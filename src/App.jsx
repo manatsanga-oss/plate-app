@@ -5,7 +5,7 @@ export default function App() {
   const [result, setResult] = useState(null);
 
   const searchPlate = async () => {
-    const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/094b8071-9478-4bc2-90e8-4c0d21660f0c", {
+    const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook-test/094b8071-9478-4bc2-90e8-4c0d21660f0c", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
