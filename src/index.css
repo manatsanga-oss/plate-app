@@ -109,3 +109,26 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes loadingBar {
+  0% {
+    transform: translateX(-120%);
+    width: 30%;
+  }
+  50% {
+    transform: translateX(40%);
+    width: 45%;
+  }
+  100% {
+    transform: translateX(220%);
+    width: 30%;
+  }
+}
