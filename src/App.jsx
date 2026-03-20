@@ -1,7 +1,18 @@
 import { useMemo, useState } from "react";
 
-const OCR_WEBHOOK_URL = "https://n8n-new-project-gwf2.onrender.com/webhook-test/094b8071-9478-4bc2-90e8-4c0d21660f0c";
-const SAVE_WEBHOOK_URL = "https://n8n-new-project-gwf2.onrender.com/webhook-test/c577cfab-e904-4c2b-86e8-3a8296676ec5";
+const OCR_WEBHOOK_URL =
+  "https://n8n-new-project-gwf2.onrender.com/webhook/094b8071-9478-4bc2-90e8-4c0d21660f0c";
+
+const SAVE_WEBHOOK_URL =
+  "https://n8n-new-project-gwf2.onrender.com/webhook/c577cfab-e904-4c2b-86e8-3a8296676ec5";
+
+// ดึงรายการจากชีต "หัวตาราง"
+const HISTORY_WEBHOOK_URL =
+  "https://n8n-new-project-gwf2.onrender.com/webhook/50a16073-d606-479c-aba3-91ae9b877dec";
+
+// รับ docNo แล้วดึง header + items กลับมา
+const DOC_DETAIL_WEBHOOK_URL =
+  "https://n8n-new-project-gwf2.onrender.com/webhook/bbaae286-5879-48cb-9746-9c51bba6d3ae";
 
 const DEFAULT_CATEGORY_OPTIONS = [
   "เครื่องเขียน",
@@ -10,7 +21,6 @@ const DEFAULT_CATEGORY_OPTIONS = [
   "ของใช้สำนักงาน",
   "เครื่องดื่ม",
   "บรรจุภัณฑ์",
-  "อื่นๆ",
 ];
 
 function emptyHeader() {
@@ -34,35 +44,66 @@ function emptyHeader() {
   };
 }
 
-function createEmptyRow(defaultCategory = "อื่นๆ") {
+function createEmptyRow() {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     code: "",
     ocrName: "",
     productName: "",
-    category: defaultCategory || "อื่นๆ",
-    qty: 0,
+    category: "",
+    qty: "",
     unit: "",
-    price: 0,
+    price: "",
     total: 0,
     quantityInferred: false,
   };
 }
 
+function T(v) {
+  return (v ?? "").toString().trim();
+}
+
 function toNumber(value) {
   if (value === null || value === undefined || value === "") return 0;
-  const n = Number(String(value).replace(/,/g, "").trim());
+  const cleaned = String(value).replace(/,/g, "").trim();
+  const n = Number(cleaned);
   return Number.isFinite(n) ? n : 0;
 }
 
-function formatNumber(value) {
+function formatNumber(value, digits = 2) {
   const n = toNumber(value);
-  return n.toLocaleString("th-TH");
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
+function formatQty(value) {
+  const n = toNumber(value);
+  if (!Number.isFinite(n)) return "";
+  if (Number.isInteger(n)) return String(n);
+  return n.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
 }
 
 function normalizeCategory(value) {
-  const s = (value ?? "").toString().trim();
-  return s || "อื่นๆ";
+  const s = T(value);
+  if (!s) return "";
+
+  const normalized = s.replace(/\s+/g, "").toLowerCase();
+
+  if (
+    normalized === "อื่นๆ" ||
+    normalized === "อื่น" ||
+    normalized === "other" ||
+    normalized === "others"
+  ) {
+    return "";
+  }
+
+  return s;
 }
 
 function uniqueTextList(values) {
@@ -70,7 +111,7 @@ function uniqueTextList(values) {
   const out = [];
 
   for (const v of values) {
-    const s = (v ?? "").toString().trim();
+    const s = normalizeCategory(v);
     if (!s) continue;
     if (seen.has(s)) continue;
     seen.add(s);
@@ -80,12 +121,25 @@ function uniqueTextList(values) {
   return out;
 }
 
+function inputNumberOnFocus(value) {
+  if (value === "" || value === null || value === undefined) return "";
+  const n = toNumber(value);
+  return Number.isFinite(n) ? String(n) : "";
+}
+
 export default function App() {
+  const [mode, setMode] = useState("form"); // form | history
+
   const [selectedFile, setSelectedFile] = useState(null);
   const [loadingOCR, setLoadingOCR] = useState(false);
   const [saving, setSaving] = useState(false);
   const [ocrStatus, setOcrStatus] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyError, setHistoryError] = useState("");
+  const [historyKeyword, setHistoryKeyword] = useState("");
 
   const [header, setHeader] = useState(emptyHeader());
   const [items, setItems] = useState([]);
@@ -95,16 +149,25 @@ export default function App() {
   }, [items]);
 
   const categoryOptions = useMemo(() => {
-    const itemCategories = items.map((row) => normalizeCategory(row.category));
-    const merged = uniqueTextList([
-      ...DEFAULT_CATEGORY_OPTIONS,
-      ...itemCategories,
-      "อื่นๆ",
-    ]);
-
-    const withoutOther = merged.filter((x) => x !== "อื่นๆ");
-    return [...withoutOther, "อื่นๆ"];
+    const itemCategories = items.map((row) => row.category);
+    return uniqueTextList([...DEFAULT_CATEGORY_OPTIONS, ...itemCategories]);
   }, [items]);
+
+  const filteredHistoryRows = useMemo(() => {
+    const q = T(historyKeyword).toLowerCase();
+    if (!q) return historyRows;
+
+    return historyRows.filter((row) => {
+      const docNo = T(row.docNo).toLowerCase();
+      const docDate = T(row.docDate).toLowerCase();
+      const sellerName = T(row.sellerName).toLowerCase();
+      return (
+        docNo.includes(q) ||
+        docDate.includes(q) ||
+        sellerName.includes(q)
+      );
+    });
+  }, [historyRows, historyKeyword]);
 
   function resetAll() {
     setSelectedFile(null);
@@ -120,50 +183,75 @@ export default function App() {
     setErrorMessage("");
   }
 
-  function applyOCRResult(data) {
+  function calcRowTotal(row) {
+    const qty = toNumber(row.qty);
+    const price = toNumber(row.price);
+    return qty * price;
+  }
+
+  function setFormFromDocumentData(data) {
+    const headerData = data?.header || {};
+
     setHeader({
-      sellerName: data?.seller?.name_th || "",
-      sellerTaxId: data?.seller?.tax_id || "",
-      sellerAddress: data?.seller?.address_th || "",
-      buyerName: data?.buyer?.name || "",
-      buyerTaxId: data?.buyer?.tax_id || "",
-      buyerAddress: data?.buyer?.address || "",
-      contactName: data?.ship_to?.contact_name || "",
-      contactTel: data?.ship_to?.tel || "",
-      docNo: data?.document?.doc_no || "",
-      docDate: data?.document?.date || "",
-      dueDate: data?.document?.due_date || "",
-      paymentType: data?.document?.payment_type || "",
-      soNo: data?.document?.so_no || "",
-      pqNo: data?.document?.pq_no || "",
-      salesCode: data?.document?.sales_code || "",
-      customerId: data?.document?.customer_id || "",
+      sellerName: headerData.sellerName || data?.seller?.name_th || "",
+      sellerTaxId: headerData.sellerTaxId || data?.seller?.tax_id || "",
+      sellerAddress: headerData.sellerAddress || data?.seller?.address_th || "",
+      buyerName: headerData.buyerName || data?.buyer?.name || "",
+      buyerTaxId: headerData.buyerTaxId || data?.buyer?.tax_id || "",
+      buyerAddress: headerData.buyerAddress || data?.buyer?.address || "",
+      contactName: headerData.contactName || data?.ship_to?.contact_name || "",
+      contactTel: headerData.contactTel || data?.ship_to?.tel || "",
+      docNo: headerData.docNo || data?.document?.doc_no || "",
+      docDate: headerData.docDate || data?.document?.date || "",
+      dueDate: headerData.dueDate || data?.document?.due_date || "",
+      paymentType: headerData.paymentType || data?.document?.payment_type || "",
+      soNo: headerData.soNo || data?.document?.so_no || "",
+      pqNo: headerData.pqNo || data?.document?.pq_no || "",
+      salesCode: headerData.salesCode || data?.document?.sales_code || "",
+      customerId: headerData.customerId || data?.document?.customer_id || "",
     });
 
-    const rows = Array.isArray(data?.items)
-      ? data.items.map((item, index) => {
-          const qty = toNumber(item?.quantity);
-          const price = toNumber(item?.unit_price);
-          const amount = toNumber(item?.net_amount);
-          const categoryFromApi = normalizeCategory(item?.["กลุ่มสินค้า"]);
+    const sourceItems = Array.isArray(data?.items) ? data.items : [];
 
-          return {
-            id: `${Date.now()}-${index}`,
-            code: item?.code || "",
-            ocrName: item?.description_raw || "",
-            productName: item?.description_clean || item?.description_raw || "",
-            category: categoryFromApi || "อื่นๆ",
-            qty,
-            unit: item?.unit || "",
-            price,
-            total: amount || qty * price,
-            quantityInferred: Boolean(item?.quantity_inferred),
-          };
-        })
-      : [];
+    const rows = sourceItems.map((item, index) => {
+      const qty = toNumber(
+        item?.quantity ?? item?.qty
+      );
+      const price = toNumber(
+        item?.unit_price ?? item?.price
+      );
+      const amount = toNumber(
+        item?.net_amount ?? item?.total
+      );
+
+      const categoryFromApi = normalizeCategory(
+        item?.["กลุ่มสินค้า"] ||
+          item?.category ||
+          item?.category_name ||
+          ""
+      );
+
+      return {
+        id: `${Date.now()}-${index}`,
+        code: item?.code || item?.product_code || "",
+        ocrName: item?.description_raw || item?.product_name_from_ocr || "",
+        productName:
+          item?.description_clean ||
+          item?.product_name ||
+          item?.description_raw ||
+          item?.product_name_from_ocr ||
+          "",
+        category: categoryFromApi,
+        qty: qty ? String(qty) : "",
+        unit: item?.unit || "",
+        price: price ? formatNumber(price) : "",
+        total: amount || qty * price,
+        quantityInferred: Boolean(item?.quantity_inferred),
+      };
+    });
 
     setItems(rows);
-    setOcrStatus("อ่านข้อมูลแล้ว");
+    setOcrStatus("โหลดข้อมูลแล้ว");
   }
 
   async function handleSendOCR() {
@@ -192,7 +280,7 @@ export default function App() {
       const data = await res.json();
       console.log("OCR RESULT:", data);
 
-      applyOCRResult(data);
+      setFormFromDocumentData(data);
     } catch (error) {
       console.error(error);
       setErrorMessage("ส่ง OCR ไม่สำเร็จ");
@@ -218,10 +306,7 @@ export default function App() {
       };
 
       row.category = normalizeCategory(row.category);
-
-      const qty = toNumber(row.qty);
-      const price = toNumber(row.price);
-      row.total = qty * price;
+      row.total = calcRowTotal(row);
 
       next[index] = row;
       return next;
@@ -229,11 +314,33 @@ export default function App() {
   }
 
   function handleAddRow() {
-    setItems((prev) => [...prev, createEmptyRow("อื่นๆ")]);
+    setItems((prev) => [...prev, createEmptyRow()]);
   }
 
   function handleDeleteRow(index) {
     setItems((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function handleQtyBlur(index) {
+    setItems((prev) => {
+      const next = [...prev];
+      const row = { ...next[index] };
+      row.qty = row.qty === "" ? "" : formatQty(row.qty);
+      row.total = calcRowTotal(row);
+      next[index] = row;
+      return next;
+    });
+  }
+
+  function handlePriceBlur(index) {
+    setItems((prev) => {
+      const next = [...prev];
+      const row = { ...next[index] };
+      row.price = row.price === "" ? "" : formatNumber(row.price);
+      row.total = calcRowTotal(row);
+      next[index] = row;
+      return next;
+    });
   }
 
   async function handleSave() {
@@ -287,17 +394,76 @@ export default function App() {
     }
   }
 
+  async function handleOpenHistory() {
+    try {
+      setMode("history");
+      setHistoryLoading(true);
+      setHistoryError("");
+      setHistoryRows([]);
+
+      const res = await fetch(HISTORY_WEBHOOK_URL, {
+        method: "GET",
+      });
+
+      if (!res.ok) {
+        throw new Error(`History request failed: HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      const rows = Array.isArray(data?.rows) ? data.rows : [];
+      setHistoryRows(rows);
+    } catch (error) {
+      console.error(error);
+      setHistoryError("โหลดประวัติไม่สำเร็จ");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
+
+  async function handleSelectHistoryRow(row) {
+    try {
+      setLoadingOCR(true);
+      setErrorMessage("");
+
+      const res = await fetch(DOC_DETAIL_WEBHOOK_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          docNo: row.docNo,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`Doc detail request failed: HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      console.log("DOC DETAIL:", data);
+
+      setFormFromDocumentData(data);
+      setMode("form");
+    } catch (error) {
+      console.error(error);
+      setErrorMessage("โหลดข้อมูลเอกสารไม่สำเร็จ");
+    } finally {
+      setLoadingOCR(false);
+    }
+  }
+
   return (
     <div style={styles.page}>
       <div style={styles.container}>
         <div style={styles.headerBlock}>
           <h1 style={styles.title}>ระบบรับวัสดุสำนักงาน</h1>
-          <p style={styles.subtitle}>
-            อัปโหลดรูปใบกำกับภาษี → ส่งเข้า n8n OCR → ตรวจสอบข้อมูล → บันทึกเข้า Google Sheet
-          </p>
 
           <div style={styles.topButtonRow}>
-            <button style={styles.secondaryButton} type="button">
+            <button
+              style={styles.secondaryButton}
+              type="button"
+              onClick={handleOpenHistory}
+            >
               ดูประวัติรับสินค้า
             </button>
 
@@ -320,8 +486,83 @@ export default function App() {
           </div>
         </div>
 
-        <div style={styles.grid}>
-          <div style={styles.leftColumn}>
+        {mode === "history" ? (
+          <div style={styles.card}>
+            <div style={styles.sectionHeaderRow}>
+              <div style={{ flex: 1 }}>
+                <h2 style={styles.sectionTitleLeft}>ประวัติรับสินค้า</h2>
+                <div style={styles.sectionDescLeft}>
+                  เลือกเอกสารที่ต้องการเปิดขึ้นมาแก้ไข
+                </div>
+              </div>
+
+              <div style={styles.buttonRowNoMargin}>
+                <button
+                  type="button"
+                  style={styles.secondaryButton}
+                  onClick={() => setMode("form")}
+                >
+                  กลับหน้าหลัก
+                </button>
+              </div>
+            </div>
+
+            <div style={styles.historySearchWrap}>
+              <input
+                style={styles.historySearchInput}
+                placeholder="ค้นหาเลขที่เอกสาร / วันที่ / ชื่อผู้ขาย"
+                value={historyKeyword}
+                onChange={(e) => setHistoryKeyword(e.target.value)}
+              />
+            </div>
+
+            {historyLoading ? (
+              <div style={styles.emptyBox}>กำลังโหลดข้อมูล...</div>
+            ) : historyError ? (
+              <div style={styles.errorText}>{historyError}</div>
+            ) : filteredHistoryRows.length === 0 ? (
+              <div style={styles.emptyBox}>ไม่พบข้อมูลประวัติ</div>
+            ) : (
+              <div style={styles.historyTableWrap}>
+                <table style={styles.historyTable}>
+                  <thead>
+                    <tr>
+                      <th style={styles.th}>เลขที่เอกสาร</th>
+                      <th style={styles.th}>วันที่</th>
+                      <th style={styles.th}>ผู้ขาย</th>
+                      <th style={styles.th}>จำนวนรายการ</th>
+                      <th style={styles.th}>ยอดรวม</th>
+                      <th style={styles.th}>เปิด</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredHistoryRows.map((row, index) => (
+                      <tr key={`${row.docNo}-${index}`}>
+                        <td style={styles.td}>{row.docNo}</td>
+                        <td style={styles.td}>{row.docDate}</td>
+                        <td style={styles.td}>{row.sellerName}</td>
+                        <td style={styles.td}>{formatQty(row.item_count)}</td>
+                        <td style={{ ...styles.td, textAlign: "right" }}>
+                          {formatNumber(row.grandTotal)}
+                        </td>
+                        <td style={styles.td}>
+                          <button
+                            type="button"
+                            style={styles.primaryButton}
+                            onClick={() => handleSelectHistoryRow(row)}
+                          >
+                            เปิด
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div style={styles.stack}>
             <div style={styles.card}>
               <h2 style={styles.sectionTitle}>1) อัปโหลดใบกำกับภาษี</h2>
 
@@ -516,19 +757,17 @@ export default function App() {
                 </div>
               </div>
             </div>
-          </div>
 
-          <div style={styles.rightColumn}>
             <div style={styles.card}>
               <div style={styles.sectionHeaderRow}>
                 <div>
-                  <h2 style={styles.sectionTitle}>3) ตรวจสอบและแก้ไขรายการวัสดุ</h2>
-                  <div style={styles.sectionDesc}>
+                  <h2 style={styles.sectionTitleLeft}>3) ตรวจสอบและแก้ไขรายการวัสดุ</h2>
+                  <div style={styles.sectionDescLeft}>
                     ตรวจสอบชื่อสินค้า กลุ่มสินค้า จำนวน หน่วย และราคา ก่อนบันทึก
                   </div>
                 </div>
 
-                <div style={styles.buttonRow}>
+                <div style={styles.buttonRowNoMargin}>
                   <button
                     type="button"
                     style={styles.secondaryButton}
@@ -552,133 +791,145 @@ export default function App() {
                 </div>
               </div>
 
-              <div style={styles.tableWrap}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>รหัส</th>
-                      <th style={styles.th}>ชื่อสินค้า</th>
-                      <th style={styles.th}>กลุ่มสินค้า</th>
-                      <th style={styles.th}>จำนวน</th>
-                      <th style={styles.th}>หน่วย</th>
-                      <th style={styles.th}>ราคา</th>
-                      <th style={styles.th}>รวม</th>
-                      <th style={styles.th}>จัดการ</th>
-                    </tr>
-                  </thead>
+              {items.length === 0 ? (
+                <div style={styles.emptyBox}>
+                  ยังไม่มีรายการสินค้า กรุณาเลือกไฟล์แล้วกดส่ง OCR หรือเปิดจากประวัติ
+                </div>
+              ) : (
+                <div style={styles.itemList}>
+                  {items.map((row, index) => {
+                    const datalistId = `category-list-${row.id}`;
+                    const categoryEmpty = !T(row.category);
 
-                  <tbody>
-                    {items.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} style={styles.emptyCell}>
-                          ยังไม่มีรายการสินค้า กรุณาเลือกไฟล์แล้วกดส่ง OCR หรือเพิ่มรายการเอง
-                        </td>
-                      </tr>
-                    ) : (
-                      items.map((row, index) => {
-                        const datalistId = `category-list-${row.id}`;
+                    return (
+                      <div key={row.id} style={styles.itemCard}>
+                        <div style={styles.itemCardHeader}>
+                          <div style={styles.itemIndex}>รายการที่ {index + 1}</div>
+                          <button
+                            type="button"
+                            style={styles.deleteButton}
+                            onClick={() => handleDeleteRow(index)}
+                          >
+                            ลบ
+                          </button>
+                        </div>
 
-                        return (
-                          <tr key={row.id}>
-                            <td style={styles.td}>
-                              <input
-                                style={styles.tableInput}
-                                value={row.code}
-                                onChange={(e) => updateRow(index, { code: e.target.value })}
-                              />
-                            </td>
+                        <div style={styles.itemGrid}>
+                          <div>
+                            <label style={styles.label}>รหัส</label>
+                            <input
+                              style={styles.tableInput}
+                              value={row.code}
+                              onChange={(e) =>
+                                updateRow(index, { code: e.target.value })
+                              }
+                            />
+                          </div>
 
-                            <td style={styles.td}>
-                              <input
-                                style={styles.tableInput}
-                                value={row.productName}
-                                onChange={(e) =>
-                                  updateRow(index, { productName: e.target.value })
-                                }
-                              />
-                            </td>
+                          <div style={styles.productNameCol}>
+                            <label style={styles.label}>ชื่อสินค้า</label>
+                            <input
+                              style={styles.productNameInput}
+                              value={row.productName}
+                              onChange={(e) =>
+                                updateRow(index, { productName: e.target.value })
+                              }
+                            />
+                          </div>
 
-                            <td style={styles.td}>
-                              <input
-                                list={datalistId}
-                                style={styles.tableInput}
-                                value={normalizeCategory(row.category)}
-                                placeholder="พิมพ์ค้นหาหรือเพิ่มกลุ่มสินค้า"
-                                onChange={(e) =>
-                                  updateRow(index, {
-                                    category: normalizeCategory(e.target.value),
-                                  })
-                                }
-                                onBlur={(e) =>
-                                  updateRow(index, {
-                                    category: normalizeCategory(e.target.value),
-                                  })
-                                }
-                              />
+                          <div>
+                            <label style={styles.label}>กลุ่มสินค้า</label>
+                            <input
+                              list={datalistId}
+                              style={{
+                                ...styles.tableInput,
+                                ...(categoryEmpty ? styles.categoryInputEmpty : {}),
+                              }}
+                              value={row.category}
+                              placeholder=""
+                              onChange={(e) =>
+                                updateRow(index, {
+                                  category: e.target.value,
+                                })
+                              }
+                              onBlur={(e) =>
+                                updateRow(index, {
+                                  category: normalizeCategory(e.target.value),
+                                })
+                              }
+                            />
+                            <datalist id={datalistId}>
+                              {categoryOptions.map((option) => (
+                                <option key={option} value={option} />
+                              ))}
+                            </datalist>
+                          </div>
 
-                              <datalist id={datalistId}>
-                                {categoryOptions.map((option) => (
-                                  <option key={option} value={option} />
-                                ))}
-                              </datalist>
+                          <div>
+                            <label style={styles.label}>จำนวน</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              style={styles.tableInput}
+                              value={row.qty}
+                              onFocus={(e) => {
+                                e.target.value = inputNumberOnFocus(row.qty);
+                              }}
+                              onChange={(e) =>
+                                updateRow(index, { qty: e.target.value })
+                              }
+                              onBlur={() => handleQtyBlur(index)}
+                            />
+                          </div>
 
-                              <div style={styles.categoryHint}>
-                                ค้นหาได้ หรือพิมพ์ชื่อกลุ่มใหม่เอง
-                              </div>
-                            </td>
+                          <div>
+                            <label style={styles.label}>หน่วย</label>
+                            <input
+                              style={styles.tableInput}
+                              value={row.unit}
+                              onChange={(e) =>
+                                updateRow(index, { unit: e.target.value })
+                              }
+                            />
+                          </div>
 
-                            <td style={styles.td}>
-                              <input
-                                type="number"
-                                style={styles.tableInput}
-                                value={row.qty}
-                                onChange={(e) => updateRow(index, { qty: e.target.value })}
-                              />
-                            </td>
+                          <div>
+                            <label style={styles.label}>ราคา</label>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              style={styles.tableInput}
+                              value={row.price}
+                              onFocus={(e) => {
+                                e.target.value = inputNumberOnFocus(row.price);
+                              }}
+                              onChange={(e) =>
+                                updateRow(index, { price: e.target.value })
+                              }
+                              onBlur={() => handlePriceBlur(index)}
+                            />
+                          </div>
 
-                            <td style={styles.td}>
-                              <input
-                                style={styles.tableInput}
-                                value={row.unit}
-                                onChange={(e) => updateRow(index, { unit: e.target.value })}
-                              />
-                            </td>
-
-                            <td style={styles.td}>
-                              <input
-                                type="number"
-                                style={styles.tableInput}
-                                value={row.price}
-                                onChange={(e) => updateRow(index, { price: e.target.value })}
-                              />
-                            </td>
-
-                            <td style={styles.tdRight}>{formatNumber(row.total)}</td>
-
-                            <td style={styles.td}>
-                              <button
-                                type="button"
-                                style={styles.deleteButton}
-                                onClick={() => handleDeleteRow(index)}
-                              >
-                                ลบ
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                          <div>
+                            <label style={styles.label}>รวม</label>
+                            <div style={styles.totalBox}>
+                              {formatNumber(row.total)}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               <div style={styles.summaryBar}>
-                <div>จำนวนรายการ: {items.length}</div>
+                <div>จำนวนรายการ: {formatQty(items.length)}</div>
                 <div>รวมทั้งสิ้น: {formatNumber(grandTotal)} บาท</div>
               </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {loadingOCR && (
@@ -689,13 +940,11 @@ export default function App() {
               <div style={styles.loaderDot}></div>
             </div>
 
-            <div style={styles.modalTitle}>กำลังประมวลผล OCR</div>
+            <div style={styles.modalTitle}>กำลังประมวลผลข้อมูล</div>
             <div style={styles.modalText}>
-              ระบบกำลังส่งรูปภาพไปอ่านข้อมูลจากใบกำกับภาษี
+              ระบบกำลังโหลดหรืออ่านข้อมูลเอกสาร
             </div>
-            <div style={styles.modalSubText}>
-              กรุณารอสักครู่ อย่าปิดหน้านี้
-            </div>
+            <div style={styles.modalSubText}>กรุณารอสักครู่ อย่าปิดหน้านี้</div>
 
             <div style={styles.progressFake}>
               <div style={styles.progressFakeBar}></div>
@@ -717,12 +966,12 @@ const styles = {
     color: "#24324a",
   },
   container: {
-    maxWidth: 1500,
+    maxWidth: 1360,
     margin: "0 auto",
   },
   headerBlock: {
     background: "#ffffff",
-    borderRadius: 20,
+    borderRadius: 22,
     padding: 24,
     boxShadow: "0 6px 20px rgba(0,0,0,0.06)",
     marginBottom: 24,
@@ -733,12 +982,6 @@ const styles = {
     fontWeight: 700,
     textAlign: "center",
   },
-  subtitle: {
-    margin: "8px 0 0 0",
-    textAlign: "center",
-    color: "#617089",
-    fontSize: 18,
-  },
   topButtonRow: {
     display: "flex",
     gap: 12,
@@ -746,26 +989,17 @@ const styles = {
     flexWrap: "wrap",
     marginTop: 18,
   },
-  grid: {
-    display: "grid",
-    gridTemplateColumns: "420px 1fr",
-    gap: 24,
-    alignItems: "start",
-  },
-  leftColumn: {
+  stack: {
     display: "flex",
     flexDirection: "column",
     gap: 24,
-  },
-  rightColumn: {
-    display: "flex",
-    flexDirection: "column",
   },
   card: {
     background: "#ffffff",
     borderRadius: 24,
     padding: 24,
     boxShadow: "0 6px 20px rgba(0,0,0,0.06)",
+    overflow: "hidden",
   },
   sectionTitle: {
     margin: 0,
@@ -773,10 +1007,16 @@ const styles = {
     fontWeight: 700,
     textAlign: "center",
   },
-  sectionDesc: {
+  sectionTitleLeft: {
+    margin: 0,
+    fontSize: 24,
+    fontWeight: 700,
+    textAlign: "left",
+  },
+  sectionDescLeft: {
     marginTop: 8,
     color: "#6c7a92",
-    textAlign: "center",
+    textAlign: "left",
     fontSize: 16,
   },
   uploadBox: {
@@ -804,6 +1044,12 @@ const styles = {
     flexWrap: "wrap",
     marginTop: 16,
   },
+  buttonRowNoMargin: {
+    display: "flex",
+    gap: 10,
+    justifyContent: "center",
+    flexWrap: "wrap",
+  },
   primaryButton: {
     background: "#1f6feb",
     color: "#fff",
@@ -830,9 +1076,10 @@ const styles = {
     background: "#fff1f1",
     color: "#c62828",
     border: "1px solid #efb0b0",
-    borderRadius: 8,
-    padding: "8px 12px",
+    borderRadius: 10,
+    padding: "10px 14px",
     cursor: "pointer",
+    fontSize: 16,
   },
   fileText: {
     marginTop: 16,
@@ -850,7 +1097,7 @@ const styles = {
   },
   formGrid: {
     display: "grid",
-    gridTemplateColumns: "1fr 1fr",
+    gridTemplateColumns: "repeat(4, minmax(220px, 1fr))",
     gap: 14,
     marginTop: 18,
   },
@@ -860,14 +1107,15 @@ const styles = {
     fontWeight: 700,
     fontSize: 14,
     color: "#4d5b73",
+    textAlign: "center",
   },
   input: {
     width: "100%",
     boxSizing: "border-box",
     border: "1px solid #c8d2e1",
     borderRadius: 10,
-    padding: "10px 12px",
-    fontSize: 15,
+    padding: "12px 14px",
+    fontSize: 16,
     outline: "none",
   },
   sectionHeaderRow: {
@@ -878,67 +1126,145 @@ const styles = {
     flexWrap: "wrap",
     marginBottom: 16,
   },
-  tableWrap: {
-    overflowX: "auto",
+  emptyBox: {
     border: "1px solid #d9e2ee",
-    borderRadius: 16,
+    background: "#f8fbff",
+    borderRadius: 18,
+    padding: 28,
+    textAlign: "center",
+    color: "#697791",
+    fontSize: 16,
   },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    minWidth: 980,
-    background: "#fff",
+  itemList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
   },
-  th: {
-    background: "#f5f8fc",
-    color: "#4a5870",
-    textAlign: "left",
-    padding: 12,
-    fontSize: 15,
-    borderBottom: "1px solid #d9e2ee",
-    whiteSpace: "nowrap",
+  itemCard: {
+    border: "1px solid #d9e2ee",
+    borderRadius: 20,
+    padding: 18,
+    background: "#fcfdff",
+    overflow: "hidden",
   },
-  td: {
-    padding: 10,
-    borderBottom: "1px solid #edf2f8",
-    verticalAlign: "top",
+  itemCardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 14,
+    flexWrap: "wrap",
   },
-  tdRight: {
-    padding: 10,
-    borderBottom: "1px solid #edf2f8",
-    verticalAlign: "top",
-    textAlign: "right",
+  itemIndex: {
+    fontSize: 20,
     fontWeight: 700,
+    color: "#24324a",
+  },
+  itemGrid: {
+    display: "grid",
+    gridTemplateColumns:
+      "130px minmax(220px, 2fr) minmax(160px, 1.2fr) 90px 110px 120px 150px",
+    gap: 12,
+    alignItems: "end",
+    minWidth: 0,
+  },
+  productNameCol: {
+    minWidth: 0,
   },
   tableInput: {
     width: "100%",
-    minWidth: 100,
+    minWidth: 0,
     boxSizing: "border-box",
     border: "1px solid #c8d2e1",
-    borderRadius: 8,
-    padding: "8px 10px",
-    fontSize: 14,
+    borderRadius: 10,
+    padding: "12px 14px",
+    fontSize: 18,
     background: "#fff",
+    outline: "none",
   },
-  emptyCell: {
-    textAlign: "center",
-    padding: 28,
-    color: "#697791",
+  productNameInput: {
+    width: "100%",
+    minWidth: 0,
+    boxSizing: "border-box",
+    border: "1px solid #c8d2e1",
+    borderRadius: 10,
+    padding: "13px 14px",
+    fontSize: 18,
+    background: "#fff",
+    outline: "none",
+    fontWeight: 600,
   },
-  categoryHint: {
-    marginTop: 6,
-    fontSize: 12,
-    color: "#7a879d",
-    lineHeight: 1.4,
+  categoryInputEmpty: {
+    background: "#fff4a8",
+    border: "1px solid #e0bf2f",
+  },
+  totalBox: {
+    width: "100%",
+    boxSizing: "border-box",
+    border: "1px solid #d7e0ec",
+    borderRadius: 10,
+    padding: "12px 14px",
+    fontSize: 22,
+    fontWeight: 700,
+    color: "#17325c",
+    background: "#f7faff",
+    textAlign: "right",
+    minHeight: 52,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "flex-end",
   },
   summaryBar: {
-    marginTop: 14,
+    marginTop: 18,
     display: "flex",
     justifyContent: "space-between",
     gap: 12,
     flexWrap: "wrap",
     fontWeight: 700,
     color: "#32425b",
+    fontSize: 20,
+    background: "#f5f8fc",
+    borderRadius: 16,
+    padding: "16px 18px",
+  },
+  historySearchWrap: {
+    marginBottom: 16,
+  },
+  historySearchInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    border: "1px solid #c8d2e1",
+    borderRadius: 12,
+    padding: "12px 14px",
+    fontSize: 16,
+    outline: "none",
+  },
+  historyTableWrap: {
+    overflowX: "auto",
+    border: "1px solid #d9e2ee",
+    borderRadius: 16,
+    background: "#fff",
+  },
+  historyTable: {
+    width: "100%",
+    borderCollapse: "collapse",
+    minWidth: 900,
+  },
+  th: {
+    background: "#f3f7fc",
+    color: "#32425b",
+    fontWeight: 700,
+    fontSize: 15,
+    padding: "12px 14px",
+    borderBottom: "1px solid #d9e2ee",
+    textAlign: "left",
+  },
+  td: {
+    padding: "12px 14px",
+    borderBottom: "1px solid #eef2f7",
+    fontSize: 15,
+    color: "#24324a",
+    verticalAlign: "middle",
   },
   modalOverlay: {
     position: "fixed",
