@@ -1,37 +1,59 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import "./App.css";
 import ReceivePage from "./pages/ReceivePage";
 import IssuePage from "./pages/IssuePage";
+import UserPage from "./pages/UserPage";
+import LoginPage from "./pages/LoginPage";
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState("receive");
+  const [currentUser, setCurrentUser] = useState(null);
+
+  useEffect(() => {
+    const savedUser = localStorage.getItem("user");
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+    }
+  }, []);
+
+  const handleLogin = (user) => {
+    setCurrentUser(user);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("user");
+    setCurrentUser(null);
+    setActiveMenu("receive");
+  };
+
+  if (!currentUser) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
 
   return (
     <div className="app-layout">
-      <Sidebar activeMenu={activeMenu} onChange={setActiveMenu} />
+      <Sidebar
+        activeMenu={activeMenu}
+        onChange={setActiveMenu}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
 
       <main className="main-content">
-        {activeMenu === "receive" && <ReceivePage />}
-
-        {activeMenu === "issue" && <IssuePage />}
-
-        {activeMenu === "users" && (
-          <div className="page-box">
-            <h2>หน้ากำหนดผู้ใช้งาน</h2>
-            <p>หน้านี้ไว้จัดการผู้ใช้งาน</p>
-          </div>
+        {activeMenu === "receive" && <ReceivePage currentUser={currentUser} />}
+        {activeMenu === "issue" && <IssuePage currentUser={currentUser} />}
+        {activeMenu === "users" && currentUser.role === "admin" && (
+          <UserPage currentUser={currentUser} />
         )}
       </main>
     </div>
   );
 }
 
-function Sidebar({ activeMenu, onChange }) {
+function Sidebar({ activeMenu, onChange, currentUser, onLogout }) {
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">
-        📦 ระบบวัสดุสำนักงาน
-      </div>
+      <div className="sidebar-header">📦 ระบบวัสดุสำนักงาน</div>
 
       <button
         className={`menu-btn ${activeMenu === "receive" ? "active" : ""}`}
@@ -47,12 +69,26 @@ function Sidebar({ activeMenu, onChange }) {
         📤 เบิกวัสดุ
       </button>
 
-      <button
-        className={`menu-btn ${activeMenu === "users" ? "active" : ""}`}
-        onClick={() => onChange("users")}
-      >
-        👤 กำหนดผู้ใช้งาน
-      </button>
+      {currentUser?.role === "admin" && (
+        <button
+          className={`menu-btn ${activeMenu === "users" ? "active" : ""}`}
+          onClick={() => onChange("users")}
+        >
+          👤 กำหนดผู้ใช้งาน
+        </button>
+      )}
+
+      <div className="sidebar-user-box">
+        <div className="sidebar-user-name">👋 {currentUser?.name || "-"}</div>
+        <div className="sidebar-user-detail">{currentUser?.branch || "-"}</div>
+        <div className="sidebar-user-detail">
+          สิทธิ์: {currentUser?.role || "-"}
+        </div>
+
+        <button className="logout-btn" onClick={onLogout}>
+          ออกจากระบบ
+        </button>
+      </div>
     </aside>
   );
 }

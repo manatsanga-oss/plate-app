@@ -1,294 +1,234 @@
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 
-// ===============================
-// CONFIGcm
-// ===============================
-const MATERIAL_WEBHOOK_URL =
-  "https://n8n-new-project-gwf2.onrender.com/webhook/4f649516-de04-4661-a6f5-caae15261e7f";
-
-// เปลี่ยนเป็น webhook จริงตอนใช้งานจริง
-const SAVE_ISSUE_WEBHOOK_URL =
-  "https://n8n-new-project-gwf2.onrender.com/webhook-test/4541d09a-88a3-4b45-877c-f148163cb8c3";
-
-// ===============================
-// HELPERS
-// ===============================
-function T(v) {
-  return (v ?? "").toString().trim();
-}
-
-function toNum(v) {
-  if (v === null || v === undefined || v === "") return 0;
-  const n = Number(String(v).replace(/,/g, "").trim());
-  return Number.isFinite(n) ? n : 0;
-}
-
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function normalizeMaterialRow(row, index = 0) {
-  const code =
-    T(row["รหัส"]) ||
-    T(row["material_code"]) ||
-    T(row["product_code"]) ||
-    T(row["code"]) ||
-    `ITEM-${index + 1}`;
-
-  const name =
-    T(row["ชื่อวัสดุ"]) ||
-    T(row["ชื่อสินค้า"]) ||
-    T(row["product_name"]) ||
-    T(row["material_name"]) ||
-    T(row["item_name"]) ||
-    "-";
-
-  const category =
-    T(row["กลุ่มสินค้า"]) ||
-    T(row["category"]) ||
-    T(row["product_group"]) ||
-    "ไม่ระบุกลุ่ม";
-
-  const unit =
-    T(row["หน่วย"]) ||
-    T(row["unit"]) ||
-    T(row["unit_name"]) ||
-    "-";
-
-  const qtyReceive =
-    toNum(row["จำนวนรับเข้า"]) ||
-    toNum(row["qty_receive"]) ||
-    toNum(row["receive_qty"]);
-
-  const qtyIssue =
-    toNum(row["จำนวนจ่ายออก"]) ||
-    toNum(row["qty_issue"]) ||
-    toNum(row["issue_qty"]);
-
-  let qtyBalance =
-    toNum(row["จำนวนคงเหลือ"]) ||
-    toNum(row["qty_balance"]) ||
-    toNum(row["balance_qty"]);
-
-  // ถ้าไม่ได้ส่งคงเหลือมา แต่มีรับเข้า/จ่ายออก
-  if (!qtyBalance && (qtyReceive || qtyIssue)) {
-    qtyBalance = qtyReceive - qtyIssue;
-  }
-
-  return {
-    id: code,
-    code,
-    name,
-    category,
-    unit,
-    qtyReceive,
-    qtyIssue,
-    qtyBalance,
-    raw: row,
-  };
-}
-
-function formatNumber(value) {
-  const n = toNum(value);
-  return n.toLocaleString("th-TH");
-}
-
-// ===============================
-// COMPONENT
-// ===============================
 export default function IssuePage() {
+  // =========================
+  // URL n8n
+  // =========================
+  const LOAD_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/4f649516-de04-4661-a6f5-caae15261e7f";
+  const SAVE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/4541d09a-88a3-4b45-877c-f148163cb8c3";
+
+  // =========================
+  // State
+  // =========================
   const [materials, setMaterials] = useState([]);
   const [selectedItems, setSelectedItems] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [errorText, setErrorText] = useState("");
-  const [successText, setSuccessText] = useState("");
 
-  const [searchText, setSearchText] = useState("");
-  const [rowsPerPage, setRowsPerPage] = useState(7);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchKeyword, setSearchKeyword] = useState("");
 
   const [requesterName, setRequesterName] = useState("จักรพงศ์ พ่อมือ");
-  const [department, setDepartment] = useState("กลุ่มงาน 1");
-  const [note, setNote] = useState("");
+  const [requesterTeam, setRequesterTeam] = useState("กลุ่มงาน 1");
+  const [remark, setRemark] = useState("");
 
-  // -------------------------------
-  // LOAD MATERIALS
-  // -------------------------------
-  const loadMaterials = async () => {
+  const [rowsPerPage, setRowsPerPage] = useState(7);
+
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  // =========================
+  // Helpers
+  // =========================
+  const toNumber = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const getItemName = (item) => {
+    return (
+      item["กลุ่มสินค้า"] ||
+      item["ชื่อสินค้า"] ||
+      item["ชื่อวัสดุ"] ||
+      item["materialName"] ||
+      "-"
+    );
+  };
+
+  const getRemainQty = (item) => {
+    return toNumber(
+      item["จำนวนคงเหลือใหม่"] ??
+        item["จำนวนคงเหลือ"] ??
+        item["คงเหลือ"] ??
+        item["remainQty"] ??
+        0
+    );
+  };
+
+  const getCode = (item) => {
+    return item["รหัส"] || item["itemCode"] || "";
+  };
+
+  // =========================
+  // โหลดข้อมูล
+  // =========================
+  const handleLoad = async () => {
+    setLoading(true);
+    setMessage("");
+
     try {
-      setLoading(true);
-      setErrorText("");
-      setSuccessText("");
-
-      const res = await fetch(MATERIAL_WEBHOOK_URL, {
+      const res = await fetch(LOAD_URL, {
         method: "GET",
       });
 
-      if (!res.ok) {
-        throw new Error(`โหลดข้อมูลไม่สำเร็จ (${res.status})`);
-      }
-
       const data = await res.json();
 
-      let rows = [];
+      let list = [];
+
       if (Array.isArray(data)) {
-        rows = data;
-      } else if (Array.isArray(data?.data)) {
-        rows = data.data;
-      } else if (Array.isArray(data?.items)) {
-        rows = data.items;
-      } else if (Array.isArray(data?.materials)) {
-        rows = data.materials;
-      } else {
-        throw new Error("รูปแบบข้อมูลที่ได้รับไม่ถูกต้อง");
+        list = data;
+      } else if (Array.isArray(data.items)) {
+        list = data.items;
+      } else if (Array.isArray(data.data)) {
+        list = data.data;
       }
 
-      const normalized = rows.map((row, index) =>
-        normalizeMaterialRow(row, index)
-      );
-
-      setMaterials(normalized);
-      setCurrentPage(1);
-      setSelectedItems([]);
+      setMaterials(list);
+      setMessage(`โหลดข้อมูลสำเร็จ ${list.length} รายการ`);
     } catch (err) {
-      setErrorText(err.message || "โหลดข้อมูลไม่สำเร็จ");
-      setMaterials([]);
+      console.error(err);
+      setMessage("โหลดข้อมูลไม่สำเร็จ");
     } finally {
       setLoading(false);
     }
   };
 
-  // -------------------------------
-  // FILTER + PAGINATION
-  // -------------------------------
-  const filteredMaterials = useMemo(() => {
-    const q = T(searchText).toLowerCase();
-
-    if (!q) return materials;
-
-    return materials.filter((item) => {
-      return (
-        item.code.toLowerCase().includes(q) ||
-        item.name.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q) ||
-        item.unit.toLowerCase().includes(q)
-      );
-    });
-  }, [materials, searchText]);
-
-  const totalPages = Math.max(
-    1,
-    Math.ceil(filteredMaterials.length / rowsPerPage)
-  );
-
-  const pagedMaterials = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
-    return filteredMaterials.slice(start, start + rowsPerPage);
-  }, [filteredMaterials, currentPage, rowsPerPage]);
-
-  // -------------------------------
-  // SELECT / UPDATE / REMOVE
-  // -------------------------------
-  const addToIssueList = (material) => {
-    setSuccessText("");
-    setErrorText("");
-
-    setSelectedItems((prev) => {
-      const found = prev.find((x) => x.code === material.code);
-      if (found) {
-        return prev.map((x) =>
-          x.code === material.code
-            ? {
-                ...x,
-                qtyRequest: Math.min(x.qtyRequest + 1, material.qtyBalance || 1),
-              }
-            : x
-        );
-      }
-
-      return [
-        ...prev,
-        {
-          code: material.code,
-          name: material.name,
-          category: material.category,
-          unit: material.unit,
-          qtyBalance: material.qtyBalance,
-          qtyRequest: material.qtyBalance > 0 ? 1 : 0,
-        },
-      ];
-    });
+  // =========================
+  // ค้นหา
+  // =========================
+  const handleSearch = () => {
+    setSearchKeyword(searchInput.trim());
   };
 
-  const updateQtyRequest = (code, value) => {
-    const num = Math.max(0, Math.floor(toNum(value)));
+  // =========================
+  // ล้างข้อมูล
+  // =========================
+  const handleClear = () => {
+    setSearchInput("");
+    setSearchKeyword("");
+    setMaterials([]);
+    setSelectedItems([]);
+    setRemark("");
+    setMessage("");
+  };
 
+  // =========================
+  // filter
+  // =========================
+  const filteredMaterials = useMemo(() => {
+    const keyword = searchKeyword.toLowerCase().trim();
+    let list = [...materials];
+
+    if (keyword) {
+      list = list.filter((item) => {
+        const code = String(getCode(item)).toLowerCase();
+        const itemName = String(getItemName(item)).toLowerCase();
+        return code.includes(keyword) || itemName.includes(keyword);
+      });
+    }
+
+    return list;
+  }, [materials, searchKeyword]);
+
+  const shownMaterials = useMemo(() => {
+    return filteredMaterials.slice(0, rowsPerPage);
+  }, [filteredMaterials, rowsPerPage]);
+
+  // =========================
+  // เพิ่มรายการที่เลือก
+  // =========================
+  const addToSelected = (item) => {
+    const code = getCode(item);
+    const itemName = getItemName(item);
+    const remainQty = getRemainQty(item);
+
+    const key = code || itemName;
+
+    const foundIndex = selectedItems.findIndex((x) => x._key === key);
+
+    if (foundIndex >= 0) {
+      const next = [...selectedItems];
+      const currentQty = toNumber(next[foundIndex].qty);
+      if (currentQty < remainQty) {
+        next[foundIndex].qty = currentQty + 1;
+      }
+      setSelectedItems(next);
+      return;
+    }
+
+    setSelectedItems((prev) => [
+      ...prev,
+      {
+        _key: key,
+        code,
+        itemName,
+        remainQty,
+        qty: remainQty > 0 ? 1 : 0,
+        source: item,
+      },
+    ]);
+  };
+
+  const updateSelectedQty = (key, qty) => {
     setSelectedItems((prev) =>
       prev.map((item) => {
-        if (item.code !== code) return item;
+        if (item._key !== key) return item;
 
-        const capped = Math.min(num, item.qtyBalance);
-        return {
-          ...item,
-          qtyRequest: capped,
-        };
+        let newQty = toNumber(qty);
+        if (newQty < 0) newQty = 0;
+        if (newQty > item.remainQty) newQty = item.remainQty;
+
+        return { ...item, qty: newQty };
       })
     );
   };
 
-  const removeItem = (code) => {
-    setSelectedItems((prev) => prev.filter((item) => item.code !== code));
+  const removeSelectedItem = (key) => {
+    setSelectedItems((prev) => prev.filter((item) => item._key !== key));
   };
 
-  // -------------------------------
-  // SUMMARY
-  // -------------------------------
-  const totalSelectedLines = selectedItems.length;
+  const totalQty = selectedItems.reduce((sum, item) => sum + toNumber(item.qty), 0);
 
-  const totalSelectedQty = selectedItems.reduce(
-    (sum, item) => sum + toNum(item.qtyRequest),
-    0
-  );
+  // =========================
+  // บันทึก
+  // =========================
+  const handleSave = async () => {
+    const validItems = selectedItems.filter((item) => toNumber(item.qty) > 0);
 
-  // -------------------------------
-  // SAVE
-  // -------------------------------
-  const saveIssue = async () => {
+    if (!requesterName.trim()) {
+      alert("กรุณากรอกชื่อผู้เบิก");
+      return;
+    }
+
+    if (!requesterTeam.trim()) {
+      alert("กรุณากรอกกลุ่มงาน");
+      return;
+    }
+
+    if (validItems.length === 0) {
+      alert("ยังไม่มีรายการเบิก");
+      return;
+    }
+
+    const payload = {
+      requesterName,
+      requesterTeam,
+      remark,
+      items: validItems.map((item, index) => ({
+        line_no: index + 1,
+        รหัส: item.code,
+        ชื่อสินค้า: item.itemName,
+        กลุ่มสินค้า: item.itemName,
+        จำนวนคงเหลือเดิม: item.remainQty,
+        จำนวนเบิก: item.qty,
+        จำนวนคงเหลือใหม่: item.remainQty - item.qty,
+      })),
+    };
+
+    setSaving(true);
+    setMessage("");
+
     try {
-      setSaving(true);
-      setErrorText("");
-      setSuccessText("");
-
-      const validItems = selectedItems.filter((item) => toNum(item.qtyRequest) > 0);
-
-      if (!validItems.length) {
-        throw new Error("ยังไม่มีรายการเบิก");
-      }
-
-      const payload = {
-        docType: "ISSUE_MATERIAL",
-        issueDate: todayISO(),
-        requesterName: T(requesterName),
-        department: T(department),
-        note: T(note),
-        totalItems: validItems.length,
-        totalQty: validItems.reduce((sum, item) => sum + toNum(item.qtyRequest), 0),
-        items: validItems.map((item, index) => ({
-          line_no: index + 1,
-          รหัส: item.code,
-          ชื่อวัสดุ: item.name,
-          กลุ่มสินค้า: item.category,
-          หน่วย: item.unit,
-          จำนวนคงเหลือเดิม: toNum(item.qtyBalance),
-          จำนวนเบิก: toNum(item.qtyRequest),
-          จำนวนคงเหลือใหม่: toNum(item.qtyBalance) - toNum(item.qtyRequest),
-        })),
-      };
-
-      console.log("payload saveIssue =", payload);
-
-      const res = await fetch(SAVE_ISSUE_WEBHOOK_URL, {
+      const res = await fetch(SAVE_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -296,610 +236,436 @@ export default function IssuePage() {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        throw new Error(`บันทึกไม่สำเร็จ (${res.status})`);
+      const data = await res.json();
+      console.log("SAVE RESPONSE:", data);
+
+      if (data?.ok) {
+        setMessage(data?.message || "บันทึกรายการเบิกเรียบร้อย");
+        alert(data?.message || "บันทึกรายการเบิกเรียบร้อย");
+
+        setSelectedItems([]);
+        setRemark("");
+      } else {
+        setMessage(data?.message || "บันทึกไม่สำเร็จ");
+        alert(data?.message || "บันทึกไม่สำเร็จ");
       }
-
-      let result = null;
-      try {
-        result = await res.json();
-      } catch {
-        result = { ok: true };
-      }
-
-      console.log("save result =", result);
-
-      setSuccessText("บันทึกรายการเบิกเรียบร้อยแล้ว");
-      setSelectedItems([]);
-
-      // โหลดคงเหลือใหม่อีกครั้ง
-      await loadMaterials();
     } catch (err) {
-      setErrorText(err.message || "บันทึกไม่สำเร็จ");
+      console.error(err);
+      setMessage("บันทึกไม่สำเร็จ");
+      alert("บันทึกไม่สำเร็จ");
     } finally {
       setSaving(false);
     }
   };
 
-  // -------------------------------
-  // UI
-  // -------------------------------
+  // =========================
+  // Styles
+  // =========================
+  const styles = {
+    page: {
+      width: "100%",
+      minHeight: "100vh",
+      background: "#eef3f9",
+      padding: "24px",
+      boxSizing: "border-box",
+      fontFamily: "Tahoma, sans-serif",
+    },
+    container: {
+      maxWidth: "1100px",
+      margin: "0 auto",
+      background: "#ffffff",
+      borderRadius: "24px",
+      padding: "24px",
+      boxShadow: "0 6px 24px rgba(0,0,0,0.08)",
+    },
+    title: {
+      fontSize: "42px",
+      fontWeight: "700",
+      textAlign: "center",
+      color: "#1c2d5a",
+      marginBottom: "8px",
+    },
+    subtitle: {
+      textAlign: "center",
+      fontSize: "18px",
+      color: "#5d6b8a",
+      marginBottom: "18px",
+    },
+    buttonRow: {
+      display: "flex",
+      gap: "12px",
+      justifyContent: "center",
+      flexWrap: "wrap",
+      marginBottom: "24px",
+    },
+    primaryBtn: {
+      background: "#2f6fe4",
+      color: "#fff",
+      border: "none",
+      borderRadius: "12px",
+      padding: "12px 26px",
+      fontSize: "18px",
+      fontWeight: "700",
+      cursor: "pointer",
+    },
+    secondaryBtn: {
+      background: "#0ea55b",
+      color: "#fff",
+      border: "none",
+      borderRadius: "12px",
+      padding: "12px 26px",
+      fontSize: "18px",
+      fontWeight: "700",
+      cursor: "pointer",
+    },
+    dangerBtn: {
+      background: "#e5e7eb",
+      color: "#1f2937",
+      border: "none",
+      borderRadius: "12px",
+      padding: "12px 26px",
+      fontSize: "18px",
+      fontWeight: "700",
+      cursor: "pointer",
+    },
+    frame: {
+      border: "1px solid #d7dfef",
+      borderRadius: "20px",
+      padding: "20px",
+      marginBottom: "20px",
+      background: "#fbfcff",
+    },
+    frameTitle: {
+      fontSize: "28px",
+      fontWeight: "700",
+      textAlign: "center",
+      color: "#1c2d5a",
+      marginBottom: "18px",
+    },
+    controlRow: {
+      display: "flex",
+      gap: "12px",
+      alignItems: "center",
+      flexWrap: "wrap",
+      marginBottom: "16px",
+    },
+    label: {
+      fontSize: "18px",
+      color: "#334155",
+    },
+    select: {
+      border: "1px solid #b6c2da",
+      borderRadius: "10px",
+      padding: "10px 12px",
+      fontSize: "16px",
+      minWidth: "90px",
+    },
+    input: {
+      border: "1px solid #b6c2da",
+      borderRadius: "10px",
+      padding: "12px 14px",
+      fontSize: "16px",
+      width: "100%",
+      boxSizing: "border-box",
+    },
+    textarea: {
+      border: "1px solid #b6c2da",
+      borderRadius: "10px",
+      padding: "12px 14px",
+      fontSize: "16px",
+      width: "100%",
+      boxSizing: "border-box",
+      minHeight: "90px",
+      resize: "vertical",
+    },
+    tableWrap: {
+      overflowX: "auto",
+    },
+    table: {
+      width: "100%",
+      borderCollapse: "collapse",
+      background: "#fff",
+      borderRadius: "12px",
+      overflow: "hidden",
+    },
+    th: {
+      background: "#eef2f7",
+      color: "#1e3a5f",
+      padding: "14px 10px",
+      fontSize: "20px",
+      textAlign: "center",
+      borderBottom: "1px solid #dbe3f0",
+    },
+    td: {
+      padding: "14px 10px",
+      fontSize: "18px",
+      textAlign: "center",
+      borderBottom: "1px solid #edf1f7",
+      verticalAlign: "middle",
+    },
+    plusBtn: {
+      width: "42px",
+      height: "42px",
+      borderRadius: "999px",
+      border: "none",
+      background: "#0ea55b",
+      color: "#fff",
+      fontSize: "28px",
+      fontWeight: "700",
+      cursor: "pointer",
+      lineHeight: 1,
+    },
+    smallInput: {
+      width: "90px",
+      border: "1px solid #b6c2da",
+      borderRadius: "10px",
+      padding: "8px 10px",
+      fontSize: "16px",
+      textAlign: "center",
+    },
+    removeBtn: {
+      background: "#ef4444",
+      color: "#fff",
+      border: "none",
+      borderRadius: "10px",
+      padding: "8px 12px",
+      fontSize: "15px",
+      cursor: "pointer",
+      fontWeight: "700",
+    },
+    summaryBox: {
+      marginTop: "16px",
+      border: "1px solid #d6dfef",
+      borderRadius: "14px",
+      background: "#f7f9fc",
+      padding: "16px",
+      textAlign: "center",
+      fontSize: "18px",
+      color: "#334155",
+      lineHeight: 1.8,
+    },
+    emptyBox: {
+      marginTop: "16px",
+      border: "1px dashed #cdd7e7",
+      borderRadius: "14px",
+      background: "#ffffff",
+      padding: "18px",
+      textAlign: "center",
+      fontSize: "20px",
+      color: "#94a3b8",
+      fontWeight: "700",
+    },
+    saveBtn: {
+      width: "100%",
+      background: "#17a34a",
+      color: "#fff",
+      border: "none",
+      borderRadius: "14px",
+      padding: "16px",
+      fontSize: "28px",
+      fontWeight: "700",
+      cursor: "pointer",
+      marginTop: "18px",
+    },
+    message: {
+      marginTop: "10px",
+      textAlign: "center",
+      fontSize: "16px",
+      color: "#2563eb",
+      fontWeight: "700",
+    },
+    formGrid: {
+      display: "grid",
+      gridTemplateColumns: "1fr",
+      gap: "12px",
+      marginBottom: "16px",
+    },
+  };
+
   return (
-    <div
-      style={{
-        background: "#eef2f7",
-        minHeight: "100vh",
-        padding: 20,
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 1400,
-          margin: "0 auto",
-        }}
-      >
-        <div
-          style={{
-            background: "#fff",
-            borderRadius: 16,
-            padding: 20,
-            boxShadow: "0 4px 16px rgba(0,0,0,0.06)",
-          }}
-        >
-          <h2
-            style={{
-              margin: 0,
-              marginBottom: 8,
-              textAlign: "center",
-              fontSize: 32,
-              fontWeight: 700,
-              color: "#1f2a44",
-            }}
-          >
-            หน้าเบิกวัสดุ
-          </h2>
+    <div style={styles.page}>
+      <div style={styles.container}>
+        <div style={styles.title}>หน้าเบิกวัสดุ</div>
+        <div style={styles.subtitle}>ระบบเบิกวัสดุสำนักงาน</div>
 
-          <div
-            style={{
-              textAlign: "center",
-              marginBottom: 16,
-              color: "#5b657a",
-              fontSize: 22,
-            }}
-          >
-            ทดสอบเรียก n8n ผ่าน webhook-test
+        <div style={styles.buttonRow}>
+          <button style={styles.primaryBtn} onClick={handleLoad} disabled={loading}>
+            {loading ? "กำลังโหลด..." : "เบิก"}
+          </button>
+
+          <button style={styles.secondaryBtn} onClick={handleSearch}>
+            ค้นหา
+          </button>
+
+          <button style={styles.dangerBtn} onClick={handleClear}>
+            ล้างข้อมูล
+          </button>
+        </div>
+
+        <div style={styles.frame}>
+          <div style={styles.frameTitle}>รายการวัสดุ</div>
+
+          <div style={styles.controlRow}>
+            <span style={styles.label}>แสดง</span>
+            <select
+              style={styles.select}
+              value={rowsPerPage}
+              onChange={(e) => setRowsPerPage(Number(e.target.value))}
+            >
+              <option value={5}>5</option>
+              <option value={7}>7</option>
+              <option value={10}>10</option>
+              <option value={15}>15</option>
+              <option value={20}>20</option>
+            </select>
+            <span style={styles.label}>แถว</span>
           </div>
 
-          <div style={{ textAlign: "center", marginBottom: 20 }}>
-            <button
-              onClick={loadMaterials}
-              disabled={loading}
-              style={{
-                padding: "10px 22px",
-                fontSize: 18,
-                borderRadius: 10,
-                border: "1px solid #2d6cdf",
-                background: loading ? "#dbe7ff" : "#2d6cdf",
-                color: "#fff",
-                cursor: "pointer",
-                fontWeight: 700,
-              }}
-            >
-              {loading ? "กำลังโหลด..." : "โหลดข้อมูลจาก TEST"}
-            </button>
+          <div style={{ marginBottom: "16px" }}>
+            <label style={styles.label}>ค้นหา:</label>
+            <div style={{ marginTop: "8px" }}>
+              <input
+                style={styles.input}
+                type="text"
+                placeholder="ค้นหาชื่อสินค้า"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleSearch();
+                }}
+              />
+            </div>
           </div>
 
-          {errorText ? (
-            <div
-              style={{
-                marginBottom: 16,
-                background: "#ffe5e5",
-                color: "#b42318",
-                padding: 12,
-                borderRadius: 10,
-                fontWeight: 600,
-              }}
-            >
-              {errorText}
-            </div>
-          ) : null}
+          <div style={styles.tableWrap}>
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th style={styles.th}>ชื่อสินค้า</th>
+                  <th style={styles.th}>คงเหลือ</th>
+                  <th style={styles.th}>ขอเบิก</th>
+                </tr>
+              </thead>
+              <tbody>
+                {shownMaterials.length > 0 ? (
+                  shownMaterials.map((item, index) => {
+                    const itemName = getItemName(item);
+                    const remainQty = getRemainQty(item);
 
-          {successText ? (
-            <div
-              style={{
-                marginBottom: 16,
-                background: "#e7f8ec",
-                color: "#067647",
-                padding: 12,
-                borderRadius: 10,
-                fontWeight: 600,
-              }}
-            >
-              {successText}
-            </div>
-          ) : null}
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.6fr 1fr",
-              gap: 20,
-              alignItems: "start",
-            }}
-          >
-            {/* LEFT PANEL */}
-            <div
-              style={{
-                background: "#fff",
-                border: "1px solid #d9e2f0",
-                borderRadius: 16,
-                padding: 18,
-                minHeight: 560,
-                boxShadow: "0 2px 10px rgba(0,0,0,0.04)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 28,
-                  fontWeight: 700,
-                  color: "#26324b",
-                  marginBottom: 12,
-                }}
-              >
-                รายการวัสดุ
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 12,
-                  marginBottom: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <span style={{ fontSize: 16 }}>แสดง</span>
-                  <select
-                    value={rowsPerPage}
-                    onChange={(e) => {
-                      setRowsPerPage(Number(e.target.value));
-                      setCurrentPage(1);
-                    }}
-                    style={{
-                      padding: "6px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #c8d3e5",
-                      fontSize: 16,
-                    }}
-                  >
-                    <option value={5}>5</option>
-                    <option value={7}>7</option>
-                    <option value={10}>10</option>
-                    <option value={15}>15</option>
-                  </select>
-                  <span style={{ fontSize: 16 }}>แถว</span>
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                  }}
-                >
-                  <label style={{ fontSize: 16 }}>ค้นหา:</label>
-                  <input
-                    type="text"
-                    value={searchText}
-                    onChange={(e) => {
-                      setSearchText(e.target.value);
-                      setCurrentPage(1);
-                    }}
-                    placeholder="รหัส / ชื่อวัสดุ / กลุ่มสินค้า"
-                    style={{
-                      width: 260,
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      border: "1px solid #c8d3e5",
-                      fontSize: 15,
-                    }}
-                  />
-                </div>
-              </div>
-
-              <div style={{ overflowX: "auto" }}>
-                <table
-                  style={{
-                    width: "100%",
-                    borderCollapse: "collapse",
-                    fontSize: 15,
-                  }}
-                >
-                  <thead>
-                    <tr style={{ background: "#f5f8fc" }}>
-                      <th style={thStyle}>รหัส</th>
-                      <th style={thStyle}>ชื่อวัสดุ</th>
-                      <th style={thStyle}>กลุ่มสินค้า</th>
-                      <th style={thStyle}>หน่วย</th>
-                      <th style={thStyle}>คงเหลือ</th>
-                      <th style={thStyle}>ขอเบิก</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pagedMaterials.length === 0 ? (
-                      <tr>
-                        <td
-                          colSpan={6}
-                          style={{
-                            textAlign: "center",
-                            padding: 24,
-                            color: "#6b7280",
-                            borderBottom: "1px solid #eef2f7",
-                          }}
-                        >
-                          ยังไม่มีข้อมูล
+                    return (
+                      <tr key={`${itemName}-${index}`}>
+                        <td style={styles.td}>{itemName}</td>
+                        <td style={styles.td}>{remainQty}</td>
+                        <td style={styles.td}>
+                          <button
+                            style={styles.plusBtn}
+                            onClick={() => addToSelected(item)}
+                            disabled={remainQty <= 0}
+                            title="เพิ่มรายการ"
+                          >
+                            +
+                          </button>
                         </td>
                       </tr>
-                    ) : (
-                      pagedMaterials.map((item) => (
-                        <tr key={item.id}>
-                          <td style={tdStyle}>{item.code}</td>
-                          <td style={tdStyle}>{item.name}</td>
-                          <td style={tdStyle}>{item.category}</td>
-                          <td style={tdStyle}>{item.unit}</td>
-                          <td style={tdStyle}>{formatNumber(item.qtyBalance)}</td>
-                          <td style={tdStyleCenter}>
-                            <button
-                              onClick={() => addToIssueList(item)}
-                              disabled={toNum(item.qtyBalance) <= 0}
-                              title="เพิ่มรายการเบิก"
-                              style={{
-                                width: 34,
-                                height: 34,
-                                borderRadius: "50%",
-                                border: "none",
-                                background:
-                                  toNum(item.qtyBalance) <= 0 ? "#cbd5e1" : "#0f9d74",
-                                color: "#fff",
-                                fontSize: 22,
-                                fontWeight: 700,
-                                cursor:
-                                  toNum(item.qtyBalance) <= 0
-                                    ? "not-allowed"
-                                    : "pointer",
-                                lineHeight: 1,
-                              }}
-                            >
-                              +
-                            </button>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
-              <div
-                style={{
-                  marginTop: 14,
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  flexWrap: "wrap",
-                  gap: 10,
-                  color: "#4b5563",
-                }}
-              >
-                <div>
-                  แสดง{" "}
-                  {filteredMaterials.length === 0
-                    ? 0
-                    : (currentPage - 1) * rowsPerPage + 1}{" "}
-                  ถึง{" "}
-                  {Math.min(currentPage * rowsPerPage, filteredMaterials.length)} จาก{" "}
-                  {filteredMaterials.length} แถว
-                </div>
-
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "center",
-                  }}
-                >
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={currentPage === 1}
-                    style={pageButtonStyle(currentPage === 1)}
-                  >
-                    ก่อนหน้า
-                  </button>
-
-                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                    .slice(
-                      Math.max(0, currentPage - 2),
-                      Math.max(0, currentPage - 2) + 5
-                    )
-                    .map((page) => (
-                      <button
-                        key={page}
-                        onClick={() => setCurrentPage(page)}
-                        style={{
-                          ...pageButtonStyle(false),
-                          background: page === currentPage ? "#2d6cdf" : "#fff",
-                          color: page === currentPage ? "#fff" : "#1f2937",
-                          border:
-                            page === currentPage
-                              ? "1px solid #2d6cdf"
-                              : "1px solid #cbd5e1",
-                        }}
-                      >
-                        {page}
-                      </button>
-                    ))}
-
-                  <button
-                    onClick={() =>
-                      setCurrentPage((p) => Math.min(totalPages, p + 1))
-                    }
-                    disabled={currentPage === totalPages}
-                    style={pageButtonStyle(currentPage === totalPages)}
-                  >
-                    ถัดไป
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* RIGHT PANEL */}
-            <div
-              style={{
-                background: "#fff",
-                border: "1px solid #d9e2f0",
-                borderRadius: 16,
-                padding: 18,
-                minHeight: 560,
-                boxShadow: "0 2px 10px rgba(0,0,0,0.04)",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 28,
-                  fontWeight: 700,
-                  color: "#26324b",
-                  marginBottom: 4,
-                }}
-              >
-                รายการเบิก
-              </div>
-
-              <div style={{ color: "#0f9d74", fontWeight: 700, marginBottom: 4 }}>
-                {requesterName} {department}
-              </div>
-
-              <div style={{ color: "#6b7280", marginBottom: 14 }}>
-                โปรดเลือกรายการ
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gap: 10,
-                  marginBottom: 14,
-                }}
-              >
-                <input
-                  type="text"
-                  value={requesterName}
-                  onChange={(e) => setRequesterName(e.target.value)}
-                  placeholder="ชื่อผู้เบิก"
-                  style={inputStyle}
-                />
-                <input
-                  type="text"
-                  value={department}
-                  onChange={(e) => setDepartment(e.target.value)}
-                  placeholder="หน่วยงาน/กลุ่มงาน"
-                  style={inputStyle}
-                />
-                <textarea
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="หมายเหตุ"
-                  rows={3}
-                  style={{
-                    ...inputStyle,
-                    resize: "vertical",
-                    fontFamily: "inherit",
-                  }}
-                />
-              </div>
-
-              <div
-                style={{
-                  background: "#f8fbff",
-                  border: "1px solid #dbe5f1",
-                  borderRadius: 12,
-                  padding: 12,
-                  marginBottom: 14,
-                }}
-              >
-                <div style={{ marginBottom: 6 }}>
-                  จำนวนรายการ: <b>{formatNumber(totalSelectedLines)}</b>
-                </div>
-                <div>
-                  จำนวนเบิกรวม: <b>{formatNumber(totalSelectedQty)}</b>
-                </div>
-              </div>
-
-              <div
-                style={{
-                  display: "grid",
-                  gap: 10,
-                  maxHeight: 320,
-                  overflowY: "auto",
-                  paddingRight: 4,
-                  marginBottom: 16,
-                }}
-              >
-                {selectedItems.length === 0 ? (
-                  <div
-                    style={{
-                      color: "#9aa3b2",
-                      border: "1px dashed #cbd5e1",
-                      borderRadius: 12,
-                      padding: 20,
-                      textAlign: "center",
-                    }}
-                  >
-                    ยังไม่มีรายการเบิก
-                  </div>
+                    );
+                  })
                 ) : (
-                  selectedItems.map((item) => (
-                    <div
-                      key={item.code}
-                      style={{
-                        border: "1px solid #dbe5f1",
-                        borderRadius: 12,
-                        padding: 12,
-                        background: "#fff",
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontWeight: 700,
-                          color: "#1f2937",
-                          marginBottom: 6,
-                        }}
-                      >
-                        {item.name}
-                      </div>
+                  <tr>
+                    <td style={styles.td} colSpan={3}>
+                      ไม่พบข้อมูล
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
 
-                      <div style={{ color: "#6b7280", fontSize: 14, marginBottom: 8 }}>
-                        {item.code} | {item.category} | หน่วย {item.unit} | คงเหลือ{" "}
-                        {formatNumber(item.qtyBalance)}
-                      </div>
+        <div style={styles.frame}>
+          <div style={styles.frameTitle}>รายการที่เลือก</div>
 
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: 8,
-                          alignItems: "center",
-                          flexWrap: "wrap",
-                        }}
-                      >
-                        <span>จำนวนเบิก</span>
+          <div style={styles.formGrid}>
+            <input
+              style={styles.input}
+              type="text"
+              value={requesterName}
+              onChange={(e) => setRequesterName(e.target.value)}
+              placeholder="ชื่อผู้เบิก"
+            />
+
+            <input
+              style={styles.input}
+              type="text"
+              value={requesterTeam}
+              onChange={(e) => setRequesterTeam(e.target.value)}
+              placeholder="กลุ่มงาน"
+            />
+
+            <textarea
+              style={styles.textarea}
+              value={remark}
+              onChange={(e) => setRemark(e.target.value)}
+              placeholder="หมายเหตุ"
+            />
+          </div>
+
+          <div style={styles.summaryBox}>
+            <div>จำนวนรายการ: {selectedItems.length}</div>
+            <div>จำนวนเบิกรวม: {totalQty}</div>
+          </div>
+
+          {selectedItems.length === 0 ? (
+            <div style={styles.emptyBox}>ยังไม่มีรายการที่เลือก</div>
+          ) : (
+            <div style={{ marginTop: "16px", overflowX: "auto" }}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th style={styles.th}>ชื่อสินค้า</th>
+                    <th style={styles.th}>คงเหลือ</th>
+                    <th style={styles.th}>จำนวนเบิก</th>
+                    <th style={styles.th}>ลบ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedItems.map((item) => (
+                    <tr key={item._key}>
+                      <td style={styles.td}>{item.itemName}</td>
+                      <td style={styles.td}>{item.remainQty}</td>
+                      <td style={styles.td}>
                         <input
+                          style={styles.smallInput}
                           type="number"
                           min="0"
-                          max={item.qtyBalance}
-                          value={item.qtyRequest}
+                          max={item.remainQty}
+                          value={item.qty}
                           onChange={(e) =>
-                            updateQtyRequest(item.code, e.target.value)
+                            updateSelectedQty(item._key, e.target.value)
                           }
-                          style={{
-                            width: 100,
-                            padding: "8px 10px",
-                            borderRadius: 8,
-                            border: "1px solid #c8d3e5",
-                            fontSize: 15,
-                          }}
                         />
+                      </td>
+                      <td style={styles.td}>
                         <button
-                          onClick={() => removeItem(item.code)}
-                          style={{
-                            padding: "8px 12px",
-                            borderRadius: 8,
-                            border: "1px solid #ef4444",
-                            background: "#fff5f5",
-                            color: "#dc2626",
-                            cursor: "pointer",
-                            fontWeight: 700,
-                          }}
+                          style={styles.removeBtn}
+                          onClick={() => removeSelectedItem(item._key)}
                         >
                           ลบ
                         </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <button
-                onClick={saveIssue}
-                disabled={saving}
-                style={{
-                  width: "100%",
-                  padding: "12px 18px",
-                  borderRadius: 12,
-                  border: "none",
-                  background: saving ? "#94a3b8" : "#16a34a",
-                  color: "#fff",
-                  fontSize: 18,
-                  fontWeight: 700,
-                  cursor: saving ? "not-allowed" : "pointer",
-                }}
-              >
-                {saving ? "กำลังบันทึก..." : "บันทึกรายการเบิก"}
-              </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          </div>
+          )}
+
+          <button style={styles.saveBtn} onClick={handleSave} disabled={saving}>
+            {saving ? "กำลังบันทึก..." : "บันทึกรายการเบิก"}
+          </button>
+
+          {!!message && <div style={styles.message}>{message}</div>}
         </div>
       </div>
     </div>
   );
-}
-
-// ===============================
-// STYLES
-// ===============================
-const thStyle = {
-  textAlign: "left",
-  padding: "12px 10px",
-  borderBottom: "1px solid #dbe5f1",
-  color: "#334155",
-  fontWeight: 700,
-  whiteSpace: "nowrap",
-};
-
-const tdStyle = {
-  padding: "12px 10px",
-  borderBottom: "1px solid #eef2f7",
-  color: "#1f2937",
-  verticalAlign: "middle",
-};
-
-const tdStyleCenter = {
-  ...tdStyle,
-  textAlign: "center",
-};
-
-const inputStyle = {
-  width: "100%",
-  padding: "10px 12px",
-  borderRadius: 10,
-  border: "1px solid #c8d3e5",
-  fontSize: 15,
-  outline: "none",
-};
-
-function pageButtonStyle(disabled) {
-  return {
-    padding: "8px 12px",
-    borderRadius: 8,
-    border: "1px solid #cbd5e1",
-    background: disabled ? "#f1f5f9" : "#fff",
-    color: disabled ? "#94a3b8" : "#1f2937",
-    cursor: disabled ? "not-allowed" : "pointer",
-    minWidth: 44,
-  };
 }
