@@ -12,7 +12,7 @@ export default function UserPage() {
 
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState(""); // success | error
+  const [messageType, setMessageType] = useState("");
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -27,7 +27,7 @@ export default function UserPage() {
 
     try {
       const res = await fetch(
-        "https://n8n-new-project-gwf2.onrender.com/webhook-test/9c69cda0-c124-48c5-8e32-e24d72a7577e",
+        "https://n8n-new-project-gwf2.onrender.com/webhook/9c69cda0-c124-48c5-8e32-e24d72a7577e",
         {
           method: "POST",
           headers: {
@@ -40,7 +40,7 @@ export default function UserPage() {
       const data = await res.json();
 
       if (data.success) {
-        setMessage(data.message || "บันทึกผู้ใช้สำเร็จ");
+        setMessage("บันทึกผู้ใช้สำเร็จ");
         setMessageType("success");
 
         setForm({
@@ -67,33 +67,15 @@ export default function UserPage() {
     <div className="container">
       <h2>👤 กำหนดผู้ใช้งาน</h2>
 
-      {/* แสดงข้อความ */}
       {message && (
         <div className={`form-message ${messageType}`}>
           {message}
         </div>
       )}
 
-      <input
-        name="name"
-        placeholder="ชื่อ"
-        value={form.name}
-        onChange={handleChange}
-      />
-
-      <input
-        name="username"
-        placeholder="Username"
-        value={form.username}
-        onChange={handleChange}
-      />
-
-      <input
-        name="password"
-        placeholder="Password"
-        value={form.password}
-        onChange={handleChange}
-      />
+      <input name="name" placeholder="ชื่อ" value={form.name} onChange={handleChange} />
+      <input name="username" placeholder="Username" value={form.username} onChange={handleChange} />
+      <input name="password" placeholder="Password" value={form.password} onChange={handleChange} />
 
       <select name="branch" value={form.branch} onChange={handleChange}>
         <option value="">เลือกสาขา</option>
