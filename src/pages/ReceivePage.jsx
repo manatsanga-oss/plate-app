@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 const OCR_WEBHOOK_URL =
   "https://n8n-new-project-gwf2.onrender.com/webhook/094b8071-9478-4bc2-90e8-4c0d21660f0c";
@@ -6,56 +6,51 @@ const OCR_WEBHOOK_URL =
 const SAVE_WEBHOOK_URL =
   "https://n8n-new-project-gwf2.onrender.com/webhook/c577cfab-e904-4c2b-86e8-3a8296676ec5";
 
-// ดึงรายการจากชีต "หัวตาราง"
 const HISTORY_WEBHOOK_URL =
   "https://n8n-new-project-gwf2.onrender.com/webhook/50a16073-d606-479c-aba3-91ae9b877dec";
 
-// รับ docNo แล้วดึง header + items กลับมา
 const DOC_DETAIL_WEBHOOK_URL =
   "https://n8n-new-project-gwf2.onrender.com/webhook/bbaae286-5879-48cb-9746-9c51bba6d3ae";
 
-const DEFAULT_CATEGORY_OPTIONS = [
-  "เครื่องเขียน",
-  "กระดาษ",
-  "อุปกรณ์ทำความสะอาด",
-  "ของใช้สำนักงาน",
-  "เครื่องดื่ม",
-  "บรรจุภัณฑ์",
-];
+function todayStr() {
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
 
 function emptyHeader() {
   return {
-    sellerName: "",
-    sellerTaxId: "",
-    sellerAddress: "",
+    receive_id: "",
+    receive_no: "",
+    receive_date: todayStr(),
+    vendor_name: "",
     buyerName: "",
-    buyerTaxId: "",
-    buyerAddress: "",
-    contactName: "",
-    contactTel: "",
-    docNo: "",
-    docDate: "",
-    dueDate: "",
-    paymentType: "",
-    soNo: "",
-    pqNo: "",
-    salesCode: "",
-    customerId: "",
+    created_by: "",
   };
 }
 
-function createEmptyRow() {
+function createEmptyRow(receiveId = "", lineNo = 1) {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    code: "",
-    ocrName: "",
-    productName: "",
-    category: "",
+    receive_item_id: "",
+    receive_id: receiveId,
+    line_no: lineNo,
+    product_code: "",
+    product_name_from_ocr: "",
+    product_id: "",
+    product_name: "",
     qty: "",
     unit: "",
-    price: "",
-    total: 0,
-    quantityInferred: false,
+    unit_price: "",
+    amount: 0,
+    quantity_inferred: false,
+    match_status: "UNMATCHED",
+    match_score: "",
+    key: "",
+    created_at: "",
+    updated_at: "",
   };
 }
 
@@ -88,48 +83,62 @@ function formatQty(value) {
   });
 }
 
-function normalizeCategory(value) {
-  const s = T(value);
-  if (!s) return "";
-
-  const normalized = s.replace(/\s+/g, "").toLowerCase();
-
-  if (
-    normalized === "อื่นๆ" ||
-    normalized === "อื่น" ||
-    normalized === "other" ||
-    normalized === "others"
-  ) {
-    return "";
-  }
-
-  return s;
-}
-
-function uniqueTextList(values) {
-  const seen = new Set();
-  const out = [];
-
-  for (const v of values) {
-    const s = normalizeCategory(v);
-    if (!s) continue;
-    if (seen.has(s)) continue;
-    seen.add(s);
-    out.push(s);
-  }
-
-  return out;
-}
-
 function inputNumberOnFocus(value) {
   if (value === "" || value === null || value === undefined) return "";
   const n = toNumber(value);
   return Number.isFinite(n) ? String(n) : "";
 }
 
-export default function ReceivePage() {
-  const [mode, setMode] = useState("form"); // form | history
+function getCurrentUserId() {
+  return (
+    localStorage.getItem("user_id") ||
+    localStorage.getItem("employee_id") ||
+    localStorage.getItem("staff_id") ||
+    localStorage.getItem("admin_id") ||
+    localStorage.getItem("id") ||
+    localStorage.getItem("username") ||
+    ""
+  );
+}
 
+function getCurrentUserName() {
+  return (
+    localStorage.getItem("user_name") ||
+    localStorage.getItem("employee_name") ||
+    localStorage.getItem("staff_name") ||
+    localStorage.getItem("admin_name") ||
+    localStorage.getItem("full_name") ||
+    localStorage.getItem("display_name") ||
+    localStorage.getItem("name") ||
+    localStorage.getItem("username") ||
+    localStorage.getItem("email") ||
+    ""
+  );
+}
+
+function normalizeText(value) {
+  return T(value)
+    .toLowerCase()
+    .normalize("NFKC")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeCode(value) {
+  return T(value).replace(/[\s\-_.//]/g, "").toUpperCase();
+}
+
+function firstNotEmpty(...vals) {
+  for (const v of vals) {
+    if (T(v) !== "") return v;
+  }
+  return "";
+}
+
+export default function ReceivePage() {
+  const fileInputRef = useRef(null);
+
+  const [mode, setMode] = useState("form");
   const [selectedFile, setSelectedFile] = useState(null);
   const [loadingOCR, setLoadingOCR] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -141,16 +150,19 @@ export default function ReceivePage() {
   const [historyError, setHistoryError] = useState("");
   const [historyKeyword, setHistoryKeyword] = useState("");
 
-  const [header, setHeader] = useState(emptyHeader());
+  const [header, setHeader] = useState({
+    ...emptyHeader(),
+    created_by: getCurrentUserName() || getCurrentUserId(),
+  });
+
   const [items, setItems] = useState([]);
 
-  const grandTotal = useMemo(() => {
-    return items.reduce((sum, row) => sum + toNumber(row.total), 0);
-  }, [items]);
+  // เก็บสินค้าในระบบทั้งหมดจาก n8n
+  const [productsMaster, setProductsMaster] = useState([]);
+  const [productAliases, setProductAliases] = useState([]);
 
-  const categoryOptions = useMemo(() => {
-    const itemCategories = items.map((row) => row.category);
-    return uniqueTextList([...DEFAULT_CATEGORY_OPTIONS, ...itemCategories]);
+  const grandTotal = useMemo(() => {
+    return items.reduce((sum, row) => sum + toNumber(row.amount), 0);
   }, [items]);
 
   const filteredHistoryRows = useMemo(() => {
@@ -158,21 +170,106 @@ export default function ReceivePage() {
     if (!q) return historyRows;
 
     return historyRows.filter((row) => {
-      const docNo = T(row.docNo).toLowerCase();
-      const docDate = T(row.docDate).toLowerCase();
-      const sellerName = T(row.sellerName).toLowerCase();
+      const receiveNo = T(row.receive_no).toLowerCase();
+      const receiveDate = T(row.receive_date).toLowerCase();
+      const vendorName = T(row.vendor_name).toLowerCase();
+
       return (
-        docNo.includes(q) ||
-        docDate.includes(q) ||
-        sellerName.includes(q)
+        receiveNo.includes(q) ||
+        receiveDate.includes(q) ||
+        vendorName.includes(q)
       );
     });
   }, [historyRows, historyKeyword]);
 
+  const productSearchIndex = useMemo(() => {
+    const map = new Map();
+
+    for (const p of productsMaster) {
+      const product = {
+        product_id: T(p.product_id),
+        product_name: T(p.product_name),
+        product_code: T(firstNotEmpty(p.product_code, p.code)),
+        unit: T(firstNotEmpty(p.unit, p.uom)),
+        product_group: T(firstNotEmpty(p.product_group, p.category)),
+        product_alias: T(firstNotEmpty(p.product_alias, p.alias)),
+        keywords: T(firstNotEmpty(p.keywords, p.keyword)),
+      };
+
+      if (!product.product_id && !product.product_name) continue;
+
+      map.set(
+        product.product_id || `${product.product_name}|${product.product_code}`,
+        product
+      );
+    }
+
+    return Array.from(map.values());
+  }, [productsMaster]);
+
+  const productSuggestionList = useMemo(() => {
+    return productSearchIndex.map((p) => {
+      const aliasTexts = productAliases
+        .filter((a) => T(a.product_id) === T(p.product_id))
+        .map((a) =>
+          T(
+            firstNotEmpty(
+              a.alias_name,
+              a.product_name_from_ocr,
+              a.alias,
+              a["ชื่อจาก OCR"]
+            )
+          )
+        )
+        .filter(Boolean);
+
+      return {
+        ...p,
+        search_blob: normalizeText(
+          [
+            p.product_name,
+            p.product_code,
+            p.unit,
+            p.product_alias,
+            p.keywords,
+            ...aliasTexts,
+          ].join(" ")
+        ),
+      };
+    });
+  }, [productSearchIndex, productAliases]);
+
+  function getSuggestions(query, limit = 8) {
+    const q = normalizeText(query);
+    if (!q) return productSuggestionList.slice(0, limit);
+
+    return productSuggestionList
+      .filter((p) => p.search_blob.includes(q))
+      .slice(0, limit);
+  }
+
+  function findProductByExactNameOrCode(value) {
+    const qText = normalizeText(value);
+    const qCode = normalizeCode(value);
+
+    return (
+      productSuggestionList.find(
+        (p) =>
+          normalizeText(p.product_name) === qText ||
+          normalizeCode(p.product_code) === qCode
+      ) || null
+    );
+  }
+
   function resetAll() {
     setSelectedFile(null);
-    setHeader(emptyHeader());
+    setHeader({
+      ...emptyHeader(),
+      created_by: getCurrentUserName() || getCurrentUserId(),
+    });
     setItems([]);
+    setProductsMaster([]);
+    setProductAliases([]);
     setOcrStatus("");
     setErrorMessage("");
   }
@@ -183,64 +280,62 @@ export default function ReceivePage() {
     setErrorMessage("");
   }
 
-  function calcRowTotal(row) {
+  function calcRowAmount(row) {
     const qty = toNumber(row.qty);
-    const price = toNumber(row.price);
-    return qty * price;
+    const price = toNumber(row.unit_price);
+    return +(qty * price).toFixed(2);
   }
 
   function setFormFromDocumentData(data) {
     const headerData = data?.header || {};
 
     setHeader({
-      sellerName: headerData.sellerName || data?.seller?.name_th || "",
-      sellerTaxId: headerData.sellerTaxId || data?.seller?.tax_id || "",
-      sellerAddress: headerData.sellerAddress || data?.seller?.address_th || "",
-      buyerName: headerData.buyerName || data?.buyer?.name || "",
-      buyerTaxId: headerData.buyerTaxId || data?.buyer?.tax_id || "",
-      buyerAddress: headerData.buyerAddress || data?.buyer?.address || "",
-      contactName: headerData.contactName || data?.ship_to?.contact_name || "",
-      contactTel: headerData.contactTel || data?.ship_to?.tel || "",
-      docNo: headerData.docNo || data?.document?.doc_no || "",
-      docDate: headerData.docDate || data?.document?.date || "",
-      dueDate: headerData.dueDate || data?.document?.due_date || "",
-      paymentType: headerData.paymentType || data?.document?.payment_type || "",
-      soNo: headerData.soNo || data?.document?.so_no || "",
-      pqNo: headerData.pqNo || data?.document?.pq_no || "",
-      salesCode: headerData.salesCode || data?.document?.sales_code || "",
-      customerId: headerData.customerId || data?.document?.customer_id || "",
+      receive_id: headerData.receive_id || "",
+      receive_no: headerData.receive_no || "",
+      receive_date: headerData.receive_date || todayStr(),
+      vendor_name: headerData.vendor_name || "",
+      buyerName: headerData.buyerName || "",
+      created_by:
+        headerData.created_by || getCurrentUserName() || getCurrentUserId(),
     });
+
+    // รับสินค้าทั้งระบบจาก n8n
+    setProductsMaster(Array.isArray(data?.products_master) ? data.products_master : []);
+    setProductAliases(Array.isArray(data?.product_aliases) ? data.product_aliases : []);
 
     const sourceItems = Array.isArray(data?.items) ? data.items : [];
 
     const rows = sourceItems.map((item, index) => {
-      const qty = toNumber(item?.quantity ?? item?.qty);
-      const price = toNumber(item?.unit_price ?? item?.price);
-      const amount = toNumber(item?.net_amount ?? item?.total);
+      const qty = toNumber(item?.qty);
+      const unitPrice = toNumber(item?.unit_price);
+      const amount = toNumber(item?.amount ?? item?.total);
 
-      const categoryFromApi = normalizeCategory(
-        item?.["กลุ่มสินค้า"] ||
-          item?.category ||
-          item?.category_name ||
-          ""
-      );
+      const matchedName =
+        T(item?.product_name) && T(item?.match_status) === "MATCHED"
+          ? item?.product_name
+          : "";
 
       return {
         id: `${Date.now()}-${index}`,
-        code: item?.code || item?.product_code || "",
-        ocrName: item?.description_raw || item?.product_name_from_ocr || "",
-        productName:
-          item?.description_clean ||
-          item?.product_name ||
-          item?.description_raw ||
-          item?.product_name_from_ocr ||
-          "",
-        category: categoryFromApi,
+        receive_item_id: item?.receive_item_id || "",
+        receive_id: item?.receive_id || headerData.receive_id || "",
+        line_no: item?.line_no || index + 1,
+        product_code: item?.product_code || item?.code || "",
+        product_name_from_ocr:
+          item?.product_name_from_ocr || item?.description_raw || "",
+        product_id: item?.product_id || "",
+        product_name: matchedName,
         qty: qty ? String(qty) : "",
         unit: item?.unit || "",
-        price: price ? formatNumber(price) : "",
-        total: amount || qty * price,
-        quantityInferred: Boolean(item?.quantity_inferred),
+        unit_price: unitPrice ? formatNumber(unitPrice) : "",
+        amount: amount || +(qty * unitPrice).toFixed(2),
+        quantity_inferred: Boolean(item?.quantity_inferred),
+        match_status:
+          item?.match_status || (item?.product_id ? "MATCHED" : "UNMATCHED"),
+        match_score: item?.match_score ?? "",
+        key: item?.key || "",
+        created_at: item?.created_at || "",
+        updated_at: item?.updated_at || "",
       };
     });
 
@@ -299,20 +394,73 @@ export default function ReceivePage() {
         ...patch,
       };
 
-      row.category = normalizeCategory(row.category);
-      row.total = calcRowTotal(row);
-
+      row.amount = calcRowAmount(row);
       next[index] = row;
       return next;
     });
   }
 
+  function applySelectedProduct(index, product, typedValue = "") {
+    if (!product) {
+      updateRow(index, {
+        product_name: typedValue,
+        product_id: "",
+        match_status: T(typedValue) ? "UNMATCHED" : "UNMATCHED",
+        match_score: "",
+      });
+      return;
+    }
+
+    updateRow(index, {
+      product_id: product.product_id || "",
+      product_name: product.product_name || typedValue || "",
+      product_code: product.product_code || "",
+      unit: product.unit || "",
+      match_status: "MATCHED",
+      match_score: 1,
+    });
+  }
+
+  function handleProductNameChange(index, value) {
+    updateRow(index, { product_name: value });
+
+    const exact = findProductByExactNameOrCode(value);
+    if (exact) {
+      applySelectedProduct(index, exact, value);
+    }
+  }
+
+  function handleProductNameBlur(index, value) {
+    const exact = findProductByExactNameOrCode(value);
+    if (exact) {
+      applySelectedProduct(index, exact, value);
+      return;
+    }
+
+    updateRow(index, {
+      product_name: value,
+      product_id: "",
+      match_status: T(value) ? "UNMATCHED" : "UNMATCHED",
+      match_score: "",
+    });
+  }
+
   function handleAddRow() {
-    setItems((prev) => [...prev, createEmptyRow()]);
+    setItems((prev) => [
+      ...prev,
+      createEmptyRow(header.receive_id || "", prev.length + 1),
+    ]);
   }
 
   function handleDeleteRow(index) {
-    setItems((prev) => prev.filter((_, i) => i !== index));
+    setItems((prev) =>
+      prev
+        .filter((_, i) => i !== index)
+        .map((row, idx) => ({
+          ...row,
+          line_no: idx + 1,
+        }))
+    );
   }
 
   function handleQtyBlur(index) {
@@ -320,7 +468,7 @@ export default function ReceivePage() {
       const next = [...prev];
       const row = { ...next[index] };
       row.qty = row.qty === "" ? "" : formatQty(row.qty);
-      row.total = calcRowTotal(row);
+      row.amount = calcRowAmount(row);
       next[index] = row;
       return next;
     });
@@ -330,8 +478,8 @@ export default function ReceivePage() {
     setItems((prev) => {
       const next = [...prev];
       const row = { ...next[index] };
-      row.price = row.price === "" ? "" : formatNumber(row.price);
-      row.total = calcRowTotal(row);
+      row.unit_price = row.unit_price === "" ? "" : formatNumber(row.unit_price);
+      row.amount = calcRowAmount(row);
       next[index] = row;
       return next;
     });
@@ -342,20 +490,74 @@ export default function ReceivePage() {
       setSaving(true);
       setErrorMessage("");
 
+      if (!T(header.receive_no)) {
+        alert("กรุณากรอกเลขที่รับสินค้า");
+        return;
+      }
+
+      if (!T(header.receive_date)) {
+        alert("กรุณากรอกวันที่รับสินค้า");
+        return;
+      }
+
+      if (!T(header.vendor_name)) {
+        alert("กรุณากรอกชื่อผู้ขาย");
+        return;
+      }
+
+      if (!items.length) {
+        alert("ยังไม่มีรายการสินค้า");
+        return;
+      }
+
+      for (let i = 0; i < items.length; i++) {
+        const row = items[i];
+        if (!T(row.product_name)) {
+          alert(`กรุณากรอกชื่อสินค้า บรรทัดที่ ${i + 1}`);
+          return;
+        }
+        if (toNumber(row.qty) <= 0) {
+          alert(`จำนวนต้องมากกว่า 0 บรรทัดที่ ${i + 1}`);
+          return;
+        }
+      }
+
+      // ส่ง "ชื่อผู้ใช้" แทน id
+      const currentUserName = getCurrentUserName() || getCurrentUserId();
+
       const payload = {
         success: true,
-        header,
+        header: {
+          receive_id: header.receive_id || "",
+          receive_no: header.receive_no,
+          receive_date: header.receive_date,
+          vendor_name: header.vendor_name,
+          buyerName: header.buyerName,
+          created_by: currentUserName,
+        },
         items: items.map((row, index) => ({
+          receive_item_id: row.receive_item_id || "",
+          receive_id: row.receive_id || header.receive_id || "",
           line_no: index + 1,
-          product_code: row.code,
-          product_name_from_ocr: row.ocrName,
-          product_name: row.productName,
-          กลุ่มสินค้า: normalizeCategory(row.category),
+          product_code: row.product_code || "",
+          product_name_from_ocr: row.product_name_from_ocr || "",
+          product_id: row.product_id || "",
+          product_name: row.product_name || "",
           qty: toNumber(row.qty),
-          unit: row.unit,
-          unit_price: toNumber(row.price),
-          total: toNumber(row.total),
-          quantity_inferred: Boolean(row.quantityInferred),
+          unit: row.unit || "",
+          unit_price: toNumber(row.unit_price),
+          amount: calcRowAmount(row),
+          quantity_inferred: Boolean(row.quantity_inferred),
+          match_status: T(row.product_name) ? "MATCHED" : "UNMATCHED",
+          match_score:
+            row.match_score === "" || row.match_score === null
+              ? ""
+              : toNumber(row.match_score),
+          key:
+            row.key ||
+            `${header.receive_no || ""}${row.product_code || ""}${String(
+              index + 1
+            ).padStart(3, "0")}`,
         })),
         summary: {
           item_count: items.length,
@@ -379,7 +581,7 @@ export default function ReceivePage() {
       const result = await res.json();
       console.log("SAVE RESULT:", result);
 
-      alert("บันทึกสำเร็จ");
+      alert("บันทึกรับสินค้าเรียบร้อย");
     } catch (error) {
       console.error(error);
       setErrorMessage("บันทึกไม่สำเร็จ");
@@ -406,7 +608,7 @@ export default function ReceivePage() {
       const data = await res.json();
       console.log("HISTORY RESULT:", data);
 
-      const rows = Array.isArray(data) ? data : [];
+      const rows = Array.isArray(data) ? data : data?.data || [];
       setHistoryRows(rows);
     } catch (error) {
       console.error(error);
@@ -427,7 +629,7 @@ export default function ReceivePage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          docNo: row.docNo,
+          receive_no: row.receive_no,
         }),
       });
 
@@ -523,24 +725,18 @@ export default function ReceivePage() {
                 <table style={styles.historyTable}>
                   <thead>
                     <tr>
-                      <th style={styles.th}>เลขที่เอกสาร</th>
-                      <th style={styles.th}>วันที่</th>
+                      <th style={styles.th}>เลขที่รับสินค้า</th>
+                      <th style={styles.th}>วันที่รับ</th>
                       <th style={styles.th}>ผู้ขาย</th>
-                      <th style={styles.th}>จำนวนรายการ</th>
-                      <th style={styles.th}>ยอดรวม</th>
                       <th style={styles.th}>เปิด</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredHistoryRows.map((row, index) => (
-                      <tr key={`${row.docNo}-${index}`}>
-                        <td style={styles.td}>{row.docNo}</td>
-                        <td style={styles.td}>{row.docDate}</td>
-                        <td style={styles.td}>{row.sellerName}</td>
-                        <td style={styles.td}>{formatQty(row.itemCount)}</td>
-                        <td style={{ ...styles.td, textAlign: "right" }}>
-                          {formatNumber(row.grandTotal)}
-                        </td>
+                      <tr key={`${row.receive_no}-${index}`}>
+                        <td style={styles.td}>{row.receive_no}</td>
+                        <td style={styles.td}>{row.receive_date}</td>
+                        <td style={styles.td}>{row.vendor_name}</td>
                         <td style={styles.td}>
                           <button
                             type="button"
@@ -571,8 +767,9 @@ export default function ReceivePage() {
                   <label style={styles.primaryButton}>
                     เลือกไฟล์
                     <input
+                      ref={fileInputRef}
                       type="file"
-                      accept="image/*,.heic"
+                      accept="image/*,.heic,.pdf"
                       style={{ display: "none" }}
                       onChange={handleFileChange}
                     />
@@ -605,150 +802,52 @@ export default function ReceivePage() {
             </div>
 
             <div style={styles.card}>
-              <h2 style={styles.sectionTitle}>2) ข้อมูลจาก OCR</h2>
+              <h2 style={styles.sectionTitle}>2) รายละเอียดหัวเอกสาร</h2>
 
-              <div style={styles.formGrid}>
+              <div style={styles.formGridHeaderSmall}>
                 <div>
-                  <label style={styles.label}>ชื่อผู้ขาย</label>
+                  <label style={styles.label}>receive_id</label>
                   <input
                     style={styles.input}
-                    value={header.sellerName}
-                    onChange={(e) => updateHeader("sellerName", e.target.value)}
+                    value={header.receive_id}
+                    onChange={(e) => updateHeader("receive_id", e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label style={styles.label}>เลขผู้เสียภาษีผู้ขาย</label>
+                  <label style={styles.label}>receive_no</label>
                   <input
                     style={styles.input}
-                    value={header.sellerTaxId}
-                    onChange={(e) => updateHeader("sellerTaxId", e.target.value)}
-                  />
-                </div>
-
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <label style={styles.label}>ที่อยู่ผู้ขาย</label>
-                  <input
-                    style={styles.input}
-                    value={header.sellerAddress}
-                    onChange={(e) => updateHeader("sellerAddress", e.target.value)}
+                    value={header.receive_no}
+                    onChange={(e) => updateHeader("receive_no", e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label style={styles.label}>เลขเอกสาร</label>
+                  <label style={styles.label}>receive_date</label>
                   <input
+                    type="date"
                     style={styles.input}
-                    value={header.docNo}
-                    onChange={(e) => updateHeader("docNo", e.target.value)}
+                    value={header.receive_date}
+                    onChange={(e) => updateHeader("receive_date", e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label style={styles.label}>วันที่เอกสาร</label>
+                  <label style={styles.label}>vendor_name</label>
                   <input
                     style={styles.input}
-                    value={header.docDate}
-                    onChange={(e) => updateHeader("docDate", e.target.value)}
+                    value={header.vendor_name}
+                    onChange={(e) => updateHeader("vendor_name", e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label style={styles.label}>ชื่อผู้ซื้อ</label>
+                  <label style={styles.label}>buyerName</label>
                   <input
                     style={styles.input}
                     value={header.buyerName}
                     onChange={(e) => updateHeader("buyerName", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>เลขผู้เสียภาษีผู้ซื้อ</label>
-                  <input
-                    style={styles.input}
-                    value={header.buyerTaxId}
-                    onChange={(e) => updateHeader("buyerTaxId", e.target.value)}
-                  />
-                </div>
-
-                <div style={{ gridColumn: "1 / -1" }}>
-                  <label style={styles.label}>ที่อยู่ผู้ซื้อ</label>
-                  <input
-                    style={styles.input}
-                    value={header.buyerAddress}
-                    onChange={(e) => updateHeader("buyerAddress", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>ผู้ติดต่อ</label>
-                  <input
-                    style={styles.input}
-                    value={header.contactName}
-                    onChange={(e) => updateHeader("contactName", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>เบอร์โทร</label>
-                  <input
-                    style={styles.input}
-                    value={header.contactTel}
-                    onChange={(e) => updateHeader("contactTel", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>กำหนดชำระ</label>
-                  <input
-                    style={styles.input}
-                    value={header.dueDate}
-                    onChange={(e) => updateHeader("dueDate", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>ประเภทชำระเงิน</label>
-                  <input
-                    style={styles.input}
-                    value={header.paymentType}
-                    onChange={(e) => updateHeader("paymentType", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>SO No.</label>
-                  <input
-                    style={styles.input}
-                    value={header.soNo}
-                    onChange={(e) => updateHeader("soNo", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>PQ No.</label>
-                  <input
-                    style={styles.input}
-                    value={header.pqNo}
-                    onChange={(e) => updateHeader("pqNo", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>Sales Code</label>
-                  <input
-                    style={styles.input}
-                    value={header.salesCode}
-                    onChange={(e) => updateHeader("salesCode", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>Customer ID</label>
-                  <input
-                    style={styles.input}
-                    value={header.customerId}
-                    onChange={(e) => updateHeader("customerId", e.target.value)}
                   />
                 </div>
               </div>
@@ -759,7 +858,7 @@ export default function ReceivePage() {
                 <div>
                   <h2 style={styles.sectionTitleLeft}>3) ตรวจสอบและแก้ไขรายการวัสดุ</h2>
                   <div style={styles.sectionDescLeft}>
-                    ตรวจสอบชื่อสินค้า กลุ่มสินค้า จำนวน หน่วย และราคา ก่อนบันทึก
+                    ตรวจสอบชื่อสินค้า รหัสสินค้า จำนวน หน่วย และราคา ก่อนบันทึก
                   </div>
                 </div>
 
@@ -769,20 +868,7 @@ export default function ReceivePage() {
                     style={styles.secondaryButton}
                     onClick={handleAddRow}
                   >
-                    เพิ่มรายการเอง
-                  </button>
-
-                  <button
-                    type="button"
-                    style={{
-                      ...styles.secondaryButton,
-                      opacity: loadingOCR ? 0.7 : 1,
-                      cursor: loadingOCR ? "not-allowed" : "pointer",
-                    }}
-                    onClick={handleSendOCR}
-                    disabled={loadingOCR}
-                  >
-                    {loadingOCR ? "กำลังอ่าน..." : "ดึง OCR ใหม่"}
+                    เพิ่มรายการสินค้าเอง
                   </button>
                 </div>
               </div>
@@ -792,126 +878,133 @@ export default function ReceivePage() {
                   ยังไม่มีรายการสินค้า กรุณาเลือกไฟล์แล้วกดส่ง OCR หรือเปิดจากประวัติ
                 </div>
               ) : (
-                <div style={styles.itemList}>
+                <div style={styles.rowList}>
+                  <div style={styles.rowHeader}>
+                    <div>รหัสสินค้า OCR</div>
+                    <div>ชื่อสินค้าจาก OCR</div>
+                    <div>ชื่อสินค้า</div>
+                    <div>จำนวน</div>
+                    <div>หน่วย</div>
+                    <div>ราคาต่อหน่วย</div>
+                    <div>รวม</div>
+                    <div>ลบ</div>
+                  </div>
+
                   {items.map((row, index) => {
-                    const datalistId = `category-list-${row.id}`;
-                    const categoryEmpty = !T(row.category);
+                    const needManualName = !T(row.product_name);
+                    const suggestions = getSuggestions(
+                      T(row.product_name) || T(row.product_name_from_ocr),
+                      8
+                    );
+                    const datalistId = `product-suggestions-${row.id}`;
 
                     return (
-                      <div key={row.id} style={styles.itemCard}>
-                        <div style={styles.itemCardHeader}>
-                          <div style={styles.itemIndex}>รายการที่ {index + 1}</div>
-                          <button
-                            type="button"
-                            style={styles.deleteButton}
-                            onClick={() => handleDeleteRow(index)}
-                          >
-                            ลบ
-                          </button>
-                        </div>
+                      <div key={row.id} style={styles.rowItemWrap}>
+                        <div style={styles.rowGrid}>
+                          <input
+                            style={styles.tableInput}
+                            value={row.product_code}
+                            onChange={(e) =>
+                              updateRow(index, { product_code: e.target.value })
+                            }
+                            placeholder="รหัสสินค้า OCR"
+                          />
 
-                        <div style={styles.itemGrid}>
-                          <div>
-                            <label style={styles.label}>รหัส</label>
-                            <input
-                              style={styles.tableInput}
-                              value={row.code}
-                              onChange={(e) =>
-                                updateRow(index, { code: e.target.value })
-                              }
-                            />
-                          </div>
+                          <input
+                            style={styles.tableInput}
+                            value={row.product_name_from_ocr}
+                            onChange={(e) =>
+                              updateRow(index, {
+                                product_name_from_ocr: e.target.value,
+                              })
+                            }
+                            placeholder="ชื่อสินค้าจาก OCR"
+                          />
 
-                          <div style={styles.productNameCol}>
-                            <label style={styles.label}>ชื่อสินค้า</label>
-                            <input
-                              style={styles.productNameInput}
-                              value={row.productName}
-                              onChange={(e) =>
-                                updateRow(index, { productName: e.target.value })
-                              }
-                            />
-                          </div>
-
-                          <div>
-                            <label style={styles.label}>กลุ่มสินค้า</label>
+                          <div style={styles.autoCompleteWrap}>
                             <input
                               list={datalistId}
                               style={{
-                                ...styles.tableInput,
-                                ...(categoryEmpty ? styles.categoryInputEmpty : {}),
+                                ...styles.productNameInput,
+                                ...(needManualName ? styles.categoryInputEmpty : {}),
                               }}
-                              value={row.category}
-                              placeholder=""
+                              value={row.product_name}
                               onChange={(e) =>
-                                updateRow(index, {
-                                  category: e.target.value,
-                                })
+                                handleProductNameChange(index, e.target.value)
                               }
                               onBlur={(e) =>
-                                updateRow(index, {
-                                  category: normalizeCategory(e.target.value),
-                                })
+                                handleProductNameBlur(index, e.target.value)
+                              }
+                              placeholder={
+                                needManualName
+                                  ? "พิมพ์ชื่อสินค้าเพื่อค้นหา"
+                                  : "ชื่อสินค้า"
                               }
                             />
                             <datalist id={datalistId}>
-                              {categoryOptions.map((option) => (
-                                <option key={option} value={option} />
+                              {suggestions.map((p) => (
+                                <option
+                                  key={`${datalistId}-${p.product_id}-${p.product_code}`}
+                                  value={p.product_name}
+                                >
+                                  {`${p.product_code ? `[${p.product_code}] ` : ""}${
+                                    p.product_name
+                                  }${p.unit ? ` / ${p.unit}` : ""}`}
+                                </option>
                               ))}
                             </datalist>
                           </div>
 
-                          <div>
-                            <label style={styles.label}>จำนวน</label>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              style={styles.tableInput}
-                              value={row.qty}
-                              onFocus={(e) => {
-                                e.target.value = inputNumberOnFocus(row.qty);
-                              }}
-                              onChange={(e) =>
-                                updateRow(index, { qty: e.target.value })
-                              }
-                              onBlur={() => handleQtyBlur(index)}
-                            />
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            style={styles.tableInput}
+                            value={row.qty}
+                            onFocus={(e) => {
+                              e.target.value = inputNumberOnFocus(row.qty);
+                            }}
+                            onChange={(e) =>
+                              updateRow(index, { qty: e.target.value })
+                            }
+                            onBlur={() => handleQtyBlur(index)}
+                            placeholder="จำนวน"
+                          />
+
+                          <input
+                            style={styles.tableInput}
+                            value={row.unit}
+                            onChange={(e) =>
+                              updateRow(index, { unit: e.target.value })
+                            }
+                            placeholder="หน่วย"
+                          />
+
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            style={styles.tableInput}
+                            value={row.unit_price}
+                            onFocus={(e) => {
+                              e.target.value = inputNumberOnFocus(row.unit_price);
+                            }}
+                            onChange={(e) =>
+                              updateRow(index, { unit_price: e.target.value })
+                            }
+                            onBlur={() => handlePriceBlur(index)}
+                            placeholder="ราคาต่อหน่วย"
+                          />
+
+                          <div style={styles.totalBoxSmall}>
+                            {formatNumber(row.amount)}
                           </div>
 
-                          <div>
-                            <label style={styles.label}>หน่วย</label>
-                            <input
-                              style={styles.tableInput}
-                              value={row.unit}
-                              onChange={(e) =>
-                                updateRow(index, { unit: e.target.value })
-                              }
-                            />
-                          </div>
-
-                          <div>
-                            <label style={styles.label}>ราคา</label>
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              style={styles.tableInput}
-                              value={row.price}
-                              onFocus={(e) => {
-                                e.target.value = inputNumberOnFocus(row.price);
-                              }}
-                              onChange={(e) =>
-                                updateRow(index, { price: e.target.value })
-                              }
-                              onBlur={() => handlePriceBlur(index)}
-                            />
-                          </div>
-
-                          <div>
-                            <label style={styles.label}>รวม</label>
-                            <div style={styles.totalBox}>
-                              {formatNumber(row.total)}
-                            </div>
-                          </div>
+                          <button
+                            type="button"
+                            style={styles.deleteButtonSmall}
+                            onClick={() => handleDeleteRow(index)}
+                          >
+                            ลบ
+                          </button>
                         </div>
                       </div>
                     );
@@ -962,6 +1055,7 @@ const styles = {
     color: "#24324a",
   },
   container: {
+    width: "100%",
     maxWidth: 1360,
     margin: "0 auto",
   },
@@ -1068,15 +1162,6 @@ const styles = {
     fontSize: 16,
     cursor: "pointer",
   },
-  deleteButton: {
-    background: "#fff1f1",
-    color: "#c62828",
-    border: "1px solid #efb0b0",
-    borderRadius: 10,
-    padding: "10px 14px",
-    cursor: "pointer",
-    fontSize: 16,
-  },
   fileText: {
     marginTop: 16,
     fontSize: 16,
@@ -1091,11 +1176,12 @@ const styles = {
     color: "#c62828",
     fontWeight: 700,
   },
-  formGrid: {
+  formGridHeaderSmall: {
     display: "grid",
-    gridTemplateColumns: "repeat(4, minmax(220px, 1fr))",
+    gridTemplateColumns: "repeat(5, minmax(180px, 1fr))",
     gap: 14,
     marginTop: 18,
+    alignItems: "end",
   },
   label: {
     display: "block",
@@ -1113,6 +1199,7 @@ const styles = {
     padding: "12px 14px",
     fontSize: 16,
     outline: "none",
+    minWidth: 0,
   },
   sectionHeaderRow: {
     display: "flex",
@@ -1131,40 +1218,41 @@ const styles = {
     color: "#697791",
     fontSize: 16,
   },
-  itemList: {
+  rowList: {
     display: "flex",
     flexDirection: "column",
-    gap: 16,
+    gap: 14,
+    width: "100%",
   },
-  itemCard: {
-    border: "1px solid #d9e2ee",
-    borderRadius: 20,
-    padding: 18,
-    background: "#fcfdff",
-    overflow: "hidden",
-  },
-  itemCardHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-    marginBottom: 14,
-    flexWrap: "wrap",
-  },
-  itemIndex: {
-    fontSize: 20,
-    fontWeight: 700,
-    color: "#24324a",
-  },
-  itemGrid: {
+  rowHeader: {
     display: "grid",
     gridTemplateColumns:
-      "130px minmax(220px, 2fr) minmax(160px, 1.2fr) 90px 110px 120px 150px",
-    gap: 12,
-    alignItems: "end",
-    minWidth: 0,
+      "120px minmax(220px, 1.7fr) minmax(220px, 1.5fr) 90px 90px 120px 120px 70px",
+    gap: 10,
+    alignItems: "center",
+    fontWeight: 700,
+    color: "#4d5b73",
+    fontSize: 14,
+    padding: "0 2px",
   },
-  productNameCol: {
+  rowItemWrap: {
+    border: "1px solid #d9e2ee",
+    borderRadius: 16,
+    padding: 14,
+    background: "#fcfdff",
+    width: "100%",
+    boxSizing: "border-box",
+  },
+  rowGrid: {
+    display: "grid",
+    gridTemplateColumns:
+      "120px minmax(220px, 1.7fr) minmax(220px, 1.5fr) 90px 90px 120px 120px 70px",
+    gap: 10,
+    alignItems: "center",
+    width: "100%",
+  },
+  autoCompleteWrap: {
+    width: "100%",
     minWidth: 0,
   },
   tableInput: {
@@ -1174,7 +1262,7 @@ const styles = {
     border: "1px solid #c8d2e1",
     borderRadius: 10,
     padding: "12px 14px",
-    fontSize: 18,
+    fontSize: 16,
     background: "#fff",
     outline: "none",
   },
@@ -1184,8 +1272,8 @@ const styles = {
     boxSizing: "border-box",
     border: "1px solid #c8d2e1",
     borderRadius: 10,
-    padding: "13px 14px",
-    fontSize: 18,
+    padding: "12px 14px",
+    fontSize: 16,
     background: "#fff",
     outline: "none",
     fontWeight: 600,
@@ -1194,21 +1282,31 @@ const styles = {
     background: "#fff4a8",
     border: "1px solid #e0bf2f",
   },
-  totalBox: {
+  totalBoxSmall: {
     width: "100%",
     boxSizing: "border-box",
     border: "1px solid #d7e0ec",
     borderRadius: 10,
-    padding: "12px 14px",
-    fontSize: 22,
+    padding: "12px 10px",
+    fontSize: 16,
     fontWeight: 700,
     color: "#17325c",
     background: "#f7faff",
     textAlign: "right",
-    minHeight: 52,
+    minHeight: 48,
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
+  },
+  deleteButtonSmall: {
+    background: "#fff1f1",
+    color: "#c62828",
+    border: "1px solid #efb0b0",
+    borderRadius: 10,
+    padding: "10px 8px",
+    cursor: "pointer",
+    fontSize: 15,
+    minHeight: 48,
   },
   summaryBar: {
     marginTop: 18,
@@ -1244,7 +1342,7 @@ const styles = {
   historyTable: {
     width: "100%",
     borderCollapse: "collapse",
-    minWidth: 900,
+    minWidth: 700,
   },
   th: {
     background: "#f3f7fc",
