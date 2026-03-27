@@ -1,18 +1,23 @@
 import React, { useEffect, useState } from "react";
 import "./App.css";
+import DashboardPage from "./pages/DashboardPage";
 import ReceivePage from "./pages/ReceivePage";
 import IssuePage from "./pages/IssuePage";
 import UserPage from "./pages/UserPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
-  const [activeMenu, setActiveMenu] = useState("receive");
+  const [activeMenu, setActiveMenu] = useState("dashboard");
   const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
-    const savedUser = localStorage.getItem("user");
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
+    try {
+      const savedUser = localStorage.getItem("user");
+      if (savedUser && savedUser !== "undefined") {
+        setCurrentUser(JSON.parse(savedUser));
+      }
+    } catch {
+      localStorage.removeItem("user");
     }
   }, []);
 
@@ -23,7 +28,7 @@ export default function App() {
   const handleLogout = () => {
     localStorage.removeItem("user");
     setCurrentUser(null);
-    setActiveMenu("receive");
+    setActiveMenu("dashboard");
   };
 
   if (!currentUser) {
@@ -40,6 +45,7 @@ export default function App() {
       />
 
       <main className="main-content">
+        {activeMenu === "dashboard" && <DashboardPage currentUser={currentUser} />}
         {activeMenu === "receive" && <ReceivePage currentUser={currentUser} />}
         {activeMenu === "issue" && <IssuePage currentUser={currentUser} />}
         {activeMenu === "users" && currentUser.role === "admin" && (
@@ -54,6 +60,13 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-header">📦 ระบบวัสดุสำนักงาน</div>
+
+      <button
+        className={`menu-btn ${activeMenu === "dashboard" ? "active" : ""}`}
+        onClick={() => onChange("dashboard")}
+      >
+        📊 ภาพรวม
+      </button>
 
       <button
         className={`menu-btn ${activeMenu === "receive" ? "active" : ""}`}

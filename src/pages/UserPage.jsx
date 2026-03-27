@@ -1,513 +1,552 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
-const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
-
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  body {
-    font-family: 'Sarabun', sans-serif;
-    background: #0f1117;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 24px;
-  }
-
-  .page-wrap {
-    width: 100%;
-    max-width: 480px;
-  }
-
-  .card {
-    background: #181c27;
-    border: 1px solid #2a2f3e;
-    border-radius: 16px;
-    padding: 36px 32px;
-    box-shadow: 0 24px 64px rgba(0,0,0,0.5);
-    position: relative;
-    overflow: hidden;
-  }
-
-  .card::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0;
-    height: 3px;
-    background: linear-gradient(90deg, #3b82f6, #8b5cf6, #06b6d4);
-  }
-
-  .card-header {
-    margin-bottom: 28px;
-  }
-
-  .card-header h2 {
-    font-size: 1.4rem;
-    font-weight: 700;
-    color: #f1f5f9;
-    letter-spacing: -0.02em;
-  }
-
-  .card-header p {
-    font-size: 0.85rem;
-    color: #64748b;
-    margin-top: 4px;
-  }
-
-  .form-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .field label {
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #94a3b8;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .field label .required {
-    color: #f87171;
-    margin-left: 3px;
-  }
-
-  .field input,
-  .field select {
-    background: #0f1117;
-    border: 1.5px solid #2a2f3e;
-    border-radius: 10px;
-    padding: 11px 14px;
-    color: #f1f5f9;
-    font-family: 'Sarabun', sans-serif;
-    font-size: 0.95rem;
-    outline: none;
-    transition: border-color 0.2s, box-shadow 0.2s;
-    width: 100%;
-    appearance: none;
-    -webkit-appearance: none;
-  }
-
-  .field input::placeholder { color: #3f4a5e; }
-
-  .field input:focus,
-  .field select:focus {
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
-  }
-
-  .field.has-error input,
-  .field.has-error select {
-    border-color: #f87171;
-    box-shadow: 0 0 0 3px rgba(248,113,113,0.1);
-  }
-
-  .field-error {
-    font-size: 0.78rem;
-    color: #f87171;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .field-error::before { content: '⚠'; }
-
-  .select-wrap {
-    position: relative;
-  }
-
-  .select-wrap::after {
-    content: '▾';
-    position: absolute;
-    right: 14px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #64748b;
-    font-size: 0.8rem;
-    pointer-events: none;
-  }
-
-  .field select option { background: #181c27; }
-
-  .row-2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
-
-  .divider {
-    border: none;
-    border-top: 1px solid #2a2f3e;
-    margin: 4px 0;
-  }
-
-  .alert {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 12px 14px;
-    border-radius: 10px;
-    font-size: 0.88rem;
-    font-weight: 500;
-    animation: fadeSlide 0.25s ease;
-  }
-
-  .alert.success {
-    background: rgba(16,185,129,0.1);
-    border: 1px solid rgba(16,185,129,0.3);
-    color: #6ee7b7;
-  }
-
-  .alert.error {
-    background: rgba(248,113,113,0.1);
-    border: 1px solid rgba(248,113,113,0.3);
-    color: #fca5a5;
-  }
-
-  .alert-icon { font-size: 1rem; flex-shrink: 0; }
-
-  .btn-submit {
-    width: 100%;
-    padding: 13px;
-    background: linear-gradient(135deg, #3b82f6, #6366f1);
-    border: none;
-    border-radius: 10px;
-    color: #fff;
-    font-family: 'Sarabun', sans-serif;
-    font-size: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.2s, transform 0.15s, box-shadow 0.2s;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    box-shadow: 0 4px 20px rgba(59,130,246,0.3);
-    margin-top: 4px;
-  }
-
-  .btn-submit:hover:not(:disabled) {
-    opacity: 0.92;
-    transform: translateY(-1px);
-    box-shadow: 0 6px 24px rgba(59,130,246,0.4);
-  }
-
-  .btn-submit:active:not(:disabled) { transform: translateY(0); }
-
-  .btn-submit:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-  }
-
-  .spinner {
-    width: 16px; height: 16px;
-    border: 2px solid rgba(255,255,255,0.3);
-    border-top-color: #fff;
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-  }
-
-  .password-wrap { position: relative; }
-
-  .password-wrap input { padding-right: 44px; }
-
-  .toggle-pw {
-    position: absolute;
-    right: 12px; top: 50%;
-    transform: translateY(-50%);
-    background: none; border: none;
-    color: #64748b; cursor: pointer;
-    font-size: 1rem; padding: 4px;
-    transition: color 0.2s;
-  }
-
-  .toggle-pw:hover { color: #94a3b8; }
-
-  .pw-strength {
-    display: flex;
-    gap: 4px;
-    margin-top: 6px;
-  }
-
-  .pw-bar {
-    height: 3px;
-    border-radius: 2px;
-    flex: 1;
-    background: #2a2f3e;
-    transition: background 0.3s;
-  }
-
-  .pw-bar.weak   { background: #f87171; }
-  .pw-bar.medium { background: #fbbf24; }
-  .pw-bar.strong { background: #34d399; }
-
-  .pw-label {
-    font-size: 0.72rem;
-    color: #64748b;
-    margin-top: 4px;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  @keyframes fadeSlide {
-    from { opacity: 0; transform: translateY(-6px); }
-    to   { opacity: 1; transform: translateY(0); }
-  }
-`;
+const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/office-api";
 
 const BRANCHES = [
   "SCY01 สำนักงานใหญ่",
-  "SCY04 สิงห์ชัย สี่ขวา",
-  "SCY04 สิงห์ชัย ตลาด",
   "SCY05 ป.เปา นครหลวง",
   "SCY06 ป.เปา วังน้อย",
+  "SCY07 สิงห์ชัย ตลาด",
 ];
 
-function getPasswordStrength(pw) {
-  if (!pw) return 0;
-  let score = 0;
-  if (pw.length >= 8) score++;
-  if (/[A-Z]/.test(pw) || /[a-z]/.test(pw)) score++;
-  if (/[0-9]/.test(pw)) score++;
-  if (/[^A-Za-z0-9]/.test(pw)) score++;
-  return score;
-}
+const emptyForm = () => ({
+  name: "",
+  username: "",
+  password: "",
+  role: "user",
+  branch: "",
+  status: "active",
+});
 
-function validate(form) {
-  const errors = {};
-  if (!form.name.trim()) errors.name = "กรุณากรอกชื่อ";
-  if (!form.username.trim()) {
-    errors.username = "กรุณากรอก Username";
-  } else if (!/^[a-zA-Z0-9_]{3,20}$/.test(form.username)) {
-    errors.username = "Username: ตัวอักษร a-z, 0-9, _ (3-20 ตัว)";
-  }
-  if (!form.password) {
-    errors.password = "กรุณากรอก Password";
-  } else if (form.password.length < 6) {
-    errors.password = "Password ต้องมีอย่างน้อย 6 ตัวอักษร";
-  }
-  if (!form.branch) errors.branch = "กรุณาเลือกสาขา";
-  return errors;
-}
+export default function UserPage({ currentUser }) {
+  const [users, setUsers] = useState([]);
+  const [mode, setMode] = useState("list");
+  const [form, setForm] = useState(emptyForm());
+  const [editId, setEditId] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(null);
+  const [msg, setMsg] = useState({ text: "", type: "" });
+  const [searchText, setSearchText] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(null);
 
-export default function UserPage() {
-  const [form, setForm] = useState({
-    name: "", username: "", password: "",
-    role: "user", branch: "", status: "active",
-  });
-  const [errors, setErrors]     = useState({});
-  const [loading, setLoading]   = useState(false);
-  const [message, setMessage]   = useState("");
-  const [msgType, setMsgType]   = useState("");
-  const [showPw, setShowPw]     = useState(false);
-  const [touched, setTouched]   = useState({});
-
-  const pwStrength = getPasswordStrength(form.password);
-  const strengthLabels = ["", "อ่อน", "พอใช้", "ดี", "แข็งแกร่ง"];
-  const strengthClass  = ["", "weak", "medium", "strong", "strong"];
-
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    const updated = { ...form, [name]: value };
-    setForm(updated);
-    if (touched[name]) {
-      const newErrs = validate(updated);
-      setErrors(prev => ({ ...prev, [name]: newErrs[name] }));
-    }
+  const api = async (action, payload = {}) => {
+    const res = await fetch(API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...payload }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
   };
 
-  const handleBlur = (e) => {
-    const { name } = e.target;
-    setTouched(prev => ({ ...prev, [name]: true }));
-    const newErrs = validate(form);
-    setErrors(prev => ({ ...prev, [name]: newErrs[name] }));
+  const showMsg = (text, type = "success") => {
+    setMsg({ text, type });
+    setTimeout(() => setMsg({ text: "", type: "" }), 3000);
   };
 
-  const handleSubmit = async () => {
-    if (loading) return;
-    const allTouched = { name:true, username:true, password:true, branch:true };
-    setTouched(allTouched);
-    const errs = validate(form);
-    setErrors(errs);
-    if (Object.keys(errs).length > 0) return;
-
-    setLoading(true);
-    setMessage("");
-    setMsgType("");
-
+  const loadUsers = async () => {
     try {
-      const res = await fetch(
-        "https://n8n-new-project-gwf2.onrender.com/webhook/9c69cda0-c124-48c5-8e32-e24d72a7577e",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(form),
-        }
-      );
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-
-      if (data.success) {
-        setMessage("✓ บันทึกผู้ใช้สำเร็จ");
-        setMsgType("success");
-        setForm({ name:"", username:"", password:"", role:"user", branch:"", status:"active" });
-        setTouched({});
-        setErrors({});
-      } else {
-        setMessage(data.message || "Username นี้มีอยู่แล้ว กรุณาใช้ชื่ออื่น");
-        setMsgType("error");
-      }
+      setLoading(true);
+      const data = await api("get_users");
+      const list = Array.isArray(data) ? data : data?.users || data?.data || [];
+      setUsers(list);
     } catch {
-      setMessage("เชื่อมต่อระบบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง");
-      setMsgType("error");
+      showMsg("โหลดข้อมูลไม่สำเร็จ", "error");
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <>
-      <style>{STYLES}</style>
-      <div className="page-wrap">
-        <div className="card">
-          <div className="card-header">
-            <h2>👤 กำหนดผู้ใช้งาน</h2>
-            <p>เพิ่มบัญชีผู้ใช้ใหม่เข้าสู่ระบบ</p>
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const handleAdd = () => {
+    setEditId(null);
+    setForm(emptyForm());
+    setMode("form");
+  };
+
+  const handleEdit = (user) => {
+    setEditId(user.user_id || user.id || user.username);
+    setForm({
+      name: user.name || "",
+      username: user.username || "",
+      password: "",
+      role: user.role || "user",
+      branch: user.branch || "",
+      status: user.status || "active",
+    });
+    setMode("form");
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim()) return showMsg("กรุณาระบุชื่อ-นามสกุล", "error");
+    if (!form.username.trim()) return showMsg("กรุณาระบุ Username", "error");
+    if (!editId && !form.password.trim()) return showMsg("กรุณาระบุรหัสผ่าน", "error");
+    if (!form.branch) return showMsg("กรุณาเลือกสาขา", "error");
+
+    try {
+      setSaving(true);
+      const action = editId ? "update_user" : "save_user";
+      const payload = editId ? { ...form, user_id: editId } : form;
+      const raw = await api(action, payload);
+      const data = Array.isArray(raw) ? raw[0] : raw;
+      if (data?.success || data?.ok) {
+        showMsg(editId ? "แก้ไขผู้ใช้สำเร็จ" : "เพิ่มผู้ใช้สำเร็จ");
+        setMode("list");
+        await loadUsers();
+      } else {
+        showMsg(data?.message || "บันทึกไม่สำเร็จ", "error");
+      }
+    } catch {
+      showMsg("ไม่สามารถเชื่อมต่อระบบได้", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (user) => {
+    const id = user.user_id || user.id;
+    try {
+      setDeleting(id);
+      const raw = await api("delete_user", { user_id: id });
+      const data = Array.isArray(raw) ? raw[0] : raw;
+      if (data?.success || data?.ok) {
+        showMsg("ลบผู้ใช้สำเร็จ");
+        await loadUsers();
+      } else {
+        showMsg(data?.message || "ลบไม่สำเร็จ", "error");
+      }
+    } catch {
+      showMsg("ไม่สามารถลบได้", "error");
+    } finally {
+      setDeleting(null);
+      setConfirmDelete(null);
+    }
+  };
+
+  const filtered = users.filter((u) => {
+    const q = searchText.toLowerCase();
+    return (
+      !q ||
+      (u.name || "").toLowerCase().includes(q) ||
+      (u.username || "").toLowerCase().includes(q) ||
+      (u.branch || "").toLowerCase().includes(q)
+    );
+  });
+
+  /* ── STYLES ── */
+  const S = {
+    page: {
+      padding: "20px",
+      background: "#f5f5f5",
+      minHeight: "100vh",
+      fontFamily: "Tahoma, Arial, sans-serif",
+      fontSize: "14px",
+      color: "#333",
+    },
+    card: {
+      background: "#fff",
+      borderRadius: "6px",
+      boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
+      padding: "20px",
+      marginBottom: "16px",
+    },
+    cardHeader: {
+      fontSize: "15px",
+      fontWeight: "700",
+      color: "#333",
+      marginBottom: "16px",
+      paddingBottom: "10px",
+      borderBottom: "2px solid #e0e0e0",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+    },
+    topRow: {
+      display: "flex",
+      gap: "8px",
+      marginBottom: "14px",
+      alignItems: "center",
+    },
+    input: {
+      border: "1px solid #d9d9d9",
+      borderRadius: "4px",
+      padding: "7px 10px",
+      fontSize: "14px",
+      boxSizing: "border-box",
+      width: "100%",
+      color: "#333",
+      outline: "none",
+    },
+    btnPrimary: {
+      background: "#1976d2",
+      color: "#fff",
+      border: "none",
+      borderRadius: "4px",
+      padding: "8px 18px",
+      cursor: "pointer",
+      fontSize: "14px",
+      fontWeight: "600",
+      whiteSpace: "nowrap",
+    },
+    btnGray: {
+      background: "#757575",
+      color: "#fff",
+      border: "none",
+      borderRadius: "4px",
+      padding: "8px 16px",
+      cursor: "pointer",
+      fontSize: "13px",
+      whiteSpace: "nowrap",
+    },
+    btnEdit: {
+      background: "#f57c00",
+      color: "#fff",
+      border: "none",
+      borderRadius: "3px",
+      padding: "5px 12px",
+      cursor: "pointer",
+      fontSize: "12px",
+      marginRight: "4px",
+    },
+    btnDelete: {
+      background: "#d32f2f",
+      color: "#fff",
+      border: "none",
+      borderRadius: "3px",
+      padding: "5px 12px",
+      cursor: "pointer",
+      fontSize: "12px",
+    },
+    btnSave: {
+      background: "#1976d2",
+      color: "#fff",
+      border: "none",
+      borderRadius: "4px",
+      padding: "9px 28px",
+      cursor: "pointer",
+      fontSize: "14px",
+      fontWeight: "600",
+    },
+    table: { width: "100%", borderCollapse: "collapse", fontSize: "13px" },
+    th: {
+      background: "#f0f0f0",
+      padding: "9px 12px",
+      textAlign: "left",
+      borderBottom: "2px solid #ddd",
+      fontWeight: "700",
+      color: "#555",
+      whiteSpace: "nowrap",
+    },
+    thCenter: {
+      background: "#f0f0f0",
+      padding: "9px 12px",
+      textAlign: "center",
+      borderBottom: "2px solid #ddd",
+      fontWeight: "700",
+      color: "#555",
+      whiteSpace: "nowrap",
+    },
+    td: {
+      padding: "9px 12px",
+      borderBottom: "1px solid #ebebeb",
+      color: "#333",
+      verticalAlign: "middle",
+    },
+    tdCenter: {
+      padding: "9px 12px",
+      borderBottom: "1px solid #ebebeb",
+      color: "#333",
+      verticalAlign: "middle",
+      textAlign: "center",
+    },
+    badge: (c) => ({
+      display: "inline-block",
+      padding: "2px 10px",
+      borderRadius: "10px",
+      fontSize: "12px",
+      fontWeight: "600",
+      background:
+        c === "green" ? "#e8f5e9" : c === "red" ? "#ffebee" : "#e3f2fd",
+      color:
+        c === "green" ? "#2e7d32" : c === "red" ? "#c62828" : "#1565c0",
+    }),
+    msgBox: (t) => ({
+      padding: "10px 16px",
+      borderRadius: "4px",
+      marginBottom: "12px",
+      background: t === "success" ? "#e8f5e9" : "#ffebee",
+      color: t === "success" ? "#2e7d32" : "#c62828",
+      fontSize: "13px",
+      fontWeight: "600",
+    }),
+    formGrid: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: "14px",
+    },
+    formRow: { display: "flex", flexDirection: "column", gap: "4px" },
+    label: { fontSize: "13px", color: "#555", fontWeight: "600" },
+    formActions: {
+      display: "flex",
+      gap: "8px",
+      marginTop: "18px",
+      paddingTop: "14px",
+      borderTop: "1px solid #eee",
+    },
+    overlay: {
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.4)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      zIndex: 9999,
+    },
+    dialog: {
+      background: "#fff",
+      borderRadius: "6px",
+      padding: "24px",
+      maxWidth: "360px",
+      width: "90%",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+    },
+  };
+
+  /* ── FORM VIEW ── */
+  if (mode === "form") {
+    return (
+      <div style={S.page}>
+        <div style={S.card}>
+          <div style={S.cardHeader}>
+            <span>{editId ? "แก้ไขผู้ใช้งาน" : "เพิ่มผู้ใช้งานใหม่"}</span>
           </div>
-
-          {message && (
-            <div className={`alert ${msgType}`} style={{ marginBottom: 20 }}>
-              <span className="alert-icon">{msgType === "success" ? "✓" : "✕"}</span>
-              <span>{message}</span>
-            </div>
-          )}
-
-          <div className="form-grid">
-            {/* ชื่อ */}
-            <div className={`field ${errors.name ? "has-error" : ""}`}>
-              <label>ชื่อ-นามสกุล <span className="required">*</span></label>
+          {msg.text && <div style={S.msgBox(msg.type)}>{msg.text}</div>}
+          <div style={S.formGrid}>
+            <div style={S.formRow}>
+              <label style={S.label}>ชื่อ - นามสกุล *</label>
               <input
-                name="name"
-                placeholder="ชื่อจริง นามสกุล"
+                style={S.input}
                 value={form.name}
-                onChange={handleChange}
-                onBlur={handleBlur}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="ชื่อ นามสกุล"
               />
-              {errors.name && <span className="field-error">{errors.name}</span>}
             </div>
-
-            {/* Username */}
-            <div className={`field ${errors.username ? "has-error" : ""}`}>
-              <label>Username <span className="required">*</span></label>
+            <div style={S.formRow}>
+              <label style={S.label}>Username *</label>
               <input
-                name="username"
-                placeholder="เช่น john_doe"
+                style={{ ...S.input, background: editId ? "#f5f5f5" : "#fff" }}
                 value={form.username}
-                onChange={handleChange}
-                onBlur={handleBlur}
-                autoComplete="off"
+                onChange={(e) => setForm({ ...form, username: e.target.value })}
+                placeholder="username"
+                disabled={!!editId}
               />
-              {errors.username && <span className="field-error">{errors.username}</span>}
             </div>
-
-            {/* Password */}
-            <div className={`field ${errors.password ? "has-error" : ""}`}>
-              <label>Password <span className="required">*</span></label>
-              <div className="password-wrap">
-                <input
-                  name="password"
-                  type={showPw ? "text" : "password"}
-                  placeholder="อย่างน้อย 6 ตัวอักษร"
-                  value={form.password}
-                  onChange={handleChange}
-                  onBlur={handleBlur}
-                  autoComplete="new-password"
-                />
-                <button
-                  className="toggle-pw"
-                  type="button"
-                  onClick={() => setShowPw(v => !v)}
-                  tabIndex={-1}
-                >
-                  {showPw ? "🙈" : "👁"}
-                </button>
-              </div>
-              {form.password && (
-                <>
-                  <div className="pw-strength">
-                    {[1,2,3,4].map(i => (
-                      <div
-                        key={i}
-                        className={`pw-bar ${i <= pwStrength ? strengthClass[pwStrength] : ""}`}
-                      />
-                    ))}
-                  </div>
-                  <div className="pw-label">
-                    ความแข็งแกร่ง: {strengthLabels[pwStrength]}
-                  </div>
-                </>
-              )}
-              {errors.password && <span className="field-error">{errors.password}</span>}
+            <div style={S.formRow}>
+              <label style={S.label}>
+                รหัสผ่าน {editId ? "(เว้นว่างถ้าไม่เปลี่ยน)" : "*"}
+              </label>
+              <input
+                style={S.input}
+                type="password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder="รหัสผ่าน"
+              />
             </div>
-
-            <hr className="divider" />
-
-            {/* สาขา */}
-            <div className={`field ${errors.branch ? "has-error" : ""}`}>
-              <label>สาขา <span className="required">*</span></label>
-              <div className="select-wrap">
-                <select name="branch" value={form.branch} onChange={handleChange} onBlur={handleBlur}>
-                  <option value="">— เลือกสาขา —</option>
-                  {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
-                </select>
-              </div>
-              {errors.branch && <span className="field-error">{errors.branch}</span>}
+            <div style={S.formRow}>
+              <label style={S.label}>สาขา *</label>
+              <select
+                style={S.input}
+                value={form.branch}
+                onChange={(e) => setForm({ ...form, branch: e.target.value })}
+              >
+                <option value="">-- เลือกสาขา --</option>
+                {BRANCHES.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </select>
             </div>
-
-            {/* Role + Status */}
-            <div className="row-2">
-              <div className="field">
-                <label>สิทธิ์การใช้งาน</label>
-                <div className="select-wrap">
-                  <select name="role" value={form.role} onChange={handleChange}>
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
-                  </select>
-                </div>
-              </div>
-              <div className="field">
-                <label>สถานะ</label>
-                <div className="select-wrap">
-                  <select name="status" value={form.status} onChange={handleChange}>
-                    <option value="active">ใช้งาน</option>
-                    <option value="inactive">ปิดใช้งาน</option>
-                  </select>
-                </div>
-              </div>
+            <div style={S.formRow}>
+              <label style={S.label}>สิทธิ์การใช้งาน</label>
+              <select
+                style={S.input}
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+              >
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+              </select>
             </div>
-
-            <button className="btn-submit" onClick={handleSubmit} disabled={loading}>
-              {loading ? (
-                <><div className="spinner" /> กำลังบันทึก...</>
-              ) : (
-                <>💾 บันทึกผู้ใช้งาน</>
-              )}
+            <div style={S.formRow}>
+              <label style={S.label}>สถานะ</label>
+              <select
+                style={S.input}
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+              >
+                <option value="active">ใช้งาน</option>
+                <option value="inactive">ปิดใช้งาน</option>
+              </select>
+            </div>
+          </div>
+          <div style={S.formActions}>
+            <button style={S.btnSave} onClick={handleSave} disabled={saving}>
+              {saving ? "กำลังบันทึก..." : "บันทึก"}
+            </button>
+            <button style={S.btnGray} onClick={() => setMode("list")}>
+              ยกเลิก
             </button>
           </div>
         </div>
       </div>
-    </>
+    );
+  }
+
+  /* ── LIST VIEW ── */
+  return (
+    <div style={S.page}>
+      <div style={S.card}>
+        <div style={S.cardHeader}>
+          <span>กำหนดผู้ใช้งาน</span>
+          <button style={S.btnPrimary} onClick={handleAdd}>
+            + เพิ่มผู้ใช้
+          </button>
+        </div>
+
+        {msg.text && <div style={S.msgBox(msg.type)}>{msg.text}</div>}
+
+        <div style={S.topRow}>
+          <input
+            style={{ ...S.input, maxWidth: "300px" }}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="ค้นหาชื่อ / username / สาขา"
+          />
+          <button style={S.btnGray} onClick={loadUsers} disabled={loading}>
+            {loading ? "..." : "รีเฟรช"}
+          </button>
+        </div>
+
+        <div style={{ overflowX: "auto" }}>
+          <table style={S.table}>
+            <thead>
+              <tr>
+                <th style={S.th}>#</th>
+                <th style={S.th}>ชื่อ - นามสกุล</th>
+                <th style={S.th}>Username</th>
+                <th style={S.th}>สาขา</th>
+                <th style={S.thCenter}>สิทธิ์</th>
+                <th style={S.thCenter}>สถานะ</th>
+                <th style={S.thCenter}>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    style={{ ...S.tdCenter, color: "#999", padding: "24px" }}
+                  >
+                    กำลังโหลด...
+                  </td>
+                </tr>
+              ) : filtered.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={7}
+                    style={{ ...S.tdCenter, color: "#999", padding: "24px" }}
+                  >
+                    ไม่มีข้อมูลผู้ใช้งาน
+                  </td>
+                </tr>
+              ) : (
+                filtered.map((u, i) => (
+                  <tr
+                    key={u.user_id || u.username || i}
+                    style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}
+                  >
+                    <td style={S.td}>{i + 1}</td>
+                    <td style={S.td}>{u.name || "-"}</td>
+                    <td style={S.td}>{u.username || "-"}</td>
+                    <td style={S.td}>{u.branch || "-"}</td>
+                    <td style={S.tdCenter}>
+                      <span style={S.badge(u.role === "admin" ? "blue" : "")}>
+                        {u.role === "admin" ? "Admin" : "User"}
+                      </span>
+                    </td>
+                    <td style={S.tdCenter}>
+                      <span
+                        style={S.badge(
+                          u.status === "active" ? "green" : "red"
+                        )}
+                      >
+                        {u.status === "active" ? "ใช้งาน" : "ปิดใช้งาน"}
+                      </span>
+                    </td>
+                    <td style={S.tdCenter}>
+                      <button style={S.btnEdit} onClick={() => handleEdit(u)}>
+                        แก้ไข
+                      </button>
+                      <button
+                        style={S.btnDelete}
+                        onClick={() => setConfirmDelete(u)}
+                        disabled={
+                          deleting === (u.user_id || u.id)
+                        }
+                      >
+                        {deleting === (u.user_id || u.id) ? "..." : "ลบ"}
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Confirm Delete Dialog ── */}
+      {confirmDelete && (
+        <div style={S.overlay}>
+          <div style={S.dialog}>
+            <div
+              style={{
+                fontSize: "16px",
+                fontWeight: "700",
+                marginBottom: "10px",
+                color: "#333",
+              }}
+            >
+              ยืนยันการลบ
+            </div>
+            <p style={{ color: "#555", marginBottom: "18px", lineHeight: 1.6 }}>
+              ต้องการลบผู้ใช้{" "}
+              <strong>{confirmDelete.name || confirmDelete.username}</strong>{" "}
+              ออกจากระบบใช่หรือไม่?
+            </p>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                style={S.btnDelete}
+                onClick={() => handleDelete(confirmDelete)}
+              >
+                ยืนยัน ลบ
+              </button>
+              <button
+                style={S.btnGray}
+                onClick={() => setConfirmDelete(null)}
+              >
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
