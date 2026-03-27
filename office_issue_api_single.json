@@ -1,0 +1,441 @@
+{
+  "name": "Office Issue API (Single Workflow)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "office-issue-api",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "node-webhook",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [120, 300],
+      "webhookId": "office-issue-api"
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "load_materials",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "load_materials"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "save_issue",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "save_issue"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "search_issues",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "search_issues"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "open_issue",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "open_issue"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+                "combinator": "and",
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.body.action }}",
+                    "rightValue": "update_issue",
+                    "operator": { "type": "string", "operation": "equals" }
+                  }
+                ]
+              },
+              "renameOutput": true,
+              "outputKey": "update_issue"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-switch",
+      "name": "Switch - Route by action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [360, 300]
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  p.product_id,\n  p.product_name,\n  p.unit,\n  COALESCE(s.qty_on_hand, 0) AS qty_on_hand\nFROM products p\nLEFT JOIN stock s ON s.product_id = p.product_id\nWHERE p.is_active = true\nORDER BY p.product_name ASC;",
+        "options": {}
+      },
+      "id": "node-load-sql",
+      "name": "SQL - Load Materials",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [600, 60],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": { "responseHeaders": { "entries": [{ "name": "Access-Control-Allow-Origin", "value": "*" }] } }
+      },
+      "id": "node-respond-load",
+      "name": "Respond - Load",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [840, 60]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst now = new Date();\nconst yyyy = now.getFullYear();\nconst mm = String(now.getMonth() + 1).padStart(2, '0');\nconst dd = String(now.getDate()).padStart(2, '0');\nconst rand = String(Math.floor(Math.random() * 9000) + 1000);\nconst issueNo = `ISS-${yyyy}${mm}${dd}-${rand}`;\nconst items = Array.isArray(body.items) ? body.items : [];\nconst totalQty = items.reduce((s, i) => s + (Number(i.qty_issue) || 0), 0);\nreturn [{ json: {\n  issue_no: issueNo,\n  issue_date: `${yyyy}-${mm}-${dd}`,\n  requester_name: body.username || '',\n  issue_branch: body.branch || '',\n  total_qty: totalQty,\n  created_by: body.username || '',\n  items\n} }];"
+      },
+      "id": "node-save-prepare",
+      "name": "Code - Prepare Save",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 180]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO issue_header (issue_no, issue_date, requester_name, issue_branch, total_qty, created_by, created_at)\nVALUES (\n  '{{ $json.issue_no }}',\n  '{{ $json.issue_date }}',\n  '{{ $json.requester_name }}',\n  '{{ $json.issue_branch }}',\n  {{ $json.total_qty }},\n  '{{ $json.created_by }}',\n  NOW()\n);",
+        "options": {}
+      },
+      "id": "node-save-header",
+      "name": "SQL - Insert Header",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [840, 180],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Code - Prepare Save').first().json;\nconst values = data.items.map((item, idx) =>\n  `('${data.issue_no}', ${item.line_no || idx + 1}, '${(item.product_id||'').replace(/'/g,\"''\")}', '${(item.product_name||'').replace(/'/g,\"''\")}', '${(item.unit||'').replace(/'/g,\"''\")}', ${Number(item.qty_issue)||0}, ${item.qty_on_hand!=null ? Number(item.qty_on_hand) : 'NULL'}, NOW())`\n).join(',\\n');\nreturn [{ json: { insertSql: values, issueNo: data.issue_no, items: data.items } }];"
+      },
+      "id": "node-save-items-code",
+      "name": "Code - Prepare Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 180]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO issue_items (issue_no, line_no, product_id, product_name, unit, qty_issue, qty_on_hand, created_at)\nVALUES\n{{ $json.insertSql }};",
+        "options": {}
+      },
+      "id": "node-save-items-sql",
+      "name": "SQL - Insert Items",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1320, 180],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE stock s\nSET qty_on_hand = s.qty_on_hand - i.qty_issue,\n    updated_at = NOW()\nFROM issue_items i\nWHERE i.issue_no = '{{ $('Code - Prepare Save').first().json.issue_no }}'\n  AND s.product_id = i.product_id;",
+        "options": {}
+      },
+      "id": "node-save-stock",
+      "name": "SQL - Update Stock",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 180],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"บันทึกใบเบิกเรียบร้อย\", \"issue_no\": \"{{ $('Code - Prepare Save').first().json.issue_no }}\" }",
+        "options": { "responseHeaders": { "entries": [{ "name": "Access-Control-Allow-Origin", "value": "*" }] } }
+      },
+      "id": "node-respond-save",
+      "name": "Respond - Save",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1800, 180]
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n  issue_no,\n  TO_CHAR(issue_date, 'YYYY-MM-DD') AS issue_date,\n  requester_name,\n  issue_branch,\n  total_qty\nFROM issue_header\nORDER BY created_at DESC\nLIMIT 200;",
+        "options": {}
+      },
+      "id": "node-search-sql",
+      "name": "SQL - Search Issues",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [600, 300],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": { "responseHeaders": { "entries": [{ "name": "Access-Control-Allow-Origin", "value": "*" }] } }
+      },
+      "id": "node-respond-search",
+      "name": "Respond - Search",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [840, 300]
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT issue_no, TO_CHAR(issue_date,'YYYY-MM-DD') AS issue_date, requester_name, issue_branch, total_qty, COALESCE(note,'') AS note\nFROM issue_header WHERE issue_no = '{{ $('Webhook').first().json.body.issue_no }}' LIMIT 1;",
+        "options": {}
+      },
+      "id": "node-open-header",
+      "name": "SQL - Open Header",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [600, 420],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT issue_item_id, issue_no, line_no, product_id, product_name, unit, qty_issue\nFROM issue_items WHERE issue_no = '{{ $('Webhook').first().json.body.issue_no }}'\nORDER BY line_no ASC;",
+        "options": {}
+      },
+      "id": "node-open-items",
+      "name": "SQL - Open Items",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [600, 540],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const headerRows = $('SQL - Open Header').all();\nconst itemRows = $('SQL - Open Items').all();\nconst header = headerRows.length > 0 ? headerRows[0].json : {};\nconst items = itemRows.map(r => r.json);\nreturn [{ json: { header, items } }];"
+      },
+      "id": "node-open-merge",
+      "name": "Code - Merge Detail",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 480]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": { "responseHeaders": { "entries": [{ "name": "Access-Control-Allow-Origin", "value": "*" }] } }
+      },
+      "id": "node-respond-open",
+      "name": "Respond - Open",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1080, 480]
+    },
+
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst issueNo = (body.issue_no || '').trim();\nconst items = Array.isArray(body.items) ? body.items : [];\nif (!issueNo) throw new Error('ไม่พบ issue_no');\nif (!items.length) throw new Error('ไม่มีรายการ');\nconst totalQty = items.reduce((s, i) => s + (Number(i.qty_issue) || 0), 0);\nreturn [{ json: { issue_no: issueNo, total_qty: totalQty, note: body.note || '', updated_by: body.updated_by || '', items } }];"
+      },
+      "id": "node-update-validate",
+      "name": "Code - Validate Update",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [600, 660]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE issue_header\nSET total_qty = {{ $json.total_qty }}, note = '{{ $json.note }}', updated_by = '{{ $json.updated_by }}', updated_at = NOW()\nWHERE issue_no = '{{ $json.issue_no }}';",
+        "options": {}
+      },
+      "id": "node-update-header",
+      "name": "SQL - Update Header",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [840, 660],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM issue_items WHERE issue_no = '{{ $('Code - Validate Update').first().json.issue_no }}';",
+        "options": {}
+      },
+      "id": "node-update-delete",
+      "name": "SQL - Delete Old Items",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1080, 660],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $('Code - Validate Update').first().json;\nconst values = data.items.map((item, idx) =>\n  `('${data.issue_no}', ${item.line_no || idx + 1}, '${(item.product_id||'').replace(/'/g,\"''\")}', '${(item.product_name||'').replace(/'/g,\"''\")}', '${(item.unit||'').replace(/'/g,\"''\")}', ${Number(item.qty_issue)||0}, NOW())`\n).join(',\\n');\nreturn [{ json: { insertSql: values, issueNo: data.issue_no } }];"
+      },
+      "id": "node-update-items-code",
+      "name": "Code - New Items SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1320, 660]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO issue_items (issue_no, line_no, product_id, product_name, unit, qty_issue, created_at)\nVALUES\n{{ $json.insertSql }};",
+        "options": {}
+      },
+      "id": "node-update-insert",
+      "name": "SQL - Insert New Items",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1560, 660],
+      "credentials": {
+        "postgres": {
+          "id": "YOUR_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"success\": true, \"message\": \"แก้ไขใบเบิกเรียบร้อย\", \"issue_no\": \"{{ $('Code - Validate Update').first().json.issue_no }}\" }",
+        "options": { "responseHeaders": { "entries": [{ "name": "Access-Control-Allow-Origin", "value": "*" }] } }
+      },
+      "id": "node-respond-update",
+      "name": "Respond - Update",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1800, 660]
+    }
+  ],
+
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Switch - Route by action", "type": "main", "index": 0 }]]
+    },
+    "Switch - Route by action": {
+      "main": [
+        [{ "node": "SQL - Load Materials",   "type": "main", "index": 0 }],
+        [{ "node": "Code - Prepare Save",    "type": "main", "index": 0 }],
+        [{ "node": "SQL - Search Issues",    "type": "main", "index": 0 }],
+        [{ "node": "SQL - Open Header",      "type": "main", "index": 0 },
+         { "node": "SQL - Open Items",       "type": "main", "index": 0 }],
+        [{ "node": "Code - Validate Update", "type": "main", "index": 0 }]
+      ]
+    },
+    "SQL - Load Materials":    { "main": [[{ "node": "Respond - Load",        "type": "main", "index": 0 }]] },
+    "Code - Prepare Save":     { "main": [[{ "node": "SQL - Insert Header",   "type": "main", "index": 0 }]] },
+    "SQL - Insert Header":     { "main": [[{ "node": "Code - Prepare Items",  "type": "main", "index": 0 }]] },
+    "Code - Prepare Items":    { "main": [[{ "node": "SQL - Insert Items",    "type": "main", "index": 0 }]] },
+    "SQL - Insert Items":      { "main": [[{ "node": "SQL - Update Stock",    "type": "main", "index": 0 }]] },
+    "SQL - Update Stock":      { "main": [[{ "node": "Respond - Save",        "type": "main", "index": 0 }]] },
+    "SQL - Search Issues":     { "main": [[{ "node": "Respond - Search",      "type": "main", "index": 0 }]] },
+    "SQL - Open Header":       { "main": [[{ "node": "Code - Merge Detail",   "type": "main", "index": 0 }]] },
+    "SQL - Open Items":        { "main": [[{ "node": "Code - Merge Detail",   "type": "main", "index": 0 }]] },
+    "Code - Merge Detail":     { "main": [[{ "node": "Respond - Open",        "type": "main", "index": 0 }]] },
+    "Code - Validate Update":  { "main": [[{ "node": "SQL - Update Header",   "type": "main", "index": 0 }]] },
+    "SQL - Update Header":     { "main": [[{ "node": "SQL - Delete Old Items","type": "main", "index": 0 }]] },
+    "SQL - Delete Old Items":  { "main": [[{ "node": "Code - New Items SQL",  "type": "main", "index": 0 }]] },
+    "Code - New Items SQL":    { "main": [[{ "node": "SQL - Insert New Items", "type": "main", "index": 0 }]] },
+    "SQL - Insert New Items":  { "main": [[{ "node": "Respond - Update",      "type": "main", "index": 0 }]] }
+  },
+
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "versionId": "1",
+  "meta": { "templateCredsSetupCompleted": true },
+  "tags": ["วัสดุสำนักงาน", "issue"]
+}
