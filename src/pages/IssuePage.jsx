@@ -1,21 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-export default function IssuePage() {
-  const LOAD_URL =
-    "https://n8n-new-project-gwf2.onrender.com/webhook/4f649516-de04-4661-a6f5-caae15261e7f";
-
-  const SAVE_URL =
-    "https://n8n-new-project-gwf2.onrender.com/webhook/4541d09a-88a3-4b45-877c-f148163cb8c3";
-
-  const SEARCH_URL =
-    "https://n8n-new-project-gwf2.onrender.com/webhook/0d0939d3-4289-4c97-82df-60ce5ffaa2b7";
-
-  const OPEN_ISSUE_URL =
-    "https://n8n-new-project-gwf2.onrender.com/webhook/ed288563-3318-46ce-8d11-b5093f3e65a4";
-
-  // เปลี่ยนเป็น webhook สำหรับแก้ไขใบเบิก
-  const UPDATE_ISSUE_URL =
-    "https://n8n-new-project-gwf2.onrender.com/webhook-test/9607ab8d-0779-4892-880c-dc1b96b36202";
+export default function IssuePage({ currentUser }) {
+  const ISSUE_API_URL =
+    "https://n8n-new-project-gwf2.onrender.com/webhook/office-api";
 
   const PAGE_SIZE = 10;
 
@@ -55,12 +42,7 @@ export default function IssuePage() {
   };
 
   const openPopup = (type, title, popupMessage) => {
-    setPopup({
-      open: true,
-      type,
-      title,
-      message: popupMessage,
-    });
+    setPopup({ open: true, type, title, message: popupMessage });
   };
 
   const closePopup = () => {
@@ -75,115 +57,37 @@ export default function IssuePage() {
     return [];
   };
 
-  const getUserFromStorage = () => {
-    const candidates = [
-      {
-        username: localStorage.getItem("username"),
-        branch: localStorage.getItem("branch"),
-      },
-      {
-        username: sessionStorage.getItem("username"),
-        branch: sessionStorage.getItem("branch"),
-      },
-    ];
-
-    try {
-      const userRaw = localStorage.getItem("user");
-      if (userRaw) {
-        const userObj = JSON.parse(userRaw);
-        candidates.push({
-          username:
-            userObj?.username ||
-            userObj?.user_name ||
-            userObj?.name ||
-            "",
-          branch: userObj?.branch || userObj?.branch_name || "",
-        });
-      }
-    } catch {}
-
-    try {
-      const authRaw = localStorage.getItem("authUser");
-      if (authRaw) {
-        const authObj = JSON.parse(authRaw);
-        candidates.push({
-          username:
-            authObj?.username ||
-            authObj?.user_name ||
-            authObj?.name ||
-            "",
-          branch: authObj?.branch || authObj?.branch_name || "",
-        });
-      }
-    } catch {}
-
-    for (const c of candidates) {
-      if (text(c.username) || text(c.branch)) {
-        return {
-          username: text(c.username),
-          branch: text(c.branch),
-        };
-      }
-    }
-
-    return {
-      username: "",
-      branch: "",
-    };
-  };
-
   useEffect(() => {
-    const user = getUserFromStorage();
-    setUsername(user.username);
-    setBranch(user.branch);
-  }, []);
+    if (currentUser) {
+      setUsername(text(currentUser.name || currentUser.username || ""));
+      setBranch(text(currentUser.branch || ""));
+    }
+  }, [currentUser]);
 
-  const getItemName = (item) => {
-    return (
-      text(item?.product_name) ||
-      text(item?.["product_name"]) ||
-      text(item?.["ชื่อสินค้า"]) ||
-      text(item?.["ชื่อวัสดุ"]) ||
-      text(item?.materialName) ||
-      text(item?.name) ||
-      "-"
-    );
-  };
+  const getItemName = (item) =>
+    text(item?.product_name) ||
+    text(item?.["ชื่อสินค้า"]) ||
+    text(item?.["ชื่อวัสดุ"]) ||
+    text(item?.name) ||
+    "-";
 
-  const getCode = (item) => {
-    return (
-      text(item?.product_id) ||
-      text(item?.["product_id"]) ||
-      text(item?.product_code) ||
-      text(item?.["product_code"]) ||
-      text(item?.["รหัส"]) ||
-      text(item?.itemCode) ||
-      ""
-    );
-  };
+  const getCode = (item) =>
+    text(item?.product_id) ||
+    text(item?.product_code) ||
+    text(item?.["รหัส"]) ||
+    "";
 
-  const getUnit = (item) => {
-    return (
-      text(item?.unit) ||
-      text(item?.["unit"]) ||
-      text(item?.["หน่วย"]) ||
-      ""
-    );
-  };
+  const getUnit = (item) =>
+    text(item?.unit) || text(item?.["หน่วย"]) || "";
 
   const getRemainQty = (item) => {
     const v =
       item?.qty_on_hand ??
-      item?.["qty_on_hand"] ??
-      item?.["จำนวนคงเหลือใหม่"] ??
       item?.["จำนวนคงเหลือ"] ??
       item?.["คงเหลือ"] ??
       item?.remainQty ??
       item?.stock ??
-      item?.qty ??
-      item?.quantity ??
       null;
-
     if (v === null || v === undefined || v === "") return null;
     return toNumber(v);
   };
@@ -197,19 +101,24 @@ export default function IssuePage() {
   const formatDateDisplay = (value) => {
     if (!value) return "";
     const raw = String(value);
-
     const matchThai = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (matchThai) {
-      return `${matchThai[3]}/${matchThai[2]}/${matchThai[1]}`;
-    }
-
+    if (matchThai) return `${matchThai[3]}/${matchThai[2]}/${matchThai[1]}`;
     const d = new Date(raw);
     if (Number.isNaN(d.getTime())) return raw;
-
     const yyyy = d.getFullYear();
     const mm = String(d.getMonth() + 1).padStart(2, "0");
     const dd = String(d.getDate()).padStart(2, "0");
     return `${dd}/${mm}/${yyyy}`;
+  };
+
+  const apiPost = async (payload) => {
+    const res = await fetch(ISSUE_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
   };
 
   const handleLoad = async () => {
@@ -220,23 +129,15 @@ export default function IssuePage() {
       setCurrentPage(1);
       setFilterText("");
       setIssueDetail(null);
+      setSelectedItems([]);
 
-      const res = await fetch(LOAD_URL, {
-        method: "GET",
-      });
-
-      if (!res.ok) {
-        throw new Error("โหลดข้อมูลไม่สำเร็จ");
-      }
-
-      const data = await res.json();
+      const stockGroup = ["SCY05","SCY06"].includes(branch) ? "ppao" : "singchai";
+      const data = await apiPost({ action: "load_materials", stock_group: stockGroup });
       const list = normalizeListResponse(data);
-
       setMaterials(list);
       setHistoryRows([]);
       setMessage(`โหลดข้อมูลสำเร็จ ${list.length} รายการ`);
     } catch (error) {
-      console.error("LOAD ERROR:", error);
       setMaterials([]);
       setMessage("โหลดข้อมูลไม่สำเร็จ");
       openPopup("error", "โหลดข้อมูลไม่สำเร็จ", "ไม่สามารถโหลดรายการวัสดุได้");
@@ -251,27 +152,16 @@ export default function IssuePage() {
       setSearching(true);
       setMessage("");
       setCurrentPage(1);
+      setSelectedItems([]);
       setFilterText("");
       setIssueDetail(null);
 
-      const res = await fetch(SEARCH_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({}),
-      });
-
-      if (!res.ok) {
-        throw new Error(`ค้นหาไม่สำเร็จ (${res.status})`);
-      }
-
-      const data = await res.json();
+      const data = await apiPost({ action: "search_issues" });
       const list = normalizeListResponse(data).map((row) => ({
         issue_no: text(row.issue_no),
         issue_date: formatDateDisplay(row.issue_date || row.issueDate),
-        requester_name: text(row.requester_name || row.requesterName),
-        issue_branch: text(row.issue_branch || row.department),
+        requester_name: text(row.requester_name || row.requesterName || row.created_by),
+        issue_branch: text(row.issue_branch || row.department || row.branch),
         total_qty: toNumber(row.total_qty || row.totalQty),
       }));
 
@@ -279,7 +169,6 @@ export default function IssuePage() {
       setMaterials([]);
       setMessage(`ค้นหาสำเร็จ ${list.length} รายการ`);
     } catch (error) {
-      console.error("SEARCH ERROR:", error);
       setHistoryRows([]);
       setMessage("ค้นหาข้อมูลไม่สำเร็จ");
       openPopup("error", "ค้นหาไม่สำเร็จ", "ไม่สามารถค้นหาข้อมูลได้");
@@ -290,47 +179,20 @@ export default function IssuePage() {
 
   const handleOpenIssue = async (row) => {
     const issueNo = text(row?.issue_no);
-
     if (!issueNo) {
       openPopup("error", "เปิดใบเบิกไม่สำเร็จ", "ไม่พบเลขที่ใบเบิก");
       return;
     }
-
     try {
       setOpeningIssue(true);
       setMessage("");
 
-      const res = await fetch(OPEN_ISSUE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          issue_no: issueNo,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`เปิดใบเบิกไม่สำเร็จ (${res.status})`);
-      }
-
-      const data = await res.json();
+      const data = await apiPost({ action: "open_issue", issue_no: issueNo });
 
       const header =
-        data?.header ||
-        data?.data?.header ||
-        data?.issue_header ||
-        data?.issue ||
-        data?.summary ||
-        {};
-
+        data?.header || data?.data?.header || data?.issue || {};
       const items =
-        data?.items ||
-        data?.data?.items ||
-        data?.detail ||
-        data?.details ||
-        data?.lines ||
-        [];
+        data?.items || data?.data?.items || data?.detail || data?.details || [];
 
       const detailData = {
         issue_no: text(header.issue_no || row.issue_no),
@@ -351,7 +213,7 @@ export default function IssuePage() {
               issue_item_id: text(item.issue_item_id || item.id),
               product_id: text(item.product_id || item.code || item.item_code),
               product_name: text(
-                item.product_name || item.name || item.item_name || item["ชื่อสินค้า"]
+                item.product_name || item.name || item["ชื่อสินค้า"]
               ),
               unit: text(item.unit || item["หน่วย"]),
               qty_issue: toNumber(item.qty_issue || item.qty || item.quantity),
@@ -362,10 +224,9 @@ export default function IssuePage() {
 
       setIssueDetail(detailData);
       setMode("detail");
-      setMessage(`เปิดรายละเอียดใบเบิก ${issueNo} สำเร็จ`);
+      setMessage(`เปิดใบเบิก ${issueNo} สำเร็จ`);
     } catch (error) {
-      console.error("OPEN ISSUE ERROR:", error);
-      openPopup("error", "เปิดใบเบิกไม่สำเร็จ", "ไม่สามารถโหลดรายละเอียดใบเบิกได้");
+      openPopup("error", "เปิดใบเบิกไม่สำเร็จ", "ไม่สามารถโหลดรายละเอียดได้");
     } finally {
       setOpeningIssue(false);
     }
@@ -392,10 +253,7 @@ export default function IssuePage() {
     setIssueDetail((prev) => {
       if (!prev) return prev;
       const nextItems = [...prev.items];
-      nextItems[index] = {
-        ...nextItems[index],
-        isEditing: true,
-      };
+      nextItems[index] = { ...nextItems[index], isEditing: true };
       return { ...prev, items: nextItems };
     });
   };
@@ -416,10 +274,7 @@ export default function IssuePage() {
     setIssueDetail((prev) => {
       if (!prev) return prev;
       const nextItems = [...prev.items];
-      nextItems[index] = {
-        ...nextItems[index],
-        isEditing: false,
-      };
+      nextItems[index] = { ...nextItems[index], isEditing: false };
       const totalQty = nextItems.reduce(
         (sum, item) => sum + toNumber(item.qty_issue),
         0
@@ -445,27 +300,27 @@ export default function IssuePage() {
       openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบข้อมูลใบเบิก");
       return;
     }
-
     if (!text(issueDetail.issue_no)) {
       openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบเลขที่ใบเบิก");
       return;
     }
-
     const validItems = (issueDetail.items || []).filter(
       (item) => toNumber(item.qty_issue) > 0
     );
-
     if (validItems.length === 0) {
-      openPopup("error", "บันทึกไม่สำเร็จ", "ยังไม่มีรายการสำหรับแก้ไข");
-      return;
+      if (!window.confirm("ไม่มีรายการ — ยืนยันการบันทึก (จะเป็นการยกเลิกรายการเบิกทั้งหมด)?")) return;
     }
 
     const payload = {
+      action: "update_issue",
       issue_no: issueDetail.issue_no,
       issue_date: issueDetail.issue_date,
       requester_name: issueDetail.requester_name,
       issue_branch: issueDetail.issue_branch,
-      total_qty: validItems.reduce((sum, item) => sum + toNumber(item.qty_issue), 0),
+      total_qty: validItems.reduce(
+        (sum, item) => sum + toNumber(item.qty_issue),
+        0
+      ),
       note: issueDetail.note || "",
       updated_by: username || "",
       items: validItems.map((item, index) => ({
@@ -481,26 +336,10 @@ export default function IssuePage() {
     try {
       setUpdatingIssue(true);
       setMessage("");
-
-      const res = await fetch(UPDATE_ISSUE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        throw new Error(`อัปเดตใบเบิกไม่สำเร็จ (${res.status})`);
-      }
-
-      const raw = await res.json();
+      const raw = await apiPost(payload);
       const data = Array.isArray(raw) ? raw[0] : raw;
-
       const isSuccess =
-        data?.ok === true ||
-        data?.success === true ||
-        data?.status === "success";
+        data?.ok === true || data?.success === true || data?.status === "success";
 
       if (isSuccess) {
         const msg = data?.message || "บันทึกการแก้ไขรายการเบิกเรียบร้อย";
@@ -508,12 +347,10 @@ export default function IssuePage() {
         openPopup("success", "บันทึกสำเร็จ", msg);
       } else {
         const msg = data?.message || "บันทึกการแก้ไขไม่สำเร็จ";
-        setMessage(msg);
         openPopup("error", "บันทึกไม่สำเร็จ", msg);
       }
     } catch (error) {
-      console.error("UPDATE ISSUE ERROR:", error);
-      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่สามารถส่งข้อมูลแก้ไขไป n8n ได้");
+      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่สามารถส่งข้อมูลแก้ไขไปยังระบบได้");
     } finally {
       setUpdatingIssue(false);
     }
@@ -521,9 +358,7 @@ export default function IssuePage() {
 
   const filteredMaterials = useMemo(() => {
     const keyword = filterText.toLowerCase().trim();
-
     if (!keyword) return materials;
-
     return materials.filter((item) => {
       const itemName = getItemName(item).toLowerCase();
       const code = getCode(item).toLowerCase();
@@ -533,22 +368,16 @@ export default function IssuePage() {
 
   const filteredHistoryRows = useMemo(() => {
     const keyword = filterText.toLowerCase().trim();
-
     if (!keyword) return historyRows;
-
-    return historyRows.filter((row) => {
-      return (
-        text(row.issue_no).toLowerCase().includes(keyword) ||
-        text(row.issue_date).toLowerCase().includes(keyword) ||
-        text(row.requester_name).toLowerCase().includes(keyword) ||
-        text(row.issue_branch).toLowerCase().includes(keyword) ||
-        String(row.total_qty).includes(keyword)
-      );
-    });
+    return historyRows.filter((row) =>
+      text(row.issue_no).toLowerCase().includes(keyword) ||
+      text(row.issue_date).toLowerCase().includes(keyword) ||
+      text(row.requester_name).toLowerCase().includes(keyword) ||
+      text(row.issue_branch).toLowerCase().includes(keyword)
+    );
   }, [historyRows, filterText]);
 
   const activeRows = mode === "history" ? filteredHistoryRows : filteredMaterials;
-
   const totalPages = Math.max(1, Math.ceil(activeRows.length / PAGE_SIZE));
 
   const shownRows = useMemo(() => {
@@ -557,9 +386,7 @@ export default function IssuePage() {
   }, [activeRows, currentPage]);
 
   useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
+    if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
 
   const addToSelected = (item) => {
@@ -571,31 +398,17 @@ export default function IssuePage() {
 
     setSelectedItems((prev) => {
       const foundIndex = prev.findIndex((x) => x._key === key);
-
       if (foundIndex >= 0) {
         const next = [...prev];
         const currentQty = toNumber(next[foundIndex].qty);
-
-        if (remainQty === null) {
-          next[foundIndex].qty = currentQty + 1;
-        } else if (currentQty < remainQty) {
+        if (remainQty === null || currentQty < remainQty) {
           next[foundIndex].qty = currentQty + 1;
         }
-
         return next;
       }
-
       return [
         ...prev,
-        {
-          _key: key,
-          code,
-          itemName,
-          unit,
-          remainQty,
-          qty: 1,
-          source: item,
-        },
+        { _key: key, code, itemName, unit, remainQty, qty: 1, source: item },
       ];
     });
   };
@@ -604,14 +417,10 @@ export default function IssuePage() {
     setSelectedItems((prev) =>
       prev.map((item) => {
         if (item._key !== key) return item;
-
         let newQty = toNumber(qty);
         if (newQty < 0) newQty = 0;
-
-        if (item.remainQty !== null && newQty > item.remainQty) {
+        if (item.remainQty !== null && newQty > item.remainQty)
           newQty = item.remainQty;
-        }
-
         return { ...item, qty: newQty };
       })
     );
@@ -621,27 +430,29 @@ export default function IssuePage() {
     setSelectedItems((prev) => prev.filter((item) => item._key !== key));
   };
 
-  const totalQty = selectedItems.reduce((sum, item) => sum + toNumber(item.qty), 0);
+  const totalQty = selectedItems.reduce(
+    (sum, item) => sum + toNumber(item.qty),
+    0
+  );
 
   const handleSave = async () => {
     const validItems = selectedItems.filter((item) => toNumber(item.qty) > 0);
 
     if (!text(username)) {
-      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบ username");
+      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบข้อมูลผู้ใช้งาน");
       return;
     }
-
     if (!text(branch)) {
-      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบ branch");
+      openPopup("error", "บันทึกไม่สำเร็จ", "ไม่พบข้อมูลสาขา");
       return;
     }
-
     if (validItems.length === 0) {
       openPopup("error", "บันทึกไม่สำเร็จ", "ยังไม่มีรายการเบิก");
       return;
     }
 
     const payload = {
+      action: "save_issue",
       username,
       branch,
       items: validItems.map((item, index) => ({
@@ -651,372 +462,317 @@ export default function IssuePage() {
         unit: item.unit,
         qty_issue: item.qty,
         qty_on_hand: item.remainQty,
-        remain_qty: item.remainQty === null ? null : item.remainQty - item.qty,
+        remain_qty:
+          item.remainQty === null ? null : item.remainQty - item.qty,
       })),
     };
 
     try {
       setSaving(true);
       setMessage("");
-
-      const res = await fetch(SAVE_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        throw new Error("บันทึกไม่สำเร็จ");
-      }
-
-      const raw = await res.json();
+      const raw = await apiPost(payload);
       const data = Array.isArray(raw) ? raw[0] : raw;
-
       const isSuccess =
-        data?.ok === true ||
-        data?.success === true ||
-        data?.status === "success";
+        data?.ok === true || data?.success === true || data?.status === "success";
 
       if (isSuccess) {
         const msg = data?.message || "บันทึกรายการเบิกเรียบร้อย";
-        setMessage(msg);
         setSelectedItems([]);
         openPopup("success", "บันทึกสำเร็จ", msg);
         await handleLoad();
       } else {
         const msg = data?.message || "บันทึกไม่สำเร็จ";
-        setMessage(msg);
         openPopup("error", "บันทึกไม่สำเร็จ", msg);
       }
     } catch (error) {
-      console.error("SAVE ERROR:", error);
-      setMessage("บันทึกไม่สำเร็จ");
       openPopup("error", "บันทึกไม่สำเร็จ", "ไม่สามารถเชื่อมต่อระบบได้");
     } finally {
       setSaving(false);
     }
   };
 
-  const styles = {
+  /* ───────── STYLES ───────── */
+  const S = {
     page: {
       width: "100%",
       minHeight: "100vh",
-      background: "#eef3f9",
-      padding: "24px",
+      background: "#f0f2f5",
+      padding: "16px",
       boxSizing: "border-box",
-      fontFamily: "Tahoma, sans-serif",
+      fontFamily: "Tahoma, Arial, sans-serif",
+      fontSize: "14px",
+      color: "#333",
     },
-    container: {
-      maxWidth: "1180px",
-      margin: "0 auto",
-      background: "#ffffff",
-      borderRadius: "24px",
-      padding: "24px",
-      boxShadow: "0 6px 24px rgba(0,0,0,0.08)",
+    container: { maxWidth: "1180px", margin: "0 auto" },
+    card: {
+      background: "#fff",
+      border: "1px solid #d9d9d9",
+      borderRadius: "4px",
+      marginBottom: "12px",
     },
-    title: {
-      fontSize: "42px",
+    cardHeader: {
+      padding: "8px 14px",
+      borderBottom: "1px solid #e8e8e8",
+      fontSize: "14px",
       fontWeight: "700",
-      textAlign: "center",
-      color: "#1c2d5a",
-      marginBottom: "8px",
+      color: "#1565C0",
+      background: "#fafafa",
+      borderRadius: "4px 4px 0 0",
     },
-    subtitle: {
-      textAlign: "center",
-      fontSize: "18px",
-      color: "#5d6b8a",
-      marginBottom: "18px",
-    },
-    buttonRow: {
+    cardBody: { padding: "12px 14px" },
+    topBar: {
       display: "flex",
-      gap: "12px",
-      justifyContent: "center",
+      gap: "6px",
       flexWrap: "wrap",
-      marginBottom: "24px",
+      alignItems: "center",
+      marginBottom: "10px",
     },
-    primaryBtn: {
-      background: "#2f6fe4",
-      color: "#fff",
-      border: "none",
-      borderRadius: "12px",
-      padding: "12px 26px",
-      fontSize: "18px",
-      fontWeight: "700",
+    // buttons
+    btn: (color = "#1565C0", outline = false) => ({
+      background: outline ? "#fff" : color,
+      color: outline ? color : "#fff",
+      border: `1px solid ${color}`,
+      borderRadius: "3px",
+      padding: "5px 14px",
+      fontSize: "13px",
+      fontWeight: "600",
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+    }),
+    btnGray: {
+      background: "#fff",
+      color: "#555",
+      border: "1px solid #bbb",
+      borderRadius: "3px",
+      padding: "5px 14px",
+      fontSize: "13px",
+      fontWeight: "600",
       cursor: "pointer",
     },
-    secondaryBtn: {
-      background: "#0ea55b",
-      color: "#fff",
-      border: "none",
-      borderRadius: "12px",
-      padding: "12px 26px",
-      fontSize: "18px",
-      fontWeight: "700",
-      cursor: "pointer",
+    userInfo: {
+      marginLeft: "auto",
+      fontSize: "12px",
+      color: "#555",
+      background: "#f5f5f5",
+      border: "1px solid #e0e0e0",
+      borderRadius: "3px",
+      padding: "4px 10px",
     },
-    dangerBtn: {
-      background: "#e5e7eb",
-      color: "#1f2937",
-      border: "none",
-      borderRadius: "12px",
-      padding: "12px 26px",
-      fontSize: "18px",
-      fontWeight: "700",
-      cursor: "pointer",
-    },
-    infoBtn: {
-      background: "#64748b",
-      color: "#fff",
-      border: "none",
-      borderRadius: "12px",
-      padding: "12px 26px",
-      fontSize: "18px",
-      fontWeight: "700",
-      cursor: "pointer",
-    },
-    frame: {
-      border: "1px solid #d7dfef",
-      borderRadius: "20px",
-      padding: "20px",
-      marginBottom: "20px",
-      background: "#fbfcff",
-    },
-    frameTitle: {
-      fontSize: "28px",
-      fontWeight: "700",
-      textAlign: "center",
-      color: "#1c2d5a",
-      marginBottom: "18px",
-    },
-    label: {
-      fontSize: "18px",
-      color: "#334155",
-    },
+    // search bar
+    searchRow: { display: "flex", gap: "8px", marginBottom: "10px" },
     input: {
-      border: "1px solid #b6c2da",
-      borderRadius: "10px",
-      padding: "12px 14px",
-      fontSize: "16px",
-      width: "100%",
-      boxSizing: "border-box",
+      border: "1px solid #d9d9d9",
+      borderRadius: "3px",
+      padding: "5px 10px",
+      fontSize: "13px",
+      flex: 1,
+      color: "#333",
     },
-    tableWrap: {
-      overflowX: "auto",
-    },
+    // table
+    tableWrap: { overflowX: "auto" },
     table: {
       width: "100%",
       borderCollapse: "collapse",
-      background: "#fff",
-      borderRadius: "12px",
-      overflow: "hidden",
+      fontSize: "13px",
     },
     th: {
-      background: "#eef2f7",
-      color: "#1e3a5f",
-      padding: "14px 10px",
-      fontSize: "20px",
+      background: "#f0f0f0",
+      color: "#333",
+      padding: "7px 10px",
+      fontWeight: "700",
       textAlign: "center",
-      borderBottom: "1px solid #dbe3f0",
+      borderBottom: "2px solid #d0d0d0",
+      borderRight: "1px solid #e0e0e0",
       whiteSpace: "nowrap",
     },
     td: {
-      padding: "14px 10px",
-      fontSize: "18px",
+      padding: "6px 10px",
       textAlign: "center",
-      borderBottom: "1px solid #edf1f7",
+      borderBottom: "1px solid #ebebeb",
+      borderRight: "1px solid #f0f0f0",
       verticalAlign: "middle",
+      color: "#333",
     },
+    tdLeft: {
+      padding: "6px 10px",
+      textAlign: "left",
+      borderBottom: "1px solid #ebebeb",
+      borderRight: "1px solid #f0f0f0",
+      verticalAlign: "middle",
+      color: "#333",
+    },
+    trHover: { background: "#fafafa" },
+    // small buttons inside table
     plusBtn: {
-      width: "42px",
-      height: "42px",
-      borderRadius: "999px",
-      border: "none",
-      background: "#0ea55b",
+      width: "26px",
+      height: "26px",
+      borderRadius: "3px",
+      border: "1px solid #1565C0",
+      background: "#1565C0",
       color: "#fff",
-      fontSize: "28px",
+      fontSize: "16px",
       fontWeight: "700",
       cursor: "pointer",
-      lineHeight: 1,
+      lineHeight: "1",
     },
     plusBtnDisabled: {
-      width: "42px",
-      height: "42px",
-      borderRadius: "999px",
-      border: "none",
-      background: "#cbd5e1",
-      color: "#ffffff",
-      fontSize: "28px",
+      width: "26px",
+      height: "26px",
+      borderRadius: "3px",
+      border: "1px solid #ccc",
+      background: "#f5f5f5",
+      color: "#bbb",
+      fontSize: "16px",
       fontWeight: "700",
       cursor: "not-allowed",
-      lineHeight: 1,
+      lineHeight: "1",
     },
     openBtn: {
-      background: "#2f6fe4",
+      background: "#1565C0",
       color: "#fff",
-      border: "none",
-      borderRadius: "10px",
-      padding: "8px 16px",
-      fontSize: "16px",
-      fontWeight: "700",
+      border: "1px solid #1565C0",
+      borderRadius: "3px",
+      padding: "3px 10px",
+      fontSize: "12px",
+      fontWeight: "600",
       cursor: "pointer",
-      minWidth: "72px",
     },
     editBtn: {
-      background: "#f59e0b",
-      color: "#fff",
-      border: "none",
-      borderRadius: "10px",
-      padding: "8px 12px",
-      fontSize: "15px",
-      fontWeight: "700",
+      background: "#fff",
+      color: "#e67e00",
+      border: "1px solid #e67e00",
+      borderRadius: "3px",
+      padding: "3px 8px",
+      fontSize: "12px",
+      fontWeight: "600",
       cursor: "pointer",
-      minWidth: "70px",
-      marginRight: "8px",
     },
     saveRowBtn: {
-      background: "#16a34a",
+      background: "#2e7d32",
       color: "#fff",
-      border: "none",
-      borderRadius: "10px",
-      padding: "8px 12px",
-      fontSize: "15px",
-      fontWeight: "700",
+      border: "1px solid #2e7d32",
+      borderRadius: "3px",
+      padding: "3px 8px",
+      fontSize: "12px",
+      fontWeight: "600",
       cursor: "pointer",
-      minWidth: "70px",
-      marginRight: "8px",
-    },
-    smallInput: {
-      width: "90px",
-      border: "1px solid #b6c2da",
-      borderRadius: "10px",
-      padding: "8px 10px",
-      fontSize: "16px",
-      textAlign: "center",
     },
     removeBtn: {
-      background: "#ef4444",
-      color: "#fff",
-      border: "none",
-      borderRadius: "10px",
-      padding: "8px 12px",
-      fontSize: "15px",
+      background: "#fff",
+      color: "#c62828",
+      border: "1px solid #c62828",
+      borderRadius: "3px",
+      padding: "3px 8px",
+      fontSize: "12px",
+      fontWeight: "600",
       cursor: "pointer",
-      fontWeight: "700",
     },
-    summaryBox: {
-      marginTop: "16px",
-      border: "1px solid #d6dfef",
-      borderRadius: "14px",
-      background: "#f7f9fc",
-      padding: "16px",
+    smallInput: {
+      width: "72px",
+      border: "1px solid #d9d9d9",
+      borderRadius: "3px",
+      padding: "3px 6px",
+      fontSize: "13px",
       textAlign: "center",
-      fontSize: "18px",
-      color: "#334155",
-      lineHeight: 1.8,
+    },
+    actionCell: { display: "flex", gap: "4px", justifyContent: "center" },
+    // summary bar
+    summaryBar: {
+      display: "flex",
+      gap: "24px",
+      padding: "7px 12px",
+      background: "#f8f9fa",
+      border: "1px solid #e8e8e8",
+      borderRadius: "3px",
+      marginBottom: "10px",
+      fontSize: "13px",
+      color: "#333",
     },
     emptyBox: {
-      marginTop: "16px",
-      border: "1px dashed #cdd7e7",
-      borderRadius: "14px",
-      background: "#ffffff",
-      padding: "18px",
+      padding: "24px",
       textAlign: "center",
-      fontSize: "20px",
-      color: "#94a3b8",
-      fontWeight: "700",
+      fontSize: "13px",
+      color: "#aaa",
+      border: "1px dashed #ddd",
+      borderRadius: "3px",
+      background: "#fafafa",
+      marginTop: "8px",
     },
     saveBtn: {
       width: "100%",
-      background: "#17a34a",
+      background: "#1565C0",
       color: "#fff",
       border: "none",
-      borderRadius: "14px",
-      padding: "16px",
-      fontSize: "28px",
+      borderRadius: "3px",
+      padding: "9px",
+      fontSize: "14px",
       fontWeight: "700",
       cursor: "pointer",
-      marginTop: "18px",
+      marginTop: "10px",
     },
     message: {
-      marginTop: "10px",
+      marginTop: "6px",
       textAlign: "center",
-      fontSize: "16px",
-      color: "#2563eb",
-      fontWeight: "700",
+      fontSize: "12px",
+      color: "#1565C0",
+      fontWeight: "600",
     },
+    // pagination
     pagerWrap: {
-      marginTop: "16px",
       display: "flex",
-      justifyContent: "center",
+      justifyContent: "flex-end",
       alignItems: "center",
-      gap: "8px",
-      flexWrap: "wrap",
+      gap: "3px",
+      marginTop: "8px",
+      fontSize: "12px",
     },
     pagerBtn: {
-      border: "1px solid #b6c2da",
-      background: "#ffffff",
-      color: "#1e3a5f",
-      borderRadius: "10px",
-      padding: "8px 14px",
-      fontSize: "15px",
-      fontWeight: "700",
+      border: "1px solid #d9d9d9",
+      background: "#fff",
+      color: "#333",
+      borderRadius: "3px",
+      padding: "3px 8px",
+      fontSize: "12px",
       cursor: "pointer",
     },
     pagerBtnActive: {
-      border: "1px solid #2f6fe4",
-      background: "#2f6fe4",
-      color: "#ffffff",
-      borderRadius: "10px",
-      padding: "8px 14px",
-      fontSize: "15px",
-      fontWeight: "700",
+      border: "1px solid #1565C0",
+      background: "#1565C0",
+      color: "#fff",
+      borderRadius: "3px",
+      padding: "3px 8px",
+      fontSize: "12px",
       cursor: "pointer",
     },
     pagerBtnDisabled: {
-      border: "1px solid #cbd5e1",
-      background: "#e2e8f0",
-      color: "#94a3b8",
-      borderRadius: "10px",
-      padding: "8px 14px",
-      fontSize: "15px",
-      fontWeight: "700",
+      border: "1px solid #eee",
+      background: "#f5f5f5",
+      color: "#bbb",
+      borderRadius: "3px",
+      padding: "3px 8px",
+      fontSize: "12px",
       cursor: "not-allowed",
     },
+    // detail info grid
     detailGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-      gap: "12px",
-      marginBottom: "18px",
+      gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+      gap: "8px",
+      marginBottom: "10px",
     },
     detailCard: {
-      background: "#ffffff",
-      border: "1px solid #dbe3f0",
-      borderRadius: "14px",
-      padding: "14px",
+      background: "#fafafa",
+      border: "1px solid #e8e8e8",
+      borderRadius: "3px",
+      padding: "7px 10px",
     },
-    detailLabel: {
-      fontSize: "15px",
-      color: "#64748b",
-      marginBottom: "6px",
-    },
-    detailValue: {
-      fontSize: "20px",
-      color: "#0f172a",
-      fontWeight: "700",
-      wordBreak: "break-word",
-    },
-    actionCell: {
-      display: "flex",
-      gap: "8px",
-      justifyContent: "center",
-      flexWrap: "wrap",
-    },
+    detailLabel: { fontSize: "11px", color: "#888", marginBottom: "2px" },
+    detailValue: { fontSize: "13px", color: "#222", fontWeight: "700" },
+    // popup
     popupOverlay: {
       position: "fixed",
       inset: 0,
-      background: "rgba(15,23,42,0.45)",
+      background: "rgba(0,0,0,0.35)",
       display: "flex",
       alignItems: "center",
       justifyContent: "center",
@@ -1025,218 +781,137 @@ export default function IssuePage() {
     },
     popupBox: {
       width: "100%",
-      maxWidth: "520px",
-      background: "#ffffff",
-      borderRadius: "22px",
-      boxShadow: "0 18px 45px rgba(0,0,0,0.22)",
+      maxWidth: "380px",
+      background: "#fff",
+      borderRadius: "4px",
+      boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
       overflow: "hidden",
-      animation: "popupFadeIn 0.2s ease-out",
     },
-    popupHeaderSuccess: {
-      background: "linear-gradient(135deg, #16a34a, #22c55e)",
+    popupHeader: (type) => ({
+      background:
+        type === "success" ? "#2e7d32" : type === "error" ? "#c62828" : "#1565C0",
       color: "#fff",
-      padding: "18px 24px",
-      fontSize: "30px",
-      fontWeight: "900",
-      textAlign: "center",
-      letterSpacing: "0.3px",
-    },
-    popupHeaderError: {
-      background: "linear-gradient(135deg, #dc2626, #ef4444)",
-      color: "#fff",
-      padding: "18px 24px",
-      fontSize: "30px",
-      fontWeight: "900",
-      textAlign: "center",
-      letterSpacing: "0.3px",
-    },
-    popupHeaderInfo: {
-      background: "linear-gradient(135deg, #2563eb, #3b82f6)",
-      color: "#fff",
-      padding: "18px 24px",
-      fontSize: "30px",
-      fontWeight: "900",
-      textAlign: "center",
-      letterSpacing: "0.3px",
-    },
-    popupBody: {
-      padding: "28px 24px 18px",
-      textAlign: "center",
-    },
-    popupTitle: {
-      fontSize: "36px",
-      fontWeight: "900",
-      color: "#0f172a",
-      marginBottom: "12px",
-    },
-    popupMessage: {
-      fontSize: "22px",
+      padding: "10px 18px",
+      fontSize: "14px",
       fontWeight: "700",
-      color: "#334155",
-      lineHeight: 1.7,
-      wordBreak: "break-word",
-      whiteSpace: "pre-wrap",
+      textAlign: "center",
+    }),
+    popupBody: { padding: "18px 20px 12px", textAlign: "center" },
+    popupTitle: {
+      fontSize: "16px",
+      fontWeight: "700",
+      color: "#222",
+      marginBottom: "6px",
     },
-    popupFooter: {
-      padding: "0 24px 24px",
-      display: "flex",
-      justifyContent: "center",
-    },
-    popupBtnSuccess: {
-      minWidth: "140px",
-      background: "#16a34a",
+    popupMsg: { fontSize: "13px", color: "#555", lineHeight: 1.6 },
+    popupFooter: { padding: "0 20px 16px", display: "flex", justifyContent: "center" },
+    popupBtn: (type) => ({
+      minWidth: "90px",
+      background:
+        type === "success" ? "#2e7d32" : type === "error" ? "#c62828" : "#1565C0",
       color: "#fff",
       border: "none",
-      borderRadius: "14px",
-      padding: "12px 24px",
-      fontSize: "20px",
-      fontWeight: "800",
+      borderRadius: "3px",
+      padding: "7px 18px",
+      fontSize: "13px",
+      fontWeight: "700",
       cursor: "pointer",
-      boxShadow: "0 6px 16px rgba(22,163,74,0.25)",
-    },
-    popupBtnError: {
-      minWidth: "140px",
-      background: "#dc2626",
-      color: "#fff",
-      border: "none",
-      borderRadius: "14px",
-      padding: "12px 24px",
-      fontSize: "20px",
-      fontWeight: "800",
-      cursor: "pointer",
-      boxShadow: "0 6px 16px rgba(220,38,38,0.25)",
-    },
-    popupBtnInfo: {
-      minWidth: "140px",
-      background: "#2563eb",
-      color: "#fff",
-      border: "none",
-      borderRadius: "14px",
-      padding: "12px 24px",
-      fontSize: "20px",
-      fontWeight: "800",
-      cursor: "pointer",
-      boxShadow: "0 6px 16px rgba(37,99,235,0.25)",
-    },
+    }),
   };
 
+  /* ───────── PAGINATION ───────── */
   const renderPagination = () => {
-    if (mode === "detail") return null;
-    if (activeRows.length <= PAGE_SIZE) return null;
-
-    const pages = [];
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-
+    if (mode === "detail" || activeRows.length <= PAGE_SIZE) return null;
+    const pages = Array.from({ length: totalPages }, (_, i) => i + 1);
     return (
-      <div style={styles.pagerWrap}>
+      <div style={S.pagerWrap}>
+        <span style={{ color: "#666", marginRight: "4px" }}>
+          หน้า {currentPage}/{totalPages}
+        </span>
         <button
-          style={currentPage === 1 ? styles.pagerBtnDisabled : styles.pagerBtn}
+          style={currentPage === 1 ? S.pagerBtnDisabled : S.pagerBtn}
           onClick={() => currentPage > 1 && setCurrentPage(currentPage - 1)}
           disabled={currentPage === 1}
         >
-          ก่อนหน้า
+          ◀
         </button>
-
-        {pages.map((page) => (
+        {pages.map((p) => (
           <button
-            key={page}
-            style={page === currentPage ? styles.pagerBtnActive : styles.pagerBtn}
-            onClick={() => setCurrentPage(page)}
+            key={p}
+            style={p === currentPage ? S.pagerBtnActive : S.pagerBtn}
+            onClick={() => setCurrentPage(p)}
           >
-            {page}
+            {p}
           </button>
         ))}
-
         <button
-          style={currentPage === totalPages ? styles.pagerBtnDisabled : styles.pagerBtn}
+          style={currentPage === totalPages ? S.pagerBtnDisabled : S.pagerBtn}
           onClick={() => currentPage < totalPages && setCurrentPage(currentPage + 1)}
           disabled={currentPage === totalPages}
         >
-          ถัดไป
+          ▶
         </button>
       </div>
     );
   };
 
-  const popupHeaderStyle =
-    popup.type === "success"
-      ? styles.popupHeaderSuccess
-      : popup.type === "error"
-      ? styles.popupHeaderError
-      : styles.popupHeaderInfo;
-
-  const popupButtonStyle =
-    popup.type === "success"
-      ? styles.popupBtnSuccess
-      : popup.type === "error"
-      ? styles.popupBtnError
-      : styles.popupBtnInfo;
-
+  /* ───────── RENDER ───────── */
   return (
     <>
-      <style>
-        {`
-          @keyframes popupFadeIn {
-            from {
-              opacity: 0;
-              transform: translateY(10px) scale(0.98);
-            }
-            to {
-              opacity: 1;
-              transform: translateY(0) scale(1);
-            }
-          }
-        `}
-      </style>
+      <div style={S.page}>
+        <div style={S.container}>
 
-      <div style={styles.page}>
-        <div style={styles.container}>
-          <div style={styles.title}>หน้าเบิกวัสดุ</div>
-          <div style={styles.subtitle}>ระบบเบิกวัสดุสำนักงาน</div>
+          {/* ── TOP BAR ── */}
+          <div style={S.card}>
+            <div style={S.cardBody}>
+              <div style={S.topBar}>
+                <button
+                  style={S.btn("#1565C0", mode === "issue")}
+                  onClick={handleLoad}
+                  disabled={loading}
+                >
+                  {loading ? "กำลังโหลด..." : "📋 เบิกวัสดุ"}
+                </button>
 
-          <div style={styles.buttonRow}>
-            <button style={styles.primaryBtn} onClick={handleLoad} disabled={loading}>
-              {loading ? "กำลังโหลด..." : "เบิก"}
-            </button>
+                <button
+                  style={S.btn("#2e7d32", mode === "history")}
+                  onClick={handleSearch}
+                  disabled={searching}
+                >
+                  {searching ? "กำลังค้นหา..." : "🔍 ประวัติการเบิก"}
+                </button>
 
-            <button
-              style={styles.secondaryBtn}
-              onClick={handleSearch}
-              disabled={searching}
-            >
-              {searching ? "กำลังค้นหา..." : "ค้นหา"}
-            </button>
+                <button style={S.btnGray} onClick={handleClear}>
+                  ล้างข้อมูล
+                </button>
 
-            <button style={styles.dangerBtn} onClick={handleClear}>
-              ล้างข้อมูล
-            </button>
+                {mode === "detail" && (
+                  <button style={S.btnGray} onClick={handleBackToHistory}>
+                    ← กลับไปประวัติ
+                  </button>
+                )}
 
-            {mode === "detail" && (
-              <button style={styles.infoBtn} onClick={handleBackToHistory}>
-                กลับไปประวัติ
-              </button>
-            )}
+                <div style={S.userInfo}>
+                  👤 {username || "-"} &nbsp;|&nbsp; 🏢 {branch || "-"}
+                </div>
+              </div>
+            </div>
           </div>
 
+          {/* ── MODE: ISSUE / HISTORY (TABLE) ── */}
           {mode !== "detail" && (
-            <div style={styles.frame}>
-              <div style={styles.frameTitle}>
+            <div style={S.card}>
+              <div style={S.cardHeader}>
                 {mode === "history" ? "ประวัติการเบิกวัสดุ" : "รายการวัสดุ"}
               </div>
-
-              <div style={{ marginBottom: "16px" }}>
-                <label style={styles.label}>
-                  {mode === "history"
-                    ? "ค้นหาเลขที่ใบเบิก / วันที่เบิก / ชื่อผู้เบิก / สาขาที่เบิก"
-                    : "ค้นหา:"}
-                </label>
-                <div style={{ marginTop: "8px" }}>
+              <div style={S.cardBody}>
+                <div style={S.searchRow}>
                   <input
-                    style={styles.input}
+                    style={S.input}
                     type="text"
                     placeholder={
                       mode === "history"
-                        ? "ค้นหาเลขที่ใบเบิก / วันที่เบิก / ชื่อผู้เบิก / สาขาที่เบิก"
+                        ? "ค้นหาเลขที่ใบเบิก / วันที่ / ผู้เบิก / สาขา"
                         : "ค้นหาชื่อสินค้า หรือ รหัสสินค้า"
                     }
                     value={filterText}
@@ -1246,308 +921,306 @@ export default function IssuePage() {
                     }}
                   />
                 </div>
-              </div>
 
-              <div style={styles.tableWrap}>
-                {mode === "history" ? (
-                  <table style={styles.table}>
+                <div style={S.tableWrap}>
+                  {mode === "history" ? (
+                    <table style={S.table}>
+                      <thead>
+                        <tr>
+                          <th style={S.th}>เลขที่ใบเบิก</th>
+                          <th style={S.th}>วันที่เบิก</th>
+                          <th style={S.th}>ชื่อผู้เบิก</th>
+                          <th style={S.th}>สาขาที่เบิก</th>
+                          <th style={S.th}>จำนวน</th>
+                          <th style={S.th}>เปิด</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shownRows.length > 0 ? (
+                          shownRows.map((row, index) => (
+                            <tr key={`${row.issue_no}-${index}`}>
+                              <td style={S.td}>{row.issue_no || "-"}</td>
+                              <td style={S.td}>{row.issue_date || "-"}</td>
+                              <td style={S.tdLeft}>{row.requester_name || "-"}</td>
+                              <td style={S.td}>{row.issue_branch || "-"}</td>
+                              <td style={S.td}>{row.total_qty ?? 0}</td>
+                              <td style={S.td}>
+                                <button
+                                  style={S.openBtn}
+                                  onClick={() => handleOpenIssue(row)}
+                                  disabled={openingIssue}
+                                >
+                                  เปิด
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td style={S.td} colSpan={6}>
+                              ไม่พบข้อมูล
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table style={S.table}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...S.th, textAlign: "left" }}>ชื่อสินค้า</th>
+                          <th style={S.th}>หน่วย</th>
+                          <th style={S.th}>คงเหลือ</th>
+                          <th style={S.th}>เลือก</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {shownRows.length > 0 ? (
+                          shownRows.map((item, index) => {
+                            const code = getCode(item);
+                            const itemName = getItemName(item);
+                            const unit = getUnit(item);
+                            const remainQty = getRemainQty(item);
+                            const allowAdd = canAddItem(item);
+                            return (
+                              <tr key={`${code || itemName}-${index}`}>
+                                <td style={S.tdLeft}>{itemName}</td>
+                                <td style={S.td}>{unit || "-"}</td>
+                                <td style={S.td}>
+                                  {remainQty === null ? "-" : remainQty}
+                                </td>
+                                <td style={S.td}>
+                                  <button
+                                    style={allowAdd ? S.plusBtn : S.plusBtnDisabled}
+                                    onClick={() => addToSelected(item)}
+                                    disabled={!allowAdd}
+                                  >
+                                    +
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td style={S.td} colSpan={4}>
+                              ไม่พบข้อมูล
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                {renderPagination()}
+              </div>
+            </div>
+          )}
+
+          {/* ── MODE: DETAIL ── */}
+          {mode === "detail" && issueDetail && (
+            <div style={S.card}>
+              <div style={S.cardHeader}>
+                รายละเอียดใบเบิกวัสดุ
+              </div>
+              <div style={S.cardBody}>
+                <div style={S.detailGrid}>
+                  {[
+                    ["เลขที่ใบเบิก", issueDetail.issue_no],
+                    ["วันที่เบิก", issueDetail.issue_date],
+                    ["ชื่อผู้เบิก", issueDetail.requester_name],
+                    ["สาขาที่เบิก", issueDetail.issue_branch],
+                    ["จำนวนรวม", issueDetail.total_qty ?? 0],
+                    ["หมายเหตุ", issueDetail.note || "-"],
+                  ].map(([label, value]) => (
+                    <div key={label} style={S.detailCard}>
+                      <div style={S.detailLabel}>{label}</div>
+                      <div style={S.detailValue}>{value || "-"}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={S.tableWrap}>
+                  <table style={S.table}>
                     <thead>
                       <tr>
-                        <th style={styles.th}>เลขที่ใบเบิก</th>
-                        <th style={styles.th}>วันที่เบิก</th>
-                        <th style={styles.th}>ชื่อผู้เบิก</th>
-                        <th style={styles.th}>สาขาที่เบิก</th>
-                        <th style={styles.th}>จำนวนที่เบิก</th>
-                        <th style={styles.th}>เปิด</th>
+                        <th style={S.th}>ลำดับ</th>
+                        <th style={S.th}>รหัสสินค้า</th>
+                        <th style={{ ...S.th, textAlign: "left" }}>ชื่อสินค้า</th>
+                        <th style={S.th}>หน่วย</th>
+                        <th style={S.th}>จำนวนเบิก</th>
+                        <th style={S.th}>จัดการ</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {shownRows.length > 0 ? (
-                        shownRows.map((row, index) => (
-                          <tr key={`${row.issue_no}-${index}`}>
-                            <td style={styles.td}>{row.issue_no || "-"}</td>
-                            <td style={styles.td}>{row.issue_date || "-"}</td>
-                            <td style={styles.td}>{row.requester_name || "-"}</td>
-                            <td style={styles.td}>{row.issue_branch || "-"}</td>
-                            <td style={styles.td}>{row.total_qty ?? 0}</td>
-                            <td style={styles.td}>
-                              <button
-                                style={styles.openBtn}
-                                onClick={() => handleOpenIssue(row)}
-                                disabled={openingIssue}
-                              >
-                                เปิด
-                              </button>
+                      {issueDetail.items?.length > 0 ? (
+                        issueDetail.items.map((item, index) => (
+                          <tr
+                            key={`${item.issue_item_id || item.product_id || "item"}-${index}`}
+                          >
+                            <td style={S.td}>{item.line_no ?? index + 1}</td>
+                            <td style={S.td}>{item.product_id || "-"}</td>
+                            <td style={S.tdLeft}>{item.product_name || "-"}</td>
+                            <td style={S.td}>{item.unit || "-"}</td>
+                            <td style={S.td}>
+                              {item.isEditing ? (
+                                <input
+                                  style={S.smallInput}
+                                  type="number"
+                                  min="0"
+                                  value={item.qty_issue}
+                                  onChange={(e) =>
+                                    handleChangeDetailQty(index, e.target.value)
+                                  }
+                                />
+                              ) : (
+                                item.qty_issue ?? 0
+                              )}
+                            </td>
+                            <td style={S.td}>
+                              <div style={S.actionCell}>
+                                {item.isEditing ? (
+                                  <button
+                                    style={S.saveRowBtn}
+                                    onClick={() => handleSaveDetailItem(index)}
+                                  >
+                                    บันทึก
+                                  </button>
+                                ) : (
+                                  <button
+                                    style={S.editBtn}
+                                    onClick={() => handleEditDetailItem(index)}
+                                  >
+                                    แก้ไข
+                                  </button>
+                                )}
+                                <button
+                                  style={S.removeBtn}
+                                  onClick={() => handleDeleteDetailItem(index)}
+                                >
+                                  ลบ
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))
                       ) : (
                         <tr>
-                          <td style={styles.td} colSpan={6}>
-                            ไม่พบข้อมูล
+                          <td style={S.td} colSpan={6}>
+                            ไม่พบรายการ
                           </td>
                         </tr>
                       )}
                     </tbody>
                   </table>
-                ) : (
-                  <table style={styles.table}>
-                    <thead>
-                      <tr>
-                        <th style={styles.th}>ชื่อสินค้า</th>
-                        <th style={styles.th}>หน่วย</th>
-                        <th style={styles.th}>qty_on_hand</th>
-                        <th style={styles.th}>เลือก</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {shownRows.length > 0 ? (
-                        shownRows.map((item, index) => {
-                          const code = getCode(item);
-                          const itemName = getItemName(item);
-                          const unit = getUnit(item);
-                          const remainQty = getRemainQty(item);
-                          const allowAdd = canAddItem(item);
+                </div>
 
-                          return (
-                            <tr key={`${code || itemName}-${index}`}>
-                              <td style={styles.td}>{itemName}</td>
-                              <td style={styles.td}>{unit || "-"}</td>
-                              <td style={styles.td}>
-                                {remainQty === null ? "-" : remainQty}
-                              </td>
-                              <td style={styles.td}>
-                                <button
-                                  style={allowAdd ? styles.plusBtn : styles.plusBtnDisabled}
-                                  onClick={() => addToSelected(item)}
-                                  disabled={!allowAdd}
-                                >
-                                  +
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td style={styles.td} colSpan={4}>
-                            ไม่พบข้อมูล
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                )}
+                <button
+                  style={S.saveBtn}
+                  onClick={handleUpdateIssue}
+                  disabled={updatingIssue}
+                >
+                  {updatingIssue ? "กำลังบันทึก..." : "บันทึกการแก้ไข"}
+                </button>
               </div>
-
-              {renderPagination()}
             </div>
           )}
 
-          {mode === "detail" && issueDetail && (
-            <div style={styles.frame}>
-              <div style={styles.frameTitle}>รายละเอียดใบเบิกวัสดุ</div>
-
-              <div style={styles.detailGrid}>
-                <div style={styles.detailCard}>
-                  <div style={styles.detailLabel}>เลขที่ใบเบิก</div>
-                  <div style={styles.detailValue}>{issueDetail.issue_no || "-"}</div>
+          {/* ── SELECTED ITEMS (issue mode only) ── */}
+          {mode === "issue" && (
+            <div style={S.card}>
+              <div style={S.cardHeader}>รายการที่เลือกเบิก</div>
+              <div style={S.cardBody}>
+                <div style={S.summaryBar}>
+                  <span>จำนวนรายการ: <strong>{selectedItems.length}</strong></span>
+                  <span>จำนวนเบิกรวม: <strong>{totalQty}</strong></span>
                 </div>
 
-                <div style={styles.detailCard}>
-                  <div style={styles.detailLabel}>วันที่เบิก</div>
-                  <div style={styles.detailValue}>{issueDetail.issue_date || "-"}</div>
-                </div>
-
-                <div style={styles.detailCard}>
-                  <div style={styles.detailLabel}>ชื่อผู้เบิก</div>
-                  <div style={styles.detailValue}>{issueDetail.requester_name || "-"}</div>
-                </div>
-
-                <div style={styles.detailCard}>
-                  <div style={styles.detailLabel}>สาขาที่เบิก</div>
-                  <div style={styles.detailValue}>{issueDetail.issue_branch || "-"}</div>
-                </div>
-
-                <div style={styles.detailCard}>
-                  <div style={styles.detailLabel}>จำนวนที่เบิก</div>
-                  <div style={styles.detailValue}>{issueDetail.total_qty ?? 0}</div>
-                </div>
-
-                <div style={styles.detailCard}>
-                  <div style={styles.detailLabel}>หมายเหตุ</div>
-                  <div style={styles.detailValue}>{issueDetail.note || "-"}</div>
-                </div>
-              </div>
-
-              <div style={styles.tableWrap}>
-                <table style={styles.table}>
-                  <thead>
-                    <tr>
-                      <th style={styles.th}>ลำดับ</th>
-                      <th style={styles.th}>รหัสสินค้า</th>
-                      <th style={styles.th}>ชื่อสินค้า</th>
-                      <th style={styles.th}>หน่วย</th>
-                      <th style={styles.th}>จำนวนเบิก</th>
-                      <th style={styles.th}>จัดการ</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {issueDetail.items?.length > 0 ? (
-                      issueDetail.items.map((item, index) => (
-                        <tr key={`${item.issue_item_id || item.product_id || "item"}-${index}`}>
-                          <td style={styles.td}>{item.line_no ?? index + 1}</td>
-                          <td style={styles.td}>{item.product_id || "-"}</td>
-                          <td style={styles.td}>{item.product_name || "-"}</td>
-                          <td style={styles.td}>{item.unit || "-"}</td>
-                          <td style={styles.td}>
-                            {item.isEditing ? (
+                {selectedItems.length === 0 ? (
+                  <div style={S.emptyBox}>ยังไม่มีรายการที่เลือก</div>
+                ) : (
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={S.table}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...S.th, textAlign: "left" }}>ชื่อสินค้า</th>
+                          <th style={S.th}>หน่วย</th>
+                          <th style={S.th}>คงเหลือ</th>
+                          <th style={S.th}>จำนวนเบิก</th>
+                          <th style={S.th}>ลบ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedItems.map((item) => (
+                          <tr key={item._key}>
+                            <td style={S.tdLeft}>{item.itemName}</td>
+                            <td style={S.td}>{item.unit || "-"}</td>
+                            <td style={S.td}>
+                              {item.remainQty === null ? "-" : item.remainQty}
+                            </td>
+                            <td style={S.td}>
                               <input
-                                style={styles.smallInput}
+                                style={S.smallInput}
                                 type="number"
                                 min="0"
-                                value={item.qty_issue}
+                                max={
+                                  item.remainQty === null
+                                    ? undefined
+                                    : item.remainQty
+                                }
+                                value={item.qty}
                                 onChange={(e) =>
-                                  handleChangeDetailQty(index, e.target.value)
+                                  updateSelectedQty(item._key, e.target.value)
                                 }
                               />
-                            ) : (
-                              item.qty_issue ?? 0
-                            )}
-                          </td>
-                          <td style={styles.td}>
-                            <div style={styles.actionCell}>
-                              {item.isEditing ? (
-                                <button
-                                  style={styles.saveRowBtn}
-                                  onClick={() => handleSaveDetailItem(index)}
-                                >
-                                  บันทึก
-                                </button>
-                              ) : (
-                                <button
-                                  style={styles.editBtn}
-                                  onClick={() => handleEditDetailItem(index)}
-                                >
-                                  แก้ไข
-                                </button>
-                              )}
-
+                            </td>
+                            <td style={S.td}>
                               <button
-                                style={styles.removeBtn}
-                                onClick={() => handleDeleteDetailItem(index)}
+                                style={S.removeBtn}
+                                onClick={() => removeSelectedItem(item._key)}
                               >
                                 ลบ
                               </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    ) : (
-                      <tr>
-                        <td style={styles.td} colSpan={6}>
-                          ไม่พบรายละเอียดรายการสินค้า
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
-              <button
-                style={styles.saveBtn}
-                onClick={handleUpdateIssue}
-                disabled={updatingIssue}
-              >
-                {updatingIssue ? "กำลังบันทึกรายการเบิก..." : "บันทึกรายการเบิก"}
-              </button>
+                <button
+                  style={S.saveBtn}
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  {saving ? "กำลังบันทึก..." : "บันทึกรายการเบิก"}
+                </button>
+              </div>
             </div>
           )}
 
-          {mode === "issue" && (
-            <div style={styles.frame}>
-              <div style={styles.frameTitle}>รายการที่เลือก</div>
-
-              <div style={styles.summaryBox}>
-                <div>จำนวนรายการ: {selectedItems.length}</div>
-                <div>จำนวนเบิกรวม: {totalQty}</div>
-              </div>
-
-              {selectedItems.length === 0 ? (
-                <div style={styles.emptyBox}>ยังไม่มีรายการที่เลือก</div>
-              ) : (
-                <div style={{ marginTop: "16px", overflowX: "auto" }}>
-                  <table style={styles.table}>
-                    <thead>
-                      <tr>
-                        <th style={styles.th}>ชื่อสินค้า</th>
-                        <th style={styles.th}>หน่วย</th>
-                        <th style={styles.th}>qty_on_hand</th>
-                        <th style={styles.th}>จำนวนเบิก</th>
-                        <th style={styles.th}>ลบ</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedItems.map((item) => (
-                        <tr key={item._key}>
-                          <td style={styles.td}>{item.itemName}</td>
-                          <td style={styles.td}>{item.unit || "-"}</td>
-                          <td style={styles.td}>
-                            {item.remainQty === null ? "-" : item.remainQty}
-                          </td>
-                          <td style={styles.td}>
-                            <input
-                              style={styles.smallInput}
-                              type="number"
-                              min="0"
-                              max={item.remainQty === null ? undefined : item.remainQty}
-                              value={item.qty}
-                              onChange={(e) => updateSelectedQty(item._key, e.target.value)}
-                            />
-                          </td>
-                          <td style={styles.td}>
-                            <button
-                              style={styles.removeBtn}
-                              onClick={() => removeSelectedItem(item._key)}
-                            >
-                              ลบ
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              <button style={styles.saveBtn} onClick={handleSave} disabled={saving}>
-                {saving ? "กำลังบันทึก..." : "บันทึกรายการเบิก"}
-              </button>
-            </div>
-          )}
-
-          {!!message && <div style={styles.message}>{message}</div>}
+          {!!message && <div style={S.message}>{message}</div>}
         </div>
       </div>
 
+      {/* ── POPUP ── */}
       {popup.open && (
-        <div style={styles.popupOverlay} onClick={closePopup}>
-          <div style={styles.popupBox} onClick={(e) => e.stopPropagation()}>
-            <div style={popupHeaderStyle}>
+        <div style={S.popupOverlay} onClick={closePopup}>
+          <div style={S.popupBox} onClick={(e) => e.stopPropagation()}>
+            <div style={S.popupHeader(popup.type)}>
               {popup.type === "success"
-                ? "บันทึกสำเร็จ"
+                ? "✔ สำเร็จ"
                 : popup.type === "error"
-                ? "เกิดข้อผิดพลาด"
-                : "แจ้งเตือน"}
+                ? "✖ เกิดข้อผิดพลาด"
+                : "ℹ แจ้งเตือน"}
             </div>
-
-            <div style={styles.popupBody}>
-              <div style={styles.popupTitle}>{popup.title}</div>
-              <div style={styles.popupMessage}>{popup.message}</div>
+            <div style={S.popupBody}>
+              <div style={S.popupTitle}>{popup.title}</div>
+              <div style={S.popupMsg}>{popup.message}</div>
             </div>
-
-            <div style={styles.popupFooter}>
-              <button style={popupButtonStyle} onClick={closePopup}>
+            <div style={S.popupFooter}>
+              <button style={S.popupBtn(popup.type)} onClick={closePopup}>
                 ตกลง
               </button>
             </div>

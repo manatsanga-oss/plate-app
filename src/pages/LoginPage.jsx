@@ -19,23 +19,24 @@ export default function LoginPage({ onLogin }) {
     setLoading(true);
     setMessage("");
 
-    try {
+    try {c
       const res = await fetch(
-        "https://n8n-new-project-gwf2.onrender.com/webhook/a98a351e-fdc8-4e7f-b025-f0597d4816f3",
+        "https://n8n-new-project-gwf2.onrender.com/webhook/office-api",
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(form),
+          body: JSON.stringify({ action: "login", ...form }),
         }
       );
 
       const data = await res.json();
 
       if (data.success) {
-        localStorage.setItem("user", JSON.stringify(data.user));
-        onLogin(data.user);
+        const user = data.user || data;
+        localStorage.setItem("user", JSON.stringify(user));
+        onLogin(user);
       } else {
         setMessage(data.message || "ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง");
       }

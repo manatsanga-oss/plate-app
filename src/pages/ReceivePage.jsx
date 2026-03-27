@@ -1,16 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 
-const OCR_WEBHOOK_URL =
-  "https://n8n-new-project-gwf2.onrender.com/webhook/094b8071-9478-4bc2-90e8-4c0d21660f0c";
-
-const SAVE_WEBHOOK_URL =
-  "https://n8n-new-project-gwf2.onrender.com/webhook/c577cfab-e904-4c2b-86e8-3a8296676ec5";
-
-const HISTORY_WEBHOOK_URL =
-  "https://n8n-new-project-gwf2.onrender.com/webhook/50a16073-d606-479c-aba3-91ae9b877dec";
-
-const DOC_DETAIL_WEBHOOK_URL =
-  "https://n8n-new-project-gwf2.onrender.com/webhook/bbaae286-5879-48cb-9746-9c51bba6d3ae";
+const API_URL =
+  "https://n8n-new-project-gwf2.onrender.com/webhook/office-api";
 
 function todayStr() {
   const d = new Date();
@@ -23,6 +14,7 @@ function todayStr() {
 function emptyHeader() {
   return {
     receive_id: "",
+    doc_no: "",
     receive_no: "",
     receive_date: todayStr(),
     vendor_name: "",
@@ -135,7 +127,7 @@ function firstNotEmpty(...vals) {
   return "";
 }
 
-export default function ReceivePage() {
+export default function ReceivePage({ currentUser }) {
   const fileInputRef = useRef(null);
 
   const [mode, setMode] = useState("form");
@@ -241,7 +233,7 @@ export default function ReceivePage() {
 
   function getSuggestions(query, limit = 8) {
     const q = normalizeText(query);
-    if (!q) return productSuggestionList.slice(0, limit);
+    if (!q || q.length < 2) return [];
 
     return productSuggestionList
       .filter((p) => p.search_blob.includes(q))
@@ -291,10 +283,11 @@ export default function ReceivePage() {
 
     setHeader({
       receive_id: headerData.receive_id || "",
+      doc_no: headerData.doc_no || "",
       receive_no: headerData.receive_no || "",
       receive_date: headerData.receive_date || todayStr(),
       vendor_name: headerData.vendor_name || "",
-      buyerName: headerData.buyerName || "",
+      buyerName: headerData.buyerName || headerData.buyer_name || "",
       created_by:
         headerData.created_by || getCurrentUserName() || getCurrentUserId(),
     });
@@ -310,10 +303,7 @@ export default function ReceivePage() {
       const unitPrice = toNumber(item?.unit_price);
       const amount = toNumber(item?.amount ?? item?.total);
 
-      const matchedName =
-        T(item?.product_name) && T(item?.match_status) === "MATCHED"
-          ? item?.product_name
-          : "";
+      const matchedName = T(item?.product_name) || "";
 
       return {
         id: `${Date.now()}-${index}`,
@@ -354,19 +344,29 @@ export default function ReceivePage() {
       setErrorMessage("");
       setOcrStatus("กำลังส่ง OCR...");
 
-      const formData = new FormData();
-      formData.append("file", selectedFile);
+      const base64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => resolve(e.target.result.split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(selectedFile);
+      });
 
-      const res = await fetch(OCR_WEBHOOK_URL, {
+      const res = await fetch(API_URL, {
         method: "POST",
-        body: formData,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "ocr_invoice",
+          image_base64: base64,
+          filename: selectedFile.name,
+        }),
       });
 
       if (!res.ok) {
         throw new Error(`OCR request failed: HTTP ${res.status}`);
       }
 
-      const data = await res.json();
+      const rawData = await res.json();
+      const data = Array.isArray(rawData) ? rawData[0] : rawData;
       console.log("OCR RESULT:", data);
 
       setFormFromDocumentData(data);
@@ -411,13 +411,18 @@ export default function ReceivePage() {
       return;
     }
 
-    updateRow(index, {
-      product_id: product.product_id || "",
-      product_name: product.product_name || typedValue || "",
-      product_code: product.product_code || "",
-      unit: product.unit || "",
-      match_status: "MATCHED",
-      match_score: 1,
+    setItems((prev) => {
+      const next = [...prev];
+      const row = { ...next[index] };
+      row.product_id = product.product_id || "";
+      row.product_name = product.product_name || typedValue || "";
+      row.product_code = product.product_code || row.product_code || "";
+      row.unit = product.unit || row.unit || "";
+      row.match_status = "MATCHED";
+      row.match_score = 1;
+      row.amount = calcRowAmount(row);
+      next[index] = row;
+      return next;
     });
   }
 
@@ -505,6 +510,11 @@ export default function ReceivePage() {
         return;
       }
 
+      if (!T(header.buyerName)) {
+        alert("กรุณาเลือกผู้ซื้อ");
+        return;
+      }
+
       if (!items.length) {
         alert("ยังไม่มีรายการสินค้า");
         return;
@@ -524,6 +534,7 @@ export default function ReceivePage() {
 
       // ส่ง "ชื่อผู้ใช้" แทน id
       const currentUserName = getCurrentUserName() || getCurrentUserId();
+      const stockGroup = header.buyerName === "ป.เปา มอเตอร์เซอร์วิส" ? "ppao" : "singchai";
 
       const payload = {
         success: true,
@@ -533,6 +544,7 @@ export default function ReceivePage() {
           receive_date: header.receive_date,
           vendor_name: header.vendor_name,
           buyerName: header.buyerName,
+          stock_group: stockGroup,
           created_by: currentUserName,
         },
         items: items.map((row, index) => ({
@@ -548,6 +560,7 @@ export default function ReceivePage() {
           unit_price: toNumber(row.unit_price),
           amount: calcRowAmount(row),
           quantity_inferred: Boolean(row.quantity_inferred),
+          is_new: !row.product_id && T(row.product_name) ? true : false,
           match_status: T(row.product_name) ? "MATCHED" : "UNMATCHED",
           match_score:
             row.match_score === "" || row.match_score === null
@@ -566,12 +579,12 @@ export default function ReceivePage() {
         },
       };
 
-      const res = await fetch(SAVE_WEBHOOK_URL, {
+      const res = await fetch(API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({ action: "save_receive", ...payload }),
       });
 
       if (!res.ok) {
@@ -580,6 +593,10 @@ export default function ReceivePage() {
 
       const result = await res.json();
       console.log("SAVE RESULT:", result);
+
+      if (result.doc_no) {
+        setHeader(prev => ({ ...prev, doc_no: result.doc_no }));
+      }
 
       alert("บันทึกรับสินค้าเรียบร้อย");
     } catch (error) {
@@ -597,8 +614,10 @@ export default function ReceivePage() {
       setHistoryError("");
       setHistoryRows([]);
 
-      const res = await fetch(HISTORY_WEBHOOK_URL, {
-        method: "GET",
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_receive_history" }),
       });
 
       if (!res.ok) {
@@ -623,12 +642,13 @@ export default function ReceivePage() {
       setLoadingOCR(true);
       setErrorMessage("");
 
-      const res = await fetch(DOC_DETAIL_WEBHOOK_URL, {
+      const res = await fetch(API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
+          action: "get_receive_detail",
           receive_no: row.receive_no,
         }),
       });
@@ -653,58 +673,55 @@ export default function ReceivePage() {
   return (
     <div style={styles.page}>
       <div style={styles.container}>
-        <div style={styles.headerBlock}>
-          <h1 style={styles.title}>ระบบรับวัสดุสำนักงาน</h1>
-
-          <div style={styles.topButtonRow}>
-            <button
-              style={styles.secondaryButton}
-              type="button"
-              onClick={handleOpenHistory}
-            >
-              ดูประวัติรับสินค้า
-            </button>
-
-            <button
-              style={{
-                ...styles.secondaryButton,
-                opacity: saving ? 0.7 : 1,
-                cursor: saving ? "not-allowed" : "pointer",
-              }}
-              type="button"
-              onClick={handleSave}
-              disabled={saving}
-            >
-              {saving ? "กำลังบันทึก..." : "บันทึกรับสินค้า"}
-            </button>
-
-            <button style={styles.secondaryButton} type="button" onClick={resetAll}>
-              ล้างข้อมูลทั้งหมด
-            </button>
+        <div style={styles.card}>
+          <div style={styles.cardBody}>
+            <div style={styles.topBar}>
+              <button
+                style={styles.primaryButton}
+                type="button"
+                onClick={resetAll}
+              >
+                📋 รับวัสดุ
+              </button>
+              <button
+                style={styles.secondaryButton}
+                type="button"
+                onClick={handleOpenHistory}
+              >
+                🔍 ประวัติรับสินค้า
+              </button>
+              <button
+                style={{
+                  ...styles.secondaryButton,
+                  opacity: saving ? 0.7 : 1,
+                  cursor: saving ? "not-allowed" : "pointer",
+                }}
+                type="button"
+                onClick={handleSave}
+                disabled={saving}
+              >
+                {saving ? "กำลังบันทึก..." : "💾 บันทึกรับสินค้า"}
+              </button>
+              <div style={styles.userInfo}>
+                👤 {currentUser?.name || currentUser?.username || getCurrentUserName() || "-"}
+                &nbsp;|&nbsp;
+                🏢 {currentUser?.branch || "-"}
+              </div>
+            </div>
           </div>
         </div>
 
         {mode === "history" ? (
           <div style={styles.card}>
-            <div style={styles.sectionHeaderRow}>
-              <div style={{ flex: 1 }}>
-                <h2 style={styles.sectionTitleLeft}>ประวัติรับสินค้า</h2>
-                <div style={styles.sectionDescLeft}>
-                  เลือกเอกสารที่ต้องการเปิดขึ้นมาแก้ไข
-                </div>
-              </div>
-
-              <div style={styles.buttonRowNoMargin}>
-                <button
-                  type="button"
-                  style={styles.secondaryButton}
-                  onClick={() => setMode("form")}
-                >
-                  กลับหน้าหลัก
+            <div style={styles.cardHeader}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>ประวัติรับสินค้า</span>
+                <button type="button" style={styles.secondaryButton} onClick={() => setMode("form")}>
+                  ← กลับ
                 </button>
               </div>
             </div>
-
+            <div style={styles.cardBody}>
             <div style={styles.historySearchWrap}>
               <input
                 style={styles.historySearchInput}
@@ -728,6 +745,7 @@ export default function ReceivePage() {
                       <th style={styles.th}>เลขที่รับสินค้า</th>
                       <th style={styles.th}>วันที่รับ</th>
                       <th style={styles.th}>ผู้ขาย</th>
+                      <th style={styles.th}>ผู้ซื้อ</th>
                       <th style={styles.th}>เปิด</th>
                     </tr>
                   </thead>
@@ -735,8 +753,9 @@ export default function ReceivePage() {
                     {filteredHistoryRows.map((row, index) => (
                       <tr key={`${row.receive_no}-${index}`}>
                         <td style={styles.td}>{row.receive_no}</td>
-                        <td style={styles.td}>{row.receive_date}</td>
+                        <td style={styles.td}>{row.receive_date ? new Date(row.receive_date).toLocaleDateString('th-TH', {day:'2-digit',month:'2-digit',year:'numeric'}) : ''}</td>
                         <td style={styles.td}>{row.vendor_name}</td>
+                        <td style={styles.td}>{row.buyer_name || row.buyerName || ''}</td>
                         <td style={styles.td}>
                           <button
                             type="button"
@@ -752,11 +771,13 @@ export default function ReceivePage() {
                 </table>
               </div>
             )}
+            </div>{/* cardBody */}
           </div>
         ) : (
           <div style={styles.stack}>
             <div style={styles.card}>
-              <h2 style={styles.sectionTitle}>1) อัปโหลดใบกำกับภาษี</h2>
+              <div style={styles.cardHeader}>1) อัปโหลดใบกำกับภาษี</div>
+              <div style={styles.cardBody}>
 
               <div style={styles.uploadBox}>
                 <div style={{ fontSize: 44 }}>📷</div>
@@ -799,23 +820,24 @@ export default function ReceivePage() {
 
                 {errorMessage && <div style={styles.errorText}>{errorMessage}</div>}
               </div>
+              </div>{/* cardBody */}
             </div>
 
             <div style={styles.card}>
-              <h2 style={styles.sectionTitle}>2) รายละเอียดหัวเอกสาร</h2>
-
+              <div style={styles.cardHeader}>2) รายละเอียดหัวเอกสาร</div>
+              <div style={styles.cardBody}>
               <div style={styles.formGridHeaderSmall}>
                 <div>
-                  <label style={styles.label}>receive_id</label>
+                  <label style={styles.label}>รหัสรับสินค้า</label>
                   <input
-                    style={styles.input}
-                    value={header.receive_id}
-                    onChange={(e) => updateHeader("receive_id", e.target.value)}
+                    style={{...styles.input, background:"#f5f5f5"}}
+                    value={header.doc_no || (header.receive_id ? "REC........." : "")}
+                    readOnly
                   />
                 </div>
 
                 <div>
-                  <label style={styles.label}>receive_no</label>
+                  <label style={styles.label}>เลขที่เอกสาร</label>
                   <input
                     style={styles.input}
                     value={header.receive_no}
@@ -824,17 +846,17 @@ export default function ReceivePage() {
                 </div>
 
                 <div>
-                  <label style={styles.label}>receive_date</label>
+                  <label style={styles.label}>วันที่รับ</label>
                   <input
                     type="date"
                     style={styles.input}
-                    value={header.receive_date}
+                    value={header.receive_date ? header.receive_date.split('T')[0] : ''}
                     onChange={(e) => updateHeader("receive_date", e.target.value)}
                   />
                 </div>
 
                 <div>
-                  <label style={styles.label}>vendor_name</label>
+                  <label style={styles.label}>ชื่อผู้ขาย</label>
                   <input
                     style={styles.input}
                     value={header.vendor_name}
@@ -843,35 +865,35 @@ export default function ReceivePage() {
                 </div>
 
                 <div>
-                  <label style={styles.label}>buyerName</label>
-                  <input
-                    style={styles.input}
+                  <label style={styles.label}>ผู้ซื้อ *</label>
+                  <select
+                    style={{
+                      ...styles.input,
+                      color: header.buyerName ? "#1a1a2e" : "#999",
+                    }}
                     value={header.buyerName}
                     onChange={(e) => updateHeader("buyerName", e.target.value)}
-                  />
+                    required
+                  >
+                    <option value="">-- กรุณาเลือกผู้ซื้อ --</option>
+                    <option value="สิงห์ชัย สยามยนต์">สิงห์ชัย สยามยนต์</option>
+                    <option value="ป.เปา มอเตอร์เซอร์วิส">ป.เปา มอเตอร์เซอร์วิส</option>
+                  </select>
                 </div>
               </div>
+              </div>{/* cardBody */}
             </div>
 
             <div style={styles.card}>
-              <div style={styles.sectionHeaderRow}>
-                <div>
-                  <h2 style={styles.sectionTitleLeft}>3) ตรวจสอบและแก้ไขรายการวัสดุ</h2>
-                  <div style={styles.sectionDescLeft}>
-                    ตรวจสอบชื่อสินค้า รหัสสินค้า จำนวน หน่วย และราคา ก่อนบันทึก
-                  </div>
-                </div>
-
-                <div style={styles.buttonRowNoMargin}>
-                  <button
-                    type="button"
-                    style={styles.secondaryButton}
-                    onClick={handleAddRow}
-                  >
-                    เพิ่มรายการสินค้าเอง
+              <div style={styles.cardHeader}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>3) ตรวจสอบและแก้ไขรายการวัสดุ</span>
+                  <button type="button" style={styles.secondaryButton} onClick={handleAddRow}>
+                    + เพิ่มรายการ
                   </button>
                 </div>
               </div>
+              <div style={styles.cardBody}>
 
               {items.length === 0 ? (
                 <div style={styles.emptyBox}>
@@ -892,21 +914,16 @@ export default function ReceivePage() {
 
                   {items.map((row, index) => {
                     const needManualName = !T(row.product_name);
-                    const suggestions = getSuggestions(
-                      T(row.product_name) || T(row.product_name_from_ocr),
-                      8
-                    );
+                    const suggestions = getSuggestions(T(row.product_name), 8);
                     const datalistId = `product-suggestions-${row.id}`;
 
                     return (
                       <div key={row.id} style={styles.rowItemWrap}>
                         <div style={styles.rowGrid}>
                           <input
-                            style={styles.tableInput}
+                            style={{...styles.tableInput, background:"#f5f5f5", color:"#555"}}
                             value={row.product_code}
-                            onChange={(e) =>
-                              updateRow(index, { product_code: e.target.value })
-                            }
+                            readOnly
                             placeholder="รหัสสินค้า OCR"
                           />
 
@@ -1016,6 +1033,7 @@ export default function ReceivePage() {
                 <div>จำนวนรายการ: {formatQty(items.length)}</div>
                 <div>รวมทั้งสิ้น: {formatNumber(grandTotal)} บาท</div>
               </div>
+              </div>{/* cardBody */}
             </div>
           </div>
         )}
@@ -1048,221 +1066,173 @@ export default function ReceivePage() {
 const styles = {
   page: {
     minHeight: "100vh",
-    background: "#eef3f8",
-    padding: 24,
+    background: "#f0f2f5",
+    padding: "16px",
     boxSizing: "border-box",
-    fontFamily: "Tahoma, sans-serif",
-    color: "#24324a",
+    fontFamily: "Tahoma, Arial, sans-serif",
+    fontSize: "13px",
+    color: "#333",
   },
-  container: {
-    width: "100%",
-    maxWidth: 1360,
-    margin: "0 auto",
-  },
-  headerBlock: {
-    background: "#ffffff",
-    borderRadius: 22,
-    padding: 24,
-    boxShadow: "0 6px 20px rgba(0,0,0,0.06)",
-    marginBottom: 24,
-  },
-  title: {
-    margin: 0,
-    fontSize: 34,
-    fontWeight: 700,
-    textAlign: "center",
-  },
-  topButtonRow: {
-    display: "flex",
-    gap: 12,
-    justifyContent: "center",
-    flexWrap: "wrap",
-    marginTop: 18,
-  },
-  stack: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 24,
-  },
+  container: { width: "100%", maxWidth: 1360, margin: "0 auto" },
   card: {
-    background: "#ffffff",
-    borderRadius: 24,
-    padding: 24,
-    boxShadow: "0 6px 20px rgba(0,0,0,0.06)",
+    background: "#fff",
+    border: "1px solid #d9d9d9",
+    borderRadius: "4px",
+    marginBottom: "10px",
     overflow: "hidden",
   },
-  sectionTitle: {
-    margin: 0,
-    fontSize: 24,
-    fontWeight: 700,
-    textAlign: "center",
+  cardHeader: {
+    padding: "7px 14px",
+    borderBottom: "1px solid #e8e8e8",
+    fontSize: "13px",
+    fontWeight: "700",
+    color: "#1565C0",
+    background: "#fafafa",
   },
-  sectionTitleLeft: {
-    margin: 0,
-    fontSize: 24,
-    fontWeight: 700,
-    textAlign: "left",
+  cardBody: { padding: "10px 14px" },
+  topBar: {
+    display: "flex",
+    gap: "6px",
+    flexWrap: "wrap",
+    alignItems: "center",
   },
-  sectionDescLeft: {
-    marginTop: 8,
-    color: "#6c7a92",
-    textAlign: "left",
-    fontSize: 16,
+  userInfo: {
+    marginLeft: "auto",
+    fontSize: "12px",
+    color: "#555",
+    padding: "3px 8px",
+    background: "#f5f5f5",
+    border: "1px solid #e0e0e0",
+    borderRadius: "3px",
   },
+  title: { margin: 0, fontSize: 16, fontWeight: 700, color: "#1565C0" },
+  /* kept for back-compat in JSX */
+  headerBlock: {
+    background: "#fff",
+    border: "1px solid #d9d9d9",
+    borderRadius: "4px",
+    padding: "8px 14px",
+    marginBottom: "10px",
+  },
+  topButtonRow: { display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center", marginTop: 6 },
+  stack: { display: "flex", flexDirection: "column", gap: "10px" },
+  sectionTitle: { margin: 0, fontSize: 13, fontWeight: 700, color: "#1565C0" },
+  sectionTitleLeft: { margin: 0, fontSize: 13, fontWeight: 700, color: "#1565C0" },
+  sectionDescLeft: { marginTop: 3, color: "#888", textAlign: "left", fontSize: 11 },
   uploadBox: {
-    marginTop: 18,
-    border: "2px dashed #c9d7ea",
-    borderRadius: 24,
-    padding: 28,
+    marginTop: 8,
+    border: "1px dashed #c9d7ea",
+    borderRadius: "4px",
+    padding: "16px",
     textAlign: "center",
     background: "#f9fbff",
   },
-  uploadTitle: {
-    fontSize: 22,
-    fontWeight: 700,
-    marginTop: 8,
-  },
-  uploadHint: {
-    color: "#6c7a92",
-    marginTop: 6,
-    fontSize: 16,
-  },
-  buttonRow: {
-    display: "flex",
-    gap: 10,
-    justifyContent: "center",
-    flexWrap: "wrap",
-    marginTop: 16,
-  },
-  buttonRowNoMargin: {
-    display: "flex",
-    gap: 10,
-    justifyContent: "center",
-    flexWrap: "wrap",
-  },
+  uploadTitle: { fontSize: 13, fontWeight: 700, marginTop: 4 },
+  uploadHint: { color: "#888", marginTop: 3, fontSize: 11 },
+  buttonRow: { display: "flex", gap: "6px", justifyContent: "center", flexWrap: "wrap", marginTop: 8 },
+  buttonRowNoMargin: { display: "flex", gap: "6px", alignItems: "center" },
   primaryButton: {
-    background: "#1f6feb",
+    background: "#1565C0",
     color: "#fff",
-    border: "none",
-    borderRadius: 10,
-    padding: "10px 16px",
-    fontSize: 16,
+    border: "1px solid #1565C0",
+    borderRadius: "3px",
+    padding: "4px 12px",
+    fontSize: "13px",
+    fontWeight: "600",
     cursor: "pointer",
-    textDecoration: "none",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
   },
   secondaryButton: {
-    background: "#ffffff",
-    color: "#24324a",
-    border: "1px solid #c8d2e1",
-    borderRadius: 10,
-    padding: "10px 16px",
-    fontSize: 16,
+    background: "#fff",
+    color: "#555",
+    border: "1px solid #bbb",
+    borderRadius: "3px",
+    padding: "4px 12px",
+    fontSize: "13px",
+    fontWeight: "600",
     cursor: "pointer",
   },
-  fileText: {
-    marginTop: 16,
-    fontSize: 16,
-  },
-  statusText: {
-    marginTop: 8,
-    fontSize: 16,
-    color: "#4b5870",
-  },
-  errorText: {
-    marginTop: 8,
-    color: "#c62828",
-    fontWeight: 700,
-  },
+  fileText: { marginTop: 8, fontSize: 12 },
+  statusText: { marginTop: 4, fontSize: 12, color: "#4b5870" },
+  errorText: { marginTop: 6, color: "#c62828", fontWeight: 700, fontSize: 12 },
   formGridHeaderSmall: {
     display: "grid",
-    gridTemplateColumns: "repeat(5, minmax(180px, 1fr))",
-    gap: 14,
-    marginTop: 18,
+    gridTemplateColumns: "repeat(5, minmax(160px, 1fr))",
+    gap: 10,
+    marginTop: 10,
     alignItems: "end",
   },
   label: {
     display: "block",
-    marginBottom: 6,
+    marginBottom: 3,
     fontWeight: 700,
-    fontSize: 14,
-    color: "#4d5b73",
-    textAlign: "center",
+    fontSize: 12,
+    color: "#555",
   },
   input: {
     width: "100%",
     boxSizing: "border-box",
-    border: "1px solid #c8d2e1",
-    borderRadius: 10,
-    padding: "12px 14px",
-    fontSize: 16,
+    border: "1px solid #d9d9d9",
+    borderRadius: 4,
+    padding: "5px 8px",
+    fontSize: 13,
     outline: "none",
     minWidth: 0,
   },
   sectionHeaderRow: {
     display: "flex",
     justifyContent: "space-between",
-    gap: 16,
+    gap: 10,
     alignItems: "flex-start",
     flexWrap: "wrap",
-    marginBottom: 16,
+    marginBottom: 10,
   },
   emptyBox: {
-    border: "1px solid #d9e2ee",
-    background: "#f8fbff",
-    borderRadius: 18,
-    padding: 28,
+    border: "1px dashed #ddd",
+    background: "#fafafa",
+    borderRadius: 3,
+    padding: "18px",
     textAlign: "center",
-    color: "#697791",
-    fontSize: 16,
+    color: "#aaa",
+    fontSize: 13,
   },
-  rowList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 14,
-    width: "100%",
-  },
+  rowList: { display: "flex", flexDirection: "column", gap: 4, width: "100%" },
   rowHeader: {
     display: "grid",
-    gridTemplateColumns:
-      "120px minmax(220px, 1.7fr) minmax(220px, 1.5fr) 90px 90px 120px 120px 70px",
-    gap: 10,
+    gridTemplateColumns: "100px minmax(180px,1.7fr) minmax(180px,1.5fr) 80px 70px 100px 100px 60px",
+    gap: 6,
     alignItems: "center",
     fontWeight: 700,
-    color: "#4d5b73",
-    fontSize: 14,
-    padding: "0 2px",
+    color: "#555",
+    fontSize: 12,
+    padding: "4px 6px",
+    background: "#f5f5f5",
+    border: "1px solid #e8e8e8",
+    borderRadius: 3,
   },
   rowItemWrap: {
-    border: "1px solid #d9e2ee",
-    borderRadius: 16,
-    padding: 14,
-    background: "#fcfdff",
+    border: "1px solid #e8e8e8",
+    borderRadius: 3,
+    padding: "6px",
+    background: "#fff",
     width: "100%",
     boxSizing: "border-box",
   },
   rowGrid: {
     display: "grid",
-    gridTemplateColumns:
-      "120px minmax(220px, 1.7fr) minmax(220px, 1.5fr) 90px 90px 120px 120px 70px",
-    gap: 10,
+    gridTemplateColumns: "100px minmax(180px,1.7fr) minmax(180px,1.5fr) 80px 70px 100px 100px 60px",
+    gap: 6,
     alignItems: "center",
     width: "100%",
   },
-  autoCompleteWrap: {
-    width: "100%",
-    minWidth: 0,
-  },
+  autoCompleteWrap: { width: "100%", minWidth: 0 },
   tableInput: {
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box",
-    border: "1px solid #c8d2e1",
-    borderRadius: 10,
-    padding: "12px 14px",
-    fontSize: 16,
+    border: "1px solid #d9d9d9",
+    borderRadius: 3,
+    padding: "4px 7px",
+    fontSize: 12,
     background: "#fff",
     outline: "none",
   },
@@ -1270,30 +1240,27 @@ const styles = {
     width: "100%",
     minWidth: 0,
     boxSizing: "border-box",
-    border: "1px solid #c8d2e1",
-    borderRadius: 10,
-    padding: "12px 14px",
-    fontSize: 16,
+    border: "1px solid #d9d9d9",
+    borderRadius: 3,
+    padding: "4px 7px",
+    fontSize: 12,
     background: "#fff",
     outline: "none",
     fontWeight: 600,
   },
-  categoryInputEmpty: {
-    background: "#fff4a8",
-    border: "1px solid #e0bf2f",
-  },
+  categoryInputEmpty: { background: "#fff4a8", border: "1px solid #e0bf2f" },
   totalBoxSmall: {
     width: "100%",
     boxSizing: "border-box",
-    border: "1px solid #d7e0ec",
-    borderRadius: 10,
-    padding: "12px 10px",
-    fontSize: 16,
+    border: "1px solid #d9d9d9",
+    borderRadius: 3,
+    padding: "4px 6px",
+    fontSize: 12,
     fontWeight: 700,
     color: "#17325c",
-    background: "#f7faff",
+    background: "#f5f8ff",
     textAlign: "right",
-    minHeight: 48,
+    minHeight: 26,
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
@@ -1302,69 +1269,63 @@ const styles = {
     background: "#fff1f1",
     color: "#c62828",
     border: "1px solid #efb0b0",
-    borderRadius: 10,
-    padding: "10px 8px",
+    borderRadius: 3,
+    padding: "3px 7px",
     cursor: "pointer",
-    fontSize: 15,
-    minHeight: 48,
+    fontSize: 12,
+    minHeight: 26,
   },
   summaryBar: {
-    marginTop: 18,
+    marginTop: 8,
     display: "flex",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 8,
     flexWrap: "wrap",
     fontWeight: 700,
     color: "#32425b",
-    fontSize: 20,
+    fontSize: 13,
     background: "#f5f8fc",
-    borderRadius: 16,
-    padding: "16px 18px",
+    borderRadius: 3,
+    border: "1px solid #e8e8e8",
+    padding: "7px 12px",
   },
-  historySearchWrap: {
-    marginBottom: 16,
-  },
+  historySearchWrap: { marginBottom: 8 },
   historySearchInput: {
     width: "100%",
     boxSizing: "border-box",
-    border: "1px solid #c8d2e1",
-    borderRadius: 12,
-    padding: "12px 14px",
-    fontSize: 16,
+    border: "1px solid #d9d9d9",
+    borderRadius: 3,
+    padding: "5px 8px",
+    fontSize: 13,
     outline: "none",
   },
   historyTableWrap: {
     overflowX: "auto",
-    border: "1px solid #d9e2ee",
-    borderRadius: 16,
+    border: "1px solid #e8e8e8",
+    borderRadius: 3,
     background: "#fff",
   },
-  historyTable: {
-    width: "100%",
-    borderCollapse: "collapse",
-    minWidth: 700,
-  },
+  historyTable: { width: "100%", borderCollapse: "collapse", minWidth: 600 },
   th: {
-    background: "#f3f7fc",
-    color: "#32425b",
+    background: "#f5f5f5",
+    color: "#444",
     fontWeight: 700,
-    fontSize: 15,
-    padding: "12px 14px",
-    borderBottom: "1px solid #d9e2ee",
+    fontSize: 12,
+    padding: "6px 10px",
+    borderBottom: "1px solid #e8e8e8",
     textAlign: "left",
   },
   td: {
-    padding: "12px 14px",
-    borderBottom: "1px solid #eef2f7",
-    fontSize: 15,
-    color: "#24324a",
+    padding: "6px 10px",
+    borderBottom: "1px solid #f0f0f0",
+    fontSize: 12,
+    color: "#333",
     verticalAlign: "middle",
   },
   modalOverlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(15, 23, 42, 0.45)",
-    backdropFilter: "blur(4px)",
+    background: "rgba(0,0,0,0.35)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -1373,68 +1334,53 @@ const styles = {
   },
   modalBox: {
     width: "100%",
-    maxWidth: 460,
-    background: "#ffffff",
-    borderRadius: 24,
-    padding: "32px 28px",
-    boxShadow: "0 20px 60px rgba(0,0,0,0.18)",
+    maxWidth: 420,
+    background: "#fff",
+    borderRadius: 4,
+    padding: "24px 20px",
+    boxShadow: "0 4px 20px rgba(0,0,0,0.18)",
     textAlign: "center",
   },
   loaderWrap: {
     position: "relative",
-    width: 90,
-    height: 90,
-    margin: "0 auto 18px auto",
+    width: 64,
+    height: 64,
+    margin: "0 auto 12px auto",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
   },
   loaderRing: {
-    width: 74,
-    height: 74,
+    width: 52,
+    height: 52,
     borderRadius: "50%",
-    border: "6px solid #dbe7ff",
-    borderTop: "6px solid #1f6feb",
+    border: "5px solid #dbe7ff",
+    borderTop: "5px solid #1565C0",
     animation: "spin 1s linear infinite",
   },
   loaderDot: {
     position: "absolute",
-    width: 14,
-    height: 14,
+    width: 10,
+    height: 10,
     borderRadius: "50%",
-    background: "#1f6feb",
-    boxShadow: "0 0 16px rgba(31,111,235,0.45)",
+    background: "#1565C0",
   },
-  modalTitle: {
-    fontSize: 28,
-    fontWeight: 700,
-    color: "#1f2d3d",
-    marginBottom: 10,
-  },
-  modalText: {
-    fontSize: 17,
-    color: "#50627a",
-    lineHeight: 1.6,
-  },
-  modalSubText: {
-    fontSize: 15,
-    color: "#7b8aa0",
-    marginTop: 8,
-    marginBottom: 20,
-  },
+  modalTitle: { fontSize: 16, fontWeight: 700, color: "#1f2d3d", marginBottom: 6 },
+  modalText: { fontSize: 13, color: "#50627a", lineHeight: 1.5 },
+  modalSubText: { fontSize: 12, color: "#7b8aa0", marginTop: 6, marginBottom: 12 },
   progressFake: {
     width: "100%",
-    height: 10,
+    height: 6,
     background: "#eaf1fb",
     borderRadius: 999,
     overflow: "hidden",
-    marginTop: 8,
+    marginTop: 6,
   },
   progressFakeBar: {
     width: "45%",
     height: "100%",
     borderRadius: 999,
-    background: "linear-gradient(90deg, #1f6feb, #68a3ff)",
+    background: "linear-gradient(90deg, #1565C0, #68a3ff)",
     animation: "loadingBar 1.6s ease-in-out infinite",
   },
 };
