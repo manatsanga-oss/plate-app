@@ -19,7 +19,7 @@ export default function LoginPage({ onLogin }) {
     setLoading(true);
     setMessage("");
 
-    try {c
+    try {
       const res = await fetch(
         "https://n8n-new-project-gwf2.onrender.com/webhook/office-api",
         {
