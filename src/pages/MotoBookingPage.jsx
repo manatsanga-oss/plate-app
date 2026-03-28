@@ -64,10 +64,7 @@ export default function MotoBookingPage({ currentUser }) {
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "get_moto_bookings",
-          branch: isAdmin ? null : currentUser?.branch,
-        }),
+        body: JSON.stringify({ action: "get_moto_bookings" }),
       });
       const data = await res.json();
       setBookings(Array.isArray(data) ? data : []);
@@ -197,6 +194,7 @@ export default function MotoBookingPage({ currentUser }) {
   }
 
   const filtered = bookings.filter((b) => {
+    if (!isAdmin && currentUser?.branch && b.branch !== currentUser.branch) return false;
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
     if (filterBranch && b.branch !== filterBranch) return false;
     if (filterDate && b.booking_date && b.booking_date.slice(0, 10) !== filterDate) return false;
