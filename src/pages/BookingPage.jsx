@@ -16,11 +16,14 @@ const STATUS_COLOR = {
   cancelled: "#6b7280",
 };
 
+const DELIVERY_TYPES = ["ส่งรถ", "ทำสัญญา", "อื่น ๆ"];
+
 const emptyForm = () => ({
   car_model_id: "",
   driver_id: "",
-  start_date: "",
-  end_date: "",
+  booking_date: "",
+  booking_time: "",
+  delivery_type: "",
   destination: "",
   purpose: "",
 });
@@ -94,12 +97,8 @@ export default function BookingPage({ currentUser }) {
   }
 
   async function handleSave() {
-    if (!form.start_date || !form.end_date || !form.destination) {
+    if (!form.booking_date || !form.booking_time || !form.delivery_type || !form.destination) {
       setMessage("กรุณากรอกข้อมูลให้ครบถ้วน");
-      return;
-    }
-    if (form.start_date > form.end_date) {
-      setMessage("วันที่สิ้นสุดต้องมากกว่าหรือเท่ากับวันที่เริ่มต้น");
       return;
     }
     setSaving(true);
@@ -246,23 +245,41 @@ export default function BookingPage({ currentUser }) {
           </div>
 
           <div className="form-row">
-            <label>วันที่เริ่ม</label>
+            <label>วันที่จอง</label>
             <input
               type="date"
               className="form-input"
-              value={form.start_date}
-              onChange={(e) => setForm({ ...form, start_date: e.target.value })}
+              value={form.booking_date}
+              onChange={(e) => setForm({ ...form, booking_date: e.target.value })}
             />
           </div>
 
           <div className="form-row">
-            <label>วันที่สิ้นสุด</label>
+            <label>จองเวลา</label>
             <input
-              type="date"
+              type="time"
               className="form-input"
-              value={form.end_date}
-              onChange={(e) => setForm({ ...form, end_date: e.target.value })}
+              value={form.booking_time}
+              onChange={(e) => setForm({ ...form, booking_time: e.target.value })}
             />
+          </div>
+
+          <div className="form-row">
+            <label>ประเภทการจัดส่ง <span style={{ color: "#ef4444" }}>*</span></label>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
+              {DELIVERY_TYPES.map((t) => (
+                <label key={t} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: "normal" }}>
+                  <input
+                    type="radio"
+                    name="delivery_type"
+                    value={t}
+                    checked={form.delivery_type === t}
+                    onChange={(e) => setForm({ ...form, delivery_type: e.target.value })}
+                  />
+                  {t}
+                </label>
+              ))}
+            </div>
           </div>
 
           <div className="form-row">
@@ -351,7 +368,9 @@ export default function BookingPage({ currentUser }) {
                 {isAdmin && <th>สาขา</th>}
                 <th>รุ่นรถ</th>
                 <th>คนขับ</th>
-                <th>ช่วงวันที่</th>
+                <th>วันที่จอง</th>
+                <th>เวลา</th>
+                <th>ประเภท</th>
                 <th>ปลายทาง</th>
                 <th>สถานะ</th>
                 {isAdmin && <th>จัดการ</th>}
@@ -369,10 +388,12 @@ export default function BookingPage({ currentUser }) {
                   <td>{b.car_model_id ? carModelLabel(b.car_model_id) : (b.brand ? `${b.brand} ${b.marketing_name}` : "-")}</td>
                   <td>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    {b.start_date ? new Date(b.start_date).toLocaleDateString("th-TH") : "-"}
-                    {" – "}
-                    {b.end_date ? new Date(b.end_date).toLocaleDateString("th-TH") : "-"}
+                    {b.booking_date ? new Date(b.booking_date).toLocaleDateString("th-TH") : "-"}
                   </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {b.booking_time || "-"}
+                  </td>
+                  <td>{b.delivery_type || "-"}</td>
                   <td>{b.destination || "-"}</td>
                   <td>
                     <span
