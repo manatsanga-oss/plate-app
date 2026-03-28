@@ -5,6 +5,7 @@ import ReceivePage from "./pages/ReceivePage";
 import IssuePage from "./pages/IssuePage";
 import UserPage from "./pages/UserPage";
 import BookingPage from "./pages/BookingPage";
+import MotoBookingPage from "./pages/MotoBookingPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -62,6 +63,9 @@ export default function App() {
         )}
         {activeMenu === "booking" && canAccess("booking") && (
           <BookingPage currentUser={currentUser} />
+        )}
+        {activeMenu === "moto" && canAccess("moto") && (
+          <MotoBookingPage currentUser={currentUser} />
         )}
       </main>
     </div>
@@ -124,6 +128,15 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           onClick={() => onChange("booking")}
         >
           🚗 จองคนขับรถ
+        </button>
+      )}
+
+      {canAccess("moto") && (
+        <button
+          className={`menu-btn ${activeMenu === "moto" ? "active" : ""}`}
+          onClick={() => onChange("moto")}
+        >
+          🏍️ จองรถจักรยานยนต์
         </button>
       )}
 

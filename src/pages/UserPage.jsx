@@ -15,6 +15,7 @@ const PAGE_OPTIONS = [
   { key: "issue",     label: "📤 เบิกวัสดุ" },
   { key: "users",     label: "👤 กำหนดผู้ใช้งาน" },
   { key: "booking",   label: "🚗 จองคนขับรถ" },
+  { key: "moto",     label: "🏍️ จองรถจักรยานยนต์" },
 ];
 
 const DEFAULT_PAGES = ["dashboard", "receive", "issue"];
