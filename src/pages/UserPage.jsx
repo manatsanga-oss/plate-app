@@ -90,10 +90,12 @@ export default function UserPage({ currentUser }) {
     try {
       setSaving(true);
       const action = editId ? "update_user" : "save_user";
-      const payload = editId ? { ...form, user_id: editId } : form;
+      const payload = editId
+        ? { ...form, user_id: editId, pages: JSON.stringify(form.pages) }
+        : { ...form, pages: JSON.stringify(form.pages) };
       const raw = await api(action, payload);
       const data = Array.isArray(raw) ? raw[0] : raw;
-      if (data?.success || data?.ok) {
+      if (data?.success || data?.ok || data?.user_id) {
         showMsg(editId ? "แก้ไขผู้ใช้สำเร็จ" : "เพิ่มผู้ใช้สำเร็จ");
         setMode("list");
         await loadUsers();
