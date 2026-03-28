@@ -2,19 +2,8 @@ import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-api";
 
-const STATUS_LABEL = {
-  pending: "รอดำเนินการ",
-  approved: "อนุมัติ",
-  rejected: "ไม่อนุมัติ",
-  cancelled: "ยกเลิก",
-};
-
-const STATUS_COLOR = {
-  pending: "#f59e0b",
-  approved: "#10b981",
-  rejected: "#ef4444",
-  cancelled: "#6b7280",
-};
+const STATUS_LABEL = { pending: "จอง", cancelled: "ยกเลิก" };
+const STATUS_COLOR = { pending: "#10b981", cancelled: "#6b7280" };
 
 const DELIVERY_TYPES = ["ส่งรถ", "ทำสัญญา", "อื่น ๆ"];
 
@@ -29,7 +18,7 @@ const emptyForm = () => ({
 });
 
 export default function BookingPage({ currentUser }) {
-  const [mode, setMode] = useState("list"); // list | add
+  const [mode, setMode] = useState("list");
   const [bookings, setBookings] = useState([]);
   const [carModels, setCarModels] = useState([]);
   const [drivers, setDrivers] = useState([]);
@@ -40,6 +29,8 @@ export default function BookingPage({ currentUser }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [distanceInfo, setDistanceInfo] = useState(null);
+  const [loadingDist, setLoadingDist] = useState(false);
 
   const isAdmin = currentUser?.role === "admin";
 
@@ -77,9 +68,7 @@ export default function BookingPage({ currentUser }) {
       });
       const data = await res.json();
       setCarModels(Array.isArray(data) ? data : data.rows || []);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }
 
   async function fetchDrivers() {
@@ -91,9 +80,27 @@ export default function BookingPage({ currentUser }) {
       });
       const data = await res.json();
       setDrivers(Array.isArray(data) ? data : data.rows || []);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
+  }
+
+  async function fetchDistance() {
+    if (!form.destination.trim()) return;
+    setLoadingDist(true);
+    setDistanceInfo(null);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "get_distance",
+          origin: currentUser?.branch || "",
+          destination: form.destination,
+        }),
+      });
+      const data = await res.json();
+      setDistanceInfo(data);
+    } catch { /* ignore */ }
+    setLoadingDist(false);
   }
 
   async function handleSave() {
@@ -114,12 +121,15 @@ export default function BookingPage({ currentUser }) {
           ...form,
           car_model_id: form.car_model_id || null,
           driver_id: form.driver_id || null,
+          distance_text: distanceInfo?.distance_text || null,
+          duration_text: distanceInfo?.duration_text || null,
+          destination_formatted: distanceInfo?.destination_name || form.destination,
         }),
       });
       const data = await res.json();
       if (data?.success || data?.booking_id) {
-        setMessage("บันทึกการจองสำเร็จ");
         setForm(emptyForm());
+        setDistanceInfo(null);
         setMode("list");
         fetchBookings();
       } else {
@@ -158,23 +168,6 @@ export default function BookingPage({ currentUser }) {
     setSaving(false);
   }
 
-  async function handleUpdateStatus(bookingId, status) {
-    try {
-      await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "update_booking_status",
-          booking_id: bookingId,
-          status,
-        }),
-      });
-      fetchBookings();
-    } catch {
-      setMessage("เกิดข้อผิดพลาด");
-    }
-  }
-
   const filtered = bookings.filter(
     (b) => filterStatus === "all" || b.status === filterStatus
   );
@@ -189,17 +182,18 @@ export default function BookingPage({ currentUser }) {
     return d ? d.name : "-";
   };
 
+  /* ── ADD FORM ── */
   if (mode === "add") {
     return (
       <div className="page-container">
         <div className="page-topbar">
           <h2 className="page-title">🚗 จองรถ / คนขับ</h2>
-          <button className="btn-secondary" onClick={() => { setMode("list"); setMessage(""); }}>
+          <button className="btn-secondary" onClick={() => { setMode("list"); setMessage(""); setDistanceInfo(null); }}>
             ← กลับ
           </button>
         </div>
 
-        <div className="form-card" style={{ maxWidth: 600 }}>
+        <div className="form-card" style={{ maxWidth: 620 }}>
           <h3 style={{ marginTop: 0 }}>แบบฟอร์มจองรถ</h3>
 
           <div className="form-row">
@@ -214,11 +208,7 @@ export default function BookingPage({ currentUser }) {
 
           <div className="form-row">
             <label>รุ่นรถ</label>
-            <select
-              className="form-input"
-              value={form.car_model_id}
-              onChange={(e) => setForm({ ...form, car_model_id: e.target.value })}
-            >
+            <select className="form-input" value={form.car_model_id} onChange={(e) => setForm({ ...form, car_model_id: e.target.value })}>
               <option value="">-- เลือกรุ่นรถ --</option>
               {carModels.map((m) => (
                 <option key={m.model_id} value={m.model_id}>
@@ -230,11 +220,7 @@ export default function BookingPage({ currentUser }) {
 
           <div className="form-row">
             <label>คนขับรถ</label>
-            <select
-              className="form-input"
-              value={form.driver_id}
-              onChange={(e) => setForm({ ...form, driver_id: e.target.value })}
-            >
+            <select className="form-input" value={form.driver_id} onChange={(e) => setForm({ ...form, driver_id: e.target.value })}>
               <option value="">-- เลือกคนขับ --</option>
               {drivers.map((d) => (
                 <option key={d.driver_id} value={d.driver_id}>
@@ -245,23 +231,13 @@ export default function BookingPage({ currentUser }) {
           </div>
 
           <div className="form-row">
-            <label>วันที่จอง</label>
-            <input
-              type="date"
-              className="form-input"
-              value={form.booking_date}
-              onChange={(e) => setForm({ ...form, booking_date: e.target.value })}
-            />
+            <label>วันที่จอง <span style={{ color: "#ef4444" }}>*</span></label>
+            <input type="date" className="form-input" value={form.booking_date} onChange={(e) => setForm({ ...form, booking_date: e.target.value })} />
           </div>
 
           <div className="form-row">
-            <label>จองเวลา</label>
-            <input
-              type="time"
-              className="form-input"
-              value={form.booking_time}
-              onChange={(e) => setForm({ ...form, booking_time: e.target.value })}
-            />
+            <label>จองเวลา <span style={{ color: "#ef4444" }}>*</span></label>
+            <input type="time" className="form-input" value={form.booking_time} onChange={(e) => setForm({ ...form, booking_time: e.target.value })} />
           </div>
 
           <div className="form-row">
@@ -269,13 +245,7 @@ export default function BookingPage({ currentUser }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
               {DELIVERY_TYPES.map((t) => (
                 <label key={t} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: "normal" }}>
-                  <input
-                    type="radio"
-                    name="delivery_type"
-                    value={t}
-                    checked={form.delivery_type === t}
-                    onChange={(e) => setForm({ ...form, delivery_type: e.target.value })}
-                  />
+                  <input type="radio" name="delivery_type" value={t} checked={form.delivery_type === t} onChange={(e) => setForm({ ...form, delivery_type: e.target.value })} />
                   {t}
                 </label>
               ))}
@@ -283,24 +253,42 @@ export default function BookingPage({ currentUser }) {
           </div>
 
           <div className="form-row">
-            <label>ปลายทาง</label>
-            <input
-              className="form-input"
-              value={form.destination}
-              onChange={(e) => setForm({ ...form, destination: e.target.value })}
-              placeholder="ระบุจุดหมาย"
-            />
+            <label>ปลายทาง <span style={{ color: "#ef4444" }}>*</span></label>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                className="form-input"
+                style={{ flex: 1 }}
+                value={form.destination}
+                onChange={(e) => { setForm({ ...form, destination: e.target.value }); setDistanceInfo(null); }}
+                placeholder="ระบุจุดหมายปลายทาง"
+              />
+              <button
+                type="button"
+                className="btn-primary"
+                style={{ whiteSpace: "nowrap", padding: "8px 14px" }}
+                onClick={fetchDistance}
+                disabled={loadingDist || !form.destination.trim()}
+              >
+                {loadingDist ? "⏳" : "📍 ค้นหา"}
+              </button>
+            </div>
+
+            {distanceInfo && (
+              <div style={{ marginTop: 10, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "12px 14px" }}>
+                <div style={{ fontWeight: 700, color: "#15803d", marginBottom: 4 }}>
+                  📍 {distanceInfo.destination_name || form.destination}
+                </div>
+                <div style={{ color: "#166534", fontSize: 13 }}>
+                  🛣️ ระยะทาง: <strong>{distanceInfo.distance_text || "-"}</strong>
+                  &nbsp;&nbsp;⏱️ เวลาเดินทาง: <strong>{distanceInfo.duration_text || "-"}</strong>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="form-row">
             <label>วัตถุประสงค์</label>
-            <textarea
-              className="form-input"
-              rows={3}
-              value={form.purpose}
-              onChange={(e) => setForm({ ...form, purpose: e.target.value })}
-              placeholder="รายละเอียดการเดินทาง"
-            />
+            <textarea className="form-input" rows={3} value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })} placeholder="รายละเอียดการเดินทาง" />
           </div>
 
           {message && <div className="form-message">{message}</div>}
@@ -309,7 +297,7 @@ export default function BookingPage({ currentUser }) {
             <button className="btn-primary" onClick={handleSave} disabled={saving}>
               {saving ? "กำลังบันทึก..." : "💾 บันทึกการจอง"}
             </button>
-            <button className="btn-secondary" onClick={() => { setMode("list"); setMessage(""); }}>
+            <button className="btn-secondary" onClick={() => { setMode("list"); setMessage(""); setDistanceInfo(null); }}>
               ยกเลิก
             </button>
           </div>
@@ -318,32 +306,33 @@ export default function BookingPage({ currentUser }) {
     );
   }
 
+  /* ── LIST ── */
   return (
     <div className="page-container">
       <div className="page-topbar">
         <h2 className="page-title">🚗 ระบบจองคนขับรถ</h2>
-        <button className="btn-primary" onClick={() => { setForm(emptyForm()); setMode("add"); setMessage(""); }}>
+        <button className="btn-primary" onClick={() => { setForm(emptyForm()); setDistanceInfo(null); setMode("add"); setMessage(""); }}>
           + จองรถ
         </button>
       </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
-        {["all", "pending", "approved", "rejected", "cancelled"].map((s) => (
+        {[
+          { key: "all", label: "ทั้งหมด" },
+          { key: "pending", label: "จอง" },
+          { key: "cancelled", label: "ยกเลิก" },
+        ].map((s) => (
           <button
-            key={s}
-            onClick={() => setFilterStatus(s)}
+            key={s.key}
+            onClick={() => setFilterStatus(s.key)}
             style={{
-              padding: "6px 16px",
-              borderRadius: 20,
-              border: "none",
-              cursor: "pointer",
-              background: filterStatus === s ? "#072d6b" : "#e5e7eb",
-              color: filterStatus === s ? "#fff" : "#374151",
-              fontFamily: "Tahoma, sans-serif",
-              fontSize: 14,
+              padding: "6px 20px", borderRadius: 20, border: "none", cursor: "pointer",
+              background: filterStatus === s.key ? "#072d6b" : "#e5e7eb",
+              color: filterStatus === s.key ? "#fff" : "#374151",
+              fontFamily: "Tahoma, sans-serif", fontSize: 14,
             }}
           >
-            {s === "all" ? "ทั้งหมด" : STATUS_LABEL[s]}
+            {s.label}
           </button>
         ))}
       </div>
@@ -364,16 +353,15 @@ export default function BookingPage({ currentUser }) {
             <thead>
               <tr>
                 <th>วันที่จอง</th>
+                <th>เวลา</th>
                 <th>ผู้จอง</th>
                 {isAdmin && <th>สาขา</th>}
-                <th>รุ่นรถ</th>
-                <th>คนขับ</th>
-                <th>วันที่จอง</th>
-                <th>เวลา</th>
                 <th>ประเภท</th>
+                <th>คนขับ</th>
                 <th>ปลายทาง</th>
+                <th>ระยะทาง</th>
+                <th>เวลาเดินทาง</th>
                 <th>สถานะ</th>
-                {isAdmin && <th>จัดการ</th>}
                 <th></th>
               </tr>
             </thead>
@@ -381,58 +369,28 @@ export default function BookingPage({ currentUser }) {
               {filtered.map((b) => (
                 <tr key={b.booking_id}>
                   <td style={{ whiteSpace: "nowrap" }}>
-                    {b.created_at ? new Date(b.created_at).toLocaleDateString("th-TH") : "-"}
-                  </td>
-                  <td>{b.booker_name || "-"}</td>
-                  {isAdmin && <td>{b.branch || "-"}</td>}
-                  <td>{b.car_model_id ? carModelLabel(b.car_model_id) : (b.brand ? `${b.brand} ${b.marketing_name}` : "-")}</td>
-                  <td>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
                     {b.booking_date ? new Date(b.booking_date).toLocaleDateString("th-TH") : "-"}
                   </td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    {b.booking_time || "-"}
-                  </td>
+                  <td style={{ whiteSpace: "nowrap" }}>{b.booking_time || "-"}</td>
+                  <td>{b.booker_name || "-"}</td>
+                  {isAdmin && <td>{b.branch || "-"}</td>}
                   <td>{b.delivery_type || "-"}</td>
-                  <td>{b.destination || "-"}</td>
+                  <td>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</td>
+                  <td>{b.destination_formatted || b.destination || "-"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{b.distance_text || "-"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{b.duration_text || "-"}</td>
                   <td>
-                    <span
-                      style={{
-                        background: STATUS_COLOR[b.status] || "#d1d5db",
-                        color: "#fff",
-                        padding: "3px 10px",
-                        borderRadius: 12,
-                        fontSize: 13,
-                        whiteSpace: "nowrap",
-                      }}
-                    >
+                    <span style={{
+                      background: STATUS_COLOR[b.status] || "#d1d5db",
+                      color: "#fff", padding: "3px 10px", borderRadius: 12, fontSize: 13, whiteSpace: "nowrap",
+                    }}>
                       {STATUS_LABEL[b.status] || b.status}
                     </span>
                   </td>
-                  {isAdmin && (
-                    <td style={{ whiteSpace: "nowrap" }}>
-                      {b.status === "pending" && (
-                        <>
-                          <button
-                            style={{ marginRight: 6, padding: "3px 10px", background: "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
-                            onClick={() => handleUpdateStatus(b.booking_id, "approved")}
-                          >
-                            อนุมัติ
-                          </button>
-                          <button
-                            style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
-                            onClick={() => handleUpdateStatus(b.booking_id, "rejected")}
-                          >
-                            ไม่อนุมัติ
-                          </button>
-                        </>
-                      )}
-                    </td>
-                  )}
                   <td>
-                    {(b.status === "pending" || b.status === "approved") && (
+                    {b.status === "pending" && (
                       <button
-                        style={{ padding: "3px 10px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}
+                        style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}
                         onClick={() => { setCancelTarget(b); setCancelReason(""); }}
                       >
                         ยกเลิก
@@ -448,19 +406,15 @@ export default function BookingPage({ currentUser }) {
 
       {/* Cancel Modal */}
       {cancelTarget && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)",
-          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000
-        }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 380, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
             <h3 style={{ marginTop: 0 }}>ยืนยันการยกเลิกการจอง</h3>
-            <p>ยกเลิกการจองของ <strong>{cancelTarget.booker_name}</strong> ไปยัง {cancelTarget.destination}?</p>
+            <p>ยกเลิกการจองของ <strong>{cancelTarget.booker_name}</strong> ไปยัง {cancelTarget.destination_formatted || cancelTarget.destination}?</p>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", marginBottom: 6 }}>เหตุผลการยกเลิก</label>
               <textarea
                 style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", resize: "vertical" }}
-                rows={3}
-                value={cancelReason}
+                rows={3} value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 placeholder="ระบุเหตุผล (ถ้ามี)"
               />
@@ -468,8 +422,7 @@ export default function BookingPage({ currentUser }) {
             <div style={{ display: "flex", gap: 10 }}>
               <button
                 style={{ flex: 1, padding: "8px 0", background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}
-                onClick={handleCancel}
-                disabled={saving}
+                onClick={handleCancel} disabled={saving}
               >
                 {saving ? "กำลังยกเลิก..." : "ยืนยันยกเลิก"}
               </button>
