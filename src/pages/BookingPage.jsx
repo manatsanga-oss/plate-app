@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/office-api";
+const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-api";
 
 const STATUS_LABEL = {
   pending: "รอดำเนินการ",
