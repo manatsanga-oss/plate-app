@@ -44,6 +44,7 @@ export default function BookingPage({ currentUser }) {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterDate, setFilterDate] = useState(new Date().toISOString().slice(0, 10));
   const [distanceInfo, setDistanceInfo] = useState(null);
   const [loadingDist, setLoadingDist] = useState(false);
 
@@ -192,9 +193,14 @@ export default function BookingPage({ currentUser }) {
     setSaving(false);
   }
 
-  const filtered = bookings.filter(
-    (b) => filterStatus === "all" || b.status === filterStatus
-  );
+  const filtered = bookings.filter((b) => {
+    if (filterStatus !== "all" && b.status !== filterStatus) return false;
+    if (filterDate && b.booking_date) {
+      const d = b.booking_date.slice(0, 10);
+      if (d !== filterDate) return false;
+    }
+    return true;
+  });
 
   const carModelLabel = (id) => {
     const m = carModels.find((c) => String(c.model_id) === String(id));
@@ -381,7 +387,27 @@ export default function BookingPage({ currentUser }) {
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <label style={{ fontSize: 14, color: "#374151", whiteSpace: "nowrap" }}>📅 วันที่จอง</label>
+          <input
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+            style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid #d1d5db", fontSize: 14, fontFamily: "Tahoma" }}
+          />
+          {filterDate && (
+            <button
+              onClick={() => setFilterDate("")}
+              style={{ padding: "5px 10px", borderRadius: 8, border: "none", background: "#e5e7eb", cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}
+            >
+              ✕ ล้าง
+            </button>
+          )}
+        </div>
+
+        <div style={{ width: 1, background: "#e5e7eb", height: 28, margin: "0 4px" }} />
+
         {[
           { key: "all", label: "ทั้งหมด" },
           { key: "pending", label: "จอง" },
