@@ -369,3 +369,121 @@ body {
   background: #fdecec;
   color: #b42318;
 }
+/* BookingPage styles */
+.page-container {
+  padding: 20px;
+  font-family: Tahoma, Arial, sans-serif;
+  font-size: 14px;
+  color: #333;
+}
+
+.page-topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #072d6b;
+}
+
+.form-card {
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 1px 6px rgba(0,0,0,0.1);
+  padding: 24px;
+  margin-bottom: 20px;
+}
+
+.form-row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 14px;
+}
+
+.form-row label {
+  font-weight: 600;
+  margin-bottom: 5px;
+  color: #555;
+}
+
+.form-input {
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-family: Tahoma, Arial, sans-serif;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.form-input:focus {
+  border-color: #072d6b;
+}
+
+.form-message {
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.btn-primary {
+  background: #072d6b;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 20px;
+  font-size: 14px;
+  font-family: Tahoma, Arial, sans-serif;
+  cursor: pointer;
+}
+
+.btn-primary:hover { background: #0c3c88; }
+.btn-primary:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.btn-secondary {
+  background: #e5e7eb;
+  color: #374151;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 20px;
+  font-size: 14px;
+  font-family: Tahoma, Arial, sans-serif;
+  cursor: pointer;
+}
+
+.btn-secondary:hover { background: #d1d5db; }
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.data-table th {
+  background: #072d6b;
+  color: #fff;
+  padding: 10px 14px;
+  text-align: left;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f3f4f6;
+  font-size: 13px;
+  vertical-align: middle;
+}
+
+.data-table tr:last-child td { border-bottom: none; }
+.data-table tr:hover td { background: #f9fafb; }
