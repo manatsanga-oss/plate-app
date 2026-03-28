@@ -62,10 +62,7 @@ export default function BookingPage({ currentUser }) {
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "get_bookings",
-          branch: isAdmin ? null : currentUser?.branch,
-        }),
+        body: JSON.stringify({ action: "get_bookings" }),
       });
       const data = await res.json();
       setBookings(Array.isArray(data) ? data : data.rows || []);
@@ -194,6 +191,7 @@ export default function BookingPage({ currentUser }) {
   }
 
   const filtered = bookings.filter((b) => {
+    if (!isAdmin && currentUser?.branch && b.branch !== currentUser.branch) return false;
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
     if (filterDate && b.booking_date) {
       const d = b.booking_date.slice(0, 10);
