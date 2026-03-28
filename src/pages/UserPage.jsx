@@ -9,6 +9,16 @@ const BRANCHES = [
   "SCY07 สิงห์ชัย ตลาด",
 ];
 
+const PAGE_OPTIONS = [
+  { key: "dashboard", label: "📊 ภาพรวม" },
+  { key: "receive",   label: "📥 รับวัสดุ" },
+  { key: "issue",     label: "📤 เบิกวัสดุ" },
+  { key: "users",     label: "👤 กำหนดผู้ใช้งาน" },
+  { key: "booking",   label: "🚗 จองคนขับรถ" },
+];
+
+const DEFAULT_PAGES = ["dashboard", "receive", "issue"];
+
 const emptyForm = () => ({
   name: "",
   username: "",
@@ -16,7 +26,14 @@ const emptyForm = () => ({
   role: "user",
   branch: "",
   status: "active",
+  pages: [...DEFAULT_PAGES],
 });
+
+function parsePages(raw) {
+  if (!raw) return [...DEFAULT_PAGES];
+  if (Array.isArray(raw)) return raw;
+  try { return JSON.parse(raw); } catch { return [...DEFAULT_PAGES]; }
+}
 
 export default function UserPage({ currentUser }) {
   const [users, setUsers] = useState([]);
@@ -77,6 +94,7 @@ export default function UserPage({ currentUser }) {
       role: user.role || "user",
       branch: user.branch || "",
       status: user.status || "active",
+      pages: parsePages(user.pages),
     });
     setMode("form");
   };
@@ -90,10 +108,12 @@ export default function UserPage({ currentUser }) {
     try {
       setSaving(true);
       const action = editId ? "update_user" : "save_user";
-      const payload = editId ? { ...form, user_id: editId } : form;
+      const payload = editId
+        ? { ...form, user_id: editId, pages: JSON.stringify(form.pages) }
+        : { ...form, pages: JSON.stringify(form.pages) };
       const raw = await api(action, payload);
       const data = Array.isArray(raw) ? raw[0] : raw;
-      if (data?.success || data?.ok) {
+      if (data?.success || data?.ok || data?.user_id) {
         showMsg(editId ? "แก้ไขผู้ใช้สำเร็จ" : "เพิ่มผู้ใช้สำเร็จ");
         setMode("list");
         await loadUsers();
@@ -343,6 +363,7 @@ export default function UserPage({ currentUser }) {
                 onChange={(e) => setForm({ ...form, username: e.target.value })}
                 placeholder="username"
                 disabled={!!editId}
+                autoComplete="off"
               />
             </div>
             <div style={S.formRow}>
@@ -355,6 +376,7 @@ export default function UserPage({ currentUser }) {
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
                 placeholder="รหัสผ่าน"
+                autoComplete="new-password"
               />
             </div>
             <div style={S.formRow}>
@@ -395,6 +417,34 @@ export default function UserPage({ currentUser }) {
               </select>
             </div>
           </div>
+
+          {/* Pages Permission — ซ่อนเมื่อ role เป็น admin */}
+          {form.role !== "admin" && (
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #eee" }}>
+              <div style={{ ...S.label, marginBottom: 8 }}>สิทธิ์การเข้าใช้หน้า</div>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+                {PAGE_OPTIONS.map((p) => {
+                  const checked = (form.pages || []).includes(p.key);
+                  return (
+                    <label key={p.key} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => {
+                          const newPages = e.target.checked
+                            ? [...(form.pages || []), p.key]
+                            : (form.pages || []).filter((x) => x !== p.key);
+                          setForm({ ...form, pages: newPages });
+                        }}
+                      />
+                      {p.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div style={S.formActions}>
             <button style={S.btnSave} onClick={handleSave} disabled={saving}>
               {saving ? "กำลังบันทึก..." : "บันทึก"}
