@@ -86,35 +86,55 @@ function parseUserPages(raw) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
+  const supplyPages = ["dashboard", "receive", "issue"];
+  const supplyActive = supplyPages.includes(activeMenu);
+  const [supplyOpen, setSupplyOpen] = React.useState(supplyActive);
+
+  const hasSupply = supplyPages.some((p) => canAccess(p));
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">📦 ระบบวัสดุสำนักงาน</div>
 
-      {canAccess("dashboard") && (
-        <button
-          className={`menu-btn ${activeMenu === "dashboard" ? "active" : ""}`}
-          onClick={() => onChange("dashboard")}
-        >
-          📊 ภาพรวม
-        </button>
-      )}
+      {hasSupply && (
+        <>
+          <button
+            className={`menu-btn menu-group-btn ${supplyActive ? "active" : ""}`}
+            onClick={() => setSupplyOpen((o) => !o)}
+          >
+            📦 ระบบวัสดุสำนักงาน
+            <span className="menu-arrow">{supplyOpen ? "▾" : "▸"}</span>
+          </button>
 
-      {canAccess("receive") && (
-        <button
-          className={`menu-btn ${activeMenu === "receive" ? "active" : ""}`}
-          onClick={() => onChange("receive")}
-        >
-          📥 รับวัสดุ
-        </button>
-      )}
-
-      {canAccess("issue") && (
-        <button
-          className={`menu-btn ${activeMenu === "issue" ? "active" : ""}`}
-          onClick={() => onChange("issue")}
-        >
-          📤 เบิกวัสดุ
-        </button>
+          {supplyOpen && (
+            <div className="submenu">
+              {canAccess("dashboard") && (
+                <button
+                  className={`menu-btn submenu-btn ${activeMenu === "dashboard" ? "active" : ""}`}
+                  onClick={() => onChange("dashboard")}
+                >
+                  📊 ภาพรวม
+                </button>
+              )}
+              {canAccess("receive") && (
+                <button
+                  className={`menu-btn submenu-btn ${activeMenu === "receive" ? "active" : ""}`}
+                  onClick={() => onChange("receive")}
+                >
+                  📥 รับวัสดุ
+                </button>
+              )}
+              {canAccess("issue") && (
+                <button
+                  className={`menu-btn submenu-btn ${activeMenu === "issue" ? "active" : ""}`}
+                  onClick={() => onChange("issue")}
+                >
+                  📤 เบิกวัสดุ
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       {canAccess("users") && (

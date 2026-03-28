@@ -45,6 +45,27 @@ body {
   background: #0c3c88;
 }
 
+.menu-group-btn {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.menu-arrow {
+  font-size: 14px;
+  opacity: 0.7;
+}
+
+.submenu {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.submenu-btn {
+  padding-left: 40px;
+  font-size: 16px;
+}
+
 .sidebar-footer {
   margin-top: auto;
   padding: 18px 24px;
