@@ -191,7 +191,6 @@ export default function BookingPage({ currentUser }) {
   }
 
   const filtered = bookings.filter((b) => {
-    if (!isAdmin && currentUser?.branch && b.branch !== currentUser.branch) return false;
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
     if (filterDate && b.booking_date) {
       const d = b.booking_date.slice(0, 10);
