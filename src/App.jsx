@@ -72,13 +72,15 @@ export default function App() {
   );
 }
 
+const DEFAULT_PAGES = ["dashboard", "receive", "issue", "booking", "moto"];
+
 function parseUserPages(raw) {
-  if (!raw) return ["dashboard", "receive", "issue", "users"];
-  if (Array.isArray(raw)) return raw.length > 0 ? raw : ["dashboard", "receive", "issue", "users"];
+  if (!raw) return DEFAULT_PAGES;
+  if (Array.isArray(raw)) return raw.length > 0 ? raw : DEFAULT_PAGES;
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : ["dashboard", "receive", "issue", "users"];
-  } catch { return ["dashboard", "receive", "issue", "users"]; }
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_PAGES;
+  } catch { return DEFAULT_PAGES; }
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
