@@ -198,7 +198,7 @@ export default function BookingPage({ currentUser }) {
 
   const carModelLabel = (id) => {
     const m = carModels.find((c) => String(c.model_id) === String(id));
-    return m ? `${m.brand} ${m.marketing_name} ${m.color_name || ""}`.trim() : "-";
+    return m ? m.model_code : "-";
   };
 
   const driverLabel = (id) => {
@@ -276,7 +276,7 @@ export default function BookingPage({ currentUser }) {
                 <option value="">-- เลือกรุ่นรถ --</option>
                 {carModels.map((m) => (
                   <option key={m.model_id} value={m.model_id}>
-                    {m.brand} {m.marketing_name} ({m.color_name})
+                    {m.model_code}
                   </option>
                 ))}
               </select>
@@ -354,11 +354,6 @@ export default function BookingPage({ currentUser }) {
                 </div>
               </div>
             )}
-          </div>
-
-          <div className="form-row">
-            <label>วัตถุประสงค์</label>
-            <textarea className="form-input" rows={3} value={form.purpose} onChange={(e) => setForm({ ...form, purpose: e.target.value })} placeholder="รายละเอียดการเดินทาง" />
           </div>
 
           {message && <div className="form-message">{message}</div>}
