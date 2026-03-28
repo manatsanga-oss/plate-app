@@ -40,6 +40,8 @@ export default function App() {
   function canAccess(page) {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
+    // booking และ moto เปิดให้ทุก user ที่ login แล้ว
+    if (page === "booking" || page === "moto") return true;
     const pages = parseUserPages(currentUser.pages);
     return pages.includes(page);
   }
