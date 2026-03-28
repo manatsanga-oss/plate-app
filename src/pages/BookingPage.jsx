@@ -7,12 +7,27 @@ const STATUS_COLOR = { pending: "#10b981", cancelled: "#6b7280" };
 
 const DELIVERY_TYPES = ["ส่งรถ", "ทำสัญญา", "อื่น ๆ"];
 
+const FINANCE_COMPANIES = [
+  "กรุงศรี ออโต้",
+  "ธนชาต ออโต้",
+  "ทิสโก้",
+  "ไทยพาณิชย์ ลีสซิ่ง",
+  "กสิกรไทย",
+  "กรุงไทย",
+  "ซีไอเอ็มบี",
+  "ยูโอบี",
+  "อาคารสงเคราะห์",
+  "ออมสิน",
+  "อื่น ๆ",
+];
+
 const emptyForm = () => ({
   car_model_id: "",
   driver_id: "",
   booking_date: "",
   booking_time: "",
   delivery_type: "",
+  finance_company: "",
   destination: "",
   purpose: "",
 });
@@ -108,6 +123,14 @@ export default function BookingPage({ currentUser }) {
       setMessage("กรุณากรอกข้อมูลให้ครบถ้วน");
       return;
     }
+    if (form.delivery_type === "ทำสัญญา" && !form.finance_company) {
+      setMessage("กรุณาเลือกไฟแนนท์");
+      return;
+    }
+    if (form.delivery_type === "อื่น ๆ" && !form.purpose.trim()) {
+      setMessage("กรุณาระบุวัตถุประสงค์");
+      return;
+    }
     setSaving(true);
     setMessage("");
     try {
@@ -121,6 +144,7 @@ export default function BookingPage({ currentUser }) {
           ...form,
           car_model_id: form.car_model_id || null,
           driver_id: form.driver_id || null,
+          finance_company: form.finance_company || null,
           distance_text: distanceInfo?.distance_text || null,
           duration_text: distanceInfo?.duration_text || null,
           destination_formatted: distanceInfo?.destination_name || form.destination,
@@ -207,18 +231,6 @@ export default function BookingPage({ currentUser }) {
           </div>
 
           <div className="form-row">
-            <label>รุ่นรถ</label>
-            <select className="form-input" value={form.car_model_id} onChange={(e) => setForm({ ...form, car_model_id: e.target.value })}>
-              <option value="">-- เลือกรุ่นรถ --</option>
-              {carModels.map((m) => (
-                <option key={m.model_id} value={m.model_id}>
-                  {m.brand} {m.marketing_name} ({m.color_name})
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="form-row">
             <label>คนขับรถ</label>
             <select className="form-input" value={form.driver_id} onChange={(e) => setForm({ ...form, driver_id: e.target.value })}>
               <option value="">-- เลือกคนขับ --</option>
@@ -245,12 +257,70 @@ export default function BookingPage({ currentUser }) {
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
               {DELIVERY_TYPES.map((t) => (
                 <label key={t} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontWeight: "normal" }}>
-                  <input type="radio" name="delivery_type" value={t} checked={form.delivery_type === t} onChange={(e) => setForm({ ...form, delivery_type: e.target.value })} />
+                  <input
+                    type="radio" name="delivery_type" value={t}
+                    checked={form.delivery_type === t}
+                    onChange={(e) => setForm({ ...form, delivery_type: e.target.value, car_model_id: "", finance_company: "", purpose: "" })}
+                  />
                   {t}
                 </label>
               ))}
             </div>
           </div>
+
+          {/* ส่งรถ: รุ่นรถ */}
+          {form.delivery_type === "ส่งรถ" && (
+            <div className="form-row">
+              <label>รุ่นรถ</label>
+              <select className="form-input" value={form.car_model_id} onChange={(e) => setForm({ ...form, car_model_id: e.target.value })}>
+                <option value="">-- เลือกรุ่นรถ --</option>
+                {carModels.map((m) => (
+                  <option key={m.model_id} value={m.model_id}>
+                    {m.brand} {m.marketing_name} ({m.color_name})
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* ทำสัญญา: รุ่นรถ + ไฟแนนท์ */}
+          {form.delivery_type === "ทำสัญญา" && (
+            <>
+              <div className="form-row">
+                <label>รุ่นรถ</label>
+                <select className="form-input" value={form.car_model_id} onChange={(e) => setForm({ ...form, car_model_id: e.target.value })}>
+                  <option value="">-- เลือกรุ่นรถ --</option>
+                  {carModels.map((m) => (
+                    <option key={m.model_id} value={m.model_id}>
+                      {m.brand} {m.marketing_name} ({m.color_name})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-row">
+                <label>ไฟแนนท์ <span style={{ color: "#ef4444" }}>*</span></label>
+                <select className="form-input" value={form.finance_company} onChange={(e) => setForm({ ...form, finance_company: e.target.value })}>
+                  <option value="">-- เลือกไฟแนนท์ --</option>
+                  {FINANCE_COMPANIES.map((f) => (
+                    <option key={f} value={f}>{f}</option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+
+          {/* อื่น ๆ: วัตถุประสงค์ */}
+          {form.delivery_type === "อื่น ๆ" && (
+            <div className="form-row">
+              <label>วัตถุประสงค์ <span style={{ color: "#ef4444" }}>*</span></label>
+              <textarea
+                className="form-input" rows={3}
+                value={form.purpose}
+                onChange={(e) => setForm({ ...form, purpose: e.target.value })}
+                placeholder="ระบุวัตถุประสงค์"
+              />
+            </div>
+          )}
 
           <div className="form-row">
             <label>ปลายทาง <span style={{ color: "#ef4444" }}>*</span></label>
@@ -357,6 +427,7 @@ export default function BookingPage({ currentUser }) {
                 <th>ผู้จอง</th>
                 {isAdmin && <th>สาขา</th>}
                 <th>ประเภท</th>
+                <th>รุ่นรถ / ไฟแนนท์</th>
                 <th>คนขับ</th>
                 <th>ปลายทาง</th>
                 <th>ระยะทาง</th>
@@ -375,6 +446,9 @@ export default function BookingPage({ currentUser }) {
                   <td>{b.booker_name || "-"}</td>
                   {isAdmin && <td>{b.branch || "-"}</td>}
                   <td>{b.delivery_type || "-"}</td>
+                  <td>
+                    {b.finance_company || (b.car_model_id ? carModelLabel(b.car_model_id) : (b.brand ? `${b.brand} ${b.marketing_name}` : "-"))}
+                  </td>
                   <td>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</td>
                   <td>{b.destination_formatted || b.destination || "-"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{b.distance_text || "-"}</td>
