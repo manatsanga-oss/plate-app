@@ -22,7 +22,7 @@ const FINANCE_COMPANIES = [
 ];
 
 const emptyForm = () => ({
-  car_model_id: "",
+  car_model: "",
   driver_id: "",
   booking_date: "",
   booking_time: "",
@@ -142,7 +142,7 @@ export default function BookingPage({ currentUser }) {
           booker_name: currentUser?.name,
           branch: currentUser?.branch,
           ...form,
-          car_model_id: form.car_model_id || null,
+          car_model: form.car_model || null,
           driver_id: form.driver_id || null,
           finance_company: form.finance_company || null,
           distance_text: distanceInfo?.distance_text || null,
@@ -260,7 +260,7 @@ export default function BookingPage({ currentUser }) {
                   <input
                     type="radio" name="delivery_type" value={t}
                     checked={form.delivery_type === t}
-                    onChange={(e) => setForm({ ...form, delivery_type: e.target.value, car_model_id: "", finance_company: "", purpose: "" })}
+                    onChange={(e) => setForm({ ...form, delivery_type: e.target.value, car_model: "", finance_company: "", purpose: "" })}
                   />
                   {t}
                 </label>
@@ -272,11 +272,11 @@ export default function BookingPage({ currentUser }) {
           {form.delivery_type === "ส่งรถ" && (
             <div className="form-row">
               <label>รุ่นรถ</label>
-              <select className="form-input" value={form.car_model_id} onChange={(e) => setForm({ ...form, car_model_id: e.target.value })}>
+              <select className="form-input" value={form.car_model} onChange={(e) => setForm({ ...form, car_model: e.target.value })}>
                 <option value="">-- เลือกรุ่นรถ --</option>
                 {carModels.map((m) => (
-                  <option key={m.model_id} value={m.model_id}>
-                    {m.model_code}
+                  <option key={m.marketing_name} value={m.marketing_name}>
+                    {m.marketing_name}
                   </option>
                 ))}
               </select>
@@ -288,11 +288,11 @@ export default function BookingPage({ currentUser }) {
             <>
               <div className="form-row">
                 <label>รุ่นรถ</label>
-                <select className="form-input" value={form.car_model_id} onChange={(e) => setForm({ ...form, car_model_id: e.target.value })}>
+                <select className="form-input" value={form.car_model} onChange={(e) => setForm({ ...form, car_model: e.target.value })}>
                   <option value="">-- เลือกรุ่นรถ --</option>
                   {carModels.map((m) => (
-                    <option key={m.model_id} value={m.model_id}>
-                      {m.brand} {m.marketing_name} ({m.color_name})
+                    <option key={m.marketing_name} value={m.marketing_name}>
+                      {m.marketing_name}
                     </option>
                   ))}
                 </select>
@@ -442,7 +442,7 @@ export default function BookingPage({ currentUser }) {
                   {isAdmin && <td>{b.branch || "-"}</td>}
                   <td>{b.delivery_type || "-"}</td>
                   <td>
-                    {b.finance_company || (b.car_model_id ? carModelLabel(b.car_model_id) : (b.brand ? `${b.brand} ${b.marketing_name}` : "-"))}
+                    {b.finance_company || b.car_model || "-"}
                   </td>
                   <td>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</td>
                   <td>{b.destination_formatted || b.destination || "-"}</td>
