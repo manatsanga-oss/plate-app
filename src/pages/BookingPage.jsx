@@ -93,7 +93,7 @@ export default function BookingPage({ currentUser }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "get_distance",
-          origin: currentUser?.branch || "",
+          origin: "ตลาดวังน้อย",
           destination: form.destination,
         }),
       });
