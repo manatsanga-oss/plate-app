@@ -1,25 +1,14 @@
 import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-api";
+const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
-const STATUS_LABEL = { pending: "จอง", cancelled: "ยกเลิก" };
-const STATUS_COLOR = { pending: "#10b981", cancelled: "#6b7280" };
+const STATUS_LABEL = { pending: "จอง", cancelled: "ยกเลิก", จอง: "จอง", ยกเลิก: "ยกเลิก" };
+const STATUS_COLOR = { pending: "#10b981", cancelled: "#6b7280", จอง: "#10b981", ยกเลิก: "#6b7280" };
+const isBooked = (s) => s === "pending" || s === "จอง";
+const isCancelled = (s) => s === "cancelled" || s === "ยกเลิก";
 
 const DELIVERY_TYPES = ["ส่งรถ", "ทำสัญญา", "อื่น ๆ"];
-
-const FINANCE_COMPANIES = [
-  "กรุงศรี ออโต้",
-  "ธนชาต ออโต้",
-  "ทิสโก้",
-  "ไทยพาณิชย์ ลีสซิ่ง",
-  "กสิกรไทย",
-  "กรุงไทย",
-  "ซีไอเอ็มบี",
-  "ยูโอบี",
-  "อาคารสงเคราะห์",
-  "ออมสิน",
-  "อื่น ๆ",
-];
 
 const emptyForm = () => ({
   car_model: "",
@@ -37,6 +26,7 @@ export default function BookingPage({ currentUser }) {
   const [bookings, setBookings] = useState([]);
   const [carModels, setCarModels] = useState([]);
   const [drivers, setDrivers] = useState([]);
+  const [financeCompanies, setFinanceCompanies] = useState([]);
   const [form, setForm] = useState(emptyForm());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -54,6 +44,7 @@ export default function BookingPage({ currentUser }) {
     fetchBookings();
     fetchCarModels();
     fetchDrivers();
+    fetchFinanceCompanies();
   }, []);
 
   async function fetchBookings() {
@@ -86,13 +77,27 @@ export default function BookingPage({ currentUser }) {
 
   async function fetchDrivers() {
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetch(MASTER_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "get_drivers" }),
       });
       const data = await res.json();
-      setDrivers(Array.isArray(data) ? data : data.rows || []);
+      const all = Array.isArray(data) ? data : data.rows || [];
+      setDrivers(all.filter(d => d.status === "active"));
+    } catch { /* ignore */ }
+  }
+
+  async function fetchFinanceCompanies() {
+    try {
+      const res = await fetch(MASTER_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_finance_companies" }),
+      });
+      const data = await res.json();
+      const all = Array.isArray(data) ? data : data.rows || [];
+      setFinanceCompanies(all.filter(c => c.status === "active"));
     } catch { /* ignore */ }
   }
 
@@ -121,6 +126,10 @@ export default function BookingPage({ currentUser }) {
       setMessage("กรุณากรอกข้อมูลให้ครบถ้วน");
       return;
     }
+    if (distanceInfo && !distanceInfo._confirmed) {
+      setMessage("กรุณากดเลือกปลายทางจากผลการค้นหาก่อน");
+      return;
+    }
     if (form.delivery_type === "ทำสัญญา" && !form.finance_company) {
       setMessage("กรุณาเลือกไฟแนนท์");
       return;
@@ -140,6 +149,7 @@ export default function BookingPage({ currentUser }) {
           booker_name: currentUser?.name,
           branch: currentUser?.branch,
           ...form,
+          status: "pending",
           car_model: form.car_model || null,
           driver_id: form.driver_id || null,
           finance_company: form.finance_company || null,
@@ -191,7 +201,8 @@ export default function BookingPage({ currentUser }) {
   }
 
   const filtered = bookings.filter((b) => {
-    if (filterStatus !== "all" && b.status !== filterStatus) return false;
+    if (filterStatus === "pending" && !isBooked(b.status)) return false;
+    if (filterStatus === "cancelled" && !isCancelled(b.status)) return false;
     if (filterDate && b.booking_date) {
       const d = b.booking_date.slice(0, 10);
       if (d !== filterDate) return false;
@@ -252,7 +263,13 @@ export default function BookingPage({ currentUser }) {
 
           <div className="form-row">
             <label>จองเวลา <span style={{ color: "#ef4444" }}>*</span></label>
-            <input type="time" className="form-input" value={form.booking_time} onChange={(e) => setForm({ ...form, booking_time: e.target.value })} />
+            <select className="form-input" value={form.booking_time} onChange={(e) => setForm({ ...form, booking_time: e.target.value })}>
+              <option value="">-- เลือกเวลา --</option>
+              {Array.from({ length: 10 }, (_, i) => {
+                const h = String(i + 8).padStart(2, "0");
+                return <option key={h} value={`${h}:00`}>{h}.00 น.</option>;
+              })}
+            </select>
           </div>
 
           <div className="form-row">
@@ -304,8 +321,8 @@ export default function BookingPage({ currentUser }) {
                 <label>ไฟแนนท์ <span style={{ color: "#ef4444" }}>*</span></label>
                 <select className="form-input" value={form.finance_company} onChange={(e) => setForm({ ...form, finance_company: e.target.value })}>
                   <option value="">-- เลือกไฟแนนท์ --</option>
-                  {FINANCE_COMPANIES.map((f) => (
-                    <option key={f} value={f}>{f}</option>
+                  {financeCompanies.map((f) => (
+                    <option key={f.company_id} value={f.company_name}>{f.company_name}</option>
                   ))}
                 </select>
               </div>
@@ -346,15 +363,42 @@ export default function BookingPage({ currentUser }) {
               </button>
             </div>
 
-            {distanceInfo && (
-              <div style={{ marginTop: 10, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: "12px 14px" }}>
-                <div style={{ fontWeight: 700, color: "#15803d", marginBottom: 4 }}>
-                  📍 {distanceInfo.destination_name || form.destination}
+            {distanceInfo && !distanceInfo._confirmed && (
+              <div style={{ marginTop: 10, border: "1px solid #cbd5e1", borderRadius: 10, overflow: "hidden" }}>
+                <div style={{ background: "#f8fafc", padding: "8px 14px", fontSize: 12, color: "#64748b", borderBottom: "1px solid #e2e8f0" }}>
+                  ผลการค้นหา — กดเลือกเพื่อยืนยัน
                 </div>
-                <div style={{ color: "#166534", fontSize: 13 }}>
-                  🛣️ ระยะทาง: <strong>{distanceInfo.distance_text || "-"}</strong>
-                  &nbsp;&nbsp;⏱️ เวลาเดินทาง: <strong>{distanceInfo.duration_text || "-"}</strong>
+                <button
+                  type="button"
+                  style={{ width: "100%", textAlign: "left", padding: "12px 14px", background: "#fff", border: "none", cursor: "pointer", fontFamily: "Tahoma" }}
+                  onClick={() => setDistanceInfo({ ...distanceInfo, _confirmed: true })}
+                >
+                  <div style={{ fontWeight: 700, color: "#072d6b", marginBottom: 4 }}>
+                    📍 {distanceInfo.destination_name || form.destination}
+                  </div>
+                  <div style={{ color: "#475569", fontSize: 13 }}>
+                    🛣️ ระยะทาง: <strong>{distanceInfo.distance_text || "-"}</strong>
+                    &nbsp;&nbsp;⏱️ เวลาเดินทาง: <strong>{distanceInfo.duration_text || "-"}</strong>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {distanceInfo?._confirmed && (
+              <div style={{ marginTop: 10, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontWeight: 700, color: "#15803d", marginBottom: 4 }}>
+                    ✅ {distanceInfo.destination_name || form.destination}
+                  </div>
+                  <div style={{ color: "#166534", fontSize: 13 }}>
+                    🛣️ {distanceInfo.distance_text || "-"} &nbsp;⏱️ {distanceInfo.duration_text || "-"}
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 18 }}
+                  onClick={() => setDistanceInfo(null)}
+                >✕</button>
               </div>
             )}
           </div>
@@ -442,7 +486,6 @@ export default function BookingPage({ currentUser }) {
               <tr>
                 <th>วันที่จอง</th>
                 <th>เวลา</th>
-                <th>ผู้จอง</th>
                 {isAdmin && <th>สาขา</th>}
                 <th>ประเภท</th>
                 <th>รุ่นรถ / ไฟแนนท์</th>
@@ -461,26 +504,27 @@ export default function BookingPage({ currentUser }) {
                     {b.booking_date ? new Date(b.booking_date).toLocaleDateString("th-TH") : "-"}
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>{b.booking_time || "-"}</td>
-                  <td>{b.booker_name || "-"}</td>
                   {isAdmin && <td>{b.branch || "-"}</td>}
                   <td>{b.delivery_type || "-"}</td>
                   <td>
                     {b.finance_company || b.car_model || "-"}
                   </td>
                   <td>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</td>
-                  <td>{b.destination_formatted || b.destination || "-"}</td>
+                  <td>{b.destination || "-"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{b.distance_text || "-"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{b.duration_text || "-"}</td>
                   <td>
-                    <span style={{
-                      background: STATUS_COLOR[b.status] || "#d1d5db",
-                      color: "#fff", padding: "3px 10px", borderRadius: 12, fontSize: 13, whiteSpace: "nowrap",
-                    }}>
-                      {STATUS_LABEL[b.status] || b.status}
-                    </span>
+                    {b.status ? (
+                      <span style={{
+                        background: STATUS_COLOR[b.status] || "#d1d5db",
+                        color: "#fff", padding: "3px 10px", borderRadius: 12, fontSize: 13, whiteSpace: "nowrap",
+                      }}>
+                        {STATUS_LABEL[b.status] || b.status}
+                      </span>
+                    ) : "-"}
                   </td>
                   <td>
-                    {b.status === "pending" && (
+                    {isBooked(b.status) && (
                       <button
                         style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}
                         onClick={() => { setCancelTarget(b); setCancelReason(""); }}
@@ -505,7 +549,7 @@ export default function BookingPage({ currentUser }) {
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: "block", marginBottom: 6 }}>เหตุผลการยกเลิก</label>
               <textarea
-                style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", resize: "vertical" }}
+                style={{ width: "100%", padding: 8, borderRadius: 10, border: "1px solid #d1d5db", fontFamily: "Tahoma", resize: "vertical" }}
                 rows={3} value={cancelReason}
                 onChange={(e) => setCancelReason(e.target.value)}
                 placeholder="ระบุเหตุผล (ถ้ามี)"

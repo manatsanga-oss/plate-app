@@ -50,12 +50,24 @@ export default function MotoBookingPage({ currentUser }) {
   const [changeForm, setChangeForm] = useState({ model_code: "", color_name: "" });
   const [sellTarget, setSellTarget] = useState(null);
   const [sellInvoiceNo, setSellInvoiceNo] = useState("");
+  const [editInvoiceTarget, setEditInvoiceTarget] = useState(null);
+  const [editInvoiceNo, setEditInvoiceNo] = useState("");
+  const [detailTarget, setDetailTarget] = useState(null);
+  const [cancelBlock, setCancelBlock] = useState(null);   // { model_code, color_name }
+  const [checkingCancel, setCheckingCancel] = useState(false);
+  const [stockSummary, setStockSummary] = useState([]);
+  const [appointmentTarget, setAppointmentTarget] = useState(null);
+  const [appointmentDate, setAppointmentDate] = useState("");
+  const [appointmentNote, setAppointmentNote] = useState("");
+  const [deposits, setDeposits] = useState([]);
 
   const isAdmin = currentUser?.role === "admin";
 
   useEffect(() => {
     fetchBookings();
     fetchAllModels();
+    fetchStockSummary();
+    fetchDeposits();
   }, []);
 
   async function fetchBookings() {
@@ -72,6 +84,30 @@ export default function MotoBookingPage({ currentUser }) {
       setMessage("โหลดข้อมูลไม่สำเร็จ");
     }
     setLoading(false);
+  }
+
+  async function fetchStockSummary() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_stock_summary" }),
+      });
+      const data = await res.json();
+      setStockSummary(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+  }
+
+  async function fetchDeposits() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_moto_deposits" }),
+      });
+      const data = await res.json();
+      setDeposits(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
   }
 
   async function fetchAllModels() {
@@ -100,6 +136,20 @@ export default function MotoBookingPage({ currentUser }) {
         (!code || m.model_code === code)
       ).map(m => [m.color_name, m])
     ).values()];
+
+  const marketingByBrand = (brand) =>
+    [...new Set(
+      allModels.filter(m => !brand || m.brand === brand)
+        .map(m => m.marketing_name).filter(Boolean)
+    )].sort();
+
+  const codesByMarketing = (brand, marketing) =>
+    [...new Map(
+      allModels.filter(m =>
+        (!brand || m.brand === brand) &&
+        (!marketing || m.marketing_name === marketing)
+      ).map(m => [m.model_code, m])
+    ).values()].sort((a, b) => a.model_code.localeCompare(b.model_code));
 
   async function handleSave() {
     if (!form.branch || !form.brand || !form.model_code || !form.color_name || !form.customer_name || !form.customer_phone || !form.purchase_type) {
@@ -145,6 +195,23 @@ export default function MotoBookingPage({ currentUser }) {
     setSaving(false);
   }
 
+  async function handleUpdateInvoice() {
+    if (!editInvoiceTarget) return;
+    if (!editInvoiceNo.trim()) { alert("กรุณากรอกเลขที่ใบขาย"); return; }
+    setSaving(true);
+    try {
+      await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_invoice_no", booking_id: editInvoiceTarget.booking_id, invoice_no: editInvoiceNo.trim() }),
+      });
+      setEditInvoiceTarget(null);
+      setEditInvoiceNo("");
+      fetchBookings();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSaving(false);
+  }
+
   async function handleCancel() {
     if (!cancelTarget) return;
     if (depositAction === "คืนเงินมัดจำ" && (!refundForm.account_no.trim() || !refundForm.bank || !refundForm.amount)) {
@@ -174,9 +241,40 @@ export default function MotoBookingPage({ currentUser }) {
     setSaving(false);
   }
 
+  // เช็คเงื่อนไขก่อนยกเลิก: รถอยู่ในสต๊อก + เป็นคิวแรก → ยกเลิกไม่ได้
+  async function handleCancelClick(b) {
+    const modelCode = b.new_model_code || b.model_code;
+    const colorName = b.new_color_name || b.color_name;
+    setCheckingCancel(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "check_cancel_eligibility",
+          booking_id: b.booking_id,
+          model_code: modelCode,
+          color_name: colorName,
+        }),
+      });
+      const data = await res.json();
+      if (data?.blocked) {
+        setCancelBlock({ model_code: modelCode, color_name: colorName });
+      } else {
+        setCancelTarget(b);
+        setCancelReason("");
+      }
+    } catch {
+      // fallback: อนุญาตยกเลิกถ้า API ไม่ตอบ
+      setCancelTarget(b);
+      setCancelReason("");
+    }
+    setCheckingCancel(false);
+  }
+
   async function handleChangeModel() {
-    if (!changeTarget || !changeForm.model_code || !changeForm.color_name) {
-      setMessage("กรุณาเลือกแบบและสีใหม่");
+    if (!changeTarget || !changeForm.brand || !changeForm.marketing_name || !changeForm.model_code || !changeForm.color_name) {
+      setMessage("กรุณาเลือกยี่ห้อ ชื่อรุ่น แบบ และสีให้ครบ");
       return;
     }
     setSaving(true);
@@ -193,7 +291,95 @@ export default function MotoBookingPage({ currentUser }) {
     setSaving(false);
   }
 
+  async function handleSaveAppointment() {
+    if (!appointmentTarget || !appointmentDate) { alert("กรุณาเลือกวันที่นัดหมาย"); return; }
+    setSaving(true);
+    try {
+      await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "set_appointment",
+          booking_id: appointmentTarget.booking_id,
+          appointment_date: appointmentDate,
+          appointment_note: appointmentNote,
+        }),
+      });
+      setAppointmentTarget(null);
+      setAppointmentDate("");
+      setAppointmentNote("");
+      fetchBookings();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSaving(false);
+  }
+
+  // Normalize ตรงกับ n8n Code node
+  const normModel = (s) => {
+    let str = String(s || "").normalize("NFKC")
+      .replace(/\u00A0/g, " ")
+      .replace(/[()（）]/g, "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+    const idx = str.indexOf("th");
+    if (idx !== -1) str = str.substring(0, idx + 2);
+    return str;
+  };
+  const normColor = (s) => String(s || "").normalize("NFKC")
+    .replace(/\u00A0/g, " ")
+    .replace(/[-–—/:：]/g, "")
+    .replace(/\s+/g, "")
+    .toLowerCase();
+
+  // Group stock cars by normalized model+color, sorted by receive_age DESC (oldest first)
+  const stockGroups = {};
+  stockSummary.forEach((s) => {
+    const key = normModel(s.model_code) + "|" + normColor(s.color_name);
+    if (!stockGroups[key]) stockGroups[key] = [];
+    stockGroups[key].push(s);
+  });
+
+  // Compute queue position for each 'จอง' booking sorted by booking_date ASC
+  const queueGroups = {};
+  bookings.filter((b) => b.status === "จอง").forEach((b) => {
+    const mc = b.new_model_code || b.model_code || "";
+    const cn = b.new_color_name || b.color_name || "";
+    const key = mc + "|" + cn;
+    if (!queueGroups[key]) queueGroups[key] = [];
+    queueGroups[key].push(b);
+  });
+  Object.keys(queueGroups).forEach((key) => {
+    queueGroups[key].sort((a, b) => new Date(a.booking_date) - new Date(b.booking_date));
+  });
+  const queuePosMap = {}; // booking_id -> { pos, qty, engine_no, branch, age }
+  Object.keys(queueGroups).forEach((key) => {
+    const [mc, cn] = key.split("|");
+    const stockKey = normModel(mc) + "|" + normColor(cn);
+    const cars = stockGroups[stockKey] || [];
+    queueGroups[key].forEach((b, idx) => {
+      const car = cars[idx] || null;
+      queuePosMap[b.booking_id] = {
+        pos: idx + 1,
+        qty: cars.length,
+        engine_no: car?.engine_no || "",
+        branch: car?.branch_name || "",
+        age: car ? (Number(car.receive_age) || 0) : 0,
+      };
+    });
+  });
+
+  const isQueueReady = (b) => {
+    const q = queuePosMap[b.booking_id];
+    return b.status === "จอง" && q && q.qty > 0 && q.pos <= q.qty;
+  };
+
+  // deposit warning: booking.deposit_no ตรงกับ receipt_no ที่ยังมี remaining_amount > 0
+  const depositWarningSet = new Set(
+    deposits.filter((d) => Number(d.remaining_amount) > 0).map((d) => d.receipt_no)
+  );
+  const hasDepositWarning = (b) => b.status === "จอง" && b.deposit_no && depositWarningSet.has(b.deposit_no);
+
   const filtered = bookings.filter((b) => {
+    if (filterStatus === "รถถึงคิว") return isQueueReady(b);
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
     if (filterBranch && b.branch !== filterBranch) return false;
     if (filterDate && b.booking_date && b.booking_date.slice(0, 10) !== filterDate) return false;
@@ -337,7 +523,7 @@ export default function MotoBookingPage({ currentUser }) {
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 13, color: "#64748b", whiteSpace: "nowrap" }}>📅</span>
             <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)}
-              style={{ padding: "5px 10px", borderRadius: 7, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }} />
+              style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }} />
             {filterDate && (
               <button onClick={() => setFilterDate("")}
                 style={{ padding: "3px 8px", borderRadius: 6, border: "none", background: "#e2e8f0", cursor: "pointer", fontSize: 12, color: "#475569" }}>✕</button>
@@ -346,39 +532,39 @@ export default function MotoBookingPage({ currentUser }) {
 
           {isAdmin && (
             <select value={filterBranch} onChange={(e) => setFilterBranch(e.target.value)}
-              style={{ padding: "5px 10px", borderRadius: 7, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
+              style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
               <option value="">ทุกสาขา</option>
               {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
           )}
 
           <select value={filterBrand} onChange={(e) => { setFilterBrand(e.target.value); setFilterMarketing(""); setFilterModelCode(""); setFilterColor(""); }}
-            style={{ padding: "5px 10px", borderRadius: 7, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
+            style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
             <option value="">ทุกยี่ห้อ</option>
             {brandOpts.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
 
           <select value={filterMarketing} onChange={(e) => { setFilterMarketing(e.target.value); setFilterModelCode(""); setFilterColor(""); }}
-            style={{ padding: "5px 10px", borderRadius: 7, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
+            style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
             <option value="">ทุกรุ่น</option>
             {marketingOpts.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
 
           <select value={filterModelCode} onChange={(e) => { setFilterModelCode(e.target.value); setFilterColor(""); }}
-            style={{ padding: "5px 10px", borderRadius: 7, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
+            style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
             <option value="">ทุกแบบ</option>
             {modelCodeOpts.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
 
           <select value={filterColor} onChange={(e) => setFilterColor(e.target.value)}
-            style={{ padding: "5px 10px", borderRadius: 7, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
+            style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
             <option value="">ทุกสี</option>
             {colorOpts.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
 
           {(filterDate || filterBranch || filterBrand || filterMarketing || filterModelCode || filterColor) && (
             <button onClick={() => { setFilterDate(""); setFilterBranch(""); setFilterBrand(""); setFilterMarketing(""); setFilterModelCode(""); setFilterColor(""); }}
-              style={{ padding: "5px 12px", borderRadius: 7, border: "none", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}>
+              style={{ padding: "5px 12px", borderRadius: 10, border: "none", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}>
               🗑 ล้างตัวกรอง
             </button>
           )}
@@ -387,15 +573,15 @@ export default function MotoBookingPage({ currentUser }) {
         {/* Row 2: status pills */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "#94a3b8", marginRight: 2 }}>สถานะ:</span>
-          {["all", "จอง", "ขาย", "ยกเลิก"].map((s) => (
+          {["all", "จอง", "รถถึงคิว", "ขาย", "ยกเลิก"].map((s) => (
             <button key={s} onClick={() => setFilterStatus(s)}
               style={{
                 padding: "4px 16px", borderRadius: 20, border: "none", cursor: "pointer",
-                background: filterStatus === s ? "#072d6b" : "#e2e8f0",
-                color: filterStatus === s ? "#fff" : "#475569",
-                fontFamily: "Tahoma", fontSize: 13, transition: "all 0.15s",
+                background: filterStatus === s ? (s === "รถถึงคิว" ? "#16a34a" : "#072d6b") : (s === "รถถึงคิว" ? "#dcfce7" : "#e2e8f0"),
+                color: filterStatus === s ? "#fff" : (s === "รถถึงคิว" ? "#15803d" : "#475569"),
+                fontFamily: "Tahoma", fontSize: 13, transition: "all 0.15s", fontWeight: s === "รถถึงคิว" ? 700 : 400,
               }}>
-              {s === "all" ? "ทั้งหมด" : s}
+              {s === "all" ? "ทั้งหมด" : s === "รถถึงคิว" ? "🔔 รถถึงคิว" : s}
             </button>
           ))}
           <span style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>
@@ -426,16 +612,17 @@ export default function MotoBookingPage({ currentUser }) {
                 <th>แบบ</th>
                 <th>สี</th>
                 <th>ลูกค้า</th>
-                <th>โทร</th>
-                <th>ประเภท</th>
-                <th>เลขมัดจำ</th>
                 <th>สถานะ</th>
                 <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((b) => (
-                <tr key={b.booking_id}>
+                <tr
+                  key={b.booking_id}
+                  className={hasDepositWarning(b) ? "row-deposit-warning" : ""}
+                  style={!hasDepositWarning(b) && isQueueReady(b) ? { background: "#f0fdf4" } : {}}
+                >
                   <td style={{ whiteSpace: "nowrap" }}>
                     {b.booking_date ? new Date(b.booking_date).toLocaleDateString("th-TH") : "-"}
                   </td>
@@ -445,32 +632,79 @@ export default function MotoBookingPage({ currentUser }) {
                   <td>{b.new_model_code || b.model_code || "-"}</td>
                   <td>{b.new_color_name || b.color_name || "-"}</td>
                   <td>{b.customer_name || "-"}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>{b.customer_phone || "-"}</td>
-                  <td>{b.purchase_type || "-"}</td>
-                  <td>{b.deposit_no || "-"}</td>
                   <td>
-                    <span style={{
+                    <button onClick={() => setDetailTarget(b)} style={{
                       background: STATUS_COLOR[b.status] || "#d1d5db",
                       color: "#fff", padding: "3px 10px", borderRadius: 12, fontSize: 13, whiteSpace: "nowrap",
+                      border: "none", cursor: "pointer", fontFamily: "Tahoma",
                     }}>
-                      {STATUS_LABEL[b.status] || b.status}
-                    </span>
+                        {STATUS_LABEL[b.status] || b.status}
+                    </button>
+                    {b.status === "ขาย" && b.invoice_no && (
+                      <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>ใบขาย: {b.invoice_no}</div>
+                    )}
+                    {isQueueReady(b) && (() => {
+                      const q = queuePosMap[b.booking_id];
+                      return (
+                        <div style={{ marginTop: 4 }}>
+                          <span className="queue-ready-badge" style={{ flexDirection: "column", alignItems: "flex-start", gap: 1 }}>
+                            <span>🔔 คิวที่ {q.pos}</span>
+                            {q.engine_no && <span style={{ fontSize: 10 }}>เลขเครื่อง: {q.engine_no}</span>}
+                            {q.age > 0 && <span style={{ fontSize: 10 }}>อายุ {q.age} วัน</span>}
+                            {q.branch && <span style={{ fontSize: 10 }}>{q.branch}</span>}
+                            {b.appointment_date && (
+                              <span style={{ fontSize: 10, marginTop: 3, borderTop: "1px solid rgba(255,255,255,0.3)", paddingTop: 3 }}>
+                                📅 {new Date(b.appointment_date).toLocaleDateString("th-TH")}
+                                {b.appointment_note ? ` · ${b.appointment_note}` : ""}
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    {hasDepositWarning(b) && (
+                      <div style={{ marginTop: 4 }}>
+                        <span className="deposit-warn-badge">⚠ มัดจำค้างชำระ</span>
+                      </div>
+                    )}
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
+                    {b.status === "ขาย" && isAdmin && (
+                      <button onClick={() => { setEditInvoiceTarget(b); setEditInvoiceNo(b.invoice_no || ""); }}
+                        style={{ padding: "3px 8px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                        ✏️ ใบขาย
+                      </button>
+                    )}
                     {b.status === "จอง" && (
                       <div style={{ display: "flex", gap: 4 }}>
                         <button onClick={() => setSellTarget(b)}
                           style={{ padding: "3px 8px", background: "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
                           ขาย
                         </button>
-                        <button onClick={() => { setChangeTarget(b); setChangeForm({ model_code: b.model_code, color_name: b.color_name }); }}
-                          style={{ padding: "3px 8px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
-                          เปลี่ยน
-                        </button>
-                        <button onClick={() => { setCancelTarget(b); setCancelReason(""); }}
-                          style={{ padding: "3px 8px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
-                          ยกเลิก
-                        </button>
+                        {(() => {
+                          const blocked = !isAdmin && isQueueReady(b);
+                          return (<>
+                            <button
+                              onClick={() => !blocked && (setChangeTarget(b), setChangeForm({ brand: b.brand || "", marketing_name: b.marketing_name || "", model_code: b.model_code || "", color_name: b.color_name || "" }))}
+                              disabled={blocked}
+                              style={{ padding: "3px 8px", background: blocked ? "#d1d5db" : "#f59e0b", color: blocked ? "#9ca3af" : "#fff", border: "none", borderRadius: 6, cursor: blocked ? "not-allowed" : "pointer", fontSize: 12 }}>
+                              เปลี่ยน
+                            </button>
+                            <button
+                              onClick={() => !blocked && handleCancelClick(b)}
+                              disabled={blocked || checkingCancel}
+                              style={{ padding: "3px 8px", background: blocked ? "#d1d5db" : "#ef4444", color: blocked ? "#9ca3af" : "#fff", border: "none", borderRadius: 6, cursor: (blocked || checkingCancel) ? "not-allowed" : "pointer", fontSize: 12 }}>
+                              {checkingCancel ? "..." : "ยกเลิก"}
+                            </button>
+                          </>);
+                        })()}
+                        {isQueueReady(b) && (queuePosMap[b.booking_id]?.age ?? 0) > 3 && (
+                          <button
+                            onClick={() => { setAppointmentTarget(b); setAppointmentDate(b.appointment_date ? b.appointment_date.slice(0,10) : ""); setAppointmentNote(b.appointment_note || ""); }}
+                            style={{ padding: "3px 8px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+                            📅 นัดหมาย{b.appointment_date ? " ✓" : ""}
+                          </button>
+                        )}
                       </div>
                     )}
                   </td>
@@ -478,6 +712,37 @@ export default function MotoBookingPage({ currentUser }) {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Appointment Modal */}
+      {appointmentTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 380, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#6366f1" }}>📅 นัดหมายรับรถ</h3>
+            <p style={{ margin: "0 0 16px" }}><strong>{appointmentTarget.customer_name}</strong> — {appointmentTarget.new_model_code || appointmentTarget.model_code} {appointmentTarget.new_color_name || appointmentTarget.color_name}</p>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>วันที่นัดหมาย *</label>
+              <input type="date" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>หมายเหตุ</label>
+              <textarea value={appointmentNote} onChange={e => setAppointmentNote(e.target.value)}
+                rows={3} placeholder="ระบุหมายเหตุ (ถ้ามี)"
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, resize: "vertical", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleSaveAppointment} disabled={saving || !appointmentDate}
+                style={{ flex: 1, padding: "9px 0", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {saving ? "กำลังบันทึก..." : "บันทึกนัดหมาย"}
+              </button>
+              <button onClick={() => { setAppointmentTarget(null); setAppointmentDate(""); setAppointmentNote(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ปิด
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -494,7 +759,7 @@ export default function MotoBookingPage({ currentUser }) {
                 value={sellInvoiceNo}
                 onChange={e => setSellInvoiceNo(e.target.value)}
                 placeholder="กรอกเลขที่ใบขาย"
-                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 7, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 10, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }}
                 autoFocus
               />
             </div>
@@ -504,6 +769,36 @@ export default function MotoBookingPage({ currentUser }) {
                 {saving ? "กำลังบันทึก..." : "ยืนยันขาย"}
               </button>
               <button onClick={() => { setSellTarget(null); setSellInvoiceNo(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Invoice Modal */}
+      {editInvoiceTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 360, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#6366f1" }}>✏️ แก้ไขเลขที่ใบขาย</h3>
+            <p style={{ margin: "4px 0 12px" }}><strong>{editInvoiceTarget.customer_name}</strong> — {editInvoiceTarget.model_code} {editInvoiceTarget.color_name}</p>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลขที่ใบขาย *</label>
+              <input
+                value={editInvoiceNo}
+                onChange={e => setEditInvoiceNo(e.target.value)}
+                placeholder="กรอกเลขที่ใบขาย"
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 10, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }}
+                autoFocus
+              />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleUpdateInvoice} disabled={saving || !editInvoiceNo.trim()}
+                style={{ flex: 1, padding: "9px 0", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {saving ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+              <button onClick={() => { setEditInvoiceTarget(null); setEditInvoiceNo(""); }}
                 style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
                 ปิด
               </button>
@@ -582,7 +877,27 @@ export default function MotoBookingPage({ currentUser }) {
           <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
             <h3 style={{ marginTop: 0, color: "#f59e0b" }}>🔄 เปลี่ยนแบบ + สี</h3>
             <p><strong>{changeTarget.customer_name}</strong></p>
-            <p style={{ color: "#6b7280", fontSize: 13 }}>เดิม: {changeTarget.model_code} / {changeTarget.color_name}</p>
+            <p style={{ color: "#6b7280", fontSize: 13 }}>เดิม: {changeTarget.brand} {changeTarget.marketing_name} / {changeTarget.model_code} / {changeTarget.color_name}</p>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 600 }}>ยี่ห้อใหม่</label>
+              <select style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}
+                value={changeForm.brand}
+                onChange={(e) => setChangeForm({ ...changeForm, brand: e.target.value, marketing_name: "", model_code: "", color_name: "" })}>
+                <option value="">-- เลือกยี่ห้อ --</option>
+                {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 6, fontWeight: 600 }}>ชื่อรุ่นใหม่</label>
+              <select style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}
+                value={changeForm.marketing_name}
+                onChange={(e) => setChangeForm({ ...changeForm, marketing_name: e.target.value, model_code: "", color_name: "" })}>
+                <option value="">-- เลือกชื่อรุ่น --</option>
+                {marketingByBrand(changeForm.brand).map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
 
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: "block", marginBottom: 6, fontWeight: 600 }}>แบบใหม่</label>
@@ -590,7 +905,7 @@ export default function MotoBookingPage({ currentUser }) {
                 value={changeForm.model_code}
                 onChange={(e) => setChangeForm({ ...changeForm, model_code: e.target.value, color_name: "" })}>
                 <option value="">-- เลือกแบบ --</option>
-                {codesByBrand(changeTarget.brand).map(m => (
+                {codesByMarketing(changeForm.brand, changeForm.marketing_name).map(m => (
                   <option key={m.model_code} value={m.model_code}>{m.model_code}</option>
                 ))}
               </select>
@@ -602,7 +917,7 @@ export default function MotoBookingPage({ currentUser }) {
                 value={changeForm.color_name}
                 onChange={(e) => setChangeForm({ ...changeForm, color_name: e.target.value })}>
                 <option value="">-- เลือกสี --</option>
-                {colorsByCode(changeTarget.brand, changeForm.model_code).map(m => (
+                {colorsByCode(changeForm.brand, changeForm.model_code).map(m => (
                   <option key={m.color_code} value={m.color_name}>{m.color_name}</option>
                 ))}
               </select>
@@ -620,6 +935,97 @@ export default function MotoBookingPage({ currentUser }) {
                 ปิด
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* Detail Modal */}
+      {detailTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => setDetailTarget(null)}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)", maxHeight: "90vh", overflowY: "auto" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>รายละเอียดการจอง</h3>
+              <button onClick={() => setDetailTarget(null)}
+                style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>✕</button>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+              <tbody>
+                {[
+                  ["วันที่จอง", detailTarget.booking_date ? new Date(detailTarget.booking_date).toLocaleDateString("th-TH") : "-"],
+                  ["สาขา", detailTarget.branch || "-"],
+                  ["ยี่ห้อ", detailTarget.brand || "-"],
+                  ["ชื่อรุ่น", detailTarget.marketing_name || "-"],
+                  ["แบบ", detailTarget.new_model_code || detailTarget.model_code || "-"],
+                  ["สี", detailTarget.new_color_name || detailTarget.color_name || "-"],
+                  ["ลูกค้า", detailTarget.customer_name || "-"],
+                  ["เบอร์โทร", detailTarget.customer_phone || "-"],
+                  ["ประเภทการซื้อ", detailTarget.purchase_type || "-"],
+                  ["เลขที่ใบมัดจำ", detailTarget.deposit_no || "-"],
+                  ["ไฟแนนท์", detailTarget.finance_company || "-"],
+                  ["สถานะ", STATUS_LABEL[detailTarget.status] || detailTarget.status || "-"],
+                ].map(([label, value]) => (
+                  <tr key={label}>
+                    <td style={{ padding: "7px 10px", color: "#6b7280", fontWeight: 600, width: "40%", borderBottom: "1px solid #f3f4f6" }}>{label}</td>
+                    <td style={{ padding: "7px 10px", borderBottom: "1px solid #f3f4f6" }}>{value}</td>
+                  </tr>
+                ))}
+
+                {/* ── ข้อมูลการยกเลิก (แสดงเฉพาะสถานะยกเลิก) ── */}
+                {detailTarget.status === "ยกเลิก" && (
+                  <>
+                    <tr>
+                      <td colSpan={2} style={{ padding: "10px 10px 4px", background: "#fef2f2", fontSize: 12, fontWeight: 700, color: "#dc2626", borderBottom: "1px solid #fca5a5" }}>
+                        🚫 ข้อมูลการยกเลิก
+                      </td>
+                    </tr>
+                    {[
+                      ["ประเภทยกเลิก", detailTarget.deposit_action || "-"],
+                      ["เหตุผล", detailTarget.cancel_reason || "-"],
+                      ...(detailTarget.deposit_action === "คืนเงินมัดจำ" ? [
+                        ["เลขที่บัญชี", detailTarget.refund_account_no || "-"],
+                        ["ธนาคาร", detailTarget.refund_bank || "-"],
+                        ["จำนวนเงิน", detailTarget.refund_amount ? Number(detailTarget.refund_amount).toLocaleString("th-TH") + " บาท" : "-"],
+                      ] : []),
+                    ].map(([label, value]) => (
+                      <tr key={label}>
+                        <td style={{ padding: "7px 10px", color: "#6b7280", fontWeight: 600, width: "40%", borderBottom: "1px solid #f3f4f6", background: "#fff8f8" }}>{label}</td>
+                        <td style={{ padding: "7px 10px", borderBottom: "1px solid #f3f4f6", background: "#fff8f8" }}>{value}</td>
+                      </tr>
+                    ))}
+                  </>
+                )}
+              </tbody>
+            </table>
+            <button onClick={() => setDetailTarget(null)}
+              style={{ marginTop: 16, width: "100%", padding: "9px 0", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+              ปิด
+            </button>
+          </div>
+        </div>
+      )}
+      {/* Cancel Blocked Modal */}
+      {cancelBlock && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 28, width: 380, boxShadow: "0 8px 32px rgba(0,0,0,0.2)", textAlign: "center" }}>
+            <div style={{ fontSize: 48, marginBottom: 8 }}>🚫</div>
+            <h3 style={{ margin: "0 0 12px", color: "#dc2626", fontSize: 18 }}>ยกเลิกการจองไม่ได้</h3>
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 10, padding: "14px 16px", marginBottom: 20, textAlign: "left" }}>
+              <div style={{ marginBottom: 6 }}>
+                <span style={{ color: "#6b7280", fontSize: 13 }}>แบบ / สี:</span>{" "}
+                <strong>{cancelBlock.model_code} / {cancelBlock.color_name}</strong>
+              </div>
+              <div style={{ fontSize: 14, color: "#374151", lineHeight: 1.7 }}>
+                ✅ รถคันนี้ <strong>มีในสต๊อก</strong><br />
+                ✅ การจองนี้ <strong>เป็นคิวแรก</strong><br />
+                <span style={{ color: "#dc2626", fontWeight: 600 }}>→ ไม่อนุญาตให้ยกเลิก</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setCancelBlock(null)}
+              style={{ width: "100%", padding: "10px 0", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+              รับทราบ
+            </button>
           </div>
         </div>
       )}
