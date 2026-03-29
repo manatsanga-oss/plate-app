@@ -158,286 +158,80 @@ export default function UserPage({ currentUser }) {
     );
   });
 
-  /* ── STYLES ── */
-  const S = {
-    page: {
-      padding: "20px",
-      background: "#f5f5f5",
-      minHeight: "100vh",
-      fontFamily: "Tahoma, Arial, sans-serif",
-      fontSize: "14px",
-      color: "#333",
-    },
-    card: {
-      background: "#fff",
-      borderRadius: "6px",
-      boxShadow: "0 1px 4px rgba(0,0,0,0.1)",
-      padding: "20px",
-      marginBottom: "16px",
-    },
-    cardHeader: {
-      fontSize: "15px",
-      fontWeight: "700",
-      color: "#333",
-      marginBottom: "16px",
-      paddingBottom: "10px",
-      borderBottom: "2px solid #e0e0e0",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-    },
-    topRow: {
-      display: "flex",
-      gap: "8px",
-      marginBottom: "14px",
-      alignItems: "center",
-    },
-    input: {
-      border: "1px solid #d9d9d9",
-      borderRadius: "4px",
-      padding: "7px 10px",
-      fontSize: "14px",
-      boxSizing: "border-box",
-      width: "100%",
-      color: "#333",
-      outline: "none",
-    },
-    btnPrimary: {
-      background: "#1976d2",
-      color: "#fff",
-      border: "none",
-      borderRadius: "4px",
-      padding: "8px 18px",
-      cursor: "pointer",
-      fontSize: "14px",
-      fontWeight: "600",
-      whiteSpace: "nowrap",
-    },
-    btnGray: {
-      background: "#757575",
-      color: "#fff",
-      border: "none",
-      borderRadius: "4px",
-      padding: "8px 16px",
-      cursor: "pointer",
-      fontSize: "13px",
-      whiteSpace: "nowrap",
-    },
-    btnEdit: {
-      background: "#f57c00",
-      color: "#fff",
-      border: "none",
-      borderRadius: "3px",
-      padding: "5px 12px",
-      cursor: "pointer",
-      fontSize: "12px",
-      marginRight: "4px",
-    },
-    btnDelete: {
-      background: "#d32f2f",
-      color: "#fff",
-      border: "none",
-      borderRadius: "3px",
-      padding: "5px 12px",
-      cursor: "pointer",
-      fontSize: "12px",
-    },
-    btnSave: {
-      background: "#1976d2",
-      color: "#fff",
-      border: "none",
-      borderRadius: "4px",
-      padding: "9px 28px",
-      cursor: "pointer",
-      fontSize: "14px",
-      fontWeight: "600",
-    },
-    table: { width: "100%", borderCollapse: "collapse", fontSize: "13px" },
-    th: {
-      background: "#f0f0f0",
-      padding: "9px 12px",
-      textAlign: "left",
-      borderBottom: "2px solid #ddd",
-      fontWeight: "700",
-      color: "#555",
-      whiteSpace: "nowrap",
-    },
-    thCenter: {
-      background: "#f0f0f0",
-      padding: "9px 12px",
-      textAlign: "center",
-      borderBottom: "2px solid #ddd",
-      fontWeight: "700",
-      color: "#555",
-      whiteSpace: "nowrap",
-    },
-    td: {
-      padding: "9px 12px",
-      borderBottom: "1px solid #ebebeb",
-      color: "#333",
-      verticalAlign: "middle",
-    },
-    tdCenter: {
-      padding: "9px 12px",
-      borderBottom: "1px solid #ebebeb",
-      color: "#333",
-      verticalAlign: "middle",
-      textAlign: "center",
-    },
-    badge: (c) => ({
-      display: "inline-block",
-      padding: "2px 10px",
-      borderRadius: "10px",
-      fontSize: "12px",
-      fontWeight: "600",
-      background:
-        c === "green" ? "#e8f5e9" : c === "red" ? "#ffebee" : "#e3f2fd",
-      color:
-        c === "green" ? "#2e7d32" : c === "red" ? "#c62828" : "#1565c0",
-    }),
-    msgBox: (t) => ({
-      padding: "10px 16px",
-      borderRadius: "4px",
-      marginBottom: "12px",
-      background: t === "success" ? "#e8f5e9" : "#ffebee",
-      color: t === "success" ? "#2e7d32" : "#c62828",
-      fontSize: "13px",
-      fontWeight: "600",
-    }),
-    formGrid: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: "14px",
-    },
-    formRow: { display: "flex", flexDirection: "column", gap: "4px" },
-    label: { fontSize: "13px", color: "#555", fontWeight: "600" },
-    formActions: {
-      display: "flex",
-      gap: "8px",
-      marginTop: "18px",
-      paddingTop: "14px",
-      borderTop: "1px solid #eee",
-    },
-    overlay: {
-      position: "fixed",
-      inset: 0,
-      background: "rgba(0,0,0,0.4)",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      zIndex: 9999,
-    },
-    dialog: {
-      background: "#fff",
-      borderRadius: "6px",
-      padding: "24px",
-      maxWidth: "360px",
-      width: "90%",
-      boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
-    },
-  };
+  const badge = (c) => ({
+    display: "inline-block", padding: "3px 12px", borderRadius: 20, fontSize: 12, fontWeight: 600,
+    background: c === "green" ? "#d1fae5" : c === "red" ? "#fee2e2" : "#dbeafe",
+    color: c === "green" ? "#065f46" : c === "red" ? "#991b1b" : "#1e40af",
+  });
+  const msgBox = (t) => ({
+    padding: "10px 16px", borderRadius: 8, marginBottom: 12,
+    background: t === "success" ? "#d1fae5" : "#fee2e2",
+    color: t === "success" ? "#065f46" : "#991b1b",
+    fontSize: 13, fontWeight: 600,
+  });
+  const actionBtn = (color) => ({
+    background: color, color: "#fff", border: "none", borderRadius: 6,
+    padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600,
+  });
 
   /* ── FORM VIEW ── */
   if (mode === "form") {
     return (
-      <div style={S.page}>
-        <div style={S.card}>
-          <div style={S.cardHeader}>
-            <span>{editId ? "แก้ไขผู้ใช้งาน" : "เพิ่มผู้ใช้งานใหม่"}</span>
+      <div className="page-container">
+        <div className="form-card">
+          <div className="page-topbar" style={{ marginBottom: 20 }}>
+            <h2 className="page-title">{editId ? "แก้ไขผู้ใช้งาน" : "เพิ่มผู้ใช้งานใหม่"}</h2>
+            <button className="btn-secondary" onClick={() => setMode("list")}>← กลับ</button>
           </div>
-          {msg.text && <div style={S.msgBox(msg.type)}>{msg.text}</div>}
-          <div style={S.formGrid}>
-            <div style={S.formRow}>
-              <label style={S.label}>ชื่อ - นามสกุล *</label>
-              <input
-                style={S.input}
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                placeholder="ชื่อ นามสกุล"
-              />
+          {msg.text && <div style={msgBox(msg.type)}>{msg.text}</div>}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div className="form-row">
+              <label>ชื่อ - นามสกุล *</label>
+              <input className="form-input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="ชื่อ นามสกุล" />
             </div>
-            <div style={S.formRow}>
-              <label style={S.label}>Username *</label>
-              <input
-                style={{ ...S.input, background: editId ? "#f5f5f5" : "#fff" }}
-                value={form.username}
-                onChange={(e) => setForm({ ...form, username: e.target.value })}
-                placeholder="username"
-                disabled={!!editId}
-                autoComplete="off"
-              />
+            <div className="form-row">
+              <label>Username *</label>
+              <input className="form-input" style={{ background: editId ? "#f8fafc" : "#fff" }} value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} placeholder="username" disabled={!!editId} autoComplete="off" />
             </div>
-            <div style={S.formRow}>
-              <label style={S.label}>
-                รหัสผ่าน {editId ? "(เว้นว่างถ้าไม่เปลี่ยน)" : "*"}
-              </label>
-              <input
-                style={S.input}
-                type="password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder="รหัสผ่าน"
-                autoComplete="new-password"
-              />
+            <div className="form-row">
+              <label>รหัสผ่าน {editId ? "(เว้นว่างถ้าไม่เปลี่ยน)" : "*"}</label>
+              <input className="form-input" type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} placeholder="รหัสผ่าน" autoComplete="new-password" />
             </div>
-            <div style={S.formRow}>
-              <label style={S.label}>สาขา *</label>
-              <select
-                style={S.input}
-                value={form.branch}
-                onChange={(e) => setForm({ ...form, branch: e.target.value })}
-              >
+            <div className="form-row">
+              <label>สาขา *</label>
+              <select className="form-input" value={form.branch} onChange={(e) => setForm({ ...form, branch: e.target.value })}>
                 <option value="">-- เลือกสาขา --</option>
-                {BRANCHES.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
+                {BRANCHES.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
             </div>
-            <div style={S.formRow}>
-              <label style={S.label}>สิทธิ์การใช้งาน</label>
-              <select
-                style={S.input}
-                value={form.role}
-                onChange={(e) => setForm({ ...form, role: e.target.value })}
-              >
+            <div className="form-row">
+              <label>สิทธิ์การใช้งาน</label>
+              <select className="form-input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
-            <div style={S.formRow}>
-              <label style={S.label}>สถานะ</label>
-              <select
-                style={S.input}
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-              >
+            <div className="form-row">
+              <label>สถานะ</label>
+              <select className="form-input" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
                 <option value="active">ใช้งาน</option>
                 <option value="inactive">ปิดใช้งาน</option>
               </select>
             </div>
           </div>
 
-          {/* Pages Permission — ซ่อนเมื่อ role เป็น admin */}
           {form.role !== "admin" && (
-            <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #eee" }}>
-              <div style={{ ...S.label, marginBottom: 8 }}>สิทธิ์การเข้าใช้หน้า</div>
+            <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
+              <div style={{ fontSize: 13, color: "#374151", fontWeight: 600, marginBottom: 10 }}>สิทธิ์การเข้าใช้หน้า</div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
                 {PAGE_OPTIONS.map((p) => {
                   const checked = (form.pages || []).includes(p.key);
                   return (
                     <label key={p.key} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(e) => {
-                          const newPages = e.target.checked
-                            ? [...(form.pages || []), p.key]
-                            : (form.pages || []).filter((x) => x !== p.key);
-                          setForm({ ...form, pages: newPages });
-                        }}
-                      />
+                      <input type="checkbox" checked={checked} onChange={(e) => {
+                        const newPages = e.target.checked ? [...(form.pages || []), p.key] : (form.pages || []).filter((x) => x !== p.key);
+                        setForm({ ...form, pages: newPages });
+                      }} />
                       {p.label}
                     </label>
                   );
@@ -446,13 +240,9 @@ export default function UserPage({ currentUser }) {
             </div>
           )}
 
-          <div style={S.formActions}>
-            <button style={S.btnSave} onClick={handleSave} disabled={saving}>
-              {saving ? "กำลังบันทึก..." : "บันทึก"}
-            </button>
-            <button style={S.btnGray} onClick={() => setMode("list")}>
-              ยกเลิก
-            </button>
+          <div style={{ display: "flex", gap: 8, marginTop: 20, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
+            <button className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? "กำลังบันทึก..." : "บันทึก"}</button>
+            <button className="btn-secondary" onClick={() => setMode("list")}>ยกเลิก</button>
           </div>
         </div>
       </div>
@@ -461,96 +251,56 @@ export default function UserPage({ currentUser }) {
 
   /* ── LIST VIEW ── */
   return (
-    <div style={S.page}>
-      <div style={S.card}>
-        <div style={S.cardHeader}>
-          <span>กำหนดผู้ใช้งาน</span>
-          <button style={S.btnPrimary} onClick={handleAdd}>
-            + เพิ่มผู้ใช้
-          </button>
+    <div className="page-container">
+      <div className="form-card">
+        <div className="page-topbar" style={{ marginBottom: 16 }}>
+          <h2 className="page-title">กำหนดผู้ใช้งาน</h2>
+          <button className="btn-primary" onClick={handleAdd}>+ เพิ่มผู้ใช้</button>
         </div>
 
-        {msg.text && <div style={S.msgBox(msg.type)}>{msg.text}</div>}
+        {msg.text && <div style={msgBox(msg.type)}>{msg.text}</div>}
 
-        <div style={S.topRow}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center" }}>
           <input
-            style={{ ...S.input, maxWidth: "300px" }}
+            className="form-input"
+            style={{ maxWidth: 300 }}
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             placeholder="ค้นหาชื่อ / username / สาขา"
           />
-          <button style={S.btnGray} onClick={loadUsers} disabled={loading}>
-            {loading ? "..." : "รีเฟรช"}
-          </button>
+          <button className="btn-secondary" onClick={loadUsers} disabled={loading}>{loading ? "..." : "รีเฟรช"}</button>
         </div>
 
         <div style={{ overflowX: "auto" }}>
-          <table style={S.table}>
+          <table className="data-table">
             <thead>
               <tr>
-                <th style={S.th}>#</th>
-                <th style={S.th}>ชื่อ - นามสกุล</th>
-                <th style={S.th}>Username</th>
-                <th style={S.th}>สาขา</th>
-                <th style={S.thCenter}>สิทธิ์</th>
-                <th style={S.thCenter}>สถานะ</th>
-                <th style={S.thCenter}>จัดการ</th>
+                <th>#</th>
+                <th style={{ textAlign: "left" }}>ชื่อ - นามสกุล</th>
+                <th style={{ textAlign: "left" }}>Username</th>
+                <th style={{ textAlign: "left" }}>สาขา</th>
+                <th>สิทธิ์</th>
+                <th>สถานะ</th>
+                <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    style={{ ...S.tdCenter, color: "#999", padding: "24px" }}
-                  >
-                    กำลังโหลด...
-                  </td>
-                </tr>
+                <tr><td colSpan={7} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>กำลังโหลด...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    style={{ ...S.tdCenter, color: "#999", padding: "24px" }}
-                  >
-                    ไม่มีข้อมูลผู้ใช้งาน
-                  </td>
-                </tr>
+                <tr><td colSpan={7} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>ไม่มีข้อมูลผู้ใช้งาน</td></tr>
               ) : (
                 filtered.map((u, i) => (
-                  <tr
-                    key={u.user_id || u.username || i}
-                    style={{ background: i % 2 === 0 ? "#fff" : "#fafafa" }}
-                  >
-                    <td style={S.td}>{i + 1}</td>
-                    <td style={S.td}>{u.name || "-"}</td>
-                    <td style={S.td}>{u.username || "-"}</td>
-                    <td style={S.td}>{u.branch || "-"}</td>
-                    <td style={S.tdCenter}>
-                      <span style={S.badge(u.role === "admin" ? "blue" : "")}>
-                        {u.role === "admin" ? "Admin" : "User"}
-                      </span>
-                    </td>
-                    <td style={S.tdCenter}>
-                      <span
-                        style={S.badge(
-                          u.status === "active" ? "green" : "red"
-                        )}
-                      >
-                        {u.status === "active" ? "ใช้งาน" : "ปิดใช้งาน"}
-                      </span>
-                    </td>
-                    <td style={S.tdCenter}>
-                      <button style={S.btnEdit} onClick={() => handleEdit(u)}>
-                        แก้ไข
-                      </button>
-                      <button
-                        style={S.btnDelete}
-                        onClick={() => setConfirmDelete(u)}
-                        disabled={
-                          deleting === (u.user_id || u.id)
-                        }
-                      >
+                  <tr key={u.user_id || u.username || i}>
+                    <td>{i + 1}</td>
+                    <td style={{ textAlign: "left", color: "#072d6b", fontWeight: 600 }}>{u.name || "-"}</td>
+                    <td style={{ textAlign: "left" }}>{u.username || "-"}</td>
+                    <td style={{ textAlign: "left" }}>{u.branch || "-"}</td>
+                    <td><span style={badge(u.role === "admin" ? "blue" : "")}>{u.role === "admin" ? "Admin" : "User"}</span></td>
+                    <td><span style={badge(u.status === "active" ? "green" : "red")}>{u.status === "active" ? "ใช้งาน" : "ปิดใช้งาน"}</span></td>
+                    <td>
+                      <button style={{ ...actionBtn("#f59e0b"), marginRight: 4 }} onClick={() => handleEdit(u)}>แก้ไข</button>
+                      <button style={actionBtn("#ef4444")} onClick={() => setConfirmDelete(u)} disabled={deleting === (u.user_id || u.id)}>
                         {deleting === (u.user_id || u.id) ? "..." : "ลบ"}
                       </button>
                     </td>
@@ -562,38 +312,16 @@ export default function UserPage({ currentUser }) {
         </div>
       </div>
 
-      {/* ── Confirm Delete Dialog ── */}
       {confirmDelete && (
-        <div style={S.overlay}>
-          <div style={S.dialog}>
-            <div
-              style={{
-                fontSize: "16px",
-                fontWeight: "700",
-                marginBottom: "10px",
-                color: "#333",
-              }}
-            >
-              ยืนยันการลบ
-            </div>
-            <p style={{ color: "#555", marginBottom: "18px", lineHeight: 1.6 }}>
-              ต้องการลบผู้ใช้{" "}
-              <strong>{confirmDelete.name || confirmDelete.username}</strong>{" "}
-              ออกจากระบบใช่หรือไม่?
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+          <div style={{ background: "#fff", borderRadius: 10, padding: 24, maxWidth: 360, width: "90%", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10, color: "#1e293b" }}>ยืนยันการลบ</div>
+            <p style={{ color: "#475569", marginBottom: 18, lineHeight: 1.6 }}>
+              ต้องการลบผู้ใช้ <strong>{confirmDelete.name || confirmDelete.username}</strong> ออกจากระบบใช่หรือไม่?
             </p>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                style={S.btnDelete}
-                onClick={() => handleDelete(confirmDelete)}
-              >
-                ยืนยัน ลบ
-              </button>
-              <button
-                style={S.btnGray}
-                onClick={() => setConfirmDelete(null)}
-              >
-                ยกเลิก
-              </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn-primary" style={{ background: "#ef4444" }} onClick={() => handleDelete(confirmDelete)}>ยืนยัน ลบ</button>
+              <button className="btn-secondary" onClick={() => setConfirmDelete(null)}>ยกเลิก</button>
             </div>
           </div>
         </div>

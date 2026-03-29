@@ -6,6 +6,12 @@ import IssuePage from "./pages/IssuePage";
 import UserPage from "./pages/UserPage";
 import BookingPage from "./pages/BookingPage";
 import MotoBookingPage from "./pages/MotoBookingPage";
+import UploadPage from "./pages/UploadPage";
+import StockCheckPage from "./pages/StockCheckPage";
+import DriverPage from "./pages/DriverPage";
+import FinancePage from "./pages/FinancePage";
+import MotoPricePage from "./pages/MotoPricePage";
+import MotoModelPage from "./pages/MotoModelPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -42,6 +48,10 @@ export default function App() {
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
     if (page === "booking" || page === "moto") return true;
+    // upload, master data เฉพาะ admin
+    if (page === "upload") return false;
+    if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel") return false;
+    if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
     return pages.includes(page);
   }
@@ -69,6 +79,24 @@ export default function App() {
         {activeMenu === "moto" && canAccess("moto") && (
           <MotoBookingPage currentUser={currentUser} />
         )}
+        {activeMenu === "upload" && canAccess("upload") && (
+          <UploadPage currentUser={currentUser} />
+        )}
+        {activeMenu === "stockcheck" && canAccess("stockcheck") && (
+          <StockCheckPage currentUser={currentUser} />
+        )}
+        {activeMenu === "driver" && canAccess("driver") && (
+          <DriverPage currentUser={currentUser} />
+        )}
+        {activeMenu === "finance" && canAccess("finance") && (
+          <FinancePage currentUser={currentUser} />
+        )}
+        {activeMenu === "motoprice" && canAccess("motoprice") && (
+          <MotoPricePage currentUser={currentUser} />
+        )}
+        {activeMenu === "motomodel" && canAccess("motomodel") && (
+          <MotoModelPage currentUser={currentUser} />
+        )}
       </main>
     </div>
   );
@@ -90,7 +118,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const supplyActive = supplyPages.includes(activeMenu);
   const [supplyOpen, setSupplyOpen] = React.useState(supplyActive);
 
+  const masterPages = ["driver", "finance", "motomodel", "motoprice"];
+  const masterActive = masterPages.includes(activeMenu);
+  const [masterOpen, setMasterOpen] = React.useState(masterActive);
+
   const hasSupply = supplyPages.some((p) => canAccess(p));
+  const hasMaster = masterPages.some((p) => canAccess(p));
 
   return (
     <aside className="sidebar">
@@ -162,6 +195,73 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         >
           🏍️ จองรถจักรยานยนต์
         </button>
+      )}
+
+      {canAccess("upload") && (
+        <button
+          className={`menu-btn ${activeMenu === "upload" ? "active" : ""}`}
+          onClick={() => onChange("upload")}
+        >
+          ⬆ ระบบ Upload ข้อมูล
+        </button>
+      )}
+
+      {canAccess("stockcheck") && (
+        <button
+          className={`menu-btn ${activeMenu === "stockcheck" ? "active" : ""}`}
+          onClick={() => onChange("stockcheck")}
+        >
+          📋 ระบบเช็คสต๊อก
+        </button>
+      )}
+
+      {hasMaster && (
+        <>
+          <button
+            className={`menu-btn menu-group-btn ${masterActive ? "active" : ""}`}
+            onClick={() => setMasterOpen((o) => !o)}
+          >
+            🗂️ ข้อมูลหลัก
+            <span className="menu-arrow">{masterOpen ? "▾" : "▸"}</span>
+          </button>
+
+          {masterOpen && (
+            <div className="submenu">
+              {canAccess("driver") && (
+                <button
+                  className={`menu-btn submenu-btn ${activeMenu === "driver" ? "active" : ""}`}
+                  onClick={() => onChange("driver")}
+                >
+                  👷 ข้อมูลพนักงานขับรถ
+                </button>
+              )}
+              {canAccess("finance") && (
+                <button
+                  className={`menu-btn submenu-btn ${activeMenu === "finance" ? "active" : ""}`}
+                  onClick={() => onChange("finance")}
+                >
+                  🏢 ข้อมูลบริษัทไฟแนนท์
+                </button>
+              )}
+              {canAccess("motomodel") && (
+                <button
+                  className={`menu-btn submenu-btn ${activeMenu === "motomodel" ? "active" : ""}`}
+                  onClick={() => onChange("motomodel")}
+                >
+                  📋 ข้อมูลรุ่นรถ
+                </button>
+              )}
+              {canAccess("motoprice") && (
+                <button
+                  className={`menu-btn submenu-btn ${activeMenu === "motoprice" ? "active" : ""}`}
+                  onClick={() => onChange("motoprice")}
+                >
+                  💰 บันทึกราคาขาย
+                </button>
+              )}
+            </div>
+          )}
+        </>
       )}
 
       <div className="sidebar-user-box">
