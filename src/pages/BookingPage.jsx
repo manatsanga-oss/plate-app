@@ -65,10 +65,10 @@ export default function BookingPage({ currentUser }) {
 
   async function fetchCarModels() {
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetch(MASTER_API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_car_models" }),
+        body: JSON.stringify({ action: "get_series" }),
       });
       const data = await res.json();
       setCarModels(Array.isArray(data) ? data : data.rows || []);
@@ -295,8 +295,8 @@ export default function BookingPage({ currentUser }) {
               <select className="form-input" value={form.car_model} onChange={(e) => setForm({ ...form, car_model: e.target.value })}>
                 <option value="">-- เลือกรุ่นรถ --</option>
                 {carModels.map((m) => (
-                  <option key={m.marketing_name} value={m.marketing_name}>
-                    {m.marketing_name}
+                  <option key={m.series_id} value={m.marketing_name || m.series_name}>
+                    {m.marketing_name || m.series_name}
                   </option>
                 ))}
               </select>
