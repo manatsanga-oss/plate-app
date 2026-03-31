@@ -388,7 +388,7 @@ export default function MotoBookingPage({ currentUser }) {
     if (filterModelCode && b.model_code !== filterModelCode) return false;
     if (filterColor && b.color_name !== filterColor) return false;
     return true;
-  });
+  }).sort((a, b) => new Date(a.booking_date) - new Date(b.booking_date));
 
   // Dynamic options from loaded bookings (deduplicated)
   const brandOpts = [...new Set(bookings.map(b => b.brand).filter(Boolean))].sort();
@@ -605,6 +605,7 @@ export default function MotoBookingPage({ currentUser }) {
           <table className="data-table">
             <thead>
               <tr>
+                <th>ลำดับ</th>
                 <th>วันที่จอง</th>
                 {isAdmin && <th>สาขา</th>}
                 <th>ยี่ห้อ</th>
@@ -617,12 +618,13 @@ export default function MotoBookingPage({ currentUser }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((b) => (
+              {filtered.map((b, idx) => (
                 <tr
                   key={b.booking_id}
                   className={hasDepositWarning(b) ? "row-deposit-warning" : ""}
                   style={!hasDepositWarning(b) && isQueueReady(b) ? { background: "#f0fdf4" } : {}}
                 >
+                  <td style={{ textAlign: "center" }}>{idx + 1}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     {b.booking_date ? new Date(b.booking_date).toLocaleDateString("th-TH") : "-"}
                   </td>
