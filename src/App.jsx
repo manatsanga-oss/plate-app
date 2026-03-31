@@ -13,6 +13,7 @@ import DriverPage from "./pages/DriverPage";
 import FinancePage from "./pages/FinancePage";
 import MotoPricePage from "./pages/MotoPricePage";
 import MotoModelPage from "./pages/MotoModelPage";
+import MotoPriceCheckPage from "./pages/MotoPriceCheckPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -53,7 +54,7 @@ export default function App() {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "booking" || page === "moto") return true;
+    if (page === "booking" || page === "moto" || page === "pricecheck") return true;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -105,6 +106,9 @@ export default function App() {
         )}
         {activeMenu === "motomodel" && canAccess("motomodel") && (
           <MotoModelPage currentUser={currentUser} />
+        )}
+        {activeMenu === "pricecheck" && canAccess("pricecheck") && (
+          <MotoPriceCheckPage currentUser={currentUser} />
         )}
       </main>
     </div>
@@ -211,6 +215,15 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           onClick={() => onChange("moto")}
         >
           🏍️ จองรถจักรยานยนต์
+        </button>
+      )}
+
+      {canAccess("pricecheck") && (
+        <button
+          className={`menu-btn ${activeMenu === "pricecheck" ? "active" : ""}`}
+          onClick={() => onChange("pricecheck")}
+        >
+          💲 ตรวจสอบราคารถ
         </button>
       )}
 
