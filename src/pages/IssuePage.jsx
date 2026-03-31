@@ -131,9 +131,11 @@ export default function IssuePage({ currentUser }) {
       setIssueDetail(null);
       setSelectedItems([]);
 
-      const stockGroup = ["SCY05","SCY06"].includes(branch) ? "ppao" : "singchai";
+      const branchCode = (branch || '').substring(0, 5);
+      const stockGroup = ["SCY05","SCY06"].includes(branchCode) ? "ppao" : "singchai";
       const data = await apiPost({ action: "load_materials", stock_group: stockGroup });
-      const list = normalizeListResponse(data);
+      const all = normalizeListResponse(data);
+      const list = all.filter(r => r.stock_group === stockGroup);
       setMaterials(list);
       setHistoryRows([]);
       setMessage(`โหลดข้อมูลสำเร็จ ${list.length} รายการ`);
