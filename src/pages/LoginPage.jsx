@@ -21,7 +21,7 @@ export default function LoginPage({ onLogin }) {
 
     try {
       const res = await fetch(
-        "https://n8n-new-project-gwf2.onrender.com/webhook/office-api",
+        "https://n8n-new-project-gwf2.onrender.com/webhook/office-login",
         {
           method: "POST",
           headers: {
@@ -33,7 +33,7 @@ export default function LoginPage({ onLogin }) {
 
       const data = await res.json();
 
-      if (data.success) {
+      if (data.success && data.user_id) {
         const user = data.user || data;
         localStorage.setItem("user", JSON.stringify(user));
         onLogin(user);

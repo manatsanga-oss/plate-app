@@ -23,7 +23,12 @@ export default function App() {
     try {
       const savedUser = localStorage.getItem("user");
       if (savedUser && savedUser !== "undefined") {
-        setCurrentUser(JSON.parse(savedUser));
+        const parsed = JSON.parse(savedUser);
+        if (parsed && parsed.user_id) {
+          setCurrentUser(parsed);
+        } else {
+          localStorage.removeItem("user");
+        }
       }
     } catch {
       localStorage.removeItem("user");
@@ -53,6 +58,7 @@ export default function App() {
     if (page === "upload") return false;
     if (page === "convert") return false;
     if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel") return false;
+    if (page === "users") return true;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
     return pages.includes(page);
@@ -186,7 +192,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           className={`menu-btn ${activeMenu === "users" ? "active" : ""}`}
           onClick={() => onChange("users")}
         >
-          👤 กำหนดผู้ใช้งาน
+          {currentUser?.role === "admin" ? "👤 กำหนดผู้ใช้งาน" : "🔑 เปลี่ยนรหัสผ่าน"}
         </button>
       )}
 
