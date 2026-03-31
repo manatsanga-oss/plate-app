@@ -131,7 +131,7 @@ export default function IssuePage({ currentUser }) {
       setIssueDetail(null);
       setSelectedItems([]);
 
-      const stockGroup = ["SCY05","SCY06"].includes(branch) ? "ppao" : "singchai";
+      const stockGroup = /^SCY0[56]/.test(branch) ? "ppao" : "singchai";
       const data = await apiPost({ action: "load_materials", stock_group: stockGroup });
       const list = normalizeListResponse(data);
       setMaterials(list);
