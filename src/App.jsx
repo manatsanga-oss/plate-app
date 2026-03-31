@@ -49,8 +49,9 @@ export default function App() {
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
     if (page === "booking" || page === "moto") return true;
-    // upload, master data เฉพาะ admin
+    // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
+    if (page === "convert") return false;
     if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel") return false;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
