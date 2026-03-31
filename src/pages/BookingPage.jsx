@@ -160,6 +160,34 @@ export default function BookingPage({ currentUser }) {
       });
       const data = await res.json();
       if (data?.success || data?.booking_id) {
+        // ส่ง LINE notification
+        const thaiDate = form.booking_date
+          ? (() => {
+              const [y, m, d] = form.booking_date.split("-");
+              return `${d}/${m}/${Number(y) + 543}`;
+            })()
+          : "-";
+        const driverName = drivers.find(d => String(d.driver_id) === String(form.driver_id))?.name || "-";
+        const lineMsg = [
+          "🚗 รายการจองคนขับรถ",
+          "----------------------------",
+          `🏪 ร้านที่จอง: ${currentUser?.branch || "-"}`,
+          `📅 วันที่จอง: ${thaiDate}`,
+          `⏰ เวลา: ${form.booking_time} น.`,
+          `👤 คนขับรถ: ${driverName}`,
+          form.car_model ? `💎 รุ่น: ${form.car_model}` : "",
+          form.finance_company ? `🏢 ไฟแนนท์: ${form.finance_company}` : "",
+          form.delivery_type === "อื่น ๆ" && form.purpose ? `📝 วัตถุประสงค์: ${form.purpose}` : "",
+          distanceInfo?.destination_name ? `📍 สถานที่ส่ง: ${form.destination}` : `📍 สถานที่ส่ง: ${form.destination}`,
+          distanceInfo?.destination_name ? `📌 ที่อยู่: ${distanceInfo.destination_name}` : "",
+          distanceInfo?.distance_text ? `📏 ระยะทาง: ${distanceInfo.distance_text}` : "",
+          distanceInfo?.duration_text ? `⏱ เวลาเดินทาง: ${distanceInfo.duration_text}` : "",
+        ].filter(Boolean).join("\n");
+        fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "notify_line", message: lineMsg }),
+        }).catch(() => {});
         setForm(emptyForm());
         setDistanceInfo(null);
         setMode("list");

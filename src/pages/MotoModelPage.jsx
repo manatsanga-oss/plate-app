@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const FORM_DEFAULT = {
-  brand_name: "", series_name: "", marketing_name: "", thai_name: "",
+  brand_name: "", series_name: "", marketing_name: "", thai_name: "", engine_cc: "",
   model_code: "", model_detail: "", type_name: "", color_code: "", color_name: "",
   brand_id: "", series_id: "", model_id: "", type_id: "", status: "active",
 };
@@ -78,7 +78,7 @@ export default function MotoModelPage({ currentUser }) {
       if (tab === "brands") {
         body = { action: isEdit ? "update_brand" : "save_brand", brand_id: editTarget?.brand_id, brand_name: form.brand_name, status: form.status };
       } else if (tab === "series") {
-        body = { action: isEdit ? "update_series" : "save_series", series_id: editTarget?.series_id, brand_id: Number(form.brand_id), series_name: form.series_name, marketing_name: form.marketing_name, thai_name: form.thai_name, status: form.status };
+        body = { action: isEdit ? "update_series" : "save_series", series_id: editTarget?.series_id, brand_id: Number(form.brand_id), series_name: form.series_name, marketing_name: form.marketing_name, thai_name: form.thai_name, engine_cc: form.engine_cc, status: form.status };
       } else if (tab === "models") {
         body = { action: isEdit ? "update_model" : "save_model", model_id: editTarget?.model_id, series_id: Number(form.series_id), model_code: form.model_code, status: form.status };
       } else if (tab === "types") {
@@ -107,7 +107,7 @@ export default function MotoModelPage({ currentUser }) {
     if (tab === "brands") {
       setForm({ ...FORM_DEFAULT, brand_name: row.brand_name, status: row.status || "active" });
     } else if (tab === "series") {
-      setForm({ ...FORM_DEFAULT, brand_id: String(row.brand_id), series_name: row.series_name, marketing_name: row.marketing_name || "", thai_name: row.thai_name || "", status: row.status || "active" });
+      setForm({ ...FORM_DEFAULT, brand_id: String(row.brand_id), series_name: row.series_name, marketing_name: row.marketing_name || "", thai_name: row.thai_name || "", engine_cc: row.engine_cc || "", status: row.status || "active" });
     } else if (tab === "models") {
       setForm({ ...FORM_DEFAULT, series_id: String(row.series_id), model_code: row.model_code, status: row.status || "active" });
     } else if (tab === "types") {
@@ -234,7 +234,7 @@ export default function MotoModelPage({ currentUser }) {
                   <th style={{ width: 40 }}>#</th>
                   {tab !== "brands" && <th>ยี่ห้อ</th>}
                   {tab === "brands" && <th>ชื่อยี่ห้อ</th>}
-                  {tab === "series" && <><th>ชื่อรุ่น</th><th>ชื่อทางการตลาด</th><th>ชื่อภาษาไทยทางการตลาด</th></>}
+                  {tab === "series" && <><th>ชื่อรุ่น</th><th>ชื่อทางการตลาด</th><th>ชื่อภาษาไทยทางการตลาด</th><th>ซีซีรถ</th></>}
                   {tab === "models" && <><th>รุ่น</th><th>แบบ</th></>}
                   {tab === "types" && <><th>รุ่น</th><th>แบบ</th><th>type</th><th>รายละเอียดรุ่น</th></>}
                   {tab === "colors" && <><th>รุ่น</th><th>แบบ</th><th>type</th><th>รหัสสี</th><th>สี</th></>}
@@ -246,11 +246,11 @@ export default function MotoModelPage({ currentUser }) {
                 {currentRows.length === 0 ? (
                   <tr><td colSpan={10} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูล</td></tr>
                 ) : currentRows.map((row, i) => (
-                  <tr key={row.brand_id ?? row.series_id ?? row.model_id ?? row.type_id ?? row.color_id}>
+                  <tr key={row.color_id ?? row.type_id ?? row.model_id ?? row.series_id ?? row.brand_id}>
                     <td>{i + 1}</td>
                     {tab !== "brands" && <td>{row.brand_name || "-"}</td>}
                     {tab === "brands" && <td style={{ fontWeight: 600 }}>{row.brand_name}</td>}
-                    {tab === "series" && (<><td style={{ fontWeight: 600 }}>{row.series_name}</td><td>{row.marketing_name || "-"}</td><td>{row.thai_name || "-"}</td></>)}
+                    {tab === "series" && (<><td style={{ fontWeight: 600 }}>{row.series_name}</td><td>{row.marketing_name || "-"}</td><td>{row.thai_name || "-"}</td><td>{row.engine_cc || "-"}</td></>)}
                     {tab === "models" && (<><td>{row.series_name || "-"}</td><td style={{ fontWeight: 600 }}>{row.model_code}</td></>)}
                     {tab === "types" && (<><td>{row.series_name || "-"}</td><td>{row.model_code || "-"}</td><td style={{ fontWeight: 600 }}>{row.type_name}</td><td>{row.model_detail || "-"}</td></>)}
                     {tab === "colors" && (<><td>{row.series_name || "-"}</td><td>{row.model_code || "-"}</td><td>{row.type_name || "-"}</td><td style={{ fontWeight: 600 }}>{row.color_code}</td><td>{row.color_name || "-"}</td></>)}
@@ -284,6 +284,7 @@ export default function MotoModelPage({ currentUser }) {
               {inp("series_name", "ชื่อรุ่น", "เช่น ADV160", true)}
               {inp("marketing_name", "ชื่อทางการตลาด", "เช่น ADV160")}
               {inp("thai_name", "ชื่อภาษาไทยทางการตลาด", "เช่น เอดีวี160")}
+              {inp("engine_cc", "ซีซีรถ", "เช่น 160, 125")}
             </>)}
 
             {/* MODELS */}
