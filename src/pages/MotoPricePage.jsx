@@ -5,38 +5,33 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-a
 export default function MotoPricePage({ currentUser }) {
   const [tab, setTab] = useState("price"); // price | types
   const [priceTypes, setPriceTypes] = useState([]);
-  const [models, setModels] = useState([]);
+  const [motoTypes, setMotoTypes] = useState([]); // moto_types with hierarchy
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
-  // localPrices: { "model_code|type_id": value_string }
+  // localPrices: { "type_id|price_type_id": value_string }
   const [localPrices, setLocalPrices] = useState({});
-  const [priceUpdatedAt, setPriceUpdatedAt] = useState({}); // { "model_code|type_id": date_string }
-  const [savingRow, setSavingRow] = useState(null); // model_code being saved
-  const [editingRow, setEditingRow] = useState(null); // model_code in edit mode
-  const [editRowPrices, setEditRowPrices] = useState({}); // temp prices while editing
+  const [priceUpdatedAt, setPriceUpdatedAt] = useState({});
+  const [savingRow, setSavingRow] = useState(null); // type_id being saved
+  const [editingRow, setEditingRow] = useState(null); // type_id in edit mode
+  const [editRowPrices, setEditRowPrices] = useState({});
   const [filterBrand, setFilterBrand] = useState("");
   const [filterMarketing, setFilterMarketing] = useState("");
-  const [filterCategory, setFilterCategory] = useState("");
+  const [filterModel, setFilterModel] = useState("");
 
   // price type form
   const [showTypeForm, setShowTypeForm] = useState(false);
   const [typeForm, setTypeForm] = useState({ type_name: "", sort_order: 0, status: "active" });
   const [editTypeTarget, setEditTypeTarget] = useState(null);
 
-  // add model form
-  const [showModelForm, setShowModelForm] = useState(false);
-  const [modelForm, setModelForm] = useState({ brand: "", marketing_name: "", model_code: "", category: "ผลิต" });
-  const [savingModel, setSavingModel] = useState(false);
-
   useEffect(() => {
     fetchPriceTypes();
-    fetchModels();
+    fetchMotoTypes();
   }, []);
 
   useEffect(() => {
-    if (models.length > 0 && priceTypes.length > 0) fetchPrices();
-  }, [models, priceTypes]);
+    if (motoTypes.length > 0 && priceTypes.length > 0) fetchPrices();
+  }, [motoTypes, priceTypes]);
 
   async function fetchPriceTypes() {
     try {
@@ -46,6 +41,17 @@ export default function MotoPricePage({ currentUser }) {
       });
       const data = await res.json();
       setPriceTypes(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+  }
+
+  async function fetchMotoTypes() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_types" }),
+      });
+      const data = await res.json();
+      setMotoTypes(Array.isArray(data) ? data : []);
     } catch { /* ignore */ }
   }
 
@@ -60,7 +66,7 @@ export default function MotoPricePage({ currentUser }) {
       const map = {};
       const dateMap = {};
       (Array.isArray(data) ? data : []).forEach(p => {
-        const key = `${p.model_code}|${p.price_type_id}`;
+        const key = `${p.type_id}|${p.price_type_id}`;
         map[key] = String(p.amount ?? "");
         if (p.updated_at) dateMap[key] = p.updated_at;
       });
@@ -70,32 +76,14 @@ export default function MotoPricePage({ currentUser }) {
     setLoading(false);
   }
 
-  async function fetchModels() {
-    try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_models" }),
-      });
-      const data = await res.json();
-      // map to consistent shape: brand_name, marketing_name (=series_name), model_code, category (=status)
-      const rows = (Array.isArray(data) ? data : []).map(m => ({
-        ...m,
-        brand: m.brand_name,
-        marketing_name: m.series_name,
-        category: m.status === "active" ? "ใช้งาน" : "ยกเลิก",
-      }));
-      setModels(rows);
-    } catch { /* ignore */ }
-  }
-
-  function handleStartEdit(m) {
+  function handleStartEdit(row) {
     const snapshot = {};
     activeTypes.forEach(t => {
-      const key = `${m.model_code}|${t.type_id}`;
+      const key = `${row.type_id}|${t.type_id}`;
       snapshot[key] = localPrices[key] ?? "";
     });
     setEditRowPrices(snapshot);
-    setEditingRow(m.model_code);
+    setEditingRow(row.type_id);
     setMessage("");
   }
 
@@ -104,20 +92,18 @@ export default function MotoPricePage({ currentUser }) {
     setEditRowPrices({});
   }
 
-  async function handleSaveRow(m) {
-    setSavingRow(m.model_code);
+  async function handleSaveRow(row) {
+    setSavingRow(row.type_id);
     setMessage("");
     try {
       await Promise.all(activeTypes.map(async t => {
-        const key = `${m.model_code}|${t.type_id}`;
+        const key = `${row.type_id}|${t.type_id}`;
         const value = editRowPrices[key] ?? "";
         const res = await fetch(API_URL, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action: "save_moto_price",
-            model_code: m.model_code,
-            brand: m.brand,
-            marketing_name: m.marketing_name,
+            type_id: row.type_id,
             price_type_id: t.type_id,
             amount: value === "" ? 0 : Number(value),
           }),
@@ -133,9 +119,9 @@ export default function MotoPricePage({ currentUser }) {
     setSavingRow(null);
   }
 
-  function getModelUpdatedAt(model_code) {
+  function getTypeUpdatedAt(type_id) {
     const dates = activeTypes
-      .map(t => priceUpdatedAt[`${model_code}|${t.type_id}`])
+      .map(t => priceUpdatedAt[`${type_id}|${t.type_id}`])
       .filter(Boolean);
     if (!dates.length) return null;
     return dates.reduce((a, b) => (a > b ? a : b));
@@ -161,28 +147,6 @@ export default function MotoPricePage({ currentUser }) {
     setSaving(false);
   }
 
-  async function handleSaveModel() {
-    if (!modelForm.brand.trim() || !modelForm.model_code.trim()) {
-      setMessage("กรุณากรอก ยี่ห้อ และ แบบ"); return;
-    }
-    setSavingModel(true);
-    setMessage("");
-    try {
-      await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save_car_model", ...modelForm }),
-      });
-      setModels(prev => {
-        const exists = prev.some(m => m.model_code === modelForm.model_code);
-        if (exists) return prev;
-        return [...prev, { ...modelForm }];
-      });
-      setShowModelForm(false);
-      setModelForm({ brand: "", marketing_name: "", model_code: "", category: "ผลิต" });
-    } catch { setMessage("บันทึกไม่สำเร็จ"); }
-    setSavingModel(false);
-  }
-
   function openEditType(t) {
     setEditTypeTarget(t);
     setTypeForm({ type_name: t.type_name, sort_order: t.sort_order || 0, status: t.status || "active" });
@@ -192,15 +156,21 @@ export default function MotoPricePage({ currentUser }) {
 
   const activeTypes = priceTypes.filter(t => t.status === "active");
 
-  const brandOpts = [...new Set(models.map(m => m.brand).filter(Boolean))].sort();
+  const brandOpts = [...new Set(motoTypes.map(m => m.brand_name).filter(Boolean))].sort();
   const marketingOpts = [...new Set(
-    models.filter(m => !filterBrand || m.brand === filterBrand).map(m => m.marketing_name).filter(Boolean)
+    motoTypes.filter(m => !filterBrand || m.brand_name === filterBrand)
+      .map(m => m.marketing_name || m.series_name).filter(Boolean)
   )].sort();
-  const categoryOpts = [...new Set(models.map(m => m.category).filter(Boolean))].sort();
-  const filteredModels = models.filter(m =>
-    (!filterBrand || m.brand === filterBrand) &&
-    (!filterMarketing || m.marketing_name === filterMarketing) &&
-    (!filterCategory || m.category === filterCategory)
+  const modelOpts = [...new Set(
+    motoTypes
+      .filter(m => (!filterBrand || m.brand_name === filterBrand) && (!filterMarketing || (m.marketing_name || m.series_name) === filterMarketing))
+      .map(m => m.model_code).filter(Boolean)
+  )].sort();
+
+  const filteredRows = motoTypes.filter(m =>
+    (!filterBrand || m.brand_name === filterBrand) &&
+    (!filterMarketing || (m.marketing_name || m.series_name) === filterMarketing) &&
+    (!filterModel || m.model_code === filterModel)
   );
 
   return (
@@ -277,28 +247,23 @@ export default function MotoPricePage({ currentUser }) {
           ) : (
             <div style={{ overflowX: "auto" }}>
               <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-                <button
-                  onClick={() => { setShowModelForm(true); setMessage(""); }}
-                  style={{ padding: "6px 14px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, whiteSpace: "nowrap" }}>
-                  + เพิ่มรุ่น
-                </button>
-                <select value={filterBrand} onChange={e => { setFilterBrand(e.target.value); setFilterMarketing(""); }}
+                <select value={filterBrand} onChange={e => { setFilterBrand(e.target.value); setFilterMarketing(""); setFilterModel(""); }}
                   style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}>
                   <option value="">-- ยี่ห้อ ทั้งหมด --</option>
                   {brandOpts.map(b => <option key={b} value={b}>{b}</option>)}
                 </select>
-                <select value={filterMarketing} onChange={e => setFilterMarketing(e.target.value)}
+                <select value={filterMarketing} onChange={e => { setFilterMarketing(e.target.value); setFilterModel(""); }}
                   style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}>
                   <option value="">-- รุ่น ทั้งหมด --</option>
                   {marketingOpts.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
-                <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
+                <select value={filterModel} onChange={e => setFilterModel(e.target.value)}
                   style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}>
-                  <option value="">-- สถานะ ทั้งหมด --</option>
-                  {categoryOpts.map(c => <option key={c} value={c}>{c}</option>)}
+                  <option value="">-- แบบ ทั้งหมด --</option>
+                  {modelOpts.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
-                {(filterBrand || filterMarketing || filterCategory) && (
-                  <button onClick={() => { setFilterBrand(""); setFilterMarketing(""); setFilterCategory(""); }}
+                {(filterBrand || filterMarketing || filterModel) && (
+                  <button onClick={() => { setFilterBrand(""); setFilterMarketing(""); setFilterModel(""); }}
                     style={{ padding: "6px 12px", borderRadius: 8, border: "none", background: "#e5e7eb", cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}>
                     ✕ ล้าง
                   </button>
@@ -313,28 +278,30 @@ export default function MotoPricePage({ currentUser }) {
                     <th>ยี่ห้อ</th>
                     <th>รุ่น</th>
                     <th>แบบ</th>
+                    <th>type</th>
                     {activeTypes.map(t => <th key={t.type_id} style={{ whiteSpace: "nowrap" }}>{t.type_name}</th>)}
                     <th style={{ whiteSpace: "nowrap" }}>วันที่แก้ไข</th>
                     <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredModels.length === 0 ? (
-                    <tr><td colSpan={5 + activeTypes.length} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ไม่พบข้อมูล</td></tr>
-                  ) : filteredModels.map(m => {
-                    const isSavingRow = savingRow === m.model_code;
-                    const isEditing = editingRow === m.model_code;
-                    const latestDate = getModelUpdatedAt(m.model_code);
+                  {filteredRows.length === 0 ? (
+                    <tr><td colSpan={6 + activeTypes.length} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ไม่พบข้อมูล</td></tr>
+                  ) : filteredRows.map(row => {
+                    const isSavingRow = savingRow === row.type_id;
+                    const isEditing = editingRow === row.type_id;
+                    const latestDate = getTypeUpdatedAt(row.type_id);
                     const dateLabel = latestDate
                       ? new Date(latestDate).toLocaleString("th-TH", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" })
                       : "-";
                     return (
-                      <tr key={m.model_code} style={{ background: isEditing ? "#fffbeb" : isSavingRow ? "#f0f0ff" : undefined }}>
-                        <td style={{ whiteSpace: "nowrap" }}>{m.brand || "-"}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>{m.marketing_name || "-"}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>{m.model_code || "-"}</td>
+                      <tr key={row.type_id} style={{ background: isEditing ? "#fffbeb" : isSavingRow ? "#f0f0ff" : undefined }}>
+                        <td style={{ whiteSpace: "nowrap" }}>{row.brand_name || "-"}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{row.marketing_name || row.series_name || "-"}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{row.model_code || "-"}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{row.type_name || "-"}</td>
                         {activeTypes.map(t => {
-                          const key = `${m.model_code}|${t.type_id}`;
+                          const key = `${row.type_id}|${t.type_id}`;
                           const displayVal = localPrices[key] ? Number(localPrices[key]).toLocaleString() : "-";
                           return (
                             <td key={t.type_id} style={{ padding: "4px 8px", textAlign: "right" }}>
@@ -368,7 +335,7 @@ export default function MotoPricePage({ currentUser }) {
                           {isEditing ? (
                             <div style={{ display: "flex", gap: 6 }}>
                               <button
-                                onClick={() => handleSaveRow(m)}
+                                onClick={() => handleSaveRow(row)}
                                 disabled={isSavingRow}
                                 style={{
                                   padding: "4px 12px", background: isSavingRow ? "#9ca3af" : "#072d6b",
@@ -391,7 +358,7 @@ export default function MotoPricePage({ currentUser }) {
                             </div>
                           ) : (
                             <button
-                              onClick={() => handleStartEdit(m)}
+                              onClick={() => handleStartEdit(row)}
                               disabled={!!editingRow}
                               style={{
                                 padding: "4px 12px", background: editingRow ? "#e5e7eb" : "#f59e0b",
@@ -410,56 +377,6 @@ export default function MotoPricePage({ currentUser }) {
               </table>
             </div>
           )}
-        </div>
-      )}
-
-      {/* Add Model Modal */}
-      {showModelForm && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 400, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
-            <h3 style={{ marginTop: 0 }}>เพิ่มรุ่นรถ</h3>
-
-            {[
-              ["brand", "ยี่ห้อ *", "เช่น ฮอนด้า, ยามาฮ่า"],
-              ["marketing_name", "รุ่น", "เช่น ADV160, PCX160"],
-              ["model_code", "แบบ (รหัสรุ่น) *", "เช่น ADV160AS TH"],
-            ].map(([field, label, placeholder]) => (
-              <div key={field} style={{ marginBottom: 12 }}>
-                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>{label}</label>
-                <input
-                  value={modelForm[field]}
-                  onChange={e => setModelForm(prev => ({ ...prev, [field]: e.target.value }))}
-                  placeholder={placeholder}
-                  style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }}
-                />
-              </div>
-            ))}
-
-            <div style={{ marginBottom: 18 }}>
-              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>สถานะการผลิต</label>
-              <select
-                value={modelForm.category}
-                onChange={e => setModelForm(prev => ({ ...prev, category: e.target.value }))}
-                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14 }}>
-                {(categoryOpts.length > 0 ? categoryOpts : ["ผลิต", "ยกเลิกผลิต", "ยกเลิกผลิต/มีจำหน่าย"]).map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-
-            {message && <div style={{ color: "#ef4444", marginBottom: 12, fontSize: 13 }}>{message}</div>}
-
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={handleSaveModel} disabled={savingModel}
-                style={{ flex: 1, padding: "9px 0", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
-                {savingModel ? "กำลังบันทึก..." : "บันทึก"}
-              </button>
-              <button onClick={() => { setShowModelForm(false); setMessage(""); }}
-                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
-                ปิด
-              </button>
-            </div>
-          </div>
         </div>
       )}
 

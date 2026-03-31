@@ -6,6 +6,9 @@ const WEBHOOK_URL =
 const MOTO_PRICE_WEBHOOK_URL =
   "https://n8n-new-project-gwf2.onrender.com/webhook/upload-moto-price";
 
+const EXPENSE_WEBHOOK_URL =
+  "https://n8n-new-project-gwf2.onrender.com/webhook/upload-expenses";
+
 const UPLOAD_TYPES = [
   { icon: "📦", title: "สต๊อกสินค้าคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด" },
   { icon: "📊", title: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ" },
@@ -17,6 +20,8 @@ export default function UploadPage() {
   const [message, setMessage] = useState("");
   const [motoStatus, setMotoStatus] = useState("idle");
   const [motoMessage, setMotoMessage] = useState("");
+  const [expenseStatus, setExpenseStatus] = useState("idle");
+  const [expenseMessage, setExpenseMessage] = useState("");
 
   async function handleMotoUpload() {
     setMotoStatus("loading");
@@ -30,6 +35,21 @@ export default function UploadPage() {
     } catch (err) {
       setMotoMessage(`เกิดข้อผิดพลาด: ${err.message}`);
       setMotoStatus("error");
+    }
+  }
+
+  async function handleExpenseUpload() {
+    setExpenseStatus("loading");
+    setExpenseMessage("");
+    try {
+      const res = await fetch(EXPENSE_WEBHOOK_URL, { method: "GET" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json().catch(() => ({}));
+      setExpenseMessage(data.message || "นำเข้าข้อมูลค่าใช้จ่ายสำเร็จ");
+      setExpenseStatus("ok");
+    } catch (err) {
+      setExpenseMessage(`เกิดข้อผิดพลาด: ${err.message}`);
+      setExpenseStatus("error");
     }
   }
 
@@ -127,6 +147,7 @@ export default function UploadPage() {
         </div>
         {[
           { icon: "🏍️", label: "ตารางราคารถจักรยานยนต์", status: motoStatus, message: motoMessage, onUpload: handleMotoUpload },
+          { icon: "💸", label: "ค่าใช้จ่ายรายวัน", status: expenseStatus, message: expenseMessage, onUpload: handleExpenseUpload },
         ].map((item) => (
           <div key={item.label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: "1px solid #f3f4f6", gap: 12 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
