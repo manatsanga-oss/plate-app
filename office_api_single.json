@@ -84,6 +84,18 @@
             {
               "value2": "ocr_invoice",
               "output": 14
+            },
+            {
+              "value2": "get_convert_data",
+              "output": 15
+            },
+            {
+              "value2": "save_conversion",
+              "output": 16
+            },
+            {
+              "value2": "get_conversion_history",
+              "output": 17
             }
           ]
         }
@@ -100,7 +112,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "CREATE TABLE IF NOT EXISTS users (user_id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, role VARCHAR(20) DEFAULT 'user', branch VARCHAR(100), status VARCHAR(20) DEFAULT 'active', created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS products (product_id VARCHAR(50) PRIMARY KEY, product_name VARCHAR(255) NOT NULL, unit VARCHAR(50), is_active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS stock (product_id VARCHAR(50) PRIMARY KEY REFERENCES products(product_id), qty_on_hand NUMERIC(10,2) DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS receive_header (receive_id SERIAL PRIMARY KEY, receive_no VARCHAR(50) UNIQUE, receive_date DATE, vendor_name VARCHAR(255), buyer_name VARCHAR(255), ref_no VARCHAR(100), note TEXT, total_amount NUMERIC(12,2) DEFAULT 0, created_by VARCHAR(100), created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS receive_items (receive_item_id SERIAL PRIMARY KEY, receive_id INTEGER REFERENCES receive_header(receive_id), receive_no VARCHAR(50), line_no INTEGER, product_id VARCHAR(50), product_name VARCHAR(255), unit VARCHAR(50), qty NUMERIC(10,2) DEFAULT 0, unit_price NUMERIC(12,2) DEFAULT 0, amount NUMERIC(12,2) DEFAULT 0, created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS issue_header (issue_no VARCHAR(50) PRIMARY KEY, issue_date DATE NOT NULL, requester_name VARCHAR(255), issue_branch VARCHAR(100), total_qty NUMERIC(10,2) DEFAULT 0, note TEXT, created_by VARCHAR(100), updated_by VARCHAR(100), created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP);\nCREATE TABLE IF NOT EXISTS issue_items (issue_item_id SERIAL PRIMARY KEY, issue_no VARCHAR(50) REFERENCES issue_header(issue_no) ON DELETE CASCADE, line_no INTEGER, product_id VARCHAR(50), product_name VARCHAR(255), unit VARCHAR(50), qty_issue NUMERIC(10,2) DEFAULT 0, qty_on_hand NUMERIC(10,2), created_at TIMESTAMP DEFAULT NOW());",
+        "query": "CREATE TABLE IF NOT EXISTS users (user_id SERIAL PRIMARY KEY, name VARCHAR(255) NOT NULL, username VARCHAR(100) UNIQUE NOT NULL, password VARCHAR(255) NOT NULL, role VARCHAR(20) DEFAULT 'user', branch VARCHAR(100), status VARCHAR(20) DEFAULT 'active', created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS products (product_id VARCHAR(50) PRIMARY KEY, product_name VARCHAR(255) NOT NULL, unit VARCHAR(50), is_active BOOLEAN DEFAULT true, created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS stock (product_id VARCHAR(50) PRIMARY KEY REFERENCES products(product_id), qty_on_hand NUMERIC(10,2) DEFAULT 0, updated_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS receive_header (receive_id SERIAL PRIMARY KEY, receive_no VARCHAR(50) UNIQUE, receive_date DATE, vendor_name VARCHAR(255), buyer_name VARCHAR(255), ref_no VARCHAR(100), note TEXT, total_amount NUMERIC(12,2) DEFAULT 0, created_by VARCHAR(100), created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS receive_items (receive_item_id SERIAL PRIMARY KEY, receive_id INTEGER REFERENCES receive_header(receive_id), receive_no VARCHAR(50), line_no INTEGER, product_id VARCHAR(50), product_name VARCHAR(255), unit VARCHAR(50), qty NUMERIC(10,2) DEFAULT 0, unit_price NUMERIC(12,2) DEFAULT 0, amount NUMERIC(12,2) DEFAULT 0, created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS issue_header (issue_no VARCHAR(50) PRIMARY KEY, issue_date DATE NOT NULL, requester_name VARCHAR(255), issue_branch VARCHAR(100), total_qty NUMERIC(10,2) DEFAULT 0, note TEXT, created_by VARCHAR(100), updated_by VARCHAR(100), created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP);\nCREATE TABLE IF NOT EXISTS issue_items (issue_item_id SERIAL PRIMARY KEY, issue_no VARCHAR(50) REFERENCES issue_header(issue_no) ON DELETE CASCADE, line_no INTEGER, product_id VARCHAR(50), product_name VARCHAR(255), unit VARCHAR(50), qty_issue NUMERIC(10,2) DEFAULT 0, qty_on_hand NUMERIC(10,2), created_at TIMESTAMP DEFAULT NOW());\nCREATE TABLE IF NOT EXISTS unit_conversions (conversion_id SERIAL PRIMARY KEY, conversion_no VARCHAR(50) UNIQUE, conversion_date DATE NOT NULL, source_product_id VARCHAR(50), source_product_name VARCHAR(255), source_unit VARCHAR(50), source_qty NUMERIC(10,2), source_cost_per_unit NUMERIC(12,4), target_product_id VARCHAR(50), target_product_name VARCHAR(255), target_unit VARCHAR(50), target_qty NUMERIC(10,2), target_cost_per_unit NUMERIC(12,4), note TEXT, created_by VARCHAR(100), created_at TIMESTAMP DEFAULT NOW());",
         "options": {}
       },
       "credentials": {
@@ -964,6 +976,153 @@
         2880,
         1100
       ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT p.product_id, p.product_name, p.unit, COALESCE(s.qty_on_hand, 0) AS qty_on_hand, COALESCE((SELECT ROUND(SUM(ri.amount)::numeric / NULLIF(SUM(ri.qty)::numeric, 0), 4) FROM receive_items ri WHERE ri.product_id = p.product_id), 0) AS avg_cost_per_unit FROM products p LEFT JOIN stock s ON p.product_id = s.product_id WHERE p.is_active = true ORDER BY p.product_name",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      },
+      "id": "a1b2c3d4-1500-1500-1500-000000001500",
+      "name": "Postgres Get Convert Data",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        720,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nreturn [{ json: { success: true, data: rows } }];"
+      },
+      "id": "a1b2c3d4-1501-1501-1501-000000001501",
+      "name": "Code Convert Data List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-1502-1502-1502-000000001502",
+      "name": "Respond Get Convert Data",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        1200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\nconst convNo = 'CNV-' + Date.now();\nconst convDate = body.conversion_date || new Date().toISOString().split('T')[0];\nconst srcId = (body.source_product_id || '').replace(/'/g, \"''\");\nconst srcName = (body.source_product_name || '').replace(/'/g, \"''\");\nconst srcUnit = (body.source_unit || '').replace(/'/g, \"''\");\nconst srcQty = parseFloat(body.source_qty) || 0;\nconst srcCost = parseFloat(body.source_cost_per_unit) || 0;\nconst tgtId = (body.target_product_id || '').replace(/'/g, \"''\");\nconst tgtName = (body.target_product_name || '').replace(/'/g, \"''\");\nconst tgtUnit = (body.target_unit || '').replace(/'/g, \"''\");\nconst tgtQty = parseFloat(body.target_qty) || 0;\nconst tgtCost = srcQty > 0 && tgtQty > 0 ? Math.round((srcCost * srcQty / tgtQty) * 10000) / 10000 : 0;\nconst note = (body.note || '').replace(/'/g, \"''\");\nconst createdBy = (body.created_by || '').replace(/'/g, \"''\");\n\nconst sql = `INSERT INTO unit_conversions (conversion_no, conversion_date, source_product_id, source_product_name, source_unit, source_qty, source_cost_per_unit, target_product_id, target_product_name, target_unit, target_qty, target_cost_per_unit, note, created_by) VALUES ('${convNo}', '${convDate}', '${srcId}', '${srcName}', '${srcUnit}', ${srcQty}, ${srcCost}, '${tgtId}', '${tgtName}', '${tgtUnit}', ${tgtQty}, ${tgtCost}, '${note}', '${createdBy}');\nUPDATE stock SET qty_on_hand = qty_on_hand - ${srcQty}, updated_at = NOW() WHERE product_id = '${srcId}';\nINSERT INTO stock (product_id, qty_on_hand) VALUES ('${tgtId}', ${tgtQty}) ON CONFLICT (product_id) DO UPDATE SET qty_on_hand = stock.qty_on_hand + ${tgtQty}, updated_at = NOW();`;\n\nreturn [{ json: { sql, conversion_no: convNo } }];"
+      },
+      "id": "a1b2c3d4-1600-1600-1600-000000001600",
+      "name": "Code Prepare Save Conversion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        720,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      },
+      "id": "a1b2c3d4-1601-1601-1601-000000001601",
+      "name": "Postgres Save Conversion",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, conversion_no: $('Code Prepare Save Conversion').first().json.conversion_no }) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-1602-1602-1602-000000001602",
+      "name": "Respond Save Conversion",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        1300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT conversion_id, conversion_no, conversion_date, source_product_name, source_unit, source_qty, source_cost_per_unit, target_product_name, target_unit, target_qty, target_cost_per_unit, note, created_by, created_at FROM unit_conversions ORDER BY conversion_date DESC, conversion_id DESC LIMIT 100",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "REPLACE_POSTGRES_CREDENTIAL_ID",
+          "name": "Postgres account"
+        }
+      },
+      "id": "a1b2c3d4-1700-1700-1700-000000001700",
+      "name": "Postgres Get Conversion History",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        720,
+        1400
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = $input.all().map(i => i.json);\nreturn [{ json: { success: true, data: rows } }];"
+      },
+      "id": "a1b2c3d4-1701-1701-1701-000000001701",
+      "name": "Code Conversion History List",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        960,
+        1400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "a1b2c3d4-1702-1702-1702-000000001702",
+      "name": "Respond Get Conversion History",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        1200,
+        1400
+      ]
     }
   ],
   "connections": {
@@ -1081,6 +1240,27 @@
         [
           {
             "node": "Code Prepare OCR",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postgres Get Convert Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code Prepare Save Conversion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Postgres Get Conversion History",
             "type": "main",
             "index": 0
           }
@@ -1455,6 +1635,72 @@
         [
           {
             "node": "Respond OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Get Convert Data": {
+      "main": [
+        [
+          {
+            "node": "Code Convert Data List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Convert Data List": {
+      "main": [
+        [
+          {
+            "node": "Respond Get Convert Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Prepare Save Conversion": {
+      "main": [
+        [
+          {
+            "node": "Postgres Save Conversion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Save Conversion": {
+      "main": [
+        [
+          {
+            "node": "Respond Save Conversion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Get Conversion History": {
+      "main": [
+        [
+          {
+            "node": "Code Conversion History List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Conversion History List": {
+      "main": [
+        [
+          {
+            "node": "Respond Get Conversion History",
             "type": "main",
             "index": 0
           }

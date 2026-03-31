@@ -3,6 +3,7 @@ import "./App.css";
 import DashboardPage from "./pages/DashboardPage";
 import ReceivePage from "./pages/ReceivePage";
 import IssuePage from "./pages/IssuePage";
+import ConvertPage from "./pages/ConvertPage";
 import UserPage from "./pages/UserPage";
 import BookingPage from "./pages/BookingPage";
 import MotoBookingPage from "./pages/MotoBookingPage";
@@ -70,6 +71,7 @@ export default function App() {
         {activeMenu === "dashboard" && canAccess("dashboard") && <DashboardPage currentUser={currentUser} />}
         {activeMenu === "receive" && canAccess("receive") && <ReceivePage currentUser={currentUser} />}
         {activeMenu === "issue" && canAccess("issue") && <IssuePage currentUser={currentUser} />}
+        {activeMenu === "convert" && canAccess("convert") && <ConvertPage currentUser={currentUser} />}
         {activeMenu === "users" && canAccess("users") && (
           <UserPage currentUser={currentUser} />
         )}
@@ -114,7 +116,7 @@ function parseUserPages(raw) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const supplyPages = ["dashboard", "receive", "issue"];
+  const supplyPages = ["dashboard", "receive", "issue", "convert"];
   const supplyActive = supplyPages.includes(activeMenu);
   const [supplyOpen, setSupplyOpen] = React.useState(supplyActive);
 
@@ -163,6 +165,14 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
                   onClick={() => onChange("issue")}
                 >
                   📤 เบิกวัสดุ
+                </button>
+              )}
+              {canAccess("convert") && (
+                <button
+                  className={`menu-btn submenu-btn ${activeMenu === "convert" ? "active" : ""}`}
+                  onClick={() => onChange("convert")}
+                >
+                  🔄 แปลงหน่วยบรรจุ
                 </button>
               )}
             </div>
