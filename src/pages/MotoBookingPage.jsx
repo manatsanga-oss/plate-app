@@ -61,6 +61,7 @@ export default function MotoBookingPage({ currentUser }) {
   const [appointmentNote, setAppointmentNote] = useState("");
   const [deposits, setDeposits] = useState([]);
   const [salesMap, setSalesMap] = useState({});
+  const [allDeposits, setAllDeposits] = useState([]);
 
   const isAdmin = currentUser?.role === "admin";
 
@@ -70,6 +71,7 @@ export default function MotoBookingPage({ currentUser }) {
     fetchStockSummary();
     fetchDeposits();
     fetchSales();
+    fetchAllDeposits();
   }, []);
 
   async function fetchBookings() {
@@ -125,6 +127,18 @@ export default function MotoBookingPage({ currentUser }) {
         if (s.invoice_no) map[s.invoice_no] = { sale_date: s.sale_date, customer_name: s.customer_name };
       });
       setSalesMap(map);
+    } catch { /* ignore */ }
+  }
+
+  async function fetchAllDeposits() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_all_deposits" }),
+      });
+      const data = await res.json();
+      setAllDeposits(Array.isArray(data) ? data : []);
     } catch { /* ignore */ }
   }
 
@@ -396,6 +410,12 @@ export default function MotoBookingPage({ currentUser }) {
   );
   const hasDepositWarning = (b) => b.status === "จอง" && b.deposit_no && depositWarningSet.has(b.deposit_no);
 
+  // deposit map for cancelled bookings (from allDeposits - includes all records)
+  const depositMap = {};
+  allDeposits.forEach((d) => {
+    if (d.receipt_no) depositMap[d.receipt_no] = { remaining_amount: Number(d.remaining_amount) || 0 };
+  });
+
   const filtered = bookings.filter((b) => {
     if (filterStatus === "รถถึงคิว") return isQueueReady(b);
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
@@ -414,6 +434,21 @@ export default function MotoBookingPage({ currentUser }) {
       if (hasA && !hasB) return 1;
       if (!hasA && !hasB) return 0;
       return new Date(salesMap[b.invoice_no].sale_date) - new Date(salesMap[a.invoice_no].sale_date);
+    }
+    if (filterStatus === "ยกเลิก") {
+      const depA = a.deposit_no ? depositMap[a.deposit_no] : null;
+      const depB = b.deposit_no ? depositMap[b.deposit_no] : null;
+      // 0 = ยังไม่ตัดจ่าย (remaining > 0), 1 = ตัดจ่ายแล้ว, 2 = ไม่มี deposit, 3 = ไม่พบข้อมูล
+      const rank = (dep, depositNo) => {
+        if (!depositNo) return 2;
+        if (!dep) return 3;
+        if (dep.remaining_amount > 0) return 0;
+        return 1;
+      };
+      const rA = rank(depA, a.deposit_no);
+      const rB = rank(depB, b.deposit_no);
+      if (rA !== rB) return rA - rB;
+      return new Date(b.booking_date) - new Date(a.booking_date);
     }
     return new Date(a.booking_date) - new Date(b.booking_date);
   });
@@ -643,6 +678,8 @@ export default function MotoBookingPage({ currentUser }) {
                 <th>ลูกค้า</th>
                 {filterStatus === "ขาย" && <th>วันที่ขาย</th>}
                 {filterStatus === "ขาย" && <th>ชื่อผู้ซื้อ</th>}
+                {filterStatus === "ยกเลิก" && <th>เลขที่มัดจำ</th>}
+                {filterStatus === "ยกเลิก" && <th>เงินมัดจำคงเหลือ</th>}
                 <th>สถานะ</th>
                 <th>จัดการ</th>
               </tr>
@@ -677,6 +714,17 @@ export default function MotoBookingPage({ currentUser }) {
                       <td>{sale.customer_name || "-"}</td>
                     </>;
                   })()}
+                  {filterStatus === "ยกเลิก" && (() => {
+                    const dep = b.deposit_no ? depositMap[b.deposit_no] : null;
+                    if (!b.deposit_no) return <><td style={{ color: "#9ca3af" }}>-</td><td style={{ color: "#9ca3af" }}>-</td></>;
+                    if (!dep) return <><td style={{ color: "#9ca3af" }}>{b.deposit_no}</td><td style={{ color: "#9ca3af" }}>ไม่พบข้อมูล</td></>;
+                    return <>
+                      <td style={{ whiteSpace: "nowrap", color: dep.remaining_amount > 0 ? "#ef4444" : "#10b981", fontWeight: 600 }}>{b.deposit_no}</td>
+                      <td style={{ textAlign: "right", color: dep.remaining_amount > 0 ? "#ef4444" : "#10b981", fontWeight: 600 }}>
+                        {dep.remaining_amount > 0 ? "ยังไม่ตัดจ่าย " + dep.remaining_amount.toLocaleString() + " ฿" : "ตัดจ่ายแล้ว"}
+                      </td>
+                    </>;
+                  })()}
                   <td>
                     <button onClick={() => setDetailTarget(b)} style={{
                       background: STATUS_COLOR[b.status] || "#d1d5db",
@@ -687,6 +735,9 @@ export default function MotoBookingPage({ currentUser }) {
                     </button>
                     {b.status === "ขาย" && b.invoice_no && (
                       <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>ใบขาย: {b.invoice_no}</div>
+                    )}
+                    {b.status === "จอง" && b.deposit_no && !depositMap[b.deposit_no] && (
+                      <div style={{ fontSize: 11, color: "#ef4444", marginTop: 3, fontWeight: 600 }}>เลขที่มัดจำไม่ถูกต้อง</div>
                     )}
                     {isQueueReady(b) && (() => {
                       const q = queuePosMap[b.booking_id];
