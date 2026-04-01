@@ -15,27 +15,94 @@ body {
 
 .sidebar {
   width: 240px;
+  min-width: 240px;
+  flex-shrink: 0;
   background: #072d6b;
   color: white;
   display: flex;
   flex-direction: column;
   padding: 0;
+  overflow-y: auto;
 }
 
 .sidebar-header {
-  font-size: 28px;
+  font-size: 22px;
   font-weight: bold;
-  padding: 28px 22px;
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+  padding: 22px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+  letter-spacing: 1px;
 }
 
+.menu-group {
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+}
+
+.menu-group-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: white;
+  text-align: left;
+  padding: 14px 20px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: "Tahoma", sans-serif;
+}
+
+.menu-group-header:hover {
+  background: rgba(255,255,255,0.06);
+}
+
+.menu-group-header.active {
+  background: rgba(255,255,255,0.08);
+}
+
+.menu-arrow {
+  font-size: 13px;
+  opacity: 0.6;
+}
+
+.menu-group-items {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.menu-item {
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
+  color: rgba(255,255,255,0.85);
+  text-align: left;
+  padding: 11px 20px 11px 32px;
+  font-size: 14px;
+  cursor: pointer;
+  font-family: "Tahoma", sans-serif;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+
+.menu-item:hover {
+  background: rgba(255,255,255,0.08);
+  color: white;
+}
+
+.menu-item.active {
+  background: #0c3c88;
+  color: white;
+  font-weight: 600;
+}
+
+/* legacy - keep for compatibility */
 .menu-btn {
   background: transparent;
   border: none;
   color: white;
   text-align: left;
-  padding: 18px 24px;
-  font-size: 18px;
+  padding: 14px 20px;
+  font-size: 15px;
   cursor: pointer;
   border-bottom: 1px solid rgba(255,255,255,0.06);
 }
@@ -52,24 +119,19 @@ body {
   width: 100%;
 }
 
-.menu-arrow {
-  font-size: 14px;
-  opacity: 0.7;
-}
-
 .submenu {
   background: rgba(0, 0, 0, 0.15);
 }
 
 .submenu-btn {
-  padding-left: 40px;
-  font-size: 16px;
+  padding-left: 32px;
+  font-size: 14px;
 }
 
 .sidebar-footer {
   margin-top: auto;
-  padding: 18px 24px;
-  font-size: 16px;
+  padding: 18px 20px;
+  font-size: 14px;
   border-top: 1px solid rgba(255,255,255,0.1);
 }
 

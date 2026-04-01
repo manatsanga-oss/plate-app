@@ -14,6 +14,7 @@ import FinancePage from "./pages/FinancePage";
 import MotoPricePage from "./pages/MotoPricePage";
 import MotoModelPage from "./pages/MotoModelPage";
 import MotoPriceCheckPage from "./pages/MotoPriceCheckPage";
+import MotoExpensePage from "./pages/MotoExpensePage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -58,7 +59,7 @@ export default function App() {
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
-    if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel") return false;
+    if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel" || page === "motoexpense") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
@@ -107,6 +108,9 @@ export default function App() {
         {activeMenu === "motomodel" && canAccess("motomodel") && (
           <MotoModelPage currentUser={currentUser} />
         )}
+        {activeMenu === "motoexpense" && canAccess("motoexpense") && (
+          <MotoExpensePage currentUser={currentUser} />
+        )}
         {activeMenu === "pricecheck" && canAccess("pricecheck") && (
           <MotoPriceCheckPage currentUser={currentUser} />
         )}
@@ -126,181 +130,74 @@ function parseUserPages(raw) {
   } catch { return DEFAULT_PAGES; }
 }
 
+function MenuGroup({ title, pages, activeMenu, onChange, canAccess, children, defaultOpen }) {
+  const isActive = pages.some(p => p === activeMenu);
+  const hasAccess = pages.some(p => canAccess(p));
+  const [open, setOpen] = React.useState(defaultOpen || isActive);
+  if (!hasAccess) return null;
+  return (
+    <div className="menu-group">
+      <button className={`menu-group-header ${isActive ? "active" : ""}`} onClick={() => setOpen(o => !o)}>
+        <span>{title}</span>
+        <span className="menu-arrow">{open ? "▾" : "▸"}</span>
+      </button>
+      {open && <div className="menu-group-items">{children}</div>}
+    </div>
+  );
+}
+
+function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
+  if (!canAccess(page)) return null;
+  return (
+    <button className={`menu-item ${activeMenu === page ? "active" : ""}`} onClick={() => onChange(page)}>
+      {label}
+    </button>
+  );
+}
+
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const supplyPages = ["dashboard", "receive", "issue", "convert"];
-  const supplyActive = supplyPages.includes(activeMenu);
-  const [supplyOpen, setSupplyOpen] = React.useState(supplyActive);
-
-  const masterPages = ["driver", "finance", "motomodel", "motoprice"];
-  const masterActive = masterPages.includes(activeMenu);
-  const [masterOpen, setMasterOpen] = React.useState(masterActive);
-
-  const hasSupply = supplyPages.some((p) => canAccess(p));
-  const hasMaster = masterPages.some((p) => canAccess(p));
+  const salesPages = ["moto", "booking", "pricecheck", "stockcheck"];
+  const sparePages = ["dashboard", "receive", "issue", "convert"];
+  const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "users"];
+  const uploadPages = ["upload"];
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-header">📦 ระบบวัสดุสำนักงาน</div>
+      <div className="sidebar-header">Management</div>
 
-      {hasSupply && (
-        <>
-          <button
-            className={`menu-btn menu-group-btn ${supplyActive ? "active" : ""}`}
-            onClick={() => setSupplyOpen((o) => !o)}
-          >
-            📦 ระบบวัสดุสำนักงาน
-            <span className="menu-arrow">{supplyOpen ? "▾" : "▸"}</span>
-          </button>
+      <MenuGroup title="Sales" pages={salesPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="moto" label="จองรถจักรยานยนต์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="booking" label="จองคนขับรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="pricecheck" label="ตรวจสอบราคารถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="stockcheck" label="เช็คสต๊อก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
 
-          {supplyOpen && (
-            <div className="submenu">
-              {canAccess("dashboard") && (
-                <button
-                  className={`menu-btn submenu-btn ${activeMenu === "dashboard" ? "active" : ""}`}
-                  onClick={() => onChange("dashboard")}
-                >
-                  📊 ภาพรวม
-                </button>
-              )}
-              {canAccess("receive") && (
-                <button
-                  className={`menu-btn submenu-btn ${activeMenu === "receive" ? "active" : ""}`}
-                  onClick={() => onChange("receive")}
-                >
-                  📥 รับวัสดุ
-                </button>
-              )}
-              {canAccess("issue") && (
-                <button
-                  className={`menu-btn submenu-btn ${activeMenu === "issue" ? "active" : ""}`}
-                  onClick={() => onChange("issue")}
-                >
-                  📤 เบิกวัสดุ
-                </button>
-              )}
-              {canAccess("convert") && (
-                <button
-                  className={`menu-btn submenu-btn ${activeMenu === "convert" ? "active" : ""}`}
-                  onClick={() => onChange("convert")}
-                >
-                  🔄 แปลงหน่วยบรรจุ
-                </button>
-              )}
-            </div>
-          )}
-        </>
-      )}
+      <MenuGroup title="Spare Parts / วัสดุ" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="dashboard" label="ภาพรวม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="receive" label="รับวัสดุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="issue" label="เบิกวัสดุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="convert" label="แปลงหน่วยบรรจุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
 
-      {canAccess("users") && (
-        <button
-          className={`menu-btn ${activeMenu === "users" ? "active" : ""}`}
-          onClick={() => onChange("users")}
-        >
-          {currentUser?.role === "admin" ? "👤 กำหนดผู้ใช้งาน" : "🔑 เปลี่ยนรหัสผ่าน"}
-        </button>
-      )}
+      <MenuGroup title="Master Data" pages={masterPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="motomodel" label="ข้อมูลรุ่นรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="motoprice" label="บันทึกราคาขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="motoexpense" label="ค่าใช้จ่ายการขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="finance" label="บริษัทไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="driver" label="พนักงานขับรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="users" label={currentUser?.role === "admin" ? "กำหนดผู้ใช้งาน" : "เปลี่ยนรหัสผ่าน"} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
 
-      {canAccess("booking") && (
-        <button
-          className={`menu-btn ${activeMenu === "booking" ? "active" : ""}`}
-          onClick={() => onChange("booking")}
-        >
-          🚗 จองคนขับรถ
-        </button>
-      )}
-
-      {canAccess("moto") && (
-        <button
-          className={`menu-btn ${activeMenu === "moto" ? "active" : ""}`}
-          onClick={() => onChange("moto")}
-        >
-          🏍️ จองรถจักรยานยนต์
-        </button>
-      )}
-
-      {canAccess("pricecheck") && (
-        <button
-          className={`menu-btn ${activeMenu === "pricecheck" ? "active" : ""}`}
-          onClick={() => onChange("pricecheck")}
-        >
-          💲 ตรวจสอบราคารถ
-        </button>
-      )}
-
-      {canAccess("upload") && (
-        <button
-          className={`menu-btn ${activeMenu === "upload" ? "active" : ""}`}
-          onClick={() => onChange("upload")}
-        >
-          ⬆ ระบบ Upload ข้อมูล
-        </button>
-      )}
-
-      {canAccess("stockcheck") && (
-        <button
-          className={`menu-btn ${activeMenu === "stockcheck" ? "active" : ""}`}
-          onClick={() => onChange("stockcheck")}
-        >
-          📋 ระบบเช็คสต๊อก
-        </button>
-      )}
-
-      {hasMaster && (
-        <>
-          <button
-            className={`menu-btn menu-group-btn ${masterActive ? "active" : ""}`}
-            onClick={() => setMasterOpen((o) => !o)}
-          >
-            🗂️ ข้อมูลหลัก
-            <span className="menu-arrow">{masterOpen ? "▾" : "▸"}</span>
-          </button>
-
-          {masterOpen && (
-            <div className="submenu">
-              {canAccess("driver") && (
-                <button
-                  className={`menu-btn submenu-btn ${activeMenu === "driver" ? "active" : ""}`}
-                  onClick={() => onChange("driver")}
-                >
-                  👷 ข้อมูลพนักงานขับรถ
-                </button>
-              )}
-              {canAccess("finance") && (
-                <button
-                  className={`menu-btn submenu-btn ${activeMenu === "finance" ? "active" : ""}`}
-                  onClick={() => onChange("finance")}
-                >
-                  🏢 ข้อมูลบริษัทไฟแนนท์
-                </button>
-              )}
-              {canAccess("motomodel") && (
-                <button
-                  className={`menu-btn submenu-btn ${activeMenu === "motomodel" ? "active" : ""}`}
-                  onClick={() => onChange("motomodel")}
-                >
-                  📋 ข้อมูลรุ่นรถ
-                </button>
-              )}
-              {canAccess("motoprice") && (
-                <button
-                  className={`menu-btn submenu-btn ${activeMenu === "motoprice" ? "active" : ""}`}
-                  onClick={() => onChange("motoprice")}
-                >
-                  💰 บันทึกราคาขาย
-                </button>
-              )}
-            </div>
-          )}
-        </>
-      )}
+      <MenuGroup title="Upload" pages={uploadPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="upload" label="Upload ข้อมูล" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
 
       <div className="sidebar-user-box">
-        <div className="sidebar-user-name">👋 {currentUser?.name || "-"}</div>
+        <div className="sidebar-user-name">{currentUser?.name || "-"}</div>
         <div className="sidebar-user-detail">{currentUser?.branch || "-"}</div>
         <div className="sidebar-user-detail">
           สิทธิ์: {currentUser?.role || "-"}
         </div>
-
         <button className="logout-btn" onClick={onLogout}>
           ออกจากระบบ
         </button>

@@ -42,6 +42,8 @@ export default function MotoBookingPage({ currentUser }) {
   const [filterMarketing, setFilterMarketing] = useState("");
   const [filterModelCode, setFilterModelCode] = useState("");
   const [filterColor, setFilterColor] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const pageSize = 15;
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [depositAction, setDepositAction] = useState("ยึดเงินมัดจำ");
@@ -420,7 +422,7 @@ export default function MotoBookingPage({ currentUser }) {
     if (filterStatus === "รถถึงคิว") return isQueueReady(b);
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
     if (filterBranch && b.branch !== filterBranch) return false;
-    if (filterDate && b.booking_date && b.booking_date.slice(0, 10) !== filterDate) return false;
+    if (filterDate && b.booking_date && b.booking_date.slice(0, 7) !== filterDate) return false;
     if (filterBrand && b.brand !== filterBrand) return false;
     if (filterMarketing && b.marketing_name !== filterMarketing) return false;
     if (filterModelCode && b.model_code !== filterModelCode) return false;
@@ -585,7 +587,7 @@ export default function MotoBookingPage({ currentUser }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 13, color: "#64748b", whiteSpace: "nowrap" }}>📅</span>
-            <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)}
+            <input type="month" value={filterDate} onChange={(e) => setFilterDate(e.target.value)}
               style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }} />
             {filterDate && (
               <button onClick={() => setFilterDate("")}
@@ -637,7 +639,7 @@ export default function MotoBookingPage({ currentUser }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "#94a3b8", marginRight: 2 }}>สถานะ:</span>
           {["all", "จอง", "รถถึงคิว", "ขาย", "ยกเลิก"].map((s) => (
-            <button key={s} onClick={() => setFilterStatus(s)}
+            <button key={s} onClick={() => { setFilterStatus(s); setCurrentPage(1); }}
               style={{
                 padding: "4px 16px", borderRadius: 20, border: "none", cursor: "pointer",
                 background: filterStatus === s ? (s === "รถถึงคิว" ? "#16a34a" : "#072d6b") : (s === "รถถึงคิว" ? "#dcfce7" : "#e2e8f0"),
@@ -685,7 +687,7 @@ export default function MotoBookingPage({ currentUser }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((b, idx) => (
+              {filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize).map((b, idx) => (
                 <tr
                   key={b.booking_id}
                   className={hasDepositWarning(b) ? "row-deposit-warning" : ""}
@@ -695,7 +697,7 @@ export default function MotoBookingPage({ currentUser }) {
                     : {}
                   }
                 >
-                  <td style={{ textAlign: "center" }}>{idx + 1}</td>
+                  <td style={{ textAlign: "center" }}>{(currentPage - 1) * pageSize + idx + 1}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     {b.booking_date ? new Date(b.booking_date).toLocaleDateString("th-TH") : "-"}
                   </td>
@@ -808,6 +810,47 @@ export default function MotoBookingPage({ currentUser }) {
               ))}
             </tbody>
           </table>
+          {/* Pagination */}
+          {filtered.length > pageSize && (() => {
+            const totalPages = Math.ceil(filtered.length / pageSize);
+            return (
+              <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 4, padding: "14px 0", flexWrap: "wrap" }}>
+                <button onClick={() => setCurrentPage(1)} disabled={currentPage === 1}
+                  style={{ padding: "4px 10px", border: "1px solid #d1d5db", borderRadius: 6, background: currentPage === 1 ? "#f3f4f6" : "#fff", cursor: currentPage === 1 ? "default" : "pointer", fontSize: 13, fontFamily: "Tahoma", color: "#374151" }}>
+                  {"<<"}
+                </button>
+                <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}
+                  style={{ padding: "4px 10px", border: "1px solid #d1d5db", borderRadius: 6, background: currentPage === 1 ? "#f3f4f6" : "#fff", cursor: currentPage === 1 ? "default" : "pointer", fontSize: 13, fontFamily: "Tahoma", color: "#374151" }}>
+                  {"<"}
+                </button>
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter(p => p === 1 || p === totalPages || (p >= currentPage - 2 && p <= currentPage + 2))
+                  .reduce((acc, p, i, arr) => {
+                    if (i > 0 && p - arr[i - 1] > 1) acc.push("...");
+                    acc.push(p);
+                    return acc;
+                  }, [])
+                  .map((p, i) =>
+                    p === "..." ? <span key={`dot-${i}`} style={{ padding: "4px 6px", fontSize: 13, color: "#9ca3af" }}>...</span> :
+                    <button key={p} onClick={() => setCurrentPage(p)}
+                      style={{ padding: "4px 10px", border: "1px solid #d1d5db", borderRadius: 6, background: currentPage === p ? "#072d6b" : "#fff", color: currentPage === p ? "#fff" : "#374151", cursor: "pointer", fontSize: 13, fontFamily: "Tahoma", fontWeight: currentPage === p ? 700 : 400 }}>
+                      {p}
+                    </button>
+                  )}
+                <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages}
+                  style={{ padding: "4px 10px", border: "1px solid #d1d5db", borderRadius: 6, background: currentPage === totalPages ? "#f3f4f6" : "#fff", cursor: currentPage === totalPages ? "default" : "pointer", fontSize: 13, fontFamily: "Tahoma", color: "#374151" }}>
+                  {">"}
+                </button>
+                <button onClick={() => setCurrentPage(totalPages)} disabled={currentPage === totalPages}
+                  style={{ padding: "4px 10px", border: "1px solid #d1d5db", borderRadius: 6, background: currentPage === totalPages ? "#f3f4f6" : "#fff", cursor: currentPage === totalPages ? "default" : "pointer", fontSize: 13, fontFamily: "Tahoma", color: "#374151" }}>
+                  {">>"}
+                </button>
+                <span style={{ fontSize: 12, color: "#6b7280", marginLeft: 8 }}>
+                  หน้า {currentPage}/{totalPages} ({filtered.length} รายการ)
+                </span>
+              </div>
+            );
+          })()}
         </div>
       )}
 
