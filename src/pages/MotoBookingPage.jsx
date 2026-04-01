@@ -60,6 +60,7 @@ export default function MotoBookingPage({ currentUser }) {
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentNote, setAppointmentNote] = useState("");
   const [deposits, setDeposits] = useState([]);
+  const [salesMap, setSalesMap] = useState({});
 
   const isAdmin = currentUser?.role === "admin";
 
@@ -68,6 +69,7 @@ export default function MotoBookingPage({ currentUser }) {
     fetchAllModels();
     fetchStockSummary();
     fetchDeposits();
+    fetchSales();
   }, []);
 
   async function fetchBookings() {
@@ -107,6 +109,22 @@ export default function MotoBookingPage({ currentUser }) {
       });
       const data = await res.json();
       setDeposits(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+  }
+
+  async function fetchSales() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_moto_sales" }),
+      });
+      const data = await res.json();
+      const map = {};
+      (Array.isArray(data) ? data : []).forEach(s => {
+        if (s.invoice_no) map[s.invoice_no] = { sale_date: s.sale_date, customer_name: s.customer_name };
+      });
+      setSalesMap(map);
     } catch { /* ignore */ }
   }
 
@@ -388,7 +406,17 @@ export default function MotoBookingPage({ currentUser }) {
     if (filterModelCode && b.model_code !== filterModelCode) return false;
     if (filterColor && b.color_name !== filterColor) return false;
     return true;
-  }).sort((a, b) => new Date(a.booking_date) - new Date(b.booking_date));
+  }).sort((a, b) => {
+    if (filterStatus === "ขาย") {
+      const hasA = a.invoice_no && salesMap[a.invoice_no];
+      const hasB = b.invoice_no && salesMap[b.invoice_no];
+      if (!hasA && hasB) return -1;
+      if (hasA && !hasB) return 1;
+      if (!hasA && !hasB) return 0;
+      return new Date(salesMap[b.invoice_no].sale_date) - new Date(salesMap[a.invoice_no].sale_date);
+    }
+    return new Date(a.booking_date) - new Date(b.booking_date);
+  });
 
   // Dynamic options from loaded bookings (deduplicated)
   const brandOpts = [...new Set(bookings.map(b => b.brand).filter(Boolean))].sort();
@@ -613,6 +641,8 @@ export default function MotoBookingPage({ currentUser }) {
                 <th>แบบ</th>
                 <th>สี</th>
                 <th>ลูกค้า</th>
+                {filterStatus === "ขาย" && <th>วันที่ขาย</th>}
+                {filterStatus === "ขาย" && <th>ชื่อผู้ซื้อ</th>}
                 <th>สถานะ</th>
                 <th>จัดการ</th>
               </tr>
@@ -622,7 +652,11 @@ export default function MotoBookingPage({ currentUser }) {
                 <tr
                   key={b.booking_id}
                   className={hasDepositWarning(b) ? "row-deposit-warning" : ""}
-                  style={!hasDepositWarning(b) && isQueueReady(b) ? { background: "#f0fdf4" } : {}}
+                  style={
+                    !hasDepositWarning(b) && isQueueReady(b) ? { background: "#f0fdf4" }
+                    : filterStatus === "ขาย" && b.invoice_no && salesMap[b.invoice_no] && b.customer_name && salesMap[b.invoice_no].customer_name && (() => { const strip = (s) => s.toLowerCase().replace(/\s/g, "").replace(/^(นาย|นาง|นางสาว|น\.ส\.|ด\.ช\.|ด\.ญ\.|mr\.|mrs\.|ms\.|mr|mrs|ms)/, "").replace(/[^a-zก-๙0-9]/g, ""); const n1 = strip(b.customer_name); const n2 = strip(salesMap[b.invoice_no].customer_name); return !n2.includes(n1) && !n1.includes(n2); })() ? { background: "#fef9c3" }
+                    : {}
+                  }
                 >
                   <td style={{ textAlign: "center" }}>{idx + 1}</td>
                   <td style={{ whiteSpace: "nowrap" }}>
@@ -634,6 +668,15 @@ export default function MotoBookingPage({ currentUser }) {
                   <td>{b.new_model_code || b.model_code || "-"}</td>
                   <td>{b.new_color_name || b.color_name || "-"}</td>
                   <td>{b.customer_name || "-"}</td>
+                  {filterStatus === "ขาย" && (() => {
+                    const sale = b.invoice_no ? salesMap[b.invoice_no] : null;
+                    if (!b.invoice_no) return <><td>-</td><td>-</td></>;
+                    if (!sale) return <><td colSpan={2} style={{ color: "#ef4444", fontSize: 12 }}>เลขที่ใบขายไม่ถูกต้อง</td></>;
+                    return <>
+                      <td style={{ whiteSpace: "nowrap" }}>{sale.sale_date ? new Date(sale.sale_date).toLocaleDateString("th-TH") : "-"}</td>
+                      <td>{sale.customer_name || "-"}</td>
+                    </>;
+                  })()}
                   <td>
                     <button onClick={() => setDetailTarget(b)} style={{
                       background: STATUS_COLOR[b.status] || "#d1d5db",
