@@ -11,6 +11,7 @@ export default function ConvertPage({ currentUser }) {
   const [tab, setTab] = useState("convert"); // convert | history
 
   // Form state
+  const [stockGroup, setStockGroup] = useState("");
   const [srcId, setSrcId] = useState("");
   const [srcQty, setSrcQty] = useState("");
   const [tgtId, setTgtId] = useState("");
@@ -19,16 +20,17 @@ export default function ConvertPage({ currentUser }) {
   const [note, setNote] = useState("");
 
   useEffect(() => {
-    loadData();
-  }, []);
+    if (stockGroup) loadData(stockGroup);
+  }, [stockGroup]);
 
-  async function loadData() {
+  async function loadData(group) {
     setLoading(true);
+    setSrcId(""); setSrcQty(""); setTgtId(""); setTgtQty("");
     try {
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_convert_data" }),
+        body: JSON.stringify({ action: "get_convert_data", stock_group: group }),
       });
       const data = await res.json();
       if (data.success) setProducts(data.data || []);
@@ -75,6 +77,7 @@ export default function ConvertPage({ currentUser }) {
   const tgtQtyAfter = tgtQtyOnHand + tgtQtyNum;
 
   async function handleSave() {
+    if (!stockGroup) { setMessage("กรุณาเลือกสต๊อก (ป.เปา / สิงห์ชัย)"); return; }
     if (!srcId) { setMessage("กรุณาเลือกสินค้าต้นทาง"); return; }
     if (!tgtId) { setMessage("กรุณาเลือกสินค้าปลายทาง"); return; }
     if (srcId === tgtId) { setMessage("สินค้าต้นทางและปลายทางต้องไม่ใช่รายการเดียวกัน"); return; }
@@ -93,6 +96,7 @@ export default function ConvertPage({ currentUser }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save_conversion",
+          stock_group: stockGroup,
           conversion_date: convDate,
           source_product_id: srcId,
           source_product_name: srcProduct?.product_name || "",
@@ -168,6 +172,19 @@ export default function ConvertPage({ currentUser }) {
             <div style={{ textAlign: "center", padding: "40px", color: "#999" }}>กำลังโหลด...</div>
           ) : (
             <>
+              <div style={{ marginBottom: "16px" }}>
+                <label style={{ display: "block", marginBottom: "6px", fontWeight: "bold" }}>สต๊อก *</label>
+                <select
+                  value={stockGroup}
+                  onChange={(e) => setStockGroup(e.target.value)}
+                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #ccc", fontSize: "14px", minWidth: "220px", color: stockGroup ? "#333" : "#999" }}
+                >
+                  <option value="">-- เลือกสต๊อก --</option>
+                  <option value="ppao">ป.เปา มอเตอร์เซอร์วิส</option>
+                  <option value="singchai">สิงห์ชัย สยามยนต์</option>
+                </select>
+              </div>
+
               <div style={{ marginBottom: "16px" }}>
                 <label style={{ display: "block", marginBottom: "6px", fontWeight: "bold" }}>วันที่แปลง</label>
                 <input
