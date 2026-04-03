@@ -3,6 +3,7 @@ import React, { useState } from "react";
 const FORM_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-check";
 
 const TYPE_LABEL = {
+  "สต๊อกถูกต้อง": { color: "#166534", bg: "#f0fdf4", border: "#86efac", icon: "✅" },
   "ไม่ได้จดมา": { color: "#92400e", bg: "#fffbeb", border: "#fde68a", icon: "⚠️" },
   "ไม่เจอในสต๊อก": { color: "#991b1b", bg: "#fef2f2", border: "#fca5a5", icon: "❌" },
   "โอนรถ": { color: "#1e40af", bg: "#eff6ff", border: "#93c5fd", icon: "🔄" },
@@ -42,7 +43,12 @@ export default function StockCheckPage({ currentUser }) {
           const data = await res.json();
           if (data?.results?.length > 0) {
             setResults(data.results);
-            setMessage(`พบรายการที่ต้องตรวจสอบ ${data.results.length} รายการ`);
+            const issues = data.results.filter(r => r.ประเภท !== "สต๊อกถูกต้อง");
+            if (issues.length > 0) {
+              setMessage(`พบรายการที่ต้องตรวจสอบ ${issues.length} รายการ`);
+            } else {
+              setMessage("ส่งข้อมูลสำเร็จ สต๊อกถูกต้องทั้งหมด");
+            }
           } else {
             setMessage("ส่งข้อมูลสำเร็จ ไม่พบรายการผิดปกติ");
           }
@@ -113,6 +119,15 @@ export default function StockCheckPage({ currentUser }) {
 
       {grouped && Object.entries(grouped).map(([type, items]) => {
         const style = TYPE_LABEL[type] || { color: "#374151", bg: "#f9fafb", border: "#e5e7eb", icon: "📌" };
+        if (type === "สต๊อกถูกต้อง") {
+          return (
+            <div key={type} className="form-card" style={{ maxWidth: 700, marginTop: 16, background: style.bg, border: `1px solid ${style.border}` }}>
+              <h4 style={{ margin: 0, color: style.color, fontSize: 16 }}>
+                {style.icon} สต๊อกถูกต้อง {items[0]?.จำนวน || items.length} รายการ
+              </h4>
+            </div>
+          );
+        }
         return (
           <div key={type} className="form-card" style={{ maxWidth: 700, marginTop: 16 }}>
             <h4 style={{ margin: "0 0 12px", color: style.color }}>

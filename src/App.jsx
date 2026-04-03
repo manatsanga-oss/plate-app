@@ -15,6 +15,7 @@ import MotoPricePage from "./pages/MotoPricePage";
 import MotoModelPage from "./pages/MotoModelPage";
 import MotoPriceCheckPage from "./pages/MotoPriceCheckPage";
 import MotoExpensePage from "./pages/MotoExpensePage";
+import SubunitPage from "./pages/SubunitPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -59,6 +60,7 @@ export default function App() {
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
+    if (page === "subunit") return false;
     if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel" || page === "motoexpense") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
@@ -81,6 +83,7 @@ export default function App() {
         {activeMenu === "receive" && canAccess("receive") && <ReceivePage currentUser={currentUser} />}
         {activeMenu === "issue" && canAccess("issue") && <IssuePage currentUser={currentUser} />}
         {activeMenu === "convert" && canAccess("convert") && <ConvertPage currentUser={currentUser} />}
+        {activeMenu === "subunit" && canAccess("subunit") && <SubunitPage currentUser={currentUser} />}
         {activeMenu === "users" && canAccess("users") && (
           <UserPage currentUser={currentUser} />
         )}
@@ -158,7 +161,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "stockcheck"];
   const sparePages = ["spareorder"];
-  const officePages = ["dashboard", "receive", "issue", "convert"];
+  const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "users"];
   const uploadPages = ["upload"];
 
@@ -182,6 +185,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="receive" label="รับวัสดุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="issue" label="เบิกวัสดุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="convert" label="แปลงหน่วยบรรจุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="subunit" label="บันทึกเพิ่มหน่วยย่อย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Master Data" pages={masterPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
