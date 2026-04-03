@@ -6,6 +6,7 @@ const UPLOAD_ITEMS = [
   { key: "stock", label: "สต๊อกสินค้าคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", url: `${BASE}/upload-stock` },
   { key: "sales", label: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", url: `${BASE}/upload-sales` },
   { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", url: `${BASE}/upload-deposit` },
+  { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", url: `${BASE}/upload-honda-deposit` },
   { key: "motoprice", label: "ตารางราคารถจักรยานยนต์", desc: "อัปเดตข้อมูลราคารถ", url: `${BASE}/upload-moto-price` },
   { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่าย", url: `${BASE}/upload-expenses` },
 ];

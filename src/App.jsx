@@ -16,6 +16,8 @@ import MotoModelPage from "./pages/MotoModelPage";
 import MotoPriceCheckPage from "./pages/MotoPriceCheckPage";
 import MotoExpensePage from "./pages/MotoExpensePage";
 import SubunitPage from "./pages/SubunitPage";
+import HondaDepositPage from "./pages/HondaDepositPage";
+import SparePartsOrderPage from "./pages/SparePartsOrderPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -56,7 +58,7 @@ export default function App() {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder") return true;
+    if (page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit") return true;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -117,6 +119,12 @@ export default function App() {
         {activeMenu === "pricecheck" && canAccess("pricecheck") && (
           <MotoPriceCheckPage currentUser={currentUser} />
         )}
+        {activeMenu === "hondadeposit" && canAccess("hondadeposit") && (
+          <HondaDepositPage currentUser={currentUser} />
+        )}
+        {activeMenu === "spareorder" && canAccess("spareorder") && (
+          <SparePartsOrderPage currentUser={currentUser} />
+        )}
       </main>
     </div>
   );
@@ -160,7 +168,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "stockcheck"];
-  const sparePages = ["spareorder"];
+  const sparePages = ["spareorder", "hondadeposit"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "users"];
   const uploadPages = ["upload"];
@@ -178,6 +186,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
 
       <MenuGroup title="Spare Parts" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="spareorder" label="ระบบสั่งซื้ออะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hondadeposit" label="รายงานเงินมัดจำคงเหลือ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Office Supplies" pages={officePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
