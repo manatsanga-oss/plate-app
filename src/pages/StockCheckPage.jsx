@@ -29,7 +29,10 @@ export default function StockCheckPage({ currentUser }) {
     try {
       const fd = new FormData();
       fd.append("เลือกไลฟ์ ฟอร์ม เช็คสต๊อก", file);
-      fd.append("เลือกร้าน", branch);
+      const branchCode = branch.includes(" ") ? branch.split(" ")[0] : branch;
+      const branchName = branch.includes(" ") ? branch.split(" ").slice(1).join(" ") : branch;
+      fd.append("เลือกร้าน", branchName);
+      fd.append("รหัสสาขา", branchCode);
 
       const res = await fetch(FORM_URL, { method: "POST", body: fd });
       if (res.ok) {
