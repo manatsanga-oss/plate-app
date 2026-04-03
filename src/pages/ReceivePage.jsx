@@ -11,6 +11,47 @@ function todayStr() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/** สร้างรหัสรับสินค้า เช่น REC2569040001 */
+async function generateDocNo(apiUrl) {
+  const d = new Date();
+  const buddhistYear = d.getFullYear() + 543; // ปี พ.ศ.
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const prefix = `REC${buddhistYear}${mm}`;
+
+  try {
+    const res = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "get_receive_history" }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : data?.data || [];
+
+      // นับเฉพาะ doc_no ที่ขึ้นต้นด้วย prefix เดียวกัน (เดือน/ปี เดียวกัน)
+      let maxSeq = 0;
+      for (const row of rows) {
+        const docNo = (row.doc_no || "").toString();
+        if (docNo.startsWith(prefix)) {
+          const seq = parseInt(docNo.slice(prefix.length), 10);
+          if (seq > maxSeq) maxSeq = seq;
+        }
+      }
+
+      return `${prefix}${String(maxSeq + 1).padStart(4, "0")}`;
+    }
+  } catch (e) {
+    console.warn("generateDocNo: ไม่สามารถดึงประวัติได้, ใช้ timestamp แทน", e);
+  }
+
+  // fallback: ใช้เวลาปัจจุบันสร้าง running number
+  const dd = String(d.getDate()).padStart(2, "0");
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${prefix}${dd}${hh}${mi}`;
+}
+
 function emptyHeader() {
   return {
     receive_id: "",
@@ -136,11 +177,20 @@ export default function ReceivePage({ currentUser }) {
   const [saving, setSaving] = useState(false);
   const [ocrStatus, setOcrStatus] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [warningPopup, setWarningPopup] = useState({ show: false, message: "", field: "" });
 
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyError, setHistoryError] = useState("");
   const [historyKeyword, setHistoryKeyword] = useState("");
+
+  // ตั้งค่าผู้ซื้ออัตโนมัติจาก branch ของ user
+  function getDefaultBuyer() {
+    const branch = (currentUser?.branch || "").trim();
+    if (branch === "ป.เปา มอเตอร์เซอร์วิส" || branch.includes("เปา")) return "ป.เปา มอเตอร์เซอร์วิส";
+    if (branch === "สิงห์ชัย สยามยนต์" || branch.includes("สิงห์ชัย")) return "สิงห์ชัย สยามยนต์";
+    return "";
+  }
 
   const [header, setHeader] = useState({
     ...emptyHeader(),
@@ -278,18 +328,32 @@ export default function ReceivePage({ currentUser }) {
     return +(qty * price).toFixed(2);
   }
 
-  function setFormFromDocumentData(data) {
+  function matchBuyerName(raw) {
+    const v = (raw || "").trim();
+    if (!v) return "";
+    if (v === "ป.เปา มอเตอร์เซอร์วิส" || v === "สิงห์ชัย สยามยนต์") return v;
+    if (v.includes("เปา")) return "ป.เปา มอเตอร์เซอร์วิส";
+    if (v.includes("สิงห์ชัย")) return "สิงห์ชัย สยามยนต์";
+    return v;
+  }
+
+  function setFormFromDocumentData(data, isFromHistory = false) {
     const headerData = data?.header || {};
 
-    setHeader({
-      receive_id: headerData.receive_id || "",
-      doc_no: headerData.doc_no || "",
-      receive_no: headerData.receive_no || "",
-      receive_date: headerData.receive_date || todayStr(),
-      vendor_name: headerData.vendor_name || "",
-      buyerName: headerData.buyerName || headerData.buyer_name || "",
-      created_by:
-        headerData.created_by || getCurrentUserName() || getCurrentUserId(),
+    setHeader((prev) => {
+      const rawBuyer = headerData.buyerName || headerData.buyer_name || "";
+      return {
+        receive_id: headerData.receive_id || "",
+        doc_no: headerData.doc_no || "",
+        receive_no: headerData.receive_no || "",
+        receive_date: headerData.receive_date || todayStr(),
+        vendor_name: headerData.vendor_name || "",
+        // ถ้าโหลดจากประวัติ → ใช้ค่าจาก DB (แปลงให้ตรง dropdown)
+        // ถ้าจาก OCR → ใช้ค่าจาก dropdown เดิมเท่านั้น ไม่เอาค่า OCR มาทับ
+        buyerName: isFromHistory ? matchBuyerName(rawBuyer) : prev.buyerName,
+        created_by:
+          headerData.created_by || getCurrentUserName() || getCurrentUserId(),
+      };
     });
 
     // รับสินค้าทั้งระบบจาก n8n
@@ -491,55 +555,68 @@ export default function ReceivePage({ currentUser }) {
   }
 
   async function handleSave() {
+    // Validation ก่อน save
+    const showWarning = (message, field = "") => {
+      setWarningPopup({ show: true, message, field });
+    };
+
+    if (!T(header.receive_no)) {
+      showWarning("กรุณากรอกเลขที่รับสินค้า", "receive_no");
+      return;
+    }
+
+    if (!T(header.receive_date)) {
+      showWarning("กรุณากรอกวันที่รับสินค้า", "receive_date");
+      return;
+    }
+
+    if (!T(header.vendor_name)) {
+      showWarning("กรุณากรอกชื่อผู้ขาย", "vendor_name");
+      return;
+    }
+
+    if (!T(header.buyerName)) {
+      showWarning("กรุณาเลือกผู้ซื้อ", "buyerName");
+      return;
+    }
+
+    if (!items.length) {
+      showWarning("ยังไม่มีรายการสินค้า");
+      return;
+    }
+
+    for (let i = 0; i < items.length; i++) {
+      const row = items[i];
+      if (!T(row.product_name)) {
+        showWarning(`กรุณากรอกชื่อสินค้า บรรทัดที่ ${i + 1}`);
+        return;
+      }
+      if (toNumber(row.qty) <= 0) {
+        showWarning(`จำนวนต้องมากกว่า 0 บรรทัดที่ ${i + 1}`);
+        return;
+      }
+    }
+
     try {
       setSaving(true);
       setErrorMessage("");
-
-      if (!T(header.receive_no)) {
-        alert("กรุณากรอกเลขที่รับสินค้า");
-        return;
-      }
-
-      if (!T(header.receive_date)) {
-        alert("กรุณากรอกวันที่รับสินค้า");
-        return;
-      }
-
-      if (!T(header.vendor_name)) {
-        alert("กรุณากรอกชื่อผู้ขาย");
-        return;
-      }
-
-      if (!T(header.buyerName)) {
-        alert("กรุณาเลือกผู้ซื้อ");
-        return;
-      }
-
-      if (!items.length) {
-        alert("ยังไม่มีรายการสินค้า");
-        return;
-      }
-
-      for (let i = 0; i < items.length; i++) {
-        const row = items[i];
-        if (!T(row.product_name)) {
-          alert(`กรุณากรอกชื่อสินค้า บรรทัดที่ ${i + 1}`);
-          return;
-        }
-        if (toNumber(row.qty) <= 0) {
-          alert(`จำนวนต้องมากกว่า 0 บรรทัดที่ ${i + 1}`);
-          return;
-        }
-      }
 
       // ส่ง "ชื่อผู้ใช้" แทน id
       const currentUserName = getCurrentUserName() || getCurrentUserId();
       const stockGroup = header.buyerName === "ป.เปา มอเตอร์เซอร์วิส" ? "ppao" : "singchai";
 
+      // สร้างรหัสรับสินค้าอัตโนมัติ ถ้ายังไม่มี
+      let docNo = header.doc_no;
+      if (!T(docNo)) {
+        docNo = await generateDocNo(API_URL);
+        setHeader((prev) => ({ ...prev, doc_no: docNo }));
+      }
+
       const payload = {
         success: true,
         header: {
           receive_id: header.receive_id || "",
+          doc_no: docNo,
           receive_no: header.receive_no,
           receive_date: header.receive_date,
           vendor_name: header.vendor_name,
@@ -660,7 +737,7 @@ export default function ReceivePage({ currentUser }) {
       const data = await res.json();
       console.log("DOC DETAIL:", data);
 
-      setFormFromDocumentData(data);
+      setFormFromDocumentData(data, true);
       setMode("form");
     } catch (error) {
       console.error(error);
@@ -816,7 +893,7 @@ export default function ReceivePage({ currentUser }) {
                   <label style={styles.label}>รหัสรับสินค้า</label>
                   <input
                     style={{...styles.input, background:"#f5f5f5"}}
-                    value={header.doc_no || (header.receive_id ? "REC........." : "")}
+                    value={header.doc_no || (header.receive_id ? "REC........." : "บันทึกแล้วจะสร้างอัตโนมัติ")}
                     readOnly
                   />
                 </div>
@@ -824,9 +901,9 @@ export default function ReceivePage({ currentUser }) {
                 <div>
                   <label style={styles.label}>เลขที่เอกสาร</label>
                   <input
-                    style={styles.input}
+                    style={{...styles.input, ...(warningPopup.field === "receive_no" ? {border:"2px solid #e74c3c", background:"#fff5f5"} : {})}}
                     value={header.receive_no}
-                    onChange={(e) => updateHeader("receive_no", e.target.value)}
+                    onChange={(e) => { updateHeader("receive_no", e.target.value); if(warningPopup.field === "receive_no") setWarningPopup({show:false,message:"",field:""}); }}
                   />
                 </div>
 
@@ -834,30 +911,31 @@ export default function ReceivePage({ currentUser }) {
                   <label style={styles.label}>วันที่รับ</label>
                   <input
                     type="date"
-                    style={styles.input}
+                    style={{...styles.input, ...(warningPopup.field === "receive_date" ? {border:"2px solid #e74c3c", background:"#fff5f5"} : {})}}
                     value={header.receive_date ? header.receive_date.split('T')[0] : ''}
-                    onChange={(e) => updateHeader("receive_date", e.target.value)}
+                    onChange={(e) => { updateHeader("receive_date", e.target.value); if(warningPopup.field === "receive_date") setWarningPopup({show:false,message:"",field:""}); }}
                   />
                 </div>
 
                 <div>
                   <label style={styles.label}>ชื่อผู้ขาย</label>
                   <input
-                    style={styles.input}
+                    style={{...styles.input, ...(warningPopup.field === "vendor_name" ? {border:"2px solid #e74c3c", background:"#fff5f5"} : {})}}
                     value={header.vendor_name}
-                    onChange={(e) => updateHeader("vendor_name", e.target.value)}
+                    onChange={(e) => { updateHeader("vendor_name", e.target.value); if(warningPopup.field === "vendor_name") setWarningPopup({show:false,message:"",field:""}); }}
                   />
                 </div>
 
                 <div>
-                  <label style={styles.label}>ผู้ซื้อ *</label>
+                  <label style={{...styles.label, color: warningPopup.field === "buyerName" ? "#e74c3c" : undefined, fontWeight: warningPopup.field === "buyerName" ? "bold" : undefined}}>ผู้ซื้อ *</label>
                   <select
                     style={{
                       ...styles.input,
                       color: header.buyerName ? "#1a1a2e" : "#999",
+                      ...(warningPopup.field === "buyerName" ? {border:"2px solid #e74c3c", background:"#fff5f5"} : {}),
                     }}
                     value={header.buyerName}
-                    onChange={(e) => updateHeader("buyerName", e.target.value)}
+                    onChange={(e) => { updateHeader("buyerName", e.target.value); if(warningPopup.field === "buyerName") setWarningPopup({show:false,message:"",field:""}); }}
                     required
                   >
                     <option value="">-- กรุณาเลือกผู้ซื้อ --</option>
@@ -1041,6 +1119,38 @@ export default function ReceivePage({ currentUser }) {
             <div style={styles.progressFake}>
               <div style={styles.progressFakeBar}></div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Warning Popup */}
+      {warningPopup.show && (
+        <div style={styles.modalOverlay} onClick={() => setWarningPopup({ show: false, message: "", field: "" })}>
+          <div style={styles.modalBox} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontSize: 48, textAlign: "center", marginBottom: 12 }}>&#9888;&#65039;</div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: "#e74c3c", textAlign: "center", marginBottom: 8 }}>
+              ข้อมูลไม่ครบถ้วน
+            </div>
+            <div style={{ fontSize: 15, color: "#1a1a2e", textAlign: "center", marginBottom: 20, lineHeight: 1.6 }}>
+              {warningPopup.message}
+            </div>
+            <button
+              type="button"
+              style={{
+                width: "100%",
+                padding: "12px 0",
+                background: "#e74c3c",
+                color: "#fff",
+                border: "none",
+                borderRadius: 8,
+                fontSize: 15,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+              onClick={() => setWarningPopup({ show: false, message: "", field: "" })}
+            >
+              ตกลง
+            </button>
           </div>
         </div>
       )}
