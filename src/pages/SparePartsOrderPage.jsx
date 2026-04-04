@@ -42,6 +42,10 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
   const [ocrLoading, setOcrLoading] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [showPOModal, setShowPOModal] = useState(null);
+  const [poNumber, setPoNumber] = useState("");
+  const [savingPO, setSavingPO] = useState(false);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -75,9 +79,34 @@ export default function SparePartsOrderPage({ currentUser }) {
   }
 
   function openNew() {
+    setEditId(null);
     setForm(emptyForm());
     setShowForm(true);
     setMessage("");
+  }
+
+  async function openEdit(order) {
+    try {
+      const res = await api("get_spare_order_detail", { order_id: order.order_id });
+      const items = norm(res);
+      setEditId(order.order_id);
+      setForm({
+        order_type: order.order_type || "ปกติ",
+        ref_order_id: order.ref_order_id || "",
+        deposit_doc_no: order.deposit_doc_no || "",
+        customer_code: order.customer_code || "",
+        customer_name: order.customer_name || "",
+        vin: order.vin || "",
+        deposit_amount: Number(order.deposit_amount || 0),
+        technician: order.technician || "",
+        customer_phone: order.customer_phone || "",
+        model_name: order.model_name || "",
+        parking_status: order.parking_status || "จอดร้าน",
+        items: items.length > 0 ? items.map(it => ({ part_code: it.part_code || "", part_name: it.part_name || "", quantity: Number(it.quantity || 1) })) : [emptyItem()],
+      });
+      setShowForm(true);
+      setMessage("");
+    } catch { setMessage("โหลดข้อมูลไม่สำเร็จ"); }
   }
 
   function handleTypeChange(type) {
@@ -89,6 +118,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   function handleDepositSelect(docNo) {
     const dep = deposits.find(d => d.deposit_doc_no === docNo);
     if (dep) {
+      const isNotDEPD = !docNo.startsWith("DEPD");
       setForm(prev => ({
         ...prev,
         deposit_doc_no: docNo,
@@ -96,6 +126,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         customer_name: dep.customer_name || "",
         vin: dep.vin || "",
         deposit_amount: Number(dep.remaining_amount || 0),
+        technician: isNotDEPD ? (currentUser?.name || "") : prev.technician,
       }));
     }
   }
@@ -159,9 +190,12 @@ export default function SparePartsOrderPage({ currentUser }) {
         created_by: currentUser?.name || "",
         branch: currentUser?.branch || "",
       };
-      const res = await api("save_spare_order", payload);
+      const action = editId ? "update_spare_order" : "save_spare_order";
+      if (editId) payload.order_id = editId;
+      const res = await api(action, payload);
       if (res?.success || res?.order_id) {
-        setMessage("บันทึกสำเร็จ");
+        setMessage(editId ? "แก้ไขสำเร็จ" : "บันทึกสำเร็จ");
+        setEditId(null);
         setShowForm(false);
         loadAll();
       } else {
@@ -169,6 +203,20 @@ export default function SparePartsOrderPage({ currentUser }) {
       }
     } catch { setMessage("เกิดข้อผิดพลาด"); }
     setSaving(false);
+  }
+
+  async function handleConfirmOrder() {
+    if (!poNumber.trim()) { setMessage("กรุณากรอกเลขที่ใบรับสั่งซื้อ"); return; }
+    setSavingPO(true);
+    setMessage("");
+    try {
+      await api("confirm_spare_order", { order_id: showPOModal.order_id, vendor_po_no: poNumber.trim() });
+      setShowPOModal(null);
+      setPoNumber("");
+      setMessage("บันทึกการสั่งซื้อสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSavingPO(false);
   }
 
   async function viewDetail(order) {
@@ -318,13 +366,13 @@ export default function SparePartsOrderPage({ currentUser }) {
               <th style={th}>ประเภท</th>
               <th style={th}>เลขที่มัดจำ</th>
               <th style={th}>ลูกค้า</th>
-              <th style={th}>VIN</th>
               <th style={th}>ช่าง</th>
               <th style={th}>รุ่นรถ</th>
               <th style={th}>สถานะจอด</th>
               <th style={th}>สถานะ</th>
+              <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
               <th style={th}>วันที่</th>
-              <th style={th}>ดู</th>
+              <th style={th}>จัดการ</th>
             </tr>
           </thead>
           <tbody>
@@ -344,20 +392,26 @@ export default function SparePartsOrderPage({ currentUser }) {
                 </td>
                 <td style={td}>{o.deposit_doc_no}</td>
                 <td style={td}>{o.customer_name}</td>
-                <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{o.vin}</td>
                 <td style={td}>{o.technician}</td>
                 <td style={td}>{o.model_name}</td>
                 <td style={td}>{o.parking_status}</td>
                 <td style={td}>
                   <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                    background: o.status === "รอดำเนินการ" ? "#fef3c7" : "#d1fae5",
-                    color: o.status === "รอดำเนินการ" ? "#92400e" : "#065f46",
+                    background: o.status === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
+                    color: o.status === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
                   }}>{o.status}</span>
                 </td>
+                <td style={td}>{o.vendor_po_no || "-"}</td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
-                <td style={td}>
-                  <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>ดู</button>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                  <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
+                  {o.status === "รอดำเนินการ" && (
+                    <>
+                      <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
+                      <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}
@@ -370,7 +424,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         <div style={overlay}>
           <div style={modal}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h3 style={{ margin: 0, color: "#072d6b" }}>สร้างใบสั่งซื้ออะไหล่</h3>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>{editId ? "แก้ไขใบสั่งซื้ออะไหล่" : "สร้างใบสั่งซื้ออะไหล่"}</h3>
               <button onClick={() => setShowForm(false)} style={closeBtn}>&times;</button>
             </div>
 
@@ -450,16 +504,24 @@ export default function SparePartsOrderPage({ currentUser }) {
             {/* ช่าง */}
             <div style={row}>
               <label style={labelStyle}>ช่าง</label>
-              <select
-                value={form.technician}
-                onChange={e => setForm(p => ({ ...p, technician: e.target.value }))}
-                style={{ ...inputStyle, flex: 1 }}
-              >
-                <option value="">-- เลือกช่าง --</option>
-                {techs.map(u => (
-                  <option key={u.user_id} value={u.name}>{u.name}</option>
-                ))}
-              </select>
+              {form.deposit_doc_no && !form.deposit_doc_no.startsWith("DEPD") ? (
+                <input
+                  value={form.technician}
+                  readOnly
+                  style={{ ...inputStyle, flex: 1, background: "#f8fafc" }}
+                />
+              ) : (
+                <select
+                  value={form.technician}
+                  onChange={e => setForm(p => ({ ...p, technician: e.target.value }))}
+                  style={{ ...inputStyle, flex: 1 }}
+                >
+                  <option value="">-- เลือกช่าง --</option>
+                  {techs.map(u => (
+                    <option key={u.user_id} value={u.name}>{u.name}</option>
+                  ))}
+                </select>
+              )}
             </div>
 
             {/* รุ่นรถ */}
@@ -603,6 +665,36 @@ export default function SparePartsOrderPage({ currentUser }) {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button onClick={() => printOrder(showDetail)} style={{ padding: "8px 20px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์ใบสั่งซื้อ</button>
               <button onClick={() => setShowDetail(null)} style={{ padding: "8px 20px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", cursor: "pointer" }}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal บันทึกเลขที่ใบรับสั่งซื้อ ===== */}
+      {showPOModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#072d6b" }}>บันทึกการสั่งซื้อ</h3>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
+              <div>ใบสั่งซื้อ: <b>{showPOModal.order_no || `#${showPOModal.order_id}`}</b></div>
+              <div>ลูกค้า: <b>{showPOModal.customer_name}</b></div>
+              <div>เลขมัดจำ: <b>{showPOModal.deposit_doc_no}</b></div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลขที่ใบรับการสั่งซื้อ (Vendor) *</label>
+              <input value={poNumber} onChange={e => setPoNumber(e.target.value)}
+                placeholder="เลขที่ใบรับจาก Vendor"
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleConfirmOrder} disabled={savingPO}
+                style={{ flex: 1, padding: "9px 0", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {savingPO ? "กำลังบันทึก..." : "ยืนยันสั่งซื้อ"}
+              </button>
+              <button onClick={() => { setShowPOModal(null); setPoNumber(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ยกเลิก
+              </button>
             </div>
           </div>
         </div>

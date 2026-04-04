@@ -4,9 +4,11 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-a
 
 export default function HondaDepositPage({ currentUser }) {
   const [rows, setRows] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
 
   useEffect(() => { fetchData(); }, []);
 
@@ -14,32 +16,44 @@ export default function HondaDepositPage({ currentUser }) {
     setLoading(true);
     setMessage("");
     try {
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_honda_deposits" }),
-      });
-      const data = await res.json();
-      const list = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : Array.isArray(data?.rows) ? data.rows : [];
+      const [depRes, ordRes] = await Promise.all([
+        fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_honda_deposits" }) }),
+        fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_spare_orders" }) }),
+      ]);
+      const depData = await depRes.json();
+      const ordData = await ordRes.json();
+      const list = Array.isArray(depData) ? depData : Array.isArray(depData?.items) ? depData.items : Array.isArray(depData?.rows) ? depData.rows : [];
       setRows(list);
+      const ordList = Array.isArray(ordData) ? ordData : Array.isArray(ordData?.items) ? ordData.items : Array.isArray(ordData?.rows) ? ordData.rows : [];
+      setOrders(ordList);
     } catch {
       setMessage("โหลดข้อมูลไม่สำเร็จ");
     }
     setLoading(false);
   }
 
+  function hasOrder(deposit_doc_no) {
+    return orders.some(o => o.deposit_doc_no === deposit_doc_no);
+  }
+
   const filtered = rows.filter(r => {
-    if (!search.trim()) return true;
-    const s = search.toLowerCase();
-    return (
-      (r.customer_code || "").toLowerCase().includes(s) ||
-      (r.customer_name || "").toLowerCase().includes(s) ||
-      (r.vin || "").toLowerCase().includes(s) ||
-      (r.deposit_doc_no || "").toLowerCase().includes(s)
-    );
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      const match = (r.customer_code || "").toLowerCase().includes(s) ||
+        (r.customer_name || "").toLowerCase().includes(s) ||
+        (r.vin || "").toLowerCase().includes(s) ||
+        (r.deposit_doc_no || "").toLowerCase().includes(s);
+      if (!match) return false;
+    }
+    if (filterStatus === "ordered") return hasOrder(r.deposit_doc_no);
+    if (filterStatus === "not_ordered") return !hasOrder(r.deposit_doc_no);
+    return true;
   });
 
   const totalRemaining = filtered.reduce((sum, r) => sum + Number(r.remaining_amount || 0), 0);
+  const countAll = rows.length;
+  const countOrdered = rows.filter(r => hasOrder(r.deposit_doc_no)).length;
+  const countNotOrdered = rows.filter(r => !hasOrder(r.deposit_doc_no)).length;
 
   return (
     <div className="page-container">
@@ -61,6 +75,23 @@ export default function HondaDepositPage({ currentUser }) {
         <span style={{ fontSize: 13, color: "#6b7280" }}>
           {filtered.length} รายการ | ยอดคงเหลือรวม: <b style={{ color: "#072d6b" }}>{totalRemaining.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</b>
         </span>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {[
+          { key: "all", label: "ทั้งหมด", count: countAll, bg: "#072d6b" },
+          { key: "ordered", label: "สั่งแล้ว", count: countOrdered, bg: "#10b981" },
+          { key: "not_ordered", label: "ยังไม่ได้สั่ง", count: countNotOrdered, bg: "#f59e0b" },
+        ].map(f => (
+          <button key={f.key} onClick={() => setFilterStatus(f.key)}
+            style={{
+              padding: "6px 16px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none",
+              background: filterStatus === f.key ? f.bg : "#e5e7eb",
+              color: filterStatus === f.key ? "#fff" : "#374151",
+            }}>
+            {f.label} ({f.count})
+          </button>
+        ))}
       </div>
 
       {message && <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
