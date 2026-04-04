@@ -4,6 +4,7 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-
 
 const BRANCHES = [
   "SCY01 สำนักงานใหญ่",
+  "SCY04 สิงห์ชัย ตลาดสีขวา",
   "SCY05 ป.เปา นครหลวง",
   "SCY06 ป.เปา วังน้อย",
   "SCY07 สิงห์ชัย ตลาด",
