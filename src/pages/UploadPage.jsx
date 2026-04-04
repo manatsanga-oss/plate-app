@@ -10,6 +10,7 @@ const UPLOAD_ITEMS = [
   { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด (HONDA + อื่นๆ)", url: `${BASE}/upload-honda-inventory` },
   { key: "motoprice", label: "ตารางราคารถจักรยานยนต์", desc: "อัปเดตข้อมูลราคารถ", url: `${BASE}/upload-moto-price` },
   { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่าย", url: `${BASE}/upload-expenses` },
+  { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", url: `${BASE}/upload-dcs-orders` },
 ];
 
 export default function UploadPage() {

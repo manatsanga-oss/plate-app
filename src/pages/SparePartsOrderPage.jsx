@@ -52,7 +52,32 @@ export default function SparePartsOrderPage({ currentUser }) {
   async function loadAll() {
     setLoading(true);
     // แยก request แต่ละตัว ถ้าตัวใดพัง ตัวอื่นยังทำงานได้
-    try { const r = await api("get_spare_orders"); setOrders(norm(r)); } catch {}
+    try {
+      const r = await api("get_spare_orders");
+      const allOrders = norm(r);
+      setOrders(allOrders);
+      // เช็ค DCS อัตโนมัติสำหรับใบที่สถานะ "สั่งซื้อแล้ว"
+      const toCheck = allOrders.filter(o => o.status === "สั่งซื้อแล้ว" && o.vendor_po_no);
+      for (const o of toCheck) {
+        try {
+          const dcsRes = await api("search_dcs_orders", { vendor_po_no: o.vendor_po_no });
+          const dcsItems = norm(dcsRes);
+          const detailRes = await api("get_spare_order_detail", { order_id: o.order_id });
+          const items = norm(detailRes);
+          const strip = s => (s || "").replace(/-/g, "").toUpperCase().trim();
+          const orderCodes = items.map(it => strip(it.part_code));
+          const invalidDcs = dcsItems.filter(d => !orderCodes.includes(strip(d.part_number)));
+          const allCorrect = invalidDcs.length === 0 && dcsItems.length > 0;
+          if (allCorrect) {
+            await api("update_order_status", { order_id: o.order_id, status: "มาครบ" });
+          }
+        } catch {}
+      }
+      // โหลดใหม่ถ้ามีการอัปเดต
+      if (toCheck.length > 0) {
+        try { const r2 = await api("get_spare_orders"); setOrders(norm(r2)); } catch {}
+      }
+    } catch {}
     try { const r = await api("get_honda_deposits"); setDeposits(norm(r)); } catch {}
     try { const r = await api("get_car_model_names"); console.log("models:", r); setModels(norm(r)); } catch (e) { console.error("models err:", e); }
     try {
@@ -205,6 +230,31 @@ export default function SparePartsOrderPage({ currentUser }) {
     setSaving(false);
   }
 
+  async function checkDCSStatus() {
+    if (!showDetail?.vendor_po_no || !showDetail?.items) { setMessage("ไม่มีเลขที่ใบรับสั่งซื้อ"); return; }
+    setMessage("กำลังตรวจสอบ DCS...");
+    try {
+      const res = await api("search_dcs_orders", { vendor_po_no: showDetail.vendor_po_no });
+      const dcsItems = norm(res);
+      // เทียบ: DCS ทุกรายการต้องมีอยู่ในใบสั่งซื้อ (ใบสั่งซื้อมีมากกว่าได้)
+      const strip = s => (s || "").replace(/-/g, "").toUpperCase().trim();
+      const orderCodes = showDetail.items.map(it => strip(it.part_code));
+      // ตรวจว่า DCS มีรายการที่ไม่อยู่ในใบสั่งซื้อหรือไม่
+      const invalidDcs = dcsItems.filter(d => !orderCodes.includes(strip(d.part_number)));
+      const statusList = showDetail.items.map(it => {
+        const found = dcsItems.find(d => strip(d.part_number) === strip(it.part_code));
+        return { part_code: it.part_code, part_name: it.part_name, qty: it.quantity, status: found ? "ตรงกัน" : "รอ" };
+      });
+      const allCorrect = invalidDcs.length === 0 && dcsItems.length > 0;
+      // ถ้าถูกต้องทั้งหมด อัปเดตสถานะใน DB
+      if (allCorrect) {
+        try { await api("update_order_status", { order_id: showDetail.order_id, status: "มาครบ" }); } catch {}
+      }
+      setShowDetail(prev => ({ ...prev, dcsStatus: { items: statusList, allCorrect, invalidDcs }, status: allCorrect ? "มาครบ" : prev.status }));
+      if (allCorrect) loadAll();
+    } catch { setMessage("ไม่สามารถค้นหาข้อมูล DCS ได้"); }
+  }
+
   async function handleConfirmOrder() {
     if (!poNumber.trim()) { setMessage("กรุณากรอกเลขที่ใบรับสั่งซื้อ"); return; }
     setSavingPO(true);
@@ -236,7 +286,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         } catch {}
         return it;
       }));
-      setShowDetail({ ...order, items: itemsWithStock });
+      setShowDetail({ ...order, items: itemsWithStock, dcsStatus: null });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
@@ -398,8 +448,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                 <td style={td}>
                   <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                    background: o.status === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
-                    color: o.status === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
+                    background: o.status === "มาครบ" ? "#dbeafe" : o.status === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
+                    color: o.status === "มาครบ" ? "#1e40af" : o.status === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
                   }}>{o.status}</span>
                 </td>
                 <td style={td}>{o.vendor_po_no || "-"}</td>
@@ -628,6 +678,7 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div><b>รุ่นรถ:</b> {showDetail.model_name}</div>
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
               <div><b>สถานะ:</b> {showDetail.status}</div>
+              {showDetail.vendor_po_no && <div><b>เลขที่ใบรับสั่งซื้อ:</b> <span style={{ color: "#10b981", fontWeight: 700 }}>{showDetail.vendor_po_no}</span></div>}
               <div><b>ผู้สร้าง:</b> {showDetail.created_by}</div>
               <div><b>วันที่:</b> {fmtDate(showDetail.created_at)}</div>
             </div>
@@ -640,9 +691,6 @@ export default function SparePartsOrderPage({ currentUser }) {
                   <th style={th}>รหัสสินค้า</th>
                   <th style={th}>ชื่ออะไหล่</th>
                   <th style={{ ...th, textAlign: "center" }}>จำนวน</th>
-                  <th style={{ ...th, background: "#e0f2fe" }}>สต๊อก</th>
-                  <th style={{ ...th, textAlign: "center", background: "#e0f2fe" }}>คงเหลือ</th>
-                  <th style={{ ...th, background: "#e0f2fe" }}>ที่เก็บ</th>
                 </tr>
               </thead>
               <tbody>
@@ -654,17 +702,60 @@ export default function SparePartsOrderPage({ currentUser }) {
                     <td style={td}>{it.part_code}</td>
                     <td style={td}>{it.part_name}</td>
                     <td style={{ ...td, textAlign: "center" }}>{it.quantity}</td>
-                    <td style={{ ...td, fontSize: 11, color: "#065f46" }}>{it.stock_name || "-"}</td>
-                    <td style={{ ...td, textAlign: "center", fontSize: 11, fontWeight: 600, color: it.stock_qty > 0 ? "#065f46" : "#9ca3af" }}>{it.stock_qty != null ? it.stock_qty : "-"}</td>
-                    <td style={{ ...td, fontSize: 11, color: "#065f46" }}>{it.stock_location || "-"}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
 
+            {/* ตรวจสอบสถานะ DCS */}
+            {showDetail.vendor_po_no && (
+              <div style={{ marginTop: 16 }}>
+                {!showDetail.dcsStatus ? (
+                  <div></div>
+                ) : (
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                      <label style={{ fontWeight: 600, fontSize: 14, color: "#072d6b" }}>สถานะ DCS ({showDetail.vendor_po_no})</label>
+                      <span style={{ padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 600, background: showDetail.dcsStatus.allCorrect ? "#dbeafe" : "#fee2e2", color: showDetail.dcsStatus.allCorrect ? "#1e40af" : "#991b1b" }}>
+                        {showDetail.dcsStatus.allCorrect ? "สั่งซื้อถูกต้อง" : "ไม่ถูกต้อง"}
+                      </span>
+                    </div>
+                    {showDetail.dcsStatus.invalidDcs && showDetail.dcsStatus.invalidDcs.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 12, color: "#991b1b", fontWeight: 600, marginBottom: 4 }}>รหัสที่ไม่ตรงกับใบสั่งซื้อ:</div>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <thead>
+                            <tr style={{ background: "#fee2e2" }}>
+                              <th style={th}>#</th>
+                              <th style={th}>รหัส DCS</th>
+                              <th style={th}>รายละเอียด</th>
+                              <th style={{ ...th, textAlign: "center" }}>จำนวน</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {showDetail.dcsStatus.invalidDcs.map((d, i) => (
+                              <tr key={i} style={{ borderBottom: "1px solid #fecaca" }}>
+                                <td style={td}>{i + 1}</td>
+                                <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#991b1b" }}>{d.part_number}</td>
+                                <td style={td}>{d.part_description}</td>
+                                <td style={{ ...td, textAlign: "center" }}>{d.order_qty}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button onClick={() => printOrder(showDetail)} style={{ padding: "8px 20px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์ใบสั่งซื้อ</button>
-              <button onClick={() => setShowDetail(null)} style={{ padding: "8px 20px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", cursor: "pointer" }}>ปิด</button>
+              {showDetail.vendor_po_no && !showDetail.dcsStatus && (
+                <button type="button" onClick={() => checkDCSStatus()} style={{ padding: "8px 20px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>ตรวจสอบสถานะ DCS</button>
+              )}
+              <button type="button" onClick={() => printOrder(showDetail)} style={{ padding: "8px 20px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์ใบสั่งซื้อ</button>
+              <button type="button" onClick={() => setShowDetail(null)} style={{ padding: "8px 20px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", cursor: "pointer" }}>ปิด</button>
             </div>
           </div>
         </div>
