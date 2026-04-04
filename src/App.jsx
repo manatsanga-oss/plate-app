@@ -18,6 +18,7 @@ import MotoExpensePage from "./pages/MotoExpensePage";
 import SubunitPage from "./pages/SubunitPage";
 import HondaDepositPage from "./pages/HondaDepositPage";
 import SparePartsOrderPage from "./pages/SparePartsOrderPage";
+import PositionPage from "./pages/PositionPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -63,7 +64,7 @@ export default function App() {
     if (page === "upload") return false;
     if (page === "convert") return false;
     if (page === "subunit") return false;
-    if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel" || page === "motoexpense") return false;
+    if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "position") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
@@ -125,6 +126,9 @@ export default function App() {
         {activeMenu === "spareorder" && canAccess("spareorder") && (
           <SparePartsOrderPage currentUser={currentUser} />
         )}
+        {activeMenu === "position" && canAccess("position") && (
+          <PositionPage currentUser={currentUser} />
+        )}
       </main>
     </div>
   );
@@ -170,7 +174,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "stockcheck"];
   const sparePages = ["spareorder", "hondadeposit"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
-  const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "users"];
+  const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "position", "users"];
   const uploadPages = ["upload"];
 
   return (
@@ -203,6 +207,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="motoexpense" label="ค่าใช้จ่ายการขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="finance" label="บริษัทไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="driver" label="พนักงานขับรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="position" label="กำหนดตำแหน่ง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="users" label={currentUser?.role === "admin" ? "กำหนดผู้ใช้งาน" : "เปลี่ยนรหัสผ่าน"} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 

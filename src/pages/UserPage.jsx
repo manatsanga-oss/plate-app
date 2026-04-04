@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
+const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
 const BRANCHES = [
   "SCY01 สำนักงานใหญ่",
@@ -27,6 +28,7 @@ const emptyForm = () => ({
   password: "",
   role: "user",
   branch: "",
+  position: "",
   status: "active",
   pages: [...DEFAULT_PAGES],
 });
@@ -49,6 +51,7 @@ export default function UserPage({ currentUser }) {
   const [msg, setMsg] = useState({ text: "", type: "" });
   const [searchText, setSearchText] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
+  const [positions, setPositions] = useState([]);
 
   const isAdmin = currentUser?.role === "admin";
   const currentUserId = String(currentUser?.user_id || "");
@@ -81,8 +84,21 @@ export default function UserPage({ currentUser }) {
     }
   };
 
+  const loadPositions = async () => {
+    try {
+      const res = await fetch(MASTER_API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_positions" }),
+      });
+      const data = await res.json();
+      setPositions(Array.isArray(data) ? data.filter(p => p.status === "active") : []);
+    } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     loadUsers();
+    loadPositions();
   }, []);
 
   const handleAdd = () => {
@@ -103,6 +119,7 @@ export default function UserPage({ currentUser }) {
       password: "",
       role: user.role || "user",
       branch: user.branch || "",
+      position: user.position || "",
       status: user.status || "active",
       pages: parsePages(user.pages),
     });
@@ -266,6 +283,18 @@ export default function UserPage({ currentUser }) {
               </select>
             </div>
             {isAdmin && (
+              <div className="form-row">
+                <label>ตำแหน่ง</label>
+                <select className="form-input" value={form.position}
+                  onChange={(e) => setForm({ ...form, position: e.target.value })}>
+                  <option value="">-- เลือกตำแหน่ง --</option>
+                  {positions.map((p) => (
+                    <option key={p.position_id} value={p.position_name}>{p.position_name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {isAdmin && (
               <>
                 <div className="form-row">
                   <label>สิทธิ์การใช้งาน</label>
@@ -356,6 +385,7 @@ export default function UserPage({ currentUser }) {
                 <th style={{ textAlign: "left" }}>ชื่อ - นามสกุล</th>
                 <th style={{ textAlign: "left" }}>Username</th>
                 <th style={{ textAlign: "left" }}>สาขา</th>
+                {isAdmin && <th style={{ textAlign: "left" }}>ตำแหน่ง</th>}
                 {isAdmin && <th>สิทธิ์</th>}
                 {isAdmin && <th>สถานะ</th>}
                 <th>จัดการ</th>
@@ -363,9 +393,9 @@ export default function UserPage({ currentUser }) {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={isAdmin ? 7 : 5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>กำลังโหลด...</td></tr>
+                <tr><td colSpan={isAdmin ? 8 : 5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>กำลังโหลด...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 7 : 5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>ไม่มีข้อมูลผู้ใช้งาน</td></tr>
+                <tr><td colSpan={isAdmin ? 8 : 5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>ไม่มีข้อมูลผู้ใช้งาน</td></tr>
               ) : (
                 filtered.map((u, i) => {
                   const isOtherAdmin = u.role === "admin" && String(u.user_id || u.id) !== currentUserId;
@@ -375,6 +405,7 @@ export default function UserPage({ currentUser }) {
                       <td style={{ textAlign: "left", color: "#072d6b", fontWeight: 600 }}>{u.name || "-"}</td>
                       <td style={{ textAlign: "left" }}>{u.username || "-"}</td>
                       <td style={{ textAlign: "left" }}>{u.branch || "-"}</td>
+                      {isAdmin && <td style={{ textAlign: "left" }}>{u.position || "-"}</td>}
                       {isAdmin && <td><span style={badge(u.role === "admin" ? "blue" : "")}>{u.role === "admin" ? "Admin" : "User"}</span></td>}
                       {isAdmin && <td><span style={badge(u.status === "active" ? "green" : "red")}>{u.status === "active" ? "ใช้งาน" : "ปิดใช้งาน"}</span></td>}
                       <td>

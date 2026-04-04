@@ -23,6 +23,7 @@ const emptyForm = () => ({
   vin: "",
   deposit_amount: 0,
   technician: "",
+  customer_phone: "",
   model_name: "",
   parking_status: "จอดร้าน",
   items: [emptyItem()],
@@ -60,7 +61,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       const allUsers = norm(r);
       console.log("allUsers:", allUsers.length, "role:", currentUser?.role, "branch:", currentUser?.branch);
       const myBranch = currentUser?.branch || "";
-      setTechs(allUsers.filter(u => u.branch === myBranch));
+      setTechs(allUsers.filter(u => u.branch === myBranch && (u.position || "").includes("ช่าง")));
     } catch (e) { console.error("users err:", e); }
     setLoading(false);
   }
@@ -239,7 +240,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   function printOrder(order) {
     const items = order.items || [];
     const w = window.open("", "_blank", "width=800,height=600");
-    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบสั่งซื้อ #${order.order_id}</title>
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบสั่งซื้อ ${order.order_no || '#' + order.order_id}</title>
 <style>
   body { font-family: 'Tahoma', 'Sarabun', sans-serif; padding: 24px; font-size: 13px; color: #222; }
   h2 { text-align: center; margin-bottom: 4px; }
@@ -258,7 +259,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   @media print { body { padding: 0; } }
 </style></head><body>
 <h2>ใบสั่งซื้ออะไหล่</h2>
-<div class="sub">เลขที่: #${order.order_id} | ประเภท: สั่งซื้อ${order.order_type} ${order.ref_order_id ? '(อ้างอิงใบ #' + order.ref_order_id + ')' : ''}</div>
+<div class="sub">เลขที่: ${order.order_no || '#' + order.order_id} | ประเภท: สั่งซื้อ${order.order_type} ${order.ref_order_id ? '(อ้างอิงใบ #' + order.ref_order_id + ')' : ''}</div>
 <div class="info">
   <div><b>เลขมัดจำ:</b> ${order.deposit_doc_no || '-'}</div>
   <div><b>วันที่:</b> ${fmtDate(order.created_at)}</div>
@@ -313,7 +314,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "#072d6b", color: "#fff" }}>
-              <th style={th}>#</th>
+              <th style={th}>เลขที่ใบสั่งซื้อ</th>
               <th style={th}>ประเภท</th>
               <th style={th}>เลขที่มัดจำ</th>
               <th style={th}>ลูกค้า</th>
@@ -333,7 +334,7 @@ export default function SparePartsOrderPage({ currentUser }) {
               <tr><td colSpan={11} style={center}>ไม่พบข้อมูล</td></tr>
             ) : filtered.map((o, i) => (
               <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
-                <td style={td}>{o.order_id}</td>
+                <td style={td}>{o.order_no || o.order_id}</td>
                 <td style={td}>
                   <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
@@ -398,7 +399,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                   style={{ ...inputStyle, flex: 1 }}
                 >
                   <option value="">-- เลือกใบมัดจำ --</option>
-                  {deposits.map(d => (
+                  {deposits.filter(d => !orders.some(o => o.deposit_doc_no === d.deposit_doc_no && o.order_type === "ปกติ")).map(d => (
                     <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
                       {d.deposit_doc_no} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
                     </option>
@@ -434,6 +435,17 @@ export default function SparePartsOrderPage({ currentUser }) {
                 <div><b>ยอดมัดจำคงเหลือ:</b> <span style={{ color: "#072d6b", fontWeight: 700 }}>{fmt(form.deposit_amount)}</span></div>
               </div>
             )}
+
+            {/* เบอร์โทรลูกค้า */}
+            <div style={row}>
+              <label style={labelStyle}>เบอร์โทร</label>
+              <input
+                value={form.customer_phone}
+                onChange={e => setForm(p => ({ ...p, customer_phone: e.target.value }))}
+                placeholder="เบอร์โทรลูกค้า"
+                style={{ ...inputStyle, flex: 1 }}
+              />
+            </div>
 
             {/* ช่าง */}
             <div style={row}>
@@ -494,8 +506,9 @@ export default function SparePartsOrderPage({ currentUser }) {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: "#f1f5f9" }}>
-                    <th style={{ ...th, width: "25%" }}>รหัสสินค้า</th>
-                    <th style={{ ...th, width: "50%" }}>ชื่ออะไหล่</th>
+                    <th style={{ ...th, width: "5%", textAlign: "center" }}>#</th>
+                    <th style={{ ...th, width: "23%" }}>รหัสสินค้า</th>
+                    <th style={{ ...th, width: "47%" }}>ชื่ออะไหล่</th>
                     <th style={{ ...th, width: "15%", textAlign: "center" }}>จำนวน</th>
                     <th style={{ ...th, width: "10%" }}></th>
                   </tr>
@@ -503,6 +516,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                 <tbody>
                   {form.items.map((it, idx) => (
                     <tr key={idx} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: 4, textAlign: "center", fontSize: 12, color: "#6b7280" }}>{idx + 1}</td>
                       <td style={{ padding: 4 }}>
                         <input value={it.part_code} onChange={e => updateItem(idx, "part_code", e.target.value.toUpperCase())} placeholder="รหัสสินค้า" style={{ ...inputStyle, width: "100%", fontSize: 12 }} />
                       </td>
@@ -537,7 +551,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         <div style={overlay}>
           <div style={modal}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-              <h3 style={{ margin: 0, color: "#072d6b" }}>ใบสั่งซื้อ #{showDetail.order_id}</h3>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>ใบสั่งซื้อ {showDetail.order_no || `#${showDetail.order_id}`}</h3>
               <button onClick={() => setShowDetail(null)} style={closeBtn}>&times;</button>
             </div>
 
