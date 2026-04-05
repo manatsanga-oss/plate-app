@@ -3,14 +3,15 @@ import React, { useState } from "react";
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 
 const UPLOAD_ITEMS = [
-  { key: "stock", label: "สต๊อกสินค้าคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", url: `${BASE}/upload-stock` },
-  { key: "sales", label: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", url: `${BASE}/upload-sales` },
-  { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", url: `${BASE}/upload-deposit` },
-  { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", url: `${BASE}/upload-honda-deposit` },
-  { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด (HONDA + อื่นๆ)", url: `${BASE}/upload-honda-inventory` },
-  { key: "motoprice", label: "ตารางราคารถจักรยานยนต์", desc: "อัปเดตข้อมูลราคารถ", url: `${BASE}/upload-moto-price` },
-  { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่าย", url: `${BASE}/upload-expenses` },
-  { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", url: `${BASE}/upload-dcs-orders` },
+  { key: "stock", label: "สต๊อกสินค้าคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "stock_items", url: `${BASE}/upload-stock` },
+  { key: "sales", label: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "sales_report", url: `${BASE}/upload-sales` },
+  { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_deposit", url: `${BASE}/upload-deposit` },
+  { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "honda_deposits", url: `${BASE}/upload-honda-deposit` },
+  { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด (HONDA + อื่นๆ)", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
+  { key: "motoprice", label: "ตารางราคารถจักรยานยนต์", desc: "อัปเดตข้อมูลราคารถ", db: "moto_prices", url: `${BASE}/upload-moto-price` },
+  { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่าย", db: "daily_expenses", url: `${BASE}/upload-expenses` },
+  { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_orders", url: `${BASE}/upload-dcs-orders` },
+  { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
 ];
 
 export default function UploadPage() {
@@ -47,6 +48,7 @@ export default function UploadPage() {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: "#072d6b" }}>{item.label}</div>
                 <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>{item.desc}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>📦 Table: <span style={{ fontFamily: "monospace", color: "#6366f1" }}>{item.db}</span></div>
                 {(st === "ok" || st === "error") && (
                   <div style={{
                     marginTop: 6, fontSize: 12, padding: "3px 10px", borderRadius: 8, display: "inline-block",

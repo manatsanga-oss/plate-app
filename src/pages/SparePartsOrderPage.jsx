@@ -24,6 +24,7 @@ const emptyForm = () => ({
   deposit_amount: 0,
   technician: "",
   customer_phone: "",
+  license_plate: "",
   model_name: "",
   parking_status: "จอดร้าน",
   items: [emptyItem()],
@@ -46,6 +47,15 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [showPOModal, setShowPOModal] = useState(null);
   const [poNumber, setPoNumber] = useState("");
   const [savingPO, setSavingPO] = useState(false);
+  const [showJobModal, setShowJobModal] = useState(null);
+  const [jobNumber, setJobNumber] = useState("");
+  const [appointmentDate, setAppointmentDate] = useState("");
+  const [savingJob, setSavingJob] = useState(false);
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterParking, setFilterParking] = useState("all");
+  const [editParkingId, setEditParkingId] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 15;
 
   useEffect(() => { loadAll(); }, []);
 
@@ -125,6 +135,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         deposit_amount: Number(order.deposit_amount || 0),
         technician: order.technician || "",
         customer_phone: order.customer_phone || "",
+        license_plate: order.license_plate || "",
         model_name: order.model_name || "",
         parking_status: order.parking_status || "จอดร้าน",
         items: items.length > 0 ? items.map(it => ({ part_code: it.part_code || "", part_name: it.part_name || "", quantity: Number(it.quantity || 1) })) : [emptyItem()],
@@ -201,6 +212,8 @@ export default function SparePartsOrderPage({ currentUser }) {
     if (!form.ref_order_id && form.order_type === "สั่งเพิ่ม") {
       setMessage("กรุณาเลือกใบสั่งซื้อเดิม"); return;
     }
+    if (!form.customer_phone.trim()) { setMessage("กรุณากรอกเบอร์โทรลูกค้า"); return; }
+    if (form.parking_status === "จอดร้าน" && !form.license_plate.trim()) { setMessage("กรุณากรอกทะเบียนรถ (จอดร้าน)"); return; }
     if (!form.technician.trim()) { setMessage("กรุณาเลือกช่าง"); return; }
     if (!form.model_name) { setMessage("กรุณาเลือกรุ่นรถ"); return; }
     const validItems = form.items.filter(it => (it.part_code || "").trim() || (it.part_name || "").trim());
@@ -252,7 +265,30 @@ export default function SparePartsOrderPage({ currentUser }) {
       }
       setShowDetail(prev => ({ ...prev, dcsStatus: { items: statusList, allCorrect, invalidDcs }, status: allCorrect ? "มาครบ" : prev.status }));
       if (allCorrect) loadAll();
-    } catch { setMessage("ไม่สามารถค้นหาข้อมูล DCS ได้"); }
+    } catch { /* silent */ }
+  }
+
+  async function handleSaveJob() {
+    if (!jobNumber.trim()) { setMessage("กรุณากรอกเลขที่ใบงาน"); return; }
+    setSavingJob(true);
+    setMessage("");
+    try {
+      await api("save_job_no", { order_id: showJobModal.order_id, job_no: jobNumber.trim(), appointment_date: appointmentDate || null });
+      setShowJobModal(null);
+      setJobNumber("");
+      setAppointmentDate("");
+      setMessage("บันทึกเลขที่ใบงานสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSavingJob(false);
+  }
+
+  async function handleParkingChange(orderId, newStatus) {
+    try {
+      await api("update_parking_status", { order_id: orderId, parking_status: newStatus });
+      setOrders(prev => prev.map(o => o.order_id === orderId ? { ...o, parking_status: newStatus } : o));
+    } catch { setMessage("อัปเดตสถานะจอดไม่สำเร็จ"); }
+    setEditParkingId(null);
   }
 
   async function handleConfirmOrder() {
@@ -286,11 +322,21 @@ export default function SparePartsOrderPage({ currentUser }) {
         } catch {}
         return it;
       }));
-      setShowDetail({ ...order, items: itemsWithStock, dcsStatus: null });
+      // ดึงอะไหล่ค้างส่ง
+      let boItems = [];
+      if (order.vendor_po_no) {
+        try {
+          const boRes = await api("search_dcs_backorders", { vendor_po_no: order.vendor_po_no });
+          boItems = norm(boRes);
+        } catch {}
+      }
+      setShowDetail({ ...order, items: itemsWithStock, dcsStatus: null, boItems });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
   const filtered = orders.filter(o => {
+    if (filterStatus !== "all" && o.status !== filterStatus) return false;
+    if (filterParking !== "all" && o.parking_status !== filterParking) return false;
     if (!search.trim()) return true;
     const s = search.toLowerCase();
     return (
@@ -300,6 +346,14 @@ export default function SparePartsOrderPage({ currentUser }) {
       (o.technician || "").toLowerCase().includes(s) ||
       String(o.order_id).includes(s)
     );
+  }).sort((a, b) => {
+    const depA = deposits.find(d => d.deposit_doc_no === a.deposit_doc_no);
+    const depB = deposits.find(d => d.deposit_doc_no === b.deposit_doc_no);
+    // ปิด job (ไม่มี deposit) อยู่ล่างสุด
+    if (!depA && depB) return 1;
+    if (depA && !depB) return -1;
+    if (!depA && !depB) return 0;
+    return new Date(depB.deposit_date) - new Date(depA.deposit_date);
   });
 
 
@@ -310,17 +364,17 @@ export default function SparePartsOrderPage({ currentUser }) {
     e.target.value = "";
     setOcrLoading(true);
     try {
-      const base64 = await new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result.split(",")[1]);
-        reader.readAsDataURL(file);
-      });
-      const res = await api("ocr_spare_parts", { image: base64, filename: file.name });
+      const formData = new FormData();
+      formData.append("pdf", file, file.name);
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/ocr-pdf-spare-parts", {
+        method: "POST",
+        body: formData,
+      }).then(r => r.json());
       const ocrItems = Array.isArray(res) ? res : Array.isArray(res?.items) ? res.items : Array.isArray(res?.data) ? res.data : [];
       if (ocrItems.length > 0) {
         const newItems = ocrItems.map(it => ({
-          part_code: it.part_code || it.code || "",
-          part_name: it.part_name || it.name || "",
+          part_code: it.part_code || it.product_code || it.code || "",
+          part_name: it.part_name || it.product_name || it.name || "",
           quantity: Number(it.quantity || it.qty || 1),
         }));
         setForm(prev => ({
@@ -333,6 +387,49 @@ export default function SparePartsOrderPage({ currentUser }) {
       }
     } catch { setMessage("OCR เกิดข้อผิดพลาด"); }
     setOcrLoading(false);
+  }
+
+  function printTable() {
+    const w = window.open("", "_blank", "width=1200,height=800");
+    const filterLabel = (filterStatus === "all" ? "ทั้งหมด" : filterStatus) + (filterParking !== "all" ? ` / ${filterParking}` : "");
+    const rows = filtered.map((o, i) => {
+      const dep = deposits.find(d => d.deposit_doc_no === o.deposit_doc_no);
+      const depDate = dep ? fmtDate(dep.deposit_date) : "ปิด Job";
+      return `<tr>
+        <td>${i + 1}</td>
+        <td>${o.order_type}</td>
+        <td>${depDate}</td>
+        <td>${o.deposit_doc_no}</td>
+        <td>${o.customer_name}</td>
+        <td>${(o.technician || "").split(" ")[0]}</td>
+        <td>${o.model_name || "-"}</td>
+        <td>${o.parking_status}</td>
+        <td>${o.status}</td>
+        <td>${o.vendor_po_no || "-"}</td>
+        <td>${o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
+      </tr>`;
+    }).join("");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>รายการสั่งซื้ออะไหล่</title>
+<style>
+  body { font-family: 'Tahoma', 'Sarabun', sans-serif; padding: 16px; font-size: 11px; }
+  h2 { margin: 0 0 4px; font-size: 16px; }
+  .info { font-size: 12px; color: #555; margin-bottom: 12px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; }
+  th { background: #072d6b; color: #fff; font-size: 10px; }
+  @media print { body { padding: 0; } }
+</style></head><body>
+<h2>ระบบสั่งซื้ออะไหล่</h2>
+<div class="info">ตัวกรอง: ${filterLabel} | จำนวน: ${filtered.length} รายการ | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
+<table>
+  <thead><tr>
+    <th>#</th><th>ประเภท</th><th>วันที่มัดจำ</th><th>เลขที่มัดจำ</th><th>ลูกค้า</th><th>ช่าง</th><th>รุ่นรถ</th><th>สถานะจอด</th><th>สถานะ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>วันที่นัดหมาย</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+</body></html>`);
+    w.document.close();
+    w.print();
   }
 
   function printOrder(order) {
@@ -402,7 +499,39 @@ export default function SparePartsOrderPage({ currentUser }) {
           style={inputStyle}
         />
         <button onClick={loadAll} className="btn-primary" style={{ padding: "8px 16px", fontSize: 13 }}>Refresh</button>
+        <button onClick={printTable} style={{ padding: "8px 16px", fontSize: 13, background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์</button>
         <span style={{ fontSize: 13, color: "#6b7280" }}>{filtered.length} รายการ</span>
+      </div>
+
+      {/* ===== Filter สถานะ ===== */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม"].map(s => {
+          const count = s === "all" ? orders.length : orders.filter(o => o.status === s).length;
+          const active = filterStatus === s;
+          return (
+            <button key={s} onClick={() => { setFilterStatus(s); setCurrentPage(1); }}
+              style={{ padding: "4px 14px", fontSize: 12, borderRadius: 20, border: active ? "none" : "1px solid #d1d5db",
+                background: s === "ปิดงานซ่อม" ? "#dc2626" : active ? "#072d6b" : "#fff",
+                color: s === "ปิดงานซ่อม" ? "#fff" : active ? "#fff" : "#374151",
+                cursor: "pointer", fontWeight: (active || s === "ปิดงานซ่อม") ? 700 : 400 }}>
+              {s === "all" ? "ทั้งหมด" : s} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ===== Filter จอดร้าน ===== */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {["all", "จอดร้าน", "ไม่จอดร้าน"].map(s => {
+          const count = s === "all" ? orders.length : orders.filter(o => o.parking_status === s).length;
+          const active = filterParking === s;
+          return (
+            <button key={s} onClick={() => { setFilterParking(s); setCurrentPage(1); }}
+              style={{ padding: "4px 14px", fontSize: 12, borderRadius: 20, border: active ? "none" : "1px solid #d1d5db", background: active ? "#f59e0b" : "#fff", color: active ? "#fff" : "#374151", cursor: "pointer", fontWeight: active ? 700 : 400 }}>
+              {s === "all" ? "ทั้งหมด" : s} ({count})
+            </button>
+          );
+        })}
       </div>
 
       {message && !showForm && <div style={{ color: message.includes("สำเร็จ") ? "#15803d" : "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
@@ -412,8 +541,8 @@ export default function SparePartsOrderPage({ currentUser }) {
         <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "#072d6b", color: "#fff" }}>
-              <th style={th}>เลขที่ใบสั่งซื้อ</th>
               <th style={th}>ประเภท</th>
+              <th style={th}>วันที่มัดจำ</th>
               <th style={th}>เลขที่มัดจำ</th>
               <th style={th}>ลูกค้า</th>
               <th style={th}>ช่าง</th>
@@ -422,17 +551,17 @@ export default function SparePartsOrderPage({ currentUser }) {
               <th style={th}>สถานะ</th>
               <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
               <th style={th}>วันที่</th>
+              <th style={th}>วันที่นัดหมาย</th>
               <th style={th}>จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={11} style={center}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={12} style={center}>กำลังโหลด...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={11} style={center}>ไม่พบข้อมูล</td></tr>
-            ) : filtered.map((o, i) => (
+              <tr><td colSpan={12} style={center}>ไม่พบข้อมูล</td></tr>
+            ) : filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((o, i) => (
               <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
-                <td style={td}>{o.order_no || o.order_id}</td>
                 <td style={td}>
                   <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
@@ -440,20 +569,34 @@ export default function SparePartsOrderPage({ currentUser }) {
                     color: o.order_type === "ปกติ" ? "#1e40af" : "#92400e",
                   }}>{o.order_type}</span>
                 </td>
+                <td style={td}>{(() => { const dep = deposits.find(d => d.deposit_doc_no === o.deposit_doc_no); return dep ? fmtDate(dep.deposit_date) : <span style={{ color: "#ef4444", fontWeight: 600 }}>ปิด Job</span>; })()}</td>
                 <td style={td}>{o.deposit_doc_no}</td>
                 <td style={td}>{o.customer_name}</td>
-                <td style={td}>{o.technician}</td>
+                <td style={td}>{(o.technician || "").split(" ")[0]}</td>
                 <td style={td}>{o.model_name}</td>
-                <td style={td}>{o.parking_status}</td>
+                <td style={td}>{o.status === "เปิดงาน" && editParkingId === o.order_id ? (
+                  <select defaultValue={o.parking_status} autoFocus onBlur={() => setEditParkingId(null)}
+                    onChange={e => handleParkingChange(o.order_id, e.target.value)}
+                    style={{ fontSize: 12, padding: "2px 4px", borderRadius: 4 }}>
+                    <option value="จอดร้าน">จอดร้าน</option>
+                    <option value="ไม่จอดร้าน">ไม่จอดร้าน</option>
+                  </select>
+                ) : (
+                  <span onClick={() => o.status === "เปิดงาน" && setEditParkingId(o.order_id)}
+                    style={{ cursor: o.status === "เปิดงาน" ? "pointer" : "default", textDecoration: o.status === "เปิดงาน" ? "underline" : "none" }}>
+                    {o.parking_status}
+                  </span>
+                )}</td>
                 <td style={td}>
                   <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                    background: o.status === "มาครบ" ? "#dbeafe" : o.status === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
-                    color: o.status === "มาครบ" ? "#1e40af" : o.status === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
+                    background: o.status === "ปิดงานซ่อม" ? "#dc2626" : o.status === "อะไหล่ค้างส่ง" ? "#f97316" : o.status === "เปิดงาน" ? "#ec4899" : o.status === "มาครบ" ? "#dbeafe" : o.status === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
+                    color: o.status === "ปิดงานซ่อม" ? "#fff" : o.status === "อะไหล่ค้างส่ง" ? "#fff" : o.status === "เปิดงาน" ? "#fff" : o.status === "มาครบ" ? "#1e40af" : o.status === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
                   }}>{o.status}</span>
                 </td>
                 <td style={td}>{o.vendor_po_no || "-"}</td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
+                <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
                   {o.status === "รอดำเนินการ" && (
@@ -462,12 +605,28 @@ export default function SparePartsOrderPage({ currentUser }) {
                       <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
                     </>
                   )}
+                  {(o.status === "มาครบ" || o.status === "เปิดงาน") && (
+                    <button onClick={() => { setShowJobModal(o); setJobNumber(o.job_no || ""); setAppointmentDate(o.appointment_date || ""); setMessage(""); }}
+                      style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>{o.status === "เปิดงาน" ? "แก้ไข Job" : "เปิดงาน"}</button>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {/* ===== Pagination ===== */}
+      {filtered.length > PAGE_SIZE && (
+        <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 12 }}>
+          {Array.from({ length: Math.ceil(filtered.length / PAGE_SIZE) }, (_, i) => (
+            <button key={i} onClick={() => setCurrentPage(i + 1)}
+              style={{ padding: "4px 10px", fontSize: 12, borderRadius: 6, border: currentPage === i + 1 ? "none" : "1px solid #d1d5db", background: currentPage === i + 1 ? "#072d6b" : "#fff", color: currentPage === i + 1 ? "#fff" : "#374151", cursor: "pointer" }}>
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ===== Modal ฟอร์มสร้าง ===== */}
       {showForm && (
@@ -551,6 +710,17 @@ export default function SparePartsOrderPage({ currentUser }) {
               />
             </div>
 
+            {/* ทะเบียนรถ */}
+            <div style={row}>
+              <label style={labelStyle}>ทะเบียนรถ</label>
+              <input
+                value={form.license_plate}
+                onChange={e => setForm(p => ({ ...p, license_plate: e.target.value }))}
+                placeholder="ทะเบียนรถ"
+                style={{ ...inputStyle, flex: 1 }}
+              />
+            </div>
+
             {/* ช่าง */}
             <div style={row}>
               <label style={labelStyle}>ช่าง</label>
@@ -609,7 +779,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                 <div style={{ display: "flex", gap: 8 }}>
                   <label style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer", display: "inline-block" }}>
                     ดึงข้อมูล OCR
-                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={handleOCR} />
+                    <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={handleOCR} />
                   </label>
                   <button onClick={addItem} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}>+ เพิ่มรายการ</button>
                 </div>
@@ -783,6 +953,34 @@ export default function SparePartsOrderPage({ currentUser }) {
                 {savingPO ? "กำลังบันทึก..." : "ยืนยันสั่งซื้อ"}
               </button>
               <button onClick={() => { setShowPOModal(null); setPoNumber(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal เปิดงาน ===== */}
+      {showJobModal && (
+        <div style={overlay}>
+          <div style={{ ...modal, maxWidth: 420 }}>
+            <h3 style={{ margin: "0 0 16px", color: "#072d6b" }}>เปิดงาน - {showJobModal.order_no || showJobModal.order_id}</h3>
+            {message && <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>เลขที่ใบงาน</label>
+              <input value={jobNumber} onChange={e => setJobNumber(e.target.value)} placeholder="กรอกเลขที่ใบงาน" style={{ ...inputStyle, width: "100%" }} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>วันที่นัดหมาย</label>
+              <input type="date" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)} style={{ ...inputStyle, width: "100%" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleSaveJob} disabled={savingJob}
+                style={{ flex: 1, padding: "9px 0", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {savingJob ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+              <button onClick={() => { setShowJobModal(null); setJobNumber(""); setAppointmentDate(""); }}
                 style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
                 ยกเลิก
               </button>

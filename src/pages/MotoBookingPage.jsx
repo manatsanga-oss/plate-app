@@ -87,6 +87,7 @@ export default function MotoBookingPage({ currentUser }) {
         body: JSON.stringify({ action: "get_moto_bookings" }),
       });
       const data = await res.json();
+      console.log("📦 API get_moto_bookings:", Array.isArray(data) ? data.length : 0, "รายการ");
       setBookings(Array.isArray(data) ? data : []);
     } catch {
       setMessage("โหลดข้อมูลไม่สำเร็จ");
@@ -429,6 +430,13 @@ export default function MotoBookingPage({ currentUser }) {
   });
 
   const filtered = bookings.filter((b) => {
+    // ซ่อนรายการที่ขายแล้วหรือยกเลิกและวันที่จองเกิน 2 เดือน
+    if ((b.status === "ขาย" || b.status === "ยกเลิก") && b.booking_date) {
+      const now = new Date();
+      const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
+      const bookingDate = new Date(b.booking_date);
+      if (bookingDate < twoMonthsAgo) return false;
+    }
     if (filterStatus === "รถถึงคิว") return isQueueReady(b);
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
     if (filterBranch && b.branch !== filterBranch) return false;
