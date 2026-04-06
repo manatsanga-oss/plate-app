@@ -233,9 +233,10 @@ export default function YamahaOrderPage({ currentUser }) {
       // เช็คสต๊อกแต่ละรายการ
       const itemsWithStock = await Promise.all(items.map(async (it) => {
         try {
-          const code = (it.part_code || "").replace(/-/g, "").trim();
+          let code = (it.part_code || "").replace(/-/g, "").trim();
           if (!code) return { ...it, stock_qty: "-" };
-          const sr = await api("search_inventory", { code: it.part_code });
+          if (code.length < 12) code = code + "00";
+          const sr = await api("search_inventory", { code });
           const stockItems = norm(sr);
           const totalQty = stockItems.reduce((sum, s) => sum + (Number(s.quantity) || 0), 0);
           return { ...it, stock_qty: totalQty, stock_location: stockItems[0]?.location || "-" };
@@ -280,6 +281,56 @@ export default function YamahaOrderPage({ currentUser }) {
   };
 
   const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
+
+  function printOrder(order) {
+    const items = order.items || [];
+    const w = window.open("", "_blank", "width=800,height=600");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบสั่งซื้อ ${order.order_no || '#' + order.order_id}</title>
+<style>
+  body { font-family: 'Tahoma', 'Sarabun', sans-serif; padding: 24px; font-size: 13px; color: #222; }
+  h2 { text-align: center; margin-bottom: 4px; }
+  .sub { text-align: center; color: #666; margin-bottom: 20px; }
+  .info { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 20px; margin-bottom: 16px; }
+  .info b { min-width: 90px; display: inline-block; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 12px; }
+  th { background: #f1f5f9; font-weight: 600; }
+  .center { text-align: center; }
+  .footer { margin-top: 40px; display: flex; justify-content: space-between; }
+  .sig { text-align: center; width: 200px; }
+  .sig-line { border-top: 1px solid #333; margin-top: 50px; padding-top: 4px; }
+  @media print { body { padding: 0; } }
+</style></head><body>
+<h2>ใบสั่งซื้ออะไหล่ YAMAHA</h2>
+<div class="sub">เลขที่: ${order.order_no || '#' + order.order_id} | ประเภท: สั่งซื้อ${order.order_type} ${order.ref_order_id ? '(อ้างอิงใบ #' + order.ref_order_id + ')' : ''}</div>
+<div class="info">
+  <div><b>เลขมัดจำ:</b> ${order.deposit_doc_no || '-'}</div>
+  <div><b>วันที่:</b> ${fmtDate(order.created_at)}</div>
+  <div><b>ลูกค้า:</b> ${order.customer_name || ''}</div>
+  <div><b>ยอดมัดจำ:</b> ${fmt(order.deposit_amount)}</div>
+  <div><b>ช่าง:</b> ${order.technician || '-'}</div>
+  <div><b>รุ่นรถ:</b> ${order.model_name || '-'}</div>
+  <div><b>ทะเบียนรถ:</b> ${order.license_plate || '-'}</div>
+  <div><b>สถานะจอด:</b> ${order.parking_status || '-'}</div>
+  <div><b>ผู้สร้าง:</b> ${order.created_by || '-'}</div>
+  <div><b>สาขา:</b> ${order.branch || '-'}</div>
+  ${order.vendor_po_no ? `<div><b>เลขที่ใบรับสั่งซื้อ:</b> ${order.vendor_po_no}</div>` : ''}
+</div>
+<table>
+  <thead><tr><th class="center">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th class="center">จำนวน</th><th class="center">สต๊อก</th></tr></thead>
+  <tbody>
+    ${items.length === 0 ? '<tr><td colspan="5" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}</td><td class="center">${it.quantity || 0}</td><td class="center">${it.stock_qty != null ? it.stock_qty : '-'}</td></tr>`).join('')}
+  </tbody>
+</table>
+<div class="footer">
+  <div class="sig"><div class="sig-line">ผู้สั่งซื้อ</div></div>
+  <div class="sig"><div class="sig-line">ผู้อนุมัติ</div></div>
+</div>
+</body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
+  }
 
   return (
     <div className="page-container">
@@ -545,6 +596,7 @@ export default function YamahaOrderPage({ currentUser }) {
               <div><b>รุ่นรถ:</b> {showDetail.model_name}</div>
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
               <div><b>สถานะ:</b> {showDetail.status}</div>
+              {showDetail.vendor_po_no && <div><b>เลขที่ใบรับสั่งซื้อ:</b> <span style={{ color: "#10b981", fontWeight: 700 }}>{showDetail.vendor_po_no}</span></div>}
               <div><b>ผู้สร้าง:</b> {showDetail.created_by}</div>
               <div><b>วันที่:</b> {fmtDate(showDetail.created_at)}</div>
             </div>
@@ -574,6 +626,7 @@ export default function YamahaOrderPage({ currentUser }) {
               </tbody>
             </table>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button onClick={() => printOrder(showDetail)} style={{ padding: "8px 20px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์ใบสั่งซื้อ</button>
               <button onClick={() => setShowDetail(null)} style={{ padding: "8px 20px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", cursor: "pointer" }}>ปิด</button>
             </div>
           </div>

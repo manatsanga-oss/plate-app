@@ -58,6 +58,11 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [editParkingId, setEditParkingId] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 15;
+  const [showRepairModal, setShowRepairModal] = useState(false);
+  const [repairDeposits, setRepairDeposits] = useState([]);
+  const [repairDocNo, setRepairDocNo] = useState("");
+  const [estimateNo, setEstimateNo] = useState("");
+  const [savingRepair, setSavingRepair] = useState(false);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -91,6 +96,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       }
     } catch {}
     try { const r = await api("get_honda_deposits"); setDeposits(norm(r)); } catch {}
+    try { const r = await api("get_repair_deposits"); setRepairDeposits(norm(r)); } catch {}
     try { const r = await api("get_car_model_names"); console.log("models:", r); setModels(norm(r)); } catch (e) { console.error("models err:", e); }
     try {
       const r = await fetch(USER_API, {
@@ -105,6 +111,28 @@ export default function SparePartsOrderPage({ currentUser }) {
       setTechs(allUsers.filter(u => u.branch === myBranch && (u.position || "").includes("ช่าง")));
     } catch (e) { console.error("users err:", e); }
     setLoading(false);
+  }
+
+  async function handleSaveRepairDeposit() {
+    if (!repairDocNo) { setMessage("กรุณาเลือกใบมัดจำ"); return; }
+    if (!estimateNo.trim()) { setMessage("กรุณากรอกเลขที่ใบประเมิน"); return; }
+    setSavingRepair(true);
+    setMessage("");
+    try {
+      const dep = deposits.find(d => d.deposit_doc_no === repairDocNo);
+      await api("save_repair_deposit", {
+        deposit_doc_no: repairDocNo,
+        estimate_no: estimateNo.trim(),
+        customer_name: dep?.customer_name || "",
+        created_by: currentUser?.name || "",
+      });
+      setShowRepairModal(false);
+      setRepairDocNo("");
+      setEstimateNo("");
+      setMessage("บันทึกมัดจำตีราคาซ่อมสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSavingRepair(false);
   }
 
   function norm(d) {
@@ -313,7 +341,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       const items = norm(res);
       // ค้นสต๊อกแต่ละรายการ
       const itemsWithStock = await Promise.all(items.map(async (it) => {
-        const code = (it.part_code || "").trim();
+        const code = (it.part_code || "").replace(/-/g, "").trim();
         if (!code) return it;
         try {
           const sr = await api("search_inventory", { code });
@@ -337,7 +365,9 @@ export default function SparePartsOrderPage({ currentUser }) {
   }
 
   const filtered = orders.filter(o => {
-    if (filterStatus !== "all" && o.status !== filterStatus) return false;
+    if (filterStatus === "ตีราคาซ่อม") {
+      if (!repairDeposits.some(rd => rd.deposit_doc_no === o.deposit_doc_no)) return false;
+    } else if (filterStatus !== "all" && o.status !== filterStatus) return false;
     if (filterParking !== "all" && o.parking_status !== filterParking) return false;
     if (!search.trim()) return true;
     const s = search.toLowerCase();
@@ -504,9 +534,15 @@ export default function SparePartsOrderPage({ currentUser }) {
     <div className="page-container">
       <div className="page-topbar">
         <div className="page-title">ระบบสั่งซื้ออะไหล่</div>
-        <button className="btn-primary" onClick={openNew} style={{ padding: "8px 20px", fontSize: 13 }}>
-          + สร้างใบสั่งซื้อ
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn-primary" onClick={openNew} style={{ padding: "8px 20px", fontSize: 13 }}>
+            + สร้างใบสั่งซื้อ
+          </button>
+          <button onClick={() => { setShowRepairModal(true); setRepairDocNo(""); setEstimateNo(""); setMessage(""); }}
+            style={{ padding: "8px 16px", fontSize: 13, background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
+            บันทึกมัดจำตีราคาซ่อม
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center" }}>
@@ -522,8 +558,8 @@ export default function SparePartsOrderPage({ currentUser }) {
 
       {/* ===== Filter สถานะ ===== */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม"].map(s => {
-          const count = s === "all" ? orders.length : orders.filter(o => o.status === s).length;
+        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ตีราคาซ่อม"].map(s => {
+          const count = s === "all" ? orders.length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
           const active = filterStatus === s;
           return (
             <button key={s} onClick={() => { setFilterStatus(s); setCurrentPage(1); }}
@@ -553,7 +589,38 @@ export default function SparePartsOrderPage({ currentUser }) {
 
       {message && !showForm && <div style={{ color: message.includes("สำเร็จ") ? "#15803d" : "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
 
-      {/* ===== ตารางรายการ ===== */}
+      {/* ===== ตารางตีราคาซ่อม ===== */}
+      {filterStatus === "ตีราคาซ่อม" ? (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#072d6b", color: "#fff" }}>
+                <th style={th}>#</th>
+                <th style={th}>เลขที่มัดจำ</th>
+                <th style={th}>เลขที่ใบประเมิน</th>
+                <th style={th}>ลูกค้า</th>
+                <th style={th}>ผู้บันทึก</th>
+                <th style={th}>วันที่บันทึก</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repairDeposits.length === 0 ? (
+                <tr><td colSpan={6} style={center}>ไม่พบข้อมูล</td></tr>
+              ) : repairDeposits.map((rd, i) => (
+                <tr key={rd.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                  <td style={td}>{i + 1}</td>
+                  <td style={td}>{rd.deposit_doc_no}</td>
+                  <td style={td}>{rd.estimate_no}</td>
+                  <td style={td}>{rd.customer_name}</td>
+                  <td style={td}>{rd.created_by || "-"}</td>
+                  <td style={td}>{fmtDate(rd.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+      /* ===== ตารางรายการสั่งซื้อ ===== */
       <div style={{ overflowX: "auto" }}>
         <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -634,6 +701,7 @@ export default function SparePartsOrderPage({ currentUser }) {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* ===== Pagination ===== */}
       {filtered.length > PAGE_SIZE && (
@@ -681,7 +749,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                   style={{ ...inputStyle, flex: 1 }}
                 >
                   <option value="">-- เลือกใบมัดจำ --</option>
-                  {deposits.filter(d => !orders.some(o => o.deposit_doc_no === d.deposit_doc_no && o.order_type === "ปกติ")).map(d => (
+                  {deposits.filter(d => !orders.some(o => o.deposit_doc_no === d.deposit_doc_no && o.order_type === "ปกติ") && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)).map(d => (
                     <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
                       {d.deposit_doc_no} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
                     </option>
@@ -897,17 +965,19 @@ export default function SparePartsOrderPage({ currentUser }) {
                   <th style={th}>รหัสสินค้า</th>
                   <th style={th}>ชื่ออะไหล่</th>
                   <th style={{ ...th, textAlign: "center" }}>จำนวน</th>
+                  <th style={{ ...th, textAlign: "center" }}>สต๊อก</th>
                 </tr>
               </thead>
               <tbody>
                 {(showDetail.items || []).length === 0 ? (
-                  <tr><td colSpan={7} style={center}>ไม่มีรายการ</td></tr>
+                  <tr><td colSpan={5} style={center}>ไม่มีรายการ</td></tr>
                 ) : showDetail.items.map((it, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
                     <td style={td}>{it.part_code}</td>
                     <td style={td}>{it.part_name}</td>
                     <td style={{ ...td, textAlign: "center" }}>{it.quantity}</td>
+                    <td style={{ ...td, textAlign: "center", color: it.stock_qty > 0 ? "#10b981" : "#ef4444", fontWeight: 600 }}>{it.stock_qty != null ? it.stock_qty : "-"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1017,6 +1087,60 @@ export default function SparePartsOrderPage({ currentUser }) {
                 {savingJob ? "กำลังบันทึก..." : "บันทึก"}
               </button>
               <button onClick={() => { setShowJobModal(null); setJobNumber(""); setAppointmentDate(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal บันทึกมัดจำตีราคาซ่อม ===== */}
+      {showRepairModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 480, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#8b5cf6" }}>บันทึกมัดจำตีราคาซ่อม</h3>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลือกใบมัดจำ *</label>
+              <select value={repairDocNo} onChange={e => setRepairDocNo(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}>
+                <option value="">-- เลือกใบมัดจำ --</option>
+                {deposits
+                  .filter(d => !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
+                    && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no))
+                  .map(d => (
+                    <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
+                      {d.deposit_doc_no} | {d.customer_name} | {fmt(d.deposit_amount)}
+                    </option>
+                  ))}
+              </select>
+            </div>
+
+            {repairDocNo && (() => {
+              const dep = deposits.find(d => d.deposit_doc_no === repairDocNo);
+              return dep ? (
+                <div style={{ background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13 }}>
+                  <div><b>ลูกค้า:</b> {dep.customer_name}</div>
+                  <div><b>ยอดมัดจำ:</b> {fmt(dep.deposit_amount)}</div>
+                  <div><b>คงเหลือ:</b> {fmt(dep.remaining_amount)}</div>
+                </div>
+              ) : null;
+            })()}
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลขที่ใบประเมิน *</label>
+              <input value={estimateNo} onChange={e => setEstimateNo(e.target.value)}
+                placeholder="กรอกเลขที่ใบประเมิน"
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleSaveRepairDeposit} disabled={savingRepair}
+                style={{ flex: 1, padding: "9px 0", background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {savingRepair ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+              <button onClick={() => setShowRepairModal(false)}
                 style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
                 ยกเลิก
               </button>
