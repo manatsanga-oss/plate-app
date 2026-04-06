@@ -1,0 +1,417 @@
+{
+  "name": "ocr-pdf-spare-parts",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ocr-pdf-spare-parts",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        4768,
+        384
+      ],
+      "id": "f5e236fb-4be9-4940-bff4-c543806a5926",
+      "name": "Webhook PDF OCR",
+      "webhookId": "ocr-pdf-spare-parts"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "check-image",
+              "leftValue": "={{ $binary.image }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        4960,
+        384
+      ],
+      "id": "b1a2c3d4-switch-pdf-image",
+      "name": "IF Image or PDF"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "purpose",
+              "value": "ocr"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "pdf"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5200,
+        500
+      ],
+      "id": "0ecfbe2a-92de-442a-909f-73d7819ea551",
+      "name": "Upload PDF to Mistral",
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "o6VWlsFkBOxJYLAZ",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.mistral.ai/v1/files/{{ $json.id }}/url",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "expiry",
+              "value": "24"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5400,
+        500
+      ],
+      "id": "a53fec36-8b73-47a1-91d1-19e5d763b7e0",
+      "name": "Get Mistral File URL",
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "o6VWlsFkBOxJYLAZ",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/ocr",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral-ocr-latest\",\n  \"document\": {\n    \"type\": \"document_url\",\n    \"document_url\": \"{{ $json.url }}\"\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5600,
+        500
+      ],
+      "id": "5ae4b266-2734-41c0-a30c-55ac4acb01e0",
+      "name": "Mistral OCR PDF",
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "o6VWlsFkBOxJYLAZ",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// แปลง image binary เป็น base64 data URL สำหรับ Mistral OCR (รองรับ binaryMode: separate)\nconst item = $input.first();\nconst binaryData = item.binary.image;\nconst mimeType = binaryData.mimeType || 'image/jpeg';\n\n// ใช้ helper เพื่อดึง buffer จริงจาก filesystem\nconst buffer = await this.helpers.getBinaryDataBuffer(0, 'image');\nconst base64 = buffer.toString('base64');\nconst dataUrl = `data:${mimeType};base64,${base64}`;\n\nreturn [{ json: { image_data_url: dataUrl } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        5200,
+        260
+      ],
+      "id": "c1d2e3f4-convert-image-base64",
+      "name": "Convert Image to Base64"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/ocr",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral-ocr-latest\",\n  \"document\": {\n    \"type\": \"image_url\",\n    \"image_url\": \"{{ $json.image_data_url }}\"\n  }\n}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        5450,
+        260
+      ],
+      "id": "d2e3f4a5-mistral-ocr-image",
+      "name": "Mistral OCR Image",
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "o6VWlsFkBOxJYLAZ",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=คุณคือระบบแปลง OCR เป็น JSON\n\nให้ดึงเฉพาะ \"รายการสินค้า\" จากข้อความด้านล่าง\n\nต้องการแค่ 3 ค่า:\n- product_code (รหัสอะไหล่)\n- product_name (ชื่ออะไหล่)\n- qty (จำนวน)\n\nเงื่อนไข:\n- ตอบเป็น JSON เท่านั้น ห้ามมีข้อความอื่น\n- qty ต้องเป็นตัวเลข (number)\n- ข้ามแถว \"รวมทั้งสิ้น\"\n- ถ้าไม่มีค่า ให้ใส่ \"\" หรือ 0\n\nรูปแบบ output:\n\n{\n  \"items\": [\n    {\n      \"product_code\": \"\",\n      \"product_name\": \"\",\n      \"qty\": 0\n    }\n  ]\n}\n\nข้อมูล:\n{{ $json.pages[0].markdown }}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [
+        5760,
+        384
+      ],
+      "id": "83263bda-f263-45f9-8f6b-8769c5d00416",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-5-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        5744,
+        576
+      ],
+      "id": "475de0be-82da-4bae-bf27-08798c0c7792",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "odRg3D1h42QKDeOx",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// ดึง text จาก LLM\nconst raw = $json.text;\n\n// แปลง string → JSON\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  throw new Error(\"JSON parse ไม่ได้: \" + e.message);\n}\n\n// ดึง items ออกมา\nconst items = parsed.items || [];\n\n// แปลงให้ n8n ใช้ง่าย (แยกเป็นหลาย item)\nreturn items.map((it, index) => ({\n  json: {\n    line_no: index + 1,\n    product_code: it.product_code || \"\",\n    product_name: it.product_name || \"\",\n    qty: Number(it.qty) || 0\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        6000,
+        384
+      ],
+      "id": "21a72fde-c2ae-4410-9144-3e74b3db08e2",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($input.all().map(i => i.json)) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [
+        6200,
+        384
+      ],
+      "id": "219adb31-275a-4a99-b186-70635749a1de",
+      "name": "Respond OCR Items"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook PDF OCR": {
+      "main": [
+        [
+          {
+            "node": "IF Image or PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Image or PDF": {
+      "main": [
+        [
+          {
+            "node": "Convert Image to Base64",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Upload PDF to Mistral",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Image to Base64": {
+      "main": [
+        [
+          {
+            "node": "Mistral OCR Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral OCR Image": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload PDF to Mistral": {
+      "main": [
+        [
+          {
+            "node": "Get Mistral File URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Mistral File URL": {
+      "main": [
+        [
+          {
+            "node": "Mistral OCR PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral OCR PDF": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Respond OCR Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timezone": "Asia/Bangkok",
+    "callerPolicy": "workflowsFromSameOwner",
+    "timeSavedMode": "fixed",
+    "errorWorkflow": "RPDUpkzpRXKRErCR",
+    "availableInMCP": false
+  },
+  "versionId": "0ee52727-752d-439f-95b4-a21412df75a4",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "46831b75bc94ffb9962f749c51d31fbe46b8484f2cae7e2997e1e9cd71e7f757"
+  },
+  "id": "6EuLKicZ6H2Px91t",
+  "tags": []
+}

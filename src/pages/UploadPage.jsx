@@ -12,6 +12,7 @@ const UPLOAD_ITEMS = [
   { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่าย", db: "daily_expenses", url: `${BASE}/upload-expenses` },
   { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_orders", url: `${BASE}/upload-dcs-orders` },
   { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
+  { key: "fast-moving", label: "รหัสอะไหล่หมุนเวียนเร็ว", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "fast_moving_parts", url: `${BASE}/upload-fast-moving` },
 ];
 
 export default function UploadPage() {

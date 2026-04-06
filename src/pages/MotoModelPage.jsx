@@ -5,6 +5,7 @@ const FORM_DEFAULT = {
   brand_name: "", series_name: "", marketing_name: "", thai_name: "", engine_cc: "",
   model_code: "", model_detail: "", type_name: "", color_code: "", color_name: "",
   brand_id: "", series_id: "", model_id: "", type_id: "", status: "active",
+  vehicle_type_name: "", vehicle_type_id: "",
 };
 
 async function post(body) {
@@ -23,7 +24,7 @@ function StatusBadge({ status }) {
   );
 }
 
-const TABS = [["brands", "ยี่ห้อ"], ["series", "รุ่น"], ["models", "แบบ"], ["types", "type"], ["colors", "สี"]];
+const TABS = [["brands", "ยี่ห้อ"], ["vehicle_types", "ประเภทรถ"], ["series", "รุ่น"], ["models", "แบบ"], ["types", "type"], ["colors", "สี"]];
 
 export default function MotoModelPage({ currentUser }) {
   const [tab, setTab] = useState("brands");
@@ -32,6 +33,7 @@ export default function MotoModelPage({ currentUser }) {
   const [models, setModels] = useState([]);
   const [types, setTypes] = useState([]);
   const [colors, setColors] = useState([]);
+  const [vehicleTypes, setVehicleTypes] = useState([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -48,18 +50,20 @@ export default function MotoModelPage({ currentUser }) {
   async function fetchAll() {
     setLoading(true);
     try {
-      const [b, s, m, t, c] = await Promise.all([
+      const [b, s, m, t, c, vt] = await Promise.all([
         post({ action: "get_brands" }),
         post({ action: "get_series" }),
         post({ action: "get_models" }),
         post({ action: "get_types" }),
         post({ action: "get_colors" }),
+        post({ action: "get_vehicle_types" }),
       ]);
       setBrands(Array.isArray(b) ? b : []);
       setSeries(Array.isArray(s) ? s : []);
       setModels(Array.isArray(m) ? m : []);
       setTypes(Array.isArray(t) ? t : []);
       setColors(Array.isArray(c) ? c : []);
+      setVehicleTypes(Array.isArray(vt) ? vt : []);
     } catch { setMessage("โหลดข้อมูลไม่สำเร็จ"); }
     setLoading(false);
   }
@@ -67,6 +71,7 @@ export default function MotoModelPage({ currentUser }) {
   async function handleSave() {
     setMessage("");
     if (tab === "brands" && !form.brand_name.trim()) { setMessage("กรุณากรอกชื่อยี่ห้อ"); return; }
+    if (tab === "vehicle_types" && !form.vehicle_type_name.trim()) { setMessage("กรุณากรอกชื่อประเภทรถ"); return; }
     if (tab === "series" && (!form.series_name.trim() || !form.brand_id)) { setMessage("กรุณาเลือกยี่ห้อและกรอกชื่อรุ่น"); return; }
     if (tab === "models" && (!form.model_code.trim() || !form.series_id)) { setMessage("กรุณาเลือกรุ่นและกรอกรหัสแบบ"); return; }
     if (tab === "types" && (!form.type_name.trim() || !form.model_id)) { setMessage("กรุณาเลือกแบบและกรอกชื่อ type"); return; }
@@ -77,8 +82,10 @@ export default function MotoModelPage({ currentUser }) {
       let body;
       if (tab === "brands") {
         body = { action: isEdit ? "update_brand" : "save_brand", brand_id: editTarget?.brand_id, brand_name: form.brand_name, status: form.status };
+      } else if (tab === "vehicle_types") {
+        body = { action: isEdit ? "update_vehicle_type" : "save_vehicle_type", vehicle_type_id: editTarget?.vehicle_type_id, vehicle_type_name: form.vehicle_type_name, status: form.status };
       } else if (tab === "series") {
-        body = { action: isEdit ? "update_series" : "save_series", series_id: editTarget?.series_id, brand_id: Number(form.brand_id), series_name: form.series_name, marketing_name: form.marketing_name, thai_name: form.thai_name, engine_cc: form.engine_cc, status: form.status };
+        body = { action: isEdit ? "update_series" : "save_series", series_id: editTarget?.series_id, brand_id: Number(form.brand_id), vehicle_type_id: form.vehicle_type_id ? Number(form.vehicle_type_id) : null, series_name: form.series_name, marketing_name: form.marketing_name, thai_name: form.thai_name, engine_cc: form.engine_cc, status: form.status };
       } else if (tab === "models") {
         body = { action: isEdit ? "update_model" : "save_model", model_id: editTarget?.model_id, series_id: Number(form.series_id), model_code: form.model_code, status: form.status };
       } else if (tab === "types") {
@@ -106,8 +113,10 @@ export default function MotoModelPage({ currentUser }) {
     setEditTarget(row);
     if (tab === "brands") {
       setForm({ ...FORM_DEFAULT, brand_name: row.brand_name, status: row.status || "active" });
+    } else if (tab === "vehicle_types") {
+      setForm({ ...FORM_DEFAULT, vehicle_type_name: row.vehicle_type_name, status: row.status || "active" });
     } else if (tab === "series") {
-      setForm({ ...FORM_DEFAULT, brand_id: String(row.brand_id), series_name: row.series_name, marketing_name: row.marketing_name || "", thai_name: row.thai_name || "", engine_cc: row.engine_cc || "", status: row.status || "active" });
+      setForm({ ...FORM_DEFAULT, brand_id: String(row.brand_id), vehicle_type_id: row.vehicle_type_id ? String(row.vehicle_type_id) : "", series_name: row.series_name, marketing_name: row.marketing_name || "", thai_name: row.thai_name || "", engine_cc: row.engine_cc || "", status: row.status || "active" });
     } else if (tab === "models") {
       setForm({ ...FORM_DEFAULT, series_id: String(row.series_id), model_code: row.model_code, status: row.status || "active" });
     } else if (tab === "types") {
@@ -146,7 +155,7 @@ export default function MotoModelPage({ currentUser }) {
   const formTypeOpts = types.filter(t => !form.model_id || String(t.model_id) === form.model_id);
 
   const tabLabel = TABS.find(t => t[0] === tab)?.[1] || "";
-  const currentRows = tab === "brands" ? brands : tab === "series" ? filteredSeries : tab === "models" ? filteredModels : tab === "types" ? filteredTypes : filteredColors;
+  const currentRows = tab === "brands" ? brands : tab === "vehicle_types" ? vehicleTypes : tab === "series" ? filteredSeries : tab === "models" ? filteredModels : tab === "types" ? filteredTypes : filteredColors;
 
   const inp = (field, label, placeholder, required = false) => (
     <div style={{ marginBottom: 14 }}>
@@ -232,9 +241,10 @@ export default function MotoModelPage({ currentUser }) {
               <thead>
                 <tr>
                   <th style={{ width: 40 }}>#</th>
-                  {tab !== "brands" && <th>ยี่ห้อ</th>}
+                  {tab !== "brands" && tab !== "vehicle_types" && <th>ยี่ห้อ</th>}
                   {tab === "brands" && <th>ชื่อยี่ห้อ</th>}
-                  {tab === "series" && <><th>ชื่อรุ่น</th><th>ชื่อทางการตลาด</th><th>ชื่อภาษาไทยทางการตลาด</th><th>ซีซีรถ</th></>}
+                  {tab === "vehicle_types" && <th>ชื่อประเภทรถ</th>}
+                  {tab === "series" && <><th>ชื่อรุ่น</th><th>ชื่อทางการตลาด</th><th>ชื่อภาษาไทยทางการตลาด</th><th>ประเภทรถ</th><th>ซีซีรถ</th></>}
                   {tab === "models" && <><th>รุ่น</th><th>แบบ</th></>}
                   {tab === "types" && <><th>รุ่น</th><th>แบบ</th><th>type</th><th>รายละเอียดรุ่น</th></>}
                   {tab === "colors" && <><th>รุ่น</th><th>แบบ</th><th>type</th><th>รหัสสี</th><th>สี</th></>}
@@ -246,11 +256,12 @@ export default function MotoModelPage({ currentUser }) {
                 {currentRows.length === 0 ? (
                   <tr><td colSpan={10} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูล</td></tr>
                 ) : currentRows.map((row, i) => (
-                  <tr key={row.color_id ?? row.type_id ?? row.model_id ?? row.series_id ?? row.brand_id}>
+                  <tr key={row.color_id ?? row.type_id ?? row.model_id ?? row.series_id ?? row.vehicle_type_id ?? row.brand_id}>
                     <td>{i + 1}</td>
-                    {tab !== "brands" && <td>{row.brand_name || "-"}</td>}
+                    {tab !== "brands" && tab !== "vehicle_types" && <td>{row.brand_name || "-"}</td>}
                     {tab === "brands" && <td style={{ fontWeight: 600 }}>{row.brand_name}</td>}
-                    {tab === "series" && (<><td style={{ fontWeight: 600 }}>{row.series_name}</td><td>{row.marketing_name || "-"}</td><td>{row.thai_name || "-"}</td><td>{row.engine_cc || "-"}</td></>)}
+                    {tab === "vehicle_types" && <td style={{ fontWeight: 600 }}>{row.vehicle_type_name}</td>}
+                    {tab === "series" && (<><td style={{ fontWeight: 600 }}>{row.series_name}</td><td>{row.marketing_name || "-"}</td><td>{row.thai_name || "-"}</td><td>{(vehicleTypes.find(v => v.vehicle_type_id === row.vehicle_type_id) || {}).vehicle_type_name || "-"}</td><td>{row.engine_cc || "-"}</td></>)}
                     {tab === "models" && (<><td>{row.series_name || "-"}</td><td style={{ fontWeight: 600 }}>{row.model_code}</td></>)}
                     {tab === "types" && (<><td>{row.series_name || "-"}</td><td>{row.model_code || "-"}</td><td style={{ fontWeight: 600 }}>{row.type_name}</td><td>{row.model_detail || "-"}</td></>)}
                     {tab === "colors" && (<><td>{row.series_name || "-"}</td><td>{row.model_code || "-"}</td><td>{row.type_name || "-"}</td><td style={{ fontWeight: 600 }}>{row.color_code}</td><td>{row.color_name || "-"}</td></>)}
@@ -278,9 +289,13 @@ export default function MotoModelPage({ currentUser }) {
             {/* BRANDS */}
             {tab === "brands" && inp("brand_name", "ชื่อยี่ห้อ", "เช่น ฮอนด้า", true)}
 
+            {/* VEHICLE TYPES */}
+            {tab === "vehicle_types" && inp("vehicle_type_name", "ชื่อประเภทรถ", "เช่น AT, MT, Cub", true)}
+
             {/* SERIES */}
             {tab === "series" && (<>
               {!editTarget && sel("brand_id", "ยี่ห้อ", brands.map(b => <option key={b.brand_id} value={String(b.brand_id)}>{b.brand_name}</option>), "-- เลือกยี่ห้อ --")}
+              {sel("vehicle_type_id", "ประเภทรถ", vehicleTypes.filter(v => v.status === "active").map(v => <option key={v.vehicle_type_id} value={String(v.vehicle_type_id)}>{v.vehicle_type_name}</option>), "-- เลือกประเภทรถ --")}
               {inp("series_name", "ชื่อรุ่น", "เช่น ADV160", true)}
               {inp("marketing_name", "ชื่อทางการตลาด", "เช่น ADV160")}
               {inp("thai_name", "ชื่อภาษาไทยทางการตลาด", "เช่น เอดีวี160")}

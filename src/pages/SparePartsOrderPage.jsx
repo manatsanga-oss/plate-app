@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
@@ -43,6 +43,8 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [search, setSearch] = useState("");
   const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrMenuOpen, setOcrMenuOpen] = useState(false);
+  const ocrMenuRef = useRef(null);
   const [editId, setEditId] = useState(null);
   const [showPOModal, setShowPOModal] = useState(null);
   const [poNumber, setPoNumber] = useState("");
@@ -358,14 +360,29 @@ export default function SparePartsOrderPage({ currentUser }) {
 
 
 
-  async function handleOCR(e) {
+  // Close OCR menu when clicking outside
+  useEffect(() => {
+    if (!ocrMenuOpen) return;
+    function handleClickOutside(e) {
+      if (ocrMenuRef.current && !ocrMenuRef.current.contains(e.target)) setOcrMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [ocrMenuOpen]);
+
+  async function handleOCR(e, type) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
+    setOcrMenuOpen(false);
     setOcrLoading(true);
     try {
       const formData = new FormData();
-      formData.append("pdf", file, file.name);
+      if (type === "image") {
+        formData.append("image", file, file.name);
+      } else {
+        formData.append("pdf", file, file.name);
+      }
       const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/ocr-pdf-spare-parts", {
         method: "POST",
         body: formData,
@@ -547,6 +564,7 @@ export default function SparePartsOrderPage({ currentUser }) {
               <th style={th}>ลูกค้า</th>
               <th style={th}>ช่าง</th>
               <th style={th}>รุ่นรถ</th>
+              <th style={th}>ทะเบียนรถ</th>
               <th style={th}>สถานะจอด</th>
               <th style={th}>สถานะ</th>
               <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
@@ -557,9 +575,9 @@ export default function SparePartsOrderPage({ currentUser }) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={12} style={center}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={13} style={center}>กำลังโหลด...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={12} style={center}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={13} style={center}>ไม่พบข้อมูล</td></tr>
             ) : filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((o, i) => (
               <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                 <td style={td}>
@@ -574,6 +592,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                 <td style={td}>{o.customer_name}</td>
                 <td style={td}>{(o.technician || "").split(" ")[0]}</td>
                 <td style={td}>{o.model_name}</td>
+                <td style={td}>{o.license_plate || "-"}</td>
                 <td style={td}>{o.status === "เปิดงาน" && editParkingId === o.order_id ? (
                   <select defaultValue={o.parking_status} autoFocus onBlur={() => setEditParkingId(null)}
                     onChange={e => handleParkingChange(o.order_id, e.target.value)}
@@ -777,10 +796,27 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <label style={{ fontWeight: 600, fontSize: 14, color: "#072d6b" }}>รายการอะไหล่</label>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <label style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer", display: "inline-block" }}>
-                    ดึงข้อมูล OCR
-                    <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={handleOCR} />
-                  </label>
+                  <div ref={ocrMenuRef} style={{ position: "relative", display: "inline-block" }}>
+                    <button onClick={() => setOcrMenuOpen(!ocrMenuOpen)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}>
+                      ดึงข้อมูล OCR ▾
+                    </button>
+                    {ocrMenuOpen && (
+                      <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100, minWidth: 160, overflow: "hidden" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, color: "#334155", borderBottom: "1px solid #f1f5f9" }}
+                          onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
+                          onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                          📄 ไฟล์ PDF
+                          <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={e => handleOCR(e, "pdf")} />
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, color: "#334155" }}
+                          onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
+                          onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                          🖼️ รูปภาพ
+                          <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleOCR(e, "image")} />
+                        </label>
+                      </div>
+                    )}
+                  </div>
                   <button onClick={addItem} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}>+ เพิ่มรายการ</button>
                 </div>
               </div>

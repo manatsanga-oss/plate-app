@@ -21,6 +21,7 @@ import SparePartsOrderPage from "./pages/SparePartsOrderPage";
 import PositionPage from "./pages/PositionPage";
 import YamahaDepositPage from "./pages/YamahaDepositPage";
 import YamahaOrderPage from "./pages/YamahaOrderPage";
+import FastMovingPage from "./pages/FastMovingPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -137,6 +138,9 @@ export default function App() {
         {activeMenu === "yamahadeposit" && canAccess("yamahadeposit") && (
           <YamahaDepositPage currentUser={currentUser} />
         )}
+        {activeMenu === "fastmoving" && canAccess("fastmoving") && (
+          <FastMovingPage />
+        )}
       </main>
     </div>
   );
@@ -198,7 +202,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "stockcheck"];
-  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "hondainventory", "yamahainventory"];
+  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "hondainventory", "yamahainventory", "fastmoving"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "position", "users"];
   const uploadPages = ["upload"];
@@ -221,9 +225,10 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="yamahaorder" label="ระบบสั่งซื้ออะไหล่ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="yamahadeposit" label="รายงานเงินมัดจำคงเหลือ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
-        <MenuSubGroup title="Spare Inventory" pages={["hondainventory", "yamahainventory"]} activeMenu={activeMenu}>
+        <MenuSubGroup title="Spare Inventory" pages={["hondainventory", "yamahainventory", "fastmoving"]} activeMenu={activeMenu}>
           <MenuItem page="hondainventory" label="อะไหล่คงเหลือ HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="yamahainventory" label="อะไหล่คงเหลือ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="fastmoving" label="รายงานอะไหล่หมุนเร็ว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
       </MenuGroup>
 

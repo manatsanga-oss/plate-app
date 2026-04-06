@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
@@ -15,6 +15,7 @@ const emptyForm = () => ({
   deposit_amount: 0,
   technician: "",
   customer_phone: "",
+  license_plate: "",
   model_name: "",
   parking_status: "จอดร้าน",
   items: [emptyItem()],
@@ -35,6 +36,8 @@ export default function YamahaOrderPage({ currentUser }) {
   const [editId, setEditId] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
   const [ocrLoading, setOcrLoading] = useState(false);
+  const [ocrMenuOpen, setOcrMenuOpen] = useState(false);
+  const ocrMenuRef = useRef(null);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -95,6 +98,7 @@ export default function YamahaOrderPage({ currentUser }) {
         deposit_amount: Number(order.deposit_amount || 0),
         technician: order.technician || "",
         customer_phone: order.customer_phone || "",
+        license_plate: order.license_plate || "",
         model_name: order.model_name || "",
         parking_status: order.parking_status || "จอดร้าน",
         items: items.length > 0 ? items.map(it => ({ part_code: it.part_code || "", part_name: it.part_name || "", quantity: Number(it.quantity || 1) })) : [emptyItem()],
@@ -136,14 +140,29 @@ export default function YamahaOrderPage({ currentUser }) {
 
   function addItem() { setForm(prev => ({ ...prev, items: [...prev.items, emptyItem()] })); }
 
-  async function handleOCR(e) {
+  // Close OCR menu when clicking outside
+  useEffect(() => {
+    if (!ocrMenuOpen) return;
+    function handleClickOutside(e) {
+      if (ocrMenuRef.current && !ocrMenuRef.current.contains(e.target)) setOcrMenuOpen(false);
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [ocrMenuOpen]);
+
+  async function handleOCR(e, type) {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
+    setOcrMenuOpen(false);
     setOcrLoading(true);
     try {
       const formData = new FormData();
-      formData.append("pdf", file, file.name);
+      if (type === "image") {
+        formData.append("image", file, file.name);
+      } else {
+        formData.append("pdf", file, file.name);
+      }
       const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/ocr-pdf-spare-parts", {
         method: "POST",
         body: formData,
@@ -184,6 +203,7 @@ export default function YamahaOrderPage({ currentUser }) {
     if (!form.deposit_doc_no && form.order_type === "ปกติ") { setMessage("กรุณาเลือกเลขที่มัดจำ"); return; }
     if (!form.ref_order_id && form.order_type === "สั่งเพิ่ม") { setMessage("กรุณาเลือกใบสั่งซื้อเดิม"); return; }
     if (!form.technician.trim()) { setMessage("กรุณาเลือกช่าง"); return; }
+    if (form.parking_status === "จอดร้าน" && !form.license_plate.trim()) { setMessage("กรุณากรอกทะเบียนรถ (จอดร้าน)"); return; }
     const validItems = form.items.filter(it => (it.part_code || "").trim() || (it.part_name || "").trim());
     if (validItems.length === 0) { setMessage("กรุณาเพิ่มรายการอะไหล่อย่างน้อย 1 รายการ"); return; }
     setSaving(true);
@@ -275,13 +295,13 @@ export default function YamahaOrderPage({ currentUser }) {
         <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "#072d6b", color: "#fff" }}>
-              <th style={th}>เลขที่ใบสั่งซื้อ</th>
               <th style={th}>ประเภท</th>
               <th style={th}>วันที่มัดจำ</th>
               <th style={th}>เลขที่มัดจำ</th>
               <th style={th}>ลูกค้า</th>
               <th style={th}>ช่าง</th>
               <th style={th}>รุ่นรถ</th>
+              <th style={th}>ทะเบียนรถ</th>
               <th style={th}>สถานะจอด</th>
               <th style={th}>สถานะ</th>
               <th style={th}>จัดการ</th>
@@ -294,7 +314,6 @@ export default function YamahaOrderPage({ currentUser }) {
               <tr><td colSpan={10} style={center}>ไม่พบข้อมูล</td></tr>
             ) : sorted.map((o, i) => (
               <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
-                <td style={td}>{o.order_no || o.order_id}</td>
                 <td style={td}>
                   <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: o.order_type === "ปกติ" ? "#dbeafe" : "#fef3c7", color: o.order_type === "ปกติ" ? "#1e40af" : "#92400e" }}>{o.order_type}</span>
                 </td>
@@ -303,6 +322,7 @@ export default function YamahaOrderPage({ currentUser }) {
                 <td style={td}>{o.customer_name}</td>
                 <td style={td}>{(o.technician || "").split(" ")[0]}</td>
                 <td style={td}>{o.model_name}</td>
+                <td style={td}>{o.license_plate || "-"}</td>
                 <td style={td}>{o.parking_status}</td>
                 <td style={td}>
                   <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#fef3c7", color: "#92400e" }}>{o.status}</span>
@@ -349,7 +369,7 @@ export default function YamahaOrderPage({ currentUser }) {
                 <select value={form.deposit_doc_no} onChange={e => handleDepositSelect(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
                   <option value="">-- เลือกใบมัดจำ --</option>
                   {deposits.filter(d => d.deposit_type === "เงินมัดจำอะไหล่" && (d.receipt_no || "").startsWith("SCY01") && !orders.some(o => o.deposit_doc_no === d.receipt_no && o.order_type === "ปกติ")).map(d => (
-                    <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}</option>
+                    <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | ชำระแล้ว {fmt(d.paid_amount)} | {d.text30 || "-"}</option>
                   ))}
                 </select>
               </div>
@@ -378,6 +398,12 @@ export default function YamahaOrderPage({ currentUser }) {
             <div style={row}>
               <label style={labelStyle}>เบอร์โทร</label>
               <input value={form.customer_phone} onChange={e => setForm(p => ({ ...p, customer_phone: e.target.value }))} placeholder="เบอร์โทรลูกค้า" style={{ ...inputStyle, flex: 1 }} />
+            </div>
+
+            {/* ทะเบียนรถ */}
+            <div style={row}>
+              <label style={labelStyle}>ทะเบียนรถ</label>
+              <input value={form.license_plate} onChange={e => setForm(p => ({ ...p, license_plate: e.target.value }))} placeholder="ทะเบียนรถ" style={{ ...inputStyle, flex: 1 }} />
             </div>
 
             {/* ช่าง */}
@@ -417,10 +443,27 @@ export default function YamahaOrderPage({ currentUser }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <label style={{ fontWeight: 600, fontSize: 14, color: "#072d6b" }}>รายการอะไหล่</label>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <label style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer", display: "inline-block" }}>
-                    ดึงข้อมูล OCR
-                    <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={handleOCR} />
-                  </label>
+                  <div ref={ocrMenuRef} style={{ position: "relative", display: "inline-block" }}>
+                    <button onClick={() => setOcrMenuOpen(!ocrMenuOpen)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}>
+                      ดึงข้อมูล OCR ▾
+                    </button>
+                    {ocrMenuOpen && (
+                      <div style={{ position: "absolute", top: "100%", right: 0, marginTop: 4, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100, minWidth: 160, overflow: "hidden" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, color: "#334155", borderBottom: "1px solid #f1f5f9" }}
+                          onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
+                          onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                          📄 ไฟล์ PDF
+                          <input type="file" accept="application/pdf" style={{ display: "none" }} onChange={e => handleOCR(e, "pdf")} />
+                        </label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", cursor: "pointer", fontSize: 13, color: "#334155" }}
+                          onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
+                          onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                          🖼️ รูปภาพ
+                          <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => handleOCR(e, "image")} />
+                        </label>
+                      </div>
+                    )}
+                  </div>
                   <button onClick={addItem} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}>+ เพิ่มรายการ</button>
                 </div>
               </div>
