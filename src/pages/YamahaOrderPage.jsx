@@ -38,6 +38,9 @@ export default function YamahaOrderPage({ currentUser }) {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [ocrMenuOpen, setOcrMenuOpen] = useState(false);
   const ocrMenuRef = useRef(null);
+  const [showPOModal, setShowPOModal] = useState(null);
+  const [poNumber, setPoNumber] = useState("");
+  const [savingPO, setSavingPO] = useState(false);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -242,6 +245,20 @@ export default function YamahaOrderPage({ currentUser }) {
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
+  async function handleConfirmOrder() {
+    if (!poNumber.trim()) { setMessage("กรุณากรอกเลขที่ใบรับสั่งซื้อ"); return; }
+    setSavingPO(true);
+    setMessage("");
+    try {
+      await api("confirm_yamaha_order", { order_id: showPOModal.order_id, vendor_po_no: poNumber.trim() });
+      setShowPOModal(null);
+      setPoNumber("");
+      setMessage("บันทึกการสั่งซื้อสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSavingPO(false);
+  }
+
   const filtered = orders.filter(o => {
     if (filterStatus !== "all" && o.status !== filterStatus) return false;
     if (!search.trim()) return true;
@@ -304,14 +321,15 @@ export default function YamahaOrderPage({ currentUser }) {
               <th style={th}>ทะเบียนรถ</th>
               <th style={th}>สถานะจอด</th>
               <th style={th}>สถานะ</th>
+              <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
               <th style={th}>จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={10} style={center}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={11} style={center}>กำลังโหลด...</td></tr>
             ) : sorted.length === 0 ? (
-              <tr><td colSpan={10} style={center}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={11} style={center}>ไม่พบข้อมูล</td></tr>
             ) : sorted.map((o, i) => (
               <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                 <td style={td}>
@@ -325,12 +343,20 @@ export default function YamahaOrderPage({ currentUser }) {
                 <td style={td}>{o.license_plate || "-"}</td>
                 <td style={td}>{o.parking_status}</td>
                 <td style={td}>
-                  <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#fef3c7", color: "#92400e" }}>{o.status}</span>
+                  <span style={{
+                    padding: "2px 8px", borderRadius: 6, fontSize: 11,
+                    background: o.status === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
+                    color: o.status === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
+                  }}>{o.status}</span>
                 </td>
+                <td style={td}>{o.vendor_po_no || "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
                   {o.status === "รอดำเนินการ" && (
-                    <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>แก้ไข</button>
+                    <>
+                      <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
+                      <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
+                    </>
                   )}
                 </td>
               </tr>
@@ -549,6 +575,36 @@ export default function YamahaOrderPage({ currentUser }) {
             </table>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
               <button onClick={() => setShowDetail(null)} style={{ padding: "8px 20px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", cursor: "pointer" }}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal บันทึกเลขที่ใบรับสั่งซื้อ ===== */}
+      {showPOModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#072d6b" }}>บันทึกการสั่งซื้อ</h3>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
+              <div>ใบสั่งซื้อ: <b>{showPOModal.order_no || `#${showPOModal.order_id}`}</b></div>
+              <div>ลูกค้า: <b>{showPOModal.customer_name}</b></div>
+              <div>เลขมัดจำ: <b>{showPOModal.deposit_doc_no}</b></div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลขที่ใบรับการสั่งซื้อ (Vendor) *</label>
+              <input value={poNumber} onChange={e => setPoNumber(e.target.value)}
+                placeholder="เลขที่ใบรับจาก Vendor"
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleConfirmOrder} disabled={savingPO}
+                style={{ flex: 1, padding: "9px 0", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {savingPO ? "กำลังบันทึก..." : "ยืนยันสั่งซื้อ"}
+              </button>
+              <button onClick={() => { setShowPOModal(null); setPoNumber(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ยกเลิก
+              </button>
             </div>
           </div>
         </div>
