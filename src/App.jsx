@@ -23,6 +23,7 @@ import YamahaDepositPage from "./pages/YamahaDepositPage";
 import YamahaOrderPage from "./pages/YamahaOrderPage";
 import FastMovingPage from "./pages/FastMovingPage";
 import RepairDepositPage from "./pages/RepairDepositPage";
+import ProductGroupPage from "./pages/ProductGroupPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -145,6 +146,9 @@ export default function App() {
         {activeMenu === "fastmoving" && canAccess("fastmoving") && (
           <FastMovingPage />
         )}
+        {activeMenu === "productgroup" && canAccess("productgroup") && (
+          <ProductGroupPage currentUser={currentUser} />
+        )}
       </main>
     </div>
   );
@@ -206,7 +210,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "stockcheck"];
-  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "hondainventory", "yamahainventory", "fastmoving"];
+  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "hondainventory", "yamahainventory", "fastmoving", "productgroup"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "position", "users"];
   const uploadPages = ["upload"];
@@ -233,6 +237,9 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="hondainventory" label="อะไหล่คงเหลือ HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="yamahainventory" label="อะไหล่คงเหลือ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="fastmoving" label="รายงานอะไหล่หมุนเร็ว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        </MenuSubGroup>
+        <MenuSubGroup title="ข้อมูลหลัก" pages={["productgroup"]} activeMenu={activeMenu}>
+          <MenuItem page="productgroup" label="กลุ่มสินค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
       </MenuGroup>
 

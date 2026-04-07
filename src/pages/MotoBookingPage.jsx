@@ -430,13 +430,7 @@ export default function MotoBookingPage({ currentUser }) {
   });
 
   const filtered = bookings.filter((b) => {
-    // ซ่อนรายการที่ขายแล้วหรือยกเลิกและวันที่จองเกิน 2 เดือน
-    if ((b.status === "ขาย" || b.status === "ยกเลิก") && b.booking_date) {
-      const now = new Date();
-      const twoMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 2, 1);
-      const bookingDate = new Date(b.booking_date);
-      if (bookingDate < twoMonthsAgo) return false;
-    }
+    // การกรองขาย/ยกเลิกเกิน 1 เดือน ทำที่ backend (n8n) แล้ว
     if (filterStatus === "รถถึงคิว") return isQueueReady(b);
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
     if (filterBranch && b.branch !== filterBranch) return false;
