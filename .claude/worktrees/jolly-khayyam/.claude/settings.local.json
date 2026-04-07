@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(grep -r 'INSERT INTO.*moto_' /c/Users/manat/plate-app --include=*.sql --include=*.js --include=*.json)",
-      "Bash(git -C /c/Users/manat/plate-app log --name-only --pretty=format:)"
-    ]
-  }
-}
