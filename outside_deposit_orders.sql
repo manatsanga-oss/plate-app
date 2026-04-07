@@ -5,10 +5,13 @@ CREATE TABLE IF NOT EXISTS outside_deposit_orders (
   doc_no          VARCHAR(30) UNIQUE,           -- เลขที่ใบสั่งซื้อ (auto-gen)
   customer_name   VARCHAR(200),                 -- ชื่อลูกค้า
   customer_phone  VARCHAR(30),                  -- เบอร์โทรศัพท์
+  license_plate   VARCHAR(30),                  -- ทะเบียนรถ
   job_no          VARCHAR(50),                  -- เลขที่ใบงาน/ใบขาย
   technician      VARCHAR(100),                 -- ช่างซ่อม
   model_name      VARCHAR(100),                 -- รุ่นรถ
+  parking_status  VARCHAR(20) DEFAULT 'จอดร้าน',-- จอดร้าน/ไม่จอดร้าน
   status          VARCHAR(20) DEFAULT 'รอดำเนินการ',
+  note            TEXT,                          -- หมายเหตุ
   created_by      VARCHAR(100),
   branch          VARCHAR(100),
   created_at      TIMESTAMP DEFAULT NOW(),

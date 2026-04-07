@@ -1,0 +1,210 @@
+{
+  "name": "outside-deposit-api",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "outside-deposit-api",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "webhookId": "outside-deposit-api"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action }}",
+        "rules": {
+          "rules": [
+            { "operation": "equal", "value2": "get_orders", "output": 0 },
+            { "operation": "equal", "value2": "get_order_detail", "output": 1 },
+            { "operation": "equal", "value2": "save_order", "output": 2 },
+            { "operation": "equal", "value2": "update_order", "output": 3 },
+            { "operation": "equal", "value2": "delete_order", "output": 4 }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "id": "switch-1",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM outside_deposit_orders ORDER BY created_at DESC;"
+      },
+      "id": "pg-get-orders",
+      "name": "PG: get_orders",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [600, 100],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM outside_deposit_items WHERE order_id = {{ $json.body.order_id }} ORDER BY item_id;"
+      },
+      "id": "pg-get-detail",
+      "name": "PG: get_order_detail",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [600, 200],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+    {
+      "parameters": {
+        "functionCode": "// save_order: insert header (auto doc_no) + items\nconst body = items[0].json.body;\nconst now = new Date();\nconst yy = String(now.getFullYear()).slice(-2);\nconst mm = String(now.getMonth() + 1).padStart(2, '0');\nconst dd = String(now.getDate()).padStart(2, '0');\nconst rand = Math.floor(Math.random() * 9000 + 1000);\nconst docNo = body.doc_no && body.doc_no.trim() ? body.doc_no : `OD${yy}${mm}${dd}${rand}`;\nreturn [{ json: { ...body, doc_no: docNo } }];"
+      },
+      "id": "fn-prepare-save",
+      "name": "Prepare Save",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO outside_deposit_orders (doc_no, customer_name, customer_phone, license_plate, job_no, technician, model_name, parking_status, status, created_by, branch) VALUES ('{{ $json.doc_no }}', '{{ $json.customer_name }}', '{{ $json.customer_phone }}', '{{ $json.license_plate }}', '{{ $json.job_no }}', '{{ $json.technician }}', '{{ $json.model_name }}', '{{ $json.parking_status }}', '{{ $json.status }}', '{{ $json.created_by }}', '{{ $json.branch }}') RETURNING order_id, doc_no;"
+      },
+      "id": "pg-insert-order",
+      "name": "PG: Insert Order",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [820, 300],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+    {
+      "parameters": {
+        "functionCode": "// build INSERT for items using returned order_id\nconst orderId = $items('PG: Insert Order')[0].json.order_id;\nconst body = $items('Webhook')[0].json.body;\nconst items = (body.items || []).filter(it => it.part_code || it.part_name);\nif (!items.length) return [{ json: { sql: 'SELECT 1;', order_id: orderId, doc_no: $items('PG: Insert Order')[0].json.doc_no } }];\nconst values = items.map(it => `(${orderId}, '${(it.part_code||'').replace(/'/g,\"''\")}', '${(it.part_name||'').replace(/'/g,\"''\")}', ${Number(it.quantity)||1})`).join(',');\nconst sql = `INSERT INTO outside_deposit_items (order_id, part_code, part_name, quantity) VALUES ${values};`;\nreturn [{ json: { sql, order_id: orderId, doc_no: $items('PG: Insert Order')[0].json.doc_no } }];"
+      },
+      "id": "fn-build-items-insert",
+      "name": "Build Items Insert",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1040, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}"
+      },
+      "id": "pg-insert-items",
+      "name": "PG: Insert Items",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1260, 300],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+    {
+      "parameters": {
+        "functionCode": "// build UPDATE header + DELETE items + INSERT items\nconst body = $items('Webhook')[0].json.body;\nconst id = body.order_id;\nconst esc = s => String(s||'').replace(/'/g,\"''\");\nconst items = (body.items||[]).filter(it => it.part_code || it.part_name);\nlet sql = `UPDATE outside_deposit_orders SET customer_name='${esc(body.customer_name)}', customer_phone='${esc(body.customer_phone)}', license_plate='${esc(body.license_plate)}', job_no='${esc(body.job_no)}', technician='${esc(body.technician)}', model_name='${esc(body.model_name)}', parking_status='${esc(body.parking_status)}', status='${esc(body.status)}', updated_at=NOW() WHERE order_id=${id};`;\nsql += ` DELETE FROM outside_deposit_items WHERE order_id=${id};`;\nif (items.length) {\n  const vals = items.map(it => `(${id}, '${esc(it.part_code)}', '${esc(it.part_name)}', ${Number(it.quantity)||1})`).join(',');\n  sql += ` INSERT INTO outside_deposit_items (order_id, part_code, part_name, quantity) VALUES ${vals};`;\n}\nreturn [{ json: { sql, order_id: id } }];"
+      },
+      "id": "fn-build-update",
+      "name": "Build Update SQL",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 400]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}"
+      },
+      "id": "pg-update",
+      "name": "PG: Update Order",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [820, 400],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "DELETE FROM outside_deposit_orders WHERE order_id = {{ $json.body.order_id }};"
+      },
+      "id": "pg-delete",
+      "name": "PG: Delete Order",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [600, 500],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+    {
+      "parameters": {
+        "functionCode": "return [{ json: { success: true, ok: true, status: 'ok', order_id: $items()[0]?.json?.order_id, doc_no: $items()[0]?.json?.doc_no } }];"
+      },
+      "id": "fn-success",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1480, 350]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "id": "respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1700, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Switch Action", "type": "main", "index": 0 }]]
+    },
+    "Switch Action": {
+      "main": [
+        [{ "node": "PG: get_orders", "type": "main", "index": 0 }],
+        [{ "node": "PG: get_order_detail", "type": "main", "index": 0 }],
+        [{ "node": "Prepare Save", "type": "main", "index": 0 }],
+        [{ "node": "Build Update SQL", "type": "main", "index": 0 }],
+        [{ "node": "PG: Delete Order", "type": "main", "index": 0 }]
+      ]
+    },
+    "PG: get_orders": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "PG: get_order_detail": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "Prepare Save": {
+      "main": [[{ "node": "PG: Insert Order", "type": "main", "index": 0 }]]
+    },
+    "PG: Insert Order": {
+      "main": [[{ "node": "Build Items Insert", "type": "main", "index": 0 }]]
+    },
+    "Build Items Insert": {
+      "main": [[{ "node": "PG: Insert Items", "type": "main", "index": 0 }]]
+    },
+    "PG: Insert Items": {
+      "main": [[{ "node": "Success Response", "type": "main", "index": 0 }]]
+    },
+    "Build Update SQL": {
+      "main": [[{ "node": "PG: Update Order", "type": "main", "index": 0 }]]
+    },
+    "PG: Update Order": {
+      "main": [[{ "node": "Success Response", "type": "main", "index": 0 }]]
+    },
+    "PG: Delete Order": {
+      "main": [[{ "node": "Success Response", "type": "main", "index": 0 }]]
+    },
+    "Success Response": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "tags": []
+}

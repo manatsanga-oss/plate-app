@@ -56,13 +56,16 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterParking, setFilterParking] = useState("all");
   const [editParkingId, setEditParkingId] = useState(null);
+  const [filterDepType, setFilterDepType] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 15;
+  const [dcsMismatchIds, setDcsMismatchIds] = useState(new Set());
   const [showRepairModal, setShowRepairModal] = useState(false);
   const [repairDeposits, setRepairDeposits] = useState([]);
   const [repairDocNo, setRepairDocNo] = useState("");
   const [estimateNo, setEstimateNo] = useState("");
   const [savingRepair, setSavingRepair] = useState(false);
+  const [partSubstitutes, setPartSubstitutes] = useState([]);
 
   useEffect(() => { loadAll(); }, []);
 
@@ -74,7 +77,8 @@ export default function SparePartsOrderPage({ currentUser }) {
       const allOrders = norm(r);
       setOrders(allOrders);
       // เช็ค DCS อัตโนมัติสำหรับใบที่สถานะ "สั่งซื้อแล้ว"
-      const toCheck = allOrders.filter(o => o.status === "สั่งซื้อแล้ว" && o.vendor_po_no);
+      const toCheck = allOrders.filter(o => (o.status === "สั่งซื้อแล้ว" || o.status === "มาครบ") && o.vendor_po_no);
+      const mismatchSet = new Set();
       for (const o of toCheck) {
         try {
           const dcsRes = await api("search_dcs_orders", { vendor_po_no: o.vendor_po_no });
@@ -85,11 +89,26 @@ export default function SparePartsOrderPage({ currentUser }) {
           const orderCodes = items.map(it => strip(it.part_code));
           const invalidDcs = dcsItems.filter(d => !orderCodes.includes(strip(d.part_number)));
           const allCorrect = invalidDcs.length === 0 && dcsItems.length > 0;
-          if (allCorrect) {
-            await api("update_order_status", { order_id: o.order_id, status: "มาครบ" });
+          // เช็ค backorder
+          let hasBackorder = false;
+          try {
+            const boRes = await api("search_dcs_backorders", { vendor_po_no: o.vendor_po_no });
+            const boItems = norm(boRes).filter(b => Number(b.backorder_qty || 0) > 0);
+            hasBackorder = boItems.length > 0;
+          } catch {}
+          if (dcsItems.length > 0 && o.status === "สั่งซื้อแล้ว") {
+            const newStatus = hasBackorder ? "อะไหล่ค้างส่ง" : "มาครบ";
+            await api("update_order_status", { order_id: o.order_id, status: newStatus });
+          } else if (hasBackorder && o.status === "มาครบ") {
+            // เปลี่ยนจาก "มาครบ" เป็น "อะไหล่ค้างส่ง" ถ้าพบ backorder
+            await api("update_order_status", { order_id: o.order_id, status: "อะไหล่ค้างส่ง" });
+          }
+          if (!allCorrect && dcsItems.length > 0) {
+            mismatchSet.add(o.order_id);
           }
         } catch {}
       }
+      setDcsMismatchIds(mismatchSet);
       // โหลดใหม่ถ้ามีการอัปเดต
       if (toCheck.length > 0) {
         try { const r2 = await api("get_spare_orders"); setOrders(norm(r2)); } catch {}
@@ -97,6 +116,7 @@ export default function SparePartsOrderPage({ currentUser }) {
     } catch {}
     try { const r = await api("get_honda_deposits"); setDeposits(norm(r)); } catch {}
     try { const r = await api("get_repair_deposits"); setRepairDeposits(norm(r)); } catch {}
+    try { const r = await api("get_part_substitutes"); setPartSubstitutes(norm(r)); } catch {}
     try { const r = await api("get_car_model_names"); console.log("models:", r); setModels(norm(r)); } catch (e) { console.error("models err:", e); }
     try {
       const r = await fetch(USER_API, {
@@ -289,25 +309,92 @@ export default function SparePartsOrderPage({ currentUser }) {
         return { part_code: it.part_code, part_name: it.part_name, qty: it.quantity, status: found ? "ตรงกัน" : "รอ" };
       });
       const allCorrect = invalidDcs.length === 0 && dcsItems.length > 0;
+      // รายการใบสั่งซื้อที่ไม่ match กับ DCS
+      const unmatchedOrders = showDetail.items.filter(it => !dcsItems.find(d => strip(d.part_number) === strip(it.part_code)));
       // ถ้าถูกต้องทั้งหมด อัปเดตสถานะใน DB
       if (allCorrect) {
         try { await api("update_order_status", { order_id: showDetail.order_id, status: "มาครบ" }); } catch {}
       }
-      setShowDetail(prev => ({ ...prev, dcsStatus: { items: statusList, allCorrect, invalidDcs }, status: allCorrect ? "มาครบ" : prev.status }));
+      setShowDetail(prev => ({ ...prev, dcsStatus: { items: statusList, allCorrect, invalidDcs, dcsItems, unmatchedOrders }, status: allCorrect ? "มาครบ" : prev.status }));
       if (allCorrect) loadAll();
     } catch { /* silent */ }
   }
 
+  async function handleApproveSubstitute() {
+    if (!showDetail?.dcsStatus?.invalidDcs) return;
+    if (partSubstitutes.some(ps => ps.order_id === showDetail.order_id)) {
+      setMessage("ใบสั่งซื้อนี้เคยอนุมัติอะไหล่ใช้แทนกันแล้ว");
+      setShowDetail(prev => ({ ...prev, alreadyApproved: true }));
+      return;
+    }
+    setMessage("กำลังบันทึกอะไหล่ใช้แทนกัน...");
+    try {
+      const strip = s => (s || "").replace(/-/g, "").toUpperCase().trim();
+      const dcsMatchedCodes = (showDetail.dcsStatus.dcsItems || [])
+        .filter(d => showDetail.items.some(it => strip(it.part_code) === strip(d.part_number)))
+        .map(d => strip(d.part_number));
+      const waitingItems = showDetail.items.filter(it => !dcsMatchedCodes.includes(strip(it.part_code)));
+      // จับคู่ invalidDcs กับ waitingItems โดยเทียบ prefix รหัส (ตัด 2 หลักสุดท้าย) หรือชื่อ
+      const usedWaiting = new Set();
+      const pairs = showDetail.dcsStatus.invalidDcs.map(dcs => {
+        const dcsCode = strip(dcs.part_number);
+        const dcsPrefix = dcsCode.length >= 8 ? dcsCode.substring(0, dcsCode.length - 2) : dcsCode;
+        let bestIdx = -1;
+        let bestScore = 0;
+        waitingItems.forEach((it, idx) => {
+          if (usedWaiting.has(idx)) return;
+          const orderCode = strip(it.part_code);
+          const orderPrefix = orderCode.length >= 8 ? orderCode.substring(0, orderCode.length - 2) : orderCode;
+          // เทียบ prefix รหัส
+          if (dcsPrefix === orderPrefix) { bestScore = 100; bestIdx = idx; return; }
+          // เทียบชื่อ
+          const dcsName = (dcs.part_description || "").toLowerCase();
+          const name = (it.part_name || "").toLowerCase();
+          const score = [...name].filter((c, ci) => dcsName[ci] === c).length;
+          if (score > bestScore) { bestScore = score; bestIdx = idx; }
+        });
+        if (bestIdx >= 0) usedWaiting.add(bestIdx);
+        const matched = bestIdx >= 0 ? waitingItems[bestIdx] : null;
+        return {
+          original_code: matched?.part_code || "",
+          substitute_code: dcs.part_number || "",
+          original_name: matched?.part_name || "",
+          substitute_name: dcs.part_description || "",
+        };
+      });
+      await api("save_part_substitutes", {
+        order_id: showDetail.order_id,
+        pairs,
+        approved_by: currentUser?.name || "",
+      });
+      await api("update_order_status", { order_id: showDetail.order_id, status: "มาครบ" });
+      setShowDetail(prev => ({ ...prev, status: "มาครบ", dcsStatus: { ...prev.dcsStatus, approved: true } }));
+      setMessage("อนุมัติอะไหล่ใช้แทนกันสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+  }
+
+  async function handleRejectSubstitute() {
+    try {
+      await api("update_order_status", { order_id: showDetail.order_id, status: "อะไหล่ค้างส่ง" });
+      setShowDetail(prev => ({ ...prev, status: "อะไหล่ค้างส่ง" }));
+      setMessage("บันทึกไม่อนุมัติสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+  }
+
   async function handleSaveJob() {
-    if (!jobNumber.trim()) { setMessage("กรุณากรอกเลขที่ใบงาน"); return; }
+    const isDEPD = (showJobModal.deposit_doc_no || "").startsWith("DEPD");
+    if (isDEPD && !jobNumber.trim()) { setMessage("กรุณากรอกเลขที่ใบงาน"); return; }
+    if (!isDEPD && !appointmentDate) { setMessage("กรุณาเลือกวันที่นัดหมาย"); return; }
     setSavingJob(true);
     setMessage("");
     try {
-      await api("save_job_no", { order_id: showJobModal.order_id, job_no: jobNumber.trim(), appointment_date: appointmentDate || null });
+      await api("save_job_no", { order_id: showJobModal.order_id, job_no: jobNumber.trim() || null, appointment_date: appointmentDate || null });
       setShowJobModal(null);
       setJobNumber("");
       setAppointmentDate("");
-      setMessage("บันทึกเลขที่ใบงานสำเร็จ");
+      setMessage(isDEPD ? "บันทึกเลขที่ใบงานสำเร็จ" : "บันทึกนัดหมายสำเร็จ");
       loadAll();
     } catch { setMessage("เกิดข้อผิดพลาด"); }
     setSavingJob(false);
@@ -347,7 +434,12 @@ export default function SparePartsOrderPage({ currentUser }) {
           const sr = await api("search_inventory", { code });
           const found = norm(sr);
           if (found.length > 0) {
-            return { ...it, stock_name: found[0].source || "", stock_qty: Number(found[0].quantity || 0), stock_location: found[0].location || "" };
+            // รวมทุกสาขาที่มีสต็อก แสดงเป็น "ป.เปา(2), ห้าห้อง(1)"
+            const parts = found.filter(f => Number(f.quantity || 0) > 0);
+            const stockName = parts.map(f => `${f.source || "-"}(${Number(f.quantity || 0)})`).join(", ");
+            const totalQty = parts.reduce((s, f) => s + Number(f.quantity || 0), 0);
+            const locations = [...new Set(parts.map(f => f.location).filter(Boolean))].join(", ");
+            return { ...it, stock_name: stockName || "-", stock_qty: totalQty, stock_location: locations || "-" };
           }
         } catch {}
         return it;
@@ -360,7 +452,8 @@ export default function SparePartsOrderPage({ currentUser }) {
           boItems = norm(boRes);
         } catch {}
       }
-      setShowDetail({ ...order, items: itemsWithStock, dcsStatus: null, boItems });
+      const alreadyApproved = partSubstitutes.some(ps => ps.order_id === order.order_id);
+      setShowDetail({ ...order, items: itemsWithStock, dcsStatus: null, boItems, alreadyApproved });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
@@ -369,6 +462,8 @@ export default function SparePartsOrderPage({ currentUser }) {
       if (!repairDeposits.some(rd => rd.deposit_doc_no === o.deposit_doc_no)) return false;
     } else if (filterStatus !== "all" && o.status !== filterStatus) return false;
     if (filterParking !== "all" && o.parking_status !== filterParking) return false;
+    if (filterDepType === "repair" && !(o.deposit_doc_no || "").startsWith("DEPD")) return false;
+    if (filterDepType === "purchase" && (o.deposit_doc_no || "").startsWith("DEPD")) return false;
     if (!search.trim()) return true;
     const s = search.toLowerCase();
     return (
@@ -573,7 +668,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         })}
       </div>
 
-      {/* ===== Filter จอดร้าน ===== */}
+      {/* ===== Filter จอดร้าน + ประเภทมัดจำ ===== */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {["all", "จอดร้าน", "ไม่จอดร้าน"].map(s => {
           const count = s === "all" ? orders.length : orders.filter(o => o.parking_status === s).length;
@@ -582,6 +677,21 @@ export default function SparePartsOrderPage({ currentUser }) {
             <button key={s} onClick={() => { setFilterParking(s); setCurrentPage(1); }}
               style={{ padding: "4px 14px", fontSize: 12, borderRadius: 20, border: active ? "none" : "1px solid #d1d5db", background: active ? "#f59e0b" : "#fff", color: active ? "#fff" : "#374151", cursor: "pointer", fontWeight: active ? 700 : 400 }}>
               {s === "all" ? "ทั้งหมด" : s} ({count})
+            </button>
+          );
+        })}
+        <span style={{ borderLeft: "2px solid #d1d5db", height: 24, margin: "0 4px" }}></span>
+        {[
+          { key: "all", label: "ทั้งหมด", bg: "#6b7280" },
+          { key: "repair", label: "มัดจำซ่อม", bg: "#7c3aed" },
+          { key: "purchase", label: "มัดจำซื้อ", bg: "#3b82f6" },
+        ].map(f => {
+          const count = f.key === "all" ? orders.length : f.key === "repair" ? orders.filter(o => (o.deposit_doc_no || "").startsWith("DEPD")).length : orders.filter(o => !(o.deposit_doc_no || "").startsWith("DEPD")).length;
+          const active = filterDepType === f.key;
+          return (
+            <button key={f.key} onClick={() => { setFilterDepType(f.key); setCurrentPage(1); }}
+              style={{ padding: "4px 14px", fontSize: 12, borderRadius: 20, border: active ? "none" : "1px solid #d1d5db", background: active ? f.bg : "#fff", color: active ? "#fff" : "#374151", cursor: "pointer", fontWeight: active ? 700 : 400 }}>
+              {f.label} ({count})
             </button>
           );
         })}
@@ -646,7 +756,7 @@ export default function SparePartsOrderPage({ currentUser }) {
             ) : filtered.length === 0 ? (
               <tr><td colSpan={13} style={center}>ไม่พบข้อมูล</td></tr>
             ) : filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((o, i) => (
-              <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+              <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: dcsMismatchIds.has(o.order_id) ? "#fef9c3" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                 <td style={td}>
                   <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
@@ -673,28 +783,44 @@ export default function SparePartsOrderPage({ currentUser }) {
                     {o.parking_status}
                   </span>
                 )}</td>
-                <td style={td}>
-                  <span style={{
+                <td style={td}>{(() => {
+                  const hasDep = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
+                  if (!hasDep) return <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#dc2626", color: "#fff", fontWeight: 600 }}>ปิดซ่อม</span>;
+                  const s = o.status;
+                  return <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                    background: o.status === "ปิดงานซ่อม" ? "#dc2626" : o.status === "อะไหล่ค้างส่ง" ? "#f97316" : o.status === "เปิดงาน" ? "#ec4899" : o.status === "มาครบ" ? "#dbeafe" : o.status === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
-                    color: o.status === "ปิดงานซ่อม" ? "#fff" : o.status === "อะไหล่ค้างส่ง" ? "#fff" : o.status === "เปิดงาน" ? "#fff" : o.status === "มาครบ" ? "#1e40af" : o.status === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
-                  }}>{o.status}</span>
-                </td>
+                    background: s === "ปิดงานซ่อม" ? "#dc2626" : s === "อะไหล่ค้างส่ง" ? "#f97316" : s === "เปิดงาน" ? "#ec4899" : s === "มาครบ" ? "#dbeafe" : s === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
+                    color: s === "ปิดงานซ่อม" ? "#fff" : s === "อะไหล่ค้างส่ง" ? "#fff" : s === "เปิดงาน" ? "#fff" : s === "มาครบ" ? "#1e40af" : s === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
+                  }}>{s}</span>;
+                })()}</td>
                 <td style={td}>{o.vendor_po_no || "-"}</td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
                 <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
-                  {o.status === "รอดำเนินการ" && (
-                    <>
-                      <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
-                      <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
-                    </>
-                  )}
-                  {(o.status === "มาครบ" || o.status === "เปิดงาน") && (
-                    <button onClick={() => { setShowJobModal(o); setJobNumber(o.job_no || ""); setAppointmentDate(o.appointment_date || ""); setMessage(""); }}
-                      style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>{o.status === "เปิดงาน" ? "แก้ไข Job" : "เปิดงาน"}</button>
-                  )}
+                  {(() => {
+                    // ถ้าไม่พบเลขมัดจำใน deposits = ปิดซ่อม → ดูได้อย่างเดียว
+                    const hasDepAct = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
+                    if (!hasDepAct) return null;
+                    return (
+                      <>
+                        {o.status === "รอดำเนินการ" && (
+                          <>
+                            <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
+                            <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
+                          </>
+                        )}
+                        {(o.status === "มาครบ" || o.status === "เปิดงาน") && (() => {
+                          const isDEPD = (o.deposit_doc_no || "").startsWith("DEPD");
+                          const label = o.status === "เปิดงาน" ? (isDEPD ? "แก้ไข Job" : "แก้ไขนัด") : (isDEPD ? "เปิดงาน" : "นัดหมาย");
+                          return (
+                            <button onClick={() => { setShowJobModal(o); setJobNumber(o.job_no || ""); setAppointmentDate(o.appointment_date || ""); setMessage(""); }}
+                              style={{ background: isDEPD ? "#7c3aed" : "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>{label}</button>
+                          );
+                        })()}
+                      </>
+                    );
+                  })()}
                 </td>
               </tr>
             ))}
@@ -953,6 +1079,8 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
               <div><b>สถานะ:</b> {showDetail.status}</div>
               {showDetail.vendor_po_no && <div><b>เลขที่ใบรับสั่งซื้อ:</b> <span style={{ color: "#10b981", fontWeight: 700 }}>{showDetail.vendor_po_no}</span></div>}
+              {showDetail.job_no && <div><b>เลขที่ Job:</b> <span style={{ color: "#7c3aed", fontWeight: 700 }}>{showDetail.job_no}</span></div>}
+              {showDetail.appointment_date && <div><b>วันที่นัดหมาย:</b> {fmtDate(showDetail.appointment_date)}</div>}
               <div><b>ผู้สร้าง:</b> {showDetail.created_by}</div>
               <div><b>วันที่:</b> {fmtDate(showDetail.created_at)}</div>
             </div>
@@ -983,6 +1111,33 @@ export default function SparePartsOrderPage({ currentUser }) {
               </tbody>
             </table>
 
+            {/* รายการอะไหล่ค้างส่ง DCS */}
+            {showDetail.boItems && showDetail.boItems.length > 0 && (
+              <div style={{ marginTop: 16, padding: 12, background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 8 }}>
+                <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 8 }}>⚠ อะไหล่ค้างส่ง DCS ({showDetail.boItems.length} รายการ)</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: "#fde68a" }}>
+                      <th style={th}>#</th>
+                      <th style={th}>รหัสสินค้า</th>
+                      <th style={th}>ชื่ออะไหล่</th>
+                      <th style={{ ...th, textAlign: "center" }}>ค้างส่ง</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {showDetail.boItems.map((bo, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid #fde68a" }}>
+                        <td style={td}>{i + 1}</td>
+                        <td style={td}>{bo.part_number}</td>
+                        <td style={td}>{bo.part_description}</td>
+                        <td style={{ ...td, textAlign: "center", color: "#dc2626", fontWeight: 700 }}>{bo.backorder_qty}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {/* ตรวจสอบสถานะ DCS */}
             {showDetail.vendor_po_no && (
               <div style={{ marginTop: 16 }}>
@@ -998,27 +1153,59 @@ export default function SparePartsOrderPage({ currentUser }) {
                     </div>
                     {showDetail.dcsStatus.invalidDcs && showDetail.dcsStatus.invalidDcs.length > 0 && (
                       <div>
-                        <div style={{ fontSize: 12, color: "#991b1b", fontWeight: 600, marginBottom: 4 }}>รหัสที่ไม่ตรงกับใบสั่งซื้อ:</div>
+                        <div style={{ fontSize: 12, color: "#991b1b", fontWeight: 600, marginBottom: 4 }}>รายการที่ไม่ตรงกัน (ใบสั่งซื้อ vs DCS):</div>
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                           <thead>
                             <tr style={{ background: "#fee2e2" }}>
                               <th style={th}>#</th>
+                              <th style={th}>รหัสใบสั่งซื้อ</th>
+                              <th style={th}>ชื่อ (ใบสั่งซื้อ)</th>
+                              <th style={th}>→</th>
                               <th style={th}>รหัส DCS</th>
-                              <th style={th}>รายละเอียด</th>
+                              <th style={th}>ชื่อ (DCS)</th>
                               <th style={{ ...th, textAlign: "center" }}>จำนวน</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {showDetail.dcsStatus.invalidDcs.map((d, i) => (
-                              <tr key={i} style={{ borderBottom: "1px solid #fecaca" }}>
-                                <td style={td}>{i + 1}</td>
-                                <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#991b1b" }}>{d.part_number}</td>
-                                <td style={td}>{d.part_description}</td>
-                                <td style={{ ...td, textAlign: "center" }}>{d.order_qty}</td>
-                              </tr>
-                            ))}
+                            {showDetail.dcsStatus.invalidDcs.map((d, i) => {
+                              const unmatched = showDetail.dcsStatus.unmatchedOrders || [];
+                              const stripCode = s => (s || "").replace(/-/g, "").toUpperCase().trim();
+                              const dcsPrefix = stripCode(d.part_number).slice(0, -2);
+                              const orderItem = unmatched.find(it => stripCode(it.part_code).slice(0, -2) === dcsPrefix)
+                                || unmatched.find(it => (it.part_name || "").toLowerCase().includes((d.part_description || "").toLowerCase().substring(0, 4)))
+                                || unmatched[i] || {};
+                              return (
+                                <tr key={i} style={{ borderBottom: "1px solid #fecaca" }}>
+                                  <td style={td}>{i + 1}</td>
+                                  <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#1e40af" }}>{orderItem.part_code || "-"}</td>
+                                  <td style={td}>{orderItem.part_name || "-"}</td>
+                                  <td style={{ ...td, textAlign: "center", fontSize: 14 }}>→</td>
+                                  <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#991b1b" }}>{d.part_number}</td>
+                                  <td style={td}>{d.part_description}</td>
+                                  <td style={{ ...td, textAlign: "center" }}>{d.order_qty}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
+                      </div>
+                    )}
+                    {/* ปุ่มอนุมัติ / ไม่อนุมัติ */}
+                    {!showDetail.dcsStatus.allCorrect && !showDetail.dcsStatus.approved && !showDetail.alreadyApproved && (
+                      <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
+                        <button onClick={handleApproveSubstitute}
+                          style={{ padding: "8px 20px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+                          อนุมัติ (อะไหล่ใช้แทนกัน)
+                        </button>
+                        <button onClick={handleRejectSubstitute}
+                          style={{ padding: "8px 20px", fontSize: 13, background: "#dc2626", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+                          ไม่อนุมัติ
+                        </button>
+                      </div>
+                    )}
+                    {(showDetail.dcsStatus.approved || showDetail.alreadyApproved) && (
+                      <div style={{ marginTop: 12, padding: "8px 14px", background: "#d1fae5", borderRadius: 8, fontSize: 13, color: "#065f46", fontWeight: 600 }}>
+                        อนุมัติแล้ว - บันทึกเป็นอะไหล่ใช้แทนกัน
                       </div>
                     )}
                   </div>
@@ -1067,16 +1254,20 @@ export default function SparePartsOrderPage({ currentUser }) {
         </div>
       )}
 
-      {/* ===== Modal เปิดงาน ===== */}
-      {showJobModal && (
+      {/* ===== Modal เปิดงาน / นัดหมาย ===== */}
+      {showJobModal && (() => {
+        const isDEPD = (showJobModal.deposit_doc_no || "").startsWith("DEPD");
+        return (
         <div style={overlay}>
           <div style={{ ...modal, maxWidth: 420 }}>
-            <h3 style={{ margin: "0 0 16px", color: "#072d6b" }}>เปิดงาน - {showJobModal.order_no || showJobModal.order_id}</h3>
+            <h3 style={{ margin: "0 0 16px", color: "#072d6b" }}>{isDEPD ? "เปิดงาน" : "นัดหมาย"} - {showJobModal.order_no || showJobModal.order_id}</h3>
             {message && <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
+            {isDEPD && (
             <div style={{ marginBottom: 12 }}>
               <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>เลขที่ใบงาน</label>
               <input value={jobNumber} onChange={e => setJobNumber(e.target.value)} placeholder="กรอกเลขที่ใบงาน" style={{ ...inputStyle, width: "100%" }} />
             </div>
+            )}
             <div style={{ marginBottom: 16 }}>
               <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>วันที่นัดหมาย</label>
               <input type="date" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)} style={{ ...inputStyle, width: "100%" }} />
@@ -1093,7 +1284,8 @@ export default function SparePartsOrderPage({ currentUser }) {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* ===== Modal บันทึกมัดจำตีราคาซ่อม ===== */}
       {showRepairModal && (
