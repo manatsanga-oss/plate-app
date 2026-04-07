@@ -24,6 +24,7 @@ import YamahaOrderPage from "./pages/YamahaOrderPage";
 import FastMovingPage from "./pages/FastMovingPage";
 import RepairDepositPage from "./pages/RepairDepositPage";
 import ProductGroupPage from "./pages/ProductGroupPage";
+import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
 import LoginPage from "./pages/LoginPage";
 
 export default function App() {
@@ -64,7 +65,7 @@ export default function App() {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit") return true;
+    if (page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder") return true;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -149,6 +150,9 @@ export default function App() {
         {activeMenu === "productgroup" && canAccess("productgroup") && (
           <ProductGroupPage currentUser={currentUser} />
         )}
+        {activeMenu === "outsideorder" && canAccess("outsideorder") && (
+          <OutsideDepositOrderPage currentUser={currentUser} />
+        )}
       </main>
     </div>
   );
@@ -210,7 +214,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "stockcheck"];
-  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "hondainventory", "yamahainventory", "fastmoving", "productgroup"];
+  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "hondainventory", "yamahainventory", "fastmoving", "productgroup"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "position", "users"];
   const uploadPages = ["upload"];
@@ -227,11 +231,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
       </MenuGroup>
 
       <MenuGroup title="Spare Parts" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
-        <MenuSubGroup title="Order System" pages={["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit"]} activeMenu={activeMenu}>
+        <MenuSubGroup title="Order System" pages={["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder"]} activeMenu={activeMenu}>
           <MenuItem page="spareorder" label="ระบบสั่งซื้ออะไหล่ HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="hondadeposit" label="รายงานเงินมัดจำคงเหลือ HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="yamahaorder" label="ระบบสั่งซื้ออะไหล่ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="yamahadeposit" label="รายงานเงินมัดจำคงเหลือ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="outsideorder" label="ระบบสั่งซื้ออะไหล่นอกเงินมัดจำ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="Spare Inventory" pages={["hondainventory", "yamahainventory", "fastmoving"]} activeMenu={activeMenu}>
           <MenuItem page="hondainventory" label="อะไหล่คงเหลือ HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
