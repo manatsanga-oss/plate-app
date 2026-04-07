@@ -417,11 +417,8 @@ export default function MotoBookingPage({ currentUser }) {
     return b.status === "จอง" && q && q.qty > 0 && q.pos <= q.qty;
   };
 
-  // deposit warning: booking.deposit_no ตรงกับ receipt_no ที่ยังมี remaining_amount > 0
-  const depositWarningSet = new Set(
-    deposits.filter((d) => Number(d.remaining_amount) > 0).map((d) => d.receipt_no)
-  );
-  const hasDepositWarning = (b) => b.status === "จอง" && b.deposit_no && depositWarningSet.has(b.deposit_no);
+  // deposit warning ปิดใช้งาน: ใช้ "เลขที่มัดจำไม่ถูกต้อง" (line 768) แทน
+  const hasDepositWarning = () => false;
 
   // deposit map for cancelled bookings (from allDeposits - includes all records)
   const depositMap = {};

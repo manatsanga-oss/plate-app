@@ -446,7 +446,7 @@ export default function YamahaOrderPage({ currentUser }) {
                 <select value={form.deposit_doc_no} onChange={e => handleDepositSelect(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
                   <option value="">-- เลือกใบมัดจำ --</option>
                   {deposits.filter(d => d.deposit_type === "เงินมัดจำอะไหล่" && (d.receipt_no || "").startsWith("SCY01") && !orders.some(o => o.deposit_doc_no === d.receipt_no && o.order_type === "ปกติ")).map(d => (
-                    <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | ชำระแล้ว {fmt(d.paid_amount)} | {d.text30 || "-"}</option>
+                    <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
                   ))}
                 </select>
               </div>
@@ -591,7 +591,7 @@ export default function YamahaOrderPage({ currentUser }) {
               <div><b>ประเภท:</b> สั่งซื้อ{showDetail.order_type}</div>
               <div><b>เลขมัดจำ:</b> {showDetail.deposit_doc_no}</div>
               <div><b>ลูกค้า:</b> {showDetail.customer_name}</div>
-              <div><b>ยอดมัดจำ:</b> {fmt(showDetail.deposit_amount)}</div>
+              <div><b>ยอดคงเหลือ:</b> <span style={{ color: "#072d6b", fontWeight: 700 }}>{fmt(showDetail.current_remaining ?? showDetail.deposit_amount)}</span></div>
               <div><b>ช่าง:</b> {showDetail.technician}</div>
               <div><b>รุ่นรถ:</b> {showDetail.model_name}</div>
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
@@ -599,6 +599,7 @@ export default function YamahaOrderPage({ currentUser }) {
               {showDetail.vendor_po_no && <div><b>เลขที่ใบรับสั่งซื้อ:</b> <span style={{ color: "#10b981", fontWeight: 700 }}>{showDetail.vendor_po_no}</span></div>}
               <div><b>ผู้สร้าง:</b> {showDetail.created_by}</div>
               <div><b>วันที่:</b> {fmtDate(showDetail.created_at)}</div>
+              <div style={{ gridColumn: "1 / -1" }}><b>หมายเหตุ:</b> {showDetail.deposit_note || showDetail.note || "-"}</div>
             </div>
             <label style={{ fontWeight: 600, fontSize: 14, color: "#072d6b" }}>รายการอะไหล่</label>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 8 }}>
