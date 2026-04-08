@@ -36,6 +36,8 @@ export default function YamahaOrderPage({ currentUser }) {
   const [editId, setEditId] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
   const [ocrLoading, setOcrLoading] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 15;
   const [ocrMenuOpen, setOcrMenuOpen] = useState(false);
   const ocrMenuRef = useRef(null);
   const [showPOModal, setShowPOModal] = useState(null);
@@ -68,25 +70,42 @@ export default function YamahaOrderPage({ currentUser }) {
       const r = await api("get_yamaha_orders");
       const allOrders = norm(r);
       setOrders(allOrders);
-      // เช็คสถานะอัตโนมัติจาก yamaha_b2b_orders + backorders
-      const toCheck = allOrders.filter(o => (o.status === "รอดำเนินการ" || o.status === "สั่งซื้อแล้ว" || o.status === "มาครบ"));
+      // เช็คสถานะอัตโนมัติ: จับคู่ yamaha_spare_items กับ yamaha_b2b_orders
+      // apc_order_no ตรงกับ vendor_po_no + part_number ตรงกับ part_code
+      // เช็คใบสถานะ สั่งซื้อแล้ว / อะไหล่ค้างส่ง / มาครบ / มาไม่ครบ
+      const toCheck = allOrders.filter(o => ["สั่งซื้อแล้ว", "อะไหล่ค้างส่ง", "มาครบ", "มาไม่ครบ"].includes(o.status));
       let updated = false;
       for (const o of toCheck) {
         try {
-          // ค้นหา b2b orders ตามเลขที่ใบรับสั่งซื้อ (vendor_po_no/customer_order_no)
-          const searchKey = o.vendor_po_no || o.customer_order_no;
+          const searchKey = o.vendor_po_no;
           if (!searchKey) continue;
-          const b2bRes = await api("search_yamaha_b2b_orders", { vendor_po_no: searchKey });
-          const b2bItems = norm(b2bRes);
-          if (b2bItems.length === 0) continue;
-          // เช็ค backorder
-          let hasBackorder = false;
+          // ดึงรายการอะไหล่ในใบสั่งซื้อ
+          const detailRes = await api("get_yamaha_order_detail", { order_id: o.order_id });
+          const items = norm(detailRes);
+          const strip = s => { let c = (s || "").replace(/-/g, "").toUpperCase().trim(); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
+          const orderCodes = items.map(it => strip(it.part_code));
+          // เช็ค backorders ก่อน — ถ้าอะไหล่ในใบสั่งซื้อมี backorder ใดๆ → อะไหล่ค้างส่ง
+          let hasRelevantBackorder = false;
           try {
             const boRes = await api("search_yamaha_b2b_backorders", { vendor_po_no: searchKey });
             const boItems = norm(boRes).filter(b => Number(b.backorder_qty || 0) > 0);
-            hasBackorder = boItems.length > 0;
+            hasRelevantBackorder = boItems.some(b => {
+              const bCode = strip(b.part_number);
+              const bRecv = strip(b.received_part_number);
+              return orderCodes.includes(bCode) || orderCodes.includes(bRecv);
+            });
           } catch {}
-          const newStatus = hasBackorder ? "อะไหล่ค้างส่ง" : "มาครบ";
+          let newStatus;
+          if (hasRelevantBackorder) {
+            newStatus = "อะไหล่ค้างส่ง";
+          } else {
+            // เช็ค b2b_orders
+            const b2bRes = await api("search_yamaha_b2b_orders", { vendor_po_no: searchKey });
+            const b2bItems = norm(b2bRes);
+            const b2bCodes = b2bItems.flatMap(b => [strip(b.part_number), strip(b.received_part_number)]).filter(Boolean);
+            const allMatched = b2bItems.length > 0 && items.every(it => b2bCodes.includes(strip(it.part_code)));
+            newStatus = allMatched ? "มาครบ" : "มาไม่ครบ";
+          }
           if (o.status !== newStatus) {
             await api("update_yamaha_order_status", { order_id: o.order_id, status: newStatus });
             updated = true;
@@ -164,6 +183,8 @@ export default function YamahaOrderPage({ currentUser }) {
         ref_order_id: orderId,
         deposit_doc_no: ref.deposit_doc_no || "",
         customer_name: ref.customer_name || "",
+        customer_phone: ref.customer_phone || "",
+        license_plate: ref.license_plate || "",
         deposit_amount: Number(ref.deposit_amount || 0),
         technician: ref.technician || "",
         model_name: ref.model_name || "",
@@ -258,6 +279,29 @@ export default function YamahaOrderPage({ currentUser }) {
     setSaving(false);
   }
 
+  async function checkB2BStatus() {
+    if (!showDetail?.vendor_po_no) return;
+    try {
+      const b2bRes = await api("search_yamaha_b2b_orders", { vendor_po_no: showDetail.vendor_po_no });
+      const b2bItems = norm(b2bRes);
+      const strip = s => { let c = (s || "").replace(/-/g, "").toUpperCase().trim(); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
+      const b2bCodes = b2bItems.flatMap(b => [strip(b.part_number), strip(b.received_part_number)]).filter(Boolean);
+      const orderCodes = showDetail.items.map(it => strip(it.part_code));
+      const missingInB2b = showDetail.items.filter(it => !b2bCodes.includes(strip(it.part_code)));
+      const unmatched = b2bItems.filter(b => {
+        const bCode = strip(b.part_number);
+        const bRecv = strip(b.received_part_number);
+        return !orderCodes.includes(bCode) && !orderCodes.includes(bRecv);
+      });
+      const allMatched = b2bItems.length > 0 && missingInB2b.length === 0;
+      if (allMatched) {
+        try { await api("update_yamaha_order_status", { order_id: showDetail.order_id, status: "มาครบ" }); } catch {}
+      }
+      setShowDetail(prev => ({ ...prev, b2bItems, missingInB2b, unmatched, allMatched, status: allMatched ? "มาครบ" : prev.status }));
+      if (allMatched) loadAll();
+    } catch { /* silent */ }
+  }
+
   async function viewDetail(order) {
     try {
       const res = await api("get_yamaha_order_detail", { order_id: order.order_id });
@@ -271,40 +315,22 @@ export default function YamahaOrderPage({ currentUser }) {
           if (code.length < 12) code = code + "00";
           const sr = await api("search_inventory", { code });
           const stockItems = norm(sr);
-          if (stockItems.length === 0) return { ...it, stock_qty: 0, stock_location: "-" };
-          // รวมทุกสาขา
+          if (stockItems.length === 0) return { ...it, stock_qty: 0, stock_list: [] };
           const parts = stockItems.filter(s => Number(s.quantity || 0) > 0);
-          const stockName = parts.map(s => `${s.source || "-"}(${Number(s.quantity || 0)})`).join(", ");
           const totalQty = parts.reduce((sum, s) => sum + Number(s.quantity || 0), 0);
-          const locations = [...new Set(parts.map(s => s.location).filter(Boolean))].join(", ");
-          return { ...it, stock_qty: totalQty, stock_name: stockName || "-", stock_location: locations || "-" };
-        } catch { return { ...it, stock_qty: "-" }; }
+          return { ...it, stock_qty: totalQty, stock_list: parts };
+        } catch { return { ...it, stock_qty: "-", stock_list: [] }; }
       }));
-      // ดึงรายการ B2B Orders + Backorders
+      // ดึงอะไหล่ค้างส่งเท่านั้น ส่วน B2B check รอผู้ใช้กดปุ่ม
       let boItems = [];
-      let b2bItems = [];
-      let unmatched = [];
       const searchKey = order.vendor_po_no;
       if (searchKey) {
         try {
           const boRes = await api("search_yamaha_b2b_backorders", { vendor_po_no: searchKey });
           boItems = norm(boRes).filter(b => Number(b.backorder_qty || 0) > 0);
         } catch {}
-        try {
-          const b2bRes = await api("search_yamaha_b2b_orders", { vendor_po_no: searchKey });
-          b2bItems = norm(b2bRes);
-          // เปรียบเทียบ part_number กับรายการที่สั่ง
-          const strip = s => (s || "").replace(/-/g, "").toUpperCase().trim();
-          const orderCodes = items.map(it => strip(it.part_code));
-          // หาจาก b2b แต่ไม่อยู่ใน order
-          unmatched = b2bItems.filter(b => {
-            const bCode = strip(b.part_number);
-            const bRecv = strip(b.received_part_number);
-            return !orderCodes.includes(bCode) && !orderCodes.includes(bRecv);
-          });
-        } catch {}
       }
-      setShowDetail({ ...order, items: itemsWithStock, boItems, b2bItems, unmatched });
+      setShowDetail({ ...order, items: itemsWithStock, boItems, b2bItems: null, unmatched: null, missingInB2b: null, allMatched: null });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
@@ -379,9 +405,16 @@ export default function YamahaOrderPage({ currentUser }) {
   ${order.vendor_po_no ? `<div><b>เลขที่ใบรับสั่งซื้อ:</b> ${order.vendor_po_no}</div>` : ''}
 </div>
 <table>
-  <thead><tr><th class="center">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th class="center">จำนวน</th><th class="center">สต๊อก</th></tr></thead>
+  <thead><tr><th class="center">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th class="center">จำนวน</th><th>สต๊อก</th><th class="center">คงเหลือ</th><th>ที่เก็บ</th></tr></thead>
   <tbody>
-    ${items.length === 0 ? '<tr><td colspan="5" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}</td><td class="center">${it.quantity || 0}</td><td class="center">${it.stock_qty != null ? it.stock_qty : '-'}</td></tr>`).join('')}
+    ${items.length === 0 ? '<tr><td colspan="7" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => {
+      const stocks = Array.isArray(it.stock_list) ? it.stock_list : [];
+      const hasStock = stocks.length > 0;
+      const srcCell = hasStock ? stocks.map(s => s.source || '-').join('<br>') : '-';
+      const qtyCell = hasStock ? stocks.map(s => Number(s.quantity || 0)).join('<br>') : '-';
+      const locCell = hasStock ? stocks.map(s => s.location || '-').join('<br>') : '-';
+      return `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}</td><td class="center">${it.quantity || 0}</td><td>${srcCell}</td><td class="center">${qtyCell}</td><td>${locCell}</td></tr>`;
+    }).join('')}
   </tbody>
 </table>
 <div class="footer">
@@ -443,12 +476,15 @@ export default function YamahaOrderPage({ currentUser }) {
               <tr><td colSpan={11} style={center}>กำลังโหลด...</td></tr>
             ) : sorted.length === 0 ? (
               <tr><td colSpan={11} style={center}>ไม่พบข้อมูล</td></tr>
-            ) : sorted.map((o, i) => (
+            ) : sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((o, i) => {
+              const dep = deposits.find(d => d.receipt_no === o.deposit_doc_no);
+              const isClosed = !dep;
+              return (
               <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                 <td style={td}>
                   <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: o.order_type === "ปกติ" ? "#dbeafe" : "#fef3c7", color: o.order_type === "ปกติ" ? "#1e40af" : "#92400e" }}>{o.order_type}</span>
                 </td>
-                <td style={td}>{(() => { const dep = deposits.find(d => d.receipt_no === o.deposit_doc_no); return dep ? fmtDate(dep.deposit_date) : "-"; })()}</td>
+                <td style={td}>{dep ? fmtDate(dep.deposit_date) : <span style={{ color: "#ef4444", fontWeight: 600 }}>ปิด Job</span>}</td>
                 <td style={td}>{o.deposit_doc_no}</td>
                 <td style={td}>{o.customer_name}</td>
                 <td style={td}>{(o.technician || "").split(" ")[0]}</td>
@@ -456,16 +492,30 @@ export default function YamahaOrderPage({ currentUser }) {
                 <td style={td}>{o.license_plate || "-"}</td>
                 <td style={td}>{o.parking_status}</td>
                 <td style={td}>
-                  <span style={{
-                    padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                    background: o.status === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
-                    color: o.status === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
-                  }}>{o.status}</span>
+                  {isClosed ? (
+                    <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#fee2e2", color: "#b91c1c", fontWeight: 600 }}>ปิดซ่อม</span>
+                  ) : (
+                    <span style={{
+                      padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
+                      background: o.status === "สั่งซื้อแล้ว" ? "#d1fae5"
+                        : o.status === "มาครบ" ? "#dbeafe"
+                        : o.status === "มาไม่ครบ" ? "#fee2e2"
+                        : o.status === "อะไหล่ค้างส่ง" ? "#fed7aa"
+                        : o.status === "เปิดงาน" ? "#fce7f3"
+                        : "#fef3c7",
+                      color: o.status === "สั่งซื้อแล้ว" ? "#065f46"
+                        : o.status === "มาครบ" ? "#1e40af"
+                        : o.status === "มาไม่ครบ" ? "#b91c1c"
+                        : o.status === "อะไหล่ค้างส่ง" ? "#c2410c"
+                        : o.status === "เปิดงาน" ? "#be185d"
+                        : "#92400e",
+                    }}>{o.status}</span>
+                  )}
                 </td>
                 <td style={td}>{o.vendor_po_no || "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
-                  {o.status === "รอดำเนินการ" && (
+                  {!isClosed && o.status === "รอดำเนินการ" && (
                     <>
                       <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
                       <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
@@ -473,10 +523,23 @@ export default function YamahaOrderPage({ currentUser }) {
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
+
+      {/* ===== Pagination ===== */}
+      {sorted.length > PAGE_SIZE && (
+        <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 12 }}>
+          {Array.from({ length: Math.ceil(sorted.length / PAGE_SIZE) }, (_, i) => (
+            <button key={i} onClick={() => setCurrentPage(i + 1)}
+              style={{ padding: "4px 10px", fontSize: 12, borderRadius: 6, border: currentPage === i + 1 ? "none" : "1px solid #d1d5db", background: currentPage === i + 1 ? "#072d6b" : "#fff", color: currentPage === i + 1 ? "#fff" : "#374151", cursor: "pointer" }}>
+              {i + 1}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ===== Modal ฟอร์ม ===== */}
       {showForm && (
@@ -520,7 +583,14 @@ export default function YamahaOrderPage({ currentUser }) {
                 <label style={labelStyle}>ใบสั่งซื้อเดิม</label>
                 <select value={form.ref_order_id} onChange={e => handleRefOrderSelect(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
                   <option value="">-- เลือกใบสั่งซื้อเดิม --</option>
-                  {orders.map(o => (<option key={o.order_id} value={o.order_id}>#{o.order_id} | {o.deposit_doc_no} | {o.customer_name}</option>))}
+                  {(() => {
+                    const seen = new Set();
+                    return orders.filter(o => {
+                      if (!o.deposit_doc_no || seen.has(o.deposit_doc_no)) return false;
+                      seen.add(o.deposit_doc_no);
+                      return true;
+                    }).map(o => (<option key={o.order_id} value={o.order_id}>#{o.order_id} | {o.deposit_doc_no} | {o.customer_name}</option>));
+                  })()}
                 </select>
               </div>
             )}
@@ -529,6 +599,11 @@ export default function YamahaOrderPage({ currentUser }) {
             {form.deposit_doc_no && (
               <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 13 }}>
                 <div><b>ลูกค้า:</b> {form.customer_name}</div>
+                {form.order_type === "สั่งเพิ่ม" && form.ref_order_id && (() => {
+                  const ref = orders.find(o => String(o.order_id) === String(form.ref_order_id));
+                  return ref ? <div><b>เลขที่ใบสั่งซื้อเดิม:</b> <span style={{ color: "#072d6b", fontWeight: 700 }}>{ref.order_no || `#${ref.order_id}`}</span></div> : null;
+                })()}
+                <div><b>เลขที่มัดจำ:</b> {form.deposit_doc_no}</div>
                 <div><b>ยอดมัดจำคงเหลือ:</b> <span style={{ color: "#072d6b", fontWeight: 700 }}>{fmt(form.deposit_amount)}</span></div>
               </div>
             )}
@@ -673,23 +748,64 @@ export default function YamahaOrderPage({ currentUser }) {
                   <th style={th}>รหัสสินค้า</th>
                   <th style={th}>ชื่ออะไหล่</th>
                   <th style={{ ...th, textAlign: "center" }}>จำนวน</th>
-                  <th style={{ ...th, textAlign: "center" }}>สต๊อก</th>
+                  <th style={th}>สต๊อก</th>
+                  <th style={{ ...th, textAlign: "center" }}>คงเหลือ</th>
+                  <th style={th}>ที่เก็บ</th>
                 </tr>
               </thead>
               <tbody>
                 {(showDetail.items || []).length === 0 ? (
-                  <tr><td colSpan={5} style={center}>ไม่มีรายการ</td></tr>
-                ) : showDetail.items.map((it, i) => (
+                  <tr><td colSpan={7} style={center}>ไม่มีรายการ</td></tr>
+                ) : showDetail.items.map((it, i) => {
+                  const stocks = Array.isArray(it.stock_list) ? it.stock_list : [];
+                  const hasStock = stocks.length > 0;
+                  return (
                   <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
                     <td style={td}>{it.part_code}</td>
                     <td style={td}>{it.part_name}</td>
                     <td style={{ ...td, textAlign: "center" }}>{it.quantity}</td>
-                    <td style={{ ...td, textAlign: "center", color: it.stock_qty > 0 ? "#10b981" : "#ef4444", fontWeight: 600 }}>{it.stock_qty}</td>
+                    <td style={td}>
+                      {hasStock ? stocks.map((s, k) => <div key={k}>{s.source || "-"}</div>) : <span style={{ color: "#ef4444" }}>-</span>}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", color: "#10b981", fontWeight: 600 }}>
+                      {hasStock ? stocks.map((s, k) => <div key={k}>{Number(s.quantity || 0)}</div>) : "-"}
+                    </td>
+                    <td style={td}>
+                      {hasStock ? stocks.map((s, k) => <div key={k}>{s.location || "-"}</div>) : "-"}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
+
+            {/* รายการในใบสั่งซื้อที่ไม่เจอใน B2B (ยังไม่มาครบ) */}
+            {showDetail.missingInB2b && showDetail.missingInB2b.length > 0 && (
+              <div style={{ marginTop: 16, padding: 12, background: "#fef2f2", border: "1px solid #ef4444", borderRadius: 8 }}>
+                <div style={{ fontWeight: 700, color: "#dc2626", marginBottom: 8 }}>⚠ อะไหล่ที่ยังไม่มาครบ (ไม่เจอใน B2B) ({showDetail.missingInB2b.length} รายการ)</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: "#fecaca" }}>
+                      <th style={th}>#</th>
+                      <th style={th}>รหัสสินค้า</th>
+                      <th style={th}>ชื่ออะไหล่</th>
+                      <th style={{ ...th, textAlign: "center" }}>จำนวน</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {showDetail.missingInB2b.map((m, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid #fca5a5" }}>
+                        <td style={td}>{i + 1}</td>
+                        <td style={td}>{m.part_code}</td>
+                        <td style={td}>{m.part_name}</td>
+                        <td style={{ ...td, textAlign: "center" }}>{m.quantity}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
 
             {/* รายการที่ไม่ตรงกับใบสั่งซื้อ - จาก B2B แต่ไม่มีในรายการสั่ง */}
             {showDetail.unmatched && showDetail.unmatched.length > 0 && (
@@ -750,6 +866,9 @@ export default function YamahaOrderPage({ currentUser }) {
             )}
 
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              {showDetail.vendor_po_no && (
+                <button type="button" onClick={() => checkB2BStatus()} style={{ padding: "8px 20px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>ตรวจสอบสถานะ B2B</button>
+              )}
               <button onClick={() => printOrder(showDetail)} style={{ padding: "8px 20px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์ใบสั่งซื้อ</button>
               <button onClick={() => setShowDetail(null)} style={{ padding: "8px 20px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", cursor: "pointer" }}>ปิด</button>
             </div>
