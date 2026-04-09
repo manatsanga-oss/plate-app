@@ -669,33 +669,59 @@ export default function YamahaOrderPage({ currentUser }) {
               </div>
             </div>
 
-            {/* เลขมัดจำ */}
+            {/* เลขมัดจำ — สั่งซื้อปกติ */}
             {form.order_type === "ปกติ" && (
               <div style={row}>
                 <label style={labelStyle}>เลขที่มัดจำ</label>
                 <select value={form.deposit_doc_no} onChange={e => handleDepositSelect(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
                   <option value="">-- เลือกใบมัดจำ --</option>
-                  {deposits.filter(d => d.deposit_type === "เงินมัดจำอะไหล่" && (d.receipt_no || "").startsWith("SCY01") && !orders.some(o => o.deposit_doc_no === d.receipt_no && o.order_type === "ปกติ")).map(d => (
+                  {(() => {
+                    // filter ใบมัดจำที่ใช้ได้: เงินมัดจำอะไหล่ + SCY01 + ยังไม่ถูกใช้ + ลูกค้ายังไม่มีงานค้าง + ไม่ใช่ตีราคาซ่อม
+                    const eligible = deposits.filter(d =>
+                      d.deposit_type === "เงินมัดจำอะไหล่"
+                      && (d.receipt_no || "").startsWith("SCY01")
+                      && !orders.some(o => o.deposit_doc_no === d.receipt_no)
+                      && !orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")
+                      && !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
+                    );
+                    // จัดกลุ่มตามลูกค้า เลือกใบเก่าสุด
+                    const byCustomer = {};
+                    for (const d of eligible) {
+                      const key = d.customer_code;
+                      if (!byCustomer[key] || new Date(d.deposit_date) < new Date(byCustomer[key].deposit_date)) {
+                        byCustomer[key] = d;
+                      }
+                    }
+                    return Object.values(byCustomer);
+                  })().map(d => (
                     <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
                   ))}
                 </select>
               </div>
             )}
 
-            {/* สั่งเพิ่ม */}
+            {/* เลขมัดจำ — สั่งเพิ่ม */}
             {form.order_type === "สั่งเพิ่ม" && (
               <div style={row}>
-                <label style={labelStyle}>ใบสั่งซื้อเดิม</label>
-                <select value={form.ref_order_id} onChange={e => handleRefOrderSelect(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
-                  <option value="">-- เลือกใบสั่งซื้อเดิม --</option>
-                  {(() => {
-                    const seen = new Set();
-                    return orders.filter(o => {
-                      if (!o.deposit_doc_no || seen.has(o.deposit_doc_no)) return false;
-                      seen.add(o.deposit_doc_no);
-                      return true;
-                    }).map(o => (<option key={o.order_id} value={o.order_id}>#{o.order_id} | {o.deposit_doc_no} | {o.customer_name}</option>));
-                  })()}
+                <label style={labelStyle}>เลขที่มัดจำ (เพิ่ม)</label>
+                <select value={form.deposit_doc_no} onChange={e => handleDepositSelect(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
+                  <option value="">-- เลือกใบมัดจำเพิ่ม --</option>
+                  {deposits
+                    .filter(d =>
+                      d.deposit_type === "เงินมัดจำอะไหล่"
+                      && (d.receipt_no || "").startsWith("SCY01")
+                      // ลูกค้ามีงานเดิมที่ยังไม่ปิด
+                      && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")
+                      // ใบมัดจำนี้ยังไม่ถูกใช้
+                      && !orders.some(o => o.deposit_doc_no === d.receipt_no)
+                      // ไม่ใช่ตีราคาซ่อม
+                      && !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
+                      // มียอดคงเหลือ
+                      && Number(d.remaining_amount || 0) > 0
+                    )
+                    .map(d => (
+                      <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
+                    ))}
                 </select>
               </div>
             )}
