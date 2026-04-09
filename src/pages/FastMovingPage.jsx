@@ -20,6 +20,9 @@ export default function FastMovingPage() {
   const [eType, setEType] = useState("");
   const [eEngineCc, setEEngineCc] = useState("");
   const [eCcOp, setECcOp] = useState("="); // = | >= | <=
+  const [infoPopup, setInfoPopup] = useState(null); // edit category/name
+  const [iCategory, setICategory] = useState("");
+  const [iCustomName, setICustomName] = useState("");
   const PAGE_SIZE = 30;
 
   useEffect(() => { fetchData(); fetchCarModels(); }, []);
@@ -42,29 +45,37 @@ export default function FastMovingPage() {
     } catch { setCarModels([]); }
   }
 
-  async function saveSelection(id, sel_brand, sel_run, sel_code, sel_type, sel_vehicle_type, sel_engine_cc) {
+  async function addModel(id, sel_brand, sel_run, sel_code, sel_type, sel_vehicle_type, sel_engine_cc) {
     try {
       await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update_model", id, sel_brand, sel_run, sel_code, sel_type, sel_vehicle_type, sel_engine_cc }),
       });
-      setRows(prev => prev.map(r => r.id === id ? { ...r, sel_brand, sel_run, sel_code, sel_type, sel_vehicle_type, sel_engine_cc } : r));
+      fetchData();
+    } catch {}
+  }
+
+  async function deleteModel(pm_id) {
+    try {
+      await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_model", delete_pm_id: pm_id }),
+      });
+      fetchData();
     } catch {}
   }
 
   function openEdit(row) {
-    setEditPopup({ id: row.id, part_code: row.part_code, product_name: row.product_name });
-    setEBrand(row.sel_brand || "");
-    setEVehicleType(row.sel_vehicle_type || "");
-    setERun(row.sel_run || "");
-    setECode(row.sel_code || "");
-    setEType(row.sel_type || "");
-    // parse sel_engine_cc เช่น ">=150", "<=150", "150"
-    const raw = row.sel_engine_cc || "";
-    const m = raw.match(/^(>=|<=|=)?\s*(.*)$/);
-    setECcOp(m && m[1] ? m[1] : "=");
-    setEEngineCc(m ? m[2] : "");
+    setEditPopup({ id: row.id, part_code: row.part_code, product_name: row.product_name, models: row.models || [] });
+    setEBrand("");
+    setEVehicleType("");
+    setERun("");
+    setECode("");
+    setEType("");
+    setECcOp("=");
+    setEEngineCc("");
   }
 
   function buildCcValue() {
@@ -72,16 +83,38 @@ export default function FastMovingPage() {
     return eCcOp === "=" ? eEngineCc : `${eCcOp}${eEngineCc}`;
   }
 
-  function confirmEdit() {
+  async function confirmAdd() {
     if (!editPopup) return;
-    saveSelection(editPopup.id, eBrand, eRun, eCode, eType, eVehicleType, buildCcValue());
-    setEditPopup(null);
+    await addModel(editPopup.id, eBrand, eRun, eCode, eType, eVehicleType, buildCcValue());
+    // refresh popup state with new list
+    const fresh = (await (await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_fast_moving_report" }) })).json());
+    const updated = fresh.find(r => r.id === editPopup.id);
+    if (updated) setEditPopup({ ...editPopup, models: updated.models || [] });
+    setEBrand(""); setEVehicleType(""); setERun(""); setECode(""); setEType(""); setEEngineCc(""); setECcOp("=");
   }
 
-  function clearEdit() {
-    if (!editPopup) return;
-    saveSelection(editPopup.id, "", "", "", "", "", "");
-    setEditPopup(null);
+  async function removeModel(pm_id) {
+    await deleteModel(pm_id);
+    setEditPopup(prev => prev ? { ...prev, models: prev.models.filter(m => m.pm_id !== pm_id) } : prev);
+  }
+
+  function openInfoEdit(row) {
+    setInfoPopup({ id: row.id, part_code: row.part_code });
+    setICategory(row.category || "");
+    setICustomName(row.product_name || "");
+  }
+
+  async function saveInfo() {
+    if (!infoPopup) return;
+    try {
+      await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, custom_name: iCustomName }),
+      });
+      fetchData();
+    } catch {}
+    setInfoPopup(null);
   }
 
   const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -113,43 +146,30 @@ export default function FastMovingPage() {
     return targetCc === val;
   }
 
-  function rowMatchesScope(r) {
-    // ไม่ได้ filter อะไรเลย → ผ่านทั้งหมด
-    if (filterBrand === "all" && filterRun === "all" && filterCode === "all") return true;
-
-    // strict: filter เฉพาะรายการที่ระบุค่า sel_* ตรงเงื่อนไข
-    // brand ต้องตรง (ถ้า user เลือก)
+  function modelMatches(m) {
     if (filterBrand !== "all") {
-      if (!r.sel_brand || r.sel_brand !== filterBrand) return false;
+      if (!m.sel_brand || m.sel_brand !== filterBrand) return false;
     }
-
-    // ถ้าเลือก code → ต้อง match exact
     if (filterCode !== "all") {
-      return r.sel_code === filterCode;
+      return m.sel_code === filterCode;
     }
-
-    // ถ้าเลือก run → ต้อง match scope
     if (filterRun !== "all") {
-      // exact run match
-      if (r.sel_run === filterRun) return true;
-
-      // ตรวจสอบ vehicle_type — ถ้า row กำหนดต้องตรงกับรุ่นที่เลือก
-      if (r.sel_vehicle_type && r.sel_vehicle_type !== selectedRunVehicleType) return false;
-
-      // ตรวจสอบ CC — ถ้า row กำหนด range/value ต้องครอบคลุม
-      if (r.sel_engine_cc) {
-        if (selectedRunCc === null || !ccRangeMatches(r.sel_engine_cc, selectedRunCc)) return false;
+      if (m.sel_run === filterRun) return true;
+      if (m.sel_vehicle_type && m.sel_vehicle_type !== selectedRunVehicleType) return false;
+      if (m.sel_engine_cc) {
+        if (selectedRunCc === null || !ccRangeMatches(m.sel_engine_cc, selectedRunCc)) return false;
       }
-
-      // ผ่านทุกเงื่อนไข (brand ตรงแล้วจาก check ก่อนหน้า + vt/cc ตรงหรือไม่กำหนด)
-      // ห้ามให้ผ่านถ้า row ไม่กำหนดอะไรเลยแล้วก็ไม่มี sel_brand → จะไป match กับ "ทุกรุ่น"
-      if (!r.sel_run && !r.sel_code && !r.sel_engine_cc && !r.sel_vehicle_type && !r.sel_brand) return false;
-
+      if (!m.sel_run && !m.sel_code && !m.sel_engine_cc && !m.sel_vehicle_type && !m.sel_brand) return false;
       return true;
     }
-
-    // เลือกแค่ brand → ผ่านทุกรายการที่ brand ตรง
     return true;
+  }
+
+  function rowMatchesScope(r) {
+    if (filterBrand === "all" && filterRun === "all" && filterCode === "all") return true;
+    const models = Array.isArray(r.models) ? r.models : [];
+    if (models.length === 0) return false;
+    return models.some(modelMatches);
   }
 
   const filtered = rows.filter(r => {
@@ -257,10 +277,20 @@ export default function FastMovingPage() {
               return (
                 <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: qty <= 0 ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                   <td style={{ ...td, textAlign: "center" }}>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
-                  <td style={td}>{r.category}</td>
+                  <td onClick={() => openInfoEdit(r)} style={{ ...td, cursor: "pointer", color: "#1e40af" }}>{r.category || "-"}</td>
                   <td style={td}>{r.part_code}</td>
-                  <td style={{ ...td, whiteSpace: "normal", maxWidth: 220 }}>{r.product_name || <span style={{ color: "#9ca3af" }}>ไม่พบในสต๊อก</span>}</td>
-                  <td onClick={() => openEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 180, cursor: "pointer", color: "#1e40af", textDecoration: "underline" }}>{[r.sel_brand, r.sel_run, r.sel_code, r.sel_type, r.sel_vehicle_type].filter(Boolean).join(" / ") || "ทั่วไป"}</td>
+                  <td onClick={() => openInfoEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer", color: "#1e40af" }}>{r.product_name || <span style={{ color: "#9ca3af" }}>ไม่พบในสต๊อก</span>}</td>
+                  <td onClick={() => openEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer" }}>
+                    {Array.isArray(r.models) && r.models.length > 0 ? (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                        {r.models.map((m, idx) => (
+                          <span key={m.pm_id || idx} style={{ background: "#dbeafe", color: "#1e40af", padding: "1px 6px", borderRadius: 4, fontSize: 10 }}>
+                            {[m.sel_brand, m.sel_vehicle_type, m.sel_engine_cc && `CC${m.sel_engine_cc}`, m.sel_run, m.sel_code, m.sel_type].filter(Boolean).join("/")}
+                          </span>
+                        ))}
+                      </div>
+                    ) : <span style={{ color: "#9ca3af" }}>ทั่วไป +</span>}
+                  </td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: qty <= 0 ? "#ef4444" : "#065f46" }}>{fmtQty(qty)}</td>
                   <td style={{ ...td, textAlign: "right" }}>{fmt(r.unit_price)}</td>
                   <td style={{ ...td, textAlign: "right" }}>{fmt(r.total_value)}</td>
@@ -292,6 +322,34 @@ export default function FastMovingPage() {
         </div>
       )}
 
+      {/* ===== Popup แก้ไข หมวดหมู่/ชื่อสินค้า ===== */}
+      {infoPopup && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>แก้ไข หมวดหมู่ / ชื่อสินค้า</h3>
+              <button onClick={() => setInfoPopup(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+            <div style={{ marginBottom: 10, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, fontSize: 13, fontWeight: 700, color: "#072d6b" }}>{infoPopup.part_code}</div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>หมวดหมู่</label>
+              <input value={iCategory} onChange={e => setICategory(e.target.value)} list="cat-list" style={selectStyle} />
+              <datalist id="cat-list">
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              </datalist>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>ชื่อสินค้า</label>
+              <input value={iCustomName} onChange={e => setICustomName(e.target.value)} style={selectStyle} />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={saveInfo} style={{ flex: 1, padding: "9px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>บันทึก</button>
+              <button onClick={() => setInfoPopup(null)} style={{ padding: "9px 16px", fontSize: 13, background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ===== Popup เลือก ยี่ห้อ/รุ่น/แบบ/type ===== */}
       {editPopup && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
@@ -300,10 +358,24 @@ export default function FastMovingPage() {
               <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>เลือกยี่ห้อ / รุ่น / แบบ / type</h3>
               <button onClick={() => setEditPopup(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
             </div>
-            <div style={{ marginBottom: 14, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, fontSize: 13, borderLeft: "3px solid #1e40af" }}>
+            <div style={{ marginBottom: 12, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, fontSize: 13, borderLeft: "3px solid #1e40af" }}>
               <div style={{ fontWeight: 700, color: "#072d6b" }}>{editPopup.part_code}</div>
               <div style={{ color: "#374151", marginTop: 2 }}>{editPopup.product_name || "-"}</div>
             </div>
+
+            {Array.isArray(editPopup.models) && editPopup.models.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4 }}>รายการที่กำหนดไว้:</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {editPopup.models.map(m => (
+                    <span key={m.pm_id} style={{ background: "#dbeafe", color: "#1e40af", padding: "3px 8px", borderRadius: 12, fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+                      {[m.sel_brand, m.sel_vehicle_type, m.sel_engine_cc && `CC${m.sel_engine_cc}`, m.sel_run, m.sel_code, m.sel_type].filter(Boolean).join("/")}
+                      <button onClick={() => removeModel(m.pm_id)} style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer", padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div style={{ marginBottom: 10 }}>
               <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>ยี่ห้อ</label>
@@ -369,8 +441,7 @@ export default function FastMovingPage() {
             </div>
 
             <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={confirmEdit} style={{ flex: 1, padding: "9px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>ยืนยัน</button>
-              <button onClick={clearEdit} style={{ padding: "9px 16px", fontSize: 13, background: "#fee2e2", color: "#b91c1c", border: "none", borderRadius: 8, cursor: "pointer" }}>ลบค่า</button>
+              <button onClick={confirmAdd} style={{ flex: 1, padding: "9px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>+ เพิ่ม</button>
               <button onClick={() => setEditPopup(null)} style={{ padding: "9px 16px", fontSize: 13, background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ปิด</button>
             </div>
           </div>
