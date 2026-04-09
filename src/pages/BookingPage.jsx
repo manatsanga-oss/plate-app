@@ -286,7 +286,7 @@ export default function BookingPage({ currentUser }) {
 
           <div className="form-row">
             <label>วันที่จอง <span style={{ color: "#ef4444" }}>*</span></label>
-            <input type="date" className="form-input" value={form.booking_date} onChange={(e) => setForm({ ...form, booking_date: e.target.value })} />
+            <input type="date" className="form-input" value={form.booking_date} onChange={(e) => setForm({ ...form, booking_date: e.target.value })} onKeyDown={(e) => e.preventDefault()} />
           </div>
 
           <div className="form-row">
