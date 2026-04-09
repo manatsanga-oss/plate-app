@@ -238,9 +238,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="yamahadeposit" label="รายงานเงินมัดจำคงเหลือ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="outsideorder" label="ระบบสั่งซื้ออะไหล่นอกเงินมัดจำ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
-        <MenuSubGroup title="Spare Inventory" pages={["hondainventory", "yamahainventory", "fastmoving"]} activeMenu={activeMenu}>
-          <MenuItem page="hondainventory" label="อะไหล่คงเหลือ HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-          <MenuItem page="yamahainventory" label="อะไหล่คงเหลือ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuSubGroup title="Spare Inventory" pages={["fastmoving"]} activeMenu={activeMenu}>
           <MenuItem page="fastmoving" label="รายงานอะไหล่หมุนเร็ว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="ข้อมูลหลัก" pages={["productgroup"]} activeMenu={activeMenu}>
