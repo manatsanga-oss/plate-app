@@ -18,6 +18,7 @@ const PAGE_OPTIONS = [
   { key: "users",     label: "👤 กำหนดผู้ใช้งาน" },
   { key: "booking",   label: "🚗 จองคนขับรถ" },
   { key: "moto",     label: "🏍️ จองรถจักรยานยนต์" },
+  { key: "fastmoving", label: "⚡ รายงานอะไหล่หมุนเร็ว" },
 ];
 
 const DEFAULT_PAGES = ["dashboard", "receive", "issue"];
