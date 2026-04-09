@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-api";
+const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-master-api";
 
 export default function FastMovingPage() {
   const [rows, setRows] = useState([]);
   const [carModels, setCarModels] = useState([]);
+  const [productGroups, setProductGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("all");
@@ -25,7 +27,15 @@ export default function FastMovingPage() {
   const [iCustomName, setICustomName] = useState("");
   const PAGE_SIZE = 30;
 
-  useEffect(() => { fetchData(); fetchCarModels(); }, []);
+  useEffect(() => { fetchData(); fetchCarModels(); fetchProductGroups(); }, []);
+
+  async function fetchProductGroups() {
+    try {
+      const res = await fetch(MASTER_API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_product_groups" }) });
+      const data = await res.json();
+      setProductGroups(Array.isArray(data) ? data : (data?.data || []));
+    } catch { setProductGroups([]); }
+  }
 
   async function fetchData() {
     setLoading(true);
@@ -332,11 +342,15 @@ export default function FastMovingPage() {
             </div>
             <div style={{ marginBottom: 10, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, fontSize: 13, fontWeight: 700, color: "#072d6b" }}>{infoPopup.part_code}</div>
             <div style={{ marginBottom: 10 }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>หมวดหมู่</label>
-              <input value={iCategory} onChange={e => setICategory(e.target.value)} list="cat-list" style={selectStyle} />
-              <datalist id="cat-list">
-                {categories.map(c => <option key={c} value={c}>{c}</option>)}
-              </datalist>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>หมวดหมู่ (กลุ่มสินค้า)</label>
+              <select value={iCategory} onChange={e => setICategory(e.target.value)} style={selectStyle}>
+                <option value="">-- เลือกกลุ่มสินค้า --</option>
+                {productGroups.filter(g => g.is_active !== false).map(g => (
+                  <option key={g.group_code || g.id} value={`${g.group_code} ${g.group_name}`}>
+                    {g.group_code} {g.group_name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>ชื่อสินค้า</label>
