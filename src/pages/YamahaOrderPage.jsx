@@ -44,6 +44,9 @@ export default function YamahaOrderPage({ currentUser }) {
   const [estimateNo, setEstimateNo] = useState("");
   const [repairRemark, setRepairRemark] = useState("");
   const [savingRepair, setSavingRepair] = useState(false);
+  const [showAppointmentModal, setShowAppointmentModal] = useState(null);
+  const [appointmentDate, setAppointmentDate] = useState("");
+  const [savingAppointment, setSavingAppointment] = useState(false);
   const PAGE_SIZE = 15;
   const [ocrMenuOpen, setOcrMenuOpen] = useState(false);
   const ocrMenuRef = useRef(null);
@@ -139,6 +142,20 @@ export default function YamahaOrderPage({ currentUser }) {
       setTechs(allUsers.filter(u => u.branch === myBranch && (u.position || "").includes("ช่าง")));
     } catch {}
     setLoading(false);
+  }
+
+  async function handleSaveAppointment() {
+    if (!appointmentDate) { setMessage("กรุณาเลือกวันที่นัดหมาย"); return; }
+    setSavingAppointment(true);
+    setMessage("");
+    try {
+      await api("save_yamaha_appointment", { order_id: showAppointmentModal.order_id, appointment_date: appointmentDate });
+      setShowAppointmentModal(null);
+      setAppointmentDate("");
+      setMessage("บันทึกนัดหมายสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSavingAppointment(false);
   }
 
   async function handleSaveRepairDeposit() {
@@ -435,6 +452,7 @@ export default function YamahaOrderPage({ currentUser }) {
   <div><b>เลขมัดจำ:</b> ${order.deposit_doc_no || '-'}</div>
   <div><b>วันที่:</b> ${fmtDate(order.created_at)}</div>
   <div><b>ลูกค้า:</b> ${order.customer_name || ''}</div>
+  <div><b>เบอร์โทร:</b> ${order.customer_phone || '-'}</div>
   <div><b>ยอดมัดจำ:</b> ${fmt(order.deposit_amount)}</div>
   <div><b>ช่าง:</b> ${order.technician || '-'}</div>
   <div><b>รุ่นรถ:</b> ${order.model_name || '-'}</div>
@@ -443,6 +461,7 @@ export default function YamahaOrderPage({ currentUser }) {
   <div><b>ผู้สร้าง:</b> ${order.created_by || '-'}</div>
   <div><b>สาขา:</b> ${order.branch || '-'}</div>
   ${order.vendor_po_no ? `<div><b>เลขที่ใบรับสั่งซื้อ:</b> ${order.vendor_po_no}</div>` : ''}
+  ${order.remark ? `<div style="grid-column: 1 / -1;"><b>หมายเหตุ:</b> ${order.remark}</div>` : ''}
 </div>
 <table>
   <thead><tr><th class="center">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th class="center">จำนวน</th><th>สต๊อก</th><th class="center">คงเหลือ</th><th>ที่เก็บ</th></tr></thead>
@@ -487,19 +506,50 @@ export default function YamahaOrderPage({ currentUser }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {[
-          { key: "all", label: "ทั้งหมด", count: statusCounts.all, bg: "#072d6b" },
-          { key: "รอดำเนินการ", label: "รอดำเนินการ", count: statusCounts["รอดำเนินการ"], bg: "#f59e0b" },
-        ].map(f => (
-          <button key={f.key} onClick={() => setFilterStatus(f.key)}
-            style={{ padding: "6px 16px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none", background: filterStatus === f.key ? f.bg : "#e5e7eb", color: filterStatus === f.key ? "#fff" : "#374151" }}>
-            {f.label} ({f.count})
-          </button>
-        ))}
+        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "มาไม่ครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ตีราคาซ่อม"].map(s => {
+          const count = s === "all" ? orders.length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
+          const active = filterStatus === s;
+          return (
+            <button key={s} onClick={() => setFilterStatus(s)}
+              style={{ padding: "6px 16px", borderRadius: 20, fontSize: 12, fontWeight: active ? 700 : 400, cursor: "pointer", border: active ? "none" : "1px solid #d1d5db", background: active ? "#072d6b" : "#fff", color: active ? "#fff" : "#374151" }}>
+              {s === "all" ? "ทั้งหมด" : s} ({count})
+            </button>
+          );
+        })}
       </div>
 
       {message && !showForm && <div style={{ color: message.includes("สำเร็จ") ? "#15803d" : "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
 
+      {filterStatus === "ตีราคาซ่อม" ? (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr style={{ background: "#072d6b", color: "#fff" }}>
+                <th style={th}>#</th>
+                <th style={th}>เลขที่มัดจำ</th>
+                <th style={th}>เลขที่ใบประเมิน</th>
+                <th style={th}>ลูกค้า</th>
+                <th style={th}>ผู้บันทึก</th>
+                <th style={th}>วันที่บันทึก</th>
+              </tr>
+            </thead>
+            <tbody>
+              {repairDeposits.length === 0 ? (
+                <tr><td colSpan={6} style={center}>ไม่พบข้อมูล</td></tr>
+              ) : repairDeposits.map((rd, i) => (
+                <tr key={rd.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                  <td style={td}>{i + 1}</td>
+                  <td style={td}>{rd.deposit_doc_no}</td>
+                  <td style={td}>{rd.estimate_no}</td>
+                  <td style={td}>{rd.customer_name}</td>
+                  <td style={td}>{rd.created_by || "-"}</td>
+                  <td style={td}>{fmtDate(rd.created_at)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
       <div style={{ overflowX: "auto" }}>
         <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
@@ -513,15 +563,17 @@ export default function YamahaOrderPage({ currentUser }) {
               <th style={th}>ทะเบียนรถ</th>
               <th style={th}>สถานะจอด</th>
               <th style={th}>สถานะ</th>
+              <th style={th}>วันที่สั่งซื้อ</th>
               <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
+              <th style={th}>วันที่นัดหมาย</th>
               <th style={th}>จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={11} style={center}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={13} style={center}>กำลังโหลด...</td></tr>
             ) : sorted.length === 0 ? (
-              <tr><td colSpan={11} style={center}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={13} style={center}>ไม่พบข้อมูล</td></tr>
             ) : sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((o, i) => {
               const dep = deposits.find(d => d.receipt_no === o.deposit_doc_no);
               const isClosed = !dep;
@@ -558,7 +610,9 @@ export default function YamahaOrderPage({ currentUser }) {
                     }}>{o.status}</span>
                   )}
                 </td>
+                <td style={td}>{fmtDate(o.created_at)}</td>
                 <td style={td}>{o.vendor_po_no || "-"}</td>
+                <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
                   {!isClosed && o.status === "รอดำเนินการ" && (
@@ -567,6 +621,10 @@ export default function YamahaOrderPage({ currentUser }) {
                       <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
                     </>
                   )}
+                  {!isClosed && (o.status === "มาครบ" || o.status === "มาไม่ครบ") && (
+                    <button onClick={() => { setShowAppointmentModal(o); setAppointmentDate(o.appointment_date || ""); setMessage(""); }}
+                      style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>นัดหมาย</button>
+                  )}
                 </td>
               </tr>
               );
@@ -574,9 +632,10 @@ export default function YamahaOrderPage({ currentUser }) {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* ===== Pagination ===== */}
-      {sorted.length > PAGE_SIZE && (
+      {filterStatus !== "ตีราคาซ่อม" && sorted.length > PAGE_SIZE && (
         <div style={{ display: "flex", justifyContent: "center", gap: 4, marginTop: 12 }}>
           {Array.from({ length: Math.ceil(sorted.length / PAGE_SIZE) }, (_, i) => (
             <button key={i} onClick={() => setCurrentPage(i + 1)}
@@ -944,6 +1003,31 @@ export default function YamahaOrderPage({ currentUser }) {
                 {savingPO ? "กำลังบันทึก..." : "ยืนยันสั่งซื้อ"}
               </button>
               <button onClick={() => { setShowPOModal(null); setPoNumber(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal นัดหมาย ===== */}
+      {showAppointmentModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#7c3aed" }}>นัดหมาย - {showAppointmentModal.order_no || `#${showAppointmentModal.order_id}`}</h3>
+            {message && <div style={{ color: message.includes("สำเร็จ") ? "#15803d" : "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>วันที่นัดหมาย *</label>
+              <input type="date" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleSaveAppointment} disabled={savingAppointment}
+                style={{ flex: 1, padding: "9px 0", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {savingAppointment ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+              <button onClick={() => { setShowAppointmentModal(null); setAppointmentDate(""); }}
                 style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
                 ยกเลิก
               </button>
