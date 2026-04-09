@@ -535,7 +535,7 @@ export default function BookingPage({ currentUser }) {
                   {isAdmin && <td>{b.branch || "-"}</td>}
                   <td>{b.delivery_type || "-"}</td>
                   <td>
-                    {b.finance_company || b.car_model || "-"}
+                    {b.finance_company || b.car_model || b.purpose || "-"}
                   </td>
                   <td>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</td>
                   <td>{b.destination || "-"}</td>
