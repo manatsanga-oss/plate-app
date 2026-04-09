@@ -3,6 +3,7 @@ import React, { useEffect, useState, useRef } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
 const YAMAHA_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-deposit-api";
+const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 
 const emptyItem = () => ({ part_code: "", part_name: "", quantity: 1 });
 const emptyForm = () => ({
@@ -37,6 +38,12 @@ export default function YamahaOrderPage({ currentUser }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [ocrLoading, setOcrLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [repairDeposits, setRepairDeposits] = useState([]);
+  const [showRepairModal, setShowRepairModal] = useState(false);
+  const [repairDocNo, setRepairDocNo] = useState("");
+  const [estimateNo, setEstimateNo] = useState("");
+  const [repairRemark, setRepairRemark] = useState("");
+  const [savingRepair, setSavingRepair] = useState(false);
   const PAGE_SIZE = 15;
   const [ocrMenuOpen, setOcrMenuOpen] = useState(false);
   const ocrMenuRef = useRef(null);
@@ -66,6 +73,10 @@ export default function YamahaOrderPage({ currentUser }) {
   async function loadAll() {
     setLoading(true);
     try { const r = await api("get_car_model_names"); setModels(norm(r)); } catch {}
+    try {
+      const r = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_repair_deposits" }) }).then(res => res.json());
+      setRepairDeposits(norm(r));
+    } catch {}
     try {
       const r = await api("get_yamaha_orders");
       const allOrders = norm(r);
@@ -128,6 +139,35 @@ export default function YamahaOrderPage({ currentUser }) {
       setTechs(allUsers.filter(u => u.branch === myBranch && (u.position || "").includes("ช่าง")));
     } catch {}
     setLoading(false);
+  }
+
+  async function handleSaveRepairDeposit() {
+    if (!repairDocNo) { setMessage("กรุณาเลือกใบมัดจำ"); return; }
+    if (!estimateNo.trim()) { setMessage("กรุณากรอกเลขที่ใบประเมิน"); return; }
+    setSavingRepair(true);
+    setMessage("");
+    try {
+      const dep = deposits.find(d => d.receipt_no === repairDocNo);
+      await fetch(SPARE_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_repair_deposit",
+          deposit_doc_no: repairDocNo,
+          estimate_no: estimateNo.trim(),
+          remark: repairRemark.trim(),
+          customer_name: dep?.customer_name || "",
+          created_by: currentUser?.name || "",
+        }),
+      });
+      setShowRepairModal(false);
+      setRepairDocNo("");
+      setEstimateNo("");
+      setRepairRemark("");
+      setMessage("บันทึกมัดจำตีราคาซ่อมสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSavingRepair(false);
   }
 
   function openNew() {
@@ -431,7 +471,13 @@ export default function YamahaOrderPage({ currentUser }) {
     <div className="page-container">
       <div className="page-topbar">
         <div className="page-title">ระบบสั่งซื้ออะไหล่ YAMAHA</div>
-        <button className="btn-primary" onClick={openNew} style={{ padding: "8px 20px", fontSize: 13 }}>+ สร้างใบสั่งซื้อ</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn-primary" onClick={openNew} style={{ padding: "8px 20px", fontSize: 13 }}>+ สร้างใบสั่งซื้อ</button>
+          <button onClick={() => { setShowRepairModal(true); setRepairDocNo(""); setEstimateNo(""); setMessage(""); }}
+            style={{ padding: "8px 16px", fontSize: 13, background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
+            บันทึกมัดจำตีราคาซ่อม
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 12, marginBottom: 12, alignItems: "center" }}>
@@ -898,6 +944,62 @@ export default function YamahaOrderPage({ currentUser }) {
                 {savingPO ? "กำลังบันทึก..." : "ยืนยันสั่งซื้อ"}
               </button>
               <button onClick={() => { setShowPOModal(null); setPoNumber(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal บันทึกมัดจำตีราคาซ่อม ===== */}
+      {showRepairModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 480, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#8b5cf6" }}>บันทึกมัดจำตีราคาซ่อม</h3>
+            {message && <div style={{ color: message.includes("สำเร็จ") ? "#15803d" : "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลือกใบมัดจำ *</label>
+              <select value={repairDocNo} onChange={e => setRepairDocNo(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}>
+                <option value="">-- เลือกใบมัดจำ --</option>
+                {deposits
+                  .filter(d => !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
+                    && !orders.some(o => o.deposit_doc_no === d.receipt_no))
+                  .map(d => (
+                    <option key={d.receipt_no} value={d.receipt_no}>
+                      {d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            {repairDocNo && (() => {
+              const dep = deposits.find(d => d.receipt_no === repairDocNo);
+              return dep ? (
+                <div style={{ background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13 }}>
+                  <div><b>ลูกค้า:</b> {dep.customer_name}</div>
+                  <div><b>ยอดมัดจำ:</b> {fmt(dep.deposit_amount)}</div>
+                </div>
+              ) : null;
+            })()}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลขที่ใบประเมิน *</label>
+              <input value={estimateNo} onChange={e => setEstimateNo(e.target.value)}
+                placeholder="กรอกเลขที่ใบประเมิน"
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>หมายเหตุ</label>
+              <textarea value={repairRemark} onChange={e => setRepairRemark(e.target.value)}
+                placeholder="หมายเหตุ (ถ้ามี)" rows={3}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleSaveRepairDeposit} disabled={savingRepair}
+                style={{ flex: 1, padding: "9px 0", background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {savingRepair ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+              <button onClick={() => setShowRepairModal(false)}
                 style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
                 ยกเลิก
               </button>

@@ -217,6 +217,31 @@ export default function SparePartsOrderPage({ currentUser }) {
     }
   }
 
+  function handleAddDepositSelect(docNo) {
+    const dep = deposits.find(d => d.deposit_doc_no === docNo);
+    if (!dep) return;
+    // หาใบสั่งซื้อเดิมของลูกค้าคนนี้ (ใบล่าสุด)
+    const prevOrder = orders
+      .filter(o => o.customer_code === dep.customer_code)
+      .sort((a, b) => (b.order_id || 0) - (a.order_id || 0))[0];
+    setForm(prev => ({
+      ...prev,
+      deposit_doc_no: docNo,
+      ref_order_id: prevOrder ? prevOrder.order_id : "",
+      customer_code: dep.customer_code || "",
+      customer_name: dep.customer_name || "",
+      vin: dep.vin || prevOrder?.vin || "",
+      deposit_amount: Number(dep.remaining_amount || 0),
+      // copy ข้อมูลจากใบเดิม
+      technician: prevOrder?.technician || prev.technician,
+      model_name: prevOrder?.model_name || prev.model_name,
+      parking_status: prevOrder?.parking_status || prev.parking_status,
+      customer_phone: prevOrder?.customer_phone || prev.customer_phone,
+      license_plate: prevOrder?.license_plate || prev.license_plate,
+      items: [emptyItem()],
+    }));
+  }
+
   function handleRefOrderSelect(orderId) {
     const ref = orders.find(o => String(o.order_id) === String(orderId));
     if (ref) {
@@ -256,11 +281,9 @@ export default function SparePartsOrderPage({ currentUser }) {
   }
 
   async function handleSave() {
-    if (!form.deposit_doc_no && form.order_type === "ปกติ") {
-      setMessage("กรุณาเลือกเลขที่มัดจำ"); return;
-    }
-    if (!form.ref_order_id && form.order_type === "สั่งเพิ่ม") {
-      setMessage("กรุณาเลือกใบสั่งซื้อเดิม"); return;
+    if (!form.deposit_doc_no) {
+      setMessage(form.order_type === "สั่งเพิ่ม" ? "กรุณาเลือกใบมัดจำเพิ่ม" : "กรุณาเลือกเลขที่มัดจำ");
+      return;
     }
     if (!form.customer_phone.trim()) { setMessage("กรุณากรอกเบอร์โทรลูกค้า"); return; }
     if (form.parking_status === "จอดร้าน" && !form.license_plate.trim()) { setMessage("กรุณากรอกทะเบียนรถ (จอดร้าน)"); return; }
@@ -453,7 +476,20 @@ export default function SparePartsOrderPage({ currentUser }) {
         } catch {}
       }
       const alreadyApproved = partSubstitutes.some(ps => ps.order_id === order.order_id);
-      setShowDetail({ ...order, items: itemsWithStock, dcsStatus: null, boItems, alreadyApproved });
+      // เช็คว่าอะไหล่ครบทุกรายการ (stock_qty >= quantity)
+      const allInStock = itemsWithStock.length > 0 && itemsWithStock.every(
+        it => Number(it.stock_qty || 0) >= Number(it.quantity || 0)
+      );
+      let finalStatus = order.status;
+      if (allInStock && order.status !== "มาครบ" && order.status !== "เปิดงาน" && order.status !== "ปิดงานซ่อม") {
+        try {
+          await api("update_order_status", { order_id: order.order_id, status: "มาครบ" });
+          finalStatus = "มาครบ";
+          // อัปเดตใน list ด้วย
+          setOrders(prev => prev.map(o => o.order_id === order.order_id ? { ...o, status: "มาครบ" } : o));
+        } catch {}
+      }
+      setShowDetail({ ...order, status: finalStatus, items: itemsWithStock, dcsStatus: null, boItems, alreadyApproved });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
@@ -875,7 +911,23 @@ export default function SparePartsOrderPage({ currentUser }) {
                   style={{ ...inputStyle, flex: 1 }}
                 >
                   <option value="">-- เลือกใบมัดจำ --</option>
-                  {deposits.filter(d => !orders.some(o => o.deposit_doc_no === d.deposit_doc_no && o.order_type === "ปกติ") && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)).map(d => (
+                  {(() => {
+                    // filter ก่อน แล้วเลือกใบเก่าสุดต่อลูกค้า
+                    const eligible = deposits.filter(d =>
+                      !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
+                      && !orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")
+                      && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
+                    );
+                    // จัดกลุ่มตามลูกค้า เลือกใบเก่าสุด (วันที่น้อยสุด)
+                    const byCustomer = {};
+                    for (const d of eligible) {
+                      const key = d.customer_code;
+                      if (!byCustomer[key] || new Date(d.deposit_date) < new Date(byCustomer[key].deposit_date)) {
+                        byCustomer[key] = d;
+                      }
+                    }
+                    return Object.values(byCustomer);
+                  })().map(d => (
                     <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
                       {d.deposit_doc_no} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
                     </option>
@@ -884,21 +936,32 @@ export default function SparePartsOrderPage({ currentUser }) {
               </div>
             )}
 
-            {/* ถ้าสั่งเพิ่ม: เลือกใบเดิม */}
+            {/* ถ้าสั่งเพิ่ม: เลือกใบมัดจำที่ 2 (ลูกค้าที่สั่งไปแล้ว) */}
             {form.order_type === "สั่งเพิ่ม" && (
               <div style={row}>
-                <label style={labelStyle}>ใบสั่งซื้อเดิม</label>
+                <label style={labelStyle}>เลขที่มัดจำ (เพิ่ม)</label>
                 <select
-                  value={form.ref_order_id}
-                  onChange={e => handleRefOrderSelect(e.target.value)}
+                  value={form.deposit_doc_no}
+                  onChange={e => handleAddDepositSelect(e.target.value)}
                   style={{ ...inputStyle, flex: 1 }}
                 >
-                  <option value="">-- เลือกใบสั่งซื้อเดิม --</option>
-                  {orders.map(o => (
-                    <option key={o.order_id} value={o.order_id}>
-                      #{o.order_id} | {o.deposit_doc_no} | {o.customer_name}
-                    </option>
-                  ))}
+                  <option value="">-- เลือกใบมัดจำเพิ่ม --</option>
+                  {deposits
+                    .filter(d =>
+                      // ลูกค้ามีงานเดิมที่ยังไม่ปิด
+                      orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")
+                      // ใบมัดจำนี้ยังไม่ถูกสั่งซื้อ
+                      && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
+                      // ไม่ใช่ตีราคาซ่อม
+                      && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
+                      // มียอดคงเหลือ
+                      && Number(d.remaining_amount || 0) > 0
+                    )
+                    .map(d => (
+                      <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
+                        {d.deposit_doc_no} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
+                      </option>
+                    ))}
                 </select>
               </div>
             )}
@@ -1076,6 +1139,8 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div><b>ยอดมัดจำ:</b> {fmt(showDetail.deposit_amount)}</div>
               <div><b>ช่าง:</b> {showDetail.technician}</div>
               <div><b>รุ่นรถ:</b> {showDetail.model_name}</div>
+              <div><b>เบอร์โทร:</b> {showDetail.customer_phone || "-"}</div>
+              <div><b>ทะเบียนรถ:</b> {showDetail.license_plate || "-"}</div>
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
               <div><b>สถานะ:</b> {showDetail.status}</div>
               {showDetail.vendor_po_no && <div><b>เลขที่ใบรับสั่งซื้อ:</b> <span style={{ color: "#10b981", fontWeight: 700 }}>{showDetail.vendor_po_no}</span></div>}
