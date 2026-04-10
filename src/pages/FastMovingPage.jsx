@@ -24,6 +24,7 @@ export default function FastMovingPage() {
   const [eCcOp, setECcOp] = useState("="); // = | >= | <=
   const [infoPopup, setInfoPopup] = useState(null); // edit category/name
   const [iCategory, setICategory] = useState("");
+  const [iProductGroup, setIProductGroup] = useState("");
   const [iCustomName, setICustomName] = useState("");
   const PAGE_SIZE = 30;
 
@@ -111,6 +112,7 @@ export default function FastMovingPage() {
   function openInfoEdit(row) {
     setInfoPopup({ id: row.id, part_code: row.part_code });
     setICategory(row.category || "");
+    setIProductGroup(row.product_group || "");
     setICustomName(row.product_name || "");
   }
 
@@ -120,7 +122,7 @@ export default function FastMovingPage() {
       await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, custom_name: iCustomName }),
+        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName }),
       });
       fetchData();
     } catch {}
@@ -267,6 +269,7 @@ export default function FastMovingPage() {
             <tr style={{ background: "#072d6b", color: "#fff" }}>
               <th style={th}>#</th>
               <th style={th}>หมวดหมู่</th>
+              <th style={th}>กลุ่มสินค้า</th>
               <th style={th}>รหัสอะไหล่</th>
               <th style={th}>ชื่อสินค้า</th>
               <th style={th}>รุ่นที่ใช้</th>
@@ -288,6 +291,7 @@ export default function FastMovingPage() {
                 <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: qty <= 0 ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                   <td style={{ ...td, textAlign: "center" }}>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
                   <td onClick={() => openInfoEdit(r)} style={{ ...td, cursor: "pointer", color: "#1e40af" }}>{r.category || "-"}</td>
+                  <td onClick={() => openInfoEdit(r)} style={{ ...td, cursor: "pointer", color: "#1e40af" }}>{r.product_group || "-"}</td>
                   <td style={td}>{r.part_code}</td>
                   <td onClick={() => openInfoEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer", color: "#1e40af" }}>{r.product_name || <span style={{ color: "#9ca3af" }}>ไม่พบในสต๊อก</span>}</td>
                   <td onClick={() => openEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer" }}>
@@ -342,10 +346,17 @@ export default function FastMovingPage() {
             </div>
             <div style={{ marginBottom: 10, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, fontSize: 13, fontWeight: 700, color: "#072d6b" }}>{infoPopup.part_code}</div>
             <div style={{ marginBottom: 10 }}>
-              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>หมวดหมู่ (กลุ่มสินค้า)</label>
-              <select value={iCategory} onChange={e => setICategory(e.target.value)} style={selectStyle}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>หมวดหมู่</label>
+              <input value={iCategory} onChange={e => setICategory(e.target.value)} list="cat-list" style={selectStyle} />
+              <datalist id="cat-list">
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              </datalist>
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>กลุ่มสินค้า</label>
+              <select value={iProductGroup} onChange={e => setIProductGroup(e.target.value)} style={selectStyle}>
                 <option value="">-- เลือกกลุ่มสินค้า --</option>
-                {productGroups.filter(g => g.is_active !== false).map(g => (
+                {productGroups.filter(g => g.status !== "inactive").map(g => (
                   <option key={g.group_code || g.id} value={`${g.group_code} ${g.group_name}`}>
                     {g.group_code} {g.group_name}
                   </option>

@@ -1187,6 +1187,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                       <th style={th}>รหัสสินค้า</th>
                       <th style={th}>ชื่ออะไหล่</th>
                       <th style={{ ...th, textAlign: "center" }}>ค้างส่ง</th>
+                      <th style={{ ...th, textAlign: "center" }}>คาดว่าได้รับ</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1196,6 +1197,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                         <td style={td}>{bo.part_number}</td>
                         <td style={td}>{bo.part_description}</td>
                         <td style={{ ...td, textAlign: "center", color: "#dc2626", fontWeight: 700 }}>{bo.backorder_qty}</td>
+                        <td style={{ ...td, textAlign: "center" }}>{bo.delivery_date ? new Date(bo.delivery_date).toLocaleDateString("th-TH") : "-"}</td>
                       </tr>
                     ))}
                   </tbody>
