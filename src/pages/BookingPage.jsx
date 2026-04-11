@@ -508,7 +508,9 @@ export default function BookingPage({ currentUser }) {
       ) : filtered.length === 0 ? (
         <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>ไม่มีรายการ</div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
+        <>
+        {/* Desktop: ตาราง */}
+        <div className="booking-desktop" style={{ overflowX: "auto" }}>
           <table className="data-table">
             <thead>
               <tr>
@@ -534,31 +536,22 @@ export default function BookingPage({ currentUser }) {
                   <td style={{ whiteSpace: "nowrap" }}>{b.booking_time || "-"}</td>
                   {isAdmin && <td>{b.branch || "-"}</td>}
                   <td>{b.delivery_type || "-"}</td>
-                  <td>
-                    {b.finance_company || b.car_model || b.purpose || "-"}
-                  </td>
+                  <td>{b.finance_company || b.car_model || b.purpose || "-"}</td>
                   <td>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</td>
                   <td>{b.destination || "-"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{b.distance_text || "-"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{b.duration_text || "-"}</td>
                   <td>
                     {b.status ? (
-                      <span style={{
-                        background: STATUS_COLOR[b.status] || "#d1d5db",
-                        color: "#fff", padding: "3px 10px", borderRadius: 12, fontSize: 13, whiteSpace: "nowrap",
-                      }}>
+                      <span style={{ background: STATUS_COLOR[b.status] || "#d1d5db", color: "#fff", padding: "3px 10px", borderRadius: 12, fontSize: 13, whiteSpace: "nowrap" }}>
                         {STATUS_LABEL[b.status] || b.status}
                       </span>
                     ) : "-"}
                   </td>
                   <td>
                     {isBooked(b.status) && (
-                      <button
-                        style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}
-                        onClick={() => { setCancelTarget(b); setCancelReason(""); }}
-                      >
-                        ยกเลิก
-                      </button>
+                      <button style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}
+                        onClick={() => { setCancelTarget(b); setCancelReason(""); }}>ยกเลิก</button>
                     )}
                   </td>
                 </tr>
@@ -566,6 +559,50 @@ export default function BookingPage({ currentUser }) {
             </tbody>
           </table>
         </div>
+
+        {/* Mobile: Card */}
+        <div className="booking-mobile" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {filtered.map((b) => (
+            <div key={b.booking_id} style={{
+              background: "#fff", borderRadius: 12, padding: 14, boxShadow: "0 2px 8px rgba(7,45,107,0.08)",
+              borderLeft: `4px solid ${STATUS_COLOR[b.status] || "#d1d5db"}`,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 15, fontWeight: 700, color: "#072d6b" }}>
+                    {b.booking_date ? new Date(b.booking_date).toLocaleDateString("th-TH") : "-"}
+                  </span>
+                  <span style={{ fontSize: 14, color: "#374151" }}>{b.booking_time || "-"}</span>
+                  {b.status && (
+                    <span style={{ background: STATUS_COLOR[b.status] || "#d1d5db", color: "#fff", padding: "2px 10px", borderRadius: 12, fontSize: 12 }}>
+                      {STATUS_LABEL[b.status] || b.status}
+                    </span>
+                  )}
+                </div>
+                {isBooked(b.status) && (
+                  <button onClick={() => { setCancelTarget(b); setCancelReason(""); }}
+                    style={{ padding: "4px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                    ยกเลิก
+                  </button>
+                )}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 12px", fontSize: 13 }}>
+                {isAdmin && <div><span style={{ color: "#6b7280" }}>สาขา:</span> <b>{b.branch || "-"}</b></div>}
+                <div><span style={{ color: "#6b7280" }}>ประเภท:</span> <b>{b.delivery_type || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>รุ่นรถ:</span> <b>{b.car_model || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>คนขับ:</span> <b>{b.driver_id ? driverLabel(b.driver_id) : (b.driver_name || "-")}</b></div>
+                {b.finance_company && <div><span style={{ color: "#6b7280" }}>ไฟแนนท์:</span> <b>{b.finance_company}</b></div>}
+                {b.distance_text && <div><span style={{ color: "#6b7280" }}>ระยะทาง:</span> <b>{b.distance_text}</b></div>}
+                {b.duration_text && <div><span style={{ color: "#6b7280" }}>เวลา:</span> <b>{b.duration_text}</b></div>}
+              </div>
+              <div style={{ marginTop: 6, fontSize: 13 }}>
+                <span style={{ color: "#6b7280" }}>ปลายทาง:</span> <b style={{ color: "#072d6b" }}>{b.destination_formatted || b.destination || "-"}</b>
+              </div>
+              {b.purpose && <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>หมายเหตุ: {b.purpose}</div>}
+            </div>
+          ))}
+        </div>
+        </>
       )}
 
       {/* Cancel Modal */}

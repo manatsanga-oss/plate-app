@@ -363,6 +363,60 @@ body {
   .topbar-left h1 {
     font-size: 24px;
   }
+
+  .booking-desktop {
+    display: none !important;
+  }
+
+  .booking-mobile {
+    display: flex !important;
+  }
+
+  /* ฟอร์มจองรถ mobile */
+  .form-card {
+    padding: 14px !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    border-radius: 10px !important;
+  }
+
+  .form-card h3 {
+    font-size: 16px !important;
+    text-align: center;
+  }
+
+  .form-row label {
+    font-size: 13px !important;
+  }
+
+  .form-input {
+    font-size: 16px !important;
+    padding: 10px 12px !important;
+    border-radius: 10px !important;
+  }
+
+  .page-topbar {
+    flex-direction: column;
+    gap: 8px;
+    align-items: flex-start !important;
+  }
+
+  .page-title {
+    font-size: 18px !important;
+  }
+
+  .btn-primary, .btn-secondary {
+    font-size: 14px !important;
+    padding: 10px 16px !important;
+    width: 100%;
+    text-align: center;
+  }
+}
+
+@media (min-width: 769px) {
+  .booking-mobile {
+    display: none !important;
+  }
 }
 .sidebar-user-box {
   margin-top: auto;
