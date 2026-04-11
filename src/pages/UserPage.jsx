@@ -19,6 +19,7 @@ const PAGE_OPTIONS = [
   { key: "booking",   label: "🚗 จองคนขับรถ" },
   { key: "moto",     label: "🏍️ จองรถจักรยานยนต์" },
   { key: "fastmoving", label: "⚡ รายงานอะไหล่หมุนเร็ว" },
+  { key: "pettycash", label: "💰 เงินสดย่อย" },
 ];
 
 const DEFAULT_PAGES = ["dashboard", "receive", "issue"];
