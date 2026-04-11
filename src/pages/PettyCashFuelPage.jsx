@@ -34,7 +34,7 @@ export default function PettyCashFuelPage({ currentUser }) {
     setLoading(true);
     try {
       const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_sales_for_fuel", branch_code: currentUser?.branch_code || "00000", min_date: from || dateFrom, max_date: to || dateTo, brand: brand || selCompany.brand }) });
+        body: JSON.stringify({ action: "get_sales_for_fuel", branch_code: (currentUser?.branch || "").split(" ")[0] || "00000", min_date: from || dateFrom, max_date: to || dateTo, brand: brand || selCompany.brand }) });
       const data = await res.json();
       setSales(Array.isArray(data) ? data : []);
     } catch { setSales([]); }
