@@ -20,6 +20,7 @@ const UPLOAD_GROUPS = [
       { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
       { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
       { key: "yamaha-b2b-backorders", label: "รายงานอะไหล่ค้างส่ง YAMAHA B2B", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "yamaha_b2b_backorders", url: `${BASE}/upload-yamaha-b2b-backorders` },
+      { key: "pending-job", label: "รายการอะไหล่เบิกค้างปิด JOB", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "pending_job_parts", url: `${BASE}/upload-pending-job` },
     ],
   },
   {

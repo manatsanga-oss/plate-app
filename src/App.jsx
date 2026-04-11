@@ -23,6 +23,7 @@ import PositionPage from "./pages/PositionPage";
 import YamahaDepositPage from "./pages/YamahaDepositPage";
 import YamahaOrderPage from "./pages/YamahaOrderPage";
 import FastMovingPage from "./pages/FastMovingPage";
+import MotoStockPage from "./pages/MotoStockPage";
 import RepairDepositPage from "./pages/RepairDepositPage";
 import ProductGroupPage from "./pages/ProductGroupPage";
 import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
@@ -71,7 +72,7 @@ export default function App() {
     if (page === "upload") return false;
     if (page === "convert") return false;
     if (page === "subunit") return false;
-    if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "position") return false;
+    if (page === "driver" || page === "finance" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "position" || page === "motostock") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
@@ -146,6 +147,7 @@ export default function App() {
           <RepairDepositPage currentUser={currentUser} />
         )}
         {activeMenu === "fastmovingstock" && canAccess("fastmovingstock") && <FastMovingStockPage />}
+        {activeMenu === "motostock" && canAccess("motostock") && <MotoStockPage />}
         {activeMenu === "fastmoving" && canAccess("fastmoving") && (
           <FastMovingPage />
         )}
@@ -215,7 +217,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const salesPages = ["moto", "booking", "pricecheck", "stockcheck"];
+  const salesPages = ["moto", "booking", "pricecheck", "stockcheck", "motostock"];
   const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "position", "users"];
@@ -230,6 +232,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="booking" label="จองคนขับรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="pricecheck" label="ตรวจสอบราคารถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="stockcheck" label="เช็คสต๊อก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="motostock" label="Moto Stock Management" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Spare Parts" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

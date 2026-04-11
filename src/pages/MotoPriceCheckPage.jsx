@@ -9,6 +9,7 @@ export default function MotoPriceCheckPage({ currentUser }) {
   const [expenses, setExpenses] = useState([]);
   const [loading, setLoading] = useState(false);
   const [filterBrand, setFilterBrand] = useState("");
+  const [filterVehicleType, setFilterVehicleType] = useState("");
   const [filterMarketing, setFilterMarketing] = useState("");
   const [filterModel, setFilterModel] = useState("");
   const [filterType, setFilterType] = useState("");
@@ -16,12 +17,14 @@ export default function MotoPriceCheckPage({ currentUser }) {
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 15;
   const [motoSeries, setMotoSeries] = useState([]);
+  const [vehicleTypes, setVehicleTypes] = useState([]);
 
   useEffect(() => {
     fetchPriceTypes();
     fetchMotoTypes();
     fetchExpenses();
     fetchMotoSeries();
+    fetchVehicleTypes();
   }, []);
 
   useEffect(() => {
@@ -79,6 +82,17 @@ export default function MotoPriceCheckPage({ currentUser }) {
     } catch { /* ignore */ }
   }
 
+  async function fetchVehicleTypes() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_vehicle_types" }),
+      });
+      const data = await res.json();
+      setVehicleTypes(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+  }
+
   async function fetchExpenses() {
     try {
       const res = await fetch(API_URL, {
@@ -108,9 +122,19 @@ export default function MotoPriceCheckPage({ currentUser }) {
 
   const activeTypes = priceTypes.filter(t => t.status === "active");
 
+  // lookup vehicle_type_name จาก series
+  function getVehicleTypeName(m) {
+    const s = motoSeries.find(s => s.series_id === m.series_id);
+    if (!s || !s.vehicle_type_id) return "";
+    const vt = vehicleTypes.find(v => v.vehicle_type_id === s.vehicle_type_id);
+    return vt ? vt.vehicle_type_name : "";
+  }
+
   const brandOpts = [...new Set(motoTypes.map(m => m.brand_name).filter(Boolean))].sort();
+  const vehicleTypeOpts = [...new Set(vehicleTypes.map(v => v.vehicle_type_name).filter(Boolean))].sort();
   const marketingOpts = [...new Set(
     motoTypes.filter(m => !filterBrand || m.brand_name === filterBrand)
+      .filter(m => !filterVehicleType || getVehicleTypeName(m) === filterVehicleType)
       .map(m => m.marketing_name || m.series_name).filter(Boolean)
   )].sort();
   const modelOpts = [...new Set(
@@ -130,6 +154,7 @@ export default function MotoPriceCheckPage({ currentUser }) {
 
   const filteredRows = motoTypes.filter(m =>
     (!filterBrand || m.brand_name === filterBrand) &&
+    (!filterVehicleType || getVehicleTypeName(m) === filterVehicleType) &&
     (!filterMarketing || (m.marketing_name || m.series_name) === filterMarketing) &&
     (!filterModel || m.model_code === filterModel) &&
     (!filterType || m.type_name === filterType)
@@ -149,10 +174,15 @@ export default function MotoPriceCheckPage({ currentUser }) {
         <div>
           {/* Cascade Filters */}
           <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-            <select value={filterBrand} onChange={e => { setFilterBrand(e.target.value); setFilterMarketing(""); setFilterModel(""); setFilterType(""); setCurrentPage(1); }}
+            <select value={filterBrand} onChange={e => { setFilterBrand(e.target.value); setFilterVehicleType(""); setFilterMarketing(""); setFilterModel(""); setFilterType(""); setCurrentPage(1); }}
               style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, minWidth: 140 }}>
               <option value="">ยี่ห้อ ทั้งหมด</option>
               {brandOpts.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+            <select value={filterVehicleType} onChange={e => { setFilterVehicleType(e.target.value); setFilterMarketing(""); setFilterModel(""); setFilterType(""); setCurrentPage(1); }}
+              style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, minWidth: 140 }}>
+              <option value="">ประเภทรถ ทั้งหมด</option>
+              {vehicleTypeOpts.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
             <select value={filterMarketing} onChange={e => { setFilterMarketing(e.target.value); setFilterModel(""); setFilterType(""); setCurrentPage(1); }}
               style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, minWidth: 140 }}>

@@ -9,7 +9,7 @@ export default function FastMovingPage() {
   const [productGroups, setProductGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [filterCategory, setFilterCategory] = useState("all");
+  const [filterProductGroup, setFilterProductGroup] = useState("all");
   const [filterBrand, setFilterBrand] = useState("all");
   const [filterRun, setFilterRun] = useState("all");
   const [filterCode, setFilterCode] = useState("all");
@@ -26,6 +26,7 @@ export default function FastMovingPage() {
   const [iCategory, setICategory] = useState("");
   const [iProductGroup, setIProductGroup] = useState("");
   const [iCustomName, setICustomName] = useState("");
+  const [iStockType, setIStockType] = useState("สต๊อก");
   const PAGE_SIZE = 30;
 
   useEffect(() => { fetchData(); fetchCarModels(); fetchProductGroups(); }, []);
@@ -114,6 +115,7 @@ export default function FastMovingPage() {
     setICategory(row.category || "");
     setIProductGroup(row.product_group || "");
     setICustomName(row.product_name || "");
+    setIStockType(row.stock_type || "สต๊อก");
   }
 
   async function saveInfo() {
@@ -122,7 +124,7 @@ export default function FastMovingPage() {
       await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName }),
+        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName, stock_type: iStockType }),
       });
       fetchData();
     } catch {}
@@ -185,7 +187,7 @@ export default function FastMovingPage() {
   }
 
   const filtered = rows.filter(r => {
-    if (filterCategory !== "all" && r.category !== filterCategory) return false;
+    if (filterProductGroup !== "all" && r.product_group !== filterProductGroup) return false;
     if (!rowMatchesScope(r)) return false;
     if (search.trim()) {
       const s = search.toLowerCase();
@@ -237,10 +239,10 @@ export default function FastMovingPage() {
       <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
           placeholder="ค้นหา รหัส / ชื่อสินค้า / รุ่น" style={{ padding: "8px 14px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, width: 260 }} />
-        <select value={filterCategory} onChange={e => { setFilterCategory(e.target.value); setCurrentPage(1); }}
+        <select value={filterProductGroup} onChange={e => { setFilterProductGroup(e.target.value); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }}>
-          <option value="all">ทุกหมวดหมู่</option>
-          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+          <option value="all">ทุกกลุ่มสินค้า</option>
+          {[...new Set(rows.map(r => r.product_group).filter(Boolean))].sort().map(g => <option key={g} value={g}>{g}</option>)}
         </select>
         <select value={filterBrand} onChange={e => { setFilterBrand(e.target.value); setFilterRun("all"); setFilterCode("all"); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #072d6b", borderRadius: 8, fontWeight: 600 }}>
@@ -268,7 +270,6 @@ export default function FastMovingPage() {
           <thead>
             <tr style={{ background: "#072d6b", color: "#fff" }}>
               <th style={th}>#</th>
-              <th style={th}>หมวดหมู่</th>
               <th style={th}>กลุ่มสินค้า</th>
               <th style={th}>รหัสอะไหล่</th>
               <th style={th}>ชื่อสินค้า</th>
@@ -290,7 +291,6 @@ export default function FastMovingPage() {
               return (
                 <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: qty <= 0 ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                   <td style={{ ...td, textAlign: "center" }}>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
-                  <td onClick={() => openInfoEdit(r)} style={{ ...td, cursor: "pointer", color: "#1e40af" }}>{r.category || "-"}</td>
                   <td onClick={() => openInfoEdit(r)} style={{ ...td, cursor: "pointer", color: "#1e40af" }}>{r.product_group || "-"}</td>
                   <td style={td}>{r.part_code}</td>
                   <td onClick={() => openInfoEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer", color: "#1e40af" }}>{r.product_name || <span style={{ color: "#9ca3af" }}>ไม่พบในสต๊อก</span>}</td>
@@ -366,6 +366,17 @@ export default function FastMovingPage() {
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>ชื่อสินค้า</label>
               <input value={iCustomName} onChange={e => setICustomName(e.target.value)} style={selectStyle} />
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 6, display: "block" }}>ประเภทอะไหล่</label>
+              <div style={{ display: "flex", gap: 16 }}>
+                {["สต๊อก", "ไม่สต๊อก"].map(val => (
+                  <label key={val} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 14 }}>
+                    <input type="radio" name="stockType" value={val} checked={iStockType === val} onChange={() => setIStockType(val)} />
+                    {val === "สต๊อก" ? "อะไหล่สต๊อก" : "อะไหล่ไม่สต๊อก"}
+                  </label>
+                ))}
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={saveInfo} style={{ flex: 1, padding: "9px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>บันทึก</button>
