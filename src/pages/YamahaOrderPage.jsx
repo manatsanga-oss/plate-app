@@ -681,18 +681,9 @@ export default function YamahaOrderPage({ currentUser }) {
                       d.deposit_type === "เงินมัดจำอะไหล่"
                       && (d.receipt_no || "").startsWith("SCY01")
                       && !orders.some(o => o.deposit_doc_no === d.receipt_no)
-                      && !orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
                     );
-                    // จัดกลุ่มตามลูกค้า เลือกใบเก่าสุด
-                    const byCustomer = {};
-                    for (const d of eligible) {
-                      const key = d.customer_code;
-                      if (!byCustomer[key] || new Date(d.deposit_date) < new Date(byCustomer[key].deposit_date)) {
-                        byCustomer[key] = d;
-                      }
-                    }
-                    return Object.values(byCustomer);
+                    return eligible;
                   })().map(d => (
                     <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
                   ))}
