@@ -24,6 +24,7 @@ import YamahaDepositPage from "./pages/YamahaDepositPage";
 import YamahaOrderPage from "./pages/YamahaOrderPage";
 import FastMovingPage from "./pages/FastMovingPage";
 import MotoStockPage from "./pages/MotoStockPage";
+import PettyCashFuelPage from "./pages/PettyCashFuelPage";
 import RepairDepositPage from "./pages/RepairDepositPage";
 import ProductGroupPage from "./pages/ProductGroupPage";
 import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
@@ -148,6 +149,7 @@ export default function App() {
         )}
         {activeMenu === "fastmovingstock" && canAccess("fastmovingstock") && <FastMovingStockPage />}
         {activeMenu === "motostock" && canAccess("motostock") && <MotoStockPage />}
+        {activeMenu === "pettycash" && canAccess("pettycash") && <PettyCashFuelPage currentUser={currentUser} />}
         {activeMenu === "fastmoving" && canAccess("fastmoving") && (
           <FastMovingPage />
         )}
@@ -175,7 +177,7 @@ function parseUserPages(raw) {
 
 function MenuGroup({ title, pages, activeMenu, onChange, canAccess, children, defaultOpen }) {
   const isActive = pages.some(p => p === activeMenu);
-  const hasAccess = pages.some(p => canAccess(p));
+  const hasAccess = pages.length === 0 || pages.some(p => canAccess(p));
   const [open, setOpen] = React.useState(defaultOpen || isActive);
   if (!hasAccess) return null;
   return (
@@ -258,6 +260,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="issue" label="เบิกวัสดุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="convert" label="แปลงหน่วยบรรจุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="subunit" label="บันทึกเพิ่มหน่วยย่อย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
+      <MenuGroup title="Finance" pages={["pettycash"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuSubGroup title="เงินสดย่อย" pages={["pettycash"]} activeMenu={activeMenu}>
+          <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        </MenuSubGroup>
       </MenuGroup>
 
       <MenuGroup title="Master Data" pages={masterPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

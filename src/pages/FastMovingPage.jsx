@@ -260,6 +260,8 @@ export default function FastMovingPage() {
           {codeOpts.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
         <button onClick={fetchData} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
+        <button onClick={() => { setSearch(""); setFilterProductGroup("all"); setFilterBrand("all"); setFilterRun("all"); setFilterCode("all"); setCurrentPage(1); }}
+          style={{ padding: "8px 16px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>✕ ล้างกรอง</button>
         <span style={{ fontSize: 13, color: "#374151" }}>
           {filtered.length} รายการ | มีสต๊อก: <b style={{ color: "#10b981" }}>{inStockCount}</b> | ไม่มีสต๊อก: <b style={{ color: "#ef4444" }}>{outStockCount}</b> | มูลค่ารวม: <b style={{ color: "#072d6b" }}>{fmt(totalValue)}</b>
         </span>
