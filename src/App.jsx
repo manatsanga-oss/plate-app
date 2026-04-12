@@ -25,6 +25,7 @@ import YamahaOrderPage from "./pages/YamahaOrderPage";
 import FastMovingPage from "./pages/FastMovingPage";
 import MotoStockPage from "./pages/MotoStockPage";
 import PettyCashFuelPage from "./pages/PettyCashFuelPage";
+import PettyCashPostagePage from "./pages/PettyCashPostagePage";
 import RepairDepositPage from "./pages/RepairDepositPage";
 import ProductGroupPage from "./pages/ProductGroupPage";
 import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
@@ -68,7 +69,7 @@ export default function App() {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash") return true;
+    if (page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage") return true;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -150,6 +151,7 @@ export default function App() {
         {activeMenu === "fastmovingstock" && canAccess("fastmovingstock") && <FastMovingStockPage />}
         {activeMenu === "motostock" && canAccess("motostock") && <MotoStockPage />}
         {activeMenu === "pettycash" && canAccess("pettycash") && <PettyCashFuelPage currentUser={currentUser} />}
+        {activeMenu === "postage" && canAccess("postage") && <PettyCashPostagePage currentUser={currentUser} />}
         {activeMenu === "fastmoving" && canAccess("fastmoving") && (
           <FastMovingPage />
         )}
@@ -262,9 +264,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="subunit" label="บันทึกเพิ่มหน่วยย่อย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
-        <MenuSubGroup title="เงินสดย่อย" pages={["pettycash"]} activeMenu={activeMenu}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="pettycashgeneral" label="ค่าใช้จ่ายทั่วไป" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
       </MenuGroup>
 
