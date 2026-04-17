@@ -74,6 +74,59 @@ export default function FastMovingStockPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
+  function printReport() {
+    const w = window.open("", "_blank", "width=1200,height=800");
+    const filterLabel = [
+      filterGroup !== "all" ? `กลุ่ม: ${filterGroup}` : "",
+      filterBrand !== "all" ? `ยี่ห้อ: ${filterBrand}` : "",
+      filterStock !== "all" ? (filterStock === "in" ? "มีสต๊อก" : "สินค้าหมด") : "",
+      filterBackorder !== "all" ? (filterBackorder === "yes" ? "มีค้างส่ง" : "ไม่มีค้างส่ง") : "",
+      filterPendingJob !== "all" ? (filterPendingJob === "yes" ? "มีค้างปิด JOB" : "ไม่มีค้างปิด JOB") : "",
+    ].filter(Boolean).join(" | ") || "ทั้งหมด";
+    const fmtD = d => { if (!d) return "-"; const dt = new Date(d); if (isNaN(dt)) return d; return `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()+543}`; };
+    const rows = filtered.map((r, i) => {
+      const s = parseStores(r.stores);
+      return `<tr>
+        <td class="c">${i + 1}</td>
+        <td>${r.product_group || "-"}</td>
+        <td>${r.part_code}</td>
+        <td>${r.part_name || "-"}</td>
+        <td class="r">${Number(r.quantity || 0)}</td>
+        <td class="r">${s.ppao}</td>
+        <td class="r">${s.haahong}</td>
+        <td class="r">${s.sachtalad}</td>
+        <td>${fmtD(r.last_order_date)}</td>
+        <td class="r">${r.avg_3m || "-"}</td>
+        <td class="r">${r.backorder_qty || "-"}</td>
+        <td>${fmtD(r.backorder_eta)}</td>
+        <td class="r">${r.pending_job_qty || "-"}</td>
+      </tr>`;
+    }).join("");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>รายงานสต๊อกอะไหล่หมุนเร็ว</title>
+<style>
+  body { font-family: 'Tahoma', sans-serif; padding: 16px; font-size: 10px; }
+  h2 { margin: 0 0 4px; font-size: 15px; }
+  .info { font-size: 11px; color: #555; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #ccc; padding: 3px 5px; }
+  th { background: #072d6b; color: #fff; font-size: 9px; }
+  .c { text-align: center; }
+  .r { text-align: right; }
+  @media print { body { padding: 0; } }
+</style></head><body>
+<h2>รายงานสต๊อกอะไหล่หมุนเร็ว</h2>
+<div class="info">ตัวกรอง: ${filterLabel} | จำนวน: ${filtered.length} รายการ | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
+<table>
+  <thead><tr>
+    <th>#</th><th>กลุ่มสินค้า</th><th>รหัสสินค้า</th><th>ชื่อสินค้า</th><th>จำนวน</th><th>ป.เปา</th><th>ห้าห้อง</th><th>สช.ตลาด</th><th>วันที่สั่งล่าสุด</th><th>เฉลี่ยสั่ง/เดือน</th><th>ค้างส่ง</th><th>คาดว่าได้รับ</th><th>ค้างปิด JOB</th>
+  </tr></thead>
+  <tbody>${rows}</tbody>
+</table>
+</body></html>`);
+    w.document.close();
+    w.print();
+  }
+
   return (
     <div className="page-container">
       <div className="page-topbar">
@@ -95,6 +148,7 @@ export default function FastMovingStockPage() {
           {brands.map(b => <option key={b} value={b}>{b}</option>)}
         </select>
         <button onClick={fetchData} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
+        <button onClick={printReport} style={{ padding: "8px 16px", fontSize: 13, background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์</button>
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <select value={filterStock} onChange={e => { setFilterStock(e.target.value); setCurrentPage(1); }}
