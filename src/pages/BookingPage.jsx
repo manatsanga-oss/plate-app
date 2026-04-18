@@ -164,8 +164,8 @@ export default function BookingPage({ currentUser }) {
       setMessage("กรุณากรอกข้อมูลให้ครบถ้วน");
       return;
     }
-    if (distanceInfo && !distanceInfo._confirmed) {
-      setMessage("กรุณากดเลือกปลายทางจากผลการค้นหาก่อน");
+    if (!distanceInfo || !distanceInfo._confirmed) {
+      setMessage("กรุณากดปุ่ม 🔍 ค้นหา เพื่อดึงระยะทาง/เวลาการเดินทาง ก่อนบันทึก");
       return;
     }
     if (form.delivery_type === "ทำสัญญา" && !form.finance_company) {
