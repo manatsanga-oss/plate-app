@@ -160,30 +160,35 @@ export default function FastMovingPage() {
     return targetCc === val;
   }
 
-  function modelMatches(m) {
-    if (filterBrand !== "all") {
-      if (!m.sel_brand || m.sel_brand !== filterBrand) return false;
-    }
-    if (filterCode !== "all") {
-      return m.sel_code === filterCode;
-    }
-    if (filterRun !== "all") {
-      if (m.sel_run === filterRun) return true;
-      if (m.sel_vehicle_type && m.sel_vehicle_type !== selectedRunVehicleType) return false;
-      if (m.sel_engine_cc) {
-        if (selectedRunCc === null || !ccRangeMatches(m.sel_engine_cc, selectedRunCc)) return false;
-      }
-      if (!m.sel_run && !m.sel_code && !m.sel_engine_cc && !m.sel_vehicle_type && !m.sel_brand) return false;
+  // รุ่น match: ตรงจากชื่อ หรือจาก vehicle_type + cc range
+  function runMatches(m) {
+    if (m.sel_run === filterRun) return true;
+    if (m.sel_vehicle_type && selectedRunVehicleType && m.sel_vehicle_type !== selectedRunVehicleType) return false;
+    if (m.sel_engine_cc) {
+      if (selectedRunCc === null || !ccRangeMatches(m.sel_engine_cc, selectedRunCc)) return false;
+      // ต้องมี vehicle_type ตรงด้วย หรือไม่มีเลย (โผล่เฉพาะ cc)
       return true;
     }
-    return true;
+    // ไม่ได้กำหนดอะไรเลยใน model นี้
+    return false;
   }
 
   function rowMatchesScope(r) {
     if (filterBrand === "all" && filterRun === "all" && filterCode === "all") return true;
     const models = Array.isArray(r.models) ? r.models : [];
     if (models.length === 0) return false;
-    return models.some(modelMatches);
+
+    // ตรวจแต่ละ criterion แยก — ต้องมีอย่างน้อย 1 tag ที่ match ในแต่ละ criterion
+    if (filterBrand !== "all") {
+      if (!models.some(m => m.sel_brand === filterBrand)) return false;
+    }
+    if (filterCode !== "all") {
+      if (!models.some(m => m.sel_code === filterCode)) return false;
+    }
+    if (filterRun !== "all") {
+      if (!models.some(runMatches)) return false;
+    }
+    return true;
   }
 
   const filtered = rows.filter(r => {

@@ -35,6 +35,19 @@ export default function BookingPage({ currentUser }) {
   const [cancelReason, setCancelReason] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterDate, setFilterDate] = useState(new Date().toISOString().slice(0, 10));
+  const [activeTab, setActiveTab] = useState("booking");
+  const [fuelData, setFuelData] = useState([]);
+  const [fuelLoading, setFuelLoading] = useState(false);
+  const [fuelFrom, setFuelFrom] = useState(() => {
+    const d = new Date();
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0");
+    return `${y}-${m}-01`;
+  });
+  const [fuelTo, setFuelTo] = useState(() => {
+    const d = new Date();
+    const y = d.getFullYear(), m = String(d.getMonth() + 1).padStart(2, "0"), dd = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${dd}`;
+  });
   const [distanceInfo, setDistanceInfo] = useState(null);
   const [loadingDist, setLoadingDist] = useState(false);
 
@@ -46,6 +59,31 @@ export default function BookingPage({ currentUser }) {
     fetchDrivers();
     fetchFinanceCompanies();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === "fuel") fetchFuelExpenses();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, fuelFrom, fuelTo]);
+
+  async function fetchFuelExpenses() {
+    setFuelLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "get_fuel_expenses",
+          from: fuelFrom,
+          to: fuelTo,
+        }),
+      });
+      const data = await res.json();
+      setFuelData(Array.isArray(data) ? data : data.rows || []);
+    } catch {
+      setFuelData([]);
+    }
+    setFuelLoading(false);
+  }
 
   async function fetchBookings() {
     setLoading(true);
@@ -451,11 +489,47 @@ export default function BookingPage({ currentUser }) {
     <div className="page-container">
       <div className="page-topbar">
         <h2 className="page-title">🚗 ระบบจองคนขับรถ</h2>
-        <button className="btn-primary" onClick={() => { setForm(emptyForm()); setDistanceInfo(null); setMode("add"); setMessage(""); }}>
-          + จองรถ
-        </button>
+        {activeTab === "booking" && (
+          <button className="btn-primary" onClick={() => { setForm(emptyForm()); setDistanceInfo(null); setMode("add"); setMessage(""); }}>
+            + จองรถ
+          </button>
+        )}
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "2px solid #e5e7eb" }}>
+        {[
+          { key: "booking", label: "🚗 การจองคนขับรถ" },
+          { key: "fuel", label: "⛽ รายงานการเบิกค่าน้ำมัน" },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            style={{
+              padding: "10px 20px", fontSize: 14, fontFamily: "Tahoma, sans-serif",
+              border: "none", cursor: "pointer", fontWeight: 600,
+              borderBottom: activeTab === t.key ? "3px solid #072d6b" : "3px solid transparent",
+              background: "transparent",
+              color: activeTab === t.key ? "#072d6b" : "#6b7280",
+              marginBottom: -2,
+            }}
+          >{t.label}</button>
+        ))}
+      </div>
+
+      {activeTab === "fuel" && (
+        <FuelExpensesTab
+          data={fuelData}
+          loading={fuelLoading}
+          from={fuelFrom}
+          to={fuelTo}
+          setFrom={setFuelFrom}
+          setTo={setFuelTo}
+          isAdmin={isAdmin}
+        />
+      )}
+
+      {activeTab === "booking" && (<>
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <label style={{ fontSize: 14, color: "#374151", whiteSpace: "nowrap" }}>📅 วันที่จอง</label>
@@ -604,6 +678,7 @@ export default function BookingPage({ currentUser }) {
         </div>
         </>
       )}
+      </>)}
 
       {/* Cancel Modal */}
       {cancelTarget && (
@@ -635,6 +710,90 @@ export default function BookingPage({ currentUser }) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin }) {
+  const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtDate = d => d ? new Date(d).toLocaleDateString("th-TH") : "-";
+  const [amountRange, setAmountRange] = useState("all");
+
+  const AMOUNT_RANGES = [
+    { key: "all", label: "ทุกยอด", match: () => true },
+    { key: "500", label: "500 บาท", match: a => a === 500 },
+    { key: "1000", label: "1,000 บาท", match: a => a === 1000 },
+    { key: "other", label: "อื่นๆ (ไม่ใช่ 500/1000)", match: a => a !== 500 && a !== 1000 },
+  ];
+  const range = AMOUNT_RANGES.find(r => r.key === amountRange) || AMOUNT_RANGES[0];
+
+  const filtered = data.filter(r => range.match(Number(r.total_amount || 0)));
+  const total = filtered.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+
+  return (
+    <div>
+      {/* Filter */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: 8 }}>
+        <span style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>ตั้งแต่</span>
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+          style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+        <span style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>ถึง</span>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)}
+          style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+
+        <div style={{ width: 1, background: "#e5e7eb", height: 24, margin: "0 4px" }} />
+
+        <span style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>💰 ยอด:</span>
+        <select value={amountRange} onChange={e => setAmountRange(e.target.value)}
+          style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13, background: "#fff", minWidth: 180 }}>
+          {AMOUNT_RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </select>
+
+        <div style={{ marginLeft: "auto", fontSize: 13, color: "#374151" }}>
+          <span>จำนวน: <b>{filtered.length}</b> รายการ</span>
+          <span style={{ marginLeft: 14 }}>รวม: <b style={{ color: "#dc2626" }}>{fmt(total)}</b> บาท</span>
+        </div>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>ไม่มีรายการเบิกค่าน้ำมันในช่วงที่เลือก</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ whiteSpace: "nowrap" }}>วันที่</th>
+                <th>เลขที่จ่าย</th>
+                <th style={{ textAlign: "right" }}>เงินสด</th>
+                <th style={{ textAlign: "right" }}>โอน</th>
+                <th style={{ textAlign: "right" }}>รวม</th>
+                <th>ผู้จัดทำ</th>
+                <th>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r, i) => (
+                <tr key={r.id || i}>
+                  <td style={{ whiteSpace: "nowrap" }}>{fmtDate(r.payment_date)}</td>
+                  <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{r.payment_no || "-"}</td>
+                  <td style={{ textAlign: "right" }}>{Number(r.cash || 0) > 0 ? fmt(r.cash) : "-"}</td>
+                  <td style={{ textAlign: "right" }}>{Number(r.transfer || 0) > 0 ? fmt(r.transfer) : "-"}</td>
+                  <td style={{ textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{fmt(r.total_amount)}</td>
+                  <td style={{ fontSize: 12 }}>{r.prepared_by || "-"}</td>
+                  <td>
+                    <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11,
+                      background: r.status === "ปกติ" ? "#d1fae5" : "#fee2e2",
+                      color: r.status === "ปกติ" ? "#065f46" : "#991b1b",
+                    }}>{r.status || "-"}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
     </div>

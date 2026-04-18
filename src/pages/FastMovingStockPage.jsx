@@ -90,13 +90,13 @@ export default function FastMovingStockPage() {
         <td class="c">${i + 1}</td>
         <td>${r.product_group || "-"}</td>
         <td>${r.part_code}</td>
-        <td>${r.part_name || "-"}</td>
+        <td>${r.product_name || "-"}</td>
         <td class="r">${Number(r.quantity || 0)}</td>
         <td class="r">${s.ppao}</td>
         <td class="r">${s.haahong}</td>
         <td class="r">${s.sachtalad}</td>
         <td>${fmtD(r.last_order_date)}</td>
-        <td class="r">${r.avg_3m || "-"}</td>
+        <td class="r">${Number(r.avg_order_qty_3m || 0) > 0 ? Number(r.avg_order_qty_3m).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "-"}</td>
         <td class="r">${r.backorder_qty || "-"}</td>
         <td>${fmtD(r.backorder_eta)}</td>
         <td class="r">${r.pending_job_qty || "-"}</td>
