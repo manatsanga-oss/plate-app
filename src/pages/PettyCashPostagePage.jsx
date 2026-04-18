@@ -18,6 +18,11 @@ export default function PettyCashPostagePage({ currentUser }) {
   const [periodTo, setPeriodTo] = useState("");
   const [ocrLoading, setOcrLoading] = useState(false);
   const [selectedDocs, setSelectedDocs] = useState(new Set());
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkIdx, setLinkIdx] = useState(null);
+  const [availableReceipts, setAvailableReceipts] = useState([]);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptSearch, setReceiptSearch] = useState("");
 
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
@@ -59,13 +64,51 @@ export default function PettyCashPostagePage({ currentUser }) {
       tracking_no: i.tracking_no || "",
       destination: i.destination || "",
       amount: i.amount || 0,
+      receipt_no: i.receipt_no || "",
+      receipt_customer: i.receipt_customer || "",
+      note: i.note || "",
     })) : [emptyItem()];
     setItems(its);
     setMessage("");
   }
 
   function emptyItem() {
-    return { post_date: "", description: "", recipient_name: "", tracking_no: "", destination: "", amount: 0 };
+    return { post_date: "", description: "", recipient_name: "", tracking_no: "", destination: "", amount: 0,
+             receipt_no: "", receipt_customer: "", note: "" };
+  }
+
+  async function openLinkPopup(idx) {
+    setLinkIdx(idx);
+    setLinkOpen(true);
+    setReceiptSearch("");
+    setReceiptLoading(true);
+    try {
+      const branchCode = (currentUser?.branch || "").split(" ")[0];
+      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_available_postage_receipts", branch_code: branchCode }) });
+      const data = await res.json();
+      setAvailableReceipts(Array.isArray(data) ? data : []);
+    } catch { setAvailableReceipts([]); }
+    setReceiptLoading(false);
+  }
+
+  function selectReceipt(r) {
+    // ใช้ไม่ได้ถ้ามีในรายการ items อื่นแล้ว
+    const usedInThisDoc = items.some((it, i) => i !== linkIdx && it.receipt_no === r.receipt_no);
+    if (usedInThisDoc) { alert("ใบรับเงินนี้ถูกเลือกในรายการอื่นของเอกสารนี้แล้ว"); return; }
+    setItems(prev => prev.map((it, i) => i === linkIdx ? {
+      ...it,
+      receipt_no: r.receipt_no,
+      receipt_customer: r.customer_name || "",
+      recipient_name: it.recipient_name || r.customer_name || "",
+    } : it));
+    setLinkOpen(false);
+  }
+
+  function clearReceipt(idx) {
+    setItems(prev => prev.map((it, i) => i === idx ? {
+      ...it, receipt_no: "", receipt_customer: ""
+    } : it));
   }
 
   function updateItem(idx, field, value) {
@@ -230,7 +273,7 @@ export default function PettyCashPostagePage({ currentUser }) {
         <div style={{ overflowX: "auto" }}>
           <table className="data-table" style={{ fontSize: 12 }}>
             <thead><tr>
-              <th>#</th><th>วันที่</th><th>ผู้รับ</th><th>รายละเอียด</th><th>ปลายทาง</th><th>จำนวนเงิน</th><th></th>
+              <th>#</th><th>วันที่</th><th>ผู้รับ</th><th>รายละเอียด</th><th>ปลายทาง</th><th>จำนวนเงิน</th><th>ใบรับเงิน</th><th>หมายเหตุ</th><th></th>
             </tr></thead>
             <tbody>
               {items.map((it, idx) => (
@@ -241,6 +284,24 @@ export default function PettyCashPostagePage({ currentUser }) {
                   <td><input value={it.description} onChange={e => updateItem(idx, "description", e.target.value)} placeholder="รายละเอียด" style={{ width: 140, fontSize: 12, padding: 2 }} /></td>
                   <td><input value={it.destination} onChange={e => updateItem(idx, "destination", e.target.value)} placeholder="ปลายทาง" style={{ width: 100, fontSize: 12, padding: 2 }} /></td>
                   <td><input type="number" value={it.amount} onChange={e => updateItem(idx, "amount", e.target.value)} style={{ width: 70, fontSize: 12, padding: 2, textAlign: "right" }} /></td>
+                  <td>
+                    {it.receipt_no ? (
+                      <div style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11 }}>
+                        <span style={{ background: "#dcfce7", color: "#166534", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }} title={it.receipt_customer}>
+                          🔗 {it.receipt_no}
+                          {it.receipt_customer && <span style={{ fontWeight: 400, marginLeft: 4 }}>— {it.receipt_customer}</span>}
+                        </span>
+                        {!editDoc?.viewOnly && (
+                          <button onClick={() => clearReceipt(idx)} title="ลบลิงก์" style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 14, padding: 0 }}>×</button>
+                        )}
+                      </div>
+                    ) : !editDoc?.viewOnly ? (
+                      <button onClick={() => openLinkPopup(idx)} style={{ padding: "3px 8px", fontSize: 11, background: "#e0f2fe", color: "#0369a1", border: "1px solid #7dd3fc", borderRadius: 4, cursor: "pointer", fontWeight: 600 }}>
+                        + เลือก
+                      </button>
+                    ) : <span style={{ color: "#9ca3af", fontSize: 11 }}>-</span>}
+                  </td>
+                  <td><input value={it.note || ""} onChange={e => updateItem(idx, "note", e.target.value)} placeholder="หมายเหตุ" style={{ width: 140, fontSize: 12, padding: 2 }} disabled={editDoc?.viewOnly} /></td>
                   <td><button onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16 }}>×</button></td>
                 </tr>
               ))}
@@ -261,6 +322,77 @@ export default function PettyCashPostagePage({ currentUser }) {
               style={{ padding: "10px 24px", fontSize: 14, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>
               ยกเลิกอนุมัติ
             </button>
+          </div>
+        )}
+
+        {/* Popup: เลือกใบรับเงิน */}
+        {linkOpen && (
+          <div onClick={() => setLinkOpen(false)} style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000,
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <div onClick={e => e.stopPropagation()} style={{
+              background: "#fff", borderRadius: 12, width: "min(720px, 92vw)", maxHeight: "85vh",
+              display: "flex", flexDirection: "column", overflow: "hidden",
+            }}>
+              <div style={{ padding: "12px 16px", background: "#072d6b", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontWeight: 700 }}>เลือกใบรับเงิน (รายได้ค่าไปรษณีย์) — สาขา {(currentUser?.branch || "").split(" ")[0]}</div>
+                <button onClick={() => setLinkOpen(false)} style={{ background: "none", border: "none", color: "#fff", fontSize: 22, cursor: "pointer" }}>×</button>
+              </div>
+              <div style={{ padding: "10px 16px", borderBottom: "1px solid #e5e7eb" }}>
+                <input
+                  value={receiptSearch}
+                  onChange={e => setReceiptSearch(e.target.value)}
+                  placeholder="ค้นหา เลขที่ใบรับเงิน / ชื่อลูกค้า"
+                  style={{ width: "100%", padding: "8px 12px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }}
+                  autoFocus
+                />
+              </div>
+              <div style={{ flex: 1, overflowY: "auto", padding: "8px 16px" }}>
+                {receiptLoading ? (
+                  <div style={{ padding: 24, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+                ) : availableReceipts.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>ไม่พบใบรับเงินที่ว่างอยู่</div>
+                ) : (
+                  <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "#f3f4f6" }}>
+                        <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>เลขที่ใบรับเงิน</th>
+                        <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>วันที่</th>
+                        <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>ลูกค้า</th>
+                        <th style={{ padding: 6, textAlign: "left", borderBottom: "1px solid #e5e7eb" }}>รายละเอียด</th>
+                        <th style={{ padding: 6, textAlign: "right", borderBottom: "1px solid #e5e7eb" }}>จำนวนเงิน</th>
+                        <th style={{ padding: 6, borderBottom: "1px solid #e5e7eb" }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {availableReceipts
+                        .filter(r => !receiptSearch ||
+                          (r.receipt_no || "").toLowerCase().includes(receiptSearch.toLowerCase()) ||
+                          (r.customer_name || "").toLowerCase().includes(receiptSearch.toLowerCase()))
+                        .map((r, i) => {
+                          const usedHere = items.some((it, j) => j !== linkIdx && it.receipt_no === r.receipt_no);
+                          return (
+                            <tr key={i} style={{ background: i % 2 ? "#fafafa" : "#fff", opacity: usedHere ? 0.4 : 1 }}>
+                              <td style={{ padding: 6, fontWeight: 600 }}>{r.receipt_no}</td>
+                              <td style={{ padding: 6 }}>{r.receipt_date ? new Date(r.receipt_date).toLocaleDateString("th-TH") : "-"}</td>
+                              <td style={{ padding: 6 }}>{r.customer_name || "-"}</td>
+                              <td style={{ padding: 6 }}>{r.description || "-"}</td>
+                              <td style={{ padding: 6, textAlign: "right", fontWeight: 600 }}>{Number(r.amount || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                              <td style={{ padding: 6 }}>
+                                <button onClick={() => selectReceipt(r)} disabled={usedHere}
+                                  style={{ padding: "4px 10px", fontSize: 11, background: usedHere ? "#d1d5db" : "#072d6b", color: "#fff", border: "none", borderRadius: 4, cursor: usedHere ? "not-allowed" : "pointer", fontWeight: 600 }}>
+                                  {usedHere ? "ใช้แล้ว" : "เลือก"}
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

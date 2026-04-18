@@ -10,6 +10,7 @@ const UPLOAD_GROUPS = [
       { key: "sales", label: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "sales_report", url: `${BASE}/upload-sales` },
       { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_deposit", url: `${BASE}/upload-deposit` },
       { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "honda_deposits", url: `${BASE}/upload-honda-deposit` },
+      { key: "other-income", label: "รายได้อื่นๆ", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "other_income", url: `${BASE}/upload-other-income` },
     ],
   },
   {
