@@ -36,6 +36,7 @@ export default function YamahaOrderPage({ currentUser }) {
   const [search, setSearch] = useState("");
   const [editId, setEditId] = useState(null);
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterParking, setFilterParking] = useState("all");
   const [ocrLoading, setOcrLoading] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [repairDeposits, setRepairDeposits] = useState([]);
@@ -407,6 +408,7 @@ export default function YamahaOrderPage({ currentUser }) {
 
   const filtered = orders.filter(o => {
     if (filterStatus !== "all" && o.status !== filterStatus) return false;
+    if (filterParking !== "all" && (o.parking_status || "") !== filterParking) return false;
     if (!search.trim()) return true;
     const s = search.toLowerCase();
     return (o.customer_name || "").toLowerCase().includes(s) || (o.deposit_doc_no || "").toLowerCase().includes(s) || (o.technician || "").toLowerCase().includes(s) || String(o.order_id).includes(s);
@@ -517,6 +519,27 @@ export default function YamahaOrderPage({ currentUser }) {
           );
         })}
       </div>
+
+      {filterStatus !== "ตีราคาซ่อม" && (
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>🅿️ สถานะจอด:</span>
+          {["all", "จอดร้าน", "ไม่จอดร้าน"].map(p => {
+            const count = p === "all"
+              ? orders.length
+              : orders.filter(o => (o.parking_status || "") === p).length;
+            const active = filterParking === p;
+            const color = p === "จอดร้าน" ? "#059669" : p === "ไม่จอดร้าน" ? "#d97706" : "#6b7280";
+            return (
+              <button key={p} onClick={() => setFilterParking(p)}
+                style={{ padding: "5px 14px", borderRadius: 20, fontSize: 12, fontWeight: active ? 700 : 400, cursor: "pointer",
+                  border: active ? "none" : `1px solid ${color}`,
+                  background: active ? color : "#fff", color: active ? "#fff" : color }}>
+                {p === "all" ? "ทั้งหมด" : p} ({count})
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {message && !showForm && <div style={{ color: message.includes("สำเร็จ") ? "#15803d" : "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
 

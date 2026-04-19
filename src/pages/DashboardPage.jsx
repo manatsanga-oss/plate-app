@@ -128,6 +128,108 @@ export default function DashboardPage({ currentUser }) {
             />
           </div>
         )}
+
+        {/* Top 5 วัสดุที่เบิกมากที่สุด แยกสังกัด */}
+        {!loading && data && (
+          <div style={S.twoCol}>
+            <TopItemsCard
+              title="Top 5 วัสดุเบิกมากที่สุด — สิงห์ชัยสยามยนต์"
+              color="#1565C0"
+              lightBg="#e3f2fd"
+              items={data?.top_items_singchai || []}
+              fmt={fmt}
+              fmtMoney={fmtMoney}
+              monthLabel={monthLabel(selectedMonth)}
+            />
+            <TopItemsCard
+              title="Top 5 วัสดุเบิกมากที่สุด — ป.เปามอเตอร์เซอร์วิส"
+              color="#2e7d32"
+              lightBg="#e8f5e9"
+              items={data?.top_items_ppao || []}
+              fmt={fmt}
+              fmtMoney={fmtMoney}
+              monthLabel={monthLabel(selectedMonth)}
+            />
+          </div>
+        )}
+
+        {/* Top 5 พนักงานเบิกวัสดุมากที่สุด */}
+        {!loading && data && (
+          <div style={S.twoCol}>
+            <TopUsersCard
+              title="Top 5 พนักงานเบิกมากที่สุด — สิงห์ชัยสยามยนต์"
+              color="#1565C0"
+              lightBg="#e3f2fd"
+              users={data?.top_users_singchai || []}
+              fmt={fmt}
+              monthLabel={monthLabel(selectedMonth)}
+            />
+            <TopUsersCard
+              title="Top 5 พนักงานเบิกมากที่สุด — ป.เปามอเตอร์เซอร์วิส"
+              color="#2e7d32"
+              lightBg="#e8f5e9"
+              users={data?.top_users_ppao || []}
+              fmt={fmt}
+              monthLabel={monthLabel(selectedMonth)}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function TopItemsCard({ title, color, lightBg, items, fmt, fmtMoney, monthLabel }) {
+  const top10 = (items || []).slice(0, 5);
+  const maxQty = Math.max(1, ...top10.map(i => Number(i.total_qty) || 0));
+
+  return (
+    <div style={{ ...S.card, borderTop: `3px solid ${color}` }}>
+      <div style={{ ...S.cardHeader, color, background: lightBg }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{title}</div>
+        <div style={{ fontSize: 11, color: "#666", fontWeight: 400 }}>{monthLabel}</div>
+      </div>
+      <div style={S.cardBody}>
+        {top10.length === 0 ? (
+          <div style={S.emptyBox}>ยังไม่มีข้อมูลการเบิก</div>
+        ) : (
+          <table style={S.table}>
+            <thead>
+              <tr style={{ background: lightBg }}>
+                <th style={{ ...S.th, width: 30, textAlign: "center" }}>#</th>
+                <th style={S.th}>รายการสินค้า</th>
+                <th style={{ ...S.th, textAlign: "right", width: 70 }}>จำนวน</th>
+                <th style={{ ...S.th, textAlign: "right", width: 90 }}>มูลค่า (บาท)</th>
+                <th style={{ ...S.th, width: 80 }}>สัดส่วน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {top10.map((r, i) => {
+                const qty = Number(r.total_qty) || 0;
+                const pct = (qty / maxQty) * 100;
+                return (
+                  <tr key={i} style={i % 2 === 1 ? { background: "#fafafa" } : {}}>
+                    <td style={{ ...S.td, textAlign: "center", fontWeight: 700, color }}>{i + 1}</td>
+                    <td style={{ ...S.td, fontWeight: 600 }}>
+                      <div>{r.item_name || r.product_name || "-"}</div>
+                      {r.item_code && <div style={{ fontSize: 10, color: "#999" }}>{r.item_code}</div>}
+                    </td>
+                    <td style={{ ...S.td, textAlign: "right", fontWeight: 700 }}>{fmt(qty)}</td>
+                    <td style={{ ...S.td, textAlign: "right", color, fontWeight: 600 }}>{fmtMoney(r.total_value || 0)}</td>
+                    <td style={S.td}>
+                      <div style={{ background: "#e0e0e0", borderRadius: 4, height: 10, overflow: "hidden" }}>
+                        <div style={{
+                          width: `${pct}%`, height: "100%", background: color,
+                          borderRadius: 4, transition: "width 0.5s",
+                        }} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
@@ -200,6 +302,57 @@ function StatBox({ label, value, unit, color }) {
       <div style={S.statLabel}>{label}</div>
       <div style={{ ...S.statValue, color }}>{value}</div>
       <div style={S.statUnit}>{unit}</div>
+    </div>
+  );
+}
+
+function TopUsersCard({ title, color, lightBg, users, fmt, monthLabel }) {
+  const top5 = (users || []).slice(0, 5);
+  const maxQty = Math.max(1, ...top5.map(u => Number(u.total_qty) || 0));
+
+  return (
+    <div style={{ ...S.card, borderTop: `3px solid ${color}` }}>
+      <div style={{ ...S.cardHeader, color, background: lightBg }}>
+        <div style={{ fontWeight: 700, fontSize: 14 }}>{title}</div>
+        <div style={{ fontSize: 11, color: "#666", fontWeight: 400 }}>{monthLabel}</div>
+      </div>
+      <div style={S.cardBody}>
+        {top5.length === 0 ? (
+          <div style={S.emptyBox}>ยังไม่มีข้อมูลการเบิก</div>
+        ) : (
+          <table style={S.table}>
+            <thead>
+              <tr style={{ background: lightBg }}>
+                <th style={{ ...S.th, width: 30, textAlign: "center" }}>#</th>
+                <th style={S.th}>ชื่อพนักงาน</th>
+                <th style={{ ...S.th, textAlign: "right", width: 100 }}>จำนวนที่เบิก</th>
+                <th style={{ ...S.th, width: 100 }}>สัดส่วน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {top5.map((r, i) => {
+                const qty = Number(r.total_qty) || 0;
+                const pct = (qty / maxQty) * 100;
+                return (
+                  <tr key={i} style={i % 2 === 1 ? { background: "#fafafa" } : {}}>
+                    <td style={{ ...S.td, textAlign: "center", fontWeight: 700, color }}>{i + 1}</td>
+                    <td style={{ ...S.td, fontWeight: 600 }}>👤 {r.user_name || "-"}</td>
+                    <td style={{ ...S.td, textAlign: "right", fontWeight: 700, color }}>{fmt(qty)} ชิ้น</td>
+                    <td style={S.td}>
+                      <div style={{ background: "#e0e0e0", borderRadius: 4, height: 10, overflow: "hidden" }}>
+                        <div style={{
+                          width: `${pct}%`, height: "100%", background: color,
+                          borderRadius: 4, transition: "width 0.5s",
+                        }} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }
