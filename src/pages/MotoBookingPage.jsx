@@ -393,7 +393,16 @@ export default function MotoBookingPage({ currentUser }) {
     queueGroups[key].push(b);
   });
   Object.keys(queueGroups).forEach((key) => {
-    queueGroups[key].sort((a, b) => new Date(a.booking_date) - new Date(b.booking_date));
+    // เรียงคิวตามเลขที่ใบมัดจำ (deposit_no) จากน้อย → มาก
+    // ถ้าไม่มี deposit_no ใช้ booking_date เป็น fallback
+    queueGroups[key].sort((a, b) => {
+      const dA = (a.deposit_no || "").toString();
+      const dB = (b.deposit_no || "").toString();
+      if (dA && dB) return dA.localeCompare(dB, undefined, { numeric: true });
+      if (dA) return -1;
+      if (dB) return 1;
+      return new Date(a.booking_date) - new Date(b.booking_date);
+    });
   });
   const queuePosMap = {}; // booking_id -> { pos, qty, engine_no, branch, age }
   Object.keys(queueGroups).forEach((key) => {
@@ -461,7 +470,14 @@ export default function MotoBookingPage({ currentUser }) {
       if (rA !== rB) return rA - rB;
       return new Date(b.booking_date) - new Date(a.booking_date);
     }
-    return new Date(a.booking_date) - new Date(b.booking_date);
+    // เรียงตามวันจอง → ถ้าเหมือนกัน เรียงตามเลขที่ใบมัดจำ (deposit_no)
+    const dtA = new Date(a.booking_date).getTime();
+    const dtB = new Date(b.booking_date).getTime();
+    if (dtA !== dtB) return dtA - dtB;
+    const dA = (a.deposit_no || "").toString();
+    const dB = (b.deposit_no || "").toString();
+    if (dA && dB) return dA.localeCompare(dB, undefined, { numeric: true });
+    return 0;
   });
 
   // Dynamic options from loaded bookings (deduplicated)
