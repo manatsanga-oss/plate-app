@@ -165,6 +165,32 @@ export default function MotoStockPage() {
           <option value="all">สาขา 1</option>
           {branches.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
         </select>
+        {filterBranch !== "all" && qtyValues.length > 0 && (
+          <div ref={qtyRef} style={{ position: "relative" }}>
+            <button onClick={() => setShowQtyDropdown(v => !v)}
+              style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #1e40af", borderRadius: 8, color: "#1e40af", fontWeight: 600, background: "#fff", cursor: "pointer" }}>
+              {filterQty.length === 0 ? "ทุกจำนวน สาขา 1 ▾" : `${filterQty.join(", ")} คัน ▾`}
+            </button>
+            {showQtyDropdown && (
+              <div style={{ position: "absolute", top: "100%", left: 0, background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100, minWidth: 140, padding: 6, marginTop: 4 }}>
+                <div onClick={() => { setFilterQty([]); setCurrentPage(1); }}
+                  style={{ padding: "4px 8px", fontSize: 12, cursor: "pointer", color: "#6b7280", borderBottom: "1px solid #f3f4f6", marginBottom: 4 }}>
+                  ทั้งหมด
+                </div>
+                {qtyValues.map(q => (
+                  <label key={q} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", fontSize: 12, cursor: "pointer" }}>
+                    <input type="checkbox" checked={filterQty.includes(q)}
+                      onChange={() => {
+                        setFilterQty(prev => prev.includes(q) ? prev.filter(v => v !== q) : [...prev, q].sort((a, b) => a - b));
+                        setCurrentPage(1);
+                      }} />
+                    {q} คัน
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <select value={filterBranch2} onChange={e => { setFilterBranch2(e.target.value); setFilterQty2([]); setShowQtyDropdown2(false); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #7c3aed", borderRadius: 8, color: "#7c3aed", fontWeight: 600 }}>
           <option value="all">สาขา 2</option>
@@ -174,7 +200,7 @@ export default function MotoStockPage() {
           <div ref={qtyRef2} style={{ position: "relative" }}>
             <button onClick={() => setShowQtyDropdown2(v => !v)}
               style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #7c3aed", borderRadius: 8, color: "#7c3aed", fontWeight: 600, background: "#fff", cursor: "pointer" }}>
-              {filterQty2.length === 0 ? "จำนวน สาขา2 ▾" : `${filterQty2.join(", ")} คัน ▾`}
+              {filterQty2.length === 0 ? "ทุกจำนวน สาขา 2 ▾" : `${filterQty2.join(", ")} คัน ▾`}
             </button>
             {showQtyDropdown2 && (
               <div style={{ position: "absolute", top: "100%", left: 0, background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100, minWidth: 140, padding: 6, marginTop: 4 }}>
@@ -201,32 +227,6 @@ export default function MotoStockPage() {
           <option value="all">สาขา 3</option>
           {branches.filter(b => b.code !== filterBranch && b.code !== filterBranch2).map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
         </select>
-        {filterBranch !== "all" && qtyValues.length > 0 && (
-          <div ref={qtyRef} style={{ position: "relative" }}>
-            <button onClick={() => setShowQtyDropdown(v => !v)}
-              style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #10b981", borderRadius: 8, color: "#065f46", fontWeight: 600, background: "#fff", cursor: "pointer" }}>
-              {filterQty.length === 0 ? "ทุกจำนวน ▾" : `${filterQty.join(", ")} คัน ▾`}
-            </button>
-            {showQtyDropdown && (
-              <div style={{ position: "absolute", top: "100%", left: 0, background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, boxShadow: "0 4px 12px rgba(0,0,0,0.15)", zIndex: 100, minWidth: 140, padding: 6, marginTop: 4 }}>
-                <div onClick={() => { setFilterQty([]); setCurrentPage(1); }}
-                  style={{ padding: "4px 8px", fontSize: 12, cursor: "pointer", color: "#6b7280", borderBottom: "1px solid #f3f4f6", marginBottom: 4 }}>
-                  ทั้งหมด
-                </div>
-                {qtyValues.map(q => (
-                  <label key={q} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", fontSize: 12, cursor: "pointer" }}>
-                    <input type="checkbox" checked={filterQty.includes(q)}
-                      onChange={() => {
-                        setFilterQty(prev => prev.includes(q) ? prev.filter(v => v !== q) : [...prev, q].sort((a, b) => a - b));
-                        setCurrentPage(1);
-                      }} />
-                    {q} คัน
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
         <button onClick={fetchData} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
         {selectedRows.size > 0 && (
           <>

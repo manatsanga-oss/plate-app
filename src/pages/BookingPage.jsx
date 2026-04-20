@@ -35,7 +35,17 @@ export default function BookingPage({ currentUser }) {
   const [cancelReason, setCancelReason] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterDate, setFilterDate] = useState(new Date().toISOString().slice(0, 10));
-  const [activeTab, setActiveTab] = useState("booking");
+  const [activeTab, setActiveTab] = useState("overview");
+  const [overviewFrom, setOverviewFrom] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  });
+  const [overviewTo, setOverviewTo] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  });
+  const [overviewData, setOverviewData] = useState([]);
+  const [overviewLoading, setOverviewLoading] = useState(false);
   const [fuelData, setFuelData] = useState([]);
   const [fuelLoading, setFuelLoading] = useState(false);
   const [fuelFrom, setFuelFrom] = useState(() => {
@@ -62,8 +72,32 @@ export default function BookingPage({ currentUser }) {
 
   useEffect(() => {
     if (activeTab === "fuel") fetchFuelExpenses();
+    if (activeTab === "overview") fetchOverview();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, fuelFrom, fuelTo]);
+  }, [activeTab, fuelFrom, fuelTo, overviewFrom, overviewTo]);
+
+  async function fetchOverview() {
+    setOverviewLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_booking_overview", from: overviewFrom, to: overviewTo }),
+      });
+      const data = await res.json();
+      const arr = Array.isArray(data) ? data : [];
+      setOverviewData(arr.map(r => ({
+        branch: r.branch || "-",
+        count: Number(r.count || 0),
+        distance_m: Number(r.total_distance_m || 0),
+        duration_s: Number(r.total_duration_s || 0),
+        sales_count: Number(r.sales_count || 0),
+      })));
+    } catch {
+      setOverviewData([]);
+    }
+    setOverviewLoading(false);
+  }
 
   async function fetchFuelExpenses() {
     setFuelLoading(true);
@@ -499,6 +533,7 @@ export default function BookingPage({ currentUser }) {
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 14, borderBottom: "2px solid #e5e7eb" }}>
         {[
+          { key: "overview", label: "📊 ภาพรวม" },
           { key: "booking", label: "🚗 การจองคนขับรถ" },
           { key: "fuel", label: "⛽ รายงานการเบิกค่าน้ำมัน" },
         ].map(t => (
@@ -517,6 +552,17 @@ export default function BookingPage({ currentUser }) {
         ))}
       </div>
 
+      {activeTab === "overview" && (
+        <OverviewTab
+          data={overviewData}
+          loading={overviewLoading}
+          from={overviewFrom}
+          to={overviewTo}
+          setFrom={setOverviewFrom}
+          setTo={setOverviewTo}
+        />
+      )}
+
       {activeTab === "fuel" && (
         <FuelExpensesTab
           data={fuelData}
@@ -530,6 +576,7 @@ export default function BookingPage({ currentUser }) {
       )}
 
       {activeTab === "booking" && (<>
+      {/* Booking filters */}
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <label style={{ fontSize: 14, color: "#374151", whiteSpace: "nowrap" }}>📅 วันที่จอง</label>
@@ -710,6 +757,109 @@ export default function BookingPage({ currentUser }) {
               </button>
             </div>
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OverviewTab({ data, loading, from, to, setFrom, setTo }) {
+  const fmt = v => Number(v || 0).toLocaleString("th-TH");
+  const fmtKm = m => (Number(m || 0) / 1000).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const fmtDuration = s => {
+    const sec = Number(s || 0);
+    const h = Math.floor(sec / 3600);
+    const m = Math.round((sec % 3600) / 60);
+    if (h > 0) return `${h} ชม. ${m} นาที`;
+    return `${m} นาที`;
+  };
+  const total = data.reduce((acc, r) => ({
+    count: acc.count + r.count,
+    distance_m: acc.distance_m + r.distance_m,
+    duration_s: acc.duration_s + r.duration_s,
+    sales_count: acc.sales_count + (r.sales_count || 0),
+  }), { count: 0, distance_m: 0, duration_s: 0, sales_count: 0 });
+  const maxCount = Math.max(1, ...data.map(r => r.count));
+
+  return (
+    <div>
+      {/* Filter */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: 8 }}>
+        <span style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>ตั้งแต่</span>
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+          style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+        <span style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>ถึง</span>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)}
+          style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+        <div style={{ marginLeft: "auto", fontSize: 13, color: "#374151" }}>
+          <span>ส่งรถ: <b style={{ color: "#1565C0" }}>{fmt(total.count)}</b>/</span>
+          <span>ขาย: <b style={{ color: "#7b1fa2" }}>{fmt(total.sales_count)}</b> คัน</span>
+          <span style={{ marginLeft: 14 }}>ระยะทาง: <b style={{ color: "#059669" }}>{fmtKm(total.distance_m)}</b> กม.</span>
+          <span style={{ marginLeft: 14 }}>เวลา: <b style={{ color: "#d97706" }}>{fmtDuration(total.duration_s)}</b></span>
+        </div>
+      </div>
+
+      {/* Title */}
+      <div style={{ marginBottom: 10, padding: "8px 14px", background: "#1565C0", color: "#fff", borderRadius: 8, fontWeight: 700 }}>
+        📊 ภาพรวมการส่งรถ แยกตามร้าน (ปลายทาง)
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+      ) : data.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>ไม่มีรายการส่งรถในช่วงวันที่เลือก</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ width: 40, textAlign: "center" }}>#</th>
+                <th>ร้าน / สาขา</th>
+                <th style={{ textAlign: "right" }}>ส่งรถ (ครั้ง)</th>
+                <th style={{ textAlign: "right" }}>ขาย (คัน)</th>
+                <th style={{ textAlign: "right" }}>สัดส่วนส่ง/ขาย</th>
+                <th style={{ textAlign: "right" }}>ระยะทางรวม (กม.)</th>
+                <th style={{ textAlign: "right" }}>เวลารวม</th>
+                <th style={{ width: 160 }}>สัดส่วน</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.map((r, i) => {
+                const pct = (r.count / maxCount) * 100;
+                const deliveryRatio = r.sales_count > 0 ? ((r.count / r.sales_count) * 100).toFixed(1) : null;
+                const ratioColor = deliveryRatio === null ? "#9ca3af" : Number(deliveryRatio) >= 80 ? "#059669" : Number(deliveryRatio) >= 50 ? "#d97706" : "#dc2626";
+                return (
+                  <tr key={i}>
+                    <td style={{ textAlign: "center", fontWeight: 700, color: "#1565C0" }}>{i + 1}</td>
+                    <td style={{ fontWeight: 600 }}>{r.branch}</td>
+                    <td style={{ textAlign: "right", fontSize: 15, fontWeight: 700, color: "#1565C0" }}>{fmt(r.count)}</td>
+                    <td style={{ textAlign: "right", fontSize: 15, fontWeight: 700, color: "#7b1fa2" }}>{fmt(r.sales_count)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 700, color: ratioColor }}>
+                      {deliveryRatio !== null ? `${deliveryRatio}%` : "-"}
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 600, color: "#059669" }}>{fmtKm(r.distance_m)}</td>
+                    <td style={{ textAlign: "right", fontWeight: 600, color: "#d97706" }}>{fmtDuration(r.duration_s)}</td>
+                    <td>
+                      <div style={{ background: "#e0e0e0", borderRadius: 4, height: 12, overflow: "hidden" }}>
+                        <div style={{ width: `${pct}%`, height: "100%", background: "#1565C0", borderRadius: 4, transition: "width 0.5s" }} />
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              <tr style={{ background: "#e3f2fd", fontWeight: 700 }}>
+                <td colSpan={2} style={{ fontWeight: 700 }}>รวมทั้งหมด</td>
+                <td style={{ textAlign: "right", fontWeight: 700, color: "#1565C0" }}>{fmt(total.count)}</td>
+                <td style={{ textAlign: "right", fontWeight: 700, color: "#7b1fa2" }}>{fmt(total.sales_count)}</td>
+                <td style={{ textAlign: "right", fontWeight: 700 }}>
+                  {total.sales_count > 0 ? `${((total.count / total.sales_count) * 100).toFixed(1)}%` : "-"}
+                </td>
+                <td style={{ textAlign: "right", fontWeight: 700, color: "#059669" }}>{fmtKm(total.distance_m)}</td>
+                <td style={{ textAlign: "right", fontWeight: 700, color: "#d97706" }}>{fmtDuration(total.duration_s)}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       )}
     </div>
