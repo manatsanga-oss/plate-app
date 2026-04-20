@@ -11,12 +11,13 @@ const UPLOAD_GROUPS = [
       { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_deposit", url: `${BASE}/upload-deposit` },
       { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "honda_deposits", url: `${BASE}/upload-honda-deposit` },
       { key: "other-income", label: "รายได้อื่นๆ", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "other_income", url: `${BASE}/upload-other-income` },
+      { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่าย", db: "daily_expenses", url: `${BASE}/upload-expenses` },
     ],
   },
   {
     title: "UPLOAD ข้อมูลบริการและอะไหล่",
     items: [
-      { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด (HONDA + อื่นๆ)", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
+      { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด (ป.เปา + ห้าห้อง + สช.ตลาด + นครหลวง)", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
       { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_orders", url: `${BASE}/upload-dcs-orders` },
       { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
       { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
@@ -29,7 +30,6 @@ const UPLOAD_GROUPS = [
     items: [
       { key: "fast-moving", label: "รหัสอะไหล่หมุนเวียนเร็ว", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "fast_moving_parts", url: `${BASE}/upload-fast-moving` },
       { key: "motoprice", label: "ตารางราคารถจักรยานยนต์", desc: "อัปเดตข้อมูลราคารถ", db: "moto_prices", url: `${BASE}/upload-moto-price` },
-      { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่าย", db: "daily_expenses", url: `${BASE}/upload-expenses` },
     ],
   },
 ];

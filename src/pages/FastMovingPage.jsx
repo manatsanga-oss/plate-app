@@ -27,6 +27,7 @@ export default function FastMovingPage() {
   const [iProductGroup, setIProductGroup] = useState("");
   const [iCustomName, setICustomName] = useState("");
   const [iStockType, setIStockType] = useState("สต๊อก");
+  const [iStockNakhonluang, setIStockNakhonluang] = useState(false);
   const PAGE_SIZE = 30;
 
   useEffect(() => { fetchData(); fetchCarModels(); fetchProductGroups(); }, []);
@@ -116,6 +117,7 @@ export default function FastMovingPage() {
     setIProductGroup(row.product_group || "");
     setICustomName(row.product_name || "");
     setIStockType(row.stock_type || "สต๊อก");
+    setIStockNakhonluang(!!row.is_stock_nakhonluang);
   }
 
   async function saveInfo() {
@@ -124,7 +126,7 @@ export default function FastMovingPage() {
       await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName, stock_type: iStockType }),
+        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName, stock_type: iStockType, is_stock_nakhonluang: iStockNakhonluang }),
       });
       fetchData();
     } catch {}
@@ -384,6 +386,12 @@ export default function FastMovingPage() {
                   </label>
                 ))}
               </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, fontWeight: 600, color: iStockNakhonluang ? "#065f46" : "#374151" }}>
+                <input type="checkbox" checked={iStockNakhonluang} onChange={e => setIStockNakhonluang(e.target.checked)} />
+                🏪 เป็นอะไหล่สต๊อกนครหลวง
+              </label>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={saveInfo} style={{ flex: 1, padding: "9px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>บันทึก</button>

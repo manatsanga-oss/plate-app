@@ -141,10 +141,11 @@ export default function PettyCashOfferingPage({ currentUser }) {
 
   function printDoc(doc) {
     const its = Array.isArray(doc.items) ? doc.items : [];
+    const DAYS = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
     const thaiDate = d => {
       if (!d) return "-";
       const dt = new Date(d);
-      return `${dt.getDate()}-${dt.getMonth() + 1}-${String(dt.getFullYear() + 543).slice(-2)}`;
+      return `${DAYS[dt.getDay()]} ${dt.getDate()}-${dt.getMonth() + 1}-${String(dt.getFullYear() + 543).slice(-2)}`;
     };
     const thaiDateFull = d => d ? new Date(d).toLocaleDateString("th-TH") : "-";
     const total = its.reduce((s, i) => s + Number(i.amount || 0), 0);
@@ -217,6 +218,15 @@ export default function PettyCashOfferingPage({ currentUser }) {
   }
 
   const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
+  const DAYS_TH = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+  const DAY_COLORS = ["#dc2626", "#f59e0b", "#ec4899", "#059669", "#f97316", "#2563eb", "#7c3aed"];
+  function getDayLabel(dateStr) {
+    if (!dateStr) return { label: "-", color: "#9ca3af" };
+    const d = new Date(dateStr);
+    if (isNaN(d)) return { label: "-", color: "#9ca3af" };
+    const i = d.getDay();
+    return { label: DAYS_TH[i], color: DAY_COLORS[i] };
+  }
   const totalItems = items.reduce((s, i) => s + Number(i.amount || 0), 0);
   const selectedTotal = docs.filter(d => selectedDocs.has(d.id)).reduce((s, d) => s + Number(d.total_amount || 0), 0);
 
@@ -262,19 +272,23 @@ export default function PettyCashOfferingPage({ currentUser }) {
         <div style={{ overflowX: "auto" }}>
           <table className="data-table" style={{ fontSize: 12 }}>
             <thead><tr>
-              <th>#</th><th>วันที่</th><th>รายละเอียด</th><th>จำนวนเงิน</th><th>หมายเหตุ</th>{!editDoc?.viewOnly && <th></th>}
+              <th>#</th><th>วันที่</th><th>วัน</th><th>รายละเอียด</th><th>จำนวนเงิน</th><th>หมายเหตุ</th>{!editDoc?.viewOnly && <th></th>}
             </tr></thead>
             <tbody>
-              {items.map((it, idx) => (
+              {items.map((it, idx) => {
+                const day = getDayLabel(it.offering_date);
+                return (
                 <tr key={idx}>
                   <td>{idx + 1}</td>
                   <td><input type="date" value={it.offering_date} onChange={e => updateItem(idx, "offering_date", e.target.value)} disabled={editDoc?.viewOnly} style={{ width: 130, fontSize: 12, padding: 2 }} /></td>
+                  <td><span style={{ fontWeight: 600, color: day.color, fontSize: 12 }}>{day.label}</span></td>
                   <td><input value={it.description} onChange={e => updateItem(idx, "description", e.target.value)} disabled={editDoc?.viewOnly} placeholder="ค่าผลไม้" style={{ width: 220, fontSize: 12, padding: 2 }} /></td>
                   <td><input type="number" value={it.amount} onChange={e => updateItem(idx, "amount", e.target.value)} disabled={editDoc?.viewOnly} style={{ width: 80, fontSize: 12, padding: 2, textAlign: "right" }} /></td>
                   <td><input value={it.note} onChange={e => updateItem(idx, "note", e.target.value)} disabled={editDoc?.viewOnly} placeholder="หมายเหตุ" style={{ width: 160, fontSize: 12, padding: 2 }} /></td>
                   {!editDoc?.viewOnly && <td><button onClick={() => setItems(prev => prev.filter((_, i) => i !== idx))} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16 }}>×</button></td>}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

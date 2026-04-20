@@ -12,6 +12,9 @@ export default function FastMovingStockPage() {
   const [filterStockType, setFilterStockType] = useState("all");
   const [filterBackorder, setFilterBackorder] = useState("all");
   const [filterPendingJob, setFilterPendingJob] = useState("all");
+  const [hideRecentOrdered, setHideRecentOrdered] = useState(false);
+  const [filterStoreStock, setFilterStoreStock] = useState("all");
+  const [onlyStockNakhonluang, setOnlyStockNakhonluang] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 30;
 
@@ -31,7 +34,7 @@ export default function FastMovingStockPage() {
 
   // แยกข้อมูล stores ออกเป็นแต่ละร้าน (แสดงเฉพาะจำนวน)
   function parseStores(storesStr) {
-    const result = { ppao: "-", haahong: "-", sachtalad: "-" };
+    const result = { ppao: "-", haahong: "-", sachtalad: "-", nakhonluang: "-" };
     if (!storesStr || storesStr === "-") return result;
     const parts = String(storesStr).split("|").map(s => s.trim()).filter(Boolean);
     for (const p of parts) {
@@ -39,7 +42,8 @@ export default function FastMovingStockPage() {
       if (!m) continue;
       const name = m[1].trim();
       const qty = m[2];
-      if (name.includes("ป.เปา") || name.includes("ป เปา")) result.ppao = qty;
+      if (name.includes("นครหลวง")) result.nakhonluang = qty;
+      else if (name.includes("ป.เปา") || name.includes("ป เปา")) result.ppao = qty;
       else if (name.includes("ห้าห้อง")) result.haahong = qty;
       else if (name.includes("สช")) result.sachtalad = qty;
     }
@@ -62,6 +66,25 @@ export default function FastMovingStockPage() {
     if (filterBackorder === "no" && Number(r.backorder_qty || 0) > 0) return false;
     if (filterPendingJob === "yes" && Number(r.pending_job_qty || 0) <= 0) return false;
     if (filterPendingJob === "no" && Number(r.pending_job_qty || 0) > 0) return false;
+    // แสดงเฉพาะอะไหล่สต๊อกนครหลวง
+    if (onlyStockNakhonluang && !r.is_stock_nakhonluang) return false;
+    // กรองตามร้าน (มีของ/ไม่มีของ)
+    if (filterStoreStock !== "all") {
+      const s = parseStores(r.stores);
+      const [store, mode] = filterStoreStock.split(":");
+      const raw = s[store];
+      const qty = raw === "-" ? 0 : Number(raw) || 0;
+      if (mode === "has" && qty <= 0) return false;
+      if (mode === "none" && qty > 0) return false;
+    }
+    // ซ่อนรายการที่หมดสต๊อก + สั่งซื้อภายใน 7 วันที่ผ่านมา
+    if (hideRecentOrdered && Number(r.quantity || 0) <= 0 && r.last_order_date) {
+      const orderDate = new Date(r.last_order_date);
+      if (!isNaN(orderDate)) {
+        const diffDays = (Date.now() - orderDate.getTime()) / 86400000;
+        if (diffDays >= 0 && diffDays <= 7) return false;
+      }
+    }
     if (search) {
       const q = search.toLowerCase();
       const hit = [r.part_code, r.product_name, r.product_group]
@@ -95,6 +118,7 @@ export default function FastMovingStockPage() {
         <td class="r">${s.ppao}</td>
         <td class="r">${s.haahong}</td>
         <td class="r">${s.sachtalad}</td>
+        <td class="r">${s.nakhonluang}</td>
         <td>${fmtD(r.last_order_date)}</td>
         <td class="r">${Number(r.avg_order_qty_3m || 0) > 0 ? Number(r.avg_order_qty_3m).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "-"}</td>
         <td class="r">${r.backorder_qty || "-"}</td>
@@ -118,7 +142,7 @@ export default function FastMovingStockPage() {
 <div class="info">ตัวกรอง: ${filterLabel} | จำนวน: ${filtered.length} รายการ | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
 <table>
   <thead><tr>
-    <th>#</th><th>กลุ่มสินค้า</th><th>รหัสสินค้า</th><th>ชื่อสินค้า</th><th>จำนวน</th><th>ป.เปา</th><th>ห้าห้อง</th><th>สช.ตลาด</th><th>วันที่สั่งล่าสุด</th><th>เฉลี่ยสั่ง/เดือน</th><th>ค้างส่ง</th><th>คาดว่าได้รับ</th><th>ค้างปิด JOB</th>
+    <th>#</th><th>กลุ่มสินค้า</th><th>รหัสสินค้า</th><th>ชื่อสินค้า</th><th>จำนวน</th><th>ป.เปา</th><th>ห้าห้อง</th><th>สช.ตลาด</th><th>นครหลวง</th><th>วันที่สั่งล่าสุด</th><th>เฉลี่ยสั่ง/เดือน</th><th>ค้างส่ง</th><th>คาดว่าได้รับ</th><th>ค้างปิด JOB</th>
   </tr></thead>
   <tbody>${rows}</tbody>
 </table>
@@ -163,18 +187,30 @@ export default function FastMovingStockPage() {
           <option value="stock">อะไหล่สต๊อก</option>
           <option value="nostock">อะไหล่ไม่สต๊อก</option>
         </select>
-        <select value={filterBackorder} onChange={e => { setFilterBackorder(e.target.value); setCurrentPage(1); }}
-          style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #b91c1c", borderRadius: 8, color: "#b91c1c" }}>
-          <option value="all">ค้างส่ง ทั้งหมด</option>
-          <option value="yes">มีค้างส่ง</option>
-          <option value="no">ไม่มีค้างส่ง</option>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#065f46", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #6ee7b7", borderRadius: 8, background: filterBackorder === "no" ? "#ecfdf5" : "#fff" }}>
+          <input type="checkbox" checked={filterBackorder === "no"} onChange={e => { setFilterBackorder(e.target.checked ? "no" : "all"); setCurrentPage(1); }} />
+          ไม่ค้างส่ง
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#065f46", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #6ee7b7", borderRadius: 8, background: filterPendingJob === "no" ? "#ecfdf5" : "#fff" }}>
+          <input type="checkbox" checked={filterPendingJob === "no"} onChange={e => { setFilterPendingJob(e.target.checked ? "no" : "all"); setCurrentPage(1); }} />
+          ไม่ค้างปิด JOB
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#dc2626", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: hideRecentOrdered ? "#fef2f2" : "#fff" }}>
+          <input type="checkbox" checked={hideRecentOrdered} onChange={e => { setHideRecentOrdered(e.target.checked); setCurrentPage(1); }} />
+          สั่งซื้อ 7 วัน
+        </label>
+        <select value={filterStoreStock} onChange={e => { setFilterStoreStock(e.target.value); setCurrentPage(1); }}
+          style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #0ea5e9", borderRadius: 8, color: "#0369a1", fontWeight: 600 }}>
+          <option value="all">🏪 ทุกร้าน</option>
+          <option value="ppao:none">ป.เปา ไม่มีของ</option>
+          <option value="haahong:none">ห้าห้อง ไม่มีของ</option>
+          <option value="sachtalad:none">สช.ตลาด ไม่มีของ</option>
+          <option value="nakhonluang:none">นครหลวง ไม่มีของ</option>
         </select>
-        <select value={filterPendingJob} onChange={e => { setFilterPendingJob(e.target.value); setCurrentPage(1); }}
-          style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #7c3aed", borderRadius: 8, color: "#7c3aed" }}>
-          <option value="all">ค้างปิด JOB ทั้งหมด</option>
-          <option value="yes">มีค้างปิด JOB</option>
-          <option value="no">ไม่มีค้างปิด JOB</option>
-        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#0369a1", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #7dd3fc", borderRadius: 8, background: onlyStockNakhonluang ? "#e0f2fe" : "#fff" }}>
+          <input type="checkbox" checked={onlyStockNakhonluang} onChange={e => { setOnlyStockNakhonluang(e.target.checked); setCurrentPage(1); }} />
+          🏪 สต๊อกนครหลวง
+        </label>
         <span style={{ fontSize: 13, color: "#374151" }}>{filtered.length} รายการ</span>
       </div>
 
@@ -190,6 +226,7 @@ export default function FastMovingStockPage() {
               <th style={{ ...th, textAlign: "right" }}>ป.เปา</th>
               <th style={{ ...th, textAlign: "right" }}>ห้าห้อง</th>
               <th style={{ ...th, textAlign: "right" }}>สช.ตลาด</th>
+              <th style={{ ...th, textAlign: "right" }}>นครหลวง</th>
               <th style={th}>วันที่สั่งล่าสุด</th>
               <th style={{ ...th, textAlign: "right" }}>เฉลี่ยสั่ง/เดือน (3ด.)</th>
               <th style={{ ...th, textAlign: "right" }}>ค้างส่ง</th>
@@ -199,9 +236,9 @@ export default function FastMovingStockPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={13} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={14} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
             ) : paged.length === 0 ? (
-              <tr><td colSpan={13} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={14} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
             ) : paged.map((r, i) => {
               const qty = Number(r.quantity || 0);
               const s = parseStores(r.stores);
@@ -215,6 +252,7 @@ export default function FastMovingStockPage() {
                   <td style={{ ...td, textAlign: "right" }}>{s.ppao}</td>
                   <td style={{ ...td, textAlign: "right" }}>{s.haahong}</td>
                   <td style={{ ...td, textAlign: "right" }}>{s.sachtalad}</td>
+                  <td style={{ ...td, textAlign: "right" }}>{s.nakhonluang}</td>
                   <td style={td}>{r.last_order_date ? new Date(r.last_order_date).toLocaleDateString("th-TH") : ""}</td>
                   <td style={{ ...td, textAlign: "right" }}>{Number(r.avg_order_qty_3m || 0) > 0 ? Number(r.avg_order_qty_3m).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : ""}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.backorder_qty || 0) > 0 ? "#b91c1c" : undefined, fontWeight: Number(r.backorder_qty || 0) > 0 ? 700 : undefined }}>{Number(r.backorder_qty || 0) > 0 ? fmtQty(r.backorder_qty) : ""}</td>
