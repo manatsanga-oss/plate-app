@@ -45,6 +45,12 @@ export default function YamahaOrderPage({ currentUser }) {
   const [estimateNo, setEstimateNo] = useState("");
   const [repairRemark, setRepairRemark] = useState("");
   const [savingRepair, setSavingRepair] = useState(false);
+  const [adjustDeposits, setAdjustDeposits] = useState([]);
+  const [showAdjustModal, setShowAdjustModal] = useState(false);
+  const [adjustDocNo, setAdjustDocNo] = useState("");
+  const [adjustType, setAdjustType] = useState("มัดจำค่ารถ");
+  const [adjustRemark, setAdjustRemark] = useState("");
+  const [savingAdjust, setSavingAdjust] = useState(false);
   const [showAppointmentModal, setShowAppointmentModal] = useState(null);
   const [appointmentDate, setAppointmentDate] = useState("");
   const [savingAppointment, setSavingAppointment] = useState(false);
@@ -80,6 +86,10 @@ export default function YamahaOrderPage({ currentUser }) {
     try {
       const r = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_repair_deposits" }) }).then(res => res.json());
       setRepairDeposits(norm(r));
+    } catch {}
+    try {
+      const r = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_adjust_deposits" }) }).then(res => res.json());
+      setAdjustDeposits(norm(r));
     } catch {}
     try {
       const r = await api("get_yamaha_orders");
@@ -186,6 +196,35 @@ export default function YamahaOrderPage({ currentUser }) {
       loadAll();
     } catch { setMessage("เกิดข้อผิดพลาด"); }
     setSavingRepair(false);
+  }
+
+  async function handleSaveAdjustDeposit() {
+    if (!adjustDocNo) { setMessage("กรุณาเลือกใบมัดจำ"); return; }
+    if (!adjustType) { setMessage("กรุณาเลือกประเภทปรับปรุง"); return; }
+    setSavingAdjust(true);
+    setMessage("");
+    try {
+      const dep = deposits.find(d => d.receipt_no === adjustDocNo);
+      await fetch(SPARE_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_adjust_deposit",
+          deposit_doc_no: adjustDocNo,
+          adjust_type: adjustType,
+          remark: adjustRemark.trim(),
+          customer_name: dep?.customer_name || "",
+          created_by: currentUser?.name || "",
+        }),
+      });
+      setShowAdjustModal(false);
+      setAdjustDocNo("");
+      setAdjustType("มัดจำค่ารถ");
+      setAdjustRemark("");
+      setMessage("บันทึกปรับปรุงเงินมัดจำสำเร็จ");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSavingAdjust(false);
   }
 
   function openNew() {
@@ -498,6 +537,10 @@ export default function YamahaOrderPage({ currentUser }) {
             style={{ padding: "8px 16px", fontSize: 13, background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
             บันทึกมัดจำตีราคาซ่อม
           </button>
+          <button onClick={() => { setShowAdjustModal(true); setAdjustDocNo(""); setAdjustType("มัดจำค่ารถ"); setAdjustRemark(""); setMessage(""); }}
+            style={{ padding: "8px 16px", fontSize: 13, background: "#ea580c", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
+            บันทึกปรับปรุงเงินมัดจำ
+          </button>
         </div>
       </div>
 
@@ -705,6 +748,7 @@ export default function YamahaOrderPage({ currentUser }) {
                       && (d.receipt_no || "").startsWith("SCY01")
                       && !orders.some(o => o.deposit_doc_no === d.receipt_no)
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
+                      && !adjustDeposits.some(ad => ad.deposit_doc_no === d.receipt_no)
                     );
                     return eligible;
                   })().map(d => (
@@ -730,6 +774,8 @@ export default function YamahaOrderPage({ currentUser }) {
                       && !orders.some(o => o.deposit_doc_no === d.receipt_no)
                       // ไม่ใช่ตีราคาซ่อม
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
+                      // ไม่ใช่ปรับปรุงผิดประเภท
+                      && !adjustDeposits.some(ad => ad.deposit_doc_no === d.receipt_no)
                       // มียอดคงเหลือ
                       && Number(d.remaining_amount || 0) > 0
                     )
@@ -1089,7 +1135,8 @@ export default function YamahaOrderPage({ currentUser }) {
                 <option value="">-- เลือกใบมัดจำ --</option>
                 {deposits
                   .filter(d => !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
-                    && !orders.some(o => o.deposit_doc_no === d.receipt_no))
+                    && !orders.some(o => o.deposit_doc_no === d.receipt_no)
+                    && !adjustDeposits.some(ad => ad.deposit_doc_no === d.receipt_no))
                   .map(d => (
                     <option key={d.receipt_no} value={d.receipt_no}>
                       {d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}
@@ -1124,6 +1171,68 @@ export default function YamahaOrderPage({ currentUser }) {
                 {savingRepair ? "กำลังบันทึก..." : "บันทึก"}
               </button>
               <button onClick={() => setShowRepairModal(false)}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal บันทึกปรับปรุงเงินมัดจำ ===== */}
+      {showAdjustModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 480, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#ea580c" }}>บันทึกปรับปรุงเงินมัดจำ</h3>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+              ใช้เมื่อรับเงินมัดจำผิดประเภท (มัดจำค่ารถ / มัดจำทั่วไป) — ใบที่เลือกจะไม่แสดงในสั่งซื้ออะไหล่
+            </div>
+            {message && <div style={{ color: message.includes("สำเร็จ") ? "#15803d" : "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลือกใบมัดจำ *</label>
+              <select value={adjustDocNo} onChange={e => setAdjustDocNo(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}>
+                <option value="">-- เลือกใบมัดจำ --</option>
+                {deposits
+                  .filter(d => !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
+                    && !orders.some(o => o.deposit_doc_no === d.receipt_no)
+                    && !adjustDeposits.some(ad => ad.deposit_doc_no === d.receipt_no))
+                  .map(d => (
+                    <option key={d.receipt_no} value={d.receipt_no}>
+                      {d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            {adjustDocNo && (() => {
+              const dep = deposits.find(d => d.receipt_no === adjustDocNo);
+              return dep ? (
+                <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13 }}>
+                  <div><b>ลูกค้า:</b> {dep.customer_name}</div>
+                  <div><b>ยอดมัดจำ:</b> {fmt(dep.deposit_amount)}</div>
+                </div>
+              ) : null;
+            })()}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>ประเภทที่ถูกต้อง *</label>
+              <select value={adjustType} onChange={e => setAdjustType(e.target.value)}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}>
+                <option value="มัดจำค่ารถ">มัดจำค่ารถ</option>
+                <option value="มัดจำทั่วไป">มัดจำทั่วไป</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>หมายเหตุ</label>
+              <textarea value={adjustRemark} onChange={e => setAdjustRemark(e.target.value)}
+                placeholder="หมายเหตุ (ถ้ามี)" rows={3}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleSaveAdjustDeposit} disabled={savingAdjust}
+                style={{ flex: 1, padding: "9px 0", background: "#ea580c", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {savingAdjust ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+              <button onClick={() => setShowAdjustModal(false)}
                 style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
                 ยกเลิก
               </button>

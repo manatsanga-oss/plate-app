@@ -393,15 +393,15 @@ export default function MotoBookingPage({ currentUser }) {
     queueGroups[key].push(b);
   });
   Object.keys(queueGroups).forEach((key) => {
-    // เรียงคิวตามเลขที่ใบมัดจำ (deposit_no) จากน้อย → มาก
-    // ถ้าไม่มี deposit_no ใช้ booking_date เป็น fallback
+    // เรียงคิว: วันที่จองก่อน → ถ้าวันเดียวกัน ใช้เลขที่ใบมัดจำ (deposit_no)
     queueGroups[key].sort((a, b) => {
+      const dtA = new Date(a.booking_date).getTime();
+      const dtB = new Date(b.booking_date).getTime();
+      if (dtA !== dtB) return dtA - dtB;
       const dA = (a.deposit_no || "").toString();
       const dB = (b.deposit_no || "").toString();
       if (dA && dB) return dA.localeCompare(dB, undefined, { numeric: true });
-      if (dA) return -1;
-      if (dB) return 1;
-      return new Date(a.booking_date) - new Date(b.booking_date);
+      return 0;
     });
   });
   const queuePosMap = {}; // booking_id -> { pos, qty, engine_no, branch, age }
