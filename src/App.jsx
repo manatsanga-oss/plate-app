@@ -28,6 +28,7 @@ import PettyCashFuelPage from "./pages/PettyCashFuelPage";
 import PettyCashPostagePage from "./pages/PettyCashPostagePage";
 import PettyCashGeneralPage from "./pages/PettyCashGeneralPage";
 import PettyCashOfferingPage from "./pages/PettyCashOfferingPage";
+import ClaimPage from "./pages/ClaimPage";
 import RepairDepositPage from "./pages/RepairDepositPage";
 import ProductGroupPage from "./pages/ProductGroupPage";
 import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
@@ -72,7 +73,7 @@ export default function App() {
     if (!currentUser) return false;
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering") return true;
+    if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim") return true;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -158,6 +159,7 @@ export default function App() {
         {activeMenu === "postage" && canAccess("postage") && <PettyCashPostagePage currentUser={currentUser} />}
         {activeMenu === "pettycashgeneral" && canAccess("pettycashgeneral") && <PettyCashGeneralPage currentUser={currentUser} />}
         {activeMenu === "pettycashoffering" && canAccess("pettycashoffering") && <PettyCashOfferingPage currentUser={currentUser} />}
+        {activeMenu === "claim" && canAccess("claim") && <ClaimPage currentUser={currentUser} />}
         {activeMenu === "fastmoving" && canAccess("fastmoving") && (
           <FastMovingPage />
         )}
@@ -228,7 +230,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "stockcheck", "motostock"];
-  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup"];
+  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "claim"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "finance", "driver", "position", "users"];
   const uploadPages = ["upload"];
@@ -260,6 +262,9 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuSubGroup title="Spare Inventory" pages={["fastmoving", "fastmovingstock"]} activeMenu={activeMenu}>
           <MenuItem page="fastmoving" label="รายงานอะไหล่หมุนเร็ว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="fastmovingstock" label="ระบบจัดการสต๊อกอะไหล่หมุนเร็ว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        </MenuSubGroup>
+        <MenuSubGroup title="Claim System" pages={["claim"]} activeMenu={activeMenu}>
+          <MenuItem page="claim" label="ระบบการเคลม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="ข้อมูลหลัก" pages={["productgroup"]} activeMenu={activeMenu}>
           <MenuItem page="productgroup" label="กลุ่มสินค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
