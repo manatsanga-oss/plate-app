@@ -32,7 +32,7 @@ const TRACKING_STEPS = [
   { key: "submitted", dateKey: "submit_date", label: "1️⃣ ส่งเคลมแล้ว", color: "#3b82f6", extraKey: "submit_claim_no", extraLabel: "เลขที่ใบเคลม (ศูนย์)" },
   { key: "parts_received", dateKey: "parts_received_date", label: "2️⃣ รับอะไหล่เคลม", color: "#8b5cf6" },
   { key: "appointment_notified", dateKey: "appointment_date", label: "3️⃣ แจ้งนัดหมายลูกค้า", color: "#f59e0b", extraKey: "appointment_note", extraLabel: "หมายเหตุนัดหมาย" },
-  { key: "job_closed", dateKey: "job_closed_date", label: "4️⃣ ปิด JOB เคลม", color: "#10b981", extraKey: "job_no", extraLabel: "เลขที่ JOB" },
+  { key: "job_closed", dateKey: "job_closed_date", label: "4️⃣ เปิด JOB เคลม", color: "#10b981", extraKey: "job_no", extraLabel: "เลขที่ JOB" },
   { key: "scrap_returned", dateKey: "scrap_returned_date", label: "5️⃣ แจ้งคืนซาก", color: "#6b7280" },
   { key: "payment_received", dateKey: "payment_received_date", label: "6️⃣ รับชำระเงินค่าเคลม", color: "#059669", extraKey: "payment_amount", extraLabel: "จำนวนเงิน (บาท)", extraType: "number" },
 ];
@@ -534,8 +534,8 @@ export default function ClaimPage({ currentUser }) {
           <option value="not_submitted">ยังไม่ส่งเคลม</option>
           <option value="submitted">ส่งเคลมแล้ว (รออะไหล่)</option>
           <option value="parts_received">รับอะไหล่แล้ว (ยังไม่นัด)</option>
-          <option value="appointment_notified">นัดหมายแล้ว (ยังไม่ปิด JOB)</option>
-          <option value="job_closed">ปิด JOB แล้ว (ยังไม่คืนซาก)</option>
+          <option value="appointment_notified">นัดหมายแล้ว (ยังไม่เปิด JOB)</option>
+          <option value="job_closed">เปิด JOB แล้ว (ยังไม่คืนซาก)</option>
           <option value="scrap_returned">คืนซากแล้ว (ยังไม่ชำระ)</option>
           <option value="payment_received">ชำระเงินแล้ว (เสร็จสิ้น)</option>
         </select>
