@@ -635,13 +635,11 @@ export default function MotoBookingPage({ currentUser }) {
             )}
           </div>
 
-          {isAdmin && (
-            <select value={filterBranch} onChange={(e) => setFilterBranch(e.target.value)}
-              style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
-              <option value="">ทุกสาขา</option>
-              {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
-          )}
+          <select value={filterBranch} onChange={(e) => setFilterBranch(e.target.value)}
+            style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
+            <option value="">ทุกสาขา</option>
+            {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
 
           <select value={filterBrand} onChange={(e) => { setFilterBrand(e.target.value); setFilterMarketing(""); setFilterModelCode(""); setFilterColor(""); }}
             style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
@@ -712,7 +710,7 @@ export default function MotoBookingPage({ currentUser }) {
               <tr>
                 <th>ลำดับ</th>
                 <th>วันที่จอง</th>
-                {isAdmin && <th>สาขา</th>}
+                <th>สาขา</th>
                 <th>ยี่ห้อ</th>
                 <th>ชื่อรุ่น</th>
                 <th>แบบ</th>
@@ -741,7 +739,7 @@ export default function MotoBookingPage({ currentUser }) {
                   <td style={{ whiteSpace: "nowrap" }}>
                     {b.booking_date ? new Date(b.booking_date).toLocaleDateString("th-TH") : "-"}
                   </td>
-                  {isAdmin && <td>{b.branch || "-"}</td>}
+                  <td>{b.branch || "-"}</td>
                   <td>{b.brand || "-"}</td>
                   <td>{b.marketing_name || "-"}</td>
                   <td>{b.new_model_code || b.model_code || "-"}</td>
