@@ -367,6 +367,15 @@ export default function PettyCashPostagePage({ currentUser }) {
                     </thead>
                     <tbody>
                       {availableReceipts
+                        .filter(r => {
+                          // กรองตามช่วงวันที่ (period_from - period_to) — ตัดรายการเดือนเก่าออก
+                          if (r.receipt_date && (periodFrom || periodTo)) {
+                            const d = r.receipt_date.slice(0, 10);
+                            if (periodFrom && d < periodFrom) return false;
+                            if (periodTo && d > periodTo) return false;
+                          }
+                          return true;
+                        })
                         .filter(r => !receiptSearch ||
                           (r.receipt_no || "").toLowerCase().includes(receiptSearch.toLowerCase()) ||
                           (r.customer_name || "").toLowerCase().includes(receiptSearch.toLowerCase()))
