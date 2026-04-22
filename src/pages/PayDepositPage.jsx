@@ -198,6 +198,15 @@ export default function PayDepositPage({ currentUser }) {
         setMessage(`✅ บันทึกแล้ว ${data.payment_no || ""}`);
         setShowTransfer(false);
         setTransferForm({ ...transferForm, transaction_id: "", slip_image: "", slip_mime: "", note: "" });
+        // สร้าง payment object สำหรับพิมพ์ทันที (ไม่ต้องรอ fetch)
+        const printObj = {
+          payment_no: data.payment_no,
+          payment_date: body.payment_date,
+          items: body.items,
+        };
+        if (window.confirm("บันทึกสำเร็จ — ต้องการพิมพ์ใบโอนหรือไม่?")) {
+          printPayment(printObj);
+        }
         fetchPending();
       } else {
         setMessage("❌ บันทึกไม่สำเร็จ");
@@ -208,70 +217,96 @@ export default function PayDepositPage({ currentUser }) {
     setSaving(false);
   }
 
-  function printSelected() {
-    if (selectedList.length === 0) { alert("เลือกรายการก่อน"); return; }
-    const rows = selectedList.map((r, idx) => {
-      const s = selected[r.item_id] || {};
-      return `<tr>
-        <td style="text-align:center">${idx + 1}</td>
-        <td>${r.received_date ? r.received_date.slice(0, 10) : "-"}</td>
-        <td>${r.receipt_no || "-"}</td>
-        <td>${r.branch_code || "-"}</td>
-        <td>${r.customer_name || "-"}</td>
-        <td>${s.contract_no || "-"}</td>
-        <td style="text-align:right">${fmt(r.line_amount)}</td>
-        <td style="text-align:right">${fmt(s.paid_amount)}</td>
-      </tr>`;
-    }).join("");
-    const today = new Date().toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" });
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>รายงานชำระค่างวดกรุ๊ปลีส</title>
+  function printPayment(payment) {
+    const items = Array.isArray(payment.items) ? payment.items : [];
+    if (items.length === 0) { alert("ไม่มีรายการในใบโอนนี้"); return; }
+
+    const MIN_ROWS = 25; // จำนวนแถวขั้นต่ำในตาราง (เพื่อให้เส้นตารางดูเต็มหน้า)
+    const thMonths = ["มกราคม","กุมภาพันธ์","มีนาคม","เมษายน","พฤษภาคม","มิถุนายน","กรกฎาคม","สิงหาคม","กันยายน","ตุลาคม","พฤศจิกายน","ธันวาคม"];
+    const d = payment.payment_date ? new Date(payment.payment_date) : new Date();
+    const thDate = `${d.getDate()} ${thMonths[d.getMonth()]} ${d.getFullYear() + 543}`;
+
+    const shopName = "ป.เปา มอเตอร์เซอร์วิส";
+
+    const rows = items.map((i, idx) => `<tr>
+      <td class="c">${idx + 1}</td>
+      <td>${i.contract_no || ""}</td>
+      <td>${i.customer_name || ""}</td>
+      <td class="r">${fmt(i.paid_amount)}</td>
+      <td>${i.remark || ""}</td>
+    </tr>`).join("");
+
+    let empty = "";
+    for (let i = items.length; i < MIN_ROWS; i++) {
+      empty += `<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>`;
+    }
+
+    const total = items.reduce((s, i) => s + (Number(i.paid_amount) || 0), 0);
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>ใบชำระค่างวดกรุ๊ปลีส ${payment.payment_no || ""}</title>
       <style>
         body { font-family: "Sarabun", "Tahoma", sans-serif; padding: 20px; font-size: 14px; }
-        h2 { text-align: center; margin: 0 0 6px; }
-        h3 { text-align: center; margin: 0 0 16px; font-weight: normal; }
-        table { width: 100%; border-collapse: collapse; margin-top: 8px; }
-        th, td { border: 1px solid #333; padding: 6px 8px; }
-        th { background: #dbeafe; }
-        tfoot td { font-weight: bold; background: #fef3c7; }
-        .sig { margin-top: 40px; display: flex; justify-content: space-around; text-align: center; }
-        .sig div { width: 30%; }
+        .head { margin-bottom: 12px; line-height: 1.5; }
+        .head b { font-size: 16px; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { border: 1px solid #000; padding: 4px 8px; font-size: 13px; }
+        th { background: #f3f4f6; font-weight: bold; text-align: center; }
+        td.c { text-align: center; }
+        td.r { text-align: right; }
+        tfoot td { font-weight: bold; background: #fef08a; }
         @media print { body { padding: 10px; } button { display: none; } }
       </style>
     </head><body>
-      <h2>รายงานรายการชำระค่างวดกรุ๊ปลีส</h2>
-      <h3>พิมพ์วันที่ ${today} — รวม ${selectedList.length} รายการ</h3>
+      <div class="head">
+        <div><b>บริษัท กรุ๊ปลีส จำกัด (มหาชน)</b></div>
+        <div>ติดต่อเบอร์ Fax 0-2580-9278 โทร. 0-2580-7555 ต่อ 4405</div>
+        <div>ธนาคารกสิกรไทย เลขที่บัญชี 7371019078 สาขาประชานิเวศน์ กระแสรายวัน</div>
+        <div>ธนาคารไทยพาณิชย์ เลขที่บัญชี 0852062096 สาขาประชานิเวศน์ 1 ออมทรัพย์</div>
+        <div>ธนาคารกรุงเทพ เลขที่บัญชี 1930380306 สาขาถนนประชาชื่น ออมทรัพย์</div>
+        <div style="margin-top:6px">วันที่ &nbsp;&nbsp; ${thDate}</div>
+        <div>ร้าน &nbsp;&nbsp;&nbsp;&nbsp; ${shopName}</div>
+      </div>
       <table>
         <thead>
           <tr>
-            <th style="width:40px">#</th>
-            <th>วันที่รับ</th>
-            <th>เลขใบเสร็จ</th>
-            <th>สาขา</th>
-            <th>ลูกค้า</th>
-            <th>เลขที่สัญญา</th>
-            <th>ยอดรับ</th>
-            <th>ยอดโอน</th>
+            <th style="width:50px">ลำดับ</th>
+            <th style="width:180px">เลขที่สัญญา</th>
+            <th>ชื่อ-สกุล</th>
+            <th style="width:130px">จำนวนเงิน</th>
+            <th style="width:150px">หมายเหตุ</th>
           </tr>
         </thead>
-        <tbody>${rows}</tbody>
+        <tbody>${rows}${empty}</tbody>
         <tfoot>
           <tr>
-            <td colspan="6" style="text-align:right">รวมทั้งสิ้น</td>
-            <td style="text-align:right">${fmt(selectedList.reduce((s, r) => s + Number(r.line_amount || 0), 0))}</td>
-            <td style="text-align:right">${fmt(totalSelected)}</td>
+            <td colspan="3" class="r">รวมเงินทั้งหมด</td>
+            <td class="r">${fmt(total)}</td>
+            <td></td>
           </tr>
         </tfoot>
       </table>
-      <div class="sig">
-        <div>............................................<br/>ผู้จัดทำ</div>
-        <div>............................................<br/>ผู้ตรวจสอบ</div>
-        <div>............................................<br/>ผู้อนุมัติ</div>
-      </div>
       <button onclick="window.print()" style="margin-top:20px;padding:10px 20px;background:#1e40af;color:#fff;border:none;border-radius:4px;cursor:pointer">🖨️ พิมพ์</button>
     </body></html>`;
-    const w = window.open("", "_blank", "width=900,height=700");
+
+    const w = window.open("", "_blank", "width=900,height=800");
     w.document.write(html);
     w.document.close();
+  }
+
+  // พิมพ์จากรายการที่เลือก (ยังไม่บันทึก)
+  function printSelected() {
+    if (selectedList.length === 0) { alert("เลือกรายการก่อน"); return; }
+    const items = selectedList.map(r => ({
+      contract_no: selected[r.item_id]?.contract_no || "",
+      customer_name: r.customer_name || "",
+      paid_amount: Number(selected[r.item_id]?.paid_amount) || 0,
+      remark: "",
+    }));
+    printPayment({
+      payment_no: "",
+      payment_date: new Date().toISOString().slice(0, 10),
+      items,
+    });
   }
 
   async function deletePayment(id) {
@@ -412,6 +447,7 @@ export default function PayDepositPage({ currentUser }) {
                     <td>{p.slip_image ? "✅" : "-"}</td>
                     <td>
                       <button onClick={() => setDetailPayment(p)} style={btnSmall}>ดูรายละเอียด</button>
+                      <button onClick={() => printPayment(p)} style={{ ...btnSmall, background: "#7c3aed", color: "#fff" }}>🖨️ พิมพ์</button>
                       <button onClick={() => deletePayment(p.id)} style={{ ...btnSmall, background: "#dc2626", color: "#fff" }}>ลบ</button>
                     </td>
                   </tr>
