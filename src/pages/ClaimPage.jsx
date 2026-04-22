@@ -213,39 +213,40 @@ export default function ClaimPage({ currentUser }) {
   }
 
   async function handleImageUpload(e) {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
     if (!editId) {
       setMessage("บันทึกใบเคลมก่อนอัปโหลดรูป");
       return;
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setMessage("ไฟล์ใหญ่เกิน 5MB");
-      return;
-    }
     setUploadingImage(true);
-    try {
-      const b64 = await new Promise((res, rej) => {
-        const r = new FileReader();
-        r.onload = () => res(r.result.split(",")[1]);
-        r.onerror = rej;
-        r.readAsDataURL(file);
-      });
-      await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "upload_claim_image",
-          claim_id: editId,
-          file_name: file.name,
-          mime_type: file.type,
-          image_data: b64,
-          file_size: file.size,
-          uploaded_by: currentUser?.name || "",
-        }),
-      });
-      fetchImages(editId);
-      setMessage("อัปโหลดรูปสำเร็จ");
-    } catch { setMessage("อัปโหลดรูปไม่สำเร็จ"); }
+    let ok = 0, fail = 0;
+    for (const file of files) {
+      if (file.size > 5 * 1024 * 1024) { fail++; continue; }
+      try {
+        const b64 = await new Promise((res, rej) => {
+          const r = new FileReader();
+          r.onload = () => res(r.result.split(",")[1]);
+          r.onerror = rej;
+          r.readAsDataURL(file);
+        });
+        await fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "upload_claim_image",
+            claim_id: editId,
+            file_name: file.name,
+            mime_type: file.type,
+            image_data: b64,
+            file_size: file.size,
+            uploaded_by: currentUser?.name || "",
+          }),
+        });
+        ok++;
+      } catch { fail++; }
+    }
+    fetchImages(editId);
+    setMessage(`อัปโหลดสำเร็จ ${ok} รูป${fail > 0 ? ` (ล้มเหลว ${fail})` : ""}`);
     setUploadingImage(false);
     e.target.value = "";
   }

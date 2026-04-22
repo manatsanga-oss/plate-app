@@ -28,6 +28,7 @@ import PettyCashFuelPage from "./pages/PettyCashFuelPage";
 import PettyCashPostagePage from "./pages/PettyCashPostagePage";
 import PettyCashGeneralPage from "./pages/PettyCashGeneralPage";
 import PettyCashOfferingPage from "./pages/PettyCashOfferingPage";
+import PayDepositPage from "./pages/PayDepositPage";
 import ClaimPage from "./pages/ClaimPage";
 import RepairDepositPage from "./pages/RepairDepositPage";
 import ProductGroupPage from "./pages/ProductGroupPage";
@@ -159,6 +160,7 @@ export default function App() {
         {activeMenu === "postage" && canAccess("postage") && <PettyCashPostagePage currentUser={currentUser} />}
         {activeMenu === "pettycashgeneral" && canAccess("pettycashgeneral") && <PettyCashGeneralPage currentUser={currentUser} />}
         {activeMenu === "pettycashoffering" && canAccess("pettycashoffering") && <PettyCashOfferingPage currentUser={currentUser} />}
+        {activeMenu === "paydeposit" && canAccess("paydeposit") && <PayDepositPage currentUser={currentUser} />}
         {activeMenu === "claim" && canAccess("claim") && <ClaimPage currentUser={currentUser} />}
         {activeMenu === "fastmoving" && canAccess("fastmoving") && (
           <FastMovingPage />
@@ -279,13 +281,14 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="subunit" label="บันทึกเพิ่มหน่วยย่อย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="pettycashgeneral" label="ค่าใช้จ่ายทั่วไป" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="pettycashoffering" label="ค่าของไหว้" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
+        <MenuItem page="paydeposit" label="ชำระเงินรับฝาก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Master Data" pages={masterPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
