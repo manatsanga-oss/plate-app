@@ -516,12 +516,27 @@ export default function SparePartsOrderPage({ currentUser }) {
       String(o.order_id).includes(s)
     );
   }).sort((a, b) => {
-    // เรียงตามวันที่สั่งซื้อ (ใหม่ก่อน) — ถ้ายังไม่มีวันที่ → อยู่บนสุด
-    const tA = a.created_at ? new Date(a.created_at).getTime() : Infinity;
-    const tB = b.created_at ? new Date(b.created_at).getTime() : Infinity;
+    // หาใบ "ปกติ" ของแต่ละกลุ่ม (ถ้าเป็นสั่งเพิ่ม → ใช้วันที่ของใบปกติที่อ้างอิง)
+    const findParentDate = (o) => {
+      if (o.order_type === "ปกติ") return o.created_at;
+      // สั่งเพิ่ม → หาใบปกติที่ ref_order_id ชี้ถึง หรือใช้ deposit_doc_no เดียวกัน
+      const parent = orders.find(x =>
+        x.order_type === "ปกติ" && (
+          x.order_id === o.ref_order_id ||
+          (x.deposit_doc_no && x.deposit_doc_no === o.deposit_doc_no)
+        )
+      );
+      return parent?.created_at || o.created_at;
+    };
+    const tA = findParentDate(a) ? new Date(findParentDate(a)).getTime() : Infinity;
+    const tB = findParentDate(b) ? new Date(findParentDate(b)).getTime() : Infinity;
     if (tA !== tB) return tB - tA;
-    // ชื่อลูกค้าเดียวกันติดกัน (tiebreaker)
-    return (a.customer_name || "").localeCompare(b.customer_name || "", "th");
+    // กลุ่มเดียวกัน: "ปกติ" ขึ้นก่อน "สั่งเพิ่ม"
+    if (a.order_type !== b.order_type) {
+      return a.order_type === "ปกติ" ? -1 : 1;
+    }
+    // tiebreaker: created_at ใหม่ก่อน
+    return new Date(b.created_at || 0) - new Date(a.created_at || 0);
   });
 
 
