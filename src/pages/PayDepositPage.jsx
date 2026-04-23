@@ -62,6 +62,11 @@ export default function PayDepositPage({ currentUser }) {
   // ---- Tab Report ----
   const [report, setReport] = useState([]);
   const [reportYear, setReportYear] = useState(String(now.getFullYear()));
+  const [reportSearch, setReportSearch] = useState("");
+  const [reportDateFrom, setReportDateFrom] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-01`);
+  const [reportDateTo, setReportDateTo] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+  const [reportPage, setReportPage] = useState(1);
+  const REPORT_PAGE_SIZE = 15;
 
   useEffect(() => {
     if (tab === "pending") fetchPending();
@@ -116,10 +121,29 @@ export default function PayDepositPage({ currentUser }) {
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_glp_report", year: reportYear }),
+        body: JSON.stringify({ action: "get_glp_payments", date_from: reportDateFrom, date_to: reportDateTo }),
       });
       const data = await res.json();
-      setReport(Array.isArray(data) ? data : []);
+      const rows = Array.isArray(data) ? data : (data?.rows || data?.data || []);
+      // flatten payments → items with parent payment info
+      const flat = [];
+      rows.forEach(p => {
+        (p.items || []).forEach(it => {
+          flat.push({
+            payment_id: p.id,
+            payment_no: p.payment_no,
+            payment_date: p.payment_date,
+            transaction_id: p.transaction_id,
+            contract_no: it.contract_no,
+            customer_name: it.customer_name,
+            branch_code: it.branch_code,
+            received_date: it.received_date,
+            received_amount: it.received_amount,
+            paid_amount: it.paid_amount,
+          });
+        });
+      });
+      setReport(flat);
     } catch { setReport([]); }
   }
 
@@ -458,40 +482,98 @@ export default function PayDepositPage({ currentUser }) {
         </div>
       )}
 
-      {/* ============ TAB 3: REPORT ============ */}
-      {tab === "report" && (
-        <div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
-            <label>ปี: </label>
-            <input type="text" value={reportYear} onChange={e => setReportYear(e.target.value)} style={{ width: 80 }} />
-            <button onClick={fetchReport} style={btnPrimary}>🔍 ค้นหา</button>
+      {/* ============ TAB 3: REPORT — ค้นหาการจ่ายเงิน ============ */}
+      {tab === "report" && (() => {
+        const filtered = report.filter(r => {
+          if (!reportSearch.trim()) return true;
+          const s = reportSearch.toLowerCase().trim();
+          return (
+            (r.customer_name || "").toLowerCase().includes(s) ||
+            (r.contract_no || "").toLowerCase().includes(s)
+          );
+        });
+        const totalPaid = filtered.reduce((sum, r) => sum + (Number(r.paid_amount) || 0), 0);
+        const totalPages = Math.max(1, Math.ceil(filtered.length / REPORT_PAGE_SIZE));
+        const page = Math.min(reportPage, totalPages);
+        const pageData = filtered.slice((page - 1) * REPORT_PAGE_SIZE, page * REPORT_PAGE_SIZE);
+        return (
+          <div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+              <label>วันที่โอน: </label>
+              <input type="date" value={reportDateFrom} onChange={e => setReportDateFrom(e.target.value)} />
+              <span>ถึง</span>
+              <input type="date" value={reportDateTo} onChange={e => setReportDateTo(e.target.value)} />
+              <input type="text" placeholder="🔎 ค้นหาชื่อลูกค้า / เลขสัญญา"
+                value={reportSearch}
+                onChange={e => { setReportSearch(e.target.value); setReportPage(1); }}
+                style={{ padding: 6, minWidth: 220, border: "1px solid #ccc", borderRadius: 4 }} />
+              <button onClick={() => { fetchReport(); setReportPage(1); }} style={btnPrimary}>🔍 ค้นหา</button>
+              <div style={{ flex: 1 }}></div>
+              <div style={{ fontWeight: "bold" }}>
+                พบ: {filtered.length} รายการ | รวม: {fmt(totalPaid)} บาท
+              </div>
+            </div>
+            {filtered.length === 0 ? (
+              <p style={{ color: "#666" }}>ไม่พบข้อมูล</p>
+            ) : (
+              <>
+                <table style={tableStyle}>
+                  <thead>
+                    <tr style={{ background: "#1e40af", color: "#fff" }}>
+                      <th>วันที่โอน</th>
+                      <th>เลขใบโอน</th>
+                      <th>เลขที่สัญญา</th>
+                      <th>ลูกค้า</th>
+                      <th>สาขา</th>
+                      <th>วันที่รับ</th>
+                      <th style={{ textAlign: "right" }}>ยอดรับ</th>
+                      <th style={{ textAlign: "right" }}>ยอดโอน</th>
+                      <th>Transaction ID</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageData.map((r, i) => (
+                      <tr key={i}>
+                        <td>{r.payment_date ? r.payment_date.slice(0, 10) : "-"}</td>
+                        <td>{r.payment_no}</td>
+                        <td>{r.contract_no || "-"}</td>
+                        <td>{r.customer_name || "-"}</td>
+                        <td>{r.branch_code || "-"}</td>
+                        <td>{r.received_date ? r.received_date.slice(0, 10) : "-"}</td>
+                        <td style={{ textAlign: "right" }}>{fmt(r.received_amount)}</td>
+                        <td style={{ textAlign: "right", fontWeight: "bold" }}>{fmt(r.paid_amount)}</td>
+                        <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.transaction_id || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {/* Pagination */}
+                <div style={{ display: "flex", justifyContent: "center", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+                  <button onClick={() => setReportPage(1)} disabled={page === 1} style={pageBtn(page === 1)}>«</button>
+                  <button onClick={() => setReportPage(page - 1)} disabled={page === 1} style={pageBtn(page === 1)}>‹</button>
+                  {Array.from({ length: totalPages }).map((_, idx) => {
+                    const p = idx + 1;
+                    // show only nearby pages
+                    if (totalPages > 10 && Math.abs(p - page) > 2 && p !== 1 && p !== totalPages) {
+                      if (p === 2 || p === totalPages - 1) return <span key={p} style={{ padding: "4px 8px" }}>…</span>;
+                      return null;
+                    }
+                    return (
+                      <button key={p} onClick={() => setReportPage(p)}
+                        style={{ ...pageBtn(false), background: p === page ? "#1e40af" : "#e5e7eb", color: p === page ? "#fff" : "#111", fontWeight: p === page ? "bold" : "normal" }}>
+                        {p}
+                      </button>
+                    );
+                  })}
+                  <button onClick={() => setReportPage(page + 1)} disabled={page === totalPages} style={pageBtn(page === totalPages)}>›</button>
+                  <button onClick={() => setReportPage(totalPages)} disabled={page === totalPages} style={pageBtn(page === totalPages)}>»</button>
+                  <span style={{ padding: "4px 10px", color: "#666" }}>หน้า {page} / {totalPages}</span>
+                </div>
+              </>
+            )}
           </div>
-          <table style={tableStyle}>
-            <thead>
-              <tr style={{ background: "#1e40af", color: "#fff" }}>
-                <th>เดือน</th>
-                <th style={{ textAlign: "right" }}>จำนวนรับ</th>
-                <th style={{ textAlign: "right" }}>ยอดรับ</th>
-                <th style={{ textAlign: "right" }}>จำนวนโอน</th>
-                <th style={{ textAlign: "right" }}>ยอดโอน</th>
-                <th style={{ textAlign: "right" }}>ค้างโอน</th>
-              </tr>
-            </thead>
-            <tbody>
-              {report.map((r, i) => (
-                <tr key={i} style={Number(r.pending_amount) > 0 ? { background: "#fee2e2" } : {}}>
-                  <td>{r.ym}</td>
-                  <td style={{ textAlign: "right" }}>{r.received_count}</td>
-                  <td style={{ textAlign: "right" }}>{fmt(r.received_amount)}</td>
-                  <td style={{ textAlign: "right" }}>{r.paid_count}</td>
-                  <td style={{ textAlign: "right" }}>{fmt(r.paid_amount)}</td>
-                  <td style={{ textAlign: "right", fontWeight: "bold" }}>{fmt(r.pending_amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ============ TRANSFER MODAL ============ */}
       {showTransfer && (
@@ -620,6 +702,7 @@ const tableStyle = { width: "100%", borderCollapse: "collapse", fontSize: 14 };
 const btnPrimary = { padding: "6px 14px", background: "#1e40af", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" };
 const btnSuccess = { padding: "8px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: "bold" };
 const btnPrint = { padding: "8px 16px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontWeight: "bold" };
+const pageBtn = (disabled) => ({ padding: "4px 10px", background: "#e5e7eb", color: disabled ? "#9ca3af" : "#111", border: "none", borderRadius: 4, cursor: disabled ? "not-allowed" : "pointer", fontSize: 13, minWidth: 32 });
 const btnSmall = { padding: "4px 10px", background: "#e5e7eb", border: "none", borderRadius: 4, cursor: "pointer", marginRight: 4, fontSize: 12 };
 const inputStyle = { width: "100%", padding: 6, border: "1px solid #ccc", borderRadius: 4, boxSizing: "border-box" };
 

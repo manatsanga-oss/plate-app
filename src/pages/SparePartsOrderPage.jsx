@@ -538,12 +538,15 @@ export default function SparePartsOrderPage({ currentUser }) {
       if (tA !== tB) return tB - tA;
       return nameA.localeCompare(nameB, "th");
     }
-    // 2) ในกลุ่มเดียวกัน: "ปกติ" ขึ้นก่อน "สั่งเพิ่ม"
+    // 2) ในกลุ่มเดียวกัน: วันที่สั่งซื้อใหม่ก่อน
+    const dA = new Date(a.created_at || 0).getTime();
+    const dB = new Date(b.created_at || 0).getTime();
+    if (dA !== dB) return dB - dA;
+    // 3) วันเดียวกัน: ปกติ ขึ้นก่อน สั่งเพิ่ม
     if (a.order_type !== b.order_type) {
       return a.order_type === "ปกติ" ? -1 : 1;
     }
-    // 3) tiebreaker: วันที่สั่งซื้อใหม่ก่อน
-    return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    return 0;
   });
 
 
