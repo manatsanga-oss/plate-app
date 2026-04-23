@@ -516,25 +516,12 @@ export default function SparePartsOrderPage({ currentUser }) {
       String(o.order_id).includes(s)
     );
   }).sort((a, b) => {
-    const depA = deposits.find(d => d.deposit_doc_no === a.deposit_doc_no)
-      || repairDeposits.find(d => d.deposit_doc_no === a.deposit_doc_no);
-    const depB = deposits.find(d => d.deposit_doc_no === b.deposit_doc_no)
-      || repairDeposits.find(d => d.deposit_doc_no === b.deposit_doc_no);
-    // 1) ยังไม่ได้สั่งซื้อ (รอดำเนินการ) อยู่บนสุด
-    const pendingA = a.status === "รอดำเนินการ";
-    const pendingB = b.status === "รอดำเนินการ";
-    if (pendingA && !pendingB) return -1;
-    if (!pendingA && pendingB) return 1;
-    // 2) ชื่อลูกค้าเดียวกันติดกัน
-    const nameA = (a.customer_name || "").trim();
-    const nameB = (b.customer_name || "").trim();
-    if (nameA !== nameB) return nameA.localeCompare(nameB, "th");
-    // 3) วันที่มัดจำ (ใหม่ก่อน)
-    const dA = depA ? new Date(depA.deposit_date).getTime() : 0;
-    const dB = depB ? new Date(depB.deposit_date).getTime() : 0;
-    if (dA !== dB) return dB - dA;
-    // 4) วันที่สั่งซื้อ (ใหม่ก่อน)
-    return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    // เรียงตามวันที่สั่งซื้อ (ใหม่ก่อน) — ถ้ายังไม่มีวันที่ → อยู่บนสุด
+    const tA = a.created_at ? new Date(a.created_at).getTime() : Infinity;
+    const tB = b.created_at ? new Date(b.created_at).getTime() : Infinity;
+    if (tA !== tB) return tB - tA;
+    // ชื่อลูกค้าเดียวกันติดกัน (tiebreaker)
+    return (a.customer_name || "").localeCompare(b.customer_name || "", "th");
   });
 
 
