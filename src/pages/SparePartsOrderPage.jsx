@@ -494,6 +494,12 @@ export default function SparePartsOrderPage({ currentUser }) {
   }
 
   const filtered = orders.filter(o => {
+    // ซ่อน order ที่จับคู่กับตารางเงินมัดจำไม่ได้ (ปิด Job/ปิดซ่อม) — แสดงเฉพาะที่มีเงินมัดจำคงเหลือ
+    if (deposits.length > 0 || repairDeposits.length > 0) {
+      const hasDeposit = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no)
+        || repairDeposits.some(rd => rd.deposit_doc_no === o.deposit_doc_no);
+      if (!hasDeposit) return false;
+    }
     if (filterStatus === "ตีราคาซ่อม") {
       if (!repairDeposits.some(rd => rd.deposit_doc_no === o.deposit_doc_no)) return false;
     } else if (filterStatus !== "all" && o.status !== filterStatus) return false;
