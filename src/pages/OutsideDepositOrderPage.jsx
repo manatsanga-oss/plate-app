@@ -327,6 +327,11 @@ export default function OutsideDepositOrderPage({ currentUser }) {
                   <td>
                     <button className="btn-sm" onClick={() => openDetail(o)}>ดู</button>{" "}
                     <button className="btn-sm" disabled={isApproved(o)} onClick={() => openEdit(o)}>แก้ไข</button>{" "}
+                    <button className="btn-sm" disabled={isApproved(o)}
+                      style={{ color: isApproved(o) ? "#999" : "#fff", background: isApproved(o) ? "#e5e7eb" : "#10b981", border: "none" }}
+                      onClick={() => approve(o)}>
+                      {isApproved(o) ? "✓ บันทึกแล้ว" : "📝 บันทึกใบสั่งซื้อ"}
+                    </button>{" "}
                     <button className="btn-sm" disabled={isApproved(o)} style={{ color: isApproved(o) ? "#999" : "#dc2626" }} onClick={() => remove(o)}>ลบ</button>
                   </td>
                 </tr>
