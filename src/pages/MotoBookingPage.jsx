@@ -813,10 +813,18 @@ export default function MotoBookingPage({ currentUser }) {
                     )}
                     {b.status === "จอง" && (
                       <div style={{ display: "flex", gap: 4 }}>
-                        <button onClick={() => setSellTarget(b)}
-                          style={{ padding: "3px 8px", background: "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
-                          ขาย
-                        </button>
+                        {(() => {
+                          const sellBlocked = !isAdmin && !isQueueReady(b);
+                          return (
+                            <button
+                              onClick={() => !sellBlocked && setSellTarget(b)}
+                              disabled={sellBlocked}
+                              title={sellBlocked ? "ยังไม่ถึงคิว — ไม่สามารถลงขายได้" : ""}
+                              style={{ padding: "3px 8px", background: sellBlocked ? "#d1d5db" : "#10b981", color: sellBlocked ? "#9ca3af" : "#fff", border: "none", borderRadius: 6, cursor: sellBlocked ? "not-allowed" : "pointer", fontSize: 12 }}>
+                              ขาย
+                            </button>
+                          );
+                        })()}
                         {(() => {
                           const blocked = !isAdmin && isQueueReady(b);
                           return (<>

@@ -223,19 +223,22 @@ export default function OutsideDepositOrderPage({ currentUser }) {
   };
 
   const approve = async (o) => {
-    if (!window.confirm(`อนุมัติใบสั่งซื้อ ${o.doc_no || o.order_id}? (หลังอนุมัติจะแก้ไข/ลบไม่ได้)`)) return;
+    const poNo = window.prompt(`กรอกเลขที่ใบสั่งซื้อ (ของร้านอะไหล่)\nสำหรับใบ ${o.doc_no || o.order_id}`, o.po_no || "");
+    if (poNo === null) return;
+    if (!poNo.trim()) { alert("กรุณากรอกเลขที่ใบสั่งซื้อ"); return; }
     const res = await api("approve_order", {
       order_id: o.order_id,
+      po_no: poNo.trim(),
       approved_by: currentUser?.name || "",
     });
     if (isOk(res)) {
       await loadOrders();
     } else {
-      alert("อนุมัติไม่สำเร็จ");
+      alert("บันทึกไม่สำเร็จ");
     }
   };
 
-  const isApproved = (o) => (o.status || "").includes("อนุมัติ");
+  const isApproved = (o) => (o.status || "").includes("อนุมัติ") || (o.status || "").includes("บันทึกใบสั่งซื้อ") || !!(o.po_no);
 
   const remove = async (o) => {
     if (isApproved(o)) { alert("ใบสั่งซื้อนี้อนุมัติแล้ว ไม่สามารถลบได้"); return; }
@@ -305,13 +308,14 @@ export default function OutsideDepositOrderPage({ currentUser }) {
                 <th>รุ่นรถ</th>
                 <th>จอด</th>
                 <th>สถานะ</th>
-                <th>วันที่</th>
+                <th>เลขที่ใบสั่งซื้อ</th>
+                <th>วันที่สั่งซื้อ</th>
                 <th style={{ width: 200 }}>จัดการ</th>
               </tr>
             </thead>
             <tbody>
               {pageData.length === 0 ? (
-                <tr><td colSpan={11} style={{ textAlign: "center", padding: 16 }}>ไม่มีข้อมูล</td></tr>
+                <tr><td colSpan={12} style={{ textAlign: "center", padding: 16 }}>ไม่มีข้อมูล</td></tr>
               ) : pageData.map(o => (
                 <tr key={o.order_id}>
                   <td>{o.doc_no || "-"}</td>
@@ -323,14 +327,15 @@ export default function OutsideDepositOrderPage({ currentUser }) {
                   <td>{o.model_name || "-"}</td>
                   <td>{o.parking_status || "-"}</td>
                   <td>{o.status || "-"}</td>
-                  <td>{o.created_at ? String(o.created_at).slice(0, 16).replace("T", " ") : "-"}</td>
+                  <td style={{ fontWeight: 600 }}>{o.po_no || "-"}</td>
+                  <td>{o.approved_at ? String(o.approved_at).slice(0, 16).replace("T", " ") : (o.created_at ? String(o.created_at).slice(0, 16).replace("T", " ") : "-")}</td>
                   <td>
                     <button className="btn-sm" onClick={() => openDetail(o)}>ดู</button>{" "}
                     <button className="btn-sm" disabled={isApproved(o)} onClick={() => openEdit(o)}>แก้ไข</button>{" "}
-                    <button className="btn-sm" disabled={isApproved(o)}
-                      style={{ color: isApproved(o) ? "#999" : "#fff", background: isApproved(o) ? "#e5e7eb" : "#10b981", border: "none" }}
+                    <button className="btn-sm"
+                      style={{ color: "#fff", background: isApproved(o) ? "#2563eb" : "#10b981", border: "none" }}
                       onClick={() => approve(o)}>
-                      {isApproved(o) ? "✓ บันทึกแล้ว" : "📝 บันทึกใบสั่งซื้อ"}
+                      {isApproved(o) ? "✏️ แก้เลข PO" : "📝 บันทึกใบสั่งซื้อ"}
                     </button>{" "}
                     <button className="btn-sm" disabled={isApproved(o)} style={{ color: isApproved(o) ? "#999" : "#dc2626" }} onClick={() => remove(o)}>ลบ</button>
                   </td>

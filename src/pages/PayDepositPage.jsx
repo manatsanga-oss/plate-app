@@ -269,11 +269,11 @@ export default function PayDepositPage({ currentUser }) {
       <table>
         <thead>
           <tr>
-            <th style="width:50px">ลำดับ</th>
-            <th style="width:180px">เลขที่สัญญา</th>
+            <th style="width:45px">ลำดับ</th>
+            <th style="width:150px">เลขที่สัญญา</th>
             <th>ชื่อ-สกุล</th>
-            <th style="width:130px">จำนวนเงิน</th>
-            <th style="width:150px">หมายเหตุ</th>
+            <th style="width:95px">จำนวนเงิน</th>
+            <th style="width:95px">หมายเหตุ</th>
           </tr>
         </thead>
         <tbody>${rows}${empty}</tbody>
