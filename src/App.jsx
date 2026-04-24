@@ -37,6 +37,7 @@ import LoginPage from "./pages/LoginPage";
 import SalesOverviewPage from "./pages/SalesOverviewPage";
 import VehicleRegistrationPage from "./pages/VehicleRegistrationPage";
 import RegistrationSubmitPage from "./pages/RegistrationSubmitPage";
+import ReceiveRegistrationPage from "./pages/ReceiveRegistrationPage";
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState("salesoverview");
@@ -180,6 +181,9 @@ export default function App() {
         )}
         {activeMenu === "registrationsubmit" && canAccess("registrationsubmit") && (
           <RegistrationSubmitPage currentUser={currentUser} />
+        )}
+        {activeMenu === "registrationreceive" && canAccess("registrationreceive") && (
+          <ReceiveRegistrationPage currentUser={currentUser} />
         )}
       </main>
     </div>
