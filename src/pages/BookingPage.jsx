@@ -143,7 +143,8 @@ export default function BookingPage({ currentUser }) {
         body: JSON.stringify({ action: "get_series" }),
       });
       const data = await res.json();
-      setCarModels(Array.isArray(data) ? data : data.rows || []);
+      const all = Array.isArray(data) ? data : data.rows || [];
+      setCarModels(all.filter(s => s.status === "active"));
     } catch { /* ignore */ }
   }
 

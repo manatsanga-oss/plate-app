@@ -49,7 +49,13 @@ export default function MotoPriceCheckPage({ currentUser }) {
         body: JSON.stringify({ action: "get_types" }),
       });
       const data = await res.json();
-      setMotoTypes(Array.isArray(data) ? data : []);
+      const list = Array.isArray(data) ? data.filter(m =>
+        m.status === "active" &&
+        m.model_status === "active" &&
+        m.series_status === "active" &&
+        m.brand_status === "active"
+      ) : [];
+      setMotoTypes(list);
     } catch { /* ignore */ }
   }
 

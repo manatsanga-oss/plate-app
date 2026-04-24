@@ -35,6 +35,8 @@ import ProductGroupPage from "./pages/ProductGroupPage";
 import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
 import LoginPage from "./pages/LoginPage";
 import SalesOverviewPage from "./pages/SalesOverviewPage";
+import VehicleRegistrationPage from "./pages/VehicleRegistrationPage";
+import RegistrationSubmitPage from "./pages/RegistrationSubmitPage";
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState("salesoverview");
@@ -75,6 +77,8 @@ export default function App() {
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
     if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim") return true;
+    // Vehicle Registration module — admin only (falls through to default false for non-admin)
+    if (page === "vehicleregistration" || page === "registrationsubmit" || page === "registrationreceive" || page === "registrationreturn" || page === "registrationbilling") return false;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -170,6 +174,12 @@ export default function App() {
         )}
         {activeMenu === "outsideorder" && canAccess("outsideorder") && (
           <OutsideDepositOrderPage currentUser={currentUser} />
+        )}
+        {activeMenu === "vehicleregistration" && canAccess("vehicleregistration") && (
+          <VehicleRegistrationPage currentUser={currentUser} />
+        )}
+        {activeMenu === "registrationsubmit" && canAccess("registrationsubmit") && (
+          <RegistrationSubmitPage currentUser={currentUser} />
         )}
       </main>
     </div>
@@ -299,6 +309,14 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="driver" label="พนักงานขับรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="position" label="กำหนดตำแหน่ง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="users" label={currentUser?.role === "admin" ? "กำหนดผู้ใช้งาน" : "เปลี่ยนรหัสผ่าน"} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
+      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationreceive","registrationreturn","registrationbilling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="registrationsubmit" label="ส่งจดทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="registrationreceive" label="รับคืนงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="registrationreturn" label="ส่งคืนลูกค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="registrationbilling" label="วางบิล" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="vehicleregistration" label="ค้นหาทะเบียนรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Upload" pages={uploadPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
