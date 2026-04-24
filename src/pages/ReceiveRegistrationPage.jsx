@@ -71,6 +71,35 @@ function OcrPanel({ setMessage, currentUser }) {
     setMessage(`✅ ใส่ค่า default ให้ ${ocrItems.length} รายการแล้ว`);
   }
 
+  const [refreshing, setRefreshing] = useState(false);
+  async function refreshMatch() {
+    if (ocrItems.length === 0) return;
+    setRefreshing(true);
+    setMessage("");
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "preview_ocr_match",
+          items: ocrItems.map(it => ({ chassis_no: it.chassis_no })),
+        }),
+      });
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : data.rows || [];
+      const byChassis = {};
+      rows.forEach(r => { if (r.chassis) byChassis[r.chassis] = r; });
+      setOcrItems(items => items.map(it => {
+        const m = byChassis[String(it.chassis_no || "").toUpperCase().trim()];
+        return { ...it, invoice_no: m?.invoice_no || "", run_code: m?.run_code || "", customer_name: m?.customer_name || "" };
+      }));
+      const matched = ocrItems.filter(it => byChassis[String(it.chassis_no || "").toUpperCase().trim()]?.invoice_no).length;
+      setMessage(`🔄 Refresh สำเร็จ — จับคู่ใหม่ได้ ${matched} / ${ocrItems.length} รายการ`);
+    } catch (e) {
+      setMessage("❌ Refresh ไม่สำเร็จ");
+    }
+    setRefreshing(false);
+  }
+
   async function runOcr() {
     if (!pdfFile) { setMessage("เลือกไฟล์ PDF ก่อน"); return; }
     if (!/\.pdf$/i.test(pdfFile.name)) { setMessage("รับเฉพาะไฟล์ PDF เท่านั้น"); return; }
@@ -201,8 +230,13 @@ function OcrPanel({ setMessage, currentUser }) {
         <>
           <div style={{ padding: "12px 16px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <strong style={{ fontSize: 14, color: "#374151" }}>ขั้นตอนที่ 2 — ตรวจสอบข้อมูล ({selCount}/{ocrItems.length} เลือก)</strong>
+            <button onClick={refreshMatch} disabled={refreshing || ocrItems.length === 0}
+              style={{ marginLeft: "auto", padding: "8px 16px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, cursor: refreshing ? "not-allowed" : "pointer", opacity: refreshing ? 0.6 : 1, fontFamily: "Tahoma", fontSize: 13, fontWeight: 600 }}
+              title="จับคู่เลขที่ใบขาย/ใบส่งจด ใหม่ตาม VIN ล่าสุด (ไม่ต้อง OCR ซ้ำ)">
+              🔄 {refreshing ? "กำลังจับคู่..." : "Refresh จับคู่"}
+            </button>
             <button onClick={saveBatch} disabled={!selCount || saving}
-              style={{ marginLeft: "auto", padding: "8px 20px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: (!selCount || saving) ? "not-allowed" : "pointer", opacity: (!selCount || saving) ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>
+              style={{ padding: "8px 20px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: (!selCount || saving) ? "not-allowed" : "pointer", opacity: (!selCount || saving) ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>
               💾 {saving ? "กำลังบันทึก..." : "บันทึกรับคืน"}
             </button>
           </div>
