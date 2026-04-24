@@ -72,6 +72,28 @@ function OcrPanel({ setMessage, currentUser }) {
   }
 
   const [refreshing, setRefreshing] = useState(false);
+  const [vinSearch, setVinSearch] = useState(null); // { keyword, results, loading }
+
+  async function openVinSearch() {
+    setVinSearch({ keyword: "", results: [], loading: true });
+    try {
+      // โหลด submissions ที่ยังไม่ได้รับทะเบียน (status='submitted') — ไม่ filter brand
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_submissions", status: "submitted" }),
+      });
+      const data = await res.json();
+      const all = Array.isArray(data) ? data : data.rows || [];
+      setVinSearch({ keyword: "", results: all, loading: false });
+    } catch {
+      setVinSearch({ keyword: "", results: [], loading: false });
+    }
+  }
+
+  function pickVin(chassis) {
+    setEditingRow(r => ({ ...r, chassis_no: String(chassis || "").toUpperCase() }));
+    setVinSearch(null);
+  }
   async function refreshMatch() {
     if (ocrItems.length === 0) return;
     setRefreshing(true);
@@ -358,8 +380,15 @@ function OcrPanel({ setMessage, currentUser }) {
 
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>เลขตัวถัง (VIN)</label>
-              <input type="text" value={editingRow.chassis_no} onChange={e => setEditingRow(r => ({ ...r, chassis_no: e.target.value.toUpperCase() }))}
-                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, boxSizing: "border-box" }} />
+              <div style={{ display: "flex", gap: 6 }}>
+                <input type="text" value={editingRow.chassis_no} onChange={e => setEditingRow(r => ({ ...r, chassis_no: e.target.value.toUpperCase() }))}
+                  style={{ flex: 1, padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, boxSizing: "border-box" }} />
+                <button type="button" onClick={openVinSearch}
+                  style={{ padding: "8px 14px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}
+                  title="ค้นจากรายการส่งจดทะเบียน (ยังไม่ได้รับ)">
+                  🔍 ค้นหา
+                </button>
+              </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
@@ -402,6 +431,66 @@ function OcrPanel({ setMessage, currentUser }) {
                 💾 บันทึก
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* VIN Search Modal */}
+      {vinSearch && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+          onClick={() => setVinSearch(null)}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 20, width: 720, maxWidth: "95vw", maxHeight: "85vh", boxShadow: "0 8px 32px rgba(0,0,0,0.2)", display: "flex", flexDirection: "column" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>🔍 ค้นหาเลขตัวถัง (จากใบส่งจดทะเบียน)</h3>
+              <button onClick={() => setVinSearch(null)} style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 20, color: "#6b7280" }}>✕</button>
+            </div>
+
+            <input type="text" value={vinSearch.keyword} onChange={e => setVinSearch(v => ({ ...v, keyword: e.target.value }))}
+              placeholder="พิมพ์เลขตัวถังบางส่วน (เช่น MLESEK หรือ 51111)"
+              autoFocus
+              style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 14, boxSizing: "border-box", marginBottom: 12 }} />
+
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+              {vinSearch.loading ? "กำลังโหลดรายการ..." : `แสดงผลจากใบส่งจดทะเบียน ${vinSearch.results.length} รายการ (ยังไม่ได้รับทะเบียน)`}
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+              <table className="data-table" style={{ fontSize: 13 }}>
+                <thead style={{ position: "sticky", top: 0, background: "#072d6b", color: "#fff", zIndex: 1 }}>
+                  <tr>
+                    <th>Run</th>
+                    <th>ใบขาย</th>
+                    <th>ลูกค้า</th>
+                    <th>รุ่น</th>
+                    <th>เลขตัวถัง</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const kw = vinSearch.keyword.trim().toUpperCase();
+                    const filtered = vinSearch.results.filter(r => !kw || String(r.chassis_no || "").toUpperCase().includes(kw));
+                    if (filtered.length === 0) return (
+                      <tr><td colSpan={6} style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>{kw ? "ไม่พบ" : "โหลดรายการ..."}</td></tr>
+                    );
+                    return filtered.slice(0, 100).map(r => (
+                      <tr key={r.submission_id} style={{ cursor: "pointer" }} onClick={() => pickVin(r.chassis_no)}
+                        onMouseEnter={e => e.currentTarget.style.background = "#eff6ff"}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}>
+                        <td style={{ fontFamily: "monospace", fontWeight: 600, color: "#072d6b", whiteSpace: "nowrap" }}>{r.run_code}</td>
+                        <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{r.invoice_no || "-"}</td>
+                        <td>{r.customer_name || "-"}</td>
+                        <td style={{ whiteSpace: "nowrap", fontSize: 12 }}>{r.model_series || "-"}</td>
+                        <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.chassis_no || "-"}</td>
+                        <td><button style={{ padding: "3px 10px", background: "#10b981", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>✓ เลือก</button></td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>แสดงสูงสุด 100 รายการแรก · คลิกแถวเพื่อใช้ VIN นี้</div>
           </div>
         </div>
       )}
