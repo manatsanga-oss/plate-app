@@ -13,12 +13,16 @@ export default function RegistrationSubmitPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [search, setSearch] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [filterModel, setFilterModel] = useState("");
   const [filterFinance, setFilterFinance] = useState("");
+  const [showOnlySelected, setShowOnlySelected] = useState(false);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 50;
+  const [lastSubmitted, setLastSubmitted] = useState(null); // { runCode, rows, brand, submitDate, province }
+  const [viewMode, setViewMode] = useState("pending"); // pending | history
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [expandedRun, setExpandedRun] = useState(null);
+  const [editRun, setEditRun] = useState(null); // { run_code, submit_date, province, note }
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -51,23 +55,99 @@ export default function RegistrationSubmitPage({ currentUser }) {
     } catch {}
   }
 
+  async function cancelRun(runCode) {
+    if (!window.confirm(`ยกเลิก run ${runCode}?\n(จะเปลี่ยนสถานะทุกรายการเป็น "ยกเลิก" — รถจะกลับไปอยู่ลิสต์รอส่งอีกครั้ง)`)) return;
+    try {
+      await post({ action: "update_run", run_code: runCode, status: "cancelled" });
+      setMessage(`✅ ยกเลิก run ${runCode} สำเร็จ`);
+      fetchHistory(brand);
+    } catch {
+      setMessage("❌ ยกเลิกไม่สำเร็จ");
+    }
+  }
+
+  async function saveEditRun() {
+    if (!editRun) return;
+    try {
+      await post({
+        action: "update_run",
+        run_code: editRun.run_code,
+        submit_date: editRun.submit_date,
+        province: editRun.province,
+        note: editRun.note || "",
+      });
+      setMessage(`✅ แก้ไข run ${editRun.run_code} สำเร็จ`);
+      setEditRun(null);
+      fetchHistory(brand);
+    } catch {
+      setMessage("❌ แก้ไขไม่สำเร็จ");
+    }
+  }
+
+  async function fetchHistory(b = brand) {
+    setHistoryLoading(true);
+    try {
+      const data = await post({ action: "get_submissions", brand: b });
+      setHistory(Array.isArray(data) ? data : []);
+    } catch {
+      setHistory([]);
+    }
+    setHistoryLoading(false);
+  }
+
+  // Group history by run_code
+  const historyGrouped = React.useMemo(() => {
+    const map = new Map();
+    history.forEach(h => {
+      const key = h.run_code || `_${h.submission_id}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          run_code: h.run_code,
+          submit_date: h.submit_date,
+          brand: h.brand,
+          province: h.province,
+          status: h.status,
+          submitted_by: h.submitted_by,
+          items: [],
+        });
+      }
+      map.get(key).items.push(h);
+    });
+    return Array.from(map.values()).sort((a, b) => (b.run_code || "").localeCompare(a.run_code || ""));
+  }, [history]);
+
   useEffect(() => { fetchPending(); fetchNextRun(); /* eslint-disable-next-line */ }, []);
-  useEffect(() => { fetchPending(brand); /* eslint-disable-next-line */ }, [brand]);
+  useEffect(() => {
+    if (viewMode === "pending") fetchPending(brand);
+    else fetchHistory(brand);
+    /* eslint-disable-next-line */
+  }, [brand, viewMode]);
 
   const selectedIds = Object.entries(selected).filter(([, v]) => v).map(([k]) => Number(k));
   const selectedRows = rows.filter(r => selected[r.sale_id]);
 
+  // "-" หรือว่าง = เงินสด
+  const normalizeFinance = f => {
+    const s = String(f || "").trim();
+    return (s === "" || s === "-") ? "เงินสด" : s;
+  };
+
   // Filter rows — search only in engine_no and chassis_no (VIN)
   const kw = search.trim().toLowerCase();
   const filteredRows = rows.filter(r => {
-    if (!kw) return true;
-    const engine = String(r.engine_no || "").toLowerCase();
-    const chassis = String(r.chassis_no || "").toLowerCase();
-    return engine.includes(kw) || chassis.includes(kw);
+    if (showOnlySelected && !selected[r.sale_id]) return false;
+    if (kw) {
+      const engine = String(r.engine_no || "").toLowerCase();
+      const chassis = String(r.chassis_no || "").toLowerCase();
+      if (!engine.includes(kw) && !chassis.includes(kw)) return false;
+    }
+    if (filterFinance && normalizeFinance(r.finance_company) !== filterFinance) return false;
+    return true;
   });
 
-  const modelOpts = [...new Set(rows.map(r => r.model_series).filter(Boolean))].sort();
-  const financeOpts = [...new Set(rows.map(r => r.finance_company).filter(Boolean))].sort();
+  // Finance options — pool จากรายการที่เลือก (ถ้า toggle เปิด) หรือทั้งหมด
+  const financeSource = showOnlySelected ? rows.filter(r => selected[r.sale_id]) : rows;
+  const financeOpts = [...new Set(financeSource.map(r => normalizeFinance(r.finance_company)))].filter(Boolean).sort();
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pageRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -87,11 +167,42 @@ export default function RegistrationSubmitPage({ currentUser }) {
   }
 
   function clearFilters() {
-    setSearch(""); setDateFrom(""); setDateTo(""); setFilterModel(""); setFilterFinance(""); setPage(1);
+    setSearch(""); setFilterFinance(""); setShowOnlySelected(false); setPage(1);
   }
 
   function toggleOne(id) {
     setSelected(p => ({ ...p, [id]: !p[id] }));
+  }
+
+  function exportCsv({ rows: exportRows, runCode, brand: bnd, submitDate: sDate, province: prov }) {
+    if (!exportRows || exportRows.length === 0) { setMessage("ไม่มีรายการให้ export"); return; }
+    const headers = ["ลำดับ", "เลขที่ใบขาย", "วันที่ขาย", "ชื่อลูกค้า", "ไฟแนนซ์", "รุ่น", "สี", "เลขเครื่อง", "เลขถัง (VIN)", "จังหวัด", "วันที่ส่ง", "เลขรัน"];
+    const escCsv = v => {
+      if (v === null || v === undefined) return "";
+      const s = String(v);
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const lines = [headers.join(",")];
+    exportRows.forEach((r, i) => {
+      const finance = (String(r.finance_company || "").trim() === "" || String(r.finance_company).trim() === "-") ? "เงินสด" : r.finance_company;
+      lines.push([
+        i + 1, r.invoice_no, fmtDate(r.sale_date), r.customer_name, finance,
+        r.model_series, r.color_name, r.engine_no, r.chassis_no,
+        prov, fmtDate(sDate), runCode
+      ].map(escCsv).join(","));
+    });
+    const csv = "\uFEFF" + lines.join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const dateTag = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `ส่งจดทะเบียน_${runCode || bnd}_${dateTag}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setMessage(`✅ Export สำเร็จ ${exportRows.length} รายการ`);
   }
 
   function handlePrint() {
@@ -125,7 +236,16 @@ export default function RegistrationSubmitPage({ currentUser }) {
       });
       const n = res?.inserted ?? (Array.isArray(res?.rows) ? res.rows.length : 0);
       const savedCode = res?.rows?.[0]?.run_code || runNumber;
-      setMessage(`✅ บันทึกสำเร็จ ${n} รายการ (เลขรัน ${savedCode})`);
+      // Snapshot data ที่เพิ่งบันทึก ไว้ใช้ export/print ซ้ำ
+      setLastSubmitted({
+        runCode: savedCode,
+        rows: [...selectedRows],
+        brand,
+        submitDate,
+        province,
+        count: n,
+      });
+      setMessage(`✅ บันทึกสำเร็จ ${n} รายการ (เลขรัน ${savedCode}) — Export/พิมพ์ซ้ำได้ด้านล่าง`);
       await fetchPending(brand);
       await fetchNextRun();
     } catch (e) {
@@ -140,6 +260,22 @@ export default function RegistrationSubmitPage({ currentUser }) {
         <h2 className="page-title">📝 ส่งงานทะเบียน</h2>
       </div>
 
+      {/* Mode tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, borderBottom: "2px solid #e5e7eb" }}>
+        {[
+          ["pending", "📝 รอส่ง"],
+          ["history", "📋 ประวัติการส่ง"],
+        ].map(([v, label]) => (
+          <button key={v} onClick={() => setViewMode(v)}
+            style={{ padding: "10px 20px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
+              color: viewMode === v ? "#072d6b" : "#6b7280",
+              borderBottom: viewMode === v ? "3px solid #072d6b" : "3px solid transparent",
+              marginBottom: -2 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Brand tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         {["ฮอนด้า", "ยามาฮ่า"].map(b => (
@@ -152,6 +288,7 @@ export default function RegistrationSubmitPage({ currentUser }) {
         ))}
       </div>
 
+      {viewMode === "pending" ? <>
       {/* Control panel */}
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 16, padding: "14px 16px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
         <label style={{ fontSize: 13, fontWeight: 600 }}>เลขรัน:</label>
@@ -187,13 +324,57 @@ export default function RegistrationSubmitPage({ currentUser }) {
         </div>
       )}
 
-      {/* Search */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+      {/* Last submitted panel — shows after successful save */}
+      {lastSubmitted && (
+        <div style={{ marginBottom: 14, padding: "14px 16px", background: "#ecfdf5", borderRadius: 10, border: "2px solid #10b981" }}>
+          <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 13, color: "#065f46", fontWeight: 600 }}>📦 เพิ่งบันทึก — เลขรัน <span style={{ fontFamily: "monospace", fontSize: 15 }}>{lastSubmitted.runCode}</span></div>
+              <div style={{ fontSize: 12, color: "#047857", marginTop: 2 }}>
+                {lastSubmitted.brand} • {lastSubmitted.count} รายการ • วันที่ส่ง {fmtDate(lastSubmitted.submitDate)} • จังหวัด {lastSubmitted.province}
+              </div>
+            </div>
+            <button onClick={() => exportCsv({ rows: lastSubmitted.rows, runCode: lastSubmitted.runCode, brand: lastSubmitted.brand, submitDate: lastSubmitted.submitDate, province: lastSubmitted.province })}
+              style={{ padding: "8px 16px", background: "#0f766e", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 13, fontWeight: 600 }}>
+              📊 Export Excel (CSV)
+            </button>
+            <button onClick={() => {
+                const html = buildPrintHTML({ runNumber: lastSubmitted.runCode, brand: lastSubmitted.brand, submitDate: lastSubmitted.submitDate, province: lastSubmitted.province, rows: lastSubmitted.rows });
+                const w = window.open("", "_blank", "width=900,height=700");
+                if (!w) { setMessage("popup blocked"); return; }
+                w.document.write(html); w.document.close(); w.focus();
+                setTimeout(() => w.print(), 300);
+              }}
+              style={{ padding: "8px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 13, fontWeight: 600 }}>
+              🖨️ พิมพ์ซ้ำ
+            </button>
+            <button onClick={() => setLastSubmitted(null)}
+              style={{ padding: "8px 12px", background: "#fff", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 13 }}>
+              ✕ ปิด
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Search & Filter */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
         <input type="text" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }}
           placeholder="🔍 ค้นหาจาก เลขเครื่อง หรือ เลขถัง (VIN)"
-          style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
-        {search && (
-          <button onClick={() => { setSearch(""); setPage(1); }}
+          style={{ flex: 1, minWidth: 240, padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
+
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: showOnlySelected ? "#072d6b" : "#6b7280", cursor: "pointer", padding: "6px 10px", borderRadius: 6, background: showOnlySelected ? "#dbeafe" : "transparent", border: "1px solid " + (showOnlySelected ? "#60a5fa" : "#d1d5db") }}>
+          <input type="checkbox" checked={showOnlySelected} onChange={e => { setShowOnlySelected(e.target.checked); setPage(1); }} />
+          เฉพาะที่เลือก ({selectedIds.length})
+        </label>
+
+        <select value={filterFinance} onChange={e => { setFilterFinance(e.target.value); setPage(1); }}
+          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, minWidth: 170 }}>
+          <option value="">ไฟแนนซ์ ทั้งหมด</option>
+          {financeOpts.map(f => <option key={f} value={f}>{f}</option>)}
+        </select>
+
+        {(search || filterFinance || showOnlySelected) && (
+          <button onClick={clearFilters}
             style={{ padding: "6px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
             ✕ ล้าง
           </button>
@@ -239,7 +420,7 @@ export default function RegistrationSubmitPage({ currentUser }) {
                   <td style={{ whiteSpace: "nowrap" }}>{r.invoice_no || "-"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{fmtDate(r.sale_date)}</td>
                   <td>{r.customer_name || "-"}</td>
-                  <td>{r.finance_company || "-"}</td>
+                  <td style={{ color: normalizeFinance(r.finance_company) === "เงินสด" ? "#059669" : undefined, fontWeight: normalizeFinance(r.finance_company) === "เงินสด" ? 600 : 400 }}>{normalizeFinance(r.finance_company)}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{r.model_series || "-"}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{r.color_name || "-"}</td>
                   <td style={{ whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 13 }}>{r.engine_no || "-"}</td>
@@ -262,6 +443,135 @@ export default function RegistrationSubmitPage({ currentUser }) {
                 style={{ padding: "4px 10px", border: "1px solid #d1d5db", borderRadius: 6, background: page === totalPages ? "#f3f4f6" : "#fff", cursor: page === totalPages ? "default" : "pointer", fontSize: 13 }}>{">>"}</button>
             </div>
           )}
+        </div>
+      )}
+      </> : (
+        /* HISTORY VIEW */
+        historyLoading ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลดประวัติ...</div>
+        ) : historyGrouped.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+            ยังไม่มีประวัติการส่งสำหรับยี่ห้อ {brand}
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {historyGrouped.map(g => {
+              const isOpen = expandedRun === g.run_code;
+              const statusColor = g.status === "submitted" ? "#3b82f6" : g.status === "received" ? "#10b981" : g.status === "returned" ? "#8b5cf6" : g.status === "stuck" ? "#ef4444" : "#6b7280";
+              const statusLabel = { submitted: "ส่งแล้ว", received: "รับคืน", returned: "ส่งคืนลูกค้า", stuck: "ติด", cancelled: "ยกเลิก" }[g.status] || g.status;
+              // Map to sale-like rows for export/print
+              const rowsForExport = g.items.map(it => ({
+                sale_id: it.sale_id, invoice_no: it.invoice_no, sale_date: it.sale_date,
+                customer_name: it.customer_name, finance_company: it.finance_company,
+                model_series: it.model_series, color_name: it.color_name,
+                engine_no: it.engine_no, chassis_no: it.chassis_no,
+              }));
+              return (
+                <div key={g.run_code} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer", background: isOpen ? "#f0f9ff" : "#fff" }}
+                    onClick={() => setExpandedRun(isOpen ? null : g.run_code)}>
+                    <span style={{ fontSize: 14, color: "#6b7280" }}>{isOpen ? "▾" : "▸"}</span>
+                    <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 15, color: "#072d6b" }}>{g.run_code}</span>
+                    <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: statusColor + "22", color: statusColor, fontWeight: 600 }}>{statusLabel}</span>
+                    <span style={{ fontSize: 13, color: "#374151" }}>{fmtDate(g.submit_date)}</span>
+                    <span style={{ fontSize: 13, color: "#6b7280" }}>{g.province}</span>
+                    <span style={{ fontSize: 13, color: "#6b7280" }}>โดย {g.submitted_by || "-"}</span>
+                    <span style={{ marginLeft: "auto", fontSize: 13, color: "#111", fontWeight: 600 }}>{g.items.length} คัน</span>
+                    <button onClick={e => { e.stopPropagation(); exportCsv({ rows: rowsForExport, runCode: g.run_code, brand: g.brand, submitDate: g.submit_date, province: g.province }); }}
+                      style={{ padding: "5px 12px", background: "#0f766e", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>📊 Export</button>
+                    <button onClick={e => {
+                        e.stopPropagation();
+                        const html = buildPrintHTML({ runNumber: g.run_code, brand: g.brand, submitDate: g.submit_date, province: g.province, rows: rowsForExport });
+                        const w = window.open("", "_blank", "width=900,height=700");
+                        if (!w) return;
+                        w.document.write(html); w.document.close(); w.focus();
+                        setTimeout(() => w.print(), 300);
+                      }}
+                      style={{ padding: "5px 12px", background: "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>🖨️ พิมพ์</button>
+                    {g.status !== "cancelled" && (<>
+                      <button onClick={e => { e.stopPropagation(); setEditRun({ run_code: g.run_code, submit_date: String(g.submit_date || "").slice(0, 10), province: g.province || "", note: "" }); }}
+                        style={{ padding: "5px 12px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>✏️ แก้ไข</button>
+                      <button onClick={e => { e.stopPropagation(); cancelRun(g.run_code); }}
+                        style={{ padding: "5px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>✕ ยกเลิก</button>
+                    </>)}
+                  </div>
+                  {isOpen && (
+                    <div style={{ padding: "0 0 10px 0", borderTop: "1px solid #e5e7eb" }}>
+                      <table className="data-table" style={{ fontSize: 13 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: 40 }}>#</th>
+                            <th>ใบขาย</th>
+                            <th>ลูกค้า</th>
+                            <th>ไฟแนนซ์</th>
+                            <th>รุ่น</th>
+                            <th>สี</th>
+                            <th>เลขเครื่อง</th>
+                            <th>VIN</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {g.items.map((it, i) => (
+                            <tr key={it.submission_id}>
+                              <td style={{ textAlign: "center" }}>{i + 1}</td>
+                              <td style={{ whiteSpace: "nowrap" }}>{it.invoice_no || "-"}</td>
+                              <td>{it.customer_name || "-"}</td>
+                              <td>{(String(it.finance_company || "").trim() === "" || String(it.finance_company).trim() === "-") ? <span style={{ color: "#059669", fontWeight: 600 }}>เงินสด</span> : it.finance_company}</td>
+                              <td style={{ whiteSpace: "nowrap" }}>{it.model_series || "-"}</td>
+                              <td style={{ whiteSpace: "nowrap" }}>{it.color_name || "-"}</td>
+                              <td style={{ whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 }}>{it.engine_no || "-"}</td>
+                              <td style={{ whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 }}>{it.chassis_no || "-"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )
+      )}
+
+      {/* Edit Run Modal */}
+      {editRun && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => setEditRun(null)}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 440, maxWidth: "95vw", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 16px", color: "#072d6b" }}>✏️ แก้ไข run — {editRun.run_code}</h3>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>วันที่ส่ง</label>
+              <input type="date" value={editRun.submit_date} onChange={e => setEditRun(r => ({ ...r, submit_date: e.target.value }))}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>จังหวัด</label>
+              <input type="text" value={editRun.province} onChange={e => setEditRun(r => ({ ...r, province: e.target.value }))}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>หมายเหตุ (เขียนทับทั้งหมด)</label>
+              <textarea value={editRun.note} onChange={e => setEditRun(r => ({ ...r, note: e.target.value }))}
+                rows={2} placeholder="ไม่ต้องกรอกถ้าไม่อยากเปลี่ยน"
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setEditRun(null)}
+                style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
+                ยกเลิก
+              </button>
+              <button onClick={saveEditRun}
+                style={{ padding: "8px 20px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                💾 บันทึก
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -288,7 +598,7 @@ function buildPrintHTML({ runNumber, brand, submitDate, province, rows }) {
       <td class="c">${i + 1}</td>
       <td>${safe(r.invoice_no)}</td>
       <td>${safe(r.customer_name)}</td>
-      <td>${safe(r.finance_company)}</td>
+      <td>${safe((String(r.finance_company || "").trim() === "" || String(r.finance_company).trim() === "-") ? "เงินสด" : r.finance_company)}</td>
       <td>${safe(r.model_series)}</td>
       <td>${safe(r.color_name)}</td>
       <td class="mono">${safe(r.engine_no)}</td>
