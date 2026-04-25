@@ -4,7 +4,7 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations
 const OCR_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/ocr-pdf-registration";
 
 export default function ReceiveRegistrationPage({ currentUser }) {
-  const [mode, setMode] = useState("ocr"); // ocr | manual
+  const [mode, setMode] = useState("ocr"); // ocr | manual | history
   const [message, setMessage] = useState("");
 
   return (
@@ -18,6 +18,8 @@ export default function ReceiveRegistrationPage({ currentUser }) {
         {[
           ["ocr", "📄 OCR PDF"],
           ["manual", "🖱️ เลือกด้วยมือ"],
+          ["history", "📋 ประวัติรับคืน"],
+          ["notify", "🖨️ ใบนำส่งป้าย"],
         ].map(([v, label]) => (
           <button key={v} onClick={() => { setMode(v); setMessage(""); }}
             style={{ padding: "10px 20px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
@@ -37,8 +39,12 @@ export default function ReceiveRegistrationPage({ currentUser }) {
 
       {mode === "ocr" ? (
         <OcrPanel setMessage={setMessage} currentUser={currentUser} />
-      ) : (
+      ) : mode === "manual" ? (
         <ManualPanel setMessage={setMessage} currentUser={currentUser} />
+      ) : mode === "history" ? (
+        <HistoryPanel setMessage={setMessage} currentUser={currentUser} />
+      ) : (
+        <NotifyPanel setMessage={setMessage} currentUser={currentUser} />
       )}
     </div>
   );
@@ -709,6 +715,545 @@ function ManualPanel({ setMessage, currentUser }) {
       )}
     </div>
   );
+}
+
+/* ============================================================================
+   HISTORY TAB — View + edit received submissions
+   ============================================================================ */
+function HistoryPanel({ setMessage, currentUser }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [editTarget, setEditTarget] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [expandedRun, setExpandedRun] = useState(null);
+
+  async function fetchHistory() {
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_submissions", status: "received" }),
+      });
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data : []);
+    } catch {
+      setRows([]);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => { fetchHistory(); }, []);
+
+  // Group by run_code
+  const grouped = React.useMemo(() => {
+    const map = new Map();
+    rows.forEach(r => {
+      const key = r.run_code || `_${r.submission_id}`;
+      if (!map.has(key)) {
+        map.set(key, { run_code: r.run_code, submit_date: r.submit_date, brand: r.brand, items: [] });
+      }
+      map.get(key).items.push(r);
+    });
+    return Array.from(map.values()).sort((a, b) => (b.run_code || "").localeCompare(a.run_code || ""));
+  }, [rows]);
+
+  const kw = search.trim().toLowerCase();
+  const filteredGroups = grouped.map(g => ({
+    ...g,
+    items: g.items.filter(it => {
+      if (!kw) return true;
+      const hay = [it.chassis_no, it.plate_number, it.plate_category, it.customer_name, it.invoice_no, it.run_code]
+        .filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(kw);
+    }),
+  })).filter(g => g.items.length > 0);
+
+  function openEdit(it) {
+    setEditTarget({
+      submission_id: it.submission_id,
+      run_code: it.run_code,
+      chassis_no: it.chassis_no,
+      customer_name: it.customer_name,
+      invoice_no: it.invoice_no,
+      plate_category: it.plate_category || "",
+      plate_number: it.plate_number || "",
+      plate_province: it.plate_province || "",
+      register_date: it.register_date ? String(it.register_date).slice(0, 10) : "",
+    });
+  }
+
+  async function saveEdit() {
+    if (!editTarget) return;
+    setSaving(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_submission",
+          submission_id: editTarget.submission_id,
+          plate_category: editTarget.plate_category,
+          plate_number: editTarget.plate_number,
+          plate_province: editTarget.plate_province,
+          register_date: editTarget.register_date || null,
+        }),
+      });
+      await res.json();
+      setMessage(`✅ แก้ไข ${editTarget.run_code} สำเร็จ (sync → moto_registrations)`);
+      setEditTarget(null);
+      fetchHistory();
+    } catch {
+      setMessage("❌ แก้ไขไม่สำเร็จ");
+    }
+    setSaving(false);
+  }
+
+  async function revertToSubmitted(submissionId, runCode) {
+    if (!window.confirm(`เปลี่ยนสถานะกลับเป็น "ส่งจด" (ถือว่ายังไม่ได้รับทะเบียน)?\n${runCode}`)) return;
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_submission", submission_id: submissionId, status: "submitted" }),
+      }).then(r => r.json());
+      setMessage(`✅ ย้อนสถานะ ${runCode} กลับเป็น "ส่งจด"`);
+      fetchHistory();
+    } catch { setMessage("❌ ไม่สำเร็จ"); }
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="🔍 ค้นหา: VIN / เลขทะเบียน / ลูกค้า / run / ใบขาย"
+          style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
+        <button onClick={fetchHistory}
+          style={{ padding: "8px 14px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔄 Refresh</button>
+        <span style={{ fontSize: 12, color: "#6b7280" }}>{rows.length} รายการรับคืนแล้ว</span>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+      ) : filteredGroups.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+          {rows.length === 0 ? "ยังไม่มีประวัติรับคืน" : "ไม่พบรายการตามที่ค้นหา"}
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {filteredGroups.map(g => {
+            const isOpen = expandedRun === g.run_code;
+            return (
+              <div key={g.run_code} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px", cursor: "pointer", background: isOpen ? "#f0f9ff" : "#fff" }}
+                  onClick={() => setExpandedRun(isOpen ? null : g.run_code)}>
+                  <span style={{ fontSize: 14, color: "#6b7280" }}>{isOpen ? "▾" : "▸"}</span>
+                  <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 15, color: "#072d6b" }}>{g.run_code}</span>
+                  <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#10b98122", color: "#065f46", fontWeight: 600 }}>รับคืนแล้ว</span>
+                  <span style={{ fontSize: 13, color: "#374151" }}>{fmtDate(g.submit_date)}</span>
+                  <span style={{ fontSize: 13, color: "#6b7280" }}>{g.brand}</span>
+                  <span style={{ marginLeft: "auto", fontSize: 13, color: "#111", fontWeight: 600 }}>{g.items.length} คัน</span>
+                </div>
+                {isOpen && (
+                  <div style={{ padding: "0 0 10px 0", borderTop: "1px solid #e5e7eb", overflowX: "auto" }}>
+                    <table className="data-table" style={{ fontSize: 13 }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 40 }}>#</th>
+                          <th>ลูกค้า</th>
+                          <th>VIN</th>
+                          <th>หมวด</th>
+                          <th>เลขทะเบียน</th>
+                          <th>จังหวัด</th>
+                          <th>วันจด</th>
+                          <th>วันส่งสาขา</th>
+                          <th style={{ width: 150 }}>จัดการ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {g.items.map((it, i) => (
+                          <tr key={it.submission_id} style={{ background: it.sent_to_branch_at ? "#ecfdf5" : undefined }}>
+                            <td style={{ textAlign: "center" }}>{i + 1}</td>
+                            <td>{it.customer_name || "-"}</td>
+                            <td style={{ fontFamily: "monospace", fontSize: 12 }}>{it.chassis_no || "-"}</td>
+                            <td>{it.plate_category || "-"}</td>
+                            <td style={{ fontWeight: 600 }}>{it.plate_number || "-"}</td>
+                            <td>{it.plate_province || "-"}</td>
+                            <td>{fmtDate(it.register_date)}</td>
+                            <td style={{ color: it.sent_to_branch_at ? "#065f46" : "#9ca3af", fontWeight: it.sent_to_branch_at ? 600 : 400 }}>
+                              {it.sent_to_branch_at ? fmtDate(it.sent_to_branch_at) : "—"}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              <button onClick={() => openEdit(it)}
+                                style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>✏️ แก้</button>
+                              <button onClick={() => revertToSubmitted(it.submission_id, it.run_code)}
+                                style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>↩️ ย้อน</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Edit Modal */}
+      {editTarget && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => setEditTarget(null)}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 520, maxWidth: "95vw", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: "0 0 6px", color: "#072d6b" }}>✏️ แก้ไขข้อมูลทะเบียน — {editTarget.run_code}</h3>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>
+              {editTarget.invoice_no} • {editTarget.customer_name} • VIN: <code>{editTarget.chassis_no}</code>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>หมวด</label>
+                <input type="text" value={editTarget.plate_category} onChange={e => setEditTarget(t => ({ ...t, plate_category: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>เลขทะเบียน</label>
+                <input type="text" value={editTarget.plate_number} onChange={e => setEditTarget(t => ({ ...t, plate_number: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box", fontWeight: 600 }} />
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>จังหวัด</label>
+                <input type="text" value={editTarget.plate_province} onChange={e => setEditTarget(t => ({ ...t, plate_province: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>วันจดทะเบียน</label>
+                <input type="date" value={editTarget.register_date} onChange={e => setEditTarget(t => ({ ...t, register_date: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setEditTarget(null)}
+                style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>ยกเลิก</button>
+              <button onClick={saveEdit} disabled={saving}
+                style={{ padding: "8px 20px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.6 : 1, fontSize: 14, fontWeight: 600 }}>
+                💾 {saving ? "กำลังบันทึก..." : "บันทึกแก้ไข"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
+   NOTIFY TAB — พิมพ์ใบแจ้งลูกค้ามารับทะเบียน
+   ============================================================================ */
+function NotifyPanel({ setMessage, currentUser }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState({});
+  const [branchFilter, setBranchFilter] = useState("");
+  const [runFilter, setRunFilter] = useState("");
+  const [receiveDateFilter, setReceiveDateFilter] = useState("");
+  const [sentDate, setSentDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [savingSent, setSavingSent] = useState(false);
+  const [viewMode, setViewMode] = useState("pending"); // pending | sent | all
+
+  async function fetchReceived() {
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_submissions", status: "received" }),
+      });
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data : []);
+    } catch { setRows([]); }
+    setLoading(false);
+  }
+
+  useEffect(() => { fetchReceived(); }, []);
+
+  // แยกตาม sent_to_branch_at
+  const pendingRows = viewMode === "pending" ? rows.filter(r => !r.sent_to_branch_at)
+                    : viewMode === "sent" ? rows.filter(r => r.sent_to_branch_at)
+                    : rows;
+
+  const kw = search.trim().toLowerCase();
+  const filtered = pendingRows.filter(r => {
+    if (branchFilter && fmtBranch(r.branch_code) !== branchFilter) return false;
+    if (runFilter && r.run_code !== runFilter) return false;
+    if (receiveDateFilter) {
+      const rd = r.received_at ? String(r.received_at).slice(0, 10) : "";
+      if (rd !== receiveDateFilter) return false;
+    }
+    if (!kw) return true;
+    const hay = [r.customer_name, r.customer_phone, r.engine_no, r.plate_number, r.run_code]
+      .filter(Boolean).join(" ").toLowerCase();
+    return hay.includes(kw);
+  });
+
+  const branchOpts = [...new Set(pendingRows.map(r => fmtBranch(r.branch_code)).filter(v => v && v !== "-"))].sort();
+  const runOpts = [...new Set(pendingRows.map(r => r.run_code).filter(Boolean))].sort().reverse();
+  const receiveDateOpts = [...new Set(pendingRows.map(r => r.received_at ? String(r.received_at).slice(0, 10) : "").filter(Boolean))].sort().reverse();
+
+  function clearFilters() { setSearch(""); setBranchFilter(""); setRunFilter(""); setReceiveDateFilter(""); }
+  const selectedRows = filtered.filter(r => selected[r.submission_id]);
+  const selCount = selectedRows.length;
+
+  function toggleOne(id) { setSelected(s => ({ ...s, [id]: !s[id] })); }
+  function toggleAll() {
+    if (filtered.every(r => selected[r.submission_id])) {
+      const next = { ...selected };
+      filtered.forEach(r => delete next[r.submission_id]);
+      setSelected(next);
+    } else {
+      const next = { ...selected };
+      filtered.forEach(r => { next[r.submission_id] = true; });
+      setSelected(next);
+    }
+  }
+
+  function printNotifyList() {
+    const rowsToPrint = selCount > 0 ? selectedRows : filtered;
+    if (rowsToPrint.length === 0) { setMessage("ไม่มีรายการให้พิมพ์"); return; }
+    const branchLabel = branchFilter || fmtBranch(rowsToPrint[0]?.branch_code);
+    const html = buildNotifyHTML({ rows: rowsToPrint, branch: branchLabel });
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) { setMessage("popup blocked"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
+  async function saveSentToBranch() {
+    if (selCount === 0) { setMessage("เลือกรายการก่อนบันทึก"); return; }
+    if (!sentDate) { setMessage("กรอกวันที่ส่งคืนสาขา"); return; }
+    if (!window.confirm(`บันทึกวันที่ส่งคืนสาขา ${fmtDate(sentDate)} สำหรับ ${selCount} รายการ?`)) return;
+    setSavingSent(true);
+    try {
+      // อัพเดททีละรายการ (ใช้ update_submission ที่มีอยู่)
+      await Promise.all(selectedRows.map(r =>
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "update_submission", submission_id: r.submission_id, sent_to_branch_at: sentDate }),
+        }).then(x => x.json())
+      ));
+      setMessage(`✅ บันทึกวันส่งคืนสาขา ${selCount} รายการสำเร็จ`);
+      setSelected({});
+      fetchReceived();
+    } catch {
+      setMessage("❌ บันทึกไม่สำเร็จ");
+    }
+    setSavingSent(false);
+  }
+
+  async function markReturned(id, runCode) {
+    if (!window.confirm(`เปลี่ยนสถานะเป็น "ส่งคืนลูกค้าแล้ว"?\n${runCode}`)) return;
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_submission", submission_id: id, status: "returned" }),
+      }).then(r => r.json());
+      setMessage(`✅ ส่งคืนลูกค้าแล้ว — ${runCode}`);
+      fetchReceived();
+    } catch { setMessage("❌ ไม่สำเร็จ"); }
+  }
+
+  return (
+    <div>
+      {/* Sub-tabs */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {[
+          ["pending", "📮 รอส่งสาขา", rows.filter(r => !r.sent_to_branch_at).length],
+          ["sent", "✅ ส่งสาขาแล้ว", rows.filter(r => r.sent_to_branch_at).length],
+          ["all", "📋 ทั้งหมด", rows.length],
+        ].map(([v, label, n]) => (
+          <button key={v} onClick={() => setViewMode(v)}
+            style={{ padding: "6px 14px", border: "1px solid " + (viewMode === v ? "#072d6b" : "#d1d5db"), background: viewMode === v ? "#072d6b" : "#fff", color: viewMode === v ? "#fff" : "#374151", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            {label} ({n})
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <select value={runFilter} onChange={e => setRunFilter(e.target.value)}
+          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, minWidth: 150 }}>
+          <option value="">เลขที่ใบรับทะเบียน (ทั้งหมด)</option>
+          {runOpts.map(r => <option key={r} value={r}>{r}</option>)}
+        </select>
+        <select value={receiveDateFilter} onChange={e => setReceiveDateFilter(e.target.value)}
+          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, minWidth: 140 }}>
+          <option value="">วันที่รับทะเบียน (ทั้งหมด)</option>
+          {receiveDateOpts.map(d => <option key={d} value={d}>{fmtDate(d)}</option>)}
+        </select>
+        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
+          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, minWidth: 130 }}>
+          <option value="">ร้านที่ขาย (ทั้งหมด)</option>
+          {branchOpts.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+        {(search || branchFilter || runFilter || receiveDateFilter) && (
+          <button onClick={clearFilters}
+            style={{ padding: "6px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+            ✕ ล้าง
+          </button>
+        )}
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="🔍 ลูกค้า / เบอร์ / เครื่อง / ทะเบียน"
+          style={{ flex: 1, minWidth: 180, padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+        <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>{selCount > 0 ? `เลือก ${selCount}/` : ""}{filtered.length} / {rows.length} รายการ</span>
+        <button onClick={printNotifyList} disabled={filtered.length === 0}
+          style={{ padding: "8px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+          🖨️ พิมพ์ใบนำส่งป้าย {selCount > 0 ? `(${selCount})` : "ทั้งหมด"}
+        </button>
+        <button onClick={fetchReceived}
+          style={{ padding: "8px 14px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔄</button>
+      </div>
+
+      {/* Save sent-to-branch date — แสดงเฉพาะ view "รอส่ง" */}
+      {viewMode === "pending" && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#ecfdf5", borderRadius: 10, border: "1px solid #a7f3d0" }}>
+          <strong style={{ fontSize: 13, color: "#065f46" }}>📦 บันทึกวันที่ส่งคืนสาขา:</strong>
+          <input type="date" value={sentDate} onChange={e => setSentDate(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+          <button onClick={saveSentToBranch} disabled={selCount === 0 || savingSent}
+            style={{ padding: "7px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: (selCount === 0 || savingSent) ? "not-allowed" : "pointer", opacity: (selCount === 0 || savingSent) ? 0.5 : 1, fontSize: 13, fontWeight: 600 }}>
+            💾 {savingSent ? "กำลังบันทึก..." : `บันทึกวันส่ง (${selCount})`}
+          </button>
+          <span style={{ fontSize: 11, color: "#047857", fontStyle: "italic" }}>เลือกรายการในตารางก่อน แล้วกดบันทึก · ค่าจะเก็บในฟิลด์ sent_to_branch_at</span>
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+          {rows.length === 0 ? "ยังไม่มีรายการที่รับคืนทะเบียนแล้ว" : "ไม่พบรายการตามที่ค้นหา"}
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ width: 40 }}><input type="checkbox" checked={filtered.length > 0 && filtered.every(r => selected[r.submission_id])} onChange={toggleAll} /></th>
+                <th style={{ width: 40 }}>#</th>
+                <th>ลูกค้า</th>
+                <th>เบอร์โทร</th>
+                <th>เลขเครื่อง</th>
+                <th>หมวด</th>
+                <th>เลขทะเบียน</th>
+                <th>run</th>
+                <th>สาขา</th>
+                <th>วันส่งสาขา</th>
+                <th style={{ width: 110 }}>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((r, i) => (
+                <tr key={r.submission_id} style={{ background: selected[r.submission_id] ? "#eff6ff" : undefined, cursor: "pointer" }}
+                  onClick={() => toggleOne(r.submission_id)}>
+                  <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={!!selected[r.submission_id]} onChange={() => toggleOne(r.submission_id)} />
+                  </td>
+                  <td style={{ textAlign: "center" }}>{i + 1}</td>
+                  <td>{r.customer_name || "-"}</td>
+                  <td style={{ fontFamily: "monospace" }}>{r.customer_phone || "-"}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
+                  <td>{r.plate_category || "-"}</td>
+                  <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.run_code}</td>
+                  <td>{fmtBranch(r.branch_code)}</td>
+                  <td style={{ fontSize: 12, color: r.sent_to_branch_at ? "#065f46" : "#9ca3af", fontWeight: r.sent_to_branch_at ? 600 : 400 }}>
+                    {r.sent_to_branch_at ? fmtDate(r.sent_to_branch_at) : "—"}
+                  </td>
+                  <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                    <button onClick={() => markReturned(r.submission_id, r.run_code)}
+                      style={{ padding: "4px 10px", background: "#8b5cf6", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+                      ✓ ส่งคืนแล้ว
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function buildNotifyHTML({ rows, branch }) {
+  const today = new Date();
+  const dstr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear() + 543}`;
+  const safe = s => s === null || s === undefined ? "" : String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const tr = rows.map((r, i) => `
+    <tr>
+      <td class="c">${i + 1}</td>
+      <td>${safe(r.customer_name)}</td>
+      <td class="mono">${safe(r.customer_phone)}</td>
+      <td class="mono">${safe(r.engine_no)}</td>
+      <td class="c">${safe(r.plate_category)}</td>
+      <td class="c b">${safe(r.plate_number)}</td>
+      <td class="sig"></td>
+      <td></td>
+      <td></td>
+    </tr>`).join("");
+  return `<!doctype html><html><head><meta charset="utf-8"><title>ใบนำส่งป้ายทะเบียน</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Sarabun","Tahoma",sans-serif; font-size: 13px; color: #111; margin: 0; }
+  .doc { max-width: 297mm; margin: 0 auto; }
+  .header { border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 10px; }
+  .header h1 { margin: 0; font-size: 18px; }
+  .header .meta { font-size: 13px; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th,td { border: 1px solid #333; padding: 5px 6px; vertical-align: middle; }
+  th { background: #e5e7eb; text-align: center; font-weight: 600; }
+  .c { text-align: center; }
+  .mono { font-family: "Consolas",monospace; font-size: 11px; }
+  .b { font-weight: 700; }
+  tbody tr { min-height: 32px; }
+  .sign { margin-top: 24px; font-size: 12px; text-align: right; }
+</style></head><body>
+<div class="doc">
+  <div class="header">
+    <h1>ใบนำส่งป้ายทะเบียนรถ</h1>
+    <div class="meta"><strong>สาขา:</strong> ${safe(branch)}   <strong>วันที่พิมพ์:</strong> ${dstr}   <strong>จำนวน:</strong> ${rows.length} ราย</div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px">#</th>
+        <th>ชื่อลูกค้า</th>
+        <th style="width:90px">เบอร์โทร</th>
+        <th style="width:110px">เลขเครื่อง</th>
+        <th style="width:50px">หมวด</th>
+        <th style="width:70px">เลขทะเบียน</th>
+        <th style="width:120px">ลายเซ็นลูกค้า</th>
+        <th style="width:80px">วันที่รับ</th>
+        <th style="width:90px">ผู้จ่าย</th>
+      </tr>
+    </thead>
+    <tbody>${tr}</tbody>
+  </table>
+  <div class="sign">พิมพ์จากระบบ Management · ${new Date().toLocaleString("th-TH")}</div>
+</div>
+</body></html>`;
+}
+
+function fmtBranch(code) {
+  if (!code) return "-";
+  const s = String(code).trim();
+  // 0, 0000, 00000 → SCY01 (สำนักงานใหญ่)
+  if (/^0+$/.test(s)) return "SCY01";
+  return s;
 }
 
 function fmtDate(d) {
