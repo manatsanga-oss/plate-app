@@ -14,6 +14,9 @@ const emptyForm = () => ({
   note: "",
   status: "active",
   category: "",
+  province: "",
+  province_mode: "include",
+  province_target: "customer",
 });
 
 export default function MotoExpensePage({ currentUser }) {
@@ -131,6 +134,7 @@ export default function MotoExpensePage({ currentUser }) {
     if (form.group_by === "finance" && !form.company_id) { setMessage("กรุณาเลือกบริษัทไฟแนนท์"); return; }
     if (form.group_by === "brand" && !form.brand_id) { setMessage("กรุณาเลือกยี่ห้อ"); return; }
     if (form.group_by === "type" && !form.type_id) { setMessage("กรุณาเลือก Type"); return; }
+    if (form.group_by === "province" && !form.province?.trim()) { setMessage("กรุณากรอกชื่อจังหวัด"); return; }
     setSaving(true);
     setMessage("");
     try {
@@ -143,6 +147,8 @@ export default function MotoExpensePage({ currentUser }) {
           expense_type: form.expense_type,
           group_by: form.group_by,
           category: form.category || null,
+          province: form.group_by === "province" ? (form.province || null) : null,
+          province_mode: form.group_by === "province" ? (form.province_mode || "include") : null,
           engine_cc: form.group_by === "cc" ? Number(form.engine_cc) : null,
           company_id: form.group_by === "finance" ? Number(form.company_id) : null,
           brand_id: form.group_by === "brand" ? Number(form.brand_id) : null,
@@ -181,6 +187,9 @@ export default function MotoExpensePage({ currentUser }) {
       note: e.note || "",
       status: e.status || "active",
       category: e.category || "",
+      province: e.province || "",
+      province_mode: e.province_mode || "include",
+      province_target: e.province_target || "customer",
     });
     if (e.group_by === "type" && e.type_id) {
       const t = motoTypes.find(t => String(t.type_id) === String(e.type_id));
@@ -198,12 +207,13 @@ export default function MotoExpensePage({ currentUser }) {
 
   const filtered = expenses.filter(e => e.group_by === tab);
 
-  const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", type: "Type" };
+  const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", type: "Type", province: "จังหวัด" };
   const groupLabel = (e) => {
     if (e.group_by === "cc") return e.engine_cc ? e.engine_cc + " cc" : "-";
     if (e.group_by === "finance") return e.company_name || "-";
     if (e.group_by === "brand") return e.brand_name || "-";
     if (e.group_by === "type") return e.type_name || "-";
+    if (e.group_by === "province") return e.province || "-";
     return "-";
   };
 
@@ -212,7 +222,7 @@ export default function MotoExpensePage({ currentUser }) {
       <div className="page-topbar">
         <h2 className="page-title">💸 บันทึกค่าใช้จ่ายการขาย</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {[["cc", "ตาม CC"], ["finance", "ตามไฟแนนท์"], ["brand", "ตามยี่ห้อ"], ["type", "ตาม Type"]].map(([key, label]) => (
+          {[["cc", "ตาม CC"], ["finance", "ตามไฟแนนท์"], ["brand", "ตามยี่ห้อ"], ["type", "ตาม Type"], ["province", "ตามจังหวัด"]].map(([key, label]) => (
             <button key={key} className={tab === key ? "btn-primary" : "btn-secondary"} onClick={() => setTab(key)}>
               {label}
             </button>
@@ -399,6 +409,45 @@ export default function MotoExpensePage({ currentUser }) {
                 )}
               </>;
             })()}
+
+            {form.group_by === "province" && (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เงื่อนไข *</label>
+                  <div style={{ display: "flex", gap: 14 }}>
+                    {[
+                      ["include", "✓ เลือกจังหวัดนี้"],
+                      ["exclude", "✕ ยกเว้นจังหวัดนี้"],
+                    ].map(([val, label]) => (
+                      <label key={val} style={{ flex: 1, padding: "10px 12px", border: "2px solid " + (form.province_mode === val ? "#072d6b" : "#e5e7eb"), borderRadius: 8, cursor: "pointer", background: form.province_mode === val ? "#eff6ff" : "#fff", textAlign: "center" }}>
+                        <input type="radio" name="provinceMode" value={val} checked={form.province_mode === val}
+                          onChange={() => setForm({ ...form, province_mode: val })}
+                          style={{ marginRight: 6 }} />
+                        <span style={{ fontWeight: 600, fontSize: 13, color: form.province_mode === val ? "#072d6b" : "#374151" }}>{label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>จังหวัด *</label>
+                  <input value={form.province} onChange={e => setForm({ ...form, province: e.target.value })}
+                    placeholder="เช่น พระนครศรีอยุธยา, กรุงเทพมหานคร"
+                    list="province-suggestions"
+                    style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+                  <datalist id="province-suggestions">
+                    {[...new Set(expenses.map(x => x.province).filter(Boolean))].sort().map(p => <option key={p} value={p} />)}
+                    <option value="พระนครศรีอยุธยา" />
+                    <option value="กรุงเทพมหานคร" />
+                    <option value="อยุธยา" />
+                    <option value="สระบุรี" />
+                    <option value="ปทุมธานี" />
+                  </datalist>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
+                    {form.province_mode === "exclude" ? "💡 ค่าใช้จ่ายนี้จะขึ้นสำหรับลูกค้าทุกจังหวัด ยกเว้น" : "💡 ค่าใช้จ่ายนี้จะขึ้นเฉพาะลูกค้าที่อยู่ใน"} จังหวัดที่ระบุ
+                  </div>
+                </div>
+              </>
+            )}
 
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>จำนวนเงิน (บาท) *</label>

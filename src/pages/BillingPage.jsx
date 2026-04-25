@@ -11,9 +11,11 @@ export default function BillingPage({ currentUser }) {
   const [selected, setSelected] = useState({});
   const [search, setSearch] = useState("");
   const [branchFilter, setBranchFilter] = useState("");
+  const [runFilters, setRunFilters] = useState([]); // array of run_code
   const [showBilled, setShowBilled] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [detailRow, setDetailRow] = useState(null);
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -60,13 +62,19 @@ export default function BillingPage({ currentUser }) {
   const kw = search.trim().toLowerCase();
   const filtered = rows.filter(r => {
     if (branchFilter && fmtBranch(r.branch_code) !== branchFilter) return false;
+    if (runFilters.length > 0 && !runFilters.includes(r.run_code)) return false;
     if (!kw) return true;
     const hay = [r.customer_name, r.customer_phone, r.engine_no, r.chassis_no, r.plate_number, r.invoice_no, r.run_code]
       .filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
 
+  function toggleRun(code) {
+    setRunFilters(rs => rs.includes(code) ? rs.filter(x => x !== code) : [...rs, code]);
+  }
+
   const branchOpts = [...new Set(rows.map(r => fmtBranch(r.branch_code)).filter(v => v && v !== "-"))].sort();
+  const runOpts = [...new Set(rows.map(r => r.run_code).filter(Boolean))].sort().reverse();
   const selectedRows = filtered.filter(r => selected[r.submission_id]);
   const selCount = selectedRows.length;
   const selTotal = selectedRows.reduce((sum, r) => sum + Number(r.bill_amount || 0), 0);
@@ -145,23 +153,13 @@ export default function BillingPage({ currentUser }) {
       )}
 
       {/* Filters */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
         <label style={{ fontSize: 13, fontWeight: 600 }}>หมวดค่าใช้จ่าย:</label>
         <select value={category} onChange={e => setCategory(e.target.value)}
           style={{ padding: "7px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, minWidth: 180 }}>
           {categoryOpts.length === 0 && <option value="">(ยังไม่มีหมวด)</option>}
           {categoryOpts.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-
-        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
-          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
-          <option value="">ร้านที่ขาย (ทุกสาขา)</option>
-          {branchOpts.map(b => <option key={b} value={b}>{b}</option>)}
-        </select>
-
-        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="🔍 ลูกค้า / VIN / เลขเครื่อง / ทะเบียน"
-          style={{ flex: 1, minWidth: 180, padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
 
         <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}>
           <input type="checkbox" checked={showBilled} onChange={e => setShowBilled(e.target.checked)} />
@@ -171,6 +169,30 @@ export default function BillingPage({ currentUser }) {
         <button onClick={fetchData}
           style={{ padding: "7px 12px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔄</button>
       </div>
+
+      {/* Run filter chips */}
+      {runOpts.length > 0 && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+          <strong style={{ fontSize: 13, color: "#374151" }}>เลขที่ใบรับทะเบียน:</strong>
+          {runOpts.map(r => {
+            const active = runFilters.includes(r);
+            const count = rows.filter(x => x.run_code === r).length;
+            return (
+              <button key={r} onClick={() => toggleRun(r)}
+                style={{ padding: "5px 12px", border: "1px solid " + (active ? "#072d6b" : "#d1d5db"), background: active ? "#072d6b" : "#fff", color: active ? "#fff" : "#374151", borderRadius: 999, cursor: "pointer", fontSize: 12, fontFamily: "monospace", fontWeight: 600 }}>
+                {active && "✓ "}{r} <span style={{ opacity: 0.7, fontFamily: "Tahoma", marginLeft: 4 }}>({count})</span>
+              </button>
+            );
+          })}
+          {runFilters.length > 0 && (
+            <button onClick={() => setRunFilters([])}
+              style={{ padding: "5px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>✕ ล้าง</button>
+          )}
+          <span style={{ marginLeft: "auto", fontSize: 12, color: "#6b7280" }}>
+            {runFilters.length > 0 ? `เลือก ${runFilters.length} ใบ` : "(เลือกได้หลายใบ)"}
+          </span>
+        </div>
+      )}
 
       {/* Action bar */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#fef3c7", borderRadius: 10, border: "1px solid #fbbf24" }}>
@@ -200,6 +222,7 @@ export default function BillingPage({ currentUser }) {
               <tr>
                 <th style={{ width: 40 }}><input type="checkbox" checked={filtered.length > 0 && filtered.every(r => selected[r.submission_id])} onChange={toggleAll} /></th>
                 <th style={{ width: 40 }}>#</th>
+                <th>เลขที่รับทะเบียน</th>
                 <th>ลูกค้า</th>
                 <th>เลขเครื่อง</th>
                 <th>หมวด</th>
@@ -207,6 +230,7 @@ export default function BillingPage({ currentUser }) {
                 <th>รายการค่าใช้จ่าย</th>
                 <th style={{ textAlign: "right" }}>ยอดรวม</th>
                 {showBilled && <th>ใบวางบิล</th>}
+                <th style={{ width: 60 }}>ดู</th>
               </tr>
             </thead>
             <tbody>
@@ -219,6 +243,7 @@ export default function BillingPage({ currentUser }) {
                     {!showBilled && <input type="checkbox" checked={!!selected[r.submission_id]} onChange={() => toggleOne(r.submission_id)} />}
                   </td>
                   <td style={{ textAlign: "center" }}>{i + 1}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#072d6b" }}>{r.run_code || "-"}</td>
                   <td>{r.customer_name || "-"}</td>
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
                   <td>{r.plate_category || "-"}</td>
@@ -241,6 +266,12 @@ export default function BillingPage({ currentUser }) {
                     {r.bill_amount ? Number(r.bill_amount).toLocaleString() : "—"}
                   </td>
                   {showBilled && <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.billing_doc_no || "-"}</td>}
+                  <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                    <button onClick={() => setDetailRow(r)}
+                      style={{ padding: "4px 10px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                      👁️
+                    </button>
+                  </td>
                 </tr>
                 );
               })}
@@ -248,6 +279,120 @@ export default function BillingPage({ currentUser }) {
           </table>
         </div>
       )}
+
+      {/* Detail Modal */}
+      {detailRow && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => setDetailRow(null)}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 700, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 16, paddingBottom: 12, borderBottom: "2px solid #e5e7eb" }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>📄 รายละเอียด — {detailRow.run_code}</h3>
+              <button onClick={() => setDetailRow(null)}
+                style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 22, color: "#6b7280" }}>✕</button>
+            </div>
+
+            <DetailSection title="ข้อมูลลูกค้า" items={[
+              ["ชื่อลูกค้า", detailRow.customer_name],
+              ["เบอร์โทร", detailRow.customer_phone, "mono"],
+              ["เลขบัตรประชาชน", detailRow.id_card, "mono"],
+              ["ที่อยู่", detailRow.address],
+              ["ตำบล", detailRow.sub_district],
+              ["อำเภอ", detailRow.district],
+              ["จังหวัด", detailRow.customer_province],
+              ["รหัสไปรษณีย์", detailRow.postal_code, "mono"],
+            ]} />
+
+            <DetailSection title="ข้อมูลรถ" items={[
+              ["เลขที่ใบขาย", detailRow.invoice_no, "mono"],
+              ["วันที่ขาย", detailRow.sale_date ? String(detailRow.sale_date).slice(0,10) : "-"],
+              ["ยี่ห้อ", detailRow.brand],
+              ["รุ่น", detailRow.model_series],
+              ["สี", detailRow.color_name],
+              ["เลขเครื่อง", detailRow.engine_no, "mono"],
+              ["เลขถัง (VIN)", detailRow.chassis_no, "mono"],
+              ["ไฟแนนท์", (detailRow.finance_company && detailRow.finance_company !== '-') ? detailRow.finance_company : "เงินสด"],
+              ["สาขาที่ขาย", fmtBranch(detailRow.branch_code)],
+            ]} />
+
+            <DetailSection title="ข้อมูลทะเบียน" items={[
+              ["เลขที่รับทะเบียน", detailRow.run_code, "mono"],
+              ["หมวด", detailRow.plate_category],
+              ["เลขทะเบียน", detailRow.plate_number, "bold"],
+              ["จังหวัดทะเบียน", detailRow.plate_province],
+              ["วันจดทะเบียน", detailRow.register_date ? String(detailRow.register_date).slice(0,10) : "-"],
+              ["วันรับคืน", detailRow.received_at ? String(detailRow.received_at).slice(0,10) : "-"],
+            ]} />
+
+            {/* Bill Items */}
+            <div style={{ marginBottom: 16 }}>
+              <h4 style={{ margin: "0 0 8px", color: "#374151", fontSize: 14 }}>💰 รายการค่าใช้จ่าย</h4>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: "#f3f4f6" }}>
+                    <th style={{ padding: "6px 10px", textAlign: "left", border: "1px solid #e5e7eb" }}>รายการ</th>
+                    <th style={{ padding: "6px 10px", textAlign: "center", border: "1px solid #e5e7eb", width: 90 }}>กลุ่ม</th>
+                    <th style={{ padding: "6px 10px", textAlign: "right", border: "1px solid #e5e7eb", width: 90 }}>ยอด (บาท)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    let items = [];
+                    try { items = Array.isArray(detailRow.bill_items) ? detailRow.bill_items : (typeof detailRow.bill_items === "string" ? JSON.parse(detailRow.bill_items) : []); } catch {}
+                    return items.length === 0 ? (
+                      <tr><td colSpan={3} style={{ textAlign: "center", padding: 16, color: "#9ca3af" }}>ไม่มีรายการ</td></tr>
+                    ) : items.map((it, i) => {
+                      const groupColor = it.group_by === "finance" ? "#7c3aed" : it.group_by === "province" ? "#0f766e" : "#1e3a8a";
+                      const groupLabel = it.group_by === "finance" ? "ไฟแนนท์" : it.group_by === "province" ? "จังหวัด" : "ยี่ห้อ";
+                      return (
+                        <tr key={i}>
+                          <td style={{ padding: "6px 10px", border: "1px solid #e5e7eb" }}>{it.expense_name}</td>
+                          <td style={{ padding: "6px 10px", textAlign: "center", border: "1px solid #e5e7eb", color: groupColor, fontSize: 11, fontWeight: 600 }}>{groupLabel}</td>
+                          <td style={{ padding: "6px 10px", textAlign: "right", border: "1px solid #e5e7eb", fontWeight: 600 }}>{Number(it.amount).toLocaleString()}</td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                  <tr style={{ background: "#fef3c7" }}>
+                    <td colSpan={2} style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #fbbf24", fontWeight: 700 }}>รวม</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #fbbf24", fontWeight: 700, fontSize: 16, color: "#072d6b" }}>{Number(detailRow.bill_amount || 0).toLocaleString()}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            {detailRow.billed_at && (
+              <DetailSection title="ข้อมูลการวางบิล" items={[
+                ["เลขที่ใบวางบิล", detailRow.billing_doc_no, "mono"],
+                ["วันที่วางบิล", detailRow.billed_at ? new Date(detailRow.billed_at).toLocaleString("th-TH") : "-"],
+              ]} />
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+              <button onClick={() => setDetailRow(null)}
+                style={{ padding: "8px 24px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DetailSection({ title, items }) {
+  return (
+    <div style={{ marginBottom: 16 }}>
+      <h4 style={{ margin: "0 0 8px", color: "#374151", fontSize: 14 }}>{title}</h4>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", padding: "10px 14px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e5e7eb" }}>
+        {items.map(([label, val, type], i) => (
+          <div key={i} style={{ display: "flex", gap: 8, fontSize: 13 }}>
+            <span style={{ color: "#6b7280", minWidth: 90 }}>{label}:</span>
+            <span style={{ color: "#111", fontWeight: type === "bold" ? 700 : 400, fontFamily: type === "mono" ? "monospace" : "Tahoma", fontSize: type === "mono" ? 12 : 13 }}>
+              {val || <span style={{ color: "#d1d5db" }}>—</span>}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
