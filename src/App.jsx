@@ -38,6 +38,7 @@ import SalesOverviewPage from "./pages/SalesOverviewPage";
 import VehicleRegistrationPage from "./pages/VehicleRegistrationPage";
 import RegistrationSubmitPage from "./pages/RegistrationSubmitPage";
 import ReceiveRegistrationPage from "./pages/ReceiveRegistrationPage";
+import BillingPage from "./pages/BillingPage";
 
 export default function App() {
   const [activeMenu, setActiveMenu] = useState("salesoverview");
@@ -79,7 +80,7 @@ export default function App() {
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
     if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
-    if (page === "registrationsubmit" || page === "registrationreceive" || page === "registrationreturn" || page === "registrationbilling") return false;
+    if (page === "registrationsubmit" || page === "registrationreceive" || page === "registrationbilling") return false;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -184,6 +185,9 @@ export default function App() {
         )}
         {activeMenu === "registrationreceive" && canAccess("registrationreceive") && (
           <ReceiveRegistrationPage currentUser={currentUser} />
+        )}
+        {activeMenu === "registrationbilling" && canAccess("registrationbilling") && (
+          <BillingPage currentUser={currentUser} />
         )}
       </main>
     </div>
@@ -315,10 +319,9 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="users" label={currentUser?.role === "admin" ? "กำหนดผู้ใช้งาน" : "เปลี่ยนรหัสผ่าน"} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationreceive","registrationreturn","registrationbilling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationreceive","registrationbilling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="registrationsubmit" label="ส่งจดทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="registrationreceive" label="รับคืนงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="registrationreturn" label="ส่งคืนลูกค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="registrationreceive" label="รับคืน/ส่งคืนทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="registrationbilling" label="วางบิล" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="vehicleregistration" label="ค้นหาทะเบียนรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>

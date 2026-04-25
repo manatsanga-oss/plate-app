@@ -10,7 +10,7 @@ export default function ReceiveRegistrationPage({ currentUser }) {
   return (
     <div className="page-container">
       <div className="page-topbar">
-        <h2 className="page-title">📥 รับคืนงานทะเบียน</h2>
+        <h2 className="page-title">📥 รับคืน / ส่งคืนทะเบียน</h2>
       </div>
 
       {/* Mode tabs */}

@@ -13,6 +13,7 @@ const emptyForm = () => ({
   amount: "",
   note: "",
   status: "active",
+  category: "",
 });
 
 export default function MotoExpensePage({ currentUser }) {
@@ -141,6 +142,7 @@ export default function MotoExpensePage({ currentUser }) {
           expense_name: form.expense_name,
           expense_type: form.expense_type,
           group_by: form.group_by,
+          category: form.category || null,
           engine_cc: form.group_by === "cc" ? Number(form.engine_cc) : null,
           company_id: form.group_by === "finance" ? Number(form.company_id) : null,
           brand_id: form.group_by === "brand" ? Number(form.brand_id) : null,
@@ -178,6 +180,7 @@ export default function MotoExpensePage({ currentUser }) {
       amount: e.amount ? String(e.amount) : "",
       note: e.note || "",
       status: e.status || "active",
+      category: e.category || "",
     });
     if (e.group_by === "type" && e.type_id) {
       const t = motoTypes.find(t => String(t.type_id) === String(e.type_id));
@@ -229,6 +232,7 @@ export default function MotoExpensePage({ currentUser }) {
               <tr>
                 <th>#</th>
                 <th>ชื่อรายการ</th>
+                <th>หมวด</th>
                 <th>ประเภท</th>
                 <th>{tabLabel[tab]}</th>
                 <th>จำนวนเงิน</th>
@@ -244,6 +248,7 @@ export default function MotoExpensePage({ currentUser }) {
                 <tr key={e.expense_id || i}>
                   <td>{i + 1}</td>
                   <td style={{ fontWeight: 600 }}>{e.expense_name || "-"}</td>
+                  <td>{e.category ? <span style={{ fontSize: 12, padding: "2px 8px", borderRadius: 999, background: "#dbeafe", color: "#1e40af", fontWeight: 600 }}>{e.category}</span> : <span style={{ color: "#9ca3af", fontSize: 12 }}>-</span>}</td>
                   <td>
                     <span style={{
                       padding: "2px 10px", borderRadius: 12, fontSize: 12,
@@ -290,6 +295,18 @@ export default function MotoExpensePage({ currentUser }) {
               <input value={form.expense_name} onChange={e => setForm({ ...form, expense_name: e.target.value })}
                 placeholder="เช่น ค่าจดทะเบียน, ค่าโปรโมชั่นดาวน์"
                 style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>หมวด (สำหรับวางบิล)</label>
+              <input value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}
+                placeholder="เช่น ค่าจดทะเบียน, ประกัน, ค่าน้ำมัน (พิมพ์เองได้)"
+                list="expense-category-suggestions"
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+              <datalist id="expense-category-suggestions">
+                {[...new Set(expenses.map(x => x.category).filter(Boolean))].sort().map(c => <option key={c} value={c} />)}
+              </datalist>
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>หมวดที่ใช้บ่อยจะ auto-suggest · เว้นว่างได้ถ้ายังไม่กำหนด</div>
             </div>
 
             <div style={{ marginBottom: 12 }}>
