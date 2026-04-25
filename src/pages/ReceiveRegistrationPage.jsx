@@ -820,6 +820,22 @@ function HistoryPanel({ setMessage, currentUser }) {
     } catch { setMessage("❌ ไม่สำเร็จ"); }
   }
 
+  async function cancelEntireRun(runCode, count) {
+    if (!window.confirm(`ยกเลิกการรับคืน run ${runCode}?\n• เปลี่ยน ${count} รายการกลับเป็น "ส่งจด" (ยังไม่รับ)\n• เคลียร์ข้อมูลทะเบียน + วันส่งสาขา\n• เพื่อทำการรับคืนใหม่ได้`)) return;
+    try {
+      // ใช้ update_run เพื่อ revert ทั้ง run พร้อมล้าง plate fields
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_run", run_code: runCode, status: "submitted",
+          plate_category: "", plate_number: "", plate_province: "", register_date: null,
+        }),
+      }).then(r => r.json());
+      setMessage(`✅ ยกเลิกการรับคืน ${runCode} สำเร็จ — กลับไปอยู่ใน "รอรับคืน"`);
+      fetchHistory();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
   return (
     <div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
@@ -851,6 +867,23 @@ function HistoryPanel({ setMessage, currentUser }) {
                   <span style={{ fontSize: 13, color: "#374151" }}>{fmtDate(g.submit_date)}</span>
                   <span style={{ fontSize: 13, color: "#6b7280" }}>{g.brand}</span>
                   <span style={{ marginLeft: "auto", fontSize: 13, color: "#111", fontWeight: 600 }}>{g.items.length} คัน</span>
+                  {(() => {
+                    const billedCount = g.items.filter(it => it.billed_at).length;
+                    if (billedCount > 0) {
+                      return (
+                        <span style={{ padding: "5px 12px", background: "#fef3c7", color: "#92400e", borderRadius: 6, fontSize: 12, fontWeight: 600, border: "1px solid #fbbf24" }}
+                          title={`มี ${billedCount} รายการวางบิลแล้ว — ต้องยกเลิกใบวางบิลก่อนถึงจะยกเลิกรับคืนได้`}>
+                          💰 วางบิลแล้ว ({billedCount})
+                        </span>
+                      );
+                    }
+                    return (
+                      <button onClick={e => { e.stopPropagation(); cancelEntireRun(g.run_code, g.items.length); }}
+                        style={{ padding: "5px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                        ✕ ยกเลิกการรับคืน
+                      </button>
+                    );
+                  })()}
                 </div>
                 {isOpen && (
                   <div style={{ padding: "0 0 10px 0", borderTop: "1px solid #e5e7eb", overflowX: "auto" }}>
