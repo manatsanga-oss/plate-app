@@ -253,8 +253,8 @@ export default function BillingPage({ currentUser }) {
                       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                         {items.map((it, idx) => (
                           <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-                            <span style={{ color: it.group_by === "finance" ? "#7c3aed" : "#1e3a8a" }}>
-                              {it.group_by === "finance" ? "💼 " : ""}{it.expense_name}
+                            <span style={{ color: it.group_by === "finance" ? "#7c3aed" : it.group_by === "province" ? "#0f766e" : it.group_by === "cc" ? "#dc2626" : "#1e3a8a" }}>
+                              {it.group_by === "finance" ? "💼 " : it.group_by === "province" ? "📍 " : it.group_by === "cc" ? "🏍️ " : ""}{it.expense_name}
                             </span>
                             <span style={{ fontWeight: 600, color: "#374151" }}>{Number(it.amount).toLocaleString()}</span>
                           </div>
@@ -308,6 +308,7 @@ export default function BillingPage({ currentUser }) {
               ["วันที่ขาย", detailRow.sale_date ? String(detailRow.sale_date).slice(0,10) : "-"],
               ["ยี่ห้อ", detailRow.brand],
               ["รุ่น", detailRow.model_series],
+              ["CC", detailRow.engine_cc ? `${detailRow.engine_cc} cc` : "-"],
               ["สี", detailRow.color_name],
               ["เลขเครื่อง", detailRow.engine_no, "mono"],
               ["เลขถัง (VIN)", detailRow.chassis_no, "mono"],
@@ -342,8 +343,8 @@ export default function BillingPage({ currentUser }) {
                     return items.length === 0 ? (
                       <tr><td colSpan={3} style={{ textAlign: "center", padding: 16, color: "#9ca3af" }}>ไม่มีรายการ</td></tr>
                     ) : items.map((it, i) => {
-                      const groupColor = it.group_by === "finance" ? "#7c3aed" : it.group_by === "province" ? "#0f766e" : "#1e3a8a";
-                      const groupLabel = it.group_by === "finance" ? "ไฟแนนท์" : it.group_by === "province" ? "จังหวัด" : "ยี่ห้อ";
+                      const groupColor = it.group_by === "finance" ? "#7c3aed" : it.group_by === "province" ? "#0f766e" : it.group_by === "cc" ? "#dc2626" : "#1e3a8a";
+                      const groupLabel = it.group_by === "finance" ? "ไฟแนนท์" : it.group_by === "province" ? "จังหวัด" : it.group_by === "cc" ? "CC" : "ยี่ห้อ";
                       return (
                         <tr key={i}>
                           <td style={{ padding: "6px 10px", border: "1px solid #e5e7eb" }}>{it.expense_name}</td>

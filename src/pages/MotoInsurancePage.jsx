@@ -63,7 +63,48 @@ function OcrPanel({ setMessage }) {
   const [ocrLoading, setOcrLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingRow, setEditingRow] = useState(null);
+  const [searchSource, setSearchSource] = useState(null); // 'sale' | 'receipt' | null
+  const [searchField, setSearchField] = useState("chassis_no");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
   const fileRef = useRef();
+
+  function openSearch(source) {
+    setSearchSource(source);
+    setSearchField("chassis_no");
+    setSearchKeyword(editingRow?.chassis_no || "");
+    setSearchResults([]);
+  }
+
+  async function doSearch() {
+    if (!searchKeyword.trim()) return;
+    setSearchLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search_registrations", field: searchField, keyword: searchKeyword.trim(), source: searchSource }),
+      });
+      const data = await res.json();
+      setSearchResults(Array.isArray(data) ? data : []);
+    } catch { setSearchResults([]); }
+    setSearchLoading(false);
+  }
+
+  function pickSearchResult(r) {
+    setEditingRow(prev => ({
+      ...prev,
+      invoice_no: r.sale_doc_no || "",
+      customer_name: r.customer_name || "",
+      chassis_no: r.frame_no || prev.chassis_no || "",
+      plate_number: r.plate_number || prev.plate_number || "",
+      insured_name: prev.insured_name || r.customer_name || "",
+      match_source: r.source || (searchSource === 'receipt' ? 'receipt' : 'sale'),
+    }));
+    setSearchSource(null);
+    setSearchKeyword("");
+    setSearchResults([]);
+  }
 
   async function runOcr() {
     if (!pdfFile) { setMessage("เลือกไฟล์ PDF ก่อน"); return; }
@@ -77,7 +118,7 @@ function OcrPanel({ setMessage }) {
       const res = await fetch(OCR_URL, { method: "POST", body: fd });
       const data = await res.json();
       const arr = (Array.isArray(data) ? data : data.items || []).map((r, i) => ({
-        ...r, _key: `ocr-${i}`, _selected: true, customer_name: "", invoice_no: "",
+        ...r, _key: `ocr-${i}`, _selected: true, customer_name: "", invoice_no: "", match_source: "",
       }));
       if (arr.length === 0) {
         setMessage("❌ OCR ไม่พบข้อมูลใน PDF นี้");
@@ -85,8 +126,9 @@ function OcrPanel({ setMessage }) {
         // preview match
         await refreshMatch(arr);
         setItems(arr);
-        const matched = arr.filter(it => it.invoice_no).length;
-        setMessage(`✅ OCR ${arr.length} รายการ — match กับการขายได้ ${matched}`);
+        const matchedSale = arr.filter(it => it.match_source === "sale").length;
+        const matchedRcpt = arr.filter(it => it.match_source === "receipt").length;
+        setMessage(`✅ OCR ${arr.length} รายการ — match การขาย ${matchedSale} / รับเรื่องงานทะเบียน ${matchedRcpt}`);
       }
     } catch (e) {
       setMessage("❌ OCR ล้มเหลว: " + String(e).slice(0, 200));
@@ -101,7 +143,7 @@ function OcrPanel({ setMessage }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "preview_ocr_match",
-          items: rows.map(r => ({ chassis_no: r.chassis_no })),
+          items: rows.map(r => ({ chassis_no: r.chassis_no, contract_date: r.contract_date })),
         }),
       });
       const data = await res.json();
@@ -112,6 +154,7 @@ function OcrPanel({ setMessage }) {
         const m = byChassis[String(r.chassis_no || "").toUpperCase().trim()];
         r.invoice_no = m?.invoice_no || "";
         r.customer_name = m?.customer_name || "";
+        r.match_source = m?.match_source || "";
       });
       setItems([...rows]);
     } catch {}
@@ -242,6 +285,25 @@ function OcrPanel({ setMessage }) {
           <div style={{ background: "#fff", borderRadius: 12, padding: 22, width: 700, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
             onClick={e => e.stopPropagation()}>
             <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>✏️ แก้ไขรายการ พรบ.</h3>
+
+            {/* Search buttons */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12, padding: "10px 12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e5e7eb", alignItems: "center", flexWrap: "wrap" }}>
+              <button onClick={() => openSearch('sale')}
+                style={{ padding: "6px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                🔍 ค้นหาเลขที่ใบขาย
+              </button>
+              <button onClick={() => openSearch('receipt')}
+                style={{ padding: "6px 14px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                🔍 ค้นหาเลขที่รับเรื่อง
+              </button>
+              {(editingRow.invoice_no || editingRow.customer_name) && (
+                <span style={{ fontSize: 12, color: editingRow.match_source === 'receipt' ? "#059669" : "#0369a1", marginLeft: 6 }}>
+                  ✓ <strong>{editingRow.invoice_no || "-"}</strong> · {editingRow.customer_name || "-"}
+                  {editingRow.match_source && <span style={{ marginLeft: 6, padding: "1px 6px", background: editingRow.match_source === 'receipt' ? "#d1fae5" : "#dbeafe", borderRadius: 4 }}>{editingRow.match_source === 'receipt' ? 'รับเรื่อง' : 'ใบขาย'}</span>}
+                </span>
+              )}
+            </div>
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               {FIELDS.map(f => (
                 <div key={f.key}>
@@ -263,9 +325,87 @@ function OcrPanel({ setMessage }) {
           </div>
         </div>
       )}
+
+      {/* Search popup (nested) */}
+      {searchSource && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setSearchSource(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 20, borderRadius: 12, width: 900, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+            <h3 style={{ margin: "0 0 12px", color: searchSource === 'receipt' ? "#059669" : "#0369a1" }}>
+              🔍 {searchSource === 'sale' ? 'ค้นหาเลขที่ใบขาย (จาก moto_sales)' : 'ค้นหาเลขที่รับเรื่อง (จาก registration_receipts)'}
+            </h3>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <select value={searchField} onChange={e => setSearchField(e.target.value)}
+                style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
+                <option value="chassis_no">เลขตัวถัง</option>
+                <option value="customer_name">ชื่อลูกค้า</option>
+                <option value="plate_number">เลขทะเบียน</option>
+                <option value="engine_no">เลขเครื่อง</option>
+                <option value={searchSource === 'receipt' ? 'receipt_no' : 'invoice_no'}>{searchSource === 'receipt' ? 'เลขที่รับเรื่อง' : 'เลขที่ใบขาย'}</option>
+              </select>
+              <input value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && doSearch()}
+                placeholder="พิมพ์คำค้นแล้วกด Enter หรือคลิก ค้นหา..."
+                style={{ flex: 1, padding: "7px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+              <button onClick={doSearch} disabled={searchLoading}
+                style={{ padding: "7px 18px", background: searchSource === 'receipt' ? "#059669" : "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                {searchLoading ? "..." : "ค้นหา"}
+              </button>
+              <button onClick={() => setSearchSource(null)}
+                style={{ padding: "7px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer" }}>ปิด</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+              {searchLoading ? (
+                <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังค้นหา...</div>
+              ) : searchResults.length === 0 ? (
+                <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>
+                  {searchKeyword ? "ไม่พบข้อมูล" : "พิมพ์คำค้นและกด ค้นหา"}
+                </div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ background: "#f3f4f6", position: "sticky", top: 0 }}>
+                    <tr>
+                      <th style={thStyle}>{searchSource === 'receipt' ? 'เลขที่รับเรื่อง' : 'เลขที่ใบขาย'}</th>
+                      <th style={thStyle}>วันที่</th>
+                      <th style={thStyle}>ลูกค้า</th>
+                      <th style={thStyle}>ยี่ห้อ/รุ่น</th>
+                      <th style={thStyle}>เลขตัวถัง</th>
+                      <th style={thStyle}>เลขทะเบียน</th>
+                      <th style={thStyle}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {searchResults.map((r, i) => (
+                      <tr key={i} style={{ borderTop: "1px solid #e5e7eb", cursor: "pointer" }}
+                        onClick={() => pickSearchResult(r)}
+                        onMouseEnter={e => e.currentTarget.style.background = "#fef9c3"}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}>
+                        <td style={tdStyle}><strong>{r.sale_doc_no || "-"}</strong></td>
+                        <td style={tdStyle}>{r.sale_date ? String(r.sale_date).slice(0, 10) : "-"}</td>
+                        <td style={tdStyle}>{r.customer_name || "-"}</td>
+                        <td style={tdStyle}>{r.brand || ""} {r.model || ""}</td>
+                        <td style={{ ...tdStyle, fontFamily: "monospace" }}>{r.frame_no || "-"}</td>
+                        <td style={tdStyle}>{r.plate_number || "-"}</td>
+                        <td style={tdStyle}><span style={{ color: "#0369a1", fontSize: 11 }}>เลือก →</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            {searchResults.length > 0 && (
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>พบ {searchResults.length} รายการ — คลิกแถวเพื่อเลือก</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+const thStyle = { padding: "8px 10px", textAlign: "left", fontSize: 12, fontWeight: 600, color: "#374151" };
+const tdStyle = { padding: "7px 10px", fontSize: 12, color: "#1f2937" };
 
 /* ============================================================================
    HISTORY TAB
