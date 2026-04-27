@@ -224,8 +224,36 @@ function OcrPanel({ setMessage }) {
           <div style={{ padding: "12px 16px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <strong style={{ fontSize: 14 }}>ขั้นตอนที่ 2 — ตรวจสอบ ({selCount}/{items.length} เลือก)</strong>
             <span style={{ fontSize: 12, color: "#6b7280" }}>เบี้ยรวม {summary.total.toLocaleString()} · เบี้ยนำส่ง {summary.remit.toLocaleString()}</span>
+            <button onClick={() => {
+                const newRow = {
+                  _key: `manual-${Date.now()}`,
+                  _selected: true,
+                  contract_date: new Date().toISOString().slice(0, 10),
+                  policy_no: "",
+                  insured_name: "",
+                  chassis_no: "",
+                  plate_number: "",
+                  coverage_start: "",
+                  coverage_end: "",
+                  paid: "",
+                  premium: 0,
+                  stamp_duty: 0,
+                  tax: 0,
+                  total_premium: 0,
+                  commission: 0,
+                  premium_remit: 0,
+                  customer_name: "",
+                  invoice_no: "",
+                  match_source: "",
+                };
+                setItems([...items, newRow]);
+                setEditingRow(newRow);
+              }}
+              style={{ marginLeft: "auto", padding: "8px 14px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+              ➕ เพิ่มรายการ
+            </button>
             <button onClick={() => refreshMatch()}
-              style={{ marginLeft: "auto", padding: "8px 14px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+              style={{ padding: "8px 14px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
               🔄 Refresh จับคู่
             </button>
             <button onClick={saveBatch} disabled={!selCount || saving}

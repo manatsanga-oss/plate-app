@@ -20,6 +20,12 @@ export default function BillingPage({ currentUser }) {
   const [historyExpanded, setHistoryExpanded] = useState({});
   const [editingDiscount, setEditingDiscount] = useState({ amount: 0, note: "" });
   const [savingDiscount, setSavingDiscount] = useState(false);
+  const [selectedBills, setSelectedBills] = useState({});  // {billing_doc_no: true}
+  const [paymentDialog, setPaymentDialog] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({ paid_date: "", payment_method: "โอน", payment_note: "", paid_to_vendor: "", wht_rate: 0, wht_amount: 0, wht_base: 0, from_bank_account_id: "" });
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [vendors, setVendors] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -59,8 +65,14 @@ export default function BillingPage({ currentUser }) {
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [brand, category, showBilled]);
   useEffect(() => {
     // เปลี่ยน tab → set showBilled อัตโนมัติ
-    if (viewMode === "history") setShowBilled(true);
-    else setShowBilled(false);
+    if (viewMode === "history") {
+      setShowBilled(true);
+      if (vendors.length === 0) fetchVendors();
+    } else {
+      setShowBilled(false);
+    }
+    setSelectedBills({});
+    /* eslint-disable-next-line */
   }, [viewMode]);
   useEffect(() => {
     // sync discount state เมื่อเปิด detail
@@ -71,6 +83,111 @@ export default function BillingPage({ currentUser }) {
       });
     }
   }, [detailRow]);
+
+  async function fetchVendors() {
+    try {
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_vendors", include_inactive: "false" }),
+      });
+      const data = await res.json();
+      setVendors(Array.isArray(data) ? data : []);
+    } catch { setVendors([]); }
+  }
+
+  async function fetchBankAccounts() {
+    try {
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }),
+      });
+      const data = await res.json();
+      setBankAccounts(Array.isArray(data) ? data : []);
+    } catch { setBankAccounts([]); }
+  }
+
+  // คำนวณ base ของ WHT จากค่าบริการจดทะเบียน
+  function calcWhtBase() {
+    const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
+    const selRows = filtered.filter(r => selectedDocNos.includes(r.billing_doc_no));
+    let base = 0;
+    selRows.forEach(r => {
+      let items = [];
+      try { items = Array.isArray(r.bill_items) ? r.bill_items : (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : []); } catch {}
+      items.forEach(it => {
+        const name = String(it.expense_name || "");
+        if (name.includes("ค่าบริการ")) base += Number(it.amount || 0);
+      });
+    });
+    return base;
+  }
+
+  function onVendorChange(vendorName) {
+    const v = vendors.find(x => x.vendor_name === vendorName);
+    const rate = v ? Number(v.wht_rate || 0) : 0;
+    const base = calcWhtBase();
+    const amount = Math.round((base * rate / 100) * 100) / 100;
+    setPaymentForm(p => ({ ...p, paid_to_vendor: vendorName, wht_rate: rate, wht_base: base, wht_amount: amount }));
+  }
+
+  function openPaymentDialog() {
+    const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
+    if (selectedDocNos.length === 0) { setMessage("❌ เลือกใบวางบิลก่อน"); return; }
+    if (vendors.length === 0) fetchVendors();
+    if (bankAccounts.length === 0) fetchBankAccounts();
+    const today = new Date().toISOString().slice(0, 10);
+    setPaymentForm({ paid_date: today, payment_method: "โอน", payment_note: "", paid_to_vendor: "", wht_rate: 0, wht_amount: 0, wht_base: calcWhtBase(), from_bank_account_id: "" });
+    setPaymentDialog(true);
+  }
+
+  async function savePayment() {
+    const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
+    if (selectedDocNos.length === 0) return;
+    if (!paymentForm.paid_to_vendor) { setMessage("❌ กรุณาเลือก Vendor"); return; }
+    setSavingPayment(true);
+    try {
+      const res = await post({
+        action: "save_billing_payment",
+        billing_doc_nos: selectedDocNos,
+        paid_date: paymentForm.paid_date,
+        payment_method: paymentForm.payment_method,
+        payment_note: paymentForm.payment_note,
+        paid_to_vendor: paymentForm.paid_to_vendor,
+        wht_rate: Number(paymentForm.wht_rate) || 0,
+        wht_amount: Number(paymentForm.wht_amount) || 0,
+        from_bank_account_id: Number(paymentForm.from_bank_account_id) || null,
+        paid_by: currentUser?.username || "system",
+      });
+      const payNo = res?.paid_doc_no || res?.[0]?.paid_doc_no || "";
+      setMessage(`✅ บันทึกจ่ายเงิน ${payNo} สำเร็จ`);
+      setPaymentDialog(false);
+      setSelectedBills({});
+      fetchData();
+    } catch {
+      setMessage("❌ บันทึกไม่สำเร็จ");
+    }
+    setSavingPayment(false);
+  }
+
+  function printPaymentSummary() {
+    const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
+    if (selectedDocNos.length === 0) { setMessage("❌ เลือกใบวางบิลก่อนพิมพ์"); return; }
+    // collect rows from selected bills
+    const selRows = filtered.filter(r => selectedDocNos.includes(r.billing_doc_no));
+    const fromBank = bankAccounts.find(b => String(b.account_id) === String(paymentForm.from_bank_account_id));
+    const toVendor = vendors.find(v => v.vendor_name === paymentForm.paid_to_vendor);
+    const html = buildPaymentSummaryHTML({
+      docNos: selectedDocNos, rows: selRows, vendor: paymentForm.paid_to_vendor,
+      payDate: paymentForm.paid_date, method: paymentForm.payment_method,
+      whtRate: Number(paymentForm.wht_rate) || 0,
+      whtAmount: Number(paymentForm.wht_amount) || 0,
+      fromBank, toVendor,
+    });
+    const w = window.open("", "_blank", "width=900,height=900");
+    if (!w) { setMessage("popup blocked"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  }
 
   async function saveDiscount() {
     if (!detailRow) return;
@@ -297,30 +414,62 @@ export default function BillingPage({ currentUser }) {
             const db = b.billed_at ? new Date(b.billed_at).getTime() : 0;
             return db - da;
           });
+          const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
+          const selectedGroups = groups.filter(g => selectedBills[g.billing_doc_no]);
+          const selSum = selectedGroups.reduce((s, g) => s + g.total, 0);
           return (
             <div>
-              <div style={{ marginBottom: 10, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", display: "flex", gap: 18, fontSize: 13 }}>
+              <div style={{ marginBottom: 10, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", display: "flex", gap: 18, fontSize: 13, alignItems: "center", flexWrap: "wrap" }}>
                 <span>📑 ใบวางบิล: <strong>{groups.length}</strong></span>
                 <span>📋 รายการรวม: <strong>{filtered.length}</strong></span>
                 <span>💰 ยอดรวม: <strong style={{ color: "#dc2626" }}>{groups.reduce((s, g) => s + g.total, 0).toLocaleString()}</strong></span>
+                {selectedDocNos.length > 0 && (
+                  <span style={{ padding: "4px 10px", background: "#fef9c3", borderRadius: 6, fontWeight: 600 }}>
+                    ✓ เลือก {selectedDocNos.length} ใบ · ฿ {selSum.toLocaleString()}
+                  </span>
+                )}
+                <div style={{ flex: 1 }} />
+                <button onClick={printPaymentSummary} disabled={selectedDocNos.length === 0}
+                  style={{ padding: "7px 14px", background: selectedDocNos.length === 0 ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: selectedDocNos.length === 0 ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600 }}>
+                  🖨️ พิมพ์สรุป
+                </button>
+                <button onClick={openPaymentDialog} disabled={selectedDocNos.length === 0}
+                  style={{ padding: "7px 18px", background: selectedDocNos.length === 0 ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: selectedDocNos.length === 0 ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700 }}>
+                  💵 บันทึกจ่ายเงิน
+                </button>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {groups.map(g => {
                   const open = !!historyExpanded[g.billing_doc_no];
+                  const isPaid = !!g.items[0]?.paid_at;
+                  const paidVendor = g.items[0]?.paid_to_vendor;
+                  const paidDocNo = g.items[0]?.paid_doc_no;
                   return (
-                    <div key={g.billing_doc_no} style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
+                    <div key={g.billing_doc_no} style={{ background: "#fff", borderRadius: 10, border: selectedBills[g.billing_doc_no] ? "2px solid #059669" : "1px solid #e5e7eb", overflow: "hidden" }}>
                       <div onClick={() => setHistoryExpanded(prev => ({ ...prev, [g.billing_doc_no]: !prev[g.billing_doc_no] }))}
-                        style={{ padding: "10px 14px", background: "linear-gradient(90deg,#072d6b 0%,#0e4ba8 100%)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
+                        style={{ padding: "10px 14px", background: isPaid ? "linear-gradient(90deg,#065f46 0%,#10b981 100%)" : "linear-gradient(90deg,#072d6b 0%,#0e4ba8 100%)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
+                        <input type="checkbox"
+                          checked={!!selectedBills[g.billing_doc_no]}
+                          onClick={e => e.stopPropagation()}
+                          onChange={e => setSelectedBills(prev => ({ ...prev, [g.billing_doc_no]: e.target.checked }))}
+                          disabled={isPaid}
+                          style={{ width: 16, height: 16, cursor: isPaid ? "not-allowed" : "pointer" }}
+                          title={isPaid ? "จ่ายแล้ว" : "เลือกเพื่อบันทึกจ่ายเงิน"} />
                         <span style={{ fontSize: 14 }}>{open ? "▾" : "▸"}</span>
                         <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 14 }}>{g.billing_doc_no}</span>
                         <span style={{ background: "#fff3", padding: "2px 8px", borderRadius: 4, fontSize: 11 }}>
                           {g.billed_at ? new Date(g.billed_at).toLocaleString("th-TH") : "-"}
                         </span>
                         <span style={{ fontSize: 13 }}>📋 {g.items.length} รายการ</span>
+                        {isPaid && (
+                          <span style={{ background: "#fff3", padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                            ✓ จ่ายแล้ว · {paidDocNo || ""}{paidVendor ? ` · ${paidVendor}` : ""}
+                          </span>
+                        )}
                         <div style={{ flex: 1 }} />
                         <span style={{ fontWeight: 700, fontSize: 15 }}>฿ {g.total.toLocaleString()}</span>
                         <button onClick={e => { e.stopPropagation(); printBilling(); }}
-                          title="พิมพ์ซ้ำ ต้องเลือก checkbox ของรายการในใบนี้"
+                          title="พิมพ์ซ้ำ"
                           style={{ padding: "4px 10px", background: "#fff2", color: "#fff", border: "1px solid #fff5", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
                           🖨️
                         </button>
@@ -604,8 +753,324 @@ export default function BillingPage({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* Payment Dialog */}
+      {paymentDialog && (() => {
+        const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
+        const selRows = filtered.filter(r => selectedDocNos.includes(r.billing_doc_no));
+        const selSum = selRows.reduce((s, r) => s + Number(r.bill_amount || 0), 0);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+            onClick={() => !savingPayment && setPaymentDialog(false)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 600, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}>
+              <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>💵 บันทึกจ่ายเงิน</h3>
+
+              <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+                <div><strong>📑 ใบที่จ่าย:</strong> {selectedDocNos.length} ใบ</div>
+                <div><strong>📋 รายการรวม:</strong> {selRows.length} รายการ</div>
+                <div><strong>💰 ยอดรวม:</strong> <span style={{ color: "#dc2626", fontWeight: 700 }}>฿ {selSum.toLocaleString()}</span></div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>วันที่จ่าย *</label>
+                  <input type="date" value={paymentForm.paid_date} onChange={e => setPaymentForm(p => ({ ...p, paid_date: e.target.value }))}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>วิธีจ่าย</label>
+                  <select value={paymentForm.payment_method} onChange={e => setPaymentForm(p => ({ ...p, payment_method: e.target.value }))}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                    <option value="โอน">โอน</option>
+                    <option value="เงินสด">เงินสด</option>
+                    <option value="เช็ค">เช็ค</option>
+                    <option value="หักบัญชี">หักบัญชี</option>
+                  </select>
+                </div>
+                <div style={{ gridColumn: "1 / span 2" }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>Vendor (จ่ายให้) *</label>
+                  <select value={paymentForm.paid_to_vendor} onChange={e => onVendorChange(e.target.value)}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                    <option value="">-- เลือก Vendor --</option>
+                    {vendors.map(v => (
+                      <option key={v.vendor_id} value={v.vendor_name}>{v.vendor_name}{v.wht_rate ? ` (${v.wht_rate}%)` : ""}</option>
+                    ))}
+                  </select>
+                  {vendors.length === 0 && (
+                    <div style={{ fontSize: 11, color: "#dc2626", marginTop: 2 }}>⚠️ ยังไม่มี Vendor — ไปเพิ่มที่ Master Data → Supplier</div>
+                  )}
+                </div>
+                <div style={{ gridColumn: "1 / span 2" }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>หมายเหตุ</label>
+                  <textarea value={paymentForm.payment_note} onChange={e => setPaymentForm(p => ({ ...p, payment_note: e.target.value }))} rows={2}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box", resize: "vertical" }} />
+                </div>
+              </div>
+
+              {/* Bank Accounts block */}
+              <div style={{ marginTop: 12, padding: 10, background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#1e40af", marginBottom: 6 }}>🏦 บัญชีธนาคาร</div>
+
+                <div style={{ marginBottom: 8 }}>
+                  <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#1e40af", marginBottom: 2 }}>โอนจาก (บัญชีบริษัท) *</label>
+                  <select value={paymentForm.from_bank_account_id} onChange={e => setPaymentForm(p => ({ ...p, from_bank_account_id: e.target.value }))}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                    <option value="">-- เลือกบัญชีโอนจาก --</option>
+                    {bankAccounts.map(b => (
+                      <option key={b.account_id} value={b.account_id}>
+                        {b.bank_name} · {b.account_no} · {b.account_name}
+                      </option>
+                    ))}
+                  </select>
+                  {bankAccounts.length === 0 && (
+                    <div style={{ fontSize: 11, color: "#dc2626", marginTop: 2 }}>⚠️ ยังไม่มีบัญชีธนาคาร — ไปเพิ่มที่ Accounting → บัญชีธนาคาร</div>
+                  )}
+                </div>
+
+                {/* TO bank info — auto from selected vendor */}
+                {paymentForm.paid_to_vendor && (() => {
+                  const v = vendors.find(x => x.vendor_name === paymentForm.paid_to_vendor);
+                  if (!v) return null;
+                  return (
+                    <div style={{ padding: 8, background: "#fff", borderRadius: 6, fontSize: 12 }}>
+                      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 3 }}>โอนเข้าบัญชี (ของ Vendor)</div>
+                      {v.bank_name || v.bank_account_no ? (
+                        <div>
+                          <strong>{v.bank_name || "-"}</strong>
+                          {v.bank_branch && <span> · {v.bank_branch}</span>}
+                          <div style={{ fontFamily: "monospace", color: "#0369a1", fontWeight: 600, marginTop: 2 }}>
+                            {v.bank_account_no || "-"}
+                            {v.bank_account_name && <span style={{ fontFamily: "Tahoma", color: "#374151", marginLeft: 8 }}>({v.bank_account_name})</span>}
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ color: "#dc2626", fontSize: 11 }}>⚠️ Vendor ยังไม่มีข้อมูลบัญชีธนาคาร — ไปเพิ่มที่ Master Data → Supplier</div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* WHT block */}
+              <div style={{ marginTop: 12, padding: 10, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", marginBottom: 6 }}>🧾 หักณที่จ่าย</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, alignItems: "end" }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, marginBottom: 2 }}>ยอดค่าบริการ (base)</label>
+                    <input type="text" value={Number(paymentForm.wht_base || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })} readOnly
+                      style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", background: "#fff", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, marginBottom: 2 }}>อัตรา %</label>
+                    <input type="number" step="0.01" value={paymentForm.wht_rate}
+                      onChange={e => {
+                        const r = Number(e.target.value) || 0;
+                        const amt = Math.round((paymentForm.wht_base * r / 100) * 100) / 100;
+                        setPaymentForm(p => ({ ...p, wht_rate: r, wht_amount: amt }));
+                      }}
+                      style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", boxSizing: "border-box" }} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: 11, marginBottom: 2 }}>หัก ณ ที่จ่าย</label>
+                    <input type="number" step="0.01" value={paymentForm.wht_amount}
+                      onChange={e => setPaymentForm(p => ({ ...p, wht_amount: Number(e.target.value) || 0 }))}
+                      style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", fontWeight: 700, color: "#dc2626", boxSizing: "border-box" }} />
+                  </div>
+                </div>
+                <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13 }}>
+                  <span>ยอดวางบิล: <strong>{selSum.toLocaleString()}</strong></span>
+                  <span style={{ marginLeft: 14, color: "#dc2626" }}>− หัก WHT: <strong>{Number(paymentForm.wht_amount || 0).toLocaleString()}</strong></span>
+                  <span style={{ marginLeft: 14, color: "#059669", fontWeight: 700 }}>= ยอดโอนจริง: {(selSum - Number(paymentForm.wht_amount || 0)).toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Preview docs */}
+              <div style={{ marginTop: 12, maxHeight: 200, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+                <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                  <thead style={{ background: "#f3f4f6", position: "sticky", top: 0 }}>
+                    <tr>
+                      <th style={{ padding: "6px 10px", textAlign: "left" }}>เลขใบวางบิล</th>
+                      <th style={{ padding: "6px 10px", textAlign: "left" }}>วันที่</th>
+                      <th style={{ padding: "6px 10px", textAlign: "right" }}>ยอด</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedDocNos.map(no => {
+                      const rows = selRows.filter(r => r.billing_doc_no === no);
+                      const total = rows.reduce((s, r) => s + Number(r.bill_amount || 0), 0);
+                      const date = rows[0]?.billed_at;
+                      return (
+                        <tr key={no} style={{ borderTop: "1px solid #e5e7eb" }}>
+                          <td style={{ padding: "6px 10px", fontFamily: "monospace", fontWeight: 600 }}>{no}</td>
+                          <td style={{ padding: "6px 10px" }}>{date ? new Date(date).toLocaleDateString("th-TH") : "-"}</td>
+                          <td style={{ padding: "6px 10px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{total.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+                <button onClick={() => setPaymentDialog(false)} disabled={savingPayment}
+                  style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+                <button onClick={savePayment} disabled={savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id}
+                  style={{ padding: "8px 20px", background: savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: (savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id) ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                  {savingPayment ? "กำลังบันทึก..." : "💾 บันทึกจ่ายเงิน"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
+}
+
+function buildPaymentSummaryHTML({ docNos, rows, vendor, payDate, method, whtRate = 0, whtAmount = 0, fromBank = null, toVendor = null }) {
+  const safe = s => String(s ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+  const fmtN = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const today = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const dateStr = `${pad(today.getDate())}/${pad(today.getMonth() + 1)}/${today.getFullYear() + 543} ${pad(today.getHours())}:${pad(today.getMinutes())}:${pad(today.getSeconds())}`;
+
+  // รวมยอดวางบิลทั้งหมด (ก่อนหักส่วนลด)
+  const subtotal = rows.reduce((s, r) => s + Number(r.subtotal_amount || r.bill_amount || 0), 0);
+  const totalDiscount = rows.reduce((s, r) => s + Number(r.discount_amount || 0), 0);
+  const netTotal = rows.reduce((s, r) => s + Number(r.bill_amount || 0), 0);
+
+  // รวมตาม (expense_name, group_by) — flatten bill_items จากทุก row
+  const expenseMap = new Map();
+  rows.forEach(r => {
+    let items = [];
+    try { items = Array.isArray(r.bill_items) ? r.bill_items : (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : []); } catch {}
+    items.forEach(it => {
+      const key = `${it.group_by || ''}||${it.expense_name || ''}`;
+      const cur = expenseMap.get(key) || { expense_name: it.expense_name || '-', group_by: it.group_by || '-', count: 0, total: 0 };
+      cur.count += 1;
+      cur.total += Number(it.amount || 0);
+      expenseMap.set(key, cur);
+    });
+  });
+  // sort by group then expense_name
+  const expenseRows = [...expenseMap.values()].sort((a, b) => {
+    if (a.group_by !== b.group_by) return String(a.group_by).localeCompare(String(b.group_by));
+    return String(a.expense_name).localeCompare(String(b.expense_name));
+  });
+
+  const groupLabel = g => g === "finance" ? "ไฟแนนท์" : g === "province" ? "จังหวัด" : g === "cc" ? "CC" : g === "brand" ? "ยี่ห้อ" : "-";
+  const groupColor = g => g === "finance" ? "#7c3aed" : g === "province" ? "#0f766e" : g === "cc" ? "#dc2626" : "#1e3a8a";
+
+  const expRows = expenseRows.map((r, i) => `<tr>
+    <td>${i + 1}</td>
+    <td>${safe(r.expense_name)}</td>
+    <td class="num">${r.count}</td>
+    <td class="num">${fmtN(r.total)}</td>
+  </tr>`).join("");
+
+  const docList = docNos.map(no => {
+    const docRows = rows.filter(r => r.billing_doc_no === no);
+    const docSubtotal = docRows.reduce((s, r) => s + Number(r.subtotal_amount || r.bill_amount || 0), 0);
+    const docDiscount = docRows.reduce((s, r) => s + Number(r.discount_amount || 0), 0);
+    const docNet = docRows.reduce((s, r) => s + Number(r.bill_amount || 0), 0);
+    const date = docRows[0]?.billed_at;
+    const dt = date ? new Date(date) : null;
+    const dateFmt = dt ? `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear() + 543}` : "-";
+    return `<tr>
+      <td class="mono">${safe(no)}</td>
+      <td>${dateFmt}</td>
+      <td class="num">${docRows.length}</td>
+      <td class="num">${fmtN(docSubtotal)}</td>
+      <td class="num">${fmtN(docDiscount)}</td>
+      <td class="num">${fmtN(docNet)}</td>
+    </tr>`;
+  }).join("");
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>สรุปการจ่ายเงิน</title>
+<style>
+@page { size: A4 portrait; margin: 12mm; }
+body { font-family: 'Tahoma','Arial',sans-serif; font-size: 11pt; }
+h1 { text-align: center; margin: 0 0 4px; font-size: 16pt; color: #072d6b; }
+.head { text-align: center; margin-bottom: 14px; font-size: 10pt; color: #444; }
+.info { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 12px; padding: 10px; background: #f0f4f9; border-radius: 6px; font-size: 10pt; }
+.info strong { color: #072d6b; }
+h2 { color: #072d6b; font-size: 12pt; margin: 12px 0 6px; padding-bottom: 4px; border-bottom: 2px solid #072d6b; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+th, td { border: 1px solid #555; padding: 5px 8px; font-size: 10pt; text-align: left; }
+th { background: #f0f4f9; }
+.num { text-align: right; font-family: monospace; }
+.mono { font-family: monospace; }
+.total { font-weight: 700; background: #fef9c3; font-size: 11pt; }
+.subtotal { background: #f3f4f6; font-weight: 600; }
+.discount { background: #fee2e2; color: #991b1b; }
+.net { background: #d1fae5; color: #065f46; font-weight: 700; font-size: 12pt; }
+.sign-box { display: inline-block; width: 45%; margin-top: 30px; padding: 0 10px; vertical-align: top; }
+.sign-line { margin-bottom: 6px; }
+</style></head><body>
+<h1>สรุปการจ่ายเงิน</h1>
+<div class="head">วันที่พิมพ์: ${dateStr}</div>
+
+<div class="info">
+  <div><strong>จ่ายให้ (Vendor):</strong> ${safe(vendor)}</div>
+  <div><strong>วันที่จ่าย:</strong> ${safe(payDate)}</div>
+  <div><strong>วิธีจ่าย:</strong> ${safe(method)}</div>
+  <div><strong>จำนวนใบวางบิล:</strong> ${docNos.length} ใบ · ${rows.length} รายการ</div>
+</div>
+
+<div class="info" style="grid-template-columns:1fr 1fr;background:#dbeafe">
+  <div>
+    <div style="font-size:9pt;color:#1e40af;font-weight:700;margin-bottom:3px">โอนจาก (บัญชีบริษัท)</div>
+    ${fromBank ? `
+      <div><strong>${safe(fromBank.bank_name)}</strong>${fromBank.branch ? ` · ${safe(fromBank.branch)}` : ''}</div>
+      <div class="mono" style="color:#0369a1">${safe(fromBank.account_no)}</div>
+      <div style="font-size:9pt">${safe(fromBank.account_name)}</div>
+    ` : '<div style="color:#999">-</div>'}
+  </div>
+  <div>
+    <div style="font-size:9pt;color:#1e40af;font-weight:700;margin-bottom:3px">โอนเข้า (บัญชี Vendor)</div>
+    ${toVendor && (toVendor.bank_name || toVendor.bank_account_no) ? `
+      <div><strong>${safe(toVendor.bank_name || '-')}</strong>${toVendor.bank_branch ? ` · ${safe(toVendor.bank_branch)}` : ''}</div>
+      <div class="mono" style="color:#0369a1">${safe(toVendor.bank_account_no || '-')}</div>
+      <div style="font-size:9pt">${safe(toVendor.bank_account_name || '-')}</div>
+    ` : '<div style="color:#999">-</div>'}
+  </div>
+</div>
+
+<h2>📑 รายการใบวางบิล</h2>
+<table>
+  <thead><tr>
+    <th>เลขที่ใบวางบิล</th><th>วันที่</th><th>จำนวน</th><th>ยอด</th><th>ส่วนลด</th><th>สุทธิ</th>
+  </tr></thead>
+  <tbody>
+    ${docList}
+    <tr class="total"><td colspan="3" style="text-align:right">รวม ${docNos.length} ใบ</td>
+      <td class="num">${fmtN(subtotal)}</td>
+      <td class="num">${fmtN(totalDiscount)}</td>
+      <td class="num">${fmtN(netTotal)}</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>💰 สรุปแยกตามประเภทค่าใช้จ่าย</h2>
+<table>
+  <thead><tr>
+    <th>#</th><th>รายการค่าใช้จ่าย</th><th>จำนวน</th><th>ยอดรวม</th>
+  </tr></thead>
+  <tbody>
+    ${expRows}
+    <tr class="subtotal"><td colspan="3" style="text-align:right">รวมก่อนส่วนลด</td><td class="num">${fmtN(subtotal)}</td></tr>
+    ${totalDiscount > 0 ? `<tr class="discount"><td colspan="3" style="text-align:right">หักส่วนลด</td><td class="num">−${fmtN(totalDiscount)}</td></tr>` : ''}
+    <tr class="subtotal"><td colspan="3" style="text-align:right">ยอดวางบิลสุทธิ</td><td class="num">${fmtN(netTotal)}</td></tr>
+    ${whtAmount > 0 ? `<tr class="discount"><td colspan="3" style="text-align:right">หัก ณ ที่จ่าย ${whtRate ? `(${whtRate}%)` : ''}</td><td class="num">−${fmtN(whtAmount)}</td></tr>` : ''}
+    <tr class="net"><td colspan="3" style="text-align:right">ยอดโอนจริง</td><td class="num">${fmtN(netTotal - whtAmount)}</td></tr>
+  </tbody>
+</table>
+
+<div style="margin-top:25px;">
+  <div class="sign-box"><div style="height:35px"></div><div class="sign-line">ลงชื่อ ........................................................<br/>ผู้จ่ายเงิน</div></div>
+  <div class="sign-box"><div style="height:35px"></div><div class="sign-line">ลงชื่อ ........................................................<br/>ผู้รับเงิน (Vendor)</div></div>
+</div>
+</body></html>`;
 }
 
 function DetailSection({ title, items }) {
