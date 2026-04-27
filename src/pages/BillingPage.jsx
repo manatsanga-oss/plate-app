@@ -16,6 +16,10 @@ export default function BillingPage({ currentUser }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [detailRow, setDetailRow] = useState(null);
+  const [viewMode, setViewMode] = useState("pending");  // 'pending' | 'history'
+  const [historyExpanded, setHistoryExpanded] = useState({});
+  const [editingDiscount, setEditingDiscount] = useState({ amount: 0, note: "" });
+  const [savingDiscount, setSavingDiscount] = useState(false);
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -53,6 +57,43 @@ export default function BillingPage({ currentUser }) {
 
   useEffect(() => { fetchCategories(); }, []);
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [brand, category, showBilled]);
+  useEffect(() => {
+    // เปลี่ยน tab → set showBilled อัตโนมัติ
+    if (viewMode === "history") setShowBilled(true);
+    else setShowBilled(false);
+  }, [viewMode]);
+  useEffect(() => {
+    // sync discount state เมื่อเปิด detail
+    if (detailRow) {
+      setEditingDiscount({
+        amount: Number(detailRow.discount_amount || 0),
+        note: detailRow.discount_note || "",
+      });
+    }
+  }, [detailRow]);
+
+  async function saveDiscount() {
+    if (!detailRow) return;
+    setSavingDiscount(true);
+    try {
+      await post({
+        action: "save_submission_discount",
+        submission_id: detailRow.submission_id,
+        discount_amount: Number(editingDiscount.amount) || 0,
+        discount_note: editingDiscount.note || "",
+      });
+      setMessage("✅ บันทึกส่วนลดเรียบร้อย");
+      // refresh data
+      fetchData();
+      // update detailRow ใน UI
+      const newDiscount = Number(editingDiscount.amount) || 0;
+      const subtotal = Number(detailRow.subtotal_amount || detailRow.bill_amount || 0) + Number(detailRow.discount_amount || 0);
+      setDetailRow({ ...detailRow, discount_amount: newDiscount, discount_note: editingDiscount.note, bill_amount: subtotal - newDiscount, subtotal_amount: subtotal });
+    } catch {
+      setMessage("❌ บันทึกไม่สำเร็จ");
+    }
+    setSavingDiscount(false);
+  }
 
   function fmtBranch(code) {
     if (!code) return "-";
@@ -134,6 +175,21 @@ export default function BillingPage({ currentUser }) {
         <h2 className="page-title">💰 วางบิล</h2>
       </div>
 
+      {/* View mode tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, borderBottom: "2px solid #e5e7eb" }}>
+        {[
+          ["pending", "📋 รอวางบิล"],
+          ["history", "💵 บันทึกจ่ายเงิน"],
+        ].map(([v, label]) => (
+          <button key={v} onClick={() => setViewMode(v)}
+            style={{ padding: "10px 22px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
+              color: viewMode === v ? "#072d6b" : "#6b7280",
+              borderBottom: viewMode === v ? "3px solid #072d6b" : "3px solid transparent", marginBottom: -2 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
       {/* Brand tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
         {["ฮอนด้า", "ยามาฮ่า"].map(b => (
@@ -161,17 +217,19 @@ export default function BillingPage({ currentUser }) {
           {categoryOpts.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}>
-          <input type="checkbox" checked={showBilled} onChange={e => setShowBilled(e.target.checked)} />
-          แสดงที่วางบิลแล้ว
-        </label>
+        {viewMode === "pending" && (
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={showBilled} onChange={e => setShowBilled(e.target.checked)} />
+            แสดงที่วางบิลแล้ว
+          </label>
+        )}
 
         <button onClick={fetchData}
           style={{ padding: "7px 12px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔄</button>
       </div>
 
-      {/* Run filter chips */}
-      {runOpts.length > 0 && (
+      {/* Run filter chips — เฉพาะโหมด pending */}
+      {viewMode === "pending" && runOpts.length > 0 && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
           <strong style={{ fontSize: 13, color: "#374151" }}>เลขที่ใบรับทะเบียน:</strong>
           {runOpts.map(r => {
@@ -194,27 +252,149 @@ export default function BillingPage({ currentUser }) {
         </div>
       )}
 
-      {/* Action bar */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#fef3c7", borderRadius: 10, border: "1px solid #fbbf24" }}>
-        <strong style={{ fontSize: 14, color: "#92400e" }}>
-          เลือก {selCount} / {filtered.length} รายการ • ยอดรวม <span style={{ fontSize: 18 }}>{selTotal.toLocaleString()}</span> บาท
-        </strong>
-        <button onClick={printBilling} disabled={selCount === 0}
-          style={{ marginLeft: "auto", padding: "8px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: selCount === 0 ? "not-allowed" : "pointer", opacity: selCount === 0 ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 13, fontWeight: 600 }}>
-          🖨️ พิมพ์ใบวางบิล
-        </button>
-        <button onClick={saveBilling} disabled={selCount === 0 || saving || showBilled}
-          style={{ padding: "8px 18px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: (selCount === 0 || saving || showBilled) ? "not-allowed" : "pointer", opacity: (selCount === 0 || saving || showBilled) ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>
-          💾 {saving ? "กำลังบันทึก..." : "บันทึกวางบิล"}
-        </button>
-      </div>
+      {/* Action bar — เฉพาะโหมด pending */}
+      {viewMode === "pending" && (
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#fef3c7", borderRadius: 10, border: "1px solid #fbbf24" }}>
+          <strong style={{ fontSize: 14, color: "#92400e" }}>
+            เลือก {selCount} / {filtered.length} รายการ • ยอดรวม <span style={{ fontSize: 18 }}>{selTotal.toLocaleString()}</span> บาท
+          </strong>
+          <button onClick={printBilling} disabled={selCount === 0}
+            style={{ marginLeft: "auto", padding: "8px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: selCount === 0 ? "not-allowed" : "pointer", opacity: selCount === 0 ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 13, fontWeight: 600 }}>
+            🖨️ พิมพ์ใบวางบิล
+          </button>
+          <button onClick={saveBilling} disabled={selCount === 0 || saving || showBilled}
+            style={{ padding: "8px 18px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: (selCount === 0 || saving || showBilled) ? "not-allowed" : "pointer", opacity: (selCount === 0 || saving || showBilled) ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>
+            💾 {saving ? "กำลังบันทึก..." : "บันทึกวางบิล"}
+          </button>
+        </div>
+      )}
 
       {loading ? (
         <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
       ) : filtered.length === 0 ? (
         <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
-          {showBilled ? "ไม่มีรายการที่วางบิลแล้ว" : "ไม่มีรายการรอวางบิล (ทุกคันถูกวางบิลแล้ว หรือยังไม่มีรับคืนทะเบียน)"}
+          {viewMode === "history" ? "ยังไม่มีใบวางบิล" : "ไม่มีรายการรอวางบิล (ทุกคันถูกวางบิลแล้ว หรือยังไม่มีรับคืนทะเบียน)"}
         </div>
+      ) : viewMode === "history" ? (
+        // ประวัติการวางบิล — group by billing_doc_no
+        (() => {
+          const grouped = {};
+          filtered.forEach(r => {
+            const key = r.billing_doc_no || "unknown";
+            if (!grouped[key]) {
+              grouped[key] = {
+                billing_doc_no: key,
+                billed_at: r.billed_at,
+                items: [],
+                total: 0,
+              };
+            }
+            grouped[key].items.push(r);
+            grouped[key].total += Number(r.bill_amount || 0);
+          });
+          const groups = Object.values(grouped).sort((a, b) => {
+            const da = a.billed_at ? new Date(a.billed_at).getTime() : 0;
+            const db = b.billed_at ? new Date(b.billed_at).getTime() : 0;
+            return db - da;
+          });
+          return (
+            <div>
+              <div style={{ marginBottom: 10, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", display: "flex", gap: 18, fontSize: 13 }}>
+                <span>📑 ใบวางบิล: <strong>{groups.length}</strong></span>
+                <span>📋 รายการรวม: <strong>{filtered.length}</strong></span>
+                <span>💰 ยอดรวม: <strong style={{ color: "#dc2626" }}>{groups.reduce((s, g) => s + g.total, 0).toLocaleString()}</strong></span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {groups.map(g => {
+                  const open = !!historyExpanded[g.billing_doc_no];
+                  return (
+                    <div key={g.billing_doc_no} style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
+                      <div onClick={() => setHistoryExpanded(prev => ({ ...prev, [g.billing_doc_no]: !prev[g.billing_doc_no] }))}
+                        style={{ padding: "10px 14px", background: "linear-gradient(90deg,#072d6b 0%,#0e4ba8 100%)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
+                        <span style={{ fontSize: 14 }}>{open ? "▾" : "▸"}</span>
+                        <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 14 }}>{g.billing_doc_no}</span>
+                        <span style={{ background: "#fff3", padding: "2px 8px", borderRadius: 4, fontSize: 11 }}>
+                          {g.billed_at ? new Date(g.billed_at).toLocaleString("th-TH") : "-"}
+                        </span>
+                        <span style={{ fontSize: 13 }}>📋 {g.items.length} รายการ</span>
+                        <div style={{ flex: 1 }} />
+                        <span style={{ fontWeight: 700, fontSize: 15 }}>฿ {g.total.toLocaleString()}</span>
+                        <button onClick={e => { e.stopPropagation(); printBilling(); }}
+                          title="พิมพ์ซ้ำ ต้องเลือก checkbox ของรายการในใบนี้"
+                          style={{ padding: "4px 10px", background: "#fff2", color: "#fff", border: "1px solid #fff5", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
+                          🖨️
+                        </button>
+                      </div>
+
+                      {open && (
+                        <table className="data-table">
+                          <thead style={{ background: "#f3f4f6" }}>
+                            <tr>
+                              <th style={{ width: 40 }}>#</th>
+                              <th>เลขที่รับทะเบียน</th>
+                              <th>ลูกค้า</th>
+                              <th>เลขเครื่อง</th>
+                              <th>หมวด</th>
+                              <th>เลขทะเบียน</th>
+                              <th>รายการค่าใช้จ่าย</th>
+                              <th style={{ textAlign: "right" }}>ยอดรวม</th>
+                              <th style={{ width: 60 }}>ดู</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {g.items.map((r, i) => {
+                              const items = Array.isArray(r.bill_items) ? r.bill_items : (r.bill_items ? (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : r.bill_items) : []);
+                              return (
+                                <tr key={r.submission_id}>
+                                  <td style={{ textAlign: "center" }}>{i + 1}</td>
+                                  <td style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#072d6b" }}>{r.run_code || "-"}</td>
+                                  <td>{r.customer_name || "-"}</td>
+                                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
+                                  <td>{r.plate_category || "-"}</td>
+                                  <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
+                                  <td style={{ fontSize: 11 }}>
+                                    {items.length === 0 ? <span style={{ color: "#9ca3af" }}>—</span> : (
+                                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                        {items.map((it, idx) => (
+                                          <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                                            <span style={{ color: it.group_by === "finance" ? "#7c3aed" : it.group_by === "province" ? "#0f766e" : it.group_by === "cc" ? "#dc2626" : "#1e3a8a" }}>
+                                              {it.group_by === "finance" ? "💼 " : it.group_by === "province" ? "📍 " : it.group_by === "cc" ? "🏍️ " : ""}{it.expense_name}
+                                            </span>
+                                            <span style={{ fontWeight: 600, color: "#374151" }}>{Number(it.amount).toLocaleString()}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: "right", fontWeight: 700, fontSize: 15, color: "#072d6b" }}>
+                                    {r.bill_amount ? Number(r.bill_amount).toLocaleString() : "—"}
+                                  </td>
+                                  <td style={{ textAlign: "center" }}>
+                                    <button onClick={() => setDetailRow(r)}
+                                      style={{ padding: "4px 10px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>
+                                      👁️
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot style={{ background: "#fef9c3", fontWeight: 700 }}>
+                            <tr>
+                              <td colSpan={7} style={{ textAlign: "right", padding: "8px 12px" }}>รวม {g.items.length} รายการ</td>
+                              <td style={{ textAlign: "right", padding: "8px 12px", color: "#dc2626", fontSize: 15 }}>{g.total.toLocaleString()}</td>
+                              <td></td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table className="data-table">
@@ -354,12 +534,60 @@ export default function BillingPage({ currentUser }) {
                       );
                     });
                   })()}
-                  <tr style={{ background: "#fef3c7" }}>
-                    <td colSpan={2} style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #fbbf24", fontWeight: 700 }}>รวม</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #fbbf24", fontWeight: 700, fontSize: 16, color: "#072d6b" }}>{Number(detailRow.bill_amount || 0).toLocaleString()}</td>
-                  </tr>
+                  {(() => {
+                    const subtotal = Number(detailRow.subtotal_amount || 0) || (Number(detailRow.bill_amount || 0) + Number(detailRow.discount_amount || 0));
+                    const discount = Number(editingDiscount.amount) || 0;
+                    const net = subtotal - discount;
+                    const isLocked = !!detailRow.billed_at;  // วางบิลแล้ว → ห้ามแก้
+                    return (
+                      <>
+                        <tr style={{ background: "#f3f4f6" }}>
+                          <td colSpan={2} style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #d1d5db", fontWeight: 600 }}>รวม</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #d1d5db", fontWeight: 600 }}>{subtotal.toLocaleString()}</td>
+                        </tr>
+                        <tr style={{ background: "#fee2e2" }}>
+                          <td colSpan={2} style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #fca5a5", fontWeight: 600, color: "#991b1b" }}>
+                            <span style={{ marginRight: 8 }}>ส่วนลด</span>
+                            <input type="number" step="0.01" min="0" max={subtotal}
+                              value={editingDiscount.amount}
+                              onChange={e => setEditingDiscount(p => ({ ...p, amount: e.target.value }))}
+                              disabled={isLocked}
+                              style={{ width: 100, padding: "3px 6px", textAlign: "right", border: "1px solid #fca5a5", borderRadius: 4, fontFamily: "monospace", background: isLocked ? "#f3f4f6" : "#fff" }}
+                            />
+                          </td>
+                          <td style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #fca5a5", fontWeight: 600, color: "#991b1b" }}>−{discount.toLocaleString()}</td>
+                        </tr>
+                        <tr style={{ background: "#fef3c7" }}>
+                          <td colSpan={2} style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #fbbf24", fontWeight: 700 }}>ยอดสุทธิ</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right", border: "1px solid #fbbf24", fontWeight: 700, fontSize: 16, color: "#072d6b" }}>{net.toLocaleString()}</td>
+                        </tr>
+                      </>
+                    );
+                  })()}
                 </tbody>
               </table>
+
+              {/* discount note + save button */}
+              {!detailRow.billed_at && (
+                <div style={{ marginTop: 8, padding: "10px 12px", background: "#fef9c3", borderRadius: 6, border: "1px solid #fbbf24" }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#92400e", marginBottom: 4 }}>หมายเหตุส่วนลด (ถ้ามี)</label>
+                  <input type="text" value={editingDiscount.note}
+                    onChange={e => setEditingDiscount(p => ({ ...p, note: e.target.value }))}
+                    placeholder="เช่น ลดให้ลูกค้าประจำ, เคสพิเศษ"
+                    style={{ width: "100%", padding: "5px 8px", borderRadius: 4, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} />
+                  <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+                    <button onClick={saveDiscount} disabled={savingDiscount || Number(editingDiscount.amount) === Number(detailRow.discount_amount || 0) && editingDiscount.note === (detailRow.discount_note || "")}
+                      style={{ padding: "6px 16px", background: savingDiscount ? "#9ca3af" : "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: savingDiscount ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600 }}>
+                      {savingDiscount ? "กำลังบันทึก..." : "💾 บันทึกส่วนลด"}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {detailRow.billed_at && detailRow.discount_note && (
+                <div style={{ marginTop: 8, padding: "8px 12px", background: "#fef9c3", borderRadius: 6, fontSize: 12, color: "#92400e" }}>
+                  💬 หมายเหตุส่วนลด: {detailRow.discount_note}
+                </div>
+              )}
             </div>
 
             {detailRow.billed_at && (
