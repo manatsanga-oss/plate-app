@@ -9,6 +9,7 @@ const emptyForm = () => ({
   income_type: "",
   income_code: "",
   income_name: "",
+  income_amount: "",
   amount: "",
   note: "",
   status: "active",
@@ -24,6 +25,7 @@ export default function ServiceExpensePage({ currentUser }) {
   const [form, setForm] = useState(emptyForm());
   const [editTarget, setEditTarget] = useState(null);
   const [search, setSearch] = useState("");
+  const [filterIncomeType, setFilterIncomeType] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -106,6 +108,7 @@ export default function ServiceExpensePage({ currentUser }) {
       income_type: r.income_type || "",
       income_code: r.income_code || "",
       income_name: r.income_name || "",
+      income_amount: r.income_amount ?? "",
       amount: r.amount || "",
       note: r.note || "",
       status: r.status || "active",
@@ -127,6 +130,7 @@ export default function ServiceExpensePage({ currentUser }) {
   // Local search filter
   const kw = search.trim().toLowerCase();
   const filtered = rows.filter(r => {
+    if (filterIncomeType && r.income_type !== filterIncomeType) return false;
     if (!kw) return true;
     const hay = [r.expense_name, r.income_type, r.income_code, r.income_name, r.note]
       .filter(Boolean).join(" ").toLowerCase();
@@ -164,9 +168,14 @@ export default function ServiceExpensePage({ currentUser }) {
 
       {/* Filter */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        <input type="text" placeholder="🔍 ค้นหา (ชื่อรายการ, ประเภทรายได้, หมายเหตุ)"
+        <label style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>ประเภทรายได้:</label>
+        <select value={filterIncomeType} onChange={e => setFilterIncomeType(e.target.value)} style={{ ...inp, minWidth: 200 }}>
+          <option value="">ทุกประเภท</option>
+          {uniqueIncomeTypes.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <input type="text" placeholder="🔍 ค้นหา (ชื่อรายการ, หมายเหตุ)"
           value={search} onChange={e => setSearch(e.target.value)}
-          style={{ ...inp, flex: 1, minWidth: 280 }} />
+          style={{ ...inp, flex: 1, minWidth: 240 }} />
         <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}>
           <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} />
           แสดงที่ปิดการใช้งาน
@@ -191,9 +200,9 @@ export default function ServiceExpensePage({ currentUser }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead style={{ background: "#072d6b", color: "#fff" }}>
               <tr>
-                <th style={th}>ประเภทรายได้</th>
                 <th style={th}>รหัส</th>
                 <th style={th}>ชื่อรายได้</th>
+                <th style={th}>ยอดรายได้</th>
                 <th style={th}>ชื่อรายการค่าใช้จ่าย</th>
                 <th style={th}>ประเภท</th>
                 <th style={th}>จำนวนเงิน</th>
@@ -205,13 +214,11 @@ export default function ServiceExpensePage({ currentUser }) {
             <tbody>
               {filtered.map(r => (
                 <tr key={r.expense_id} style={{ borderTop: "1px solid #e5e7eb", opacity: r.status === "inactive" ? 0.5 : 1 }}>
-                  <td style={td}>
-                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#0369a1", color: "#fff" }}>
-                      {r.income_type || "ทุกประเภท"}
-                    </span>
-                  </td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.income_code || "-"}</td>
                   <td style={td}>{r.income_name || "(ทุกชื่อ)"}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
+                    {r.income_amount != null && r.income_amount !== "" ? Number(r.income_amount).toLocaleString("th-TH", { minimumFractionDigits: 2 }) : <span style={{ color: "#9ca3af" }}>(ทุกจำนวน)</span>}
+                  </td>
                   <td style={{ ...td, fontWeight: 600 }}>{r.expense_name}</td>
                   <td style={td}>
                     <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: r.expense_type === "percent" ? "#fef3c7" : "#dbeafe", color: r.expense_type === "percent" ? "#92400e" : "#1e40af" }}>
@@ -278,6 +285,14 @@ export default function ServiceExpensePage({ currentUser }) {
                 <input value={form.income_code}
                   onChange={e => setForm(f => ({ ...f, income_code: e.target.value }))}
                   placeholder="เช่น 002" style={{ ...inp, fontFamily: "monospace" }} />
+              </div>
+
+              <div>
+                <label style={lbl}>จำนวนเงินรายได้ (ตรงเป๊ะ)</label>
+                <input type="number" step="0.01" value={form.income_amount}
+                  onChange={e => setForm(f => ({ ...f, income_amount: e.target.value }))}
+                  placeholder="เช่น 200" style={{ ...inp, fontFamily: "monospace" }} />
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>เว้นว่าง = match ทุกจำนวน</div>
               </div>
 
               <div>

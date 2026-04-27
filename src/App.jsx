@@ -49,6 +49,7 @@ import HrHolidaysPage from "./pages/HrHolidaysPage";
 import HrMonthlyExtrasPage from "./pages/HrMonthlyExtrasPage";
 import HrPayrollPage from "./pages/HrPayrollPage";
 import BankAccountsPage from "./pages/BankAccountsPage";
+import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
 
 export default function App() {
@@ -102,7 +103,7 @@ export default function App() {
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
     if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
-    if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "registrationbilling" || page === "motoinsurance" || page === "insurancebilling" || page === "hrspecialcommission" || page === "hrtimetracking" || page === "hremployees") return false;
+    if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "insurancebilling" || page === "hrspecialcommission" || page === "hrtimetracking" || page === "hremployees") return false;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -219,6 +220,9 @@ export default function App() {
         )}
         {activeMenu === "registrationbilling" && canAccess("registrationbilling") && (
           <BillingPage currentUser={currentUser} />
+        )}
+        {activeMenu === "receiptbilling" && canAccess("receiptbilling") && (
+          <ReceiptBillingPage currentUser={currentUser} />
         )}
         {activeMenu === "motoinsurance" && canAccess("motoinsurance") && (
           <MotoInsurancePage currentUser={currentUser} />
@@ -382,15 +386,18 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="users" label={currentUser?.role === "admin" ? "กำหนดผู้ใช้งาน" : "เปลี่ยนรหัสผ่าน"} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","registrationbilling","motoinsurance","insurancebilling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","registrationbilling","receiptbilling","motoinsurance","insurancebilling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="ส่งงานทะเบียน" pages={["registrationsubmit","registrationsubmitreceipt"]} activeMenu={activeMenu}>
           <MenuItem page="registrationsubmit" label="ส่งจดทะเบียนรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="registrationsubmitreceipt" label="ส่งงานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuItem page="registrationreceive" label="รับคืน/ส่งคืนทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="registrationbilling" label="วางบิลงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuSubGroup title="วางบิล" pages={["registrationbilling","receiptbilling","insurancebilling"]} activeMenu={activeMenu}>
+          <MenuItem page="registrationbilling" label="วางบิลงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="receiptbilling" label="วางบิลงานรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="insurancebilling" label="วางบิล งานพรบ." activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        </MenuSubGroup>
         <MenuItem page="motoinsurance" label="บันทึก พรบ.รถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="insurancebilling" label="วางบิล งานพรบ." activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="vehicleregistration" label="ค้นหาทะเบียนรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
