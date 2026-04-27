@@ -169,6 +169,39 @@ export default function BillingPage({ currentUser }) {
     setSavingPayment(false);
   }
 
+  function reprintGroup(g) {
+    // พิมพ์สรุปสำหรับใบเดียว — ใช้ข้อมูลจริงที่บันทึกไว้
+    const isPaid = !!g.items[0]?.paid_at;
+    const fromBankId = g.items[0]?.from_bank_account_id;
+    const fromBank = fromBankId ? bankAccounts.find(b => String(b.account_id) === String(fromBankId)) : null;
+    const vendorName = g.items[0]?.paid_to_vendor;
+    const toVendor = vendorName ? vendors.find(v => v.vendor_name === vendorName) : null;
+    const payDate = g.items[0]?.paid_at ? String(g.items[0].paid_at).slice(0, 10) : "";
+    const method = g.items[0]?.payment_method || "";
+    const whtRate = Number(g.items[0]?.wht_rate || 0);
+    const whtAmount = Number(g.items[0]?.wht_amount || 0);
+
+    // ถ้ายังไม่ได้ fetch vendors/banks → fetch ก่อน
+    if (isPaid && (vendors.length === 0 || bankAccounts.length === 0)) {
+      Promise.all([fetchVendors(), fetchBankAccounts()]).then(() => {
+        // retry หลัง fetch เสร็จ
+        setTimeout(() => reprintGroup(g), 300);
+      });
+      return;
+    }
+
+    const html = buildPaymentSummaryHTML({
+      docNos: [g.billing_doc_no], rows: g.items,
+      vendor: vendorName || "",
+      payDate, method, whtRate, whtAmount,
+      fromBank, toVendor,
+    });
+    const w = window.open("", "_blank", "width=900,height=900");
+    if (!w) { setMessage("popup blocked"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
   function printPaymentSummary() {
     const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
     if (selectedDocNos.length === 0) { setMessage("❌ เลือกใบวางบิลก่อนพิมพ์"); return; }
@@ -452,9 +485,8 @@ export default function BillingPage({ currentUser }) {
                           checked={!!selectedBills[g.billing_doc_no]}
                           onClick={e => e.stopPropagation()}
                           onChange={e => setSelectedBills(prev => ({ ...prev, [g.billing_doc_no]: e.target.checked }))}
-                          disabled={isPaid}
-                          style={{ width: 16, height: 16, cursor: isPaid ? "not-allowed" : "pointer" }}
-                          title={isPaid ? "จ่ายแล้ว" : "เลือกเพื่อบันทึกจ่ายเงิน"} />
+                          style={{ width: 16, height: 16, cursor: "pointer" }}
+                          title={isPaid ? "เลือกเพื่อพิมพ์สรุปซ้ำ" : "เลือกเพื่อบันทึกจ่ายเงิน"} />
                         <span style={{ fontSize: 14 }}>{open ? "▾" : "▸"}</span>
                         <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 14 }}>{g.billing_doc_no}</span>
                         <span style={{ background: "#fff3", padding: "2px 8px", borderRadius: 4, fontSize: 11 }}>
@@ -468,8 +500,8 @@ export default function BillingPage({ currentUser }) {
                         )}
                         <div style={{ flex: 1 }} />
                         <span style={{ fontWeight: 700, fontSize: 15 }}>฿ {g.total.toLocaleString()}</span>
-                        <button onClick={e => { e.stopPropagation(); printBilling(); }}
-                          title="พิมพ์ซ้ำ"
+                        <button onClick={e => { e.stopPropagation(); reprintGroup(g); }}
+                          title={isPaid ? "พิมพ์สรุปการจ่ายเงินซ้ำ" : "พิมพ์ใบวางบิลซ้ำ"}
                           style={{ padding: "4px 10px", background: "#fff2", color: "#fff", border: "1px solid #fff5", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
                           🖨️
                         </button>
