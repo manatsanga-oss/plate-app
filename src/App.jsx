@@ -93,9 +93,10 @@ export default function App() {
     if (HR_PAGES.includes(page)) {
       return HR_USERS.includes(currentUser.username);
     }
-    // เมนู Accounting — เห็นเฉพาะ admin เท่านั้น
+    // เมนู Accounting — เห็นเฉพาะ admin + WARUT เท่านั้น
+    const ACC_USERS = ["admin", "WARUT"];
     if (page === "accounting" || page.startsWith("acc")) {
-      return currentUser.role === "admin";
+      return ACC_USERS.includes(currentUser.username);
     }
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
