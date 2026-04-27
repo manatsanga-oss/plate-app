@@ -48,6 +48,7 @@ import HrEmployeesPage from "./pages/HrEmployeesPage";
 import HrHolidaysPage from "./pages/HrHolidaysPage";
 import HrMonthlyExtrasPage from "./pages/HrMonthlyExtrasPage";
 import HrPayrollPage from "./pages/HrPayrollPage";
+import BankAccountsPage from "./pages/BankAccountsPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
 
 export default function App() {
@@ -91,6 +92,10 @@ export default function App() {
     const HR_USERS = ["admin", "SUKANYA"];
     if (HR_PAGES.includes(page)) {
       return HR_USERS.includes(currentUser.username);
+    }
+    // เมนู Accounting — เห็นเฉพาะ admin เท่านั้น
+    if (page === "accounting" || page.startsWith("acc")) {
+      return currentUser.role === "admin";
     }
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
@@ -237,6 +242,9 @@ export default function App() {
         )}
         {activeMenu === "hrmonthlyextras" && canAccess("hrmonthlyextras") && (
           <HrMonthlyExtrasPage currentUser={currentUser} />
+        )}
+        {activeMenu === "accbankaccounts" && canAccess("accbankaccounts") && (
+          <BankAccountsPage currentUser={currentUser} />
         )}
         {activeMenu === "hrpayroll" && canAccess("hrpayroll") && (
           <HrPayrollPage currentUser={currentUser} />
@@ -385,10 +393,14 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="vehicleregistration" label="ค้นหาทะเบียนรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
+      <MenuGroup title="Accounting" pages={["accbankaccounts"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="accbankaccounts" label="บัญชีธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
       <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrspecialcommission","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="hremployees" label="ข้อมูลพนักงาน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrholidays" label="ปฏิทินวันหยุด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="hrtimetracking" label="แสดงเวลาทำงานพนักงาน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hrtimetracking" label="บันทึกเวลาทำงาน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrmonthlyextras" label="กรอกรายเดือน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrpayroll" label="คำนวณเงินเดือน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrspecialcommission" label="รายงานค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

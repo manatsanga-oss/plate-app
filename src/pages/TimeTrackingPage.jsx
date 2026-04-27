@@ -13,15 +13,20 @@ export default function TimeTrackingPage({ currentUser }) {
   const [dateTo, setDateTo] = useState("");
   const [empFilter, setEmpFilter] = useState("");
   const [message, setMessage] = useState("");
+  const [editingStatus, setEditingStatus] = useState(null);  // {id, current, employee, date}
+  const [statusValue, setStatusValue] = useState("");
+  const [statusNote, setStatusNote] = useState("");
+  const [savingStatus, setSavingStatus] = useState(false);
 
   useEffect(() => {
     fetchEmployees();
-    // default filter: เดือนนี้
+    // default filter: 21 ของเดือนก่อน → 20 ของเดือนปัจจุบัน
     const now = new Date();
-    const first = new Date(now.getFullYear(), now.getMonth(), 1);
-    const last = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-    setDateFrom(first.toISOString().slice(0, 10));
-    setDateTo(last.toISOString().slice(0, 10));
+    const fmt = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const from = new Date(now.getFullYear(), now.getMonth() - 1, 21);
+    const to = new Date(now.getFullYear(), now.getMonth(), 20);
+    setDateFrom(fmt(from));
+    setDateTo(fmt(to));
     /* eslint-disable-next-line */
   }, []);
 
@@ -60,6 +65,39 @@ export default function TimeTrackingPage({ currentUser }) {
       setRows(Array.isArray(data) ? data : []);
     } catch { setMessage("❌ โหลดข้อมูลไม่สำเร็จ"); setRows([]); }
     setLoading(false);
+  }
+
+  function openStatusEditor(r) {
+    setEditingStatus({
+      id: r.id,
+      employee: r.employee_name,
+      date: r.clock_date,
+      auto_calc: r.day_status,
+      override: r.day_status_override,
+    });
+    setStatusValue(r.day_status_override || "");
+    setStatusNote(r.override_note || "");
+  }
+
+  async function saveStatusOverride() {
+    if (!editingStatus) return;
+    setSavingStatus(true);
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_time_tracking_status",
+          id: editingStatus.id,
+          day_status_override: statusValue || null,
+          override_note: statusNote || "",
+          override_by: currentUser?.username || "system",
+        }),
+      });
+      setMessage("✅ บันทึกสถานะเรียบร้อย");
+      setEditingStatus(null);
+      fetchDetail();
+    } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+    setSavingStatus(false);
   }
 
   async function fetchSummary() {
@@ -188,13 +226,26 @@ export default function TimeTrackingPage({ currentUser }) {
                 </thead>
                 <tbody>
                   {filteredDetail.map(r => {
-                    const isAbsent = r.absence === "Absence";
+                    const status = r.day_status || (r.absence === "Absence" ? "ขาด" : null);
+                    const isAbsent = status === "ขาด";
+                    const isWorking = status === "มา";
+                    let bg = "transparent", badgeBg = "#f3f4f6", badgeColor = "#6b7280";
+                    if (isAbsent) { bg = "#fef2f2"; badgeBg = "#fee2e2"; badgeColor = "#991b1b"; }
+                    else if (isWorking) { badgeBg = "#d1fae5"; badgeColor = "#065f46"; }
+                    else if (status === "วันหยุดประจำสัปดาห์") { bg = "#eff6ff"; badgeBg = "#dbeafe"; badgeColor = "#1e40af"; }
+                    else if (status === "วันหยุดกลางเดือน") { bg = "#f5f3ff"; badgeBg = "#ede9fe"; badgeColor = "#5b21b6"; }
+                    else if (status === "ชดเชย" || status === "OT") { bg = "#f0fdf4"; badgeBg = "#bbf7d0"; badgeColor = "#15803d"; }
+                    else if (status && status.startsWith("ลา")) { bg = "#fff7ed"; badgeBg = "#fed7aa"; badgeColor = "#9a3412"; }
+                    else if (status) {
+                      // วันหยุดประจำปี (ใช้ชื่อวันหยุดเป็น status เช่น "วันสงกรานต์", "วันแรงงาน")
+                      bg = "#fef9c3"; badgeBg = "#fef3c7"; badgeColor = "#92400e";
+                    }
                     return (
-                      <tr key={r.id} style={{ borderTop: "1px solid #e5e7eb", background: isAbsent ? "#fef2f2" : "transparent" }}>
+                      <tr key={r.id} style={{ borderTop: "1px solid #e5e7eb", background: bg }}>
                         <td style={td}>{fmtDate(r.clock_date)}</td>
                         <td style={td}>{r.day_name || "-"}</td>
                         <td style={{ ...td, fontWeight: 600 }}>{r.employee_name}</td>
-                        <td style={td}>{r.team_name || "-"}</td>
+                        <td style={td}>{r.team_name || r.affiliation || "-"}</td>
                         <td style={td}>{r.position_name || "-"}</td>
                         <td style={{ ...td, fontFamily: "monospace" }}>{r.clock_in || "-"}</td>
                         <td style={{ ...td, fontFamily: "monospace" }}>{r.clock_out || "-"}</td>
@@ -209,15 +260,11 @@ export default function TimeTrackingPage({ currentUser }) {
                           {r.over_time || "-"}
                         </td>
                         <td style={td}>
-                          {isAbsent ? (
-                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#fee2e2", color: "#991b1b" }}>ขาด</span>
-                          ) : r.leave_text && r.leave_text !== "-" ? (
-                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#fef3c7", color: "#92400e" }}>ลา</span>
-                          ) : r.clock_in && r.clock_in !== "-" ? (
-                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#d1fae5", color: "#065f46" }}>มา</span>
-                          ) : (
-                            <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#f3f4f6", color: "#6b7280" }}>-</span>
-                          )}
+                          <button onClick={() => openStatusEditor(r)} title="คลิกเพื่อแก้สถานะ"
+                            style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: badgeBg, color: badgeColor, fontWeight: 600, border: r.day_status_override ? "2px dashed #7c3aed" : "1px solid transparent", cursor: "pointer" }}>
+                            {status || "-"}
+                            {r.day_status_override && <span style={{ marginLeft: 4, fontSize: 9 }}>✏️</span>}
+                          </button>
                         </td>
                       </tr>
                     );
@@ -279,6 +326,55 @@ export default function TimeTrackingPage({ currentUser }) {
               </tfoot>
             </table>
           )}
+        </div>
+      )}
+
+      {/* Status Override Editor */}
+      {editingStatus && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => !savingStatus && setEditingStatus(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 480, maxWidth: "95vw" }}>
+            <h3 style={{ margin: "0 0 12px", color: "#072d6b" }}>✏️ แก้ไขสถานะวันทำงาน</h3>
+
+            <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+              <div><strong>พนักงาน:</strong> {editingStatus.employee}</div>
+              <div><strong>วันที่:</strong> {fmtDate(editingStatus.date)}</div>
+              <div><strong>ระบบคำนวณ:</strong> <span style={{ color: "#0369a1" }}>{editingStatus.auto_calc || "-"}</span></div>
+            </div>
+
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+              ประเภทวันหยุด (override) — เว้นว่าง = ใช้ระบบคำนวณ
+            </label>
+            <select value={statusValue} onChange={e => setStatusValue(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, fontFamily: "Tahoma", marginBottom: 10 }}>
+              <option value="">-- ใช้ระบบคำนวณอัตโนมัติ --</option>
+              <option value="มา">มา</option>
+              <option value="ขาด">ขาด</option>
+              <option value="ลากิจ">ลากิจ</option>
+              <option value="ลาป่วย">ลาป่วย</option>
+              <option value="ลาพักร้อน">ลาพักร้อน</option>
+              <option value="ลาคลอดบุตร">ลาคลอดบุตร</option>
+              <option value="วันหยุดประจำสัปดาห์">วันหยุดประจำสัปดาห์</option>
+              <option value="วันหยุดประจำปี">วันหยุดประจำปี</option>
+              <option value="วันหยุดกลางเดือน">วันหยุดกลางเดือน</option>
+              <option value="ชดเชย">ชดเชย (วันหยุดชดเชย)</option>
+              <option value="OT">OT (ทำงานวันหยุด)</option>
+            </select>
+
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>หมายเหตุ</label>
+            <textarea value={statusNote} onChange={e => setStatusNote(e.target.value)} rows={2}
+              placeholder="เหตุผลที่เปลี่ยนสถานะ (ถ้ามี)"
+              style={{ width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, fontFamily: "Tahoma", boxSizing: "border-box", resize: "vertical" }} />
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+              <button onClick={() => setEditingStatus(null)} disabled={savingStatus}
+                style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={saveStatusOverride} disabled={savingStatus}
+                style={{ padding: "8px 20px", background: savingStatus ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: savingStatus ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                {savingStatus ? "กำลังบันทึก..." : "💾 บันทึก"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
