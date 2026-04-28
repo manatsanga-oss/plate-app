@@ -14,6 +14,7 @@ function getMonthRange() {
 }
 
 export default function MyMotoReportPage({ currentUser }) {
+  const isAdmin = currentUser?.role === "admin";
   const _mr = getMonthRange();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -151,7 +152,7 @@ export default function MyMotoReportPage({ currentUser }) {
                 <th style={th}>วันที่ขาย</th>
                 <th style={th}>สถานะ</th>
                 <th style={th}>MyMoto Honda</th>
-                <th style={th}>จัดการ</th>
+                {isAdmin && <th style={th}>จัดการ</th>}
               </tr>
             </thead>
             <tbody>
@@ -207,13 +208,15 @@ export default function MyMotoReportPage({ currentUser }) {
                         <span style={{ color: "#9ca3af", fontSize: 11 }}>—</span>
                       )}
                     </td>
-                    <td style={td}>
-                      <button onClick={() => handleDelete(r)}
-                        title="ลบแถวนี้"
-                        style={{ padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
-                        🗑️ ลบ
-                      </button>
-                    </td>
+                    {isAdmin && (
+                      <td style={td}>
+                        <button onClick={() => handleDelete(r)}
+                          title="ลบแถวนี้"
+                          style={{ padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
+                          🗑️ ลบ
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}

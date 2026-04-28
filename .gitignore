@@ -24,3 +24,4 @@ dist-ssr
 *.sw?
 src/pages/Claude Setup.exe
 .claude/worktrees/
+.claude-worktrees/
