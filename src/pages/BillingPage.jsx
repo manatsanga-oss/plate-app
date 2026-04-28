@@ -65,9 +65,10 @@ export default function BillingPage({ currentUser }) {
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [brand, category, showBilled]);
   useEffect(() => {
     // เปลี่ยน tab → set showBilled อัตโนมัติ
-    if (viewMode === "history") {
+    if (viewMode === "history" || viewMode === "paidHistory") {
       setShowBilled(true);
       if (vendors.length === 0) fetchVendors();
+      if (viewMode === "paidHistory" && bankAccounts.length === 0) fetchBankAccounts();
     } else {
       setShowBilled(false);
     }
@@ -205,8 +206,10 @@ export default function BillingPage({ currentUser }) {
   function printPaymentSummary() {
     const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
     if (selectedDocNos.length === 0) { setMessage("❌ เลือกใบวางบิลก่อนพิมพ์"); return; }
-    // collect rows from selected bills
-    const selRows = filtered.filter(r => selectedDocNos.includes(r.billing_doc_no));
+    // collect rows: paidHistory ใช้ paid_doc_no, history ใช้ billing_doc_no
+    const selRows = viewMode === "paidHistory"
+      ? filtered.filter(r => selectedDocNos.includes(r.paid_doc_no))
+      : filtered.filter(r => selectedDocNos.includes(r.billing_doc_no));
     const fromBank = bankAccounts.find(b => String(b.account_id) === String(paymentForm.from_bank_account_id));
     const toVendor = vendors.find(v => v.vendor_name === paymentForm.paid_to_vendor);
     const html = buildPaymentSummaryHTML({
@@ -330,6 +333,7 @@ export default function BillingPage({ currentUser }) {
         {[
           ["pending", "📋 รอวางบิล"],
           ["history", "💵 บันทึกจ่ายเงิน"],
+          ["paidHistory", "📚 ประวัติการจ่ายเงิน"],
         ].map(([v, label]) => (
           <button key={v} onClick={() => setViewMode(v)}
             style={{ padding: "10px 22px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
@@ -423,38 +427,70 @@ export default function BillingPage({ currentUser }) {
         <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
       ) : filtered.length === 0 ? (
         <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
-          {viewMode === "history" ? "ยังไม่มีใบวางบิล" : "ไม่มีรายการรอวางบิล (ทุกคันถูกวางบิลแล้ว หรือยังไม่มีรับคืนทะเบียน)"}
+          {viewMode === "paidHistory" ? "ยังไม่มีประวัติการจ่ายเงิน"
+            : viewMode === "history" ? "ยังไม่มีใบวางบิล"
+            : "ไม่มีรายการรอวางบิล (ทุกคันถูกวางบิลแล้ว หรือยังไม่มีรับคืนทะเบียน)"}
         </div>
-      ) : viewMode === "history" ? (
-        // ประวัติการวางบิล — group by billing_doc_no
+      ) : viewMode === "history" || viewMode === "paidHistory" ? (
+        // ประวัติการวางบิล — group by billing_doc_no (history) หรือ paid_doc_no/วันที่จ่าย (paidHistory)
         (() => {
+          // กรองก่อน group
+          const visibleRows = filtered.filter(r => {
+            if (viewMode === "history") return !r.paid_at;
+            if (viewMode === "paidHistory") return !!r.paid_at;
+            return true;
+          });
+
           const grouped = {};
-          filtered.forEach(r => {
-            const key = r.billing_doc_no || "unknown";
+          visibleRows.forEach(r => {
+            // paidHistory: group ด้วย paid_doc_no (หรือ fallback วันที่จ่าย) → รวมทุกบิลที่จ่ายในใบเดียวกัน
+            // history: group ด้วย billing_doc_no
+            const key = viewMode === "paidHistory"
+              ? (r.paid_doc_no || `paid-${(r.paid_at || "").slice(0,10)}`)
+              : (r.billing_doc_no || "unknown");
             if (!grouped[key]) {
               grouped[key] = {
-                billing_doc_no: key,
+                group_key: key,
+                billing_doc_no: viewMode === "paidHistory" ? null : key,
+                paid_doc_no: viewMode === "paidHistory" ? r.paid_doc_no : null,
+                paid_at: r.paid_at,
+                paid_to_vendor: r.paid_to_vendor,
+                payment_method: r.payment_method,
                 billed_at: r.billed_at,
                 items: [],
                 total: 0,
+                billDocNos: new Set(),
               };
             }
             grouped[key].items.push(r);
             grouped[key].total += Number(r.bill_amount || 0);
+            if (r.billing_doc_no) grouped[key].billDocNos.add(r.billing_doc_no);
+            // เก็บเวลาวางบิลแรกสุดในกลุ่ม (สำหรับ paidHistory จะแสดงช่วงวันที่)
+            if (r.billed_at && (!grouped[key].billed_at || new Date(r.billed_at) < new Date(grouped[key].billed_at))) {
+              grouped[key].billed_at = r.billed_at;
+            }
           });
-          const groups = Object.values(grouped).sort((a, b) => {
+          let groups = Object.values(grouped).map(g => ({ ...g, billDocCount: g.billDocNos.size }));
+          groups.sort((a, b) => {
+            // paidHistory เรียงตามวันที่จ่าย, history เรียงตามวันที่วางบิล
+            if (viewMode === "paidHistory") {
+              const da = a.paid_at ? new Date(a.paid_at).getTime() : 0;
+              const db = b.paid_at ? new Date(b.paid_at).getTime() : 0;
+              return db - da;
+            }
             const da = a.billed_at ? new Date(a.billed_at).getTime() : 0;
             const db = b.billed_at ? new Date(b.billed_at).getTime() : 0;
             return db - da;
           });
           const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
-          const selectedGroups = groups.filter(g => selectedBills[g.billing_doc_no]);
+          const selectedGroups = groups.filter(g => selectedBills[g.group_key]);
           const selSum = selectedGroups.reduce((s, g) => s + g.total, 0);
+          const totalRowCount = groups.reduce((s, g) => s + g.items.length, 0);
           return (
             <div>
               <div style={{ marginBottom: 10, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", display: "flex", gap: 18, fontSize: 13, alignItems: "center", flexWrap: "wrap" }}>
-                <span>📑 ใบวางบิล: <strong>{groups.length}</strong></span>
-                <span>📋 รายการรวม: <strong>{filtered.length}</strong></span>
+                <span>{viewMode === "paidHistory" ? "💵 ใบจ่ายเงิน" : "📑 ใบวางบิล"}: <strong>{groups.length}</strong></span>
+                <span>📋 รายการรวม: <strong>{totalRowCount}</strong></span>
                 <span>💰 ยอดรวม: <strong style={{ color: "#dc2626" }}>{groups.reduce((s, g) => s + g.total, 0).toLocaleString()}</strong></span>
                 {selectedDocNos.length > 0 && (
                   <span style={{ padding: "4px 10px", background: "#fef9c3", borderRadius: 6, fontWeight: 600 }}>
@@ -466,37 +502,60 @@ export default function BillingPage({ currentUser }) {
                   style={{ padding: "7px 14px", background: selectedDocNos.length === 0 ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: selectedDocNos.length === 0 ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 600 }}>
                   🖨️ พิมพ์สรุป
                 </button>
-                <button onClick={openPaymentDialog} disabled={selectedDocNos.length === 0}
-                  style={{ padding: "7px 18px", background: selectedDocNos.length === 0 ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: selectedDocNos.length === 0 ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700 }}>
-                  💵 บันทึกจ่ายเงิน
-                </button>
+                {viewMode === "history" && (
+                  <button onClick={openPaymentDialog} disabled={selectedDocNos.length === 0}
+                    style={{ padding: "7px 18px", background: selectedDocNos.length === 0 ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: selectedDocNos.length === 0 ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700 }}>
+                    💵 บันทึกจ่ายเงิน
+                  </button>
+                )}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 {groups.map(g => {
-                  const open = !!historyExpanded[g.billing_doc_no];
-                  const isPaid = !!g.items[0]?.paid_at;
-                  const paidVendor = g.items[0]?.paid_to_vendor;
-                  const paidDocNo = g.items[0]?.paid_doc_no;
+                  const open = !!historyExpanded[g.group_key];
+                  const isPaid = !!g.paid_at;
+                  const paidVendor = g.paid_to_vendor;
+                  const paidDocNo = g.paid_doc_no;
+                  const isPaidView = viewMode === "paidHistory";
                   return (
-                    <div key={g.billing_doc_no} style={{ background: "#fff", borderRadius: 10, border: selectedBills[g.billing_doc_no] ? "2px solid #059669" : "1px solid #e5e7eb", overflow: "hidden" }}>
-                      <div onClick={() => setHistoryExpanded(prev => ({ ...prev, [g.billing_doc_no]: !prev[g.billing_doc_no] }))}
+                    <div key={g.group_key} style={{ background: "#fff", borderRadius: 10, border: selectedBills[g.group_key] ? "2px solid #059669" : "1px solid #e5e7eb", overflow: "hidden" }}>
+                      <div onClick={() => setHistoryExpanded(prev => ({ ...prev, [g.group_key]: !prev[g.group_key] }))}
                         style={{ padding: "10px 14px", background: isPaid ? "linear-gradient(90deg,#065f46 0%,#10b981 100%)" : "linear-gradient(90deg,#072d6b 0%,#0e4ba8 100%)", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", gap: 12 }}>
                         <input type="checkbox"
-                          checked={!!selectedBills[g.billing_doc_no]}
+                          checked={!!selectedBills[g.group_key]}
                           onClick={e => e.stopPropagation()}
-                          onChange={e => setSelectedBills(prev => ({ ...prev, [g.billing_doc_no]: e.target.checked }))}
+                          onChange={e => setSelectedBills(prev => ({ ...prev, [g.group_key]: e.target.checked }))}
                           style={{ width: 16, height: 16, cursor: "pointer" }}
                           title={isPaid ? "เลือกเพื่อพิมพ์สรุปซ้ำ" : "เลือกเพื่อบันทึกจ่ายเงิน"} />
                         <span style={{ fontSize: 14 }}>{open ? "▾" : "▸"}</span>
-                        <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 14 }}>{g.billing_doc_no}</span>
-                        <span style={{ background: "#fff3", padding: "2px 8px", borderRadius: 4, fontSize: 11 }}>
-                          {g.billed_at ? new Date(g.billed_at).toLocaleString("th-TH") : "-"}
-                        </span>
-                        <span style={{ fontSize: 13 }}>📋 {g.items.length} รายการ</span>
-                        {isPaid && (
-                          <span style={{ background: "#fff3", padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
-                            ✓ จ่ายแล้ว · {paidDocNo || ""}{paidVendor ? ` · ${paidVendor}` : ""}
-                          </span>
+                        {isPaidView ? (
+                          <>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 14 }}>{paidDocNo || g.group_key}</span>
+                            <span style={{ background: "#fbbf24", color: "#78350f", padding: "3px 10px", borderRadius: 4, fontSize: 12, fontWeight: 700 }} title="วันที่จ่ายเงิน">
+                              💵 จ่ายเมื่อ {g.paid_at ? new Date(g.paid_at).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-"}
+                            </span>
+                            <span style={{ fontSize: 12 }}>📑 {g.billDocCount} ใบวางบิล · 📋 {g.items.length} รายการ</span>
+                            {paidVendor && (
+                              <span style={{ background: "#fff3", padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                                👤 {paidVendor}
+                              </span>
+                            )}
+                            {g.payment_method && (
+                              <span style={{ background: "#fff3", padding: "2px 8px", borderRadius: 4, fontSize: 11 }}>{g.payment_method}</span>
+                            )}
+                          </>
+                        ) : (
+                          <>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 14 }}>{g.billing_doc_no}</span>
+                            <span style={{ background: "#fff3", padding: "2px 8px", borderRadius: 4, fontSize: 11 }} title="วันที่วางบิล">
+                              📅 {g.billed_at ? new Date(g.billed_at).toLocaleString("th-TH") : "-"}
+                            </span>
+                            <span style={{ fontSize: 13 }}>📋 {g.items.length} รายการ</span>
+                            {isPaid && (
+                              <span style={{ background: "#fff3", padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                                ✓ จ่ายแล้ว · {paidDocNo || ""}{paidVendor ? ` · ${paidVendor}` : ""}
+                              </span>
+                            )}
+                          </>
                         )}
                         <div style={{ flex: 1 }} />
                         <span style={{ fontWeight: 700, fontSize: 15 }}>฿ {g.total.toLocaleString()}</span>
@@ -512,6 +571,7 @@ export default function BillingPage({ currentUser }) {
                           <thead style={{ background: "#f3f4f6" }}>
                             <tr>
                               <th style={{ width: 40 }}>#</th>
+                              {isPaidView && <th>เลขที่ใบวางบิล</th>}
                               <th>เลขที่รับทะเบียน</th>
                               <th>ลูกค้า</th>
                               <th>เลขเครื่อง</th>
@@ -528,6 +588,7 @@ export default function BillingPage({ currentUser }) {
                               return (
                                 <tr key={r.submission_id}>
                                   <td style={{ textAlign: "center" }}>{i + 1}</td>
+                                  {isPaidView && <td style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#065f46" }}>{r.billing_doc_no || "-"}</td>}
                                   <td style={{ fontFamily: "monospace", fontSize: 12, fontWeight: 600, color: "#072d6b" }}>{r.run_code || "-"}</td>
                                   <td>{r.customer_name || "-"}</td>
                                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
@@ -562,7 +623,7 @@ export default function BillingPage({ currentUser }) {
                           </tbody>
                           <tfoot style={{ background: "#fef9c3", fontWeight: 700 }}>
                             <tr>
-                              <td colSpan={7} style={{ textAlign: "right", padding: "8px 12px" }}>รวม {g.items.length} รายการ</td>
+                              <td colSpan={isPaidView ? 8 : 7} style={{ textAlign: "right", padding: "8px 12px" }}>รวม {g.items.length} รายการ</td>
                               <td style={{ textAlign: "right", padding: "8px 12px", color: "#dc2626", fontSize: 15 }}>{g.total.toLocaleString()}</td>
                               <td></td>
                             </tr>
