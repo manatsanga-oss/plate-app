@@ -33,6 +33,7 @@ const UPLOAD_GROUPS = [
       { key: "registration-receipts", label: "รับเรื่องงานทะเบียน/พรบ", desc: "Header + Line items (upsert)", db: "registration_receipts", url: `${BASE}/upload-registration-receipts` },
       { key: "time-tracking", label: "บันทึกเวลาทำงาน", desc: "เดือนปัจจุบัน · upsert (พนักงาน + วันที่)", db: "time_tracking_records", url: `${BASE}/upload-time-tracking` },
       { key: "honda-warranty", label: "ลงทะเบียนรับประกันคุณภาพ HONDA", desc: "radee14b.xls · 4 fields · upsert (warrantee_code)", db: "honda_warranty_registrations", url: `${BASE}/upload-vehicle-registrations` },
+      { key: "cosmos-insurance", label: "ประกัน COSMOS (4 แผน)", desc: "RSA / PA / 3PLUS / รถหาย · upsert (app_no)", db: "cosmos_*", url: `${BASE}/upload-cosmos-insurance` },
     ],
   },
 ];
