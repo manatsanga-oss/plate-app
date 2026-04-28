@@ -39,6 +39,23 @@ export default function CosmosInsurancePage({ currentUser }) {
         <h2 className="page-title">🛡️ บันทึกประกัน COSMOS</h2>
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "2px solid #e5e7eb" }}>
+        {[
+          ["save",    "📝 บันทึก"],
+          ["history", "📋 ประวัติการบันทึก"],
+        ].map(([v, label]) => (
+          <button key={v} onClick={() => { setMode(v); setMessage(""); }}
+            style={{
+              padding: "10px 20px", border: "none", background: "transparent",
+              cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
+              color: mode === v ? "#072d6b" : "#6b7280",
+              borderBottom: mode === v ? "3px solid #072d6b" : "3px solid transparent",
+              marginBottom: -2,
+            }}>{label}</button>
+        ))}
+      </div>
+
       {message && (
         <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8,
           background: message.startsWith("✅") ? "#d1fae5" : message.startsWith("⚠️") ? "#fef3c7" : "#fee2e2",
@@ -48,7 +65,167 @@ export default function CosmosInsurancePage({ currentUser }) {
         </div>
       )}
 
-      <HistoryPanel setMessage={setMessage} />
+      {mode === "save"
+        ? <HistoryPanel setMessage={setMessage} currentUser={currentUser} />
+        : <SubmissionsPanel setMessage={setMessage} />}
+    </div>
+  );
+}
+
+/* ============================================================================
+   TAB: ประวัติการบันทึก (group by batch_no)
+   ============================================================================ */
+function SubmissionsPanel({ setMessage }) {
+  const [plan, setPlan] = useState("rsa");
+  const [batches, setBatches] = useState([]);
+  const [details, setDetails] = useState([]);
+  const [selectedBatch, setSelectedBatch] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const currentPlan = PLAN_OPTS.find(p => p.key === plan) || PLAN_OPTS[0];
+
+  useEffect(() => { fetchBatches(plan); /* eslint-disable-next-line */ }, [plan]);
+
+  async function fetchBatches(planKey) {
+    setLoading(true); setMessage(""); setSelectedBatch(null); setDetails([]);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_cosmos_submissions", plan: planKey }),
+      });
+      const data = await res.json();
+      setBatches(Array.isArray(data) ? data : []);
+    } catch {
+      setMessage("❌ โหลดไม่สำเร็จ");
+      setBatches([]);
+    }
+    setLoading(false);
+  }
+
+  async function viewBatch(batch_no) {
+    setLoading(true); setSelectedBatch(batch_no); setDetails([]);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_cosmos_submissions", batch_no }),
+      });
+      const data = await res.json();
+      setDetails(Array.isArray(data) ? data : []);
+    } catch {
+      setMessage("❌ โหลดรายละเอียดไม่สำเร็จ");
+    }
+    setLoading(false);
+  }
+
+  return (
+    <div>
+      {/* Combobox + Refresh */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <label style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>ประเภทประกัน:</label>
+        <select value={plan} onChange={e => setPlan(e.target.value)}
+          style={{
+            padding: "7px 12px", fontSize: 13, fontWeight: 600, borderRadius: 6,
+            border: `2px solid ${currentPlan.color}`, background: "#fff",
+            color: currentPlan.color, cursor: "pointer", minWidth: 240, outline: "none",
+            fontFamily: "Tahoma",
+          }}>
+          {PLAN_OPTS.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+        </select>
+        <button onClick={() => fetchBatches(plan)} disabled={loading}
+          style={{ padding: "7px 16px", background: currentPlan.color, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+          {loading ? "..." : "🔄 รีเฟรช"}
+        </button>
+      </div>
+
+      {/* List of batches */}
+      <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 12 }}>
+        <div style={{ padding: "10px 14px", borderBottom: "1px solid #e5e7eb", fontWeight: 700, fontSize: 13 }}>
+          📦 รายการ Batch — {batches.length} ใบ
+        </div>
+        {loading && !selectedBatch ? (
+          <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+        ) : batches.length === 0 ? (
+          <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ยังไม่มีบันทึก</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead style={{ background: "#f3f4f6" }}>
+              <tr>
+                <th style={th}>เลขที่ใบบันทึก</th>
+                <th style={th}>ประเภท</th>
+                <th style={th}>จำนวน</th>
+                <th style={th}>เบี้ยรวม</th>
+                <th style={th}>วันที่บันทึก</th>
+                <th style={th}>ผู้บันทึก</th>
+                <th style={th}>ดู</th>
+              </tr>
+            </thead>
+            <tbody>
+              {batches.map((b, i) => (
+                <tr key={b.batch_no} style={{ borderTop: "1px solid #e5e7eb", background: selectedBatch === b.batch_no ? "#eff6ff" : "transparent" }}>
+                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: currentPlan.color }}>{b.batch_no}</td>
+                  <td style={td}><span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#dbeafe", color: "#1e40af" }}>{b.plan}</span></td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{b.items}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{Number(b.total_premium || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                  <td style={td}>{new Date(b.submitted_at).toLocaleString("th-TH", { dateStyle: "short", timeStyle: "short" })}</td>
+                  <td style={td}>{b.submitted_by || "-"}</td>
+                  <td style={td}>
+                    <button onClick={() => viewBatch(b.batch_no)}
+                      style={{ padding: "3px 10px", background: currentPlan.color, color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
+                      📂 ดู
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Details of selected batch */}
+      {selectedBatch && (
+        <div style={{ background: "#fff", borderRadius: 10, border: "2px solid " + currentPlan.color }}>
+          <div style={{ padding: "10px 14px", borderBottom: "1px solid #e5e7eb", fontWeight: 700, fontSize: 13, background: currentPlan.color, color: "#fff", borderRadius: "8px 8px 0 0" }}>
+            📂 รายละเอียด Batch: <code style={{ background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: 4 }}>{selectedBatch}</code>
+            <button onClick={() => { setSelectedBatch(null); setDetails([]); }}
+              style={{ float: "right", padding: "2px 10px", background: "rgba(255,255,255,0.2)", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>✕ ปิด</button>
+          </div>
+          {loading ? (
+            <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+          ) : details.length === 0 ? (
+            <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead style={{ background: "#f3f4f6" }}>
+                  <tr>
+                    <th style={th}>#</th>
+                    <th style={th}>App No.</th>
+                    <th style={th}>Invoice</th>
+                    <th style={th}>ลูกค้า</th>
+                    <th style={th}>เลขถัง</th>
+                    <th style={th}>แผน</th>
+                    <th style={th}>เบี้ย</th>
+                    <th style={th}>คุ้มครอง</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {details.map((d, i) => (
+                    <tr key={d.id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <td style={td}>{i + 1}</td>
+                      <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{d.app_no}</td>
+                      <td style={{ ...td, fontFamily: "monospace", color: "#059669" }}>{d.invoice_no || "-"}</td>
+                      <td style={td}>{d.customer_name || "-"}</td>
+                      <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{cleanChassis(d.chassis_no) || "-"}</td>
+                      <td style={td}>{d.plan_name || "-"}</td>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmtMoney(d.premium)}</td>
+                      <td style={{ ...td, fontSize: 11 }}>{fmtDate(d.cover_start)} - {fmtDate(d.cover_end)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -97,11 +274,12 @@ function SavePanel({ setMessage, currentUser }) {
 /* ============================================================================
    TAB: ประวัติการบันทึก
    ============================================================================ */
-function HistoryPanel({ setMessage }) {
+function HistoryPanel({ setMessage, currentUser }) {
   const [plan, setPlan] = useState("rsa");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState(new Set()); // app_no ที่ถูกเลือก
   const currentPlan = PLAN_OPTS.find(p => p.key === plan) || PLAN_OPTS[0];
 
   // Manual sale link selector
@@ -132,9 +310,53 @@ function HistoryPanel({ setMessage }) {
     setSearchLoading(false);
   }
 
+  async function saveSubmission() {
+    // เฉพาะ row ที่ติ๊กเลือก + จับคู่กับการขายแล้ว
+    const rowsToSave = filtered.filter(r => selected.has(r.app_no) && r.sale_id);
+    if (!rowsToSave.length) {
+      setMessage("⚠️ กรุณาติ๊กเลือกรายการที่ต้องการบันทึก (เฉพาะที่จับคู่กับการขายแล้วเท่านั้น)");
+      return;
+    }
+    if (!window.confirm(`บันทึก ${rowsToSave.length} รายการ ${currentPlan.label} ลงฐานข้อมูล?`)) return;
+
+    setLoading(true);
+    setMessage("");
+    try {
+      const payload = {
+        action: "save_cosmos_submission",
+        plan,
+        submitted_by: currentUser?.username || currentUser?.name || "system",
+        rows: rowsToSave.map(r => ({
+          app_no: r.app_no,
+          invoice_no: r.invoice_no,
+          customer_name: r.sale_customer_name || r.customer_name || "",
+          chassis_no: cleanChassis(r.chassis_no),
+          plan_name: r.plan_name,
+          premium: r.premium,
+          cover_start: r.cover_start,
+          cover_end: r.cover_end,
+        })),
+      };
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data?.success) {
+        const batches = (data.batches || []).filter(Boolean);
+        setMessage(`✅ บันทึก ${data.count} รายการ — Batch: ${batches.join(", ") || "-"}`);
+        setSelected(new Set()); // เคลียร์การเลือก
+      } else {
+        setMessage("❌ บันทึกไม่สำเร็จ");
+      }
+    } catch (e) {
+      setMessage("❌ บันทึกไม่สำเร็จ: " + e.message);
+    }
+    setLoading(false);
+  }
+
   async function pickSale(sale) {
     if (!linkRow) return;
-    if (!window.confirm(`ลิงก์ใบขาย ${sale.invoice_no} (${sale.chassis_no}) กับ ${linkRow.app_no}?`)) return;
     try {
       await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -152,6 +374,24 @@ function HistoryPanel({ setMessage }) {
   }
 
   useEffect(() => { fetchData(plan); /* eslint-disable-next-line */ }, [plan]);
+  useEffect(() => { setSelected(new Set()); }, [plan]); // เปลี่ยนแผน → reset selection
+
+  function toggleRow(appNo) {
+    setSelected(s => {
+      const ns = new Set(s);
+      if (ns.has(appNo)) ns.delete(appNo); else ns.add(appNo);
+      return ns;
+    });
+  }
+
+  function toggleAll(rows) {
+    setSelected(s => {
+      const eligible = rows.filter(r => r.sale_id).map(r => r.app_no);
+      const allSelected = eligible.every(a => s.has(a));
+      if (allSelected) return new Set();
+      return new Set(eligible);
+    });
+  }
 
   async function fetchData(planKey) {
     setLoading(true); setMessage("");
@@ -206,6 +446,10 @@ function HistoryPanel({ setMessage }) {
           style={{ padding: "7px 16px", background: currentPlan.color, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
           {loading ? "..." : "🔄 รีเฟรช"}
         </button>
+        <button onClick={saveSubmission} disabled={loading || selected.size === 0}
+          style={{ padding: "7px 16px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: selected.size ? "pointer" : "not-allowed", fontWeight: 600, opacity: selected.size ? 1 : 0.5 }}>
+          💾 บันทึก ({selected.size})
+        </button>
       </div>
 
       {/* Summary */}
@@ -214,6 +458,7 @@ function HistoryPanel({ setMessage }) {
         {!isPlus && <span style={{ fontSize: 13, color: currentPlan.color }}>💰 เบี้ยรวม: <strong>{fmtMoney(totalPremium)}</strong> บาท</span>}
         <span style={{ fontSize: 13, color: "#059669" }}>🚗 จับคู่ขาย: <strong>{filtered.filter(r => r.sale_id).length}</strong></span>
         {!hideReceipt && <span style={{ fontSize: 13, color: "#0369a1" }}>📋 จับคู่รับเรื่อง: <strong>{filtered.filter(r => r.receipt_no).length}</strong></span>}
+        <span style={{ fontSize: 13, color: "#7c3aed", fontWeight: 700 }}>☑️ เลือกแล้ว: {selected.size}</span>
         <span style={{ fontSize: 12, color: "#6b7280", marginLeft: "auto" }}>Table: <code>{currentPlan.table}</code></span>
       </div>
 
@@ -227,6 +472,12 @@ function HistoryPanel({ setMessage }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead style={{ background: currentPlan.color, color: "#fff" }}>
               <tr>
+                <th style={{ ...th, width: 36, textAlign: "center" }}>
+                  <input type="checkbox"
+                    checked={filtered.filter(r => r.sale_id).length > 0 && filtered.filter(r => r.sale_id).every(r => selected.has(r.app_no))}
+                    onChange={() => toggleAll(filtered)}
+                    style={{ cursor: "pointer", width: 16, height: 16 }} />
+                </th>
                 <th style={th}>#</th>
                 <th style={th}>App No.</th>
                 {isPA ? (
@@ -257,14 +508,21 @@ function HistoryPanel({ setMessage }) {
                     </>}
                     <th style={th}>🚗 ขาย</th>
                     {!hideReceipt && <th style={th}>📋 รับเรื่อง</th>}
-                    <th style={th}>Source</th>
                   </>
                 )}
               </tr>
             </thead>
             <tbody>
               {filtered.map((r, i) => (
-                <tr key={r.app_no + i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                <tr key={r.app_no + i} style={{ borderTop: "1px solid #e5e7eb", background: selected.has(r.app_no) ? "#fef3c7" : "transparent" }}>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    <input type="checkbox"
+                      checked={selected.has(r.app_no)}
+                      onChange={() => toggleRow(r.app_no)}
+                      disabled={!r.sale_id}
+                      title={!r.sale_id ? "ต้องเลือกใบขายก่อน" : ""}
+                      style={{ cursor: r.sale_id ? "pointer" : "not-allowed", width: 16, height: 16 }} />
+                  </td>
                   <td style={td}>{i + 1}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: currentPlan.color }}>{r.app_no}</td>
                   {isPA ? (
@@ -348,7 +606,6 @@ function HistoryPanel({ setMessage }) {
                           ) : <span style={{ color: "#9ca3af", fontSize: 11 }}>—</span>}
                         </td>
                       )}
-                      <td style={{ ...td, fontSize: 10, color: "#6b7280" }}>{r.source_file || "-"}</td>
                     </>
                   )}
                 </tr>
