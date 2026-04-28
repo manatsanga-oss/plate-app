@@ -38,14 +38,15 @@ export default function FastMovingStockPage() {
     if (!storesStr || storesStr === "-") return result;
     const parts = String(storesStr).split("|").map(s => s.trim()).filter(Boolean);
     for (const p of parts) {
-      const m = p.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*\(([^)]+)\)\s*$/);
+      // อนุญาตให้ไม่มี (location) หรือมี () ว่างก็ได้
+      const m = p.match(/^(.+?)\s+(\d+(?:\.\d+)?)(?:\s*\(([^)]*)\))?\s*$/);
       if (!m) continue;
       const name = m[1].trim();
       const qty = m[2];
       if (name.includes("นครหลวง")) result.nakhonluang = qty;
       else if (name.includes("ป.เปา") || name.includes("ป เปา")) result.ppao = qty;
-      else if (name.includes("ห้าห้อง")) result.haahong = qty;
-      else if (name.includes("สช")) result.sachtalad = qty;
+      else if (name.includes("ห้าห้อง") || name.includes("ห้าน้อง")) result.haahong = qty;
+      else if (name.includes("สช") || name.includes("ศช")) result.sachtalad = qty;
     }
     return result;
   }
