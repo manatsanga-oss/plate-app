@@ -24,6 +24,7 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
   const [expanded, setExpanded] = useState({});  // {receipt_no: true/false}
   const [expandAll, setExpandAll] = useState(true);
   const [selected, setSelected] = useState({});  // {line_id: true/false}
+  const [selectedLineData, setSelectedLineData] = useState({});  // {line_id: lineObj} — เก็บ object เต็มของรายการที่เลือก เพื่อจดจำข้ามการค้นหา
   const [submitDialog, setSubmitDialog] = useState(false);
   const [destination, setDestination] = useState("");
   const [submissionDate, setSubmissionDate] = useState(new Date().toISOString().slice(0, 10));
@@ -188,17 +189,42 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
     return no in expanded ? expanded[no] : expandAll;
   }
 
-  function toggleLineSelect(lineId) {
-    setSelected(prev => ({ ...prev, [lineId]: !prev[lineId] }));
+  function toggleLineSelect(line) {
+    const lineId = line.line_id;
+    const isOn = !selected[lineId];
+    setSelected(prev => ({ ...prev, [lineId]: isOn }));
+    setSelectedLineData(prev => {
+      const next = { ...prev };
+      if (isOn) next[lineId] = line;
+      else delete next[lineId];
+      return next;
+    });
   }
   function toggleSelectAllLines() {
     const allSelected = rows.length > 0 && rows.every(r => selected[r.line_id]);
     if (allSelected) {
-      setSelected({});
+      // ยกเลิกเลือกเฉพาะ rows ปัจจุบัน — ไม่กระทบรายการที่เลือกไว้นอก search
+      setSelected(prev => {
+        const next = { ...prev };
+        rows.forEach(r => { delete next[r.line_id]; });
+        return next;
+      });
+      setSelectedLineData(prev => {
+        const next = { ...prev };
+        rows.forEach(r => { delete next[r.line_id]; });
+        return next;
+      });
     } else {
-      const next = {};
-      rows.forEach(r => { next[r.line_id] = true; });
-      setSelected(next);
+      setSelected(prev => {
+        const next = { ...prev };
+        rows.forEach(r => { next[r.line_id] = true; });
+        return next;
+      });
+      setSelectedLineData(prev => {
+        const next = { ...prev };
+        rows.forEach(r => { next[r.line_id] = r; });
+        return next;
+      });
     }
   }
   function toggleReceiptLines(rcpt, on) {
@@ -207,12 +233,27 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
       rcpt.lines.forEach(l => { next[l.line_id] = on; });
       return next;
     });
+    setSelectedLineData(prev => {
+      const next = { ...prev };
+      rcpt.lines.forEach(l => {
+        if (on) next[l.line_id] = l;
+        else delete next[l.line_id];
+      });
+      return next;
+    });
+  }
+  function clearAllSelected() {
+    setSelected({});
+    setSelectedLineData({});
   }
 
-  const selectedLines = rows.filter(r => selected[r.line_id]);
+  // selectedLines: ใช้ข้อมูลจาก selectedLineData (เก็บข้ามการค้นหา) ไม่ใช่ rows ปัจจุบัน
+  const selectedLines = Object.values(selectedLineData);
   const selCount = selectedLines.length;
   const selTotal = selectedLines.reduce((s, l) => s + Number(l.net_price || 0), 0);
   const selReceipts = [...new Set(selectedLines.map(l => l.receipt_no))];
+  // จำนวนรายการที่เลือกไว้แต่ไม่อยู่ในผลค้นหาปัจจุบัน
+  const selectedNotInRows = selectedLines.filter(l => !rows.some(r => r.line_id === l.line_id));
 
   async function fetchSuppliers() {
     try {
@@ -271,7 +312,7 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
       });
       setMessage(`✅ ส่งเรื่องสำเร็จ — ${batchCode} (${itemsCount} รายการ)`);
       setSubmitDialog(false);
-      setSelected({});
+      clearAllSelected();
       fetchData();
     } catch (e) {
       setMessage("❌ ส่งเรื่องไม่สำเร็จ: " + String(e.message || e).slice(0, 200));
@@ -367,11 +408,24 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
             ✓ เลือก {selCount} รายการ · ฿ {fmtNum(selTotal)}
           </span>
         )}
+        {selCount > 0 && (
+          <button onClick={clearAllSelected} title="ล้างทุกรายการที่เลือกไว้"
+            style={{ padding: "6px 12px", background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            ✕ ล้างเลือก
+          </button>
+        )}
         <button onClick={openSubmitDialog} disabled={selCount === 0}
           style={{ padding: "8px 18px", background: selCount === 0 ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: selCount === 0 ? "not-allowed" : "pointer", fontWeight: 700 }}>
           📤 ส่งเรื่องงานทะเบียน
         </button>
       </div>
+
+      {selectedNotInRows.length > 0 && (
+        <div style={{ marginBottom: 12, padding: "10px 14px", background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8, fontSize: 13, color: "#1e40af", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span>📌 จดจำการเลือกไว้ <strong>{selectedNotInRows.length}</strong> รายการ จากการค้นหาก่อนหน้า (ไม่อยู่ในผลค้นหาปัจจุบัน) — ยอดรวม ฿ {fmtNum(selectedNotInRows.reduce((s, l) => s + Number(l.net_price || 0), 0))}</span>
+          <span style={{ fontSize: 11, opacity: 0.75 }}>ใบรับเรื่อง: {[...new Set(selectedNotInRows.map(l => l.receipt_no))].join(", ")}</span>
+        </div>
+      )}
 
       {/* Receipts grouped */}
       {loading ? (
@@ -447,7 +501,7 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
                             <td style={tdNum}>{fmtNum(l.discount)}</td>
                             <td style={{ ...tdNum, color: "#dc2626", fontWeight: 600 }}>{fmtNum(l.net_price)}</td>
                             <td style={{ ...td, textAlign: "center" }}>
-                              <input type="checkbox" checked={!!selected[l.line_id]} onChange={() => toggleLineSelect(l.line_id)} style={{ width: 16, height: 16, cursor: "pointer" }} />
+                              <input type="checkbox" checked={!!selected[l.line_id]} onChange={() => toggleLineSelect(l)} style={{ width: 16, height: 16, cursor: "pointer" }} />
                             </td>
                           </tr>
                         ))}
