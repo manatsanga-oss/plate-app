@@ -40,17 +40,58 @@ export default function PayDepositPage({ currentUser }) {
   const [showTransfer, setShowTransfer] = useState(false);
   const [transferForm, setTransferForm] = useState({
     payment_date: new Date().toISOString().slice(0, 10),
-    transaction_id: "",
-    from_bank: "กสิกรไทย",
-    from_account: "",
-    to_account: "xxx-x-x1907-x",
-    fee: 0,
+    payment_method: "โอน",
+    paid_to_vendor: "",
     note: "",
     slip_image: "",
     slip_mime: "",
+    transaction_id: "",
+    fee: 0,
+    from_bank_account_id: "",
+    wht_rate: 0,
+    wht_amount: 0,
+    wht_base: 0,
   });
+  const [vendors, setVendors] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+
+  // โหลด vendors + bank accounts ตอนเปิด page
+  useEffect(() => {
+    fetchVendors();
+    fetchBankAccounts();
+  }, []);
+
+  async function fetchVendors() {
+    try {
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_vendors", include_inactive: "false" }),
+      });
+      const data = await res.json();
+      setVendors(Array.isArray(data) ? data : []);
+    } catch { setVendors([]); }
+  }
+
+  async function fetchBankAccounts() {
+    try {
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }),
+      });
+      const data = await res.json();
+      setBankAccounts(Array.isArray(data) ? data : []);
+    } catch { setBankAccounts([]); }
+  }
+
+  function onVendorChange(vendorName) {
+    const v = vendors.find(x => x.vendor_name === vendorName);
+    const rate = v ? Number(v.wht_rate || 0) : 0;
+    const base = transferForm.wht_base || 0;
+    const amount = rate > 0 ? Math.round((base * rate / 100) * 100) / 100 : 0;
+    setTransferForm(p => ({ ...p, paid_to_vendor: vendorName, wht_rate: rate, wht_amount: amount }));
+  }
 
   // ---- Tab History ----
   const [payments, setPayments] = useState([]);
@@ -179,18 +220,26 @@ export default function PayDepositPage({ currentUser }) {
 
   function openTransfer() {
     if (selectedList.length === 0) { alert("เลือกรายการก่อน"); return; }
-    // validate contract_no
     const missing = selectedList.filter(r => !(selected[r.item_id]?.contract_no || "").trim());
     if (missing.length > 0) { alert(`มี ${missing.length} รายการยังไม่ได้กรอกเลขที่สัญญา`); return; }
+    if (vendors.length === 0) fetchVendors();
+    if (bankAccounts.length === 0) fetchBankAccounts();
     setTransferForm({
       ...transferForm,
       payment_date: new Date().toISOString().slice(0, 10),
+      wht_base: totalSelected,
+      wht_rate: 0,
+      wht_amount: 0,
+      paid_to_vendor: "",
+      from_bank_account_id: "",
     });
     setShowTransfer(true);
   }
 
   async function submitTransfer() {
-    if (!transferForm.payment_date) { alert("กรอกวันที่โอน"); return; }
+    if (!transferForm.payment_date) { alert("กรอกวันที่จ่าย"); return; }
+    if (!transferForm.paid_to_vendor) { alert("กรุณาเลือก Vendor"); return; }
+    if (!transferForm.from_bank_account_id) { alert("กรุณาเลือกบัญชีโอนจาก"); return; }
     setSaving(true);
     setMessage("");
     try {
@@ -205,6 +254,9 @@ export default function PayDepositPage({ currentUser }) {
         branch_code: r.branch_code || "",
         remark: "",
       }));
+      // ดึงข้อมูล bank account + vendor ส่งไป backend
+      const fromBank = bankAccounts.find(b => b.account_id === Number(transferForm.from_bank_account_id));
+      const toVendor = vendors.find(v => v.vendor_name === transferForm.paid_to_vendor);
       const body = {
         action: "save_glp_payment",
         ...transferForm,
@@ -212,6 +264,16 @@ export default function PayDepositPage({ currentUser }) {
         status: "transferred",
         created_by: currentUser?.name || "",
         items,
+        // ส่งข้อมูลธนาคาร + vendor ที่จำเป็น
+        from_bank_account_id: Number(transferForm.from_bank_account_id) || null,
+        from_bank: fromBank?.bank_name || transferForm.from_bank || "",
+        from_account: fromBank?.account_no || "",
+        to_bank: toVendor?.bank_name || "กสิกรไทย",
+        to_account: toVendor?.bank_account_no || transferForm.to_account || "",
+        to_name: toVendor?.bank_account_name || transferForm.paid_to_vendor || "",
+        wht_rate: Number(transferForm.wht_rate) || 0,
+        wht_amount: Number(transferForm.wht_amount) || 0,
+        wht_base: Number(transferForm.wht_base) || 0,
       };
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -578,57 +640,135 @@ export default function PayDepositPage({ currentUser }) {
       {/* ============ TRANSFER MODAL ============ */}
       {showTransfer && (
         <Modal onClose={() => setShowTransfer(false)}>
-          <h3>สร้างใบโอนค่างวดกรุ๊ปลีส</h3>
-          <div style={{ background: "#f3f4f6", padding: 10, borderRadius: 4, marginBottom: 10 }}>
-            <div>รายการที่เลือก: <b>{selectedList.length}</b> รายการ</div>
-            <div>ยอดรวม: <b style={{ color: "#dc2626", fontSize: 20 }}>{fmt(totalSelected)}</b> บาท</div>
+          <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>💵 บันทึกจ่ายเงิน</h3>
+
+          <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13, textAlign: "center" }}>
+            <div>📋 รายการรวม: <b>{selectedList.length}</b> รายการ</div>
+            <div>💰 ยอดรวม: <b style={{ color: "#dc2626", fontSize: 20 }}>฿ {fmt(totalSelected)}</b></div>
           </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <label>วันที่โอน *<br />
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>วันที่จ่าย *</label>
               <input type="date" value={transferForm.payment_date}
-                onChange={e => setTransferForm({ ...transferForm, payment_date: e.target.value })}
-                style={inputStyle} />
-            </label>
-            <label>Transaction ID<br />
-              <input type="text" value={transferForm.transaction_id}
-                placeholder="TRBS260420562992257"
-                onChange={e => setTransferForm({ ...transferForm, transaction_id: e.target.value })}
-                style={inputStyle} />
-            </label>
-            <label>ธนาคารผู้โอน<br />
-              <input type="text" value={transferForm.from_bank}
-                onChange={e => setTransferForm({ ...transferForm, from_bank: e.target.value })}
-                style={inputStyle} />
-            </label>
-            <label>บัญชีผู้โอน<br />
-              <input type="text" value={transferForm.from_account}
-                placeholder="xxx-x-x0376-x"
-                onChange={e => setTransferForm({ ...transferForm, from_account: e.target.value })}
-                style={inputStyle} />
-            </label>
-            <label>บัญชีปลายทาง<br />
-              <input type="text" value={transferForm.to_account}
-                onChange={e => setTransferForm({ ...transferForm, to_account: e.target.value })}
-                style={inputStyle} />
-            </label>
-            <label>ค่าธรรมเนียม<br />
-              <input type="number" value={transferForm.fee}
-                onChange={e => setTransferForm({ ...transferForm, fee: e.target.value })}
-                style={inputStyle} />
-            </label>
+                onChange={e => setTransferForm(p => ({ ...p, payment_date: e.target.value }))}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>วิธีจ่าย</label>
+              <select value={transferForm.payment_method}
+                onChange={e => setTransferForm(p => ({ ...p, payment_method: e.target.value }))}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                <option value="โอน">โอน</option>
+                <option value="เงินสด">เงินสด</option>
+                <option value="เช็ค">เช็ค</option>
+                <option value="หักบัญชี">หักบัญชี</option>
+              </select>
+            </div>
+            <div style={{ gridColumn: "1 / span 2" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>Vendor (จ่ายให้) *</label>
+              <select value={transferForm.paid_to_vendor} onChange={e => onVendorChange(e.target.value)}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                <option value="">-- เลือก Vendor --</option>
+                {vendors.map(v => (
+                  <option key={v.vendor_id} value={v.vendor_name}>{v.vendor_name}{v.wht_rate ? ` (${v.wht_rate}%)` : ""}</option>
+                ))}
+              </select>
+              {vendors.length === 0 && (
+                <div style={{ fontSize: 11, color: "#dc2626", marginTop: 2 }}>⚠️ ยังไม่มี Vendor — ไปเพิ่มที่ Master Data → Supplier</div>
+              )}
+            </div>
+            <div style={{ gridColumn: "1 / span 2" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>หมายเหตุ</label>
+              <textarea value={transferForm.note} onChange={e => setTransferForm(p => ({ ...p, note: e.target.value }))} rows={2}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box", resize: "vertical" }} />
+            </div>
           </div>
-          <label>หมายเหตุ<br />
-            <textarea value={transferForm.note} onChange={e => setTransferForm({ ...transferForm, note: e.target.value })}
-              style={{ ...inputStyle, minHeight: 40 }} />
-          </label>
-          <label>Slip โอน (image, ≤ 5MB)<br />
-            <input type="file" accept="image/*" onChange={handleSlipUpload} />
-            {transferForm.slip_image && <span> ✅ อัปโหลดแล้ว</span>}
-          </label>
-          <div style={{ marginTop: 15, textAlign: "right" }}>
+
+          {/* Bank account block */}
+          <div style={{ marginTop: 12, padding: 10, background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#1e40af", marginBottom: 6, textAlign: "center" }}>🏦 บัญชีธนาคาร</div>
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#1e40af", marginBottom: 2 }}>โอนจาก (บัญชีบริษัท) *</label>
+              <select value={transferForm.from_bank_account_id} onChange={e => setTransferForm(p => ({ ...p, from_bank_account_id: e.target.value }))}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                <option value="">-- เลือกบัญชีโอนจาก --</option>
+                {bankAccounts.map(b => (
+                  <option key={b.account_id} value={b.account_id}>
+                    {b.bank_name} · {b.account_no} · {b.account_name}
+                  </option>
+                ))}
+              </select>
+              {bankAccounts.length === 0 && (
+                <div style={{ fontSize: 11, color: "#dc2626", marginTop: 2 }}>⚠️ ยังไม่มีบัญชีธนาคาร — ไปเพิ่มที่ Accounting → บัญชีธนาคาร</div>
+              )}
+            </div>
+            {transferForm.paid_to_vendor && (() => {
+              const v = vendors.find(x => x.vendor_name === transferForm.paid_to_vendor);
+              if (!v) return null;
+              return (
+                <div style={{ padding: 8, background: "#fff", borderRadius: 6, fontSize: 12 }}>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 3 }}>โอนเข้าบัญชี (ของ Vendor)</div>
+                  {v.bank_name || v.bank_account_no ? (
+                    <div>
+                      <strong>{v.bank_name || "-"}</strong>
+                      {v.bank_branch && <span> · {v.bank_branch}</span>}
+                      <div style={{ fontFamily: "monospace", color: "#0369a1", fontWeight: 600, marginTop: 2 }}>
+                        {v.bank_account_no || "-"}
+                        {v.bank_account_name && <span style={{ fontFamily: "Tahoma", color: "#374151", marginLeft: 8 }}>({v.bank_account_name})</span>}
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ color: "#dc2626", fontSize: 11 }}>⚠️ Vendor ยังไม่มีข้อมูลบัญชีธนาคาร</div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* WHT block */}
+          <div style={{ marginTop: 12, padding: 10, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", marginBottom: 6, textAlign: "center" }}>🧾 หักณที่จ่าย</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, alignItems: "end" }}>
+              <div>
+                <label style={{ display: "block", fontSize: 11, marginBottom: 2 }}>ยอดค่าบริการ (base)</label>
+                <input type="text" value={Number(transferForm.wht_base || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })} readOnly
+                  style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", background: "#fff", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 11, marginBottom: 2 }}>อัตรา %</label>
+                <input type="number" step="0.01" value={transferForm.wht_rate}
+                  onChange={e => {
+                    const r = Number(e.target.value) || 0;
+                    const amt = Math.round((transferForm.wht_base * r / 100) * 100) / 100;
+                    setTransferForm(p => ({ ...p, wht_rate: r, wht_amount: amt }));
+                  }}
+                  style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 11, marginBottom: 2 }}>หัก ณ ที่จ่าย</label>
+                <input type="number" step="0.01" value={transferForm.wht_amount}
+                  onChange={e => setTransferForm(p => ({ ...p, wht_amount: Number(e.target.value) || 0 }))}
+                  style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", fontWeight: 700, color: "#dc2626", boxSizing: "border-box" }} />
+              </div>
+            </div>
+            <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13, textAlign: "center" }}>
+              <span>ยอดวางบิล: <strong>{fmt(totalSelected)}</strong></span>
+              <span style={{ marginLeft: 14, color: "#dc2626" }}>− หัก WHT: <strong>{fmt(transferForm.wht_amount)}</strong></span>
+              <span style={{ marginLeft: 14, color: "#059669", fontWeight: 700 }}>= ยอดโอนจริง: {fmt(totalSelected - Number(transferForm.wht_amount || 0))}</span>
+            </div>
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <label style={{ fontSize: 12, fontWeight: 600 }}>Slip โอน (image, ≤ 5MB)</label>
+            <input type="file" accept="image/*" onChange={handleSlipUpload} style={{ display: "block", marginTop: 4 }} />
+            {transferForm.slip_image && <span style={{ fontSize: 11, color: "#059669" }}> ✅ อัปโหลดแล้ว</span>}
+          </div>
+
+          <div style={{ marginTop: 18, textAlign: "right" }}>
             <button onClick={() => setShowTransfer(false)} style={{ ...btnSmall, marginRight: 8 }}>ยกเลิก</button>
             <button onClick={submitTransfer} disabled={saving} style={btnSuccess}>
-              {saving ? "กำลังบันทึก..." : "✅ บันทึกการโอน"}
+              {saving ? "กำลังบันทึก..." : "💾 บันทึกจ่ายเงิน"}
             </button>
           </div>
         </Modal>
