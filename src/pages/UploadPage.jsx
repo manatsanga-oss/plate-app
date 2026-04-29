@@ -57,16 +57,25 @@ function fmtDateTime(iso) {
   return `${dd}/${mm}/${yy} ${hh}:${mi}`;
 }
 
+// items ที่รับ year_month override (ระบุเดือนเพื่อ upload ไฟล์ย้อนหลัง)
+const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
+
 export default function UploadPage() {
   const [statuses, setStatuses] = useState({});
   const [messages, setMessages] = useState({});
   const [lastUploads, setLastUploads] = useState(loadLastUploads);
+  const [yearMonths, setYearMonths] = useState({}); // {key: '6903'}
 
   async function handleUpload(item) {
     setStatuses(prev => ({ ...prev, [item.key]: "loading" }));
     setMessages(prev => ({ ...prev, [item.key]: "" }));
     try {
-      const res = await fetch(item.url, { method: "GET" });
+      let url = item.url;
+      const ym = (yearMonths[item.key] || "").trim();
+      if (ym && SUPPORTS_YEAR_MONTH.has(item.key)) {
+        url += (url.includes("?") ? "&" : "?") + "year_month=" + encodeURIComponent(ym);
+      }
+      const res = await fetch(url, { method: "GET" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json().catch(() => ({}));
       setMessages(prev => ({ ...prev, [item.key]: data.message || "นำเข้าข้อมูลสำเร็จ" }));
@@ -118,19 +127,31 @@ export default function UploadPage() {
                       </div>
                     )}
                   </div>
-                  <button
-                    onClick={() => handleUpload(item)}
-                    disabled={st === "loading"}
-                    style={{
-                      padding: "8px 20px", fontSize: 13, fontWeight: 700,
-                      fontFamily: "Tahoma, Arial, sans-serif",
-                      background: st === "loading" ? "#9ca3af" : "#072d6b",
-                      color: "#fff", border: "none", borderRadius: 8, whiteSpace: "nowrap",
-                      cursor: st === "loading" ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {st === "loading" ? "กำลังนำเข้า..." : "Upload"}
-                  </button>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    {SUPPORTS_YEAR_MONTH.has(item.key) && (
+                      <input
+                        type="text"
+                        value={yearMonths[item.key] || ""}
+                        onChange={e => setYearMonths(p => ({ ...p, [item.key]: e.target.value }))}
+                        placeholder="เดือน (e.g. 6903)"
+                        title="เดือนที่ต้องการ upload (เว้นว่าง = เดือนปัจจุบัน) — รองรับ 6903 / 2569-03 / 03-2569"
+                        style={{ width: 120, padding: "7px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6 }}
+                      />
+                    )}
+                    <button
+                      onClick={() => handleUpload(item)}
+                      disabled={st === "loading"}
+                      style={{
+                        padding: "8px 20px", fontSize: 13, fontWeight: 700,
+                        fontFamily: "Tahoma, Arial, sans-serif",
+                        background: st === "loading" ? "#9ca3af" : "#072d6b",
+                        color: "#fff", border: "none", borderRadius: 8, whiteSpace: "nowrap",
+                        cursor: st === "loading" ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {st === "loading" ? "กำลังนำเข้า..." : "Upload"}
+                    </button>
+                  </div>
                 </div>
               );
             })}

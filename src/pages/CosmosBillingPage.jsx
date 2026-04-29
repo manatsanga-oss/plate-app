@@ -271,6 +271,7 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
 function HistoryPanel({ currentPlan, setMessage }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [openSet, setOpenSet] = useState(new Set());
 
   useEffect(() => { fetchData(); }, []);
 
@@ -286,13 +287,26 @@ function HistoryPanel({ currentPlan, setMessage }) {
       // group by paid_doc_no
       const g = {};
       rows.forEach(r => {
-        if (!g[r.paid_doc_no]) g[r.paid_doc_no] = { paid_doc_no: r.paid_doc_no, paid_at: r.paid_at, paid_to_vendor: r.paid_to_vendor, payment_method: r.payment_method, items: [], total: 0, wht: Number(r.wht_amount || 0) };
+        if (!g[r.paid_doc_no]) g[r.paid_doc_no] = {
+          paid_doc_no: r.paid_doc_no, paid_at: r.paid_at, paid_to_vendor: r.paid_to_vendor,
+          payment_method: r.payment_method, payment_note: r.payment_note,
+          bank_account_name: r.bank_account_name, bank_name: r.bank_name, bank_account_no: r.bank_account_no,
+          items: [], total: 0, wht: Number(r.wht_amount || 0)
+        };
         g[r.paid_doc_no].items.push(r);
         g[r.paid_doc_no].total += Number(r.premium) || 0;
       });
       setGroups(Object.values(g));
     } catch { setGroups([]); }
     setLoading(false);
+  }
+
+  function toggleOpen(docNo) {
+    setOpenSet(prev => {
+      const next = new Set(prev);
+      if (next.has(docNo)) next.delete(docNo); else next.add(docNo);
+      return next;
+    });
   }
 
   return (
@@ -305,16 +319,76 @@ function HistoryPanel({ currentPlan, setMessage }) {
 
       {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
        groups.length === 0 ? <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ยังไม่มีประวัติการจ่าย</div> :
-       groups.map(g => (
-        <div key={g.paid_doc_no} style={{ marginBottom: 12, padding: "12px 16px", background: "#ecfdf5", border: "1px solid #6ee7b7", borderRadius: 10, display: "flex", alignItems: "center", gap: 14 }}>
-          <strong style={{ fontFamily: "monospace", color: "#065f46", fontSize: 15 }}>{g.paid_doc_no}</strong>
-          <span style={{ fontSize: 12 }}>📅 {fmtDate(g.paid_at)}</span>
-          <span style={{ fontSize: 12 }}>👤 {g.paid_to_vendor || "-"}</span>
-          <span style={{ fontSize: 12 }}>💰 {g.payment_method || "-"}</span>
-          <span style={{ marginLeft: "auto", fontWeight: 700, fontSize: 16, color: "#065f46" }}>{g.items.length} ใบ · {fmt(g.total)}</span>
-          {g.wht > 0 && <span style={{ fontSize: 12, color: "#dc2626" }}>WHT: {fmt(g.wht)}</span>}
+       groups.map(g => {
+        const isOpen = openSet.has(g.paid_doc_no);
+        return (
+        <div key={g.paid_doc_no} style={{ marginBottom: 12, background: "#ecfdf5", border: "1px solid #6ee7b7", borderRadius: 10, overflow: "hidden" }}>
+          <div onClick={() => toggleOpen(g.paid_doc_no)}
+               style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 14, cursor: "pointer", userSelect: "none" }}
+               title="คลิกเพื่อดูรายละเอียดใบโอนเงิน">
+            <span style={{ fontSize: 14, color: "#065f46", width: 14 }}>{isOpen ? "▼" : "▶"}</span>
+            <strong style={{ fontFamily: "monospace", color: "#065f46", fontSize: 15 }}>{g.paid_doc_no}</strong>
+            <span style={{ fontSize: 12 }}>📅 {fmtDate(g.paid_at)}</span>
+            <span style={{ fontSize: 12 }}>👤 {g.paid_to_vendor || "-"}</span>
+            <span style={{ fontSize: 12 }}>💰 {g.payment_method || "-"}</span>
+            <span style={{ marginLeft: "auto", fontWeight: 700, fontSize: 16, color: "#065f46" }}>{g.items.length} ใบ · {fmt(g.total)}</span>
+            {g.wht > 0 && <span style={{ fontSize: 12, color: "#dc2626" }}>WHT: {fmt(g.wht)}</span>}
+          </div>
+
+          {isOpen && (
+            <div style={{ borderTop: "1px solid #6ee7b7", background: "#fff", padding: "12px 16px" }}>
+              {/* บันทึกการโอนเงิน — info block */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10, marginBottom: 12, padding: 12, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, fontSize: 12 }}>
+                <div><b>💳 วิธีจ่าย:</b> {g.payment_method || "-"}</div>
+                <div><b>👤 จ่ายให้:</b> {g.paid_to_vendor || "-"}</div>
+                <div><b>🏦 ธนาคาร:</b> {g.bank_name ? `${g.bank_name}${g.bank_account_no ? ` — ${g.bank_account_no}` : ""}` : "-"}</div>
+                <div><b>📋 บัญชี:</b> {g.bank_account_name || "-"}</div>
+                <div><b>💸 WHT:</b> {g.wht > 0 ? fmt(g.wht) : "—"}</div>
+                {g.payment_note && <div style={{ gridColumn: "1 / -1" }}><b>📝 หมายเหตุ:</b> {g.payment_note}</div>}
+              </div>
+
+              {/* รายการใบวางบิลในใบโอน */}
+              <div style={{ overflow: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ background: currentPlan.color, color: "#fff" }}>
+                    <tr>
+                      <th style={th}>#</th>
+                      <th style={th}>App No.</th>
+                      <th style={th}>ลูกค้า</th>
+                      <th style={th}>เลขถัง</th>
+                      <th style={th}>แผน</th>
+                      <th style={th}>🚗 ใบขาย</th>
+                      <th style={th}>📋 ใบรับเรื่อง</th>
+                      <th style={{ ...th, textAlign: "right" }}>เบี้ย</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.items.map((r, i) => (
+                      <tr key={r.id || `${g.paid_doc_no}-${i}`} style={{ borderTop: "1px solid #e5e7eb" }}>
+                        <td style={td}>{i + 1}</td>
+                        <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: currentPlan.color }}>{r.app_no}</td>
+                        <td style={td}>{r.customer_name || "-"}</td>
+                        <td style={{ ...td, fontFamily: "monospace" }}>{r.chassis_no || "-"}</td>
+                        <td style={td}>{r.plan_name || "-"}</td>
+                        <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{r.invoice_no || "-"}</td>
+                        <td style={{ ...td, fontFamily: "monospace", color: "#7c3aed" }}>{r.receipt_no || "-"}</td>
+                        <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{fmt(r.premium)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background: "#f0fdf4", fontWeight: 700 }}>
+                      <td style={td} colSpan={7}>รวม {g.items.length} รายการ</td>
+                      <td style={{ ...td, textAlign: "right", color: "#065f46" }}>{fmt(g.total)}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

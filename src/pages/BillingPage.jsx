@@ -26,6 +26,12 @@ export default function BillingPage({ currentUser }) {
   const [savingPayment, setSavingPayment] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
+  // Link picker dialog — เลือกใบขาย/ใบรับเรื่อง ให้ submission
+  const [linkPickerRow, setLinkPickerRow] = useState(null); // submission row หรือ null
+  const [linkSearchKw, setLinkSearchKw] = useState("");
+  const [linkResults, setLinkResults] = useState([]);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkSaving, setLinkSaving] = useState(false);
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -251,6 +257,65 @@ export default function BillingPage({ currentUser }) {
   function fmtBranch(code) {
     if (!code) return "-";
     return /^0+$/.test(String(code).trim()) ? "SCY01" : String(code).trim();
+  }
+
+  // ========== Link picker — เลือกใบขาย / ใบรับเรื่อง ==========
+  function openLinkPicker(row) {
+    setLinkPickerRow(row);
+    setLinkSearchKw(row.chassis_no || row.engine_no || row.customer_name || "");
+    setLinkResults([]);
+    // auto-search ทันทีเมื่อเปิด
+    setTimeout(() => doLinkSearch(row.chassis_no || row.engine_no || row.customer_name || ""), 50);
+  }
+  async function doLinkSearch(kw) {
+    const k = (kw || "").trim();
+    if (k.length < 2) { setLinkResults([]); return; }
+    setLinkLoading(true);
+    try {
+      // ค้นเฉพาะ registration_receipts (ตารางรับเรื่องงานทะเบียน)
+      const looksChassis = /^[A-Za-z0-9]{10,20}$/.test(k);
+      const looksDocNo = /^(SCY|SS|TB|RCT|INV)[A-Z0-9-]+$/i.test(k);
+      const fields = looksChassis ? ["chassis_no", "engine_no"]
+                   : looksDocNo ? ["receipt_no"]
+                   : ["customer_name"];
+      const calls = fields.map(f => post({ action: "search_sale_or_receipt", source: "receipt", field: f, keyword: k }));
+      const allRes = await Promise.all(calls);
+      const seen = new Set();
+      const merged = [];
+      for (const res of allRes) {
+        const arr = Array.isArray(res) ? res : [];
+        for (const r of arr) {
+          const key = `${r.sale_doc_no}:${r.frame_no || ""}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push({ ...r, _kind: "receipt" });
+        }
+      }
+      setLinkResults(merged);
+    } catch { setLinkResults([]); }
+    setLinkLoading(false);
+  }
+  async function pickLink(item) {
+    if (!linkPickerRow) return;
+    setLinkSaving(true);
+    try {
+      const body = { action: "update_submission", submission_id: linkPickerRow.submission_id };
+      if (item._kind === "sale") body.sale_id = item.sale_id;
+      else body.linked_receipt_no = item.sale_doc_no;
+      await post(body);
+      setMessage("✅ ลิงค์รายการเรียบร้อย");
+      setLinkPickerRow(null);
+      fetchData();
+    } catch { setMessage("❌ ลิงค์ไม่สำเร็จ"); }
+    setLinkSaving(false);
+  }
+  async function clearLink(row) {
+    if (!confirm(`ยกเลิกการเลือกใบรับเรื่องของ ${row.run_code}?`)) return;
+    try {
+      await post({ action: "update_submission", submission_id: row.submission_id, linked_receipt_no: "" });
+      setMessage("✅ ยกเลิกการลิงค์ใบรับเรื่อง");
+      fetchData();
+    } catch { setMessage("❌ ทำรายการไม่สำเร็จ"); }
   }
 
   const kw = search.trim().toLowerCase();
@@ -577,14 +642,14 @@ export default function BillingPage({ currentUser }) {
                               <th>เลขเครื่อง</th>
                               <th>หมวด</th>
                               <th>เลขทะเบียน</th>
-                              <th>รายการค่าใช้จ่าย</th>
+                              <th>เลขที่ใบขาย</th>
+                              <th>เลขที่รับเรื่อง</th>
                               <th style={{ textAlign: "right" }}>ยอดรวม</th>
                               <th style={{ width: 60 }}>ดู</th>
                             </tr>
                           </thead>
                           <tbody>
                             {g.items.map((r, i) => {
-                              const items = Array.isArray(r.bill_items) ? r.bill_items : (r.bill_items ? (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : r.bill_items) : []);
                               return (
                                 <tr key={r.submission_id}>
                                   <td style={{ textAlign: "center" }}>{i + 1}</td>
@@ -594,20 +659,8 @@ export default function BillingPage({ currentUser }) {
                                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
                                   <td>{r.plate_category || "-"}</td>
                                   <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
-                                  <td style={{ fontSize: 11 }}>
-                                    {items.length === 0 ? <span style={{ color: "#9ca3af" }}>—</span> : (
-                                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                                        {items.map((it, idx) => (
-                                          <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-                                            <span style={{ color: it.group_by === "finance" ? "#7c3aed" : it.group_by === "province" ? "#0f766e" : it.group_by === "cc" ? "#dc2626" : "#1e3a8a" }}>
-                                              {it.group_by === "finance" ? "💼 " : it.group_by === "province" ? "📍 " : it.group_by === "cc" ? "🏍️ " : ""}{it.expense_name}
-                                            </span>
-                                            <span style={{ fontWeight: 600, color: "#374151" }}>{Number(it.amount).toLocaleString()}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </td>
+                                  <td style={{ fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{(r.linked_receipt_no || r.receipt_no) ? "-" : (r.invoice_no || "-")}</td>
+                                  <td style={{ fontFamily: "monospace", fontSize: 11, color: "#7c3aed" }}>{r.linked_receipt_no || r.receipt_no || "-"}</td>
                                   <td style={{ textAlign: "right", fontWeight: 700, fontSize: 15, color: "#072d6b" }}>
                                     {r.bill_amount ? Number(r.bill_amount).toLocaleString() : "—"}
                                   </td>
@@ -623,7 +676,7 @@ export default function BillingPage({ currentUser }) {
                           </tbody>
                           <tfoot style={{ background: "#fef9c3", fontWeight: 700 }}>
                             <tr>
-                              <td colSpan={isPaidView ? 8 : 7} style={{ textAlign: "right", padding: "8px 12px" }}>รวม {g.items.length} รายการ</td>
+                              <td colSpan={isPaidView ? 9 : 8} style={{ textAlign: "right", padding: "8px 12px" }}>รวม {g.items.length} รายการ</td>
                               <td style={{ textAlign: "right", padding: "8px 12px", color: "#dc2626", fontSize: 15 }}>{g.total.toLocaleString()}</td>
                               <td></td>
                             </tr>
@@ -649,15 +702,16 @@ export default function BillingPage({ currentUser }) {
                 <th>เลขเครื่อง</th>
                 <th>หมวด</th>
                 <th>เลขทะเบียน</th>
-                <th>รายการค่าใช้จ่าย</th>
+                <th>เลขที่ใบขาย</th>
+                <th>เลขที่รับเรื่อง</th>
                 <th style={{ textAlign: "right" }}>ยอดรวม</th>
                 {showBilled && <th>ใบวางบิล</th>}
                 <th style={{ width: 60 }}>ดู</th>
+                <th style={{ width: 110 }}>เลือก</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r, i) => {
-                const items = Array.isArray(r.bill_items) ? r.bill_items : (r.bill_items ? (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : r.bill_items) : []);
                 return (
                 <tr key={r.submission_id} style={{ background: selected[r.submission_id] ? "#eff6ff" : (r.billed_at ? "#f9fafb" : undefined), cursor: "pointer" }}
                   onClick={() => !showBilled && toggleOne(r.submission_id)}>
@@ -670,20 +724,8 @@ export default function BillingPage({ currentUser }) {
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
                   <td>{r.plate_category || "-"}</td>
                   <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
-                  <td style={{ fontSize: 11 }}>
-                    {items.length === 0 ? <span style={{ color: "#9ca3af" }}>—</span> : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        {items.map((it, idx) => (
-                          <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-                            <span style={{ color: it.group_by === "finance" ? "#7c3aed" : it.group_by === "province" ? "#0f766e" : it.group_by === "cc" ? "#dc2626" : "#1e3a8a" }}>
-                              {it.group_by === "finance" ? "💼 " : it.group_by === "province" ? "📍 " : it.group_by === "cc" ? "🏍️ " : ""}{it.expense_name}
-                            </span>
-                            <span style={{ fontWeight: 600, color: "#374151" }}>{Number(it.amount).toLocaleString()}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{(r.linked_receipt_no || r.receipt_no) ? "-" : (r.invoice_no || "-")}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11, color: "#7c3aed" }}>{r.linked_receipt_no || r.receipt_no || "-"}</td>
                   <td style={{ textAlign: "right", fontWeight: 700, fontSize: 15, color: r.bill_amount ? "#072d6b" : "#9ca3af" }}>
                     {r.bill_amount ? Number(r.bill_amount).toLocaleString() : "—"}
                   </td>
@@ -694,11 +736,93 @@ export default function BillingPage({ currentUser }) {
                       👁️
                     </button>
                   </td>
+                  <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                    <button onClick={() => openLinkPicker(r)} title="เลือกใบขายหรือใบรับเรื่อง"
+                      style={{ padding: "3px 8px", background: "#fff", color: "#7c3aed", border: "1px solid #7c3aed", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                      🔄 เลือก
+                    </button>
+                    {r.linked_receipt_no && (
+                      <button onClick={() => clearLink(r)} title="ยกเลิกการลิงค์ใบรับเรื่อง"
+                        style={{ marginLeft: 4, padding: "3px 6px", background: "#fff", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 4, cursor: "pointer", fontSize: 10 }}>
+                        ✕
+                      </button>
+                    )}
+                  </td>
                 </tr>
                 );
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Link picker dialog */}
+      {linkPickerRow && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+          onClick={() => setLinkPickerRow(null)}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 20, width: 800, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 12, paddingBottom: 10, borderBottom: "2px solid #e5e7eb" }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>📋 เลือกใบรับเรื่อง</h3>
+              <button onClick={() => setLinkPickerRow(null)} style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 22, color: "#6b7280" }}>✕</button>
+            </div>
+            <div style={{ marginBottom: 10, fontSize: 13, color: "#6b7280" }}>
+              <b>{linkPickerRow.run_code}</b> · {linkPickerRow.customer_name} · เลขถัง: <code>{linkPickerRow.chassis_no}</code>
+            </div>
+
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>ค้นหาในตาราง <b>รับเรื่องงานทะเบียน</b>:</div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <input type="text" value={linkSearchKw} onChange={e => setLinkSearchKw(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && doLinkSearch(linkSearchKw)}
+                placeholder="ค้นด้วยชื่อลูกค้า / เลขถัง / เลขเครื่อง / เลขใบ"
+                style={{ flex: 1, padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13 }} />
+              <button onClick={() => doLinkSearch(linkSearchKw)} disabled={linkLoading}
+                style={{ padding: "8px 16px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                {linkLoading ? "กำลังค้น..." : "🔍 ค้นหา"}
+              </button>
+            </div>
+            <div style={{ maxHeight: 480, overflowY: "auto" }}>
+              {linkResults.length === 0 ? (
+                <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>{linkLoading ? "กำลังค้นหา..." : "ไม่พบรายการ"}</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ background: "#f3f4f6" }}>
+                    <tr>
+                      <th style={{ padding: 8, textAlign: "left" }}>ประเภท</th>
+                      <th style={{ padding: 8, textAlign: "left" }}>เลขที่</th>
+                      <th style={{ padding: 8, textAlign: "left" }}>วันที่</th>
+                      <th style={{ padding: 8, textAlign: "left" }}>ลูกค้า</th>
+                      <th style={{ padding: 8, textAlign: "left" }}>เลขถัง</th>
+                      <th style={{ padding: 8, textAlign: "left" }}>เลือก</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {linkResults.map((it, idx) => (
+                      <tr key={idx} style={{ borderTop: "1px solid #e5e7eb" }}>
+                        <td style={{ padding: 8 }}>
+                          <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+                            background: it._kind === "sale" ? "#dbeafe" : "#ede9fe",
+                            color: it._kind === "sale" ? "#1e40af" : "#6d28d9" }}>
+                            {it._kind === "sale" ? "🚗 ใบขาย" : "📋 ใบรับเรื่อง"}
+                          </span>
+                        </td>
+                        <td style={{ padding: 8, fontFamily: "monospace", fontWeight: 600 }}>{it.sale_doc_no || "-"}</td>
+                        <td style={{ padding: 8 }}>{it.sale_date ? String(it.sale_date).slice(0,10) : "-"}</td>
+                        <td style={{ padding: 8 }}>{it.customer_name || "-"}</td>
+                        <td style={{ padding: 8, fontFamily: "monospace", fontSize: 11 }}>{it.frame_no || "-"}</td>
+                        <td style={{ padding: 8 }}>
+                          <button onClick={() => pickLink(it)} disabled={linkSaving}
+                            style={{ padding: "4px 12px", background: "#10b981", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                            {linkSaving ? "กำลังบันทึก..." : "✓ ใช้อันนี้"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
