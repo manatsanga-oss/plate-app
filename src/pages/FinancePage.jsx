@@ -6,6 +6,7 @@ const emptyForm = () => ({
   company_name: "",
   contact_name: "",
   phone: "",
+  address: "",
   note: "",
   status: "active",
 });
@@ -61,7 +62,7 @@ export default function FinancePage({ currentUser }) {
 
   function openEdit(c) {
     setEditTarget(c);
-    setForm({ company_name: c.company_name || "", contact_name: c.contact_name || "", phone: c.phone || "", note: c.note || "", status: c.status || "active" });
+    setForm({ company_name: c.company_name || "", contact_name: c.contact_name || "", phone: c.phone || "", address: c.address || "", note: c.note || "", status: c.status || "active" });
     setShowForm(true);
     setMessage("");
   }
@@ -93,6 +94,7 @@ export default function FinancePage({ currentUser }) {
                 <th>ชื่อบริษัท</th>
                 <th>ผู้ติดต่อ</th>
                 <th>เบอร์โทร</th>
+                <th>ที่อยู่</th>
                 <th>หมายเหตุ</th>
                 <th>สถานะ</th>
                 <th>จัดการ</th>
@@ -100,13 +102,14 @@ export default function FinancePage({ currentUser }) {
             </thead>
             <tbody>
               {companies.length === 0 ? (
-                <tr><td colSpan={7} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลบริษัทไฟแนนท์</td></tr>
+                <tr><td colSpan={8} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลบริษัทไฟแนนท์</td></tr>
               ) : companies.map((c, i) => (
                 <tr key={c.company_id || i}>
                   <td>{i + 1}</td>
                   <td>{c.company_name || "-"}</td>
                   <td>{c.contact_name || "-"}</td>
                   <td>{c.phone || "-"}</td>
+                  <td style={{ maxWidth: 300, whiteSpace: "normal" }}>{c.address || "-"}</td>
                   <td>{c.note || "-"}</td>
                   <td>
                     <span style={{
@@ -154,6 +157,14 @@ export default function FinancePage({ currentUser }) {
               <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })}
                 placeholder="0xx-xxx-xxxx" type="tel"
                 style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>ที่อยู่</label>
+              <textarea value={form.address} onChange={e => setForm({ ...form, address: e.target.value })}
+                placeholder="ที่อยู่บริษัท (สำหรับใบกำกับภาษี)"
+                rows={3}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
             </div>
 
             <div style={{ marginBottom: 12 }}>

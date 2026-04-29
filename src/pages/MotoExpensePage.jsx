@@ -149,6 +149,7 @@ export default function MotoExpensePage({ currentUser }) {
           category: form.category || null,
           province: form.group_by === "province" ? (form.province || null) : null,
           province_mode: form.group_by === "province" ? (form.province_mode || "include") : null,
+          province_target: form.group_by === "province" ? (form.province_target || "customer") : null,
           engine_cc: form.group_by === "cc" ? Number(form.engine_cc) : null,
           company_id: form.group_by === "finance" ? Number(form.company_id) : null,
           brand_id: form.group_by === "brand" ? Number(form.brand_id) : null,
@@ -168,7 +169,13 @@ export default function MotoExpensePage({ currentUser }) {
 
   function openAdd() {
     setEditTarget(null);
-    setForm({ ...emptyForm(), group_by: tab });
+    // tab register_province → group_by='province' + province_target='registered'
+    const isRegisterProv = tab === "register_province";
+    setForm({
+      ...emptyForm(),
+      group_by: isRegisterProv ? "province" : tab,
+      province_target: isRegisterProv ? "registered" : "customer",
+    });
     setShowForm(true);
     setMessage("");
   }
@@ -205,9 +212,13 @@ export default function MotoExpensePage({ currentUser }) {
     setMessage("");
   }
 
-  const filtered = expenses.filter(e => e.group_by === tab);
+  const filtered = expenses.filter(e => {
+    if (tab === "province")          return e.group_by === "province" && (e.province_target || "customer") === "customer";
+    if (tab === "register_province") return e.group_by === "province" && e.province_target === "registered";
+    return e.group_by === tab;
+  });
 
-  const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", type: "Type", province: "จังหวัด" };
+  const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", type: "Type", province: "จังหวัดลูกค้า", register_province: "จังหวัดจดทะเบียน" };
   const groupLabel = (e) => {
     if (e.group_by === "cc") return e.engine_cc ? e.engine_cc + " cc" : "-";
     if (e.group_by === "finance") return e.company_name || "-";
@@ -222,7 +233,7 @@ export default function MotoExpensePage({ currentUser }) {
       <div className="page-topbar">
         <h2 className="page-title">💸 บันทึกค่าใช้จ่ายการขาย</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {[["cc", "ตาม CC"], ["finance", "ตามไฟแนนท์"], ["brand", "ตามยี่ห้อ"], ["type", "ตาม Type"], ["province", "ตามจังหวัด"]].map(([key, label]) => (
+          {[["cc", "ตาม CC"], ["finance", "ตามไฟแนนท์"], ["brand", "ตามยี่ห้อ"], ["type", "ตาม Type"], ["province", "ตามจังหวัดลูกค้า"], ["register_province", "ตามจังหวัดจดทะเบียน"]].map(([key, label]) => (
             <button key={key} className={tab === key ? "btn-primary" : "btn-secondary"} onClick={() => setTab(key)}>
               {label}
             </button>
@@ -413,22 +424,6 @@ export default function MotoExpensePage({ currentUser }) {
             {form.group_by === "province" && (
               <>
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เงื่อนไข *</label>
-                  <div style={{ display: "flex", gap: 14 }}>
-                    {[
-                      ["include", "✓ เลือกจังหวัดนี้"],
-                      ["exclude", "✕ ยกเว้นจังหวัดนี้"],
-                    ].map(([val, label]) => (
-                      <label key={val} style={{ flex: 1, padding: "10px 12px", border: "2px solid " + (form.province_mode === val ? "#072d6b" : "#e5e7eb"), borderRadius: 8, cursor: "pointer", background: form.province_mode === val ? "#eff6ff" : "#fff", textAlign: "center" }}>
-                        <input type="radio" name="provinceMode" value={val} checked={form.province_mode === val}
-                          onChange={() => setForm({ ...form, province_mode: val })}
-                          style={{ marginRight: 6 }} />
-                        <span style={{ fontWeight: 600, fontSize: 13, color: form.province_mode === val ? "#072d6b" : "#374151" }}>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-                <div style={{ marginBottom: 12 }}>
                   <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>จังหวัด *</label>
                   <input value={form.province} onChange={e => setForm({ ...form, province: e.target.value })}
                     placeholder="เช่น พระนครศรีอยุธยา, กรุงเทพมหานคร"
@@ -443,8 +438,30 @@ export default function MotoExpensePage({ currentUser }) {
                     <option value="ปทุมธานี" />
                   </datalist>
                   <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
-                    {form.province_mode === "exclude" ? "💡 ค่าใช้จ่ายนี้จะขึ้นสำหรับลูกค้าทุกจังหวัด ยกเว้น" : "💡 ค่าใช้จ่ายนี้จะขึ้นเฉพาะลูกค้าที่อยู่ใน"} จังหวัดที่ระบุ
+                    {form.province_mode === "exclude"
+                      ? "💡 ขึ้นสำหรับลูกค้าทุกจังหวัด ยกเว้นจังหวัดที่ระบุ"
+                      : form.province_mode === "cross"
+                        ? "💡 จดทะเบียน = จังหวัดนี้ + ลูกค้า/ไฟแนนท์ ไม่ได้อยู่จังหวัดนี้ → คิดค่าใช้จ่าย (ขอใช้ข้ามจังหวัด)"
+                        : "💡 ขึ้นเฉพาะลูกค้าที่อยู่ในจังหวัดที่ระบุ"}
                   </div>
+                </div>
+                <div style={{ marginBottom: 12, padding: "8px 10px", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                    <input type="checkbox"
+                      checked={form.province_mode === "cross"}
+                      onChange={e => setForm({ ...form, province_mode: e.target.checked ? "cross" : "include" })}
+                      style={{ width: 16, height: 16, cursor: "pointer" }} />
+                    🌐 ขอใช้ข้ามจังหวัด
+                  </label>
+                  {form.province_mode !== "cross" && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 12, marginTop: 6, color: "#6b7280" }}>
+                      <input type="checkbox"
+                        checked={form.province_mode === "exclude"}
+                        onChange={e => setForm({ ...form, province_mode: e.target.checked ? "exclude" : "include" })}
+                        style={{ width: 14, height: 14, cursor: "pointer" }} />
+                      ✕ ยกเว้นจังหวัดนี้ (กรณีพิเศษ)
+                    </label>
+                  )}
                 </div>
               </>
             )}
