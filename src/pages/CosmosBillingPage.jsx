@@ -5,10 +5,11 @@ const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-ap
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
 const PLAN_OPTS = [
-  { key: "rsa",   label: "RSA (ช่วยเหลือฉุกเฉิน)",     color: "#1565c0" },
-  { key: "pa",    label: "PA (อุบัติเหตุส่วนบุคคล)",    color: "#2e7d32" },
-  { key: "3plus", label: "3 PLUS",                       color: "#7b1fa2" },
-  { key: "theft", label: "ประกันรถหาย",                 color: "#c62828" },
+  { key: "rsa",           label: "RSA (ช่วยเหลือฉุกเฉิน)",     color: "#1565c0" },
+  { key: "pa",            label: "PA (อุบัติเหตุส่วนบุคคล)",    color: "#2e7d32" },
+  { key: "3plus",         label: "3 PLUS",                       color: "#7b1fa2" },
+  { key: "theft",         label: "ประกันรถหาย",                color: "#c62828" },
+  { key: "theft_renewal", label: "ประกันรถหายปีต่อ",          color: "#ea580c" },
 ];
 
 function fmt(n) {

@@ -3,10 +3,11 @@ import React, { useEffect, useState } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 
 const PLAN_OPTS = [
-  { key: "rsa",   label: "RSA (ช่วยเหลือฉุกเฉิน)",     table: "cosmos_rsa",   color: "#1565c0" },
-  { key: "pa",    label: "PA (อุบัติเหตุส่วนบุคคล)",    table: "cosmos_pa",    color: "#2e7d32" },
-  { key: "3plus", label: "3 PLUS",                       table: "cosmos_3plus", color: "#7b1fa2" },
-  { key: "theft", label: "ประกันรถหาย",                 table: "cosmos_theft", color: "#c62828" },
+  { key: "rsa",           label: "RSA (ช่วยเหลือฉุกเฉิน)",     table: "cosmos_rsa",   color: "#1565c0" },
+  { key: "pa",            label: "PA (อุบัติเหตุส่วนบุคคล)",    table: "cosmos_pa",    color: "#2e7d32" },
+  { key: "3plus",         label: "3 PLUS",                       table: "cosmos_3plus", color: "#7b1fa2" },
+  { key: "theft",         label: "ประกันรถหาย",                table: "cosmos_theft", color: "#c62828" },
+  { key: "theft_renewal", label: "ประกันรถหายปีต่อ",          table: "cosmos_theft", color: "#ea580c" },
 ];
 
 function fmtDate(v) {
@@ -421,6 +422,7 @@ function HistoryPanel({ setMessage, currentUser }) {
   const isPlus = plan === "3plus";
   const isPA = plan === "pa";
   const isRSA = plan === "rsa";
+  const isTheft = plan === "theft" || plan === "theft_renewal";
   const hideReceipt = isPA || isRSA;
 
   return (
@@ -500,7 +502,7 @@ function HistoryPanel({ setMessage, currentUser }) {
                       <th style={th}>สี</th>
                     </>}
                     {isPlus && <th style={th}>รุ่นรถ</th>}
-                    <th style={th}>แผน</th>
+                    {!isTheft && <th style={th}>แผน</th>}
                     {!isPlus && <>
                       <th style={th}>เริ่มคุ้มครอง</th>
                       <th style={th}>สิ้นสุด</th>
@@ -562,7 +564,7 @@ function HistoryPanel({ setMessage, currentUser }) {
                   ) : (
                     <>
                       <td style={td}>{fmtDate(r.app_date)}</td>
-                      <td style={{ ...td, fontWeight: 500 }}>{r.customer_name || "-"}</td>
+                      <td style={{ ...td, fontWeight: 500 }}>{(isTheft ? r.sale_customer_name : r.customer_name) || "-"}</td>
                       <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{cleanChassis(r.chassis_no) || "-"}</td>
                       {!isPlus && <>
                         <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.citizen_id || "-"}</td>
@@ -573,11 +575,13 @@ function HistoryPanel({ setMessage, currentUser }) {
                         <td style={{ ...td, fontSize: 11 }}>{r.color || "-"}</td>
                       </>}
                       {isPlus && <td style={td}>{r.model_name || "-"}</td>}
-                      <td style={td}>
-                        <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#dbeafe", color: "#1e40af" }}>
-                          {r.plan_name || "-"}
-                        </span>
-                      </td>
+                      {!isTheft && (
+                        <td style={td}>
+                          <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#dbeafe", color: "#1e40af" }}>
+                            {r.plan_name || "-"}
+                          </span>
+                        </td>
+                      )}
                       {!isPlus && <>
                         <td style={td}>{fmtDate(r.cover_start)}</td>
                         <td style={td}>{fmtDate(r.cover_end)}</td>
