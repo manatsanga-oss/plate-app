@@ -52,6 +52,7 @@ import HrMonthlyExtrasPage from "./pages/HrMonthlyExtrasPage";
 import HrPayrollPage from "./pages/HrPayrollPage";
 import BankAccountsPage from "./pages/BankAccountsPage";
 import BankMovementsPage from "./pages/BankMovementsPage";
+import BankTransferPage from "./pages/BankTransferPage";
 import MyMotoReportPage from "./pages/MyMotoReportPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
@@ -273,6 +274,9 @@ export default function App() {
         {activeMenu === "accbankmovements" && canAccess("accbankmovements") && (
           <BankMovementsPage currentUser={currentUser} />
         )}
+        {activeMenu === "accbanktransfer" && canAccess("accbanktransfer") && (
+          <BankTransferPage currentUser={currentUser} />
+        )}
         {activeMenu === "hrpayroll" && canAccess("hrpayroll") && (
           <HrPayrollPage currentUser={currentUser} />
         )}
@@ -430,9 +434,10 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="vehicleregistration" label="ค้นหาทะเบียนรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Accounting" pages={["accbankaccounts","accbankmovements"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Accounting" pages={["accbankaccounts","accbankmovements","accbanktransfer"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="accbankaccounts" label="บัญชีธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbankmovements" label="รายงานการเคลื่อนไหว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="accbanktransfer" label="โอนเงินระหว่างบัญชี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrspecialcommission","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

@@ -442,6 +442,7 @@ function HistoryPanel({ setMessage }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
+  const [editTarget, setEditTarget] = useState(null);
 
   async function fetchList() {
     setLoading(true);
@@ -496,7 +497,7 @@ function HistoryPanel({ setMessage }) {
                 <th>ผู้เอาประกัน</th>
                 <th>เบี้ยรวม</th>
                 <th>ใบขาย</th>
-                <th>ลูกค้า</th>
+                <th>เลขที่รับเรื่อง</th>
                 <th>จัดการ</th>
               </tr>
             </thead>
@@ -509,9 +510,15 @@ function HistoryPanel({ setMessage }) {
                   <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                   <td>{r.insured_name || "-"}</td>
                   <td style={{ textAlign: "right", fontWeight: 600 }}>{Number(r.total_premium || 0).toLocaleString()}</td>
-                  <td style={{ color: r.invoice_no ? "#065f46" : "#9ca3af", fontWeight: r.invoice_no ? 600 : 400 }}>{r.invoice_no || ""}</td>
-                  <td>{r.customer_name || ""}</td>
-                  <td style={{ textAlign: "center" }}>
+                  <td>
+                    {r.invoice_no && <div style={{ color: "#065f46", fontWeight: 600 }}>{r.invoice_no}</div>}
+                    {r.customer_name && <div style={{ fontSize: 11, color: "#6b7280", marginTop: r.invoice_no ? 2 : 0 }}>{r.customer_name}</div>}
+                    {!r.invoice_no && !r.customer_name && <span style={{ color: "#9ca3af" }}>-</span>}
+                  </td>
+                  <td style={{ color: r.receipt_no ? "#1e40af" : "#9ca3af", fontWeight: r.receipt_no ? 600 : 400 }}>{r.receipt_no || ""}</td>
+                  <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                    <button onClick={() => setEditTarget(r)}
+                      style={{ padding: "3px 10px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>✏️ แก้ไข</button>
                     <button onClick={() => deleteOne(r.insurance_id)}
                       style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🗑️ ลบ</button>
                   </td>
@@ -521,6 +528,159 @@ function HistoryPanel({ setMessage }) {
           </table>
         </div>
       )}
+
+      {editTarget && (
+        <InsuranceEditDialog
+          record={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => { setEditTarget(null); setMessage("✅ บันทึกสำเร็จ"); fetchList(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function InsuranceEditDialog({ record, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    contract_date: record.contract_date ? String(record.contract_date).slice(0, 10) : "",
+    policy_no: record.policy_no || "",
+    insured_name: record.insured_name || "",
+    chassis_no: record.chassis_no || "",
+    plate_number: record.plate_number || "",
+    coverage_start: record.coverage_start ? String(record.coverage_start).slice(0, 10) : "",
+    coverage_end: record.coverage_end ? String(record.coverage_end).slice(0, 10) : "",
+    paid: record.paid || "",
+    premium: record.premium || 0,
+    stamp_duty: record.stamp_duty || 0,
+    tax: record.tax || 0,
+    total_premium: record.total_premium || 0,
+    commission: record.commission || 0,
+    premium_remit: record.premium_remit || 0,
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [matchedReceipt, setMatchedReceipt] = useState(null);
+  const [matchedSale, setMatchedSale] = useState(null);
+
+  // Auto-match chassis_no with registration_receipts and moto_sales when chassis changes
+  useEffect(() => {
+    const chassis = (form.chassis_no || "").trim().toUpperCase();
+    if (!chassis) { setMatchedReceipt(null); setMatchedSale(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        // Search receipts
+        const r1 = await fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "search_registrations", source: "receipt", field: "chassis_no", keyword: chassis }),
+        });
+        const d1 = await r1.json();
+        if (cancelled) return;
+        const rcpt = Array.isArray(d1) && d1.length > 0 ? d1[0] : null;
+        setMatchedReceipt(rcpt);
+
+        // Search sales
+        const r2 = await fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "search_registrations", source: "sale", field: "chassis_no", keyword: chassis }),
+        });
+        const d2 = await r2.json();
+        if (cancelled) return;
+        const sale = Array.isArray(d2) && d2.length > 0 ? d2[0] : null;
+        setMatchedSale(sale);
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [form.chassis_no]);
+
+  async function handleSave() {
+    setSaving(true); setError("");
+    try {
+      const body = { action: "update_insurance", insurance_id: record.insurance_id, ...form };
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("save fail");
+      onSaved();
+    } catch (e) { setError("บันทึกไม่สำเร็จ: " + e.message); }
+    setSaving(false);
+  }
+
+  const lbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 4 };
+  const inp = { width: "100%", padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, fontFamily: "Tahoma" };
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+      onClick={() => !saving && onClose()}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 720, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto" }}>
+        <h3 style={{ margin: "0 0 14px", color: "#0891b2" }}>✏️ แก้ไขข้อมูล พรบ.</h3>
+
+        {/* Match info */}
+        {(matchedReceipt || matchedSale) && (
+          <div style={{ background: "#ecfeff", border: "1px solid #67e8f9", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 12 }}>
+            {matchedSale && (
+              <div>📄 <b>ใบขาย:</b> <code>{matchedSale.sale_doc_no}</code> · {matchedSale.customer_name || "-"}</div>
+            )}
+            {matchedReceipt && (
+              <div>📋 <b>เลขที่รับเรื่อง:</b> <code>{matchedReceipt.sale_doc_no}</code> · {matchedReceipt.customer_name || "-"}</div>
+            )}
+            {!matchedReceipt && form.chassis_no && (
+              <div style={{ color: "#6b7280" }}>ℹ️ ไม่พบเลขถังนี้ในตารางรับเรื่องงานทะเบียน</div>
+            )}
+          </div>
+        )}
+
+        {error && <div style={{ padding: 8, background: "#fee2e2", color: "#991b1b", borderRadius: 6, marginBottom: 10, fontSize: 13 }}>❌ {error}</div>}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+          <div><label style={lbl}>วันที่ทำสัญญา</label>
+            <input type="date" value={form.contract_date} onChange={e => setForm(p => ({ ...p, contract_date: e.target.value }))} style={inp} /></div>
+          <div><label style={lbl}>เลขกรมธรรม์</label>
+            <input value={form.policy_no} onChange={e => setForm(p => ({ ...p, policy_no: e.target.value }))} style={inp} /></div>
+          <div><label style={lbl}>ชำระ</label>
+            <select value={form.paid} onChange={e => setForm(p => ({ ...p, paid: e.target.value }))} style={inp}>
+              <option value="">-</option><option value="Y">Y</option><option value="N">N</option>
+            </select></div>
+
+          <div style={{ gridColumn: "1 / span 2" }}><label style={lbl}>ผู้เอาประกัน</label>
+            <input value={form.insured_name} onChange={e => setForm(p => ({ ...p, insured_name: e.target.value }))} style={inp} /></div>
+          <div><label style={lbl}>เลขทะเบียน</label>
+            <input value={form.plate_number} onChange={e => setForm(p => ({ ...p, plate_number: e.target.value }))} style={inp} /></div>
+
+          <div style={{ gridColumn: "1 / span 3" }}><label style={lbl}>เลขตัวถัง (ค้นหาอัตโนมัติเมื่อกรอก)</label>
+            <input value={form.chassis_no} onChange={e => setForm(p => ({ ...p, chassis_no: e.target.value.toUpperCase() }))} style={{ ...inp, fontFamily: "monospace" }} /></div>
+
+          <div><label style={lbl}>เริ่มต้น</label>
+            <input type="date" value={form.coverage_start} onChange={e => setForm(p => ({ ...p, coverage_start: e.target.value }))} style={inp} /></div>
+          <div><label style={lbl}>สิ้นสุด</label>
+            <input type="date" value={form.coverage_end} onChange={e => setForm(p => ({ ...p, coverage_end: e.target.value }))} style={inp} /></div>
+          <div></div>
+
+          <div><label style={lbl}>เบี้ย</label>
+            <input type="number" value={form.premium} onChange={e => setForm(p => ({ ...p, premium: e.target.value }))} style={inp} /></div>
+          <div><label style={lbl}>อากร</label>
+            <input type="number" value={form.stamp_duty} onChange={e => setForm(p => ({ ...p, stamp_duty: e.target.value }))} style={inp} /></div>
+          <div><label style={lbl}>ภาษี</label>
+            <input type="number" value={form.tax} onChange={e => setForm(p => ({ ...p, tax: e.target.value }))} style={inp} /></div>
+
+          <div><label style={lbl}>เบี้ยรวม</label>
+            <input type="number" value={form.total_premium} onChange={e => setForm(p => ({ ...p, total_premium: e.target.value }))} style={inp} /></div>
+          <div><label style={lbl}>ค่าคอม</label>
+            <input type="number" value={form.commission} onChange={e => setForm(p => ({ ...p, commission: e.target.value }))} style={inp} /></div>
+          <div><label style={lbl}>เบี้ยนำส่ง</label>
+            <input type="number" value={form.premium_remit} onChange={e => setForm(p => ({ ...p, premium_remit: e.target.value }))} style={inp} /></div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+          <button onClick={onClose} disabled={saving}
+            style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={handleSave} disabled={saving}
+            style={{ padding: "8px 24px", background: saving ? "#9ca3af" : "#0891b2", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

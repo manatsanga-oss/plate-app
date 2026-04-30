@@ -57,6 +57,8 @@ export default function MotoBookingPage({ currentUser }) {
   const [editInvoiceTarget, setEditInvoiceTarget] = useState(null);
   const [editInvoiceNo, setEditInvoiceNo] = useState("");
   const [detailTarget, setDetailTarget] = useState(null);
+  const [refundTarget, setRefundTarget] = useState(null);
+  const [bankAccounts, setBankAccounts] = useState([]);
   const [cancelBlock, setCancelBlock] = useState(null);   // { model_code, color_name }
   const [checkingCancel, setCheckingCancel] = useState(false);
   const [stockSummary, setStockSummary] = useState([]);
@@ -76,7 +78,20 @@ export default function MotoBookingPage({ currentUser }) {
     fetchDeposits();
     fetchSales();
     fetchAllDeposits();
+    if (isAdmin) fetchBankAccounts();
   }, []);
+
+  async function fetchBankAccounts() {
+    try {
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }),
+      });
+      const data = await res.json();
+      setBankAccounts(Array.isArray(data) ? data : []);
+    } catch { setBankAccounts([]); }
+  }
+  function fetchData() { fetchBookings(); }
 
   async function fetchBookings() {
     setLoading(true);
@@ -805,6 +820,20 @@ export default function MotoBookingPage({ currentUser }) {
                     )}
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
+                    {/* Refund status badge — only shown when paid (admin only) */}
+                    {isAdmin && b.status === "ยกเลิก" && b.deposit_action === "คืนเงินมัดจำ" && Number(b.refund_amount) > 0 && b.refund_paid_at && (
+                      <button
+                        onClick={() => setDetailTarget(b)}
+                        title={`จ่ายคืนแล้วเมื่อ ${new Date(b.refund_paid_at).toLocaleDateString("th-TH")} · ${b.refund_paid_doc_no || ""} (คลิกเพื่อดูรายละเอียด)`}
+                        style={{
+                          padding: "3px 10px",
+                          background: "#16a34a",
+                          color: "#fff", border: "none", borderRadius: 12,
+                          cursor: "pointer", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap",
+                        }}>
+                        ✓ จ่ายแล้ว
+                      </button>
+                    )}
                     {b.status === "ขาย" && isAdmin && (
                       <button onClick={() => { setEditInvoiceTarget(b); setEditInvoiceNo(b.invoice_no || ""); }}
                         style={{ padding: "3px 8px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
@@ -1171,6 +1200,20 @@ export default function MotoBookingPage({ currentUser }) {
                         ["เลขที่บัญชี", detailTarget.refund_account_no || "-"],
                         ["ธนาคาร", detailTarget.refund_bank || "-"],
                         ["จำนวนเงิน", detailTarget.refund_amount ? Number(detailTarget.refund_amount).toLocaleString("th-TH") + " บาท" : "-"],
+                        ...(detailTarget.refund_paid_at ? [
+                          ["━━━ การจ่ายคืน ━━━", ""],
+                          ["สถานะการจ่าย", <span style={{ color: "#16a34a", fontWeight: 700 }}>✓ จ่ายคืนแล้ว</span>],
+                          ["เลขที่เอกสารจ่าย", detailTarget.refund_paid_doc_no || "-"],
+                          ["วันที่จ่าย", new Date(detailTarget.refund_paid_at).toLocaleDateString("th-TH", { year: "numeric", month: "long", day: "numeric" })],
+                          ["วิธีจ่าย", detailTarget.refund_payment_method || "-"],
+                          ["จากบัญชี", (() => {
+                            const acc = bankAccounts.find(a => String(a.account_id) === String(detailTarget.refund_from_bank_account_id));
+                            return acc ? `${acc.bank_name} · ${acc.account_no} · ${acc.account_name}` : (detailTarget.refund_from_bank_account_id || "-");
+                          })()],
+                          ["ผู้บันทึกจ่าย", detailTarget.refund_paid_by || "-"],
+                        ] : [
+                          ["สถานะการจ่าย", <span style={{ color: "#dc2626", fontWeight: 700 }}>⏳ รอจ่ายคืน</span>],
+                        ]),
                       ] : []),
                     ].map(([label, value]) => (
                       <tr key={label}>
@@ -1182,12 +1225,33 @@ export default function MotoBookingPage({ currentUser }) {
                 )}
               </tbody>
             </table>
+
+            {/* ── ปุ่มบันทึกจ่ายคืนเงินมัดจำ (admin only + cancelled with refund) ── */}
+            {isAdmin && detailTarget.status === "ยกเลิก" && detailTarget.deposit_action === "คืนเงินมัดจำ" && Number(detailTarget.refund_amount) > 0 && (
+              <button onClick={() => setRefundTarget(detailTarget)}
+                style={{ marginTop: 12, width: "100%", padding: "10px 0", background: detailTarget.refund_paid_at ? "#0891b2" : "#dc2626", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 700 }}
+                title={detailTarget.refund_paid_at ? "แก้ไขข้อมูลการจ่ายคืน" : "บันทึกการจ่ายคืนเงินมัดจำ"}>
+                {detailTarget.refund_paid_at ? "✏️ แก้ไขการจ่ายคืนเงินมัดจำ" : "💰 บันทึกจ่ายคืนเงินมัดจำ"}
+              </button>
+            )}
+
             <button onClick={() => setDetailTarget(null)}
-              style={{ marginTop: 16, width: "100%", padding: "9px 0", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+              style={{ marginTop: 12, width: "100%", padding: "9px 0", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
               ปิด
             </button>
           </div>
         </div>
+      )}
+
+      {/* Refund Payment Dialog (admin) */}
+      {refundTarget && (
+        <RefundPaymentDialog
+          booking={refundTarget}
+          bankAccounts={bankAccounts}
+          currentUser={currentUser}
+          onClose={() => setRefundTarget(null)}
+          onSaved={() => { setRefundTarget(null); setDetailTarget(null); fetchData(); }}
+        />
       )}
       {/* Cancel Blocked Modal */}
       {cancelBlock && (
@@ -1217,3 +1281,108 @@ export default function MotoBookingPage({ currentUser }) {
     </div>
   );
 }
+
+function RefundPaymentDialog({ booking, bankAccounts, currentUser, onClose, onSaved }) {
+  const isEdit = !!booking.refund_paid_at;
+  const [form, setForm] = useState({
+    paid_date: booking.refund_paid_at ? new Date(booking.refund_paid_at).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+    payment_method: booking.refund_payment_method || "โอน",
+    from_bank_account_id: booking.refund_from_bank_account_id || "",
+    payment_note: booking.refund_payment_note || "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const refundAmount = Number(booking.refund_amount) || 0;
+
+  async function handleSave() {
+    if (!form.from_bank_account_id) { setError("เลือกบัญชีโอนจาก"); return; }
+    setSaving(true);
+    setError("");
+    try {
+      const body = {
+        action: isEdit ? "edit_refund_payment" : "save_refund_payment",
+        booking_id: booking.booking_id,
+        deposit_no: booking.deposit_no,
+        paid_date: form.paid_date,
+        payment_method: form.payment_method,
+        from_bank_account_id: Number(form.from_bank_account_id) || null,
+        payment_note: form.payment_note,
+        refund_amount: refundAmount,
+        refund_account_no: booking.refund_account_no,
+        refund_bank: booking.refund_bank,
+        paid_by: currentUser?.username || currentUser?.name || "system",
+      };
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("save fail");
+      onSaved();
+    } catch (e) { setError("บันทึกไม่สำเร็จ: " + e.message); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+      onClick={() => !saving && onClose()}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 540, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}>
+        <h3 style={{ margin: "0 0 14px", color: "#dc2626" }}>💰 {isEdit ? "แก้ไขการจ่ายคืนเงินมัดจำ" : "บันทึกจ่ายคืนเงินมัดจำ"}</h3>
+        {isEdit && booking.refund_paid_doc_no && (
+          <div style={{ marginBottom: 10, padding: 8, background: "#dcfce7", border: "1px solid #86efac", borderRadius: 6, fontSize: 13 }}>
+            <b>เลขที่เอกสารจ่าย:</b> <code>{booking.refund_paid_doc_no}</code>
+          </div>
+        )}
+
+        <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 13 }}>
+          <div><b>เลขที่ใบมัดจำ:</b> <code>{booking.deposit_no || "-"}</code></div>
+          <div><b>ลูกค้า:</b> {booking.customer_name || "-"}</div>
+          <div><b>โอนเข้าบัญชี:</b> {booking.refund_bank || "-"} · <code>{booking.refund_account_no || "-"}</code></div>
+          <div style={{ marginTop: 6, fontSize: 16, color: "#dc2626" }}><b>จำนวนเงิน:</b> {refundAmount.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท</div>
+        </div>
+
+        {error && <div style={{ padding: 8, background: "#fee2e2", color: "#991b1b", borderRadius: 6, marginBottom: 10, fontSize: 13 }}>❌ {error}</div>}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label style={lbl}>วันที่จ่าย *</label>
+            <input type="date" value={form.paid_date}
+              onChange={e => setForm(p => ({ ...p, paid_date: e.target.value }))} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>วิธีจ่าย</label>
+            <select value={form.payment_method} onChange={e => setForm(p => ({ ...p, payment_method: e.target.value }))} style={inp}>
+              <option value="โอน">โอน</option>
+              <option value="เงินสด">เงินสด</option>
+              <option value="เช็ค">เช็ค</option>
+            </select>
+          </div>
+          <div style={{ gridColumn: "1 / span 2" }}>
+            <label style={lbl}>โอนจาก (บัญชีบริษัท) *</label>
+            <select value={form.from_bank_account_id} onChange={e => setForm(p => ({ ...p, from_bank_account_id: e.target.value }))} style={inp}>
+              <option value="">-- เลือกบัญชี --</option>
+              {bankAccounts.map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
+            </select>
+          </div>
+          <div style={{ gridColumn: "1 / span 2" }}>
+            <label style={lbl}>หมายเหตุ</label>
+            <textarea value={form.payment_note}
+              onChange={e => setForm(p => ({ ...p, payment_note: e.target.value }))} rows={2} style={inp} />
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+          <button onClick={onClose} disabled={saving}
+            style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={handleSave} disabled={saving || !form.from_bank_account_id}
+            style={{ padding: "8px 24px", background: saving || !form.from_bank_account_id ? "#9ca3af" : "#dc2626", color: "#fff", border: "none", borderRadius: 8, cursor: saving || !form.from_bank_account_id ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            {saving ? "กำลังบันทึก..." : "💾 บันทึกจ่ายคืน"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const lbl = { display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 };
+const inp = { width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" };
