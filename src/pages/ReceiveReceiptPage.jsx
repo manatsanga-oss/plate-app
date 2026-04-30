@@ -6,7 +6,7 @@ export default function ReceiveReceiptPage({ currentUser }) {
   const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("active");
+  const [filterStatus, setFilterStatus] = useState("all");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [message, setMessage] = useState("");
@@ -123,11 +123,10 @@ export default function ReceiveReceiptPage({ currentUser }) {
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
 
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={inp}>
-          <option value="active">⏳ มีรายการรอจัดการ</option>
-          <option value="pending">⏳ มีรายการรอรับคืน</option>
-          <option value="received">📥 มีรายการรับคืนแล้ว · รอส่งลูกค้า</option>
-          <option value="returned">✅ มีรายการส่งคืนลูกค้าแล้ว</option>
-          <option value="all">ทั้งหมด</option>
+          <option value="all">📋 ทั้งหมด</option>
+          <option value="pending">⏳ รอจัดการ</option>
+          <option value="received">📥 รอส่งลูกค้า</option>
+          <option value="returned">✅ ส่งคืนลูกค้าแล้ว</option>
         </select>
 
         <input type="text" placeholder="🔍 ค้นหา (เลข batch, supplier)"
