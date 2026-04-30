@@ -59,6 +59,8 @@ export default function MotoInsurancePage({ currentUser }) {
    ============================================================================ */
 function OcrPanel({ setMessage }) {
   const [pdfFile, setPdfFile] = useState(null);
+  const [xlsxFile, setXlsxFile] = useState(null);
+  const [xlsxLoading, setXlsxLoading] = useState(false);
   const [items, setItems] = useState([]);
   const [ocrLoading, setOcrLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -69,6 +71,83 @@ function OcrPanel({ setMessage }) {
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const fileRef = useRef();
+  const xlsxRef = useRef();
+
+  async function readXlsx() {
+    if (!xlsxFile) { setMessage("เลือกไฟล์ Excel ก่อน"); return; }
+    if (!/\.(xlsx|xls)$/i.test(xlsxFile.name)) { setMessage("รับเฉพาะ .xlsx / .xls"); return; }
+    setXlsxLoading(true); setMessage("");
+    try {
+      // Dynamic import xlsx library from CDN
+      const XLSX = await import(/* @vite-ignore */ "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+      const buf = await xlsxFile.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array", cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+
+      // Map columns: [no, agent_id, contract_date, policy_no, insured_name, chassis_no, plate_number,
+      //               coverage_start, coverage_end, source, payment_method, premium, stamp_duty, tax,
+      //               total_premium, commission, premium_remit]
+      const fmt = v => {
+        if (!v) return "";
+        if (v instanceof Date) return v.toISOString().slice(0, 10);
+        const s = String(v).trim();
+        // dd/mm/yyyy → yyyy-mm-dd (Thai Buddhist year handling)
+        const m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
+        if (m) {
+          let [_, d, mo, y] = m; y = +y;
+          if (y > 2400) y -= 543;
+          else if (y < 100) y += 2000;
+          return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        }
+        // yyyy-mm-dd already
+        const iso = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+        if (iso) {
+          let y = +iso[1]; if (y > 2400) y -= 543;
+          return `${y}-${String(iso[2]).padStart(2, "0")}-${String(iso[3]).padStart(2, "0")}`;
+        }
+        return s;
+      };
+      const num = v => isFinite(Number(v)) ? Number(v) : 0;
+
+      const arr = rows
+        .filter(r => r && (r[5] || r[3]))  // must have chassis_no or policy_no
+        .map((r, i) => ({
+          _key: `xlsx-${i}`,
+          _selected: true,
+          contract_date: fmt(r[2]),
+          policy_no: String(r[3] || "").trim(),
+          insured_name: String(r[4] || "").trim(),
+          chassis_no: String(r[5] || "").trim().toUpperCase(),
+          plate_number: String(r[6] || "").trim(),
+          coverage_start: fmt(r[7]),
+          coverage_end: fmt(r[8]),
+          paid: String(r[10] || "").trim(),
+          premium: num(r[11]),
+          stamp_duty: num(r[12]),
+          tax: num(r[13]),
+          total_premium: num(r[14]),
+          commission: num(r[15]),
+          premium_remit: num(r[16]),
+          customer_name: "",
+          invoice_no: "",
+          match_source: "",
+        }));
+
+      if (arr.length === 0) {
+        setMessage("❌ ไม่พบข้อมูลในไฟล์ Excel นี้");
+      } else {
+        await refreshMatch(arr);
+        setItems(arr);
+        const matchedSale = arr.filter(it => it.match_source === "sale").length;
+        const matchedRcpt = arr.filter(it => it.match_source === "receipt").length;
+        setMessage(`✅ อ่าน Excel ${arr.length} รายการ — match การขาย ${matchedSale} / รับเรื่องงานทะเบียน ${matchedRcpt}`);
+      }
+    } catch (e) {
+      setMessage("❌ อ่าน Excel ล้มเหลว: " + String(e).slice(0, 200));
+    }
+    setXlsxLoading(false);
+  }
 
   function openSearch(source) {
     setSearchSource(source);
@@ -206,16 +285,31 @@ function OcrPanel({ setMessage }) {
 
   return (
     <div>
-      {/* Upload */}
+      {/* Upload — 2 ทางเลือก: PDF หรือ Excel */}
       <div style={{ padding: "14px 16px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 12 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>ขั้นตอนที่ 1 — อัพโหลด PDF พรบ.</div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>ขั้นตอนที่ 1 — อัพโหลดไฟล์ พรบ. (เลือก PDF หรือ Excel)</div>
+
+        {/* PDF row */}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 6, marginBottom: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#0f766e", minWidth: 60 }}>📄 PDF</span>
           <input ref={fileRef} type="file" accept="application/pdf" onChange={e => setPdfFile(e.target.files?.[0] || null)} />
           <button onClick={runOcr} disabled={!pdfFile || ocrLoading}
             style={{ padding: "8px 18px", background: "#0f766e", color: "#fff", border: "none", borderRadius: 8, cursor: (!pdfFile || ocrLoading) ? "not-allowed" : "pointer", opacity: (!pdfFile || ocrLoading) ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>
             🔍 {ocrLoading ? "กำลัง OCR..." : "เริ่ม OCR"}
           </button>
-          {pdfFile && <span style={{ fontSize: 12, color: "#6b7280" }}>{pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)</span>}
+          {pdfFile && <span style={{ fontSize: 11, color: "#6b7280" }}>{pdfFile.name} ({(pdfFile.size / 1024 / 1024).toFixed(2)} MB)</span>}
+        </div>
+
+        {/* Excel row */}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "8px 10px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "#15803d", minWidth: 60 }}>📊 Excel</span>
+          <input ref={xlsxRef} type="file" accept=".xlsx,.xls" onChange={e => setXlsxFile(e.target.files?.[0] || null)} />
+          <button onClick={readXlsx} disabled={!xlsxFile || xlsxLoading}
+            style={{ padding: "8px 18px", background: "#15803d", color: "#fff", border: "none", borderRadius: 8, cursor: (!xlsxFile || xlsxLoading) ? "not-allowed" : "pointer", opacity: (!xlsxFile || xlsxLoading) ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>
+            📂 {xlsxLoading ? "กำลังอ่าน..." : "อ่าน Excel"}
+          </button>
+          {xlsxFile && <span style={{ fontSize: 11, color: "#6b7280" }}>{xlsxFile.name} ({(xlsxFile.size / 1024).toFixed(1)} KB)</span>}
+          <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: "auto" }}>คอลัมน์: เลข, agent, วันสัญญา, เลขกรมธรรม์, ผู้เอาฯ, เลขถัง, ทะเบียน, เริ่ม, สิ้นสุด, source, ชำระ, เบี้ย, อากร, ภาษี, รวม, คอม, นำส่ง</span>
         </div>
       </div>
 
