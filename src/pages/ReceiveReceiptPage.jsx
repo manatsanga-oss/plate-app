@@ -54,24 +54,35 @@ export default function ReceiveReceiptPage({ currentUser }) {
     const label = action === "mark_batch_received_back" ? "รับคืน" : "ส่งคืนลูกค้า";
     if (!window.confirm(`บันทึก${label} ${items.length} รายการ จาก ${batch.batch_code}?`)) return;
     try {
-      const res = await post({
+      await post({
         action,
         item_ids: items.map(it => it.item_id),
         by: currentUser?.username || currentUser?.name || "system",
       });
-      const data = Array.isArray(res) ? res : (res?.rows || []);
-      const docNo = data[0]?.received_back_doc_no || data[0]?.returned_doc_no || "";
-      setMessage(`✅ บันทึก${label} ${items.length} รายการสำเร็จ${docNo ? ` · เลขที่: ${docNo}` : ""}`);
+      setMessage(`✅ บันทึก${label} ${items.length} รายการสำเร็จ`);
       setSelected({});
-      // Auto-switch filter to show the just-updated batch
+      // Auto-switch: รับคืน → รอส่งลูกค้า, ส่งคืน → ส่งคืนลูกค้าแล้ว
       const nextFilter = action === "mark_batch_received_back" ? "received" : "returned";
-      if (filterStatus !== "all" && filterStatus !== nextFilter) {
+      if (filterStatus !== nextFilter) {
         setFilterStatus(nextFilter);
-        // fetchData will be called by useEffect when filterStatus changes
       } else {
         fetchData();
       }
     } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+  }
+
+  async function undoItems(items, batch) {
+    if (items.length === 0) { setMessage("เลือกรายการก่อน"); return; }
+    if (!window.confirm(`ยกเลิกสถานะ ${items.length} รายการ จาก ${batch.batch_code}?\n(ถ้าส่งคืนแล้ว → กลับเป็นรอส่งลูกค้า · ถ้ารับคืนแล้ว → กลับเป็นรอจัดการ)`)) return;
+    try {
+      await post({
+        action: "undo_item_status",
+        item_ids: items.map(it => it.item_id),
+      });
+      setMessage(`✅ ยกเลิก ${items.length} รายการสำเร็จ`);
+      setSelected({});
+      fetchData();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
   }
 
   function fmtDate(v) {
@@ -187,7 +198,7 @@ export default function ReceiveReceiptPage({ currentUser }) {
                 </div>
 
                 {/* Action bar */}
-                {b.status !== "cancelled" && (pendingItems.length > 0 || receivedItems.length > 0) && (
+                {b.status !== "cancelled" && items.length > 0 && (
                   <div style={{ padding: "10px 14px", borderTop: "1px solid #e5e7eb", background: "#f8fafc", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <label style={{ fontSize: 12, color: "#6b7280", display: "flex", alignItems: "center", gap: 4 }}>
                       <input type="checkbox" checked={allInBatchSelected}
@@ -214,6 +225,13 @@ export default function ReceiveReceiptPage({ currentUser }) {
                         ✅ บันทึกส่งคืนลูกค้า {selectedInBatch.length > 0 ? `(${selectedInBatch.filter(it => !it.returned_at).length})` : `(ทั้งหมด ${receivedItems.length})`}
                       </button>
                     )}
+                    {selectedInBatch.length > 0 && selectedInBatch.some(it => it.received_back_at || it.returned_at) && (
+                      <button
+                        onClick={() => undoItems(selectedInBatch.filter(it => it.received_back_at || it.returned_at), b)}
+                        style={{ padding: "8px 16px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+                        ↩️ ยกเลิก ({selectedInBatch.filter(it => it.received_back_at || it.returned_at).length})
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -223,7 +241,10 @@ export default function ReceiveReceiptPage({ currentUser }) {
                     <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                       <thead style={{ background: "#f3f4f6" }}>
                         <tr>
-                          <th style={{ padding: "6px 8px", width: 30 }}></th>
+                          <th style={{ padding: "6px 8px", width: 30 }}>
+                            <input type="checkbox" checked={items.length > 0 && items.every(it => selected[it.item_id])}
+                              onChange={(e) => toggleBatchItems(b, e.target.checked)} />
+                          </th>
                           <th style={th}>เลขที่รับเรื่อง</th>
                           <th style={th}>ลูกค้า</th>
                           <th style={th}>เลขถัง</th>
@@ -231,20 +252,18 @@ export default function ReceiveReceiptPage({ currentUser }) {
                           <th style={th}>รายการ</th>
                           <th style={{ ...th, textAlign: "right" }}>ยอด</th>
                           <th style={th}>สถานะ</th>
-                          <th style={th}>เลขที่บันทึก</th>
+                          <th style={{ ...th, textAlign: "center" }}>จัดการ</th>
                         </tr>
                       </thead>
                       <tbody>
                         {items.map((it, i) => {
                           const ist = itemStatusBadge(it);
-                          const done = !!it.returned_at;
+                          const canUndo = !!(it.received_back_at || it.returned_at);
                           return (
                             <tr key={it.item_id || i} style={{ borderTop: "1px solid #e5e7eb", background: selected[it.item_id] ? "#fef9c3" : "transparent" }}>
                               <td style={{ padding: "6px 8px" }}>
-                                {!done && (
-                                  <input type="checkbox" checked={!!selected[it.item_id]}
-                                    onChange={() => toggleItem(it.item_id)} />
-                                )}
+                                <input type="checkbox" checked={!!selected[it.item_id]}
+                                  onChange={() => toggleItem(it.item_id)} />
                               </td>
                               <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{it.receipt_no || "-"}</td>
                               <td style={td}>{it.customer_name || "-"}</td>
@@ -255,10 +274,14 @@ export default function ReceiveReceiptPage({ currentUser }) {
                               <td style={td}>
                                 <span style={{ display: "inline-block", padding: "2px 8px", background: ist.bg, color: ist.color, borderRadius: 8, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap" }}>{ist.label}</span>
                               </td>
-                              <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>
-                                {it.received_back_doc_no && <div style={{ color: "#1e40af", fontWeight: 600 }}>📥 {it.received_back_doc_no}</div>}
-                                {it.returned_doc_no && <div style={{ color: "#065f46", fontWeight: 600 }}>✅ {it.returned_doc_no}</div>}
-                                {!it.received_back_doc_no && !it.returned_doc_no && <span style={{ color: "#9ca3af" }}>-</span>}
+                              <td style={{ ...td, textAlign: "center" }}>
+                                {canUndo && (
+                                  <button onClick={() => undoItems([it], b)}
+                                    title={it.returned_at ? "ยกเลิก: กลับเป็นรอส่งลูกค้า" : "ยกเลิก: กลับเป็นรอจัดการ"}
+                                    style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                                    ↩️ ยกเลิก
+                                  </button>
+                                )}
                               </td>
                             </tr>
                           );
