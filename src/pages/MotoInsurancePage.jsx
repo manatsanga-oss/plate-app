@@ -260,12 +260,17 @@ function OcrPanel({ setMessage }) {
         body: JSON.stringify({ action: "save_insurance_batch", items: toSave.map(({ _key, _selected, customer_name, invoice_no, ...rest }) => rest) }),
       });
       const data = await res.json();
-      const n = data?.inserted ?? 0;
-      const matched = (data?.rows || []).filter(r => r.sale_id).length;
-      setMessage(`✅ บันทึกสำเร็จ ${n} รายการ (จับคู่ moto_sales: ${matched})`);
+      // n8n อาจตอบกลับเป็น array หรือ object — รองรับทั้ง 2 แบบ
+      const rows = Array.isArray(data) ? data : (data?.rows || []);
+      const n = data?.inserted ?? rows.length;
+      const matched = rows.filter(r => r.sale_id).length;
+      const batchNo = rows[0]?.record_batch_no || "";
+      setMessage(`✅ บันทึก ${n} รายการสำเร็จ${batchNo ? ` · เลขที่บันทึก: ${batchNo}` : ""} · จับคู่ใบขาย: ${matched}`);
       setItems([]);
       setPdfFile(null);
+      setXlsxFile(null);
       if (fileRef.current) fileRef.current.value = "";
+      if (xlsxRef.current) xlsxRef.current.value = "";
     } catch {
       setMessage("❌ บันทึกไม่สำเร็จ");
     }
@@ -592,11 +597,14 @@ function HistoryPanel({ setMessage }) {
                 <th>เบี้ยรวม</th>
                 <th>ใบขาย</th>
                 <th>เลขที่รับเรื่อง</th>
+                <th>เลขที่บันทึก</th>
                 <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
+              {rows.map((r, i) => {
+                const locked = !!r.billing_doc_no;
+                return (
                 <tr key={r.insurance_id}>
                   <td style={{ textAlign: "center" }}>{i + 1}</td>
                   <td style={{ whiteSpace: "nowrap" }}>{r.contract_date ? String(r.contract_date).slice(0, 10) : "-"}</td>
@@ -610,14 +618,21 @@ function HistoryPanel({ setMessage }) {
                     {!r.invoice_no && !r.customer_name && <span style={{ color: "#9ca3af" }}>-</span>}
                   </td>
                   <td style={{ color: r.receipt_no ? "#1e40af" : "#9ca3af", fontWeight: r.receipt_no ? 600 : 400 }}>{r.receipt_no || ""}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>
+                    {r.record_batch_no && <div style={{ color: "#7c3aed", fontWeight: 600 }}>{r.record_batch_no}</div>}
+                    {locked && <div style={{ fontSize: 10, color: "#059669", marginTop: 2 }}>🔒 {r.billing_doc_no}</div>}
+                  </td>
                   <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
-                    <button onClick={() => setEditTarget(r)}
-                      style={{ padding: "3px 10px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>✏️ แก้ไข</button>
-                    <button onClick={() => deleteOne(r.insurance_id)}
-                      style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🗑️ ลบ</button>
+                    <button onClick={() => !locked && setEditTarget(r)} disabled={locked}
+                      title={locked ? `วางบิลแล้ว (${r.billing_doc_no}) — แก้ไขไม่ได้` : "แก้ไข"}
+                      style={{ padding: "3px 10px", background: locked ? "#d1d5db" : "#0891b2", color: locked ? "#9ca3af" : "#fff", border: "none", borderRadius: 4, cursor: locked ? "not-allowed" : "pointer", fontSize: 11, marginRight: 4 }}>✏️ แก้ไข</button>
+                    <button onClick={() => !locked && deleteOne(r.insurance_id)} disabled={locked}
+                      title={locked ? `วางบิลแล้ว (${r.billing_doc_no}) — ลบไม่ได้` : "ลบ"}
+                      style={{ padding: "3px 10px", background: locked ? "#d1d5db" : "#ef4444", color: locked ? "#9ca3af" : "#fff", border: "none", borderRadius: 4, cursor: locked ? "not-allowed" : "pointer", fontSize: 11 }}>🗑️ ลบ</button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
