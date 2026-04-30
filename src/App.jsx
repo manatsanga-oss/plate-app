@@ -114,7 +114,7 @@ export default function App() {
     if (page === "upload") return false;
     if (page === "convert") return false;
     if (page === "subunit") return false;
-    if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "position" || page === "motostock") return false;
+    if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "expenserecord" || page === "position" || page === "motostock") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
