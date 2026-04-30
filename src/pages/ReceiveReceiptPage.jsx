@@ -3,13 +3,14 @@ import React, { useEffect, useState } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 
 export default function ReceiveReceiptPage({ currentUser }) {
-  const [rows, setRows] = useState([]);
+  const [batches, setBatches] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all"); // all | pending | received | returned
+  const [filterStatus, setFilterStatus] = useState("active"); // active | received | returned | all
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [message, setMessage] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [selected, setSelected] = useState({});
+  const [expanded, setExpanded] = useState({});
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -21,53 +22,45 @@ export default function ReceiveReceiptPage({ currentUser }) {
 
   async function fetchData() {
     setLoading(true);
-    setSelected({});
     try {
-      const data = await post({ action: "list_receipt_receive", status: filterStatus });
-      setRows(Array.isArray(data) ? data : []);
-    } catch { setRows([]); }
+      const data = await post({
+        action: "get_submission_batches",
+        date_from: dateFrom || null,
+        date_to: dateTo || null,
+        status: filterStatus,
+        keyword: search.trim(),
+      });
+      setBatches(Array.isArray(data) ? data : []);
+    } catch { setBatches([]); }
     setLoading(false);
   }
 
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [filterStatus]);
 
-  const kw = search.trim().toLowerCase();
-  const filtered = rows.filter(r => {
-    if (!kw) return true;
-    const hay = [r.receipt_no, r.customer_name, r.chassis_no, r.plate_number, r.brand].filter(Boolean).join(" ").toLowerCase();
-    return hay.includes(kw);
-  });
-
-  const selectedIds = filtered.filter(r => selected[r.receipt_no]).map(r => r.receipt_no);
-
-  function toggleOne(no) { setSelected(s => ({ ...s, [no]: !s[no] })); }
-  function toggleAll() {
-    if (filtered.every(r => selected[r.receipt_no])) {
-      const next = { ...selected };
-      filtered.forEach(r => delete next[r.receipt_no]);
-      setSelected(next);
-    } else {
-      const next = { ...selected };
-      filtered.forEach(r => { next[r.receipt_no] = true; });
-      setSelected(next);
-    }
-  }
-
-  async function markAs(action) {
-    if (selectedIds.length === 0) { setMessage("เลือกรายการก่อน"); return; }
-    const label = action === "mark_received_back" ? "รับคืนจากสำนักงาน" : "ส่งคืนลูกค้า";
-    if (!window.confirm(`${label} ${selectedIds.length} รายการ?`)) return;
-    setSaving(true);
+  async function markBatchReceived(batch) {
+    if (!window.confirm(`บันทึกรับคืน batch ${batch.batch_code}?\n${batch.items?.length || 0} รายการ`)) return;
     try {
       await post({
-        action,
-        receipt_nos: selectedIds,
+        action: "mark_batch_received_back",
+        batch_id: batch.batch_id,
         by: currentUser?.username || currentUser?.name || "system",
       });
-      setMessage(`✅ ${label} สำเร็จ ${selectedIds.length} รายการ`);
+      setMessage(`✅ บันทึกรับคืน ${batch.batch_code} สำเร็จ`);
       fetchData();
-    } catch { setMessage("❌ ทำรายการไม่สำเร็จ"); }
-    setSaving(false);
+    } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+  }
+
+  async function markBatchReturned(batch) {
+    if (!window.confirm(`บันทึกส่งคืนลูกค้า batch ${batch.batch_code}?\n${batch.items?.length || 0} รายการ`)) return;
+    try {
+      await post({
+        action: "mark_batch_returned",
+        batch_id: batch.batch_id,
+        by: currentUser?.username || currentUser?.name || "system",
+      });
+      setMessage(`✅ บันทึกส่งคืนลูกค้า ${batch.batch_code} สำเร็จ`);
+      fetchData();
+    } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
   }
 
   function fmtDate(v) {
@@ -76,12 +69,18 @@ export default function ReceiveReceiptPage({ currentUser }) {
     if (isNaN(d)) return String(v).slice(0, 10);
     return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`;
   }
+  function fmtNum(v) { return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
-  function statusBadge(r) {
-    if (r.returned_to_customer_at) return <span style={{ display: "inline-block", padding: "2px 10px", background: "#dcfce7", color: "#065f46", borderRadius: 12, fontSize: 11, fontWeight: 600 }}>✅ ส่งคืนลูกค้าแล้ว</span>;
-    if (r.received_back_at) return <span style={{ display: "inline-block", padding: "2px 10px", background: "#dbeafe", color: "#1e40af", borderRadius: 12, fontSize: 11, fontWeight: 600 }}>📥 รับคืนแล้ว</span>;
-    return <span style={{ display: "inline-block", padding: "2px 10px", background: "#fef3c7", color: "#92400e", borderRadius: 12, fontSize: 11, fontWeight: 600 }}>⏳ รอรับคืน</span>;
+  function batchStatus(b) {
+    if (b.status === "cancelled") return { label: "ยกเลิก", color: "#dc2626", bg: "#fee2e2" };
+    if (b.returned_at) return { label: "✅ ส่งคืนลูกค้าแล้ว", color: "#065f46", bg: "#dcfce7" };
+    if (b.received_back_at) return { label: "📥 รับคืนแล้ว · รอส่งลูกค้า", color: "#1e40af", bg: "#dbeafe" };
+    return { label: "⏳ ส่งแล้ว · รอรับคืน", color: "#92400e", bg: "#fef3c7" };
   }
+
+  // Total
+  const grandItems = batches.reduce((s, b) => s + (b.items?.length || 0), 0);
+  const grandTotal = batches.reduce((s, b) => s + Number(b.total_amount || 0), 0);
 
   return (
     <div className="page-container">
@@ -97,93 +96,128 @@ export default function ReceiveReceiptPage({ currentUser }) {
 
       {/* Filter */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>สถานะ:</span>
-        {[
-          ["all", "ทั้งหมด"],
-          ["pending", "⏳ รอรับคืน"],
-          ["received", "📥 รับคืนแล้ว"],
-          ["returned", "✅ ส่งคืนลูกค้าแล้ว"],
-        ].map(([v, label]) => (
-          <button key={v} onClick={() => setFilterStatus(v)}
-            style={{ padding: "5px 14px", background: filterStatus === v ? "#072d6b" : "#e5e7eb", color: filterStatus === v ? "#fff" : "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
-            {label}
-          </button>
-        ))}
+        <span style={{ fontSize: 12, fontWeight: 600 }}>วันที่ส่ง:</span>
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+        <span>ถึง</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
 
-        <input type="text" placeholder="🔍 ค้นหา (เลขที่รับเรื่อง, ลูกค้า, เลขถัง, ทะเบียน)"
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
+          <option value="active">⏳ รอรับคืน + รับแล้วรอส่งลูกค้า</option>
+          <option value="pending">⏳ รอรับคืนเท่านั้น</option>
+          <option value="received">📥 รับคืนแล้ว · รอส่งลูกค้า</option>
+          <option value="returned">✅ ส่งคืนลูกค้าแล้ว</option>
+          <option value="all">ทั้งหมด</option>
+        </select>
+
+        <input type="text" placeholder="🔍 ค้นหา (เลข batch, supplier)"
           value={search} onChange={e => setSearch(e.target.value)}
-          style={{ flex: 1, minWidth: 280, padding: "6px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+          onKeyDown={e => e.key === "Enter" && fetchData()}
+          style={{ flex: 1, minWidth: 220, padding: "6px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
 
         <button onClick={fetchData} disabled={loading}
-          style={{ padding: "7px 16px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
-          {loading ? "..." : "🔄 รีเฟรช"}
+          style={{ padding: "7px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+          {loading ? "..." : "🔍 ค้นหา"}
         </button>
       </div>
 
-      {/* Action bar */}
-      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        <strong style={{ fontSize: 13 }}>เลือก {selectedIds.length} รายการ</strong>
-        <div style={{ flex: 1 }} />
-        <button onClick={() => markAs("mark_received_back")} disabled={selectedIds.length === 0 || saving}
-          style={{ padding: "8px 16px", background: selectedIds.length === 0 ? "#9ca3af" : "#1e40af", color: "#fff", border: "none", borderRadius: 8, cursor: selectedIds.length === 0 ? "not-allowed" : "pointer", fontWeight: 600 }}>
-          📥 บันทึกรับคืน
-        </button>
-        <button onClick={() => markAs("mark_returned_to_customer")} disabled={selectedIds.length === 0 || saving}
-          style={{ padding: "8px 16px", background: selectedIds.length === 0 ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: selectedIds.length === 0 ? "not-allowed" : "pointer", fontWeight: 600 }}>
-          ✅ บันทึกส่งคืนลูกค้า
-        </button>
+      {/* Summary */}
+      <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 13 }}>
+        <span>📦 batch: <strong>{batches.length}</strong></span>
+        <span>📋 รายการรวม: <strong>{grandItems}</strong></span>
+        <span>💰 ยอดสุทธิรวม: <strong style={{ color: "#dc2626" }}>{fmtNum(grandTotal)}</strong></span>
       </div>
 
-      {/* Table */}
-      <div style={{ overflowX: "auto", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        {loading ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead style={{ background: "#072d6b", color: "#fff" }}>
-              <tr>
-                <th style={th}><input type="checkbox" checked={filtered.length > 0 && filtered.every(r => selected[r.receipt_no])} onChange={toggleAll} /></th>
-                <th style={th}>เลขที่รับเรื่อง</th>
-                <th style={th}>วันที่รับเรื่อง</th>
-                <th style={th}>ลูกค้า</th>
-                <th style={th}>เลขตัวถัง</th>
-                <th style={th}>ทะเบียน</th>
-                <th style={th}>สาขา</th>
-                <th style={th}>วันรับคืน</th>
-                <th style={th}>วันส่งคืนลูกค้า</th>
-                <th style={th}>สถานะ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(r => (
-                <tr key={r.receipt_no} style={{ borderTop: "1px solid #e5e7eb", background: selected[r.receipt_no] ? "#fef9c3" : "transparent" }}>
-                  <td style={td}><input type="checkbox" checked={!!selected[r.receipt_no]} onChange={() => toggleOne(r.receipt_no)} /></td>
-                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#0369a1" }}>{r.receipt_no || "-"}</td>
-                  <td style={td}>{fmtDate(r.receive_date)}</td>
-                  <td style={td}>{r.customer_name || "-"}</td>
-                  <td style={{ ...td, fontFamily: "monospace" }}>{r.chassis_no || "-"}</td>
-                  <td style={td}>{r.plate_number || "-"}</td>
-                  <td style={td}>{r.branch_name || r.branch_code || "-"}</td>
-                  <td style={td}>{fmtDate(r.received_back_at)}</td>
-                  <td style={td}>{fmtDate(r.returned_to_customer_at)}</td>
-                  <td style={td}>{statusBadge(r)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot style={{ background: "#f3f4f6", fontWeight: 700 }}>
-              <tr>
-                <td colSpan={9} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} รายการ</td>
-                <td></td>
-              </tr>
-            </tfoot>
-          </table>
-        )}
-      </div>
+      {/* Batches list */}
+      {loading ? (
+        <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+      ) : batches.length === 0 ? (
+        <div style={{ padding: 60, textAlign: "center", color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+          ไม่มี batch ที่ส่งแล้ว
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {batches.map(b => {
+            const st = batchStatus(b);
+            const isOpen = !!expanded[b.batch_id];
+            return (
+              <div key={b.batch_id} style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
+                {/* Batch header — colored bar */}
+                <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", background: "#1e3a8a", color: "#fff" }}>
+                  <button onClick={() => setExpanded(p => ({ ...p, [b.batch_id]: !p[b.batch_id] }))}
+                    style={{ background: "transparent", color: "#fff", border: "none", cursor: "pointer", fontSize: 14, padding: 0 }}>
+                    {isOpen ? "▼" : "▶"}
+                  </button>
+                  <strong style={{ fontFamily: "monospace", fontSize: 16, color: "#fff" }}>{b.batch_code}</strong>
+                  <span style={{ background: "#cbd5e1", color: "#1e293b", padding: "2px 10px", borderRadius: 6, fontSize: 12 }}>{fmtDate(b.submission_date)}</span>
+                  <span style={{ flex: 1 }}>📍 {b.destination || "-"} · {b.items?.length || 0} รายการ</span>
+                  <span style={{ background: st.bg, color: st.color, padding: "3px 12px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>{st.label}</span>
+                  <strong style={{ color: "#fbbf24", fontSize: 15 }}>฿ {fmtNum(b.total_amount)}</strong>
+                  <span style={{ fontSize: 11, color: "#cbd5e1" }}>by {b.created_by || "-"}</span>
+                </div>
+
+                {/* Action buttons */}
+                {b.status !== "cancelled" && !b.returned_at && (
+                  <div style={{ padding: "10px 14px", borderTop: "1px solid #e5e7eb", background: "#f8fafc", display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    {!b.received_back_at && (
+                      <button onClick={() => markBatchReceived(b)}
+                        style={{ padding: "8px 18px", background: "#1e40af", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+                        📥 บันทึกรับคืน
+                      </button>
+                    )}
+                    {b.received_back_at && (
+                      <>
+                        <span style={{ alignSelf: "center", fontSize: 12, color: "#1e40af" }}>📥 รับคืนแล้ว: {fmtDate(b.received_back_at)} โดย {b.received_back_by || "-"}</span>
+                        <button onClick={() => markBatchReturned(b)}
+                          style={{ padding: "8px 18px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+                          ✅ บันทึกส่งคืนลูกค้า
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+                {b.returned_at && (
+                  <div style={{ padding: "10px 14px", borderTop: "1px solid #e5e7eb", background: "#dcfce7", fontSize: 12, color: "#065f46" }}>
+                    ✅ ส่งคืนลูกค้าแล้ว: {fmtDate(b.returned_at)} โดย {b.returned_by || "-"} · 📥 รับคืน: {fmtDate(b.received_back_at)} โดย {b.received_back_by || "-"}
+                  </div>
+                )}
+
+                {/* Items detail (when expanded) */}
+                {isOpen && b.items?.length > 0 && (
+                  <div style={{ padding: "10px 14px", borderTop: "1px solid #e5e7eb" }}>
+                    <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                      <thead style={{ background: "#f3f4f6" }}>
+                        <tr>
+                          <th style={{ padding: "6px 10px", textAlign: "left" }}>เลขที่รับเรื่อง</th>
+                          <th style={{ padding: "6px 10px", textAlign: "left" }}>ลูกค้า</th>
+                          <th style={{ padding: "6px 10px", textAlign: "left" }}>เลขถัง</th>
+                          <th style={{ padding: "6px 10px", textAlign: "left" }}>ทะเบียน</th>
+                          <th style={{ padding: "6px 10px", textAlign: "left" }}>รายการ</th>
+                          <th style={{ padding: "6px 10px", textAlign: "right" }}>ยอด</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {b.items.map((it, i) => (
+                          <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                            <td style={{ padding: "6px 10px", fontFamily: "monospace", color: "#0369a1" }}>{it.receipt_no || "-"}</td>
+                            <td style={{ padding: "6px 10px" }}>{it.customer_name || "-"}</td>
+                            <td style={{ padding: "6px 10px", fontFamily: "monospace" }}>{it.chassis_no || "-"}</td>
+                            <td style={{ padding: "6px 10px" }}>{it.plate_number || "-"}</td>
+                            <td style={{ padding: "6px 10px" }}>{it.income_name || it.income_type || "-"}</td>
+                            <td style={{ padding: "6px 10px", textAlign: "right" }}>{fmtNum(it.net_price)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
-
-const th = { padding: "10px 12px", textAlign: "left", fontSize: 12, fontWeight: 600 };
-const td = { padding: "8px 12px", fontSize: 12, color: "#1f2937" };
