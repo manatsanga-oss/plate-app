@@ -8,6 +8,7 @@ export default function InsuranceBillingPage({ currentUser }) {
   const [selected, setSelected] = useState({});
   const [search, setSearch] = useState("");
   const [showBilled, setShowBilled] = useState(false);
+  const [viewMode, setViewMode] = useState("detail"); // 'detail' | 'summary'
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [saving, setSaving] = useState(false);
@@ -48,6 +49,39 @@ export default function InsuranceBillingPage({ currentUser }) {
       .filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
+
+  // Group by billing_doc_no for summary view
+  const groupedByBill = React.useMemo(() => {
+    const map = new Map();
+    filtered.forEach(r => {
+      const key = r.billing_doc_no || "(ยังไม่วางบิล)";
+      if (!map.has(key)) {
+        map.set(key, {
+          billing_doc_no: r.billing_doc_no,
+          billed_at: r.billed_at,
+          billed_by: r.billed_by,
+          count: 0,
+          premium: 0,
+          total_premium: 0,
+          commission: 0,
+          premium_remit: 0,
+          rows: [],
+        });
+      }
+      const g = map.get(key);
+      g.count += 1;
+      g.premium += Number(r.premium || 0);
+      g.total_premium += Number(r.total_premium || 0);
+      g.commission += Number(r.commission || 0);
+      g.premium_remit += Number(r.premium_remit || 0);
+      g.rows.push(r);
+    });
+    return Array.from(map.values()).sort((a, b) => {
+      const at = a.billed_at ? new Date(a.billed_at).getTime() : 0;
+      const bt = b.billed_at ? new Date(b.billed_at).getTime() : 0;
+      return bt - at;
+    });
+  }, [filtered]);
 
   const selectedRows = filtered.filter(r => selected[r.insurance_id]);
   const selCount = selectedRows.length;
@@ -157,6 +191,19 @@ export default function InsuranceBillingPage({ currentUser }) {
           <input type="checkbox" checked={showBilled} onChange={e => setShowBilled(e.target.checked)} />
           แสดงที่วางบิลแล้ว
         </label>
+
+        {showBilled && (
+          <div style={{ display: "flex", gap: 4, marginLeft: 6 }}>
+            <button onClick={() => setViewMode("detail")}
+              style={{ padding: "5px 12px", background: viewMode === "detail" ? "#072d6b" : "#e5e7eb", color: viewMode === "detail" ? "#fff" : "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+              📋 ทุกรายการ
+            </button>
+            <button onClick={() => setViewMode("summary")}
+              style={{ padding: "5px 12px", background: viewMode === "summary" ? "#072d6b" : "#e5e7eb", color: viewMode === "summary" ? "#fff" : "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+              📊 สรุปต่อใบ
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Summary + Action */}
@@ -183,6 +230,56 @@ export default function InsuranceBillingPage({ currentUser }) {
           <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>
             {showBilled ? "ไม่มีรายการที่วางบิลแล้ว" : "ไม่มีรายการ พรบ. รอวางบิล"}
           </div>
+        ) : showBilled && viewMode === "summary" ? (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead style={{ background: "#072d6b", color: "#fff" }}>
+              <tr>
+                <th style={th}>เลขที่ใบวางบิล</th>
+                <th style={th}>วันที่วางบิล</th>
+                <th style={th}>ผู้บันทึก</th>
+                <th style={th}>จำนวน</th>
+                <th style={th}>เบี้ย</th>
+                <th style={th}>เบี้ยรวม</th>
+                <th style={th}>ค่าคอม</th>
+                <th style={th}>เบี้ยนำส่ง</th>
+                <th style={th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {groupedByBill.map(g => (
+                <tr key={g.billing_doc_no || "x"} style={{ borderTop: "1px solid #e5e7eb" }}>
+                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#072d6b" }}>{g.billing_doc_no || "-"}</td>
+                  <td style={td}>{fmtDate(g.billed_at)}</td>
+                  <td style={td}>{g.billed_by || "-"}</td>
+                  <td style={{ ...tdNum, fontWeight: 600 }}>{g.count}</td>
+                  <td style={tdNum}>{fmtNum(g.premium)}</td>
+                  <td style={{ ...tdNum, color: "#dc2626", fontWeight: 700 }}>{fmtNum(g.total_premium)}</td>
+                  <td style={tdNum}>{fmtNum(g.commission)}</td>
+                  <td style={{ ...tdNum, color: "#0369a1", fontWeight: 700 }}>{fmtNum(g.premium_remit)}</td>
+                  <td style={td}>
+                    {g.billing_doc_no && (
+                      <>
+                        <button onClick={() => setDetailRow(g)} title="ดูรายการในใบนี้"
+                          style={{ padding: "3px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>📋 ดู</button>
+                        <button onClick={() => cancelBilling(g.billing_doc_no)} title="ยกเลิกใบวางบิล"
+                          style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🗑️ ยกเลิก</button>
+                      </>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {/* Grand total */}
+              <tr style={{ borderTop: "2px solid #072d6b", background: "#f1f5f9", fontWeight: 700 }}>
+                <td style={{ ...td, fontWeight: 700 }} colSpan={3}>รวม {groupedByBill.length} ใบ</td>
+                <td style={tdNum}>{groupedByBill.reduce((s, g) => s + g.count, 0)}</td>
+                <td style={tdNum}>{fmtNum(groupedByBill.reduce((s, g) => s + g.premium, 0))}</td>
+                <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(groupedByBill.reduce((s, g) => s + g.total_premium, 0))}</td>
+                <td style={tdNum}>{fmtNum(groupedByBill.reduce((s, g) => s + g.commission, 0))}</td>
+                <td style={{ ...tdNum, color: "#0369a1" }}>{fmtNum(groupedByBill.reduce((s, g) => s + g.premium_remit, 0))}</td>
+                <td style={td}></td>
+              </tr>
+            </tbody>
+          </table>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead style={{ background: "#072d6b", color: "#fff" }}>
