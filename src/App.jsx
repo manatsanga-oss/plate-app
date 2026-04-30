@@ -421,7 +421,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="registrationsubmitreceipt" label="ส่งงานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="บันทึกงานทะเบียน/ประกัน" pages={["registrationreceive","motoinsurance","cosmosinsurance"]} activeMenu={activeMenu}>
-          <MenuItem page="registrationreceive" label="บันทึกรับ/ส่งคืนงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="registrationreceive" label="บันทึกรับ/ส่งคืนงานทะเบียนรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="motoinsurance" label="บันทึก พรบ.รถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="cosmosinsurance" label="บันทึกประกัน COSMOS" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
