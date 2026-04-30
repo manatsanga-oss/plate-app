@@ -542,6 +542,8 @@ function HistoryPanel({ setMessage }) {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState(null);
+  const [viewMode, setViewMode] = useState("group"); // 'group' (default) | 'detail'
+  const [openBatch, setOpenBatch] = useState(null); // batch record being viewed in detail popup
 
   async function fetchList() {
     setLoading(true);
@@ -567,6 +569,45 @@ function HistoryPanel({ setMessage }) {
 
   useEffect(() => { fetchList(); /* eslint-disable-next-line */ }, []);
 
+  // Group rows by record_batch_no for summary view
+  const groupedBatches = React.useMemo(() => {
+    const map = new Map();
+    rows.forEach(r => {
+      const key = r.record_batch_no || "(ไม่มี batch)";
+      if (!map.has(key)) {
+        map.set(key, {
+          batch_no: r.record_batch_no,
+          first_created: r.created_at,
+          count: 0,
+          billed_count: 0,
+          premium: 0,
+          total_premium: 0,
+          commission: 0,
+          premium_remit: 0,
+          rows: [],
+        });
+      }
+      const g = map.get(key);
+      g.count += 1;
+      if (r.billing_doc_no) g.billed_count += 1;
+      g.premium += Number(r.premium || 0);
+      g.total_premium += Number(r.total_premium || 0);
+      g.commission += Number(r.commission || 0);
+      g.premium_remit += Number(r.premium_remit || 0);
+      g.rows.push(r);
+      // Track latest contract_date as first
+      if (!g.first_created || (r.created_at && r.created_at > g.first_created)) {
+        g.first_created = r.created_at;
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => {
+      // Sort by batch_no descending (newest first)
+      const an = a.batch_no || "";
+      const bn = b.batch_no || "";
+      return bn.localeCompare(an);
+    });
+  }, [rows]);
+
   return (
     <div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
@@ -576,6 +617,18 @@ function HistoryPanel({ setMessage }) {
           style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
         <button onClick={fetchList}
           style={{ padding: "8px 18px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>🔍 ค้นหา</button>
+
+        {/* View mode toggle */}
+        <div style={{ display: "flex", gap: 4, marginLeft: 8 }}>
+          <button onClick={() => setViewMode("group")}
+            style={{ padding: "8px 14px", background: viewMode === "group" ? "#7c3aed" : "#e5e7eb", color: viewMode === "group" ? "#fff" : "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            📊 สรุปต่อใบบันทึก
+          </button>
+          <button onClick={() => setViewMode("detail")}
+            style={{ padding: "8px 14px", background: viewMode === "detail" ? "#7c3aed" : "#e5e7eb", color: viewMode === "detail" ? "#fff" : "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            📋 ทุกรายการ
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -583,6 +636,55 @@ function HistoryPanel({ setMessage }) {
       ) : rows.length === 0 ? (
         <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
           ไม่มีข้อมูล
+        </div>
+      ) : viewMode === "group" ? (
+        /* GROUP / SUMMARY VIEW — Batch List */
+        <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
+          <div style={{ padding: "12px 16px", textAlign: "center", borderBottom: "1px solid #e5e7eb", background: "#fafafa", fontSize: 14, fontWeight: 700, color: "#374151" }}>
+            📦 รายการ Batch — {groupedBatches.length} ใบ
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table" style={{ fontSize: 13, width: "100%" }}>
+              <thead>
+                <tr>
+                  <th>เลขที่ใบบันทึก</th>
+                  <th style={{ textAlign: "center" }}>ประเภท</th>
+                  <th style={{ textAlign: "right" }}>จำนวน</th>
+                  <th style={{ textAlign: "right" }}>เบี้ยรวม</th>
+                  <th>วันที่บันทึก</th>
+                  <th>ผู้บันทึก</th>
+                  <th style={{ textAlign: "center" }}>ดู</th>
+                </tr>
+              </thead>
+              <tbody>
+                {groupedBatches.map(g => (
+                  <tr key={g.batch_no || "x"}>
+                    <td style={{ fontFamily: "monospace", fontWeight: 700, color: "#0369a1" }}>{g.batch_no || "-"}</td>
+                    <td style={{ textAlign: "center" }}>
+                      <span style={{ display: "inline-block", padding: "2px 10px", background: "#e0f2fe", color: "#0369a1", borderRadius: 12, fontSize: 11, fontWeight: 600 }}>พรบ.</span>
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>{g.count}</td>
+                    <td style={{ textAlign: "right", color: "#dc2626", fontWeight: 700 }}>{g.total_premium.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                    <td style={{ whiteSpace: "nowrap", color: "#6b7280" }}>{g.first_created ? new Date(g.first_created).toLocaleString("th-TH", { day: "numeric", month: "numeric", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}</td>
+                    <td style={{ color: "#6b7280" }}>{g.rows[0]?.created_by || "system"}</td>
+                    <td style={{ textAlign: "center" }}>
+                      <button onClick={() => setOpenBatch(g)}
+                        style={{ padding: "5px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                        📁 ดู
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {/* Grand total */}
+                <tr style={{ borderTop: "2px solid #072d6b", background: "#f1f5f9", fontWeight: 700 }}>
+                  <td colSpan={2} style={{ textAlign: "right", padding: "8px 12px" }}>รวม {groupedBatches.length} ใบ</td>
+                  <td style={{ textAlign: "right" }}>{groupedBatches.reduce((s, g) => s + g.count, 0)}</td>
+                  <td style={{ textAlign: "right", color: "#dc2626" }}>{groupedBatches.reduce((s, g) => s + g.total_premium, 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                  <td colSpan={3}></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
@@ -645,6 +747,93 @@ function HistoryPanel({ setMessage }) {
           onSaved={() => { setEditTarget(null); setMessage("✅ บันทึกสำเร็จ"); fetchList(); }}
         />
       )}
+
+      {openBatch && (
+        <BatchDetailDialog
+          batch={openBatch}
+          onClose={() => setOpenBatch(null)}
+          onEdit={(r) => { setOpenBatch(null); setEditTarget(r); }}
+          onDelete={async (id) => {
+            await deleteOne(id);
+            setOpenBatch(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function BatchDetailDialog({ batch, onClose, onEdit, onDelete }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 1100, maxWidth: "96vw", maxHeight: "92vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ margin: 0, color: "#7c3aed" }}>📋 รายการในใบบันทึก: <code>{batch.batch_no}</code></h3>
+          <span style={{ marginLeft: 12, fontSize: 13, color: "#6b7280" }}>
+            {batch.count} รายการ · เบี้ยรวม {batch.total_premium.toLocaleString("th-TH", { minimumFractionDigits: 2 })} · วางบิลแล้ว {batch.billed_count}/{batch.count}
+          </span>
+          <button onClick={onClose} style={{ marginLeft: "auto", padding: "6px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>ปิด</button>
+        </div>
+
+        <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+          <table className="data-table" style={{ fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>วันสัญญา</th>
+                <th>เลขกรมธรรม์</th>
+                <th>เลขตัวถัง</th>
+                <th>ผู้เอาประกัน</th>
+                <th>เบี้ยรวม</th>
+                <th>ใบขาย / ลูกค้า</th>
+                <th>เลขที่รับเรื่อง</th>
+                <th>สถานะ</th>
+                <th>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {batch.rows.map((r, i) => {
+                const locked = !!r.billing_doc_no;
+                return (
+                  <tr key={r.insurance_id}>
+                    <td style={{ textAlign: "center" }}>{i + 1}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{r.contract_date ? String(r.contract_date).slice(0, 10) : "-"}</td>
+                    <td>{r.policy_no || "-"}</td>
+                    <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
+                    <td>{r.insured_name || "-"}</td>
+                    <td style={{ textAlign: "right", fontWeight: 600, color: "#dc2626" }}>{Number(r.total_premium || 0).toLocaleString()}</td>
+                    <td>
+                      {r.invoice_no && <div style={{ color: "#065f46", fontWeight: 600 }}>{r.invoice_no}</div>}
+                      {r.customer_name && <div style={{ fontSize: 11, color: "#6b7280" }}>{r.customer_name}</div>}
+                      {!r.invoice_no && !r.customer_name && <span style={{ color: "#9ca3af" }}>-</span>}
+                    </td>
+                    <td style={{ color: r.receipt_no ? "#1e40af" : "#9ca3af", fontWeight: r.receipt_no ? 600 : 400 }}>{r.receipt_no || ""}</td>
+                    <td>
+                      {locked ? (
+                        <span style={{ display: "inline-block", padding: "2px 8px", background: "#dcfce7", color: "#065f46", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                          🔒 {r.billing_doc_no}
+                        </span>
+                      ) : (
+                        <span style={{ display: "inline-block", padding: "2px 8px", background: "#fef3c7", color: "#92400e", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                          ⏳ รอวางบิล
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                      <button onClick={() => !locked && onEdit(r)} disabled={locked}
+                        title={locked ? "วางบิลแล้ว — แก้ไขไม่ได้" : "แก้ไข"}
+                        style={{ padding: "3px 8px", background: locked ? "#d1d5db" : "#0891b2", color: locked ? "#9ca3af" : "#fff", border: "none", borderRadius: 4, cursor: locked ? "not-allowed" : "pointer", fontSize: 11, marginRight: 4 }}>✏️</button>
+                      <button onClick={() => !locked && window.confirm("ลบรายการนี้?") && onDelete(r.insurance_id)} disabled={locked}
+                        title={locked ? "วางบิลแล้ว — ลบไม่ได้" : "ลบ"}
+                        style={{ padding: "3px 8px", background: locked ? "#d1d5db" : "#ef4444", color: locked ? "#9ca3af" : "#fff", border: "none", borderRadius: 4, cursor: locked ? "not-allowed" : "pointer", fontSize: 11 }}>🗑️</button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
