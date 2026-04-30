@@ -290,10 +290,9 @@ export default function InsuranceBillingPage({ currentUser }) {
                 <th style={th}>ผู้เอาประกัน</th>
                 <th style={th}>เลขตัวถัง</th>
                 <th style={th}>เลขทะเบียน</th>
-                <th style={th}>เบี้ย</th>
-                <th style={th}>เบี้ยรวม</th>
-                <th style={th}>ค่าคอม</th>
-                <th style={th}>เบี้ยนำส่ง</th>
+                <th style={th}>เลขที่ใบขาย</th>
+                <th style={th}>เลขที่รับเรื่อง</th>
+                <th style={th}>ค่าเบี้ย</th>
                 {showBilled && <th style={th}>ใบวางบิล</th>}
                 {showBilled && <th style={th}>วันที่วางบิล</th>}
                 <th style={th}></th>
@@ -308,10 +307,9 @@ export default function InsuranceBillingPage({ currentUser }) {
                   <td style={td}>{r.insured_name || "-"}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.chassis_no || "-"}</td>
                   <td style={td}>{r.plate_number || "-"}</td>
-                  <td style={tdNum}>{fmtNum(r.premium)}</td>
+                  <td style={{ ...td, color: r.invoice_no ? "#065f46" : "#9ca3af", fontWeight: r.invoice_no ? 600 : 400 }}>{r.invoice_no || "-"}</td>
+                  <td style={{ ...td, color: r.receipt_no ? "#1e40af" : "#9ca3af", fontWeight: r.receipt_no ? 600 : 400 }}>{r.receipt_no || "-"}</td>
                   <td style={{ ...tdNum, color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}</td>
-                  <td style={tdNum}>{fmtNum(r.commission)}</td>
-                  <td style={{ ...tdNum, color: "#0369a1", fontWeight: 600 }}>{fmtNum(r.premium_remit)}</td>
                   {showBilled && <td style={{ ...td, fontFamily: "monospace", color: "#059669" }}>{r.billing_doc_no || "-"}</td>}
                   {showBilled && <td style={td}>{r.billed_at ? new Date(r.billed_at).toLocaleString("th-TH") : "-"}</td>}
                   <td style={td}>
@@ -331,11 +329,8 @@ export default function InsuranceBillingPage({ currentUser }) {
             </tbody>
             <tfoot style={{ background: "#f3f4f6", fontWeight: 700 }}>
               <tr>
-                <td colSpan={6} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} รายการ</td>
-                <td style={tdNum}>{fmtNum(filtered.reduce((s, r) => s + Number(r.premium || 0), 0))}</td>
+                <td colSpan={8} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} รายการ</td>
                 <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(filtered.reduce((s, r) => s + Number(r.total_premium || 0), 0))}</td>
-                <td style={tdNum}>{fmtNum(filtered.reduce((s, r) => s + Number(r.commission || 0), 0))}</td>
-                <td style={{ ...tdNum, color: "#0369a1" }}>{fmtNum(filtered.reduce((s, r) => s + Number(r.premium_remit || 0), 0))}</td>
                 {showBilled && <td colSpan={2}></td>}
                 <td></td>
               </tr>
