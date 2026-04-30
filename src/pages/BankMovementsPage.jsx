@@ -69,12 +69,20 @@ export default function BankMovementsPage({ currentUser }) {
     return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   }
 
-  // Calculate balances
+  // Calculate balances (amount เป็น NET หลังหัก WHT แล้ว — out = ติดลบ, in = บวก)
   const opening = Number(acc?.opening_balance || 0);
   const totalIn = movements.filter(m => m.direction === "in").reduce((s, m) => s + Number(m.amount || 0), 0);
   const totalOut = movements.filter(m => m.direction === "out").reduce((s, m) => s + Math.abs(Number(m.amount || 0)), 0);
-  const totalWht = movements.reduce((s, m) => s + Number(m.wht_amount || 0), 0);
-  const currentBalance = opening + totalIn - totalOut - totalWht;
+  const currentBalance = opening + totalIn - totalOut;
+  // เรียง ASC (เก่าก่อน → ใหม่หลัง) สำหรับคำนวณ running balance
+  const sortedAsc = movements.slice().sort((a, b) => new Date(a.movement_date) - new Date(b.movement_date));
+  const movementsWithBalance = [];
+  let runningBalance = opening;
+  for (const m of sortedAsc) {
+    const amt = Number(m.amount || 0);
+    runningBalance += amt;
+    movementsWithBalance.push({ ...m, running_balance: runningBalance });
+  }
 
   return (
     <div className="page-container">
@@ -111,9 +119,8 @@ export default function BankMovementsPage({ currentUser }) {
       {acc && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 12 }}>
           <Card label="ยอดยกมา" value={fmtNum(opening)} color="#6b7280" sub={acc.opening_date ? fmtDate(acc.opening_date) : ""} />
-          <Card label="💰 รับเข้า" value={fmtNum(totalIn)} color="#059669" />
-          <Card label="📤 จ่ายออก" value={fmtNum(totalOut)} color="#dc2626" />
-          <Card label="🧾 หักณที่จ่าย" value={fmtNum(totalWht)} color="#ea580c" />
+          <Card label="💰 รับเข้า (DR)" value={fmtNum(totalIn)} color="#059669" />
+          <Card label="📤 จ่ายออก (CR)" value={fmtNum(totalOut)} color="#dc2626" />
           <Card label="💵 ยอดคงเหลือ" value={fmtNum(currentBalance)} color="#7c3aed" highlight />
         </div>
       )}
@@ -136,33 +143,46 @@ export default function BankMovementsPage({ currentUser }) {
                 <th style={th}>คู่ค้า / Vendor</th>
                 <th style={th}>วิธี</th>
                 <th style={th}>หมายเหตุ</th>
-                <th style={{ ...th, textAlign: "right" }}>ยอด</th>
-                <th style={{ ...th, textAlign: "right" }}>WHT</th>
+                <th style={{ ...th, textAlign: "right" }}>DR</th>
+                <th style={{ ...th, textAlign: "right" }}>CR</th>
+                <th style={{ ...th, textAlign: "right" }}>คงเหลือ</th>
               </tr>
             </thead>
             <tbody>
-              {movements.map((m, i) => (
-                <tr key={i} style={{ borderTop: "1px solid #e5e7eb", background: m.direction === "in" ? "#f0fdf4" : "#fef2f2" }}>
-                  <td style={td}>{fmtDate(m.movement_date)}</td>
-                  <td style={{ ...td, fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{m.doc_no || "-"}</td>
-                  <td style={td}>{m.movement_type}</td>
-                  <td style={td}>{m.counterparty || "-"}</td>
-                  <td style={td}>{m.payment_method || "-"}</td>
-                  <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{m.note || ""}</td>
-                  <td style={{ ...tdNum, color: m.direction === "in" ? "#059669" : "#dc2626", fontWeight: 700 }}>
-                    {m.direction === "in" ? "+" : ""}{fmtNum(m.amount)}
-                  </td>
-                  <td style={{ ...tdNum, color: "#ea580c" }}>{Number(m.wht_amount || 0) > 0 ? `−${fmtNum(m.wht_amount)}` : "-"}</td>
-                </tr>
-              ))}
+              {/* Opening balance row */}
+              <tr style={{ borderTop: "1px solid #e5e7eb", background: "#fef9c3", fontWeight: 600 }}>
+                <td style={td}>{acc?.opening_date ? fmtDate(acc.opening_date) : "-"}</td>
+                <td style={{ ...td }} colSpan={5}>📌 ยอดยกมา</td>
+                <td style={tdNum}>-</td>
+                <td style={tdNum}>-</td>
+                <td style={{ ...tdNum, color: opening >= 0 ? "#059669" : "#dc2626" }}>{fmtNum(opening)}</td>
+              </tr>
+              {movementsWithBalance.map((m, i) => {
+                const amt = Number(m.amount || 0);
+                const isIn = amt >= 0;
+                const dr = isIn ? Math.abs(amt) : 0;
+                const cr = !isIn ? Math.abs(amt) : 0;
+                return (
+                  <tr key={i} style={{ borderTop: "1px solid #e5e7eb", background: isIn ? "#f0fdf4" : "#fef2f2" }}>
+                    <td style={td}>{fmtDate(m.movement_date)}</td>
+                    <td style={{ ...td, fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{m.doc_no || "-"}</td>
+                    <td style={td}>{m.movement_type}</td>
+                    <td style={td}>{m.counterparty || "-"}</td>
+                    <td style={td}>{m.payment_method || "-"}</td>
+                    <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{m.note || ""}</td>
+                    <td style={{ ...tdNum, color: "#059669", fontWeight: 700 }}>{dr > 0 ? fmtNum(dr) : "-"}</td>
+                    <td style={{ ...tdNum, color: "#dc2626", fontWeight: 700 }}>{cr > 0 ? fmtNum(cr) : "-"}</td>
+                    <td style={{ ...tdNum, color: m.running_balance >= 0 ? "#059669" : "#dc2626", fontWeight: 700 }}>{fmtNum(m.running_balance)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
             <tfoot style={{ background: "#f3f4f6", fontWeight: 700 }}>
               <tr>
                 <td colSpan={6} style={{ ...td, textAlign: "right" }}>รวม {movements.length} รายการ</td>
-                <td style={{ ...tdNum, color: totalIn - totalOut >= 0 ? "#059669" : "#dc2626" }}>
-                  {fmtNum(totalIn - totalOut)}
-                </td>
-                <td style={{ ...tdNum, color: "#ea580c" }}>−{fmtNum(totalWht)}</td>
+                <td style={{ ...tdNum, color: "#059669" }}>{fmtNum(totalIn)}</td>
+                <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(totalOut)}</td>
+                <td style={{ ...tdNum, color: currentBalance >= 0 ? "#059669" : "#dc2626" }}>{fmtNum(currentBalance)}</td>
               </tr>
             </tfoot>
           </table>

@@ -26,12 +26,10 @@ export default function BillingPage({ currentUser }) {
   const [savingPayment, setSavingPayment] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
-  // Link picker dialog — เลือกใบขาย/ใบรับเรื่อง ให้ submission
-  const [linkPickerRow, setLinkPickerRow] = useState(null); // submission row หรือ null
-  const [linkSearchKw, setLinkSearchKw] = useState("");
-  const [linkResults, setLinkResults] = useState([]);
-  const [linkLoading, setLinkLoading] = useState(false);
-  const [linkSaving, setLinkSaving] = useState(false);
+  const [receiptDetail, setReceiptDetail] = useState(null); // ข้อมูลใบรับเรื่องที่จะแสดงใน popup
+  const [editingPayDocNo, setEditingPayDocNo] = useState(null); // paid_doc_no ที่กำลัง edit (null = new payment mode)
+  const [receiptSelectedKeys, setReceiptSelectedKeys] = useState(new Set()); // checkbox ใน popup
+  const [receiptSaving, setReceiptSaving] = useState(false);
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -259,63 +257,103 @@ export default function BillingPage({ currentUser }) {
     return /^0+$/.test(String(code).trim()) ? "SCY01" : String(code).trim();
   }
 
-  // ========== Link picker — เลือกใบขาย / ใบรับเรื่อง ==========
-  function openLinkPicker(row) {
-    setLinkPickerRow(row);
-    setLinkSearchKw(row.chassis_no || row.engine_no || row.customer_name || "");
-    setLinkResults([]);
-    // auto-search ทันทีเมื่อเปิด
-    setTimeout(() => doLinkSearch(row.chassis_no || row.engine_no || row.customer_name || ""), 50);
-  }
-  async function doLinkSearch(kw) {
-    const k = (kw || "").trim();
-    if (k.length < 2) { setLinkResults([]); return; }
-    setLinkLoading(true);
+  // ยกเลิกการจ่ายเงิน — clear paid_* fields ทั้งหมดของ submissions ใน paid_doc_no นั้น
+  async function cancelPayment(g) {
+    const docNo = g.paid_doc_no;
+    if (!docNo) return;
+    const cnt = (g.items || []).length;
+    if (!window.confirm(`ยกเลิกการจ่ายเงิน "${docNo}"?\n\nรายการทั้งหมด ${cnt} ใบวางบิลจะกลับเป็นสถานะ "รอจ่าย"\n\n⚠ Action นี้ undo ไม่ได้`)) return;
     try {
-      // ค้นเฉพาะ registration_receipts (ตารางรับเรื่องงานทะเบียน)
-      const looksChassis = /^[A-Za-z0-9]{10,20}$/.test(k);
-      const looksDocNo = /^(SCY|SS|TB|RCT|INV)[A-Z0-9-]+$/i.test(k);
-      const fields = looksChassis ? ["chassis_no", "engine_no"]
-                   : looksDocNo ? ["receipt_no"]
-                   : ["customer_name"];
-      const calls = fields.map(f => post({ action: "search_sale_or_receipt", source: "receipt", field: f, keyword: k }));
-      const allRes = await Promise.all(calls);
-      const seen = new Set();
-      const merged = [];
-      for (const res of allRes) {
-        const arr = Array.isArray(res) ? res : [];
-        for (const r of arr) {
-          const key = `${r.sale_doc_no}:${r.frame_no || ""}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          merged.push({ ...r, _kind: "receipt" });
-        }
-      }
-      setLinkResults(merged);
-    } catch { setLinkResults([]); }
-    setLinkLoading(false);
+      const data = await post({ action: "save_billing_payment", mode: "cancel", paid_doc_no: docNo });
+      const cancelled = data?.cancelled_count ?? data?.updated_count ?? data?.[0]?.cancelled_count ?? 0;
+      setMessage(`✅ ยกเลิกการจ่ายเงินเรียบร้อย (${cancelled} รายการ)`);
+      fetchData();
+    } catch (e) {
+      setMessage(`❌ ยกเลิกไม่สำเร็จ: ${e.message || ""}`);
+    }
   }
-  async function pickLink(item) {
-    if (!linkPickerRow) return;
-    setLinkSaving(true);
+
+  // เปิด dialog แก้ไขรายละเอียดการจ่ายเงิน
+  function openEditPayment(g) {
+    if (!g.paid_doc_no) return;
+    // ดึงยอดวางบิลและ wht/method/vendor จาก submissions ใน group g
+    const total = Number(g.total) || (g.items || []).reduce((s, r) => s + Number(r.bill_amount || 0), 0);
+    const firstItem = (g.items || [])[0] || {};
+    const whtRate = Number(g.wht_rate || firstItem.wht_rate || 0);
+    const whtAmount = Number(g.wht_amount || firstItem.wht_amount || 0);
+    setPaymentForm({
+      paid_date: g.paid_at ? String(g.paid_at).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      payment_method: g.payment_method || firstItem.payment_method || "โอน",
+      payment_note: g.payment_note || firstItem.payment_note || "",
+      paid_to_vendor: g.paid_to_vendor || firstItem.paid_to_vendor || "",
+      wht_rate: whtRate,
+      wht_amount: whtAmount,
+      wht_base: total,
+      from_bank_account_id: g.from_bank_account_id || firstItem.from_bank_account_id || "",
+    });
+    setEditingPayDocNo(g.paid_doc_no);
+    setPaymentDialog(true);
+    if (vendors.length === 0) fetchVendors();
+    if (bankAccounts.length === 0) fetchBankAccounts();
+  }
+  async function saveEditPayment() {
+    if (!editingPayDocNo) return;
+    setSavingPayment(true);
     try {
-      const body = { action: "update_submission", submission_id: linkPickerRow.submission_id };
-      if (item._kind === "sale") body.sale_id = item.sale_id;
-      else body.linked_receipt_no = item.sale_doc_no;
+      const body = {
+        action: "save_billing_payment",
+        mode: "edit",
+        paid_doc_no: editingPayDocNo,
+        paid_date: paymentForm.paid_date,
+        payment_method: paymentForm.payment_method,
+        payment_note: paymentForm.payment_note,
+        paid_to_vendor: paymentForm.paid_to_vendor,
+        wht_rate: Number(paymentForm.wht_rate) || 0,
+        wht_amount: Number(paymentForm.wht_amount) || 0,
+        from_bank_account_id: paymentForm.from_bank_account_id,
+      };
       await post(body);
-      setMessage("✅ ลิงค์รายการเรียบร้อย");
-      setLinkPickerRow(null);
+      setMessage(`✅ แก้ไขการจ่ายเงิน ${editingPayDocNo} เรียบร้อย`);
+      setPaymentDialog(false);
+      setEditingPayDocNo(null);
       fetchData();
-    } catch { setMessage("❌ ลิงค์ไม่สำเร็จ"); }
-    setLinkSaving(false);
+    } catch (e) {
+      setMessage(`❌ แก้ไขไม่สำเร็จ: ${e.message || ""}`);
+    }
+    setSavingPayment(false);
   }
-  async function clearLink(row) {
-    if (!confirm(`ยกเลิกการเลือกใบรับเรื่องของ ${row.run_code}?`)) return;
+
+  // เปิด popup ใบรับเรื่อง — initialize checkbox จากที่เคยบันทึก
+  function openReceiptDetail(row) {
+    setReceiptDetail(row);
+    const saved = Array.isArray(row.selected_receipt_items) ? row.selected_receipt_items : [];
+    const keys = new Set(saved.map(it => `${it.income_code || ""}|${it.income_name || ""}`));
+    setReceiptSelectedKeys(keys);
+  }
+  function toggleReceiptItem(item) {
+    const key = `${item.income_code || ""}|${item.income_name || ""}`;
+    setReceiptSelectedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+  async function saveSelectedReceiptItems() {
+    if (!receiptDetail) return;
+    const lines = Array.isArray(receiptDetail.receipt_lines) ? receiptDetail.receipt_lines : (typeof receiptDetail.receipt_lines === "string" ? JSON.parse(receiptDetail.receipt_lines) : []);
+    const selected = lines.filter(it => receiptSelectedKeys.has(`${it.income_code || ""}|${it.income_name || ""}`));
+    setReceiptSaving(true);
     try {
-      await post({ action: "update_submission", submission_id: row.submission_id, linked_receipt_no: "" });
-      setMessage("✅ ยกเลิกการลิงค์ใบรับเรื่อง");
+      await post({
+        action: "update_submission",
+        submission_id: receiptDetail.submission_id,
+        selected_receipt_items: selected,
+      });
+      setMessage("✅ บันทึกรายการเรียบร้อย");
+      setReceiptDetail(null);
       fetchData();
-    } catch { setMessage("❌ ทำรายการไม่สำเร็จ"); }
+    } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+    setReceiptSaving(false);
   }
 
   const kw = search.trim().toLowerCase();
@@ -629,6 +667,20 @@ export default function BillingPage({ currentUser }) {
                           style={{ padding: "4px 10px", background: "#fff2", color: "#fff", border: "1px solid #fff5", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
                           🖨️
                         </button>
+                        {isPaidView && paidDocNo && (
+                          <>
+                            <button onClick={e => { e.stopPropagation(); openEditPayment(g); }}
+                              title="แก้ไขรายละเอียดการจ่ายเงิน"
+                              style={{ padding: "4px 10px", background: "#fff", color: "#065f46", border: "1px solid #fff", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                              ✏️ แก้ไข
+                            </button>
+                            <button onClick={e => { e.stopPropagation(); cancelPayment(g); }}
+                              title="ยกเลิกการจ่ายเงิน — กลับไปสถานะ 'รอจ่าย'"
+                              style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "1px solid #dc2626", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                              ✕ ยกเลิก
+                            </button>
+                          </>
+                        )}
                       </div>
 
                       {open && (
@@ -660,7 +712,13 @@ export default function BillingPage({ currentUser }) {
                                   <td>{r.plate_category || "-"}</td>
                                   <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
                                   <td style={{ fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{(r.linked_receipt_no || r.receipt_no) ? "-" : (r.invoice_no || "-")}</td>
-                                  <td style={{ fontFamily: "monospace", fontSize: 11, color: "#7c3aed" }}>{r.linked_receipt_no || r.receipt_no || "-"}</td>
+                                  <td style={{ fontFamily: "monospace", fontSize: 11 }} onClick={e => e.stopPropagation()}>
+                    {(r.linked_receipt_no || r.receipt_no) ? (
+                      <a onClick={() => openReceiptDetail(r)} style={{ color: "#7c3aed", cursor: "pointer", textDecoration: "underline" }}>
+                        {r.linked_receipt_no || r.receipt_no}
+                      </a>
+                    ) : "-"}
+                  </td>
                                   <td style={{ textAlign: "right", fontWeight: 700, fontSize: 15, color: "#072d6b" }}>
                                     {r.bill_amount ? Number(r.bill_amount).toLocaleString() : "—"}
                                   </td>
@@ -704,10 +762,10 @@ export default function BillingPage({ currentUser }) {
                 <th>เลขทะเบียน</th>
                 <th>เลขที่ใบขาย</th>
                 <th>เลขที่รับเรื่อง</th>
+                <th>รายการรับเรื่อง</th>
                 <th style={{ textAlign: "right" }}>ยอดรวม</th>
                 {showBilled && <th>ใบวางบิล</th>}
                 <th style={{ width: 60 }}>ดู</th>
-                <th style={{ width: 110 }}>เลือก</th>
               </tr>
             </thead>
             <tbody>
@@ -725,7 +783,30 @@ export default function BillingPage({ currentUser }) {
                   <td>{r.plate_category || "-"}</td>
                   <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
                   <td style={{ fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{(r.linked_receipt_no || r.receipt_no) ? "-" : (r.invoice_no || "-")}</td>
-                  <td style={{ fontFamily: "monospace", fontSize: 11, color: "#7c3aed" }}>{r.linked_receipt_no || r.receipt_no || "-"}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }} onClick={e => e.stopPropagation()}>
+                    {(r.linked_receipt_no || r.receipt_no) ? (
+                      <a onClick={() => openReceiptDetail(r)} style={{ color: "#7c3aed", cursor: "pointer", textDecoration: "underline" }}>
+                        {r.linked_receipt_no || r.receipt_no}
+                      </a>
+                    ) : "-"}
+                  </td>
+                  <td style={{ fontSize: 11 }}>
+                    {(() => {
+                      const items = Array.isArray(r.selected_receipt_items) ? r.selected_receipt_items
+                        : (typeof r.selected_receipt_items === "string" ? (JSON.parse(r.selected_receipt_items || "[]")) : []);
+                      if (!items.length) return <span style={{ color: "#9ca3af" }}>—</span>;
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          {items.map((it, idx) => (
+                            <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                              <span style={{ color: "#7c3aed" }}>{it.income_name}</span>
+                              <span style={{ fontWeight: 600, color: "#374151" }}>{Number(it.net_price || 0).toLocaleString()}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td style={{ textAlign: "right", fontWeight: 700, fontSize: 15, color: r.bill_amount ? "#072d6b" : "#9ca3af" }}>
                     {r.bill_amount ? Number(r.bill_amount).toLocaleString() : "—"}
                   </td>
@@ -736,93 +817,11 @@ export default function BillingPage({ currentUser }) {
                       👁️
                     </button>
                   </td>
-                  <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
-                    <button onClick={() => openLinkPicker(r)} title="เลือกใบขายหรือใบรับเรื่อง"
-                      style={{ padding: "3px 8px", background: "#fff", color: "#7c3aed", border: "1px solid #7c3aed", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
-                      🔄 เลือก
-                    </button>
-                    {r.linked_receipt_no && (
-                      <button onClick={() => clearLink(r)} title="ยกเลิกการลิงค์ใบรับเรื่อง"
-                        style={{ marginLeft: 4, padding: "3px 6px", background: "#fff", color: "#dc2626", border: "1px solid #dc2626", borderRadius: 4, cursor: "pointer", fontSize: 10 }}>
-                        ✕
-                      </button>
-                    )}
-                  </td>
                 </tr>
                 );
               })}
             </tbody>
           </table>
-        </div>
-      )}
-
-      {/* Link picker dialog */}
-      {linkPickerRow && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
-          onClick={() => setLinkPickerRow(null)}>
-          <div style={{ background: "#fff", borderRadius: 12, padding: 20, width: 800, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}
-            onClick={e => e.stopPropagation()}>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 12, paddingBottom: 10, borderBottom: "2px solid #e5e7eb" }}>
-              <h3 style={{ margin: 0, color: "#072d6b" }}>📋 เลือกใบรับเรื่อง</h3>
-              <button onClick={() => setLinkPickerRow(null)} style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 22, color: "#6b7280" }}>✕</button>
-            </div>
-            <div style={{ marginBottom: 10, fontSize: 13, color: "#6b7280" }}>
-              <b>{linkPickerRow.run_code}</b> · {linkPickerRow.customer_name} · เลขถัง: <code>{linkPickerRow.chassis_no}</code>
-            </div>
-
-            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 6 }}>ค้นหาในตาราง <b>รับเรื่องงานทะเบียน</b>:</div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-              <input type="text" value={linkSearchKw} onChange={e => setLinkSearchKw(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && doLinkSearch(linkSearchKw)}
-                placeholder="ค้นด้วยชื่อลูกค้า / เลขถัง / เลขเครื่อง / เลขใบ"
-                style={{ flex: 1, padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13 }} />
-              <button onClick={() => doLinkSearch(linkSearchKw)} disabled={linkLoading}
-                style={{ padding: "8px 16px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
-                {linkLoading ? "กำลังค้น..." : "🔍 ค้นหา"}
-              </button>
-            </div>
-            <div style={{ maxHeight: 480, overflowY: "auto" }}>
-              {linkResults.length === 0 ? (
-                <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>{linkLoading ? "กำลังค้นหา..." : "ไม่พบรายการ"}</div>
-              ) : (
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                  <thead style={{ background: "#f3f4f6" }}>
-                    <tr>
-                      <th style={{ padding: 8, textAlign: "left" }}>ประเภท</th>
-                      <th style={{ padding: 8, textAlign: "left" }}>เลขที่</th>
-                      <th style={{ padding: 8, textAlign: "left" }}>วันที่</th>
-                      <th style={{ padding: 8, textAlign: "left" }}>ลูกค้า</th>
-                      <th style={{ padding: 8, textAlign: "left" }}>เลขถัง</th>
-                      <th style={{ padding: 8, textAlign: "left" }}>เลือก</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {linkResults.map((it, idx) => (
-                      <tr key={idx} style={{ borderTop: "1px solid #e5e7eb" }}>
-                        <td style={{ padding: 8 }}>
-                          <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
-                            background: it._kind === "sale" ? "#dbeafe" : "#ede9fe",
-                            color: it._kind === "sale" ? "#1e40af" : "#6d28d9" }}>
-                            {it._kind === "sale" ? "🚗 ใบขาย" : "📋 ใบรับเรื่อง"}
-                          </span>
-                        </td>
-                        <td style={{ padding: 8, fontFamily: "monospace", fontWeight: 600 }}>{it.sale_doc_no || "-"}</td>
-                        <td style={{ padding: 8 }}>{it.sale_date ? String(it.sale_date).slice(0,10) : "-"}</td>
-                        <td style={{ padding: 8 }}>{it.customer_name || "-"}</td>
-                        <td style={{ padding: 8, fontFamily: "monospace", fontSize: 11 }}>{it.frame_no || "-"}</td>
-                        <td style={{ padding: 8 }}>
-                          <button onClick={() => pickLink(it)} disabled={linkSaving}
-                            style={{ padding: "4px 12px", background: "#10b981", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
-                            {linkSaving ? "กำลังบันทึก..." : "✓ ใช้อันนี้"}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </div>
         </div>
       )}
 
@@ -971,22 +970,128 @@ export default function BillingPage({ currentUser }) {
         </div>
       )}
 
+      {/* Receipt Detail Modal */}
+      {receiptDetail && (() => {
+        const lines = Array.isArray(receiptDetail.receipt_lines) ? receiptDetail.receipt_lines
+          : (typeof receiptDetail.receipt_lines === "string" ? (JSON.parse(receiptDetail.receipt_lines || "[]")) : []);
+        return (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1050 }}
+          onClick={() => setReceiptDetail(null)}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 20, width: 1000, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: "2px solid #ede9fe" }}>
+              <h3 style={{ margin: 0, color: "#7c3aed" }}>📋 ใบรับเรื่อง — {receiptDetail.linked_receipt_no || receiptDetail.receipt_no}</h3>
+              <span style={{ marginLeft: 8, fontSize: 12, color: "#6b7280" }}>
+                ({receiptDetail.receive_date ? String(receiptDetail.receive_date).slice(0,10) : "-"})
+              </span>
+              <button onClick={() => setReceiptDetail(null)}
+                style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 22, color: "#6b7280" }}>✕</button>
+            </div>
+
+            {/* Header info — สไตล์ตาราง 2 แถว 4 col */}
+            <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px 16px" }}>
+                <div><span style={{ color: "#6b7280" }}>ประเภท:</span> <b>{receiptDetail.receipt_type || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>สถานะ:</span> <b>{receiptDetail.receipt_status || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>พนักงาน:</span> <b>{receiptDetail.receipt_staff_recorder || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>สัญญาเช่าซื้อ:</span> <b>{receiptDetail.receipt_contract_no || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>เลขทะเบียน:</span> <b style={{ color: "#1e3a8a" }}>{receiptDetail.receipt_plate_number || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>เลขเครื่อง:</span> <b style={{ fontFamily: "monospace" }}>{receiptDetail.receipt_engine_no || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>สี:</span> <b>{receiptDetail.receipt_color || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>โทร:</span> <b>{receiptDetail.receipt_customer_phone || "-"}</b></div>
+              </div>
+            </div>
+
+            {/* Line items table */}
+            <div style={{ overflow: "auto", marginBottom: 12 }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead style={{ background: "#7c3aed", color: "#fff" }}>
+                  <tr>
+                    <th style={{ padding: "8px 10px", width: 40, textAlign: "center" }}>#</th>
+                    <th style={{ padding: "8px 10px", textAlign: "left" }}>ประเภทรายได้</th>
+                    <th style={{ padding: "8px 10px", textAlign: "left" }}>รหัส</th>
+                    <th style={{ padding: "8px 10px", textAlign: "left" }}>ชื่อรายได้</th>
+                    <th style={{ padding: "8px 10px", textAlign: "left" }}>รายละเอียด</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right" }}>จำนวน</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right" }}>ราคา</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right" }}>ส่วนลด</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right" }}>สุทธิ</th>
+                    <th style={{ padding: "8px 10px", width: 40, textAlign: "center" }}>
+                      <input type="checkbox"
+                        checked={lines.length > 0 && lines.every(it => receiptSelectedKeys.has(`${it.income_code || ""}|${it.income_name || ""}`))}
+                        onChange={e => {
+                          if (e.target.checked) setReceiptSelectedKeys(new Set(lines.map(it => `${it.income_code || ""}|${it.income_name || ""}`)));
+                          else setReceiptSelectedKeys(new Set());
+                        }} />
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lines.length === 0 ? (
+                    <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีรายการ</td></tr>
+                  ) : lines.map((it, idx) => {
+                    const key = `${it.income_code || ""}|${it.income_name || ""}`;
+                    const checked = receiptSelectedKeys.has(key);
+                    return (
+                      <tr key={idx} style={{ borderTop: "1px solid #e5e7eb", background: checked ? "#fef3c7" : undefined }}>
+                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{idx + 1}</td>
+                        <td style={{ padding: "8px 10px" }}>{it.income_type || "-"}</td>
+                        <td style={{ padding: "8px 10px", fontFamily: "monospace" }}>{it.income_code || "-"}</td>
+                        <td style={{ padding: "8px 10px" }}>{it.income_name || "-"}</td>
+                        <td style={{ padding: "8px 10px" }}>{it.description || "-"}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right" }}>{Number(it.qty || 0).toFixed(2)}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right" }}>{Number(it.price_before_discount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right" }}>{Number(it.discount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{Number(it.net_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                          <input type="checkbox" checked={checked} onChange={() => toggleReceiptItem(it)} style={{ width: 16, height: 16 }} />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+              <button onClick={() => setReceiptDetail(null)}
+                style={{ padding: "8px 24px", background: "#fff", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                ปิด
+              </button>
+              <button onClick={saveSelectedReceiptItems} disabled={receiptSaving}
+                style={{ padding: "8px 24px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                {receiptSaving ? "กำลังบันทึก..." : `💾 บันทึก (${receiptSelectedKeys.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
       {/* Payment Dialog */}
       {paymentDialog && (() => {
+        const isEditMode = !!editingPayDocNo;
         const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
-        const selRows = filtered.filter(r => selectedDocNos.includes(r.billing_doc_no));
-        const selSum = selRows.reduce((s, r) => s + Number(r.bill_amount || 0), 0);
+        const selRows = isEditMode ? [] : filtered.filter(r => selectedDocNos.includes(r.billing_doc_no));
+        const selSum = isEditMode ? Number(paymentForm.wht_base) || 0 : selRows.reduce((s, r) => s + Number(r.bill_amount || 0), 0);
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
-            onClick={() => !savingPayment && setPaymentDialog(false)}>
+            onClick={() => !savingPayment && (setPaymentDialog(false), setEditingPayDocNo(null))}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 600, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}>
-              <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>💵 บันทึกจ่ายเงิน</h3>
+              <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>{isEditMode ? `✏️ แก้ไขการจ่ายเงิน — ${editingPayDocNo}` : "💵 บันทึกจ่ายเงิน"}</h3>
 
-              <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
-                <div><strong>📑 ใบที่จ่าย:</strong> {selectedDocNos.length} ใบ</div>
-                <div><strong>📋 รายการรวม:</strong> {selRows.length} รายการ</div>
-                <div><strong>💰 ยอดรวม:</strong> <span style={{ color: "#dc2626", fontWeight: 700 }}>฿ {selSum.toLocaleString()}</span></div>
-              </div>
+              {!isEditMode && (
+                <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+                  <div><strong>📑 ใบที่จ่าย:</strong> {selectedDocNos.length} ใบ</div>
+                  <div><strong>📋 รายการรวม:</strong> {selRows.length} รายการ</div>
+                  <div><strong>💰 ยอดรวม:</strong> <span style={{ color: "#dc2626", fontWeight: 700 }}>฿ {selSum.toLocaleString()}</span></div>
+                </div>
+              )}
+              {isEditMode && (
+                <div style={{ background: "#fef3c7", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13, color: "#78350f" }}>
+                  ⚠️ <b>โหมดแก้ไข</b> — กำลังแก้ใบจ่ายเงิน <code>{editingPayDocNo}</code> (เปลี่ยน vendor / ธนาคาร / วิธีจ่าย / wht ได้)
+                </div>
+              )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <div>
@@ -1101,7 +1206,8 @@ export default function BillingPage({ currentUser }) {
                 </div>
               </div>
 
-              {/* Preview docs */}
+              {/* Preview docs (hide in edit mode) */}
+              {!isEditMode && (
               <div style={{ marginTop: 12, maxHeight: 200, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
                 <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
                   <thead style={{ background: "#f3f4f6", position: "sticky", top: 0 }}>
@@ -1127,13 +1233,14 @@ export default function BillingPage({ currentUser }) {
                   </tbody>
                 </table>
               </div>
+              )}
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
-                <button onClick={() => setPaymentDialog(false)} disabled={savingPayment}
+                <button onClick={() => { setPaymentDialog(false); setEditingPayDocNo(null); }} disabled={savingPayment}
                   style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
-                <button onClick={savePayment} disabled={savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id}
-                  style={{ padding: "8px 20px", background: savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: (savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id) ? "not-allowed" : "pointer", fontWeight: 700 }}>
-                  {savingPayment ? "กำลังบันทึก..." : "💾 บันทึกจ่ายเงิน"}
+                <button onClick={isEditMode ? saveEditPayment : savePayment} disabled={savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id}
+                  style={{ padding: "8px 20px", background: savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id ? "#9ca3af" : (isEditMode ? "#7c3aed" : "#059669"), color: "#fff", border: "none", borderRadius: 8, cursor: (savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id) ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                  {savingPayment ? "กำลังบันทึก..." : (isEditMode ? "💾 บันทึกแก้ไข" : "💾 บันทึกจ่ายเงิน")}
                 </button>
               </div>
             </div>

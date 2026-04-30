@@ -288,6 +288,43 @@ function HistoryPanel({ setMessage, currentUser }) {
   const [searchKw, setSearchKw] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  // Receipt detail popup (view + select items)
+  const [receiptDetail, setReceiptDetail] = useState(null);
+  const [receiptSelectedKeys, setReceiptSelectedKeys] = useState(new Set());
+  const [receiptSaving, setReceiptSaving] = useState(false);
+
+  function openReceiptDetail(row) {
+    setReceiptDetail(row);
+    const saved = Array.isArray(row.selected_receipt_items) ? row.selected_receipt_items
+      : (typeof row.selected_receipt_items === "string" ? JSON.parse(row.selected_receipt_items || "[]") : []);
+    setReceiptSelectedKeys(new Set(saved.map(it => `${it.income_code || ""}|${it.income_name || ""}`)));
+  }
+  function toggleReceiptItem(item) {
+    const key = `${item.income_code || ""}|${item.income_name || ""}`;
+    setReceiptSelectedKeys(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+  async function saveSelectedReceiptItems() {
+    if (!receiptDetail) return;
+    const lines = Array.isArray(receiptDetail.receipt_lines) ? receiptDetail.receipt_lines
+      : (typeof receiptDetail.receipt_lines === "string" ? JSON.parse(receiptDetail.receipt_lines || "[]") : []);
+    const selected = lines.filter(it => receiptSelectedKeys.has(`${it.income_code || ""}|${it.income_name || ""}`));
+    setReceiptSaving(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "link_cosmos_sale", plan, app_no: receiptDetail.app_no, selected_receipt_items: selected }),
+      });
+      if (!res.ok) throw new Error("save fail");
+      setMessage("✅ บันทึกรายการเรียบร้อย");
+      setReceiptDetail(null);
+      fetchData(plan);
+    } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+    setReceiptSaving(false);
+  }
 
   function openLinkSelector(r) {
     setLinkRow(r);
@@ -495,21 +532,22 @@ function HistoryPanel({ setMessage, currentUser }) {
                     <th style={th}>วันที่สมัคร</th>
                     <th style={th}>ชื่อลูกค้า</th>
                     <th style={th}>เลขถัง (VIN)</th>
-                    {!isPlus && <>
-                      <th style={th}>เลขบัตร</th>
+                    {!isPlus && <th style={th}>เลขบัตร</th>}
+                    {!isPlus && !isTheft && <>
                       <th style={th}>เบอร์โทร</th>
                       <th style={th}>ยี่ห้อ/รุ่น</th>
                       <th style={th}>สี</th>
                     </>}
                     {isPlus && <th style={th}>รุ่นรถ</th>}
                     {!isTheft && <th style={th}>แผน</th>}
-                    {!isPlus && <>
+                    {!isPlus && !isTheft && <>
                       <th style={th}>เริ่มคุ้มครอง</th>
                       <th style={th}>สิ้นสุด</th>
-                      <th style={th}>เบี้ย</th>
                     </>}
+                    {!isPlus && <th style={th}>เบี้ย</th>}
                     <th style={th}>🚗 ขาย</th>
                     {!hideReceipt && <th style={th}>📋 รับเรื่อง</th>}
+                    {isTheft && <th style={th}>รายการรับเรื่อง</th>}
                   </>
                 )}
               </tr>
@@ -551,12 +589,13 @@ function HistoryPanel({ setMessage, currentUser }) {
                         )}
                       </td>
                       {!hideReceipt && (
-                        <td style={td}>
+                        <td style={td} onClick={e => e.stopPropagation()}>
                           {r.receipt_no ? (
-                            <span title={`Receipt: ${r.receipt_no} | ${fmtDate(r.receive_date)}`}
-                                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#dbeafe", color: "#1e40af", fontWeight: 600 }}>
+                            <a onClick={() => openReceiptDetail(r)}
+                                  title={`Receipt: ${r.receipt_no} | ${fmtDate(r.receive_date)}`}
+                                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#dbeafe", color: "#1e40af", fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>
                               ✓ {r.receipt_no}
-                            </span>
+                            </a>
                           ) : <span style={{ color: "#9ca3af", fontSize: 11 }}>—</span>}
                         </td>
                       )}
@@ -566,8 +605,8 @@ function HistoryPanel({ setMessage, currentUser }) {
                       <td style={td}>{fmtDate(r.app_date)}</td>
                       <td style={{ ...td, fontWeight: 500 }}>{(isTheft ? r.sale_customer_name : r.customer_name) || "-"}</td>
                       <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{cleanChassis(r.chassis_no) || "-"}</td>
-                      {!isPlus && <>
-                        <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.citizen_id || "-"}</td>
+                      {!isPlus && <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.citizen_id || "-"}</td>}
+                      {!isPlus && !isTheft && <>
                         <td style={{ ...td, fontSize: 11 }}>{r.phone || "-"}</td>
                         <td style={td}>
                           <div style={{ fontSize: 12 }}>{r.brand || ""} {r.model_name || ""}</div>
@@ -582,11 +621,11 @@ function HistoryPanel({ setMessage, currentUser }) {
                           </span>
                         </td>
                       )}
-                      {!isPlus && <>
+                      {!isPlus && !isTheft && <>
                         <td style={td}>{fmtDate(r.cover_start)}</td>
                         <td style={td}>{fmtDate(r.cover_end)}</td>
-                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmtMoney(r.premium)}</td>
                       </>}
+                      {!isPlus && <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmtMoney(r.premium)}</td>}
                       <td style={td}>
                         {r.sale_id ? (
                           <span title={`Invoice: ${r.invoice_no || "-"} | ${fmtDate(r.sale_date)}`}
@@ -601,13 +640,33 @@ function HistoryPanel({ setMessage, currentUser }) {
                         )}
                       </td>
                       {!hideReceipt && (
-                        <td style={td}>
+                        <td style={td} onClick={e => e.stopPropagation()}>
                           {r.receipt_no ? (
-                            <span title={`Receipt: ${r.receipt_no} | ${fmtDate(r.receive_date)} | ${r.receipt_branch_name || "-"}`}
-                                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#dbeafe", color: "#1e40af", fontWeight: 600 }}>
+                            <a onClick={() => openReceiptDetail(r)}
+                                  title={`Receipt: ${r.receipt_no} | ${fmtDate(r.receive_date)} | ${r.receipt_branch_name || "-"}`}
+                                  style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: "#dbeafe", color: "#1e40af", fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>
                               ✓ {r.receipt_no}
-                            </span>
+                            </a>
                           ) : <span style={{ color: "#9ca3af", fontSize: 11 }}>—</span>}
+                        </td>
+                      )}
+                      {isTheft && (
+                        <td style={{ ...td, fontSize: 11 }}>
+                          {(() => {
+                            const items = Array.isArray(r.selected_receipt_items) ? r.selected_receipt_items
+                              : (typeof r.selected_receipt_items === "string" ? JSON.parse(r.selected_receipt_items || "[]") : []);
+                            if (!items.length) return <span style={{ color: "#9ca3af" }}>—</span>;
+                            return (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                {items.map((it, idx) => (
+                                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
+                                    <span style={{ color: "#7c3aed" }}>{it.income_name}</span>
+                                    <span style={{ fontWeight: 600, color: "#374151" }}>{Number(it.net_price || 0).toLocaleString()}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </td>
                       )}
                     </>
@@ -688,6 +747,94 @@ function HistoryPanel({ setMessage, currentUser }) {
           </div>
         </div>
       )}
+
+      {/* Receipt Detail Modal */}
+      {receiptDetail && (() => {
+        const lines = Array.isArray(receiptDetail.receipt_lines) ? receiptDetail.receipt_lines
+          : (typeof receiptDetail.receipt_lines === "string" ? JSON.parse(receiptDetail.receipt_lines || "[]") : []);
+        return (
+          <div onClick={() => setReceiptDetail(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1050 }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 1000, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: "2px solid #ede9fe" }}>
+                <h3 style={{ margin: 0, color: "#7c3aed" }}>📋 ใบรับเรื่อง — {receiptDetail.receipt_no}</h3>
+                <span style={{ marginLeft: 8, fontSize: 12, color: "#6b7280" }}>({receiptDetail.receive_date ? String(receiptDetail.receive_date).slice(0,10) : "-"})</span>
+                <button onClick={() => setReceiptDetail(null)} style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 22, color: "#6b7280" }}>✕</button>
+              </div>
+
+              <div style={{ background: "#f8fafc", padding: 12, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px 16px" }}>
+                  <div><span style={{ color: "#6b7280" }}>ประเภท:</span> <b>{receiptDetail.receipt_type || "-"}</b></div>
+                  <div><span style={{ color: "#6b7280" }}>สถานะ:</span> <b>{receiptDetail.receipt_status || "-"}</b></div>
+                  <div><span style={{ color: "#6b7280" }}>พนักงาน:</span> <b>{receiptDetail.receipt_staff_recorder || "-"}</b></div>
+                  <div><span style={{ color: "#6b7280" }}>สัญญาเช่าซื้อ:</span> <b>{receiptDetail.receipt_contract_no || "-"}</b></div>
+                  <div><span style={{ color: "#6b7280" }}>เลขทะเบียน:</span> <b style={{ color: "#1e3a8a" }}>{receiptDetail.receipt_plate_number || "-"}</b></div>
+                  <div><span style={{ color: "#6b7280" }}>เลขเครื่อง:</span> <b style={{ fontFamily: "monospace" }}>{receiptDetail.receipt_engine_no || "-"}</b></div>
+                  <div><span style={{ color: "#6b7280" }}>สี:</span> <b>{receiptDetail.receipt_color || "-"}</b></div>
+                  <div><span style={{ color: "#6b7280" }}>โทร:</span> <b>{receiptDetail.receipt_customer_phone || "-"}</b></div>
+                </div>
+              </div>
+
+              <div style={{ overflow: "auto", marginBottom: 12 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead style={{ background: "#7c3aed", color: "#fff" }}>
+                    <tr>
+                      <th style={{ padding: "8px 10px", width: 40, textAlign: "center" }}>#</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>ประเภทรายได้</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>รหัส</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>ชื่อรายได้</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>รายละเอียด</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right" }}>จำนวน</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right" }}>ราคา</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right" }}>ส่วนลด</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right" }}>สุทธิ</th>
+                      <th style={{ padding: "8px 10px", width: 40, textAlign: "center" }}>
+                        <input type="checkbox"
+                          checked={lines.length > 0 && lines.every(it => receiptSelectedKeys.has(`${it.income_code || ""}|${it.income_name || ""}`))}
+                          onChange={e => {
+                            if (e.target.checked) setReceiptSelectedKeys(new Set(lines.map(it => `${it.income_code || ""}|${it.income_name || ""}`)));
+                            else setReceiptSelectedKeys(new Set());
+                          }} />
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {lines.length === 0 ? (
+                      <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีรายการ</td></tr>
+                    ) : lines.map((it, idx) => {
+                      const key = `${it.income_code || ""}|${it.income_name || ""}`;
+                      const checked = receiptSelectedKeys.has(key);
+                      return (
+                        <tr key={idx} style={{ borderTop: "1px solid #e5e7eb", background: checked ? "#fef3c7" : undefined }}>
+                          <td style={{ padding: "8px 10px", textAlign: "center" }}>{idx + 1}</td>
+                          <td style={{ padding: "8px 10px" }}>{it.income_type || "-"}</td>
+                          <td style={{ padding: "8px 10px", fontFamily: "monospace" }}>{it.income_code || "-"}</td>
+                          <td style={{ padding: "8px 10px" }}>{it.income_name || "-"}</td>
+                          <td style={{ padding: "8px 10px" }}>{it.description || "-"}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right" }}>{Number(it.qty || 0).toFixed(2)}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right" }}>{Number(it.price_before_discount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right" }}>{Number(it.discount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{Number(it.net_price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                            <input type="checkbox" checked={checked} onChange={() => toggleReceiptItem(it)} style={{ width: 16, height: 16 }} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+                <button onClick={() => setReceiptDetail(null)} style={{ padding: "8px 24px", background: "#fff", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>ปิด</button>
+                <button onClick={saveSelectedReceiptItems} disabled={receiptSaving} style={{ padding: "8px 24px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                  {receiptSaving ? "กำลังบันทึก..." : `💾 บันทึก (${receiptSelectedKeys.size})`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
     </div>
   );
 }

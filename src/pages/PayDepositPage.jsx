@@ -99,6 +99,7 @@ export default function PayDepositPage({ currentUser }) {
   const [historyFrom, setHistoryFrom] = useState(`${now.getFullYear()}-01-01`);
   const [historyTo, setHistoryTo] = useState(`${now.getFullYear()}-12-31`);
   const [detailPayment, setDetailPayment] = useState(null);
+  const [editingPaymentId, setEditingPaymentId] = useState(null); // null = create new, else = edit existing
 
   // ---- Tab Report ----
   const [report, setReport] = useState([]);
@@ -224,6 +225,7 @@ export default function PayDepositPage({ currentUser }) {
     if (missing.length > 0) { alert(`มี ${missing.length} รายการยังไม่ได้กรอกเลขที่สัญญา`); return; }
     if (vendors.length === 0) fetchVendors();
     if (bankAccounts.length === 0) fetchBankAccounts();
+    setEditingPaymentId(null);
     setTransferForm({
       ...transferForm,
       payment_date: new Date().toISOString().slice(0, 10),
@@ -236,6 +238,34 @@ export default function PayDepositPage({ currentUser }) {
     setShowTransfer(true);
   }
 
+  function openEditPayment(p) {
+    if (!p?.id) return;
+    if (vendors.length === 0) fetchVendors();
+    if (bankAccounts.length === 0) fetchBankAccounts();
+    setEditingPaymentId(p.id);
+    setTransferForm({
+      payment_date: p.payment_date ? String(p.payment_date).slice(0, 10) : "",
+      transaction_id: p.transaction_id || "",
+      from_bank: p.from_bank || "",
+      from_account: p.from_account || "",
+      to_bank: p.to_bank || "กสิกรไทย",
+      to_account: p.to_account || "",
+      to_name: p.to_name || "GROUP LEASE PUBLIC CO.,LTD.",
+      transfer_amount: Number(p.transfer_amount) || 0,
+      fee: Number(p.fee) || 0,
+      note: p.note || "",
+      slip_image: "",
+      slip_mime: "",
+      paid_to_vendor: p.paid_to_vendor || "",
+      payment_method: p.payment_method || "โอน",
+      wht_rate: Number(p.wht_rate) || 0,
+      wht_amount: Number(p.wht_amount) || 0,
+      wht_base: Number(p.wht_base) || Number(p.transfer_amount) || 0,
+      from_bank_account_id: p.from_bank_account_id || "",
+    });
+    setShowTransfer(true);
+  }
+
   async function submitTransfer() {
     if (!transferForm.payment_date) { alert("กรอกวันที่จ่าย"); return; }
     if (!transferForm.paid_to_vendor) { alert("กรุณาเลือก Vendor"); return; }
@@ -243,57 +273,83 @@ export default function PayDepositPage({ currentUser }) {
     setSaving(true);
     setMessage("");
     try {
-      const items = selectedList.map(r => ({
-        source_item_id: r.item_id,
-        source_receipt_no: r.receipt_no,
-        contract_no: selected[r.item_id]?.contract_no || "",
-        received_date: r.received_date ? r.received_date.slice(0, 10) : null,
-        received_amount: Number(r.line_amount) || 0,
-        paid_amount: Number(selected[r.item_id]?.paid_amount) || 0,
-        customer_name: r.customer_name || "",
-        branch_code: r.branch_code || "",
-        remark: "",
-      }));
-      // ดึงข้อมูล bank account + vendor ส่งไป backend
+      const isEdit = !!editingPaymentId;
       const fromBank = bankAccounts.find(b => b.account_id === Number(transferForm.from_bank_account_id));
       const toVendor = vendors.find(v => v.vendor_name === transferForm.paid_to_vendor);
-      const body = {
-        action: "save_glp_payment",
-        ...transferForm,
-        transfer_amount: totalSelected,
-        status: "transferred",
-        created_by: currentUser?.name || "",
-        items,
-        // ส่งข้อมูลธนาคาร + vendor ที่จำเป็น
-        from_bank_account_id: Number(transferForm.from_bank_account_id) || null,
-        from_bank: fromBank?.bank_name || transferForm.from_bank || "",
-        from_account: fromBank?.account_no || "",
-        to_bank: toVendor?.bank_name || "กสิกรไทย",
-        to_account: toVendor?.bank_account_no || transferForm.to_account || "",
-        to_name: toVendor?.bank_account_name || transferForm.paid_to_vendor || "",
-        wht_rate: Number(transferForm.wht_rate) || 0,
-        wht_amount: Number(transferForm.wht_amount) || 0,
-        wht_base: Number(transferForm.wht_base) || 0,
-      };
+
+      let body;
+      if (isEdit) {
+        // Edit mode — ไม่แก้ items, แก้แค่ header
+        body = {
+          action: "update_glp_payment",
+          id: editingPaymentId,
+          payment_date: transferForm.payment_date,
+          transaction_id: transferForm.transaction_id || "",
+          from_bank: fromBank?.bank_name || transferForm.from_bank || "",
+          from_account: fromBank?.account_no || transferForm.from_account || "",
+          to_bank: toVendor?.bank_name || transferForm.to_bank || "กสิกรไทย",
+          to_account: toVendor?.bank_account_no || transferForm.to_account || "",
+          to_name: toVendor?.bank_account_name || transferForm.paid_to_vendor || transferForm.to_name || "",
+          transfer_amount: Number(transferForm.transfer_amount) || 0,
+          fee: Number(transferForm.fee) || 0,
+          note: transferForm.note || "",
+          status: "transferred",
+          paid_to_vendor: transferForm.paid_to_vendor || "",
+          payment_method: transferForm.payment_method || "โอน",
+          wht_rate: Number(transferForm.wht_rate) || 0,
+          wht_amount: Number(transferForm.wht_amount) || 0,
+          wht_base: Number(transferForm.wht_base) || 0,
+          from_bank_account_id: Number(transferForm.from_bank_account_id) || null,
+          items: [], // ไม่แก้ items ในโหมด edit (จะไม่ถูก replace)
+          skip_items_replace: true,
+        };
+      } else {
+        const items = selectedList.map(r => ({
+          source_item_id: r.item_id,
+          source_receipt_no: r.receipt_no,
+          contract_no: selected[r.item_id]?.contract_no || "",
+          received_date: r.received_date ? r.received_date.slice(0, 10) : null,
+          received_amount: Number(r.line_amount) || 0,
+          paid_amount: Number(selected[r.item_id]?.paid_amount) || 0,
+          customer_name: r.customer_name || "",
+          branch_code: r.branch_code || "",
+          remark: "",
+        }));
+        body = {
+          action: "save_glp_payment",
+          ...transferForm,
+          transfer_amount: totalSelected,
+          status: "transferred",
+          created_by: currentUser?.name || "",
+          items,
+          from_bank_account_id: Number(transferForm.from_bank_account_id) || null,
+          from_bank: fromBank?.bank_name || transferForm.from_bank || "",
+          from_account: fromBank?.account_no || "",
+          to_bank: toVendor?.bank_name || "กสิกรไทย",
+          to_account: toVendor?.bank_account_no || transferForm.to_account || "",
+          to_name: toVendor?.bank_account_name || transferForm.paid_to_vendor || "",
+          wht_rate: Number(transferForm.wht_rate) || 0,
+          wht_amount: Number(transferForm.wht_amount) || 0,
+          wht_base: Number(transferForm.wht_base) || 0,
+        };
+      }
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       const data = await res.json();
       if (data?.payment_no || data?.id) {
-        setMessage(`✅ บันทึกแล้ว ${data.payment_no || ""}`);
+        setMessage(isEdit ? `✅ แก้ไขเรียบร้อย` : `✅ บันทึกแล้ว ${data.payment_no || ""}`);
         setShowTransfer(false);
+        setEditingPaymentId(null);
         setTransferForm({ ...transferForm, transaction_id: "", slip_image: "", slip_mime: "", note: "" });
-        // สร้าง payment object สำหรับพิมพ์ทันที (ไม่ต้องรอ fetch)
-        const printObj = {
-          payment_no: data.payment_no,
-          payment_date: body.payment_date,
-          items: body.items,
-        };
-        if (window.confirm("บันทึกสำเร็จ — ต้องการพิมพ์ใบโอนหรือไม่?")) {
-          printPayment(printObj);
+        if (isEdit) {
+          fetchPayments();
+        } else {
+          const printObj = { payment_no: data.payment_no, payment_date: body.payment_date, items: body.items };
+          if (window.confirm("บันทึกสำเร็จ — ต้องการพิมพ์ใบโอนหรือไม่?")) printPayment(printObj);
+          fetchPending();
         }
-        fetchPending();
       } else {
         setMessage("❌ บันทึกไม่สำเร็จ");
       }
@@ -413,7 +469,7 @@ export default function PayDepositPage({ currentUser }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "2px solid #ccc" }}>
         {[
           ["pending", "📥 รับฝากค้างโอน"],
-          ["history", "📋 ประวัติการโอน"],
+          ["history", "📋 ประวัติการจ่ายเงิน"],
           ["report", "📊 รายงาน"],
         ].map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
@@ -508,17 +564,15 @@ export default function PayDepositPage({ currentUser }) {
             <button onClick={fetchPayments} style={btnPrimary}>🔍 ค้นหา</button>
           </div>
           {paymentsLoading ? <p>กำลังโหลด...</p> : payments.length === 0 ? (
-            <p style={{ color: "#666" }}>ไม่มีประวัติการโอน</p>
+            <p style={{ color: "#666" }}>ไม่มีประวัติการจ่ายเงิน</p>
           ) : (
             <table style={tableStyle}>
               <thead>
                 <tr style={{ background: "#1e40af", color: "#fff" }}>
                   <th>วันที่โอน</th>
                   <th>เลขใบ</th>
-                  <th>Transaction ID</th>
                   <th style={{ textAlign: "right" }}>จำนวนสัญญา</th>
                   <th style={{ textAlign: "right" }}>ยอดรวม</th>
-                  <th>Slip</th>
                   <th>จัดการ</th>
                 </tr>
               </thead>
@@ -527,14 +581,13 @@ export default function PayDepositPage({ currentUser }) {
                   <tr key={p.id}>
                     <td>{p.payment_date ? p.payment_date.slice(0, 10) : "-"}</td>
                     <td>{p.payment_no}</td>
-                    <td style={{ fontFamily: "monospace" }}>{p.transaction_id || "-"}</td>
                     <td style={{ textAlign: "right" }}>{(p.items || []).length}</td>
                     <td style={{ textAlign: "right" }}>{fmt(p.transfer_amount)}</td>
-                    <td>{p.slip_image ? "✅" : "-"}</td>
                     <td>
                       <button onClick={() => setDetailPayment(p)} style={btnSmall}>ดูรายละเอียด</button>
                       <button onClick={() => printPayment(p)} style={{ ...btnSmall, background: "#7c3aed", color: "#fff" }}>🖨️ พิมพ์</button>
-                      <button onClick={() => deletePayment(p.id)} style={{ ...btnSmall, background: "#dc2626", color: "#fff" }}>ลบ</button>
+                      <button onClick={() => openEditPayment(p)} style={{ ...btnSmall, background: "#0369a1", color: "#fff" }}>✏️ แก้ไข</button>
+                      <button onClick={() => deletePayment(p.id)} style={{ ...btnSmall, background: "#dc2626", color: "#fff" }}>✕ ยกเลิก</button>
                     </td>
                   </tr>
                 ))}
@@ -590,7 +643,6 @@ export default function PayDepositPage({ currentUser }) {
                       <th>วันที่รับ</th>
                       <th style={{ textAlign: "right" }}>ยอดรับ</th>
                       <th style={{ textAlign: "right" }}>ยอดโอน</th>
-                      <th>Transaction ID</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -604,7 +656,6 @@ export default function PayDepositPage({ currentUser }) {
                         <td>{r.received_date ? r.received_date.slice(0, 10) : "-"}</td>
                         <td style={{ textAlign: "right" }}>{fmt(r.received_amount)}</td>
                         <td style={{ textAlign: "right", fontWeight: "bold" }}>{fmt(r.paid_amount)}</td>
-                        <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.transaction_id || "-"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -639,13 +690,21 @@ export default function PayDepositPage({ currentUser }) {
 
       {/* ============ TRANSFER MODAL ============ */}
       {showTransfer && (
-        <Modal onClose={() => setShowTransfer(false)}>
-          <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>💵 บันทึกจ่ายเงิน</h3>
+        <Modal onClose={() => { setShowTransfer(false); setEditingPaymentId(null); }}>
+          <h3 style={{ margin: "0 0 14px", color: editingPaymentId ? "#7c3aed" : "#072d6b" }}>
+            {editingPaymentId ? "✏️ แก้ไขการจ่ายเงิน" : "💵 บันทึกจ่ายเงิน"}
+          </h3>
 
-          <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13, textAlign: "center" }}>
-            <div>📋 รายการรวม: <b>{selectedList.length}</b> รายการ</div>
-            <div>💰 ยอดรวม: <b style={{ color: "#dc2626", fontSize: 20 }}>฿ {fmt(totalSelected)}</b></div>
-          </div>
+          {editingPaymentId ? (
+            <div style={{ background: "#fef3c7", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13, color: "#78350f" }}>
+              ⚠️ <b>โหมดแก้ไข</b> — เปลี่ยน vendor / ธนาคาร / วิธีจ่าย / wht ได้ (ไม่แก้ไขรายการรับฝาก)
+            </div>
+          ) : (
+            <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13, textAlign: "center" }}>
+              <div>📋 รายการรวม: <b>{selectedList.length}</b> รายการ</div>
+              <div>💰 ยอดรวม: <b style={{ color: "#dc2626", fontSize: 20 }}>฿ {fmt(totalSelected)}</b></div>
+            </div>
+          )}
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
@@ -752,23 +811,22 @@ export default function PayDepositPage({ currentUser }) {
                   style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", fontWeight: 700, color: "#dc2626", boxSizing: "border-box" }} />
               </div>
             </div>
-            <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13, textAlign: "center" }}>
-              <span>ยอดวางบิล: <strong>{fmt(totalSelected)}</strong></span>
-              <span style={{ marginLeft: 14, color: "#dc2626" }}>− หัก WHT: <strong>{fmt(transferForm.wht_amount)}</strong></span>
-              <span style={{ marginLeft: 14, color: "#059669", fontWeight: 700 }}>= ยอดโอนจริง: {fmt(totalSelected - Number(transferForm.wht_amount || 0))}</span>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 12 }}>
-            <label style={{ fontSize: 12, fontWeight: 600 }}>Slip โอน (image, ≤ 5MB)</label>
-            <input type="file" accept="image/*" onChange={handleSlipUpload} style={{ display: "block", marginTop: 4 }} />
-            {transferForm.slip_image && <span style={{ fontSize: 11, color: "#059669" }}> ✅ อัปโหลดแล้ว</span>}
+            {(() => {
+              const displayTotal = editingPaymentId ? (Number(transferForm.wht_base) || Number(transferForm.transfer_amount) || 0) : totalSelected;
+              return (
+                <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13, textAlign: "center" }}>
+                  <span>ยอดวางบิล: <strong>{fmt(displayTotal)}</strong></span>
+                  <span style={{ marginLeft: 14, color: "#dc2626" }}>− หัก WHT: <strong>{fmt(transferForm.wht_amount)}</strong></span>
+                  <span style={{ marginLeft: 14, color: "#059669", fontWeight: 700 }}>= ยอดโอนจริง: {fmt(displayTotal - Number(transferForm.wht_amount || 0))}</span>
+                </div>
+              );
+            })()}
           </div>
 
           <div style={{ marginTop: 18, textAlign: "right" }}>
-            <button onClick={() => setShowTransfer(false)} style={{ ...btnSmall, marginRight: 8 }}>ยกเลิก</button>
-            <button onClick={submitTransfer} disabled={saving} style={btnSuccess}>
-              {saving ? "กำลังบันทึก..." : "💾 บันทึกจ่ายเงิน"}
+            <button onClick={() => { setShowTransfer(false); setEditingPaymentId(null); }} style={{ ...btnSmall, marginRight: 8 }}>ยกเลิก</button>
+            <button onClick={submitTransfer} disabled={saving} style={editingPaymentId ? { ...btnSuccess, background: "#7c3aed" } : btnSuccess}>
+              {saving ? "กำลังบันทึก..." : (editingPaymentId ? "💾 บันทึกแก้ไข" : "💾 บันทึกจ่ายเงิน")}
             </button>
           </div>
         </Modal>
