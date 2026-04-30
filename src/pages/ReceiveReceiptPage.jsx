@@ -63,7 +63,14 @@ export default function ReceiveReceiptPage({ currentUser }) {
       const docNo = data[0]?.received_back_doc_no || data[0]?.returned_doc_no || "";
       setMessage(`✅ บันทึก${label} ${items.length} รายการสำเร็จ${docNo ? ` · เลขที่: ${docNo}` : ""}`);
       setSelected({});
-      fetchData();
+      // Auto-switch filter to show the just-updated batch
+      const nextFilter = action === "mark_batch_received_back" ? "received" : "returned";
+      if (filterStatus !== "all" && filterStatus !== nextFilter) {
+        setFilterStatus(nextFilter);
+        // fetchData will be called by useEffect when filterStatus changes
+      } else {
+        fetchData();
+      }
     } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
   }
 
