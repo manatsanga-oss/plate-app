@@ -389,6 +389,23 @@ export default function BillingPage({ currentUser }) {
     }
   }
 
+  async function cancelBilling(g) {
+    if (!g?.billing_doc_no) { setMessage("❌ ไม่มีเลขที่ใบวางบิล"); return; }
+    if (g.paid_at) { setMessage("❌ ใบนี้จ่ายเงินแล้ว — ยกเลิกไม่ได้"); return; }
+    if (!window.confirm(`ยกเลิกใบวางบิล ${g.billing_doc_no}?\n\nรายการ ${g.items.length} รายการจะกลับไปอยู่ที่ "รอวางบิล"`)) return;
+    try {
+      await post({
+        action: "cancel_billing",
+        billing_doc_no: g.billing_doc_no,
+        cancelled_by: currentUser?.username || currentUser?.name || "system",
+      });
+      setMessage(`✅ ยกเลิกใบวางบิล ${g.billing_doc_no} แล้ว`);
+      fetchData();
+    } catch {
+      setMessage("❌ ยกเลิกไม่สำเร็จ");
+    }
+  }
+
   async function saveBilling() {
     if (selCount === 0) { setMessage("เลือกรายการก่อน"); return; }
     const now = new Date();
@@ -539,6 +556,8 @@ export default function BillingPage({ currentUser }) {
         (() => {
           // กรองก่อน group
           const visibleRows = filtered.filter(r => {
+            // ต้องมี billing_doc_no — ถ้ายังไม่ได้บันทึกวางบิล ไม่ต้องแสดงในแท็บนี้
+            if (!r.billing_doc_no) return false;
             if (viewMode === "history") return !r.paid_at;
             if (viewMode === "paidHistory") return !!r.paid_at;
             return true;
@@ -677,9 +696,17 @@ export default function BillingPage({ currentUser }) {
                             <button onClick={e => { e.stopPropagation(); cancelPayment(g); }}
                               title="ยกเลิกการจ่ายเงิน — กลับไปสถานะ 'รอจ่าย'"
                               style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "1px solid #dc2626", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
-                              ✕ ยกเลิก
+                              ✕ ยกเลิกการจ่าย
                             </button>
                           </>
+                        )}
+                        {/* Cancel billing — only when not paid yet */}
+                        {!isPaidView && !isPaid && (
+                          <button onClick={e => { e.stopPropagation(); cancelBilling(g); }}
+                            title="ยกเลิกการวางบิล — รายการกลับไปอยู่ที่ 'รอวางบิล'"
+                            style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "1px solid #dc2626", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                            🚫 ยกเลิกใบวางบิล
+                          </button>
                         )}
                       </div>
 

@@ -79,11 +79,42 @@ th { background: #f0f4f9; }
     setTimeout(() => w.print(), 300);
   }
 
+  async function cancelReceiptBilling(g) {
+    if (!g?.billing_doc_no) { setMessage("❌ ไม่มีเลขที่ใบวางบิล"); return; }
+    if (g.paid_at) { setMessage("❌ ใบนี้จ่ายเงินแล้ว — ยกเลิกไม่ได้"); return; }
+    if (!window.confirm(`ยกเลิกใบวางบิล ${g.billing_doc_no}?\n\nรายการ ${g.items.length} รายการจะกลับไปอยู่ที่ "รอวางบิล"`)) return;
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "cancel_receipt_billing",
+          billing_doc_no: g.billing_doc_no,
+          cancelled_by: currentUser?.username || currentUser?.name || "system",
+        }),
+      });
+      if (!res.ok) throw new Error("cancel fail");
+      setMessage(`✅ ยกเลิกใบวางบิล ${g.billing_doc_no} แล้ว`);
+      fetchData();
+    } catch {
+      setMessage("❌ ยกเลิกไม่สำเร็จ");
+    }
+  }
+
   async function saveBilling() {
-    const items = filtered.filter(r => selected[r.item_id]).map(r => ({
-      item_id: r.item_id,
-      bill_amount: r.bill_amount || 0,
-    }));
+    const items = filtered.filter(r => selected[r.item_id]).map(r => {
+      const billItems = Array.isArray(r.bill_items) ? r.bill_items : (r.bill_items ? (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : r.bill_items) : []);
+      return {
+        item_id: r.item_id,
+        bill_amount: r.bill_amount || 0,
+        bill_items: billItems.map(it => ({
+          expense_id: it.expense_id,
+          expense_name: it.expense_name,
+          expense_type: it.expense_type,
+          group_by: it.group_by,
+          amount: Number(it.amount || 0),
+        })),
+      };
+    });
     if (!items.length) { setMessage("❌ เลือกรายการก่อน"); return; }
     if (!window.confirm(`บันทึกวางบิล ${items.length} รายการ\nยอดรวม: ${items.reduce((s, x) => s + Number(x.bill_amount || 0), 0).toLocaleString()} บาท`)) return;
     setSaving(true); setMessage("");
@@ -276,11 +307,12 @@ th { background: #f0f4f9; }
           {viewMode === "history" ? "ยังไม่มีใบวางบิล" : "ไม่มีรายการรอวางบิล (ยังไม่ได้ส่งงาน หรือถูกวางบิลแล้ว)"}
         </div>
       ) : viewMode === "history" ? (
-        // ประวัติ — group by billing_doc_no
+        // ประวัติ — group by billing_doc_no — ข้ามรายการที่ยังไม่ได้วางบิล
         (() => {
           const grouped = {};
           filtered.forEach(r => {
-            const key = r.billing_doc_no || "(ยังไม่ได้วางบิล)";
+            if (!r.billing_doc_no) return;  // skip รายการที่ยังไม่ได้วางบิล
+            const key = r.billing_doc_no;
             if (!grouped[key]) grouped[key] = { billing_doc_no: key, billed_at: r.billed_at, items: [], total: 0, paid_at: r.paid_at, paid_doc_no: r.paid_doc_no, paid_to_vendor: r.paid_to_vendor };
             grouped[key].items.push(r);
             grouped[key].total += Number(r.bill_amount || 0);
@@ -337,6 +369,13 @@ th { background: #f0f4f9; }
                           style={{ padding: "4px 10px", background: "#fff2", color: "#fff", border: "1px solid #fff5", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
                           🖨️
                         </button>
+                        {!isPaid && (
+                          <button onClick={e => { e.stopPropagation(); cancelReceiptBilling(g); }}
+                            title="ยกเลิกใบวางบิล — รายการกลับไปอยู่ที่ 'รอวางบิล'"
+                            style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "1px solid #dc2626", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                            🚫 ยกเลิกใบวางบิล
+                          </button>
+                        )}
                       </div>
                       {open && (
                         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -412,15 +451,35 @@ th { background: #f0f4f9; }
                     <td style={td}>{r.income_type || "-"}</td>
                     <td style={td}>{r.income_name || "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.net_price)}</td>
-                    <td style={{ ...td, fontSize: 11 }}>
+                    <td style={{ ...td, fontSize: 11 }} onClick={e => e.stopPropagation()}>
                       {items.length === 0 ? <span style={{ color: "#9ca3af" }}>—</span> : (
                         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                          {items.map((it, idx) => (
-                            <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6 }}>
-                              <span>{it.expense_name}</span>
-                              <span style={{ fontWeight: 600 }}>{fmtNum(it.amount)}</span>
-                            </div>
-                          ))}
+                          {items.map((it, idx) => {
+                            const isVariable = it.expense_type === "variable" || it.is_variable === true;
+                            return (
+                              <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
+                                <span style={{ flex: 1 }}>{it.expense_name}{isVariable && <span style={{ color: "#f59e0b", fontSize: 10, marginLeft: 4 }}>(ไม่คงที่)</span>}</span>
+                                {isPaid ? (
+                                  <span style={{ fontWeight: 600 }}>{fmtNum(it.amount)}</span>
+                                ) : isVariable ? (
+                                  <input type="number" step="0.01" min="0" value={it.amount || ""}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setRows(prev => prev.map(row => {
+                                        if (row.item_id !== r.item_id) return row;
+                                        const newItems = [...(Array.isArray(row.bill_items) ? row.bill_items : items)];
+                                        newItems[idx] = { ...newItems[idx], amount: v };
+                                        const newTotal = newItems.reduce((s, x) => s + Number(x.amount || 0), 0);
+                                        return { ...row, bill_items: newItems, bill_amount: newTotal };
+                                      }));
+                                    }}
+                                    style={{ width: 80, padding: "2px 6px", border: "1px solid #f59e0b", borderRadius: 4, fontFamily: "monospace", fontSize: 11, textAlign: "right" }} />
+                                ) : (
+                                  <span style={{ fontWeight: 600 }}>{fmtNum(it.amount)}</span>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </td>

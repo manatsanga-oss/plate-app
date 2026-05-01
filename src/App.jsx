@@ -39,6 +39,7 @@ import VehicleRegistrationPage from "./pages/VehicleRegistrationPage";
 import RegistrationSubmitPage from "./pages/RegistrationSubmitPage";
 import ReceiveRegistrationPage from "./pages/ReceiveRegistrationPage";
 import ReceiveReceiptPage from "./pages/ReceiveReceiptPage";
+import SearchReceiptWorkPage from "./pages/SearchReceiptWorkPage";
 import BillingPage from "./pages/BillingPage";
 import InsuranceBillingPage from "./pages/InsuranceBillingPage";
 import RegistrationSubmitReceiptPage from "./pages/RegistrationSubmitReceiptPage";
@@ -109,7 +110,7 @@ export default function App() {
     }
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration") return true;
+    if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
     if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "cosmosinsurance" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrspecialcommission" || page === "hrtimetracking" || page === "hremployees") return false;
     // upload, master data, convert เฉพาะ admin
@@ -241,6 +242,9 @@ export default function App() {
         )}
         {activeMenu === "receiptreceive" && canAccess("receiptreceive") && (
           <ReceiveReceiptPage currentUser={currentUser} />
+        )}
+        {activeMenu === "searchreceiptwork" && canAccess("searchreceiptwork") && (
+          <SearchReceiptWorkPage currentUser={currentUser} />
         )}
         {activeMenu === "registrationbilling" && canAccess("registrationbilling") && (
           <BillingPage currentUser={currentUser} />
@@ -419,7 +423,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="users" label={currentUser?.role === "admin" ? "กำหนดผู้ใช้งาน" : "เปลี่ยนรหัสผ่าน"} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","receiptreceive","motoinsurance","cosmosinsurance","registrationbilling","receiptbilling","insurancebilling","cosmosbilling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","receiptreceive","searchreceiptwork","motoinsurance","cosmosinsurance","registrationbilling","receiptbilling","insurancebilling","cosmosbilling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="ส่งงานทะเบียน" pages={["registrationsubmit","registrationsubmitreceipt"]} activeMenu={activeMenu}>
           <MenuItem page="registrationsubmit" label="ส่งจดทะเบียนรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="registrationsubmitreceipt" label="ส่งงานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -427,7 +431,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuSubGroup title="บันทึกงานทะเบียน/ประกัน" pages={["registrationreceive","receiptreceive","motoinsurance","cosmosinsurance"]} activeMenu={activeMenu}>
           <MenuItem page="registrationreceive" label="บันทึกรับ/ส่งคืนงานทะเบียนรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="receiptreceive" label="บันทึกรับ/ส่งคืน งานรับเรื่องงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-          <MenuItem page="motoinsurance" label="บันทึก พรบ.รถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="motoinsurance" label="บันทึกงาน พรบ." activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="cosmosinsurance" label="บันทึกประกัน COSMOS" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="วางบิล" pages={["registrationbilling","receiptbilling","insurancebilling","cosmosbilling"]} activeMenu={activeMenu}>
@@ -437,6 +441,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="cosmosbilling" label="วางบิล ประกัน COSMOS" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuItem page="vehicleregistration" label="ค้นหาทะเบียนรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="searchreceiptwork" label="ค้นหางานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Accounting" pages={["accbankaccounts","accbankmovements","accbanktransfer"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

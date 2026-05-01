@@ -11,6 +11,9 @@ const emptyForm = () => ({
   income_name: "",
   income_amount: "",
   amount: "",
+  match_from_province: "",
+  match_double_transfer: false,
+  match_to_province: "",
   note: "",
   status: "active",
 });
@@ -26,7 +29,7 @@ export default function ServiceExpensePage({ currentUser }) {
   const [editTarget, setEditTarget] = useState(null);
   const [search, setSearch] = useState("");
   const [filterIncomeType, setFilterIncomeType] = useState("");
-  const [includeInactive, setIncludeInactive] = useState(false);
+  const [includeInactive, setIncludeInactive] = useState(true);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -65,7 +68,10 @@ export default function ServiceExpensePage({ currentUser }) {
 
   async function handleSave() {
     if (!form.expense_name.trim()) { setMessage("❌ กรุณากรอกชื่อรายการ"); return; }
-    if (!form.amount || isNaN(Number(form.amount))) { setMessage("❌ กรุณากรอกจำนวนเงิน"); return; }
+    // amount required only for "fixed" expense type
+    if (form.expense_type === "fixed" && (!form.amount || isNaN(Number(form.amount)))) {
+      setMessage("❌ กรุณากรอกจำนวนเงิน (ค่าใช้จ่ายแบบคงที่)"); return;
+    }
     setSaving(true); setMessage("");
     try {
       const payload = {
@@ -110,6 +116,9 @@ export default function ServiceExpensePage({ currentUser }) {
       income_name: r.income_name || "",
       income_amount: r.income_amount ?? "",
       amount: r.amount || "",
+      match_from_province: r.match_from_province || "",
+      match_double_transfer: !!r.match_double_transfer,
+      match_to_province: r.match_to_province || "",
       note: r.note || "",
       status: r.status || "active",
     });
@@ -206,6 +215,9 @@ export default function ServiceExpensePage({ currentUser }) {
                 <th style={th}>ชื่อรายการค่าใช้จ่าย</th>
                 <th style={th}>ประเภท</th>
                 <th style={th}>จำนวนเงิน</th>
+                <th style={th}>จังหวัดต้นทาง</th>
+                <th style={th}>โอน 2 ต่อ</th>
+                <th style={th}>จังหวัดปลายทาง</th>
                 <th style={th}>หมายเหตุ</th>
                 <th style={th}>สถานะ</th>
                 <th style={th}></th>
@@ -221,12 +233,21 @@ export default function ServiceExpensePage({ currentUser }) {
                   </td>
                   <td style={{ ...td, fontWeight: 600 }}>{r.expense_name}</td>
                   <td style={td}>
-                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: r.expense_type === "percent" ? "#fef3c7" : "#dbeafe", color: r.expense_type === "percent" ? "#92400e" : "#1e40af" }}>
-                      {r.expense_type === "percent" ? "% ของยอด" : "คงที่"}
+                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: r.expense_type === "variable" ? "#fed7aa" : "#dbeafe", color: r.expense_type === "variable" ? "#9a3412" : "#1e40af" }}>
+                      {r.expense_type === "variable" ? "ไม่คงที่" : "คงที่"}
                     </span>
                   </td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: "#dc2626" }}>
-                    {fmtNum(r.amount)}{r.expense_type === "percent" ? " %" : " ฿"}
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: r.expense_type === "variable" ? "#9ca3af" : "#dc2626" }}>
+                    {r.expense_type === "variable" ? "—" : fmtNum(r.amount) + " ฿"}
+                  </td>
+                  <td style={td}>
+                    {r.match_from_province ? <span style={{ color: "#0369a1" }}>{r.match_from_province}</span> : <span style={{ color: "#9ca3af", fontSize: 11 }}>(ทุกจว.)</span>}
+                  </td>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    {r.match_double_transfer ? <span style={{ padding: "2px 8px", background: "#dcfce7", color: "#065f46", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>✓ โอน 2 ต่อ</span> : <span style={{ color: "#9ca3af" }}>-</span>}
+                  </td>
+                  <td style={td}>
+                    {r.match_to_province ? <span style={{ color: "#0369a1" }}>{r.match_to_province}</span> : <span style={{ color: "#9ca3af", fontSize: 11 }}>(ทุกจว.)</span>}
                   </td>
                   <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{r.note || ""}</td>
                   <td style={td}>
@@ -297,19 +318,21 @@ export default function ServiceExpensePage({ currentUser }) {
 
               <div>
                 <label style={lbl}>ประเภทค่าใช้จ่าย</label>
-                <select value={form.expense_type} onChange={e => setForm(f => ({ ...f, expense_type: e.target.value }))} style={inp}>
-                  <option value="fixed">คงที่ (บาท)</option>
-                  <option value="percent">% ของยอดสุทธิ</option>
+                <select value={form.expense_type} onChange={e => setForm(f => ({ ...f, expense_type: e.target.value, ...(e.target.value === "variable" ? { amount: "" } : {}) }))} style={inp}>
+                  <option value="fixed">คงที่</option>
+                  <option value="variable">ไม่คงที่ (กำหนดตอนใช้)</option>
                 </select>
               </div>
 
               <div>
-                <label style={lbl}>จำนวนเงิน *</label>
+                <label style={lbl}>จำนวนเงิน {form.expense_type === "fixed" ? "*" : ""}</label>
                 <input type="number" step="0.01" min="0" value={form.amount}
                   onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                  style={{ ...inp, fontFamily: "monospace" }} />
+                  disabled={form.expense_type === "variable"}
+                  placeholder={form.expense_type === "variable" ? "ผู้ใช้กำหนดตอนใช้งาน" : ""}
+                  style={{ ...inp, fontFamily: "monospace", background: form.expense_type === "variable" ? "#f3f4f6" : "#fff", color: form.expense_type === "variable" ? "#9ca3af" : "#1f2937" }} />
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
-                  {form.expense_type === "percent" ? "ใส่เป็น % เช่น 5.00" : "ใส่เป็นบาท"}
+                  {form.expense_type === "variable" ? "ไม่ต้องระบุ — ผู้ใช้กรอกตอนใช้จริง" : "ใส่เป็นบาท"}
                 </div>
               </div>
 
@@ -319,6 +342,36 @@ export default function ServiceExpensePage({ currentUser }) {
                   <option value="active">ใช้งาน</option>
                   <option value="inactive">ปิด</option>
                 </select>
+              </div>
+
+              {/* === เงื่อนไข match จังหวัดและการโอน 2 ต่อ === */}
+              <div style={{ gridColumn: "1 / span 2", marginTop: 4, padding: "10px 12px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#0369a1", marginBottom: 8 }}>📍 เงื่อนไขจังหวัด / การโอน (เพิ่มเติม)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <label style={lbl}>จังหวัดที่จดทะเบียน</label>
+                    <input type="text" value={form.match_from_province}
+                      onChange={e => setForm(f => ({ ...f, match_from_province: e.target.value }))}
+                      placeholder="เช่น กรุงเทพ" style={inp} />
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>เว้นว่าง = match ทุกจังหวัด</div>
+                  </div>
+                  <div>
+                    <label style={lbl}>จังหวัดที่จะจดทะเบียนเข้า</label>
+                    <input type="text" value={form.match_to_province}
+                      onChange={e => setForm(f => ({ ...f, match_to_province: e.target.value }))}
+                      placeholder="เช่น อยุธยา" style={inp} />
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>เว้นว่าง = match ทุกจังหวัด</div>
+                  </div>
+                  <div style={{ gridColumn: "1 / span 2" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: "6px 0" }}>
+                      <input type="checkbox" checked={form.match_double_transfer}
+                        onChange={e => setForm(f => ({ ...f, match_double_transfer: e.target.checked }))}
+                        style={{ width: 16, height: 16, cursor: "pointer" }} />
+                      🔄 โอน 2 ต่อ
+                    </label>
+                    <div style={{ fontSize: 11, color: "#6b7280" }}>เลือกถ้าค่าใช้จ่ายนี้ใช้กับการโอน 2 ต่อ</div>
+                  </div>
+                </div>
               </div>
 
               <div style={{ gridColumn: "1 / span 2" }}>

@@ -12,6 +12,7 @@ export default function ReceiveReceiptPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [expanded, setExpanded] = useState({});
   const [selected, setSelected] = useState({}); // { item_id: true }
+  const [lastSavedIds, setLastSavedIds] = useState(null); // ids ของรายการที่เพิ่ง save (สำหรับกรองหลัง save)
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -51,17 +52,19 @@ export default function ReceiveReceiptPage({ currentUser }) {
 
   async function markItems(action, items, batch) {
     if (items.length === 0) { setMessage("เลือกรายการก่อน"); return; }
-    const label = action === "mark_batch_received_back" ? "รับคืน" : "ส่งคืนลูกค้า";
+    const label = action === "mark_batch_received_back" ? "รับคืน" : "ส่งคืนร้านรับเรื่อง";
     if (!window.confirm(`บันทึก${label} ${items.length} รายการ จาก ${batch.batch_code}?`)) return;
     try {
+      const savedIds = items.map(it => it.item_id);
       await post({
         action,
-        item_ids: items.map(it => it.item_id),
+        item_ids: savedIds,
         by: currentUser?.username || currentUser?.name || "system",
       });
       setMessage(`✅ บันทึก${label} ${items.length} รายการสำเร็จ`);
       setSelected({});
-      // Auto-switch: รับคืน → รอส่งลูกค้า, ส่งคืน → ส่งคืนลูกค้าแล้ว
+      setLastSavedIds(savedIds);  // เก็บ ids ที่เพิ่งบันทึก
+      // Auto-switch: รับคืน → รอส่งร้านรับเรื่อง, ส่งคืน → ส่งคืนร้านรับเรื่องแล้ว
       const nextFilter = action === "mark_batch_received_back" ? "received" : "returned";
       if (filterStatus !== nextFilter) {
         setFilterStatus(nextFilter);
@@ -73,7 +76,7 @@ export default function ReceiveReceiptPage({ currentUser }) {
 
   async function undoItems(items, batch) {
     if (items.length === 0) { setMessage("เลือกรายการก่อน"); return; }
-    if (!window.confirm(`ยกเลิกสถานะ ${items.length} รายการ จาก ${batch.batch_code}?\n(ถ้าส่งคืนแล้ว → กลับเป็นรอส่งลูกค้า · ถ้ารับคืนแล้ว → กลับเป็นรอจัดการ)`)) return;
+    if (!window.confirm(`ยกเลิกสถานะ ${items.length} รายการ จาก ${batch.batch_code}?\n(ถ้าส่งคืนแล้ว → กลับเป็นรอส่งร้านรับเรื่อง · ถ้ารับคืนแล้ว → กลับเป็นรอจัดการ)`)) return;
     try {
       await post({
         action: "undo_item_status",
@@ -81,6 +84,77 @@ export default function ReceiveReceiptPage({ currentUser }) {
       });
       setMessage(`✅ ยกเลิก ${items.length} รายการสำเร็จ`);
       setSelected({});
+      fetchData();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
+  function printReturnDoc(batch, returnedItems) {
+    const safe = s => String(s ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const today = new Date();
+    const pad = n => String(n).padStart(2, "0");
+    const printDate = `${pad(today.getDate())}/${pad(today.getMonth() + 1)}/${today.getFullYear() + 543} ${pad(today.getHours())}:${pad(today.getMinutes())}`;
+    const total = returnedItems.reduce((s, it) => s + Number(it.net_price || 0), 0);
+    const trs = returnedItems.map((it, i) => `<tr>
+      <td>${i + 1}</td>
+      <td class="mono">${safe(it.receipt_no)}</td>
+      <td>${safe(it.customer_name)}</td>
+      <td class="mono">${safe(it.chassis_no)}</td>
+      <td>${safe(it.plate_number || "-")}</td>
+      <td>${safe(it.income_name || it.income_type || "-")}</td>
+      <td class="num">${Number(it.net_price || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+    </tr>`).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>ใบส่งคืน ${safe(batch.batch_code)}</title>
+<style>
+@page { size: A4 portrait; margin: 12mm; }
+body { font-family: 'Tahoma','Arial',sans-serif; font-size: 11pt; }
+h1 { text-align: center; margin: 0 0 4px; font-size: 16pt; color: #072d6b; }
+.head { text-align: center; margin-bottom: 14px; font-size: 10pt; color: #444; }
+.info { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px; margin-bottom: 12px; padding: 10px; background: #f0f4f9; border-radius: 6px; font-size: 10pt; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #555; padding: 5px 8px; font-size: 10pt; text-align: left; }
+th { background: #f0f4f9; }
+.num { text-align: right; font-family: monospace; }
+.mono { font-family: monospace; }
+.total { font-weight: 700; background: #fef9c3; }
+.sign-box { display: inline-block; width: 45%; margin-top: 30px; padding: 0 10px; vertical-align: top; }
+</style></head><body>
+<h1>ใบส่งคืนงานทะเบียน — ให้ร้านรับเรื่อง</h1>
+<div class="head">เลขที่ batch: <strong>${safe(batch.batch_code)}</strong> · วันที่ส่ง: ${batch.submission_date ? new Date(batch.submission_date).toLocaleDateString("th-TH") : "-"}<br/>วันที่พิมพ์: ${printDate}</div>
+<div class="info">
+  <div><strong>ร้านรับเรื่อง:</strong> ${safe(batch.destination || "-")}</div>
+  <div><strong>จำนวนรายการ:</strong> ${returnedItems.length}</div>
+  <div><strong>ผู้ดำเนินการ:</strong> ${safe(batch.created_by || "-")}</div>
+  <div><strong>ยอดรวม:</strong> ${total.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท</div>
+</div>
+<table>
+  <thead><tr><th>#</th><th>เลขที่รับเรื่อง</th><th>ลูกค้า</th><th>เลขถัง</th><th>ทะเบียน</th><th>รายการ</th><th>ยอด</th></tr></thead>
+  <tbody>
+    ${trs}
+    <tr class="total"><td colspan="6" style="text-align:right">รวมทั้งสิ้น</td><td class="num">${total.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td></tr>
+  </tbody>
+</table>
+<div style="margin-top:25px;">
+  <div class="sign-box"><div style="height:35px"></div><div style="border-top:1px solid #333;padding-top:4px">ลงชื่อ ........................................................<br/>ผู้ส่งคืน (ตัวแทน/บริษัท)</div></div>
+  <div class="sign-box"><div style="height:35px"></div><div style="border-top:1px solid #333;padding-top:4px">ลงชื่อ ........................................................<br/>ผู้รับคืน (ร้านรับเรื่อง)</div></div>
+</div>
+</body></html>`;
+    const w = window.open("", "_blank", "width=900,height=900");
+    if (!w) { setMessage("❌ Popup ถูกบล็อก"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
+  async function cancelBatch(batch) {
+    const reason = window.prompt(`ยกเลิกใบ ${batch.batch_code}?\n\nรายการทั้งหมด ${batch.items_count} รายการจะกลับไปรอส่งใหม่\nกรุณาระบุเหตุผล:`);
+    if (reason === null) return;
+    try {
+      await post({
+        action: "cancel_submission_batch",
+        batch_id: batch.batch_id,
+        cancel_reason: reason || "",
+        cancelled_by: currentUser?.username || currentUser?.name || "system",
+      });
+      setMessage(`✅ ยกเลิกใบ ${batch.batch_code} แล้ว`);
       fetchData();
     } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
   }
@@ -98,7 +172,7 @@ export default function ReceiveReceiptPage({ currentUser }) {
     const total = b.items_count || (b.items?.length || 0);
     const received = b.received_count || 0;
     const returned = b.returned_count || 0;
-    if (returned === total && total > 0) return { label: "✅ ส่งคืนลูกค้าครบแล้ว", color: "#065f46", bg: "#dcfce7" };
+    if (returned === total && total > 0) return { label: "✅ ส่งคืนร้านรับเรื่องครบแล้ว", color: "#065f46", bg: "#dcfce7" };
     if (received === total && total > 0) return { label: "📥 รับคืนครบแล้ว", color: "#1e40af", bg: "#dbeafe" };
     if (received > 0 || returned > 0) return { label: `📥 ${received}/${total} · ✅ ${returned}/${total}`, color: "#0369a1", bg: "#e0f2fe" };
     return { label: "⏳ ส่งแล้ว · รอรับคืน", color: "#92400e", bg: "#fef3c7" };
@@ -121,8 +195,14 @@ export default function ReceiveReceiptPage({ currentUser }) {
       </div>
 
       {message && (
-        <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8, background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : "#991b1b" }}>
-          {message}
+        <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8, background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : "#991b1b", display: "flex", alignItems: "center", gap: 12 }}>
+          <span style={{ flex: 1 }}>{message}</span>
+          {lastSavedIds && lastSavedIds.length > 0 && (
+            <button onClick={() => { setLastSavedIds(null); setFilterStatus("all"); setMessage(""); }}
+              style={{ padding: "6px 16px", background: "#fff", color: "#065f46", border: "1px solid #065f46", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+              ⬅ กลับหน้าแรก
+            </button>
+          )}
         </div>
       )}
 
@@ -133,11 +213,11 @@ export default function ReceiveReceiptPage({ currentUser }) {
         <span>ถึง</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
 
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={inp}>
+        <select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setLastSavedIds(null); }} style={inp}>
           <option value="all">📋 ทั้งหมด</option>
           <option value="pending">⏳ รอจัดการ</option>
-          <option value="received">📥 รอส่งลูกค้า</option>
-          <option value="returned">✅ ส่งคืนลูกค้าแล้ว</option>
+          <option value="received">📥 รอส่งร้านรับเรื่อง</option>
+          <option value="returned">✅ ส่งคืนร้านรับเรื่องแล้ว</option>
         </select>
 
         <input type="text" placeholder="🔍 ค้นหา (เลข batch, supplier)"
@@ -145,7 +225,7 @@ export default function ReceiveReceiptPage({ currentUser }) {
           onKeyDown={e => e.key === "Enter" && fetchData()}
           style={{ ...inp, flex: 1, minWidth: 200 }} />
 
-        <button onClick={fetchData} disabled={loading}
+        <button onClick={() => { setLastSavedIds(null); fetchData(); }} disabled={loading}
           style={{ padding: "7px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
           {loading ? "..." : "🔍 ค้นหา"}
         </button>
@@ -175,7 +255,20 @@ export default function ReceiveReceiptPage({ currentUser }) {
           {batches.map(b => {
             const st = batchStatusBadge(b);
             const isOpen = !!expanded[b.batch_id];
-            const items = b.items || [];
+            const allItems = b.items || [];
+            // Filter items ตาม filterStatus — แสดงเฉพาะรายการที่ตรงกับ filter
+            let items = allItems.filter(it => {
+              if (filterStatus === "pending") return !it.received_back_at;
+              if (filterStatus === "received") return it.received_back_at && !it.returned_at;
+              if (filterStatus === "returned") return !!it.returned_at;
+              return true; // 'all'
+            });
+            // ถ้าเพิ่ง save → แสดงเฉพาะ items ที่เพิ่งบันทึก
+            if (lastSavedIds && lastSavedIds.length > 0) {
+              items = items.filter(it => lastSavedIds.includes(it.item_id));
+            }
+            // ถ้า filter ทำให้ batch ไม่มี items ที่แสดง — ซ่อน batch ไปเลย
+            if (items.length === 0) return null;
             const selectedInBatch = items.filter(it => selected[it.item_id]);
             const allInBatchSelected = items.length > 0 && items.every(it => selected[it.item_id] || it.returned_at);
             const pendingItems = items.filter(it => !it.received_back_at);
@@ -194,6 +287,21 @@ export default function ReceiveReceiptPage({ currentUser }) {
                   <span style={{ flex: 1 }}>📍 {b.destination || "-"} · {items.length} รายการ</span>
                   <span style={{ background: st.bg, color: st.color, padding: "3px 12px", borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>{st.label}</span>
                   <strong style={{ color: "#fbbf24", fontSize: 15 }}>฿ {fmtNum(b.total_amount)}</strong>
+                  {/* Print button — บนหัว batch (เลือก 1 พิมพ์ 1, ไม่เลือก พิมพ์ทุก returned) */}
+                  {(() => {
+                    const selectedReturned = selectedInBatch.filter(it => it.returned_at);
+                    const allReturned = items.filter(it => it.returned_at);
+                    const printable = selectedReturned.length > 0 ? selectedReturned : allReturned;
+                    if (printable.length === 0) return null;
+                    return (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); printReturnDoc(b, printable); }}
+                        title={selectedReturned.length > 0 ? `พิมพ์ ${selectedReturned.length} รายการที่เลือก` : `พิมพ์ทั้งหมด ${allReturned.length} รายการที่ส่งคืนแล้ว`}
+                        style={{ padding: "5px 12px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 12, whiteSpace: "nowrap" }}>
+                        🖨️ พิมพ์ ({printable.length})
+                      </button>
+                    );
+                  })()}
                   <span style={{ fontSize: 11, color: "#cbd5e1" }}>by {b.created_by || "-"}</span>
                 </div>
 
@@ -207,29 +315,46 @@ export default function ReceiveReceiptPage({ currentUser }) {
                     </label>
                     <span style={{ fontSize: 12, color: "#6b7280" }}>เลือก {selectedInBatch.length} รายการ</span>
                     <div style={{ flex: 1 }} />
-                    {pendingItems.length > 0 && (
-                      <button
-                        onClick={() => markItems("mark_batch_received_back",
-                          selectedInBatch.length > 0 ? selectedInBatch.filter(it => !it.received_back_at) : pendingItems,
-                          b)}
-                        style={{ padding: "8px 16px", background: "#1e40af", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
-                        📥 บันทึกรับคืน {selectedInBatch.length > 0 ? `(${selectedInBatch.filter(it => !it.received_back_at).length})` : `(ทั้งหมด ${pendingItems.length})`}
-                      </button>
-                    )}
-                    {(receivedItems.length > 0 || selectedInBatch.length > 0) && (
-                      <button
-                        onClick={() => markItems("mark_batch_returned",
-                          selectedInBatch.length > 0 ? selectedInBatch.filter(it => !it.returned_at) : receivedItems,
-                          b)}
-                        style={{ padding: "8px 16px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
-                        ✅ บันทึกส่งคืนลูกค้า {selectedInBatch.length > 0 ? `(${selectedInBatch.filter(it => !it.returned_at).length})` : `(ทั้งหมด ${receivedItems.length})`}
-                      </button>
-                    )}
+                    {(() => {
+                      const selPending = selectedInBatch.filter(it => !it.received_back_at);
+                      const selReceived = selectedInBatch.filter(it => it.received_back_at && !it.returned_at);
+                      return (
+                        <>
+                          {/* แสดง "รับคืน" เมื่อมี pending items (หรือ selected pending) */}
+                          {pendingItems.length > 0 && (
+                            <button
+                              onClick={() => markItems("mark_batch_received_back",
+                                selPending.length > 0 ? selPending : pendingItems,
+                                b)}
+                              style={{ padding: "8px 16px", background: "#1e40af", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+                              📥 บันทึกรับคืน {selPending.length > 0 ? `(${selPending.length})` : `(ทั้งหมด ${pendingItems.length})`}
+                            </button>
+                          )}
+                          {/* แสดง "ส่งคืน" เฉพาะเมื่อ user เลือก items ที่รับคืนแล้ว (received) */}
+                          {selReceived.length > 0 && (
+                            <button
+                              onClick={() => markItems("mark_batch_returned", selReceived, b)}
+                              style={{ padding: "8px 16px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+                              ✅ บันทึกส่งคืนร้านรับเรื่อง ({selReceived.length})
+                            </button>
+                          )}
+                        </>
+                      );
+                    })()}
                     {selectedInBatch.length > 0 && selectedInBatch.some(it => it.received_back_at || it.returned_at) && (
                       <button
                         onClick={() => undoItems(selectedInBatch.filter(it => it.received_back_at || it.returned_at), b)}
                         style={{ padding: "8px 16px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
                         ↩️ ยกเลิก ({selectedInBatch.filter(it => it.received_back_at || it.returned_at).length})
+                      </button>
+                    )}
+                    {/* Cancel whole submission batch — show only when batch is fully pending (สีเหลือง) */}
+                    {selectedInBatch.length === 0 && pendingItems.length === items.length && b.status !== "cancelled" && (
+                      <button
+                        onClick={() => cancelBatch(b)}
+                        title="ยกเลิกใบทั้งหมด — รายการจะกลับไปรอส่งใหม่"
+                        style={{ padding: "8px 16px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+                        🚫 ยกเลิกใบ
                       </button>
                     )}
                   </div>
@@ -277,7 +402,7 @@ export default function ReceiveReceiptPage({ currentUser }) {
                               <td style={{ ...td, textAlign: "center" }}>
                                 {canUndo && (
                                   <button onClick={() => undoItems([it], b)}
-                                    title={it.returned_at ? "ยกเลิก: กลับเป็นรอส่งลูกค้า" : "ยกเลิก: กลับเป็นรอจัดการ"}
+                                    title={it.returned_at ? "ยกเลิก: กลับเป็นรอส่งร้านรับเรื่อง" : "ยกเลิก: กลับเป็นรอจัดการ"}
                                     style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
                                     ↩️ ยกเลิก
                                   </button>

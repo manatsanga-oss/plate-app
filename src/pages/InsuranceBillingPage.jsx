@@ -14,6 +14,7 @@ export default function InsuranceBillingPage({ currentUser }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [detailRow, setDetailRow] = useState(null);
+  const [claimDialog, setClaimDialog] = useState(null); // { insurance_id, receipt_no, ... }
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -292,6 +293,8 @@ export default function InsuranceBillingPage({ currentUser }) {
                 <th style={th}>เลขทะเบียน</th>
                 <th style={th}>เลขที่ใบขาย</th>
                 <th style={th}>เลขที่รับเรื่อง</th>
+                <th style={th}>รายการเบิก</th>
+                <th style={{ ...th, textAlign: "right" }}>รับชำระ</th>
                 <th style={th}>ค่าเบี้ย</th>
                 {showBilled && <th style={th}>ใบวางบิล</th>}
                 {showBilled && <th style={th}>วันที่วางบิล</th>}
@@ -299,8 +302,16 @@ export default function InsuranceBillingPage({ currentUser }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => (
-                <tr key={r.insurance_id} style={{ borderTop: "1px solid #e5e7eb", background: selected[r.insurance_id] ? "#fef9c3" : "transparent" }}>
+              {filtered.map(r => {
+                // Highlight เหลืองถ้ามี receipt_no แต่ยังไม่มีรายการเบิก (ต้องตรวจ/เลือกรายการ)
+                let claimed = [];
+                try { claimed = Array.isArray(r.claimed_items) ? r.claimed_items : (typeof r.claimed_items === "string" ? JSON.parse(r.claimed_items) : []); } catch {}
+                const needAttention = r.receipt_no && claimed.length === 0;
+                const rowBg = selected[r.insurance_id] ? "#fef9c3"
+                  : needAttention ? "#fef3c7"
+                  : "transparent";
+                return (
+                <tr key={r.insurance_id} style={{ borderTop: "1px solid #e5e7eb", background: rowBg }}>
                   <td style={td}><input type="checkbox" checked={!!selected[r.insurance_id]} onChange={() => toggleOne(r.insurance_id)} /></td>
                   <td style={td}>{fmtDate(r.contract_date)}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.policy_no || "-"}</td>
@@ -308,7 +319,31 @@ export default function InsuranceBillingPage({ currentUser }) {
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.chassis_no || "-"}</td>
                   <td style={td}>{r.plate_number || "-"}</td>
                   <td style={{ ...td, color: r.invoice_no ? "#065f46" : "#9ca3af", fontWeight: r.invoice_no ? 600 : 400 }}>{r.invoice_no || "-"}</td>
-                  <td style={{ ...td, color: r.receipt_no ? "#1e40af" : "#9ca3af", fontWeight: r.receipt_no ? 600 : 400 }}>{r.receipt_no || "-"}</td>
+                  <td style={td}>
+                    {r.receipt_no ? (
+                      <button onClick={() => setClaimDialog(r)}
+                        title="เลือกรายการเบิกจากใบรับเรื่อง"
+                        style={{ padding: "2px 8px", background: "transparent", color: "#1e40af", border: "1px solid #93c5fd", borderRadius: 4, cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+                        {r.receipt_no} ▼
+                      </button>
+                    ) : <span style={{ color: "#9ca3af" }}>-</span>}
+                  </td>
+                  <td style={{ ...td, fontSize: 11 }}>
+                    {(() => {
+                      let claimed = [];
+                      try { claimed = Array.isArray(r.claimed_items) ? r.claimed_items : (typeof r.claimed_items === "string" ? JSON.parse(r.claimed_items) : []); } catch {}
+                      if (!claimed.length) return <span style={{ color: "#9ca3af" }}>-</span>;
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          {r.auto_matched && (
+                            <span style={{ display: "inline-block", padding: "1px 6px", background: "#fef3c7", color: "#92400e", borderRadius: 8, fontSize: 9, fontWeight: 600, alignSelf: "flex-start" }}>🔗 Auto</span>
+                          )}
+                          {claimed.map((c, i) => <span key={i} style={{ color: "#374151" }}>• {c.income_name || c.description}</span>)}
+                        </div>
+                      );
+                    })()}
+                  </td>
+                  <td style={{ ...tdNum, color: "#0369a1", fontWeight: 700 }}>{r.amount_received ? fmtNum(r.amount_received) : "-"}</td>
                   <td style={{ ...tdNum, color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}</td>
                   {showBilled && <td style={{ ...td, fontFamily: "monospace", color: "#059669" }}>{r.billing_doc_no || "-"}</td>}
                   {showBilled && <td style={td}>{r.billed_at ? new Date(r.billed_at).toLocaleString("th-TH") : "-"}</td>}
@@ -325,11 +360,13 @@ export default function InsuranceBillingPage({ currentUser }) {
                     )}
                   </td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
             <tfoot style={{ background: "#f3f4f6", fontWeight: 700 }}>
               <tr>
-                <td colSpan={8} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} รายการ</td>
+                <td colSpan={9} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} รายการ</td>
+                <td style={{ ...tdNum, color: "#0369a1" }}>{fmtNum(filtered.reduce((s, r) => s + Number(r.amount_received || 0), 0))}</td>
                 <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(filtered.reduce((s, r) => s + Number(r.total_premium || 0), 0))}</td>
                 {showBilled && <td colSpan={2}></td>}
                 <td></td>
@@ -374,6 +411,162 @@ export default function InsuranceBillingPage({ currentUser }) {
           </div>
         </div>
       )}
+
+      {claimDialog && (
+        <ClaimItemsDialog
+          insurance={claimDialog}
+          onClose={() => setClaimDialog(null)}
+          onSaved={() => { setClaimDialog(null); setMessage("✅ บันทึกรายการเบิกสำเร็จ"); fetchData(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ClaimItemsDialog({ insurance, onClose, onSaved }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_receipt_lines", keyword: insurance.receipt_no, include_submitted: true, bypass_insurance_filter: true }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        // กรองเฉพาะรายการ พรบ./ประกัน ของใบรับเรื่องนี้เท่านั้น
+        const isInsurance = (l) => {
+          const t = String(l.income_type || "").toLowerCase();
+          const n = String(l.income_name || "").toLowerCase();
+          return t.includes("ประกัน") || t.includes("พรบ") || t.includes("พ.ร.บ") ||
+                 n.includes("ประกัน") || n.includes("พรบ") || n.includes("พ.ร.บ");
+        };
+        const lines = (Array.isArray(data) ? data : [])
+          .filter(l => l.receipt_no === insurance.receipt_no)
+          .filter(isInsurance);
+        setItems(lines);
+
+        // pre-select existing claimed
+        let claimed = [];
+        try { claimed = Array.isArray(insurance.claimed_items) ? insurance.claimed_items : (typeof insurance.claimed_items === "string" ? JSON.parse(insurance.claimed_items) : []); } catch {}
+        const sel = {};
+        claimed.forEach(c => { if (c.line_id) sel[c.line_id] = true; });
+        setSelected(sel);
+      } catch (e) { setError("โหลดรายการไม่สำเร็จ"); }
+      setLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [insurance.receipt_no]);
+
+  const fmtNum = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const selectedItems = items.filter(it => selected[it.line_id]);
+  const selTotal = selectedItems.reduce((s, x) => s + Number(x.net_price || 0), 0);
+
+  function toggle(id) { setSelected(s => ({ ...s, [id]: !s[id] })); }
+  function toggleAll() {
+    if (items.every(it => selected[it.line_id])) {
+      setSelected({});
+    } else {
+      const next = {};
+      items.forEach(it => { next[it.line_id] = true; });
+      setSelected(next);
+    }
+  }
+
+  async function handleSave() {
+    setSaving(true); setError("");
+    try {
+      const claimed = selectedItems.map(it => ({
+        line_id: it.line_id,
+        receipt_no: it.receipt_no,
+        income_type: it.income_type,
+        income_name: it.income_name,
+        description: it.description,
+        net_price: Number(it.net_price || 0),
+      }));
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_insurance_claim",
+          insurance_id: insurance.insurance_id,
+          claimed_items: claimed,
+          amount_received: selTotal,  // ใช้ยอดรวมจากรายการที่เลือกอัตโนมัติ
+        }),
+      });
+      if (!res.ok) throw new Error("save fail");
+      onSaved();
+    } catch (e) { setError("บันทึกไม่สำเร็จ"); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+      onClick={() => !saving && onClose()}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 800, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto" }}>
+        <h3 style={{ margin: "0 0 12px", color: "#0891b2" }}>📋 เลือกรายการเบิก: <code>{insurance.receipt_no}</code></h3>
+        <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+          กรมธรรม์: <code>{insurance.policy_no}</code> · ผู้เอาประกัน: {insurance.insured_name} · เบี้ย: <strong style={{ color: "#dc2626" }}>{fmtNum(insurance.total_premium)}</strong>
+        </div>
+
+        {error && <div style={{ padding: 8, background: "#fee2e2", color: "#991b1b", borderRadius: 6, marginBottom: 10 }}>{error}</div>}
+
+        {loading ? <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div> : items.length === 0 ? (
+          <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่พบรายการสำหรับใบรับเรื่องนี้</div>
+        ) : (
+          <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead style={{ background: "#f3f4f6" }}>
+                <tr>
+                  <th style={{ width: 30, padding: "6px 8px" }}>
+                    <input type="checkbox" checked={items.length > 0 && items.every(it => selected[it.line_id])} onChange={toggleAll} />
+                  </th>
+                  <th style={{ padding: "6px 10px", textAlign: "left" }}>ประเภทรายได้</th>
+                  <th style={{ padding: "6px 10px", textAlign: "left" }}>ชื่อรายได้</th>
+                  <th style={{ padding: "6px 10px", textAlign: "left" }}>รายละเอียด</th>
+                  <th style={{ padding: "6px 10px", textAlign: "right" }}>ยอด</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map(it => (
+                  <tr key={it.line_id} style={{ borderTop: "1px solid #e5e7eb", background: selected[it.line_id] ? "#fef9c3" : "transparent", cursor: "pointer" }} onClick={() => toggle(it.line_id)}>
+                    <td style={{ padding: "6px 8px" }}><input type="checkbox" checked={!!selected[it.line_id]} onChange={() => toggle(it.line_id)} /></td>
+                    <td style={{ padding: "6px 10px" }}>{it.income_type || "-"}</td>
+                    <td style={{ padding: "6px 10px" }}>{it.income_name || "-"}</td>
+                    <td style={{ padding: "6px 10px", fontSize: 11, color: "#6b7280" }}>{it.description || "-"}</td>
+                    <td style={{ padding: "6px 10px", textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmtNum(it.net_price)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot style={{ background: "#fef3c7", fontWeight: 700 }}>
+                <tr>
+                  <td colSpan={4} style={{ padding: "8px 10px", textAlign: "right" }}>เลือก {selectedItems.length} รายการ · รวม</td>
+                  <td style={{ padding: "8px 10px", textAlign: "right", color: "#dc2626" }}>{fmtNum(selTotal)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+
+        <div style={{ marginTop: 14, padding: "10px 14px", background: "#dcfce7", borderRadius: 8, fontSize: 13, fontWeight: 600, color: "#065f46" }}>
+          💰 จำนวนเงินที่รับชำระ: <span style={{ fontSize: 16, fontWeight: 700 }}>{fmtNum(selTotal)}</span> บาท
+          <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 10, fontWeight: 400 }}>(คำนวณอัตโนมัติจากรายการที่เลือก)</span>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+          <button onClick={onClose} disabled={saving}
+            style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={handleSave} disabled={saving}
+            style={{ padding: "8px 24px", background: saving ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

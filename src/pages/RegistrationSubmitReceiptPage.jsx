@@ -552,20 +552,27 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
           </div>
 
           {/* Summary */}
+          {(() => {
+            // กรองเอา batches ที่ไม่ใช่ cancelled ออก เว้นแต่ user เลือก filter "cancelled" โดยตั้งใจ
+            const visibleBatches = historyStatus === "cancelled"
+              ? historyBatches
+              : historyBatches.filter(b => b.status !== "cancelled");
+            return (
+          <>
           <div style={{ display: "flex", gap: 18, marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-            <span style={{ fontSize: 13 }}>📦 batch: <strong>{historyBatches.length}</strong></span>
-            <span style={{ fontSize: 13 }}>📋 รายการรวม: <strong>{historyBatches.reduce((s, b) => s + Number(b.items_count || 0), 0)}</strong></span>
-            <span style={{ fontSize: 13 }}>ยอดสุทธิรวม: <strong style={{ color: "#dc2626" }}>{fmtNum(historyBatches.reduce((s, b) => s + Number(b.items_total || 0), 0))}</strong></span>
+            <span style={{ fontSize: 13 }}>📦 batch: <strong>{visibleBatches.length}</strong></span>
+            <span style={{ fontSize: 13 }}>📋 รายการรวม: <strong>{visibleBatches.reduce((s, b) => s + Number(b.items_count || 0), 0)}</strong></span>
+            <span style={{ fontSize: 13 }}>ยอดสุทธิรวม: <strong style={{ color: "#dc2626" }}>{fmtNum(visibleBatches.reduce((s, b) => s + Number(b.items_total || 0), 0))}</strong></span>
           </div>
 
           {/* Batches list */}
           {historyLoading ? (
             <div style={{ padding: 30, textAlign: "center", color: "#6b7280", background: "#fff", borderRadius: 10 }}>กำลังโหลด...</div>
-          ) : historyBatches.length === 0 ? (
+          ) : visibleBatches.length === 0 ? (
             <div style={{ padding: 30, textAlign: "center", color: "#9ca3af", background: "#fff", borderRadius: 10 }}>ยังไม่มีประวัติการส่ง — กดปุ่มค้นหา</div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {historyBatches.map(b => {
+              {visibleBatches.map(b => {
                 const open = !!historyExpanded[b.batch_id];
                 const statusColor = {
                   submitted: { bg: "#dbeafe", fg: "#1e40af", label: "ส่งแล้ว · รอรับงาน" },
@@ -648,6 +655,9 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
               })}
             </div>
           )}
+          </>
+            );
+          })()}
         </>
       )}
 

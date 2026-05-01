@@ -27,7 +27,7 @@ export default function MotoInsurancePage({ currentUser }) {
   return (
     <div className="page-container">
       <div className="page-topbar">
-        <h2 className="page-title">🛡️ บันทึก พรบ.รถใหม่</h2>
+        <h2 className="page-title">🛡️ บันทึกงาน พรบ.</h2>
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "2px solid #e5e7eb" }}>
