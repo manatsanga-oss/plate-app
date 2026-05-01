@@ -2,15 +2,7 @@ import React, { useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 
-const SEARCH_FIELDS = [
-  { value: "customer_name", label: "ชื่อลูกค้า" },
-  { value: "engine_no", label: "เลขเครื่อง" },
-  { value: "frame_no", label: "เลขถัง (VIN)" },
-  { value: "plate_number", label: "เลขทะเบียน" },
-];
-
 export default function VehicleRegistrationPage({ currentUser }) {
-  const [field, setField] = useState("customer_name");
   const [keyword, setKeyword] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -32,7 +24,7 @@ export default function VehicleRegistrationPage({ currentUser }) {
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "search_registrations", field, keyword: kw }),
+        body: JSON.stringify({ action: "search_registrations", field: "all", keyword: kw }),
       });
       const data = await res.json();
       setRows(Array.isArray(data) ? data : data.rows || []);
@@ -61,14 +53,9 @@ export default function VehicleRegistrationPage({ currentUser }) {
 
       <form onSubmit={handleSearch}
         style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 16, padding: "14px 16px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        <label style={{ fontSize: 14, fontWeight: 600, color: "#374151" }}>ค้นหาจาก:</label>
-        <select value={field} onChange={e => setField(e.target.value)}
-          style={{ padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14, minWidth: 150 }}>
-          {SEARCH_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-        </select>
         <input type="text" value={keyword} onChange={e => setKeyword(e.target.value)}
-          placeholder="พิมพ์คำค้นหา..."
-          style={{ flex: 1, minWidth: 220, padding: "8px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
+          placeholder="🔍 ค้นหา: ชื่อลูกค้า / เลขเครื่อง / เลขตัวถัง / ทะเบียน / เลขที่ใบขาย"
+          style={{ flex: 1, minWidth: 280, padding: "10px 14px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
         <button type="submit" disabled={loading}
           style={{ padding: "8px 20px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600, opacity: loading ? 0.6 : 1 }}>
           🔍 {loading ? "กำลังค้นหา..." : "ค้นหา"}
