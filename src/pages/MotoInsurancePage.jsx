@@ -33,7 +33,7 @@ export default function MotoInsurancePage({ currentUser }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "2px solid #e5e7eb" }}>
         {[
           ["ocr", "📄 OCR PDF"],
-          ["history", "📋 ประวัติ"],
+          ["history", "📋 ประวัติการบันทึก"],
         ].map(([v, label]) => (
           <button key={v} onClick={() => { setMode(v); setMessage(""); }}
             style={{ padding: "10px 20px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
@@ -50,6 +50,221 @@ export default function MotoInsurancePage({ currentUser }) {
       )}
 
       {mode === "ocr" ? <OcrPanel setMessage={setMessage} /> : <HistoryPanel setMessage={setMessage} />}
+    </div>
+  );
+}
+
+/* ============================================================================
+   ประวัติการรับชำระ — แสดงเฉพาะรายการที่ amount_received > 0
+   ============================================================================ */
+function ClaimedHistoryPanel({ setMessage }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [editTarget, setEditTarget] = useState(null);
+
+  async function cancelClaim(r) {
+    if (r.billing_doc_no) { setMessage("❌ ใบนี้วางบิลแล้ว — ยกเลิกการรับชำระไม่ได้"); return; }
+    if (!window.confirm(`ยกเลิกการรับชำระ?\nกรมธรรม์: ${r.policy_no}\nผู้เอาประกัน: ${r.insured_name}\nยอด: ${Number(r.amount_received || 0).toLocaleString()}`)) return;
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_insurance_claim",
+          insurance_id: r.insurance_id,
+          claimed_items: [],
+          amount_received: 0,
+        }),
+      });
+      setMessage("✅ ยกเลิกการรับชำระแล้ว");
+      fetchList();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
+  async function fetchList() {
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_insurance_list", search }),
+      });
+      const data = await res.json();
+      // กรองเฉพาะรายการที่มี amount_received > 0
+      const all = Array.isArray(data) ? data : [];
+      setRows(all.filter(r => Number(r.amount_received || 0) > 0));
+    } catch { setRows([]); }
+    setLoading(false);
+  }
+
+  useEffect(() => { fetchList(); /* eslint-disable-next-line */ }, []);
+
+  const grandTotal = rows.reduce((s, r) => s + Number(r.amount_received || 0), 0);
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+          onKeyDown={e => { if (e.key === "Enter") fetchList(); }}
+          placeholder="🔍 ค้นหา: เลขตัวถัง / เลขกรมธรรม์ / ชื่อ"
+          style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
+        <button onClick={fetchList}
+          style={{ padding: "8px 18px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>🔍 ค้นหา</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 18, marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 13 }}>
+        <span>📋 รายการ: <strong>{rows.length}</strong></span>
+        <span>💰 ยอดรับชำระรวม: <strong style={{ color: "#059669", fontSize: 15 }}>{Number(grandTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</strong> บาท</span>
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+      ) : rows.length === 0 ? (
+        <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+          ยังไม่มีรายการที่บันทึกรับชำระ
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table" style={{ fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>วันสัญญา</th>
+                <th>เลขกรมธรรม์</th>
+                <th>เลขตัวถัง</th>
+                <th>ผู้เอาประกัน</th>
+                <th>ใบขาย / ลูกค้า</th>
+                <th>เลขที่รับเรื่อง</th>
+                <th style={{ textAlign: "right" }}>เบี้ยรวม</th>
+                <th style={{ textAlign: "right" }}>รับชำระ</th>
+                <th>เลขที่บันทึก</th>
+                <th>ใบวางบิล</th>
+                <th>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => {
+                const locked = !!r.billing_doc_no;
+                return (
+                <tr key={r.insurance_id}>
+                  <td style={{ textAlign: "center" }}>{i + 1}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>{r.contract_date ? String(r.contract_date).slice(0, 10) : "-"}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.policy_no || "-"}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
+                  <td>{r.insured_name || "-"}</td>
+                  <td>
+                    {r.invoice_no && <div style={{ color: "#065f46", fontWeight: 600 }}>{r.invoice_no}</div>}
+                    {r.customer_name && <div style={{ fontSize: 11, color: "#6b7280" }}>{r.customer_name}</div>}
+                    {!r.invoice_no && !r.customer_name && <span style={{ color: "#9ca3af" }}>-</span>}
+                  </td>
+                  <td style={{ color: r.receipt_no ? "#1e40af" : "#9ca3af", fontWeight: r.receipt_no ? 600 : 400 }}>{r.receipt_no || "-"}</td>
+                  <td style={{ textAlign: "right", fontWeight: 600, color: "#dc2626" }}>{Number(r.total_premium || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                  <td style={{ textAlign: "right", fontWeight: 700, color: "#0369a1" }}>{Number(r.amount_received || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11, color: "#7c3aed" }}>{r.record_batch_no || "-"}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 11, color: r.billing_doc_no ? "#059669" : "#9ca3af" }}>{r.billing_doc_no || "-"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <button onClick={() => !locked && setEditTarget(r)} disabled={locked}
+                      title={locked ? "วางบิลแล้ว — แก้ไขไม่ได้" : "แก้ไขรายการรับชำระ"}
+                      style={{ padding: "3px 8px", background: locked ? "#d1d5db" : "#0891b2", color: locked ? "#9ca3af" : "#fff", border: "none", borderRadius: 4, cursor: locked ? "not-allowed" : "pointer", fontSize: 11, marginRight: 4 }}>✏️ แก้</button>
+                    <button onClick={() => !locked && cancelClaim(r)} disabled={locked}
+                      title={locked ? "วางบิลแล้ว — ยกเลิกไม่ได้" : "ยกเลิกการรับชำระ"}
+                      style={{ padding: "3px 8px", background: locked ? "#d1d5db" : "#ef4444", color: locked ? "#9ca3af" : "#fff", border: "none", borderRadius: 4, cursor: locked ? "not-allowed" : "pointer", fontSize: 11 }}>🗑️ ยกเลิก</button>
+                  </td>
+                </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr style={{ background: "#f1f5f9", fontWeight: 700 }}>
+                <td colSpan={8} style={{ textAlign: "right", padding: "8px 12px" }}>รวม {rows.length} รายการ</td>
+                <td style={{ textAlign: "right", padding: "8px 12px", color: "#0369a1" }}>{grandTotal.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                <td colSpan={3}></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      {editTarget && (
+        <ClaimEditDialog
+          record={editTarget}
+          onClose={() => setEditTarget(null)}
+          onSaved={() => { setEditTarget(null); setMessage("✅ บันทึกแก้ไขสำเร็จ"); fetchList(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* Inline dialog: แก้ไขจำนวนเงินรับชำระ */
+function ClaimEditDialog({ record, onClose, onSaved }) {
+  const [amount, setAmount] = useState(Number(record.amount_received || 0));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  let claimed = [];
+  try { claimed = Array.isArray(record.claimed_items) ? record.claimed_items : (typeof record.claimed_items === "string" ? JSON.parse(record.claimed_items) : []); } catch {}
+
+  async function handleSave() {
+    setSaving(true); setError("");
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_insurance_claim",
+          insurance_id: record.insurance_id,
+          claimed_items: claimed,
+          amount_received: Number(amount) || 0,
+        }),
+      });
+      if (!res.ok) throw new Error("save fail");
+      onSaved();
+    } catch { setError("บันทึกไม่สำเร็จ"); }
+    setSaving(false);
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+      onClick={() => !saving && onClose()}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 480, maxWidth: "95vw" }}>
+        <h3 style={{ margin: "0 0 12px", color: "#0891b2" }}>✏️ แก้ไขการรับชำระ</h3>
+
+        <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+          <div><b>กรมธรรม์:</b> <code>{record.policy_no}</code></div>
+          <div><b>ผู้เอาประกัน:</b> {record.insured_name || "-"}</div>
+          <div><b>เลขที่รับเรื่อง:</b> {record.receipt_no || "-"}</div>
+          <div><b>เบี้ยรวม:</b> <span style={{ color: "#dc2626", fontWeight: 700 }}>{Number(record.total_premium || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span></div>
+        </div>
+
+        {claimed.length > 0 && (
+          <div style={{ marginBottom: 12, padding: 10, background: "#fef3c7", borderRadius: 8, fontSize: 12 }}>
+            <b>รายการเบิก:</b>
+            {claimed.map((c, i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                <span>• {c.income_name || c.description}</span>
+                <span style={{ fontFamily: "monospace", fontWeight: 600 }}>{Number(c.net_price || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && <div style={{ padding: 8, background: "#fee2e2", color: "#991b1b", borderRadius: 6, marginBottom: 10, fontSize: 13 }}>❌ {error}</div>}
+
+        <div>
+          <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>จำนวนเงินที่รับชำระ *</label>
+          <input type="number" step="0.01" min="0" value={amount}
+            onChange={e => setAmount(e.target.value)}
+            style={{ width: "100%", padding: "10px 14px", border: "2px solid #0891b2", borderRadius: 8, fontFamily: "monospace", fontSize: 18, fontWeight: 700, textAlign: "right", color: "#0369a1" }} />
+        </div>
+
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+          <button onClick={onClose} disabled={saving}
+            style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={handleSave} disabled={saving}
+            style={{ padding: "8px 24px", background: saving ? "#9ca3af" : "#0891b2", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -83,7 +298,8 @@ function OcrPanel({ setMessage }) {
       const buf = await xlsxFile.arrayBuffer();
       const wb = XLSX.read(buf, { type: "array", cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: "" });
+      // ใช้ raw: true เพื่อได้ค่า number/date แท้ — เลือกจัดการ scientific notation/precision เอง
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
 
       // Map columns: [no, agent_id, contract_date, policy_no, insured_name, chassis_no, plate_number,
       //               coverage_start, coverage_end, source, payment_method, premium, stamp_duty, tax,
@@ -109,6 +325,15 @@ function OcrPanel({ setMessage }) {
         return s;
       };
       const num = v => isFinite(Number(v)) ? Number(v) : 0;
+      // แปลงค่าเป็น string โดยไม่ใช้ scientific notation (สำหรับเลขนโยบายยาวๆ เช่น 8120169240933801)
+      const bigNumStr = v => {
+        if (v == null || v === "") return "";
+        if (typeof v === "number") {
+          // ใช้ toFixed(0) แทน toString() เพื่อไม่ให้แสดงเป็น 8.12017E+15
+          return Number.isFinite(v) ? v.toFixed(0) : "";
+        }
+        return String(v).trim();
+      };
 
       const arr = rows
         .filter(r => r && (r[5] || r[3]))  // must have chassis_no or policy_no
@@ -116,10 +341,10 @@ function OcrPanel({ setMessage }) {
           _key: `xlsx-${i}`,
           _selected: true,
           contract_date: fmt(r[2]),
-          policy_no: String(r[3] || "").trim(),
-          insured_name: String(r[4] || "").trim(),
-          chassis_no: String(r[5] || "").trim().toUpperCase(),
-          plate_number: String(r[6] || "").trim(),
+          policy_no: bigNumStr(r[3]),
+          insured_name: bigNumStr(r[4]),
+          chassis_no: bigNumStr(r[5]).toUpperCase(),
+          plate_number: bigNumStr(r[6]),
           coverage_start: fmt(r[7]),
           coverage_end: fmt(r[8]),
           paid: String(r[10] || "").trim(),
@@ -567,6 +792,27 @@ function HistoryPanel({ setMessage }) {
     } catch { setMessage("❌ ลบไม่สำเร็จ"); }
   }
 
+  async function cancelBatch(batchNo) {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel_insurance_batch", record_batch_no: batchNo }),
+      });
+      const data = await res.json();
+      const ok = Array.isArray(data) ? data[0] : data;
+      if (ok?.success === false) {
+        setMessage("❌ " + (ok?.error || "ยกเลิกไม่สำเร็จ"));
+        return false;
+      }
+      setMessage(`✅ ยกเลิกใบบันทึก ${batchNo} สำเร็จ`);
+      fetchList();
+      return true;
+    } catch (e) {
+      setMessage("❌ ยกเลิกไม่สำเร็จ: " + e.message);
+      return false;
+    }
+  }
+
   useEffect(() => { fetchList(); /* eslint-disable-next-line */ }, []);
 
   // Group rows by record_batch_no for summary view
@@ -757,23 +1003,64 @@ function HistoryPanel({ setMessage }) {
             await deleteOne(id);
             setOpenBatch(null);
           }}
+          onCancelBatch={async (batchNo) => {
+            const ok = await cancelBatch(batchNo);
+            if (ok) setOpenBatch(null);
+          }}
         />
       )}
     </div>
   );
 }
 
-function BatchDetailDialog({ batch, onClose, onEdit, onDelete }) {
+function BatchDetailDialog({ batch, onClose, onEdit, onDelete, onCancelBatch }) {
+  const [cancelling, setCancelling] = useState(false);
+  const canCancel = batch.billed_count === 0 && batch.count > 0;
+
+  async function handleCancelBatch() {
+    if (!canCancel) {
+      window.alert(`ไม่สามารถยกเลิกใบบันทึกได้\nมีรายการที่วางบิลแล้ว ${batch.billed_count} รายการ`);
+      return;
+    }
+    if (!window.confirm(`ยืนยันการยกเลิกใบบันทึก ${batch.batch_no}?\n\nรายการทั้งหมด ${batch.count} รายการ จะถูกตั้งสถานะเป็น "ยกเลิก"\nและจะไม่แสดงในรายการประวัติอีก`)) return;
+    setCancelling(true);
+    try {
+      await onCancelBatch(batch.batch_no);
+    } finally {
+      setCancelling(false);
+    }
+  }
+
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }} onClick={onClose}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 1100, maxWidth: "96vw", maxHeight: "92vh", overflowY: "auto" }}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
           <h3 style={{ margin: 0, color: "#7c3aed" }}>📋 รายการในใบบันทึก: <code>{batch.batch_no}</code></h3>
-          <span style={{ marginLeft: 12, fontSize: 13, color: "#6b7280" }}>
+          <span style={{ marginLeft: 4, fontSize: 13, color: "#6b7280" }}>
             {batch.count} รายการ · เบี้ยรวม {batch.total_premium.toLocaleString("th-TH", { minimumFractionDigits: 2 })} · วางบิลแล้ว {batch.billed_count}/{batch.count}
           </span>
-          <button onClick={onClose} style={{ marginLeft: "auto", padding: "6px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>ปิด</button>
+          <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <button onClick={handleCancelBatch} disabled={!canCancel || cancelling}
+              title={canCancel ? "ยกเลิกใบบันทึกทั้งใบ" : `วางบิลแล้ว ${batch.billed_count} รายการ — ยกเลิกไม่ได้`}
+              style={{
+                padding: "6px 14px",
+                background: canCancel ? "#dc2626" : "#d1d5db",
+                color: canCancel ? "#fff" : "#9ca3af",
+                border: "none", borderRadius: 6,
+                cursor: canCancel && !cancelling ? "pointer" : "not-allowed",
+                fontSize: 13, fontWeight: 600,
+              }}>
+              ❌ {cancelling ? "กำลังยกเลิก..." : "ยกเลิกใบบันทึก"}
+            </button>
+            <button onClick={onClose} style={{ padding: "6px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>ปิด</button>
+          </div>
         </div>
+
+        {!canCancel && batch.billed_count > 0 && (
+          <div style={{ padding: "8px 12px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 6, marginBottom: 10, fontSize: 12, color: "#92400e" }}>
+            ⚠️ ใบบันทึกนี้มีรายการวางบิลแล้ว {batch.billed_count} รายการ — ยกเลิกทั้งใบไม่ได้ (ต้องยกเลิกการวางบิลก่อน)
+          </div>
+        )}
 
         <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
           <table className="data-table" style={{ fontSize: 12 }}>
@@ -854,11 +1141,23 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
     total_premium: record.total_premium || 0,
     commission: record.commission || 0,
     premium_remit: record.premium_remit || 0,
+    // Manual link override
+    receipt_no: record.receipt_no || "",
+    invoice_no: record.invoice_no || "",
+    customer_name: record.customer_name || "",
+    match_source: "",
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [matchedReceipt, setMatchedReceipt] = useState(null);
   const [matchedSale, setMatchedSale] = useState(null);
+
+  // Search popup state
+  const [searchSource, setSearchSource] = useState(null); // 'sale' | 'receipt' | null
+  const [searchField, setSearchField] = useState("chassis_no");
+  const [searchKeyword, setSearchKeyword] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // Auto-match chassis_no with registration_receipts and moto_sales when chassis changes
   useEffect(() => {
@@ -891,6 +1190,44 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
     return () => { cancelled = true; };
   }, [form.chassis_no]);
 
+  function openSearch(source) {
+    setSearchSource(source);
+    setSearchField("chassis_no");
+    setSearchKeyword(form.chassis_no || "");
+    setSearchResults([]);
+  }
+
+  async function doSearch() {
+    if (!searchKeyword.trim()) return;
+    setSearchLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search_registrations", field: searchField, keyword: searchKeyword.trim(), source: searchSource }),
+      });
+      const data = await res.json();
+      setSearchResults(Array.isArray(data) ? data : []);
+    } catch { setSearchResults([]); }
+    setSearchLoading(false);
+  }
+
+  function pickSearchResult(r) {
+    const isReceipt = (r.source === "receipt") || (searchSource === "receipt");
+    setForm(prev => ({
+      ...prev,
+      chassis_no: r.frame_no || prev.chassis_no || "",
+      plate_number: r.plate_number || prev.plate_number || "",
+      insured_name: prev.insured_name || r.customer_name || "",
+      customer_name: r.customer_name || "",
+      receipt_no: isReceipt ? (r.sale_doc_no || "") : prev.receipt_no,
+      invoice_no: isReceipt ? prev.invoice_no : (r.sale_doc_no || ""),
+      match_source: isReceipt ? "receipt" : "sale",
+    }));
+    setSearchSource(null);
+    setSearchKeyword("");
+    setSearchResults([]);
+  }
+
   async function handleSave() {
     setSaving(true); setError("");
     try {
@@ -914,14 +1251,40 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 720, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto" }}>
         <h3 style={{ margin: "0 0 14px", color: "#0891b2" }}>✏️ แก้ไขข้อมูล พรบ.</h3>
 
-        {/* Match info */}
-        {(matchedReceipt || matchedSale) && (
+        {/* Manual override search buttons (like in OcrPanel edit dialog) */}
+        <div style={{ display: "flex", gap: 8, marginBottom: 12, padding: "10px 12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e5e7eb", alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => openSearch('sale')}
+            style={{ padding: "6px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            🔍 ค้นหาเลขที่ใบขาย
+          </button>
+          <button onClick={() => openSearch('receipt')}
+            style={{ padding: "6px 14px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            🔍 ค้นหาเลขที่รับเรื่อง
+          </button>
+          {(form.invoice_no || form.receipt_no || form.customer_name) && (
+            <span style={{ fontSize: 12, color: form.match_source === 'receipt' ? "#059669" : "#0369a1", marginLeft: 6 }}>
+              ✓ <strong>{form.receipt_no || form.invoice_no || "-"}</strong> · {form.customer_name || "-"}
+              {form.match_source && (
+                <span style={{ marginLeft: 6, padding: "1px 6px", background: form.match_source === 'receipt' ? "#d1fae5" : "#dbeafe", borderRadius: 4 }}>
+                  {form.match_source === 'receipt' ? 'รับเรื่อง' : 'ใบขาย'}
+                </span>
+              )}
+              <button onClick={() => setForm(p => ({ ...p, receipt_no: "", invoice_no: "", customer_name: "", match_source: "" }))}
+                style={{ marginLeft: 8, padding: "1px 8px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+                ✕ ล้าง
+              </button>
+            </span>
+          )}
+        </div>
+
+        {/* Match info (auto-match by chassis) */}
+        {(matchedReceipt || matchedSale) && !form.receipt_no && !form.invoice_no && (
           <div style={{ background: "#ecfeff", border: "1px solid #67e8f9", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 12 }}>
             {matchedSale && (
-              <div>📄 <b>ใบขาย:</b> <code>{matchedSale.sale_doc_no}</code> · {matchedSale.customer_name || "-"}</div>
+              <div>📄 <b>ใบขาย (auto):</b> <code>{matchedSale.sale_doc_no}</code> · {matchedSale.customer_name || "-"}</div>
             )}
             {matchedReceipt && (
-              <div>📋 <b>เลขที่รับเรื่อง:</b> <code>{matchedReceipt.sale_doc_no}</code> · {matchedReceipt.customer_name || "-"}</div>
+              <div>📋 <b>เลขที่รับเรื่อง (auto):</b> <code>{matchedReceipt.sale_doc_no}</code> · {matchedReceipt.customer_name || "-"}</div>
             )}
             {!matchedReceipt && form.chassis_no && (
               <div style={{ color: "#6b7280" }}>ℹ️ ไม่พบเลขถังนี้ในตารางรับเรื่องงานทะเบียน</div>
@@ -979,6 +1342,81 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
           </button>
         </div>
       </div>
+
+      {/* Search popup (nested) */}
+      {searchSource && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center" }}
+          onClick={() => setSearchSource(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 20, borderRadius: 12, width: 900, maxWidth: "95vw", maxHeight: "85vh", display: "flex", flexDirection: "column" }}>
+            <h3 style={{ margin: "0 0 12px", color: searchSource === 'receipt' ? "#059669" : "#0369a1" }}>
+              🔍 {searchSource === 'sale' ? 'ค้นหาเลขที่ใบขาย (จาก moto_sales)' : 'ค้นหาเลขที่รับเรื่อง (จาก registration_receipts)'}
+            </h3>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <select value={searchField} onChange={e => setSearchField(e.target.value)}
+                style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
+                <option value="chassis_no">เลขตัวถัง</option>
+                <option value="customer_name">ชื่อลูกค้า</option>
+                <option value="plate_number">เลขทะเบียน</option>
+                <option value="engine_no">เลขเครื่อง</option>
+                <option value={searchSource === 'receipt' ? 'receipt_no' : 'invoice_no'}>{searchSource === 'receipt' ? 'เลขที่รับเรื่อง' : 'เลขที่ใบขาย'}</option>
+              </select>
+              <input value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && doSearch()}
+                placeholder="พิมพ์คำค้นแล้วกด Enter หรือคลิก ค้นหา..."
+                style={{ flex: 1, padding: "7px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+              <button onClick={doSearch} disabled={searchLoading}
+                style={{ padding: "7px 18px", background: searchSource === 'receipt' ? "#059669" : "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                {searchLoading ? "..." : "ค้นหา"}
+              </button>
+              <button onClick={() => setSearchSource(null)}
+                style={{ padding: "7px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer" }}>ปิด</button>
+            </div>
+
+            <div style={{ flex: 1, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+              {searchLoading ? (
+                <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังค้นหา...</div>
+              ) : searchResults.length === 0 ? (
+                <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>
+                  {searchKeyword ? "ไม่พบข้อมูล" : "พิมพ์คำค้นและกด ค้นหา"}
+                </div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ background: "#f3f4f6", position: "sticky", top: 0 }}>
+                    <tr>
+                      <th style={thStyle}>{searchSource === 'receipt' ? 'เลขที่รับเรื่อง' : 'เลขที่ใบขาย'}</th>
+                      <th style={thStyle}>วันที่</th>
+                      <th style={thStyle}>ลูกค้า</th>
+                      <th style={thStyle}>ยี่ห้อ/รุ่น</th>
+                      <th style={thStyle}>เลขตัวถัง</th>
+                      <th style={thStyle}>เลขทะเบียน</th>
+                      <th style={thStyle}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {searchResults.map((r, i) => (
+                      <tr key={i} style={{ borderTop: "1px solid #e5e7eb", cursor: "pointer" }}
+                        onClick={() => pickSearchResult(r)}
+                        onMouseEnter={e => e.currentTarget.style.background = "#fef9c3"}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}>
+                        <td style={tdStyle}><strong>{r.sale_doc_no || "-"}</strong></td>
+                        <td style={tdStyle}>{r.sale_date ? String(r.sale_date).slice(0, 10) : "-"}</td>
+                        <td style={tdStyle}>{r.customer_name || "-"}</td>
+                        <td style={tdStyle}>{r.brand || ""} {r.model || ""}</td>
+                        <td style={{ ...tdStyle, fontFamily: "monospace" }}>{r.frame_no || "-"}</td>
+                        <td style={tdStyle}>{r.plate_number || "-"}</td>
+                        <td style={tdStyle}><span style={{ color: "#0369a1", fontSize: 11 }}>เลือก →</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            {searchResults.length > 0 && (
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>พบ {searchResults.length} รายการ — คลิกแถวเพื่อเลือก</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -55,6 +55,8 @@ import HrPayrollPage from "./pages/HrPayrollPage";
 import BankAccountsPage from "./pages/BankAccountsPage";
 import BankMovementsPage from "./pages/BankMovementsPage";
 import BankTransferPage from "./pages/BankTransferPage";
+import BankDepositPage from "./pages/BankDepositPage";
+import VehiclePaymentReceiptPage from "./pages/VehiclePaymentReceiptPage";
 import MyMotoReportPage from "./pages/MyMotoReportPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
@@ -110,9 +112,9 @@ export default function App() {
     }
     if (currentUser.role === "admin") return true;
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork") return true;
+    if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricecheck" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "fastmovingstock" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
-    if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "cosmosinsurance" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrspecialcommission" || page === "hrtimetracking" || page === "hremployees") return false;
+    if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "cosmosinsurance" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrspecialcommission" || page === "hrtimetracking" || page === "hremployees" || page === "vehiclepayment") return false;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "convert") return false;
@@ -180,6 +182,12 @@ export default function App() {
         )}
         {activeMenu === "generalexpense" && canAccess("generalexpense") && (
           <GeneralExpensePage currentUser={currentUser} />
+        )}
+        {activeMenu === "bankdeposit" && canAccess("bankdeposit") && (
+          <BankDepositPage currentUser={currentUser} />
+        )}
+        {activeMenu === "vehiclepayment" && canAccess("vehiclepayment") && (
+          <VehiclePaymentReceiptPage currentUser={currentUser} />
         )}
         {activeMenu === "expenserecord" && canAccess("expenserecord") && (
           <ExpenseRecordPage currentUser={currentUser} />
@@ -401,7 +409,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="subunit" label="บันทึกเพิ่มหน่วยย่อย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "bankdeposit", "vehiclepayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -409,6 +417,8 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="pettycashoffering" label="ค่าของไหว้" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuItem page="paydeposit" label="ชำระเงินรับฝาก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="bankdeposit" label="บันทึกรายการฝากเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="vehiclepayment" label="บันทึกรับชำระเงินค่ารถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expenserecord" label="บันทึกค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
