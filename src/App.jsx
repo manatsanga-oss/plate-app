@@ -8,6 +8,7 @@ import UserPage from "./pages/UserPage";
 import BookingPage from "./pages/BookingPage";
 import MotoBookingPage from "./pages/MotoBookingPage";
 import UploadPage from "./pages/UploadPage";
+import TaxInvoiceReportPage from "./pages/TaxInvoiceReportPage";
 import StockCheckPage from "./pages/StockCheckPage";
 import DriverPage from "./pages/DriverPage";
 import FinancePage from "./pages/FinancePage";
@@ -55,6 +56,8 @@ import HrPayrollPage from "./pages/HrPayrollPage";
 import BankAccountsPage from "./pages/BankAccountsPage";
 import BankMovementsPage from "./pages/BankMovementsPage";
 import BankTransferPage from "./pages/BankTransferPage";
+import FinanceTransferPage from "./pages/FinanceTransferPage";
+import FinancePaymentMatchPage from "./pages/FinancePaymentMatchPage";
 import BankDepositPage from "./pages/BankDepositPage";
 import VehiclePaymentReceiptPage from "./pages/VehiclePaymentReceiptPage";
 import MyMotoReportPage from "./pages/MyMotoReportPage";
@@ -117,6 +120,9 @@ export default function App() {
     if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "cosmosinsurance" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrspecialcommission" || page === "hrtimetracking" || page === "hremployees" || page === "vehiclepayment") return false;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
+    if (page === "taxinvoicereport") return false;
+    if (page === "taxinvoicesalesreport") return false;
+    if (page === "financepayment") return false;
     if (page === "convert") return false;
     if (page === "subunit") return false;
     if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "expenserecord" || page === "position" || page === "motostock") return false;
@@ -155,6 +161,12 @@ export default function App() {
         )}
         {activeMenu === "upload" && canAccess("upload") && (
           <UploadPage currentUser={currentUser} />
+        )}
+        {activeMenu === "taxinvoicereport" && canAccess("taxinvoicereport") && (
+          <TaxInvoiceReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "taxinvoicesalesreport" && canAccess("taxinvoicesalesreport") && (
+          <TaxInvoiceReportPage currentUser={currentUser} />
         )}
         {activeMenu === "stockcheck" && canAccess("stockcheck") && (
           <StockCheckPage currentUser={currentUser} />
@@ -293,6 +305,12 @@ export default function App() {
         {activeMenu === "accbanktransfer" && canAccess("accbanktransfer") && (
           <BankTransferPage currentUser={currentUser} />
         )}
+        {activeMenu === "accfinancetransfer" && canAccess("accfinancetransfer") && (
+          <FinanceTransferPage currentUser={currentUser} />
+        )}
+        {activeMenu === "financepayment" && canAccess("financepayment") && (
+          <FinancePaymentMatchPage currentUser={currentUser} />
+        )}
         {activeMenu === "hrpayroll" && canAccess("hrpayroll") && (
           <HrPayrollPage currentUser={currentUser} />
         )}
@@ -358,7 +376,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const salesPages = ["moto", "booking", "pricecheck", "stockcheck", "motostock"];
+  const salesPages = ["moto", "booking", "pricecheck", "stockcheck", "motostock", "taxinvoicereport"];
   const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "claim"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "serviceexpense", "generalexpense", "finance", "supplier", "driver", "position", "users"];
@@ -379,6 +397,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="pricecheck" label="ตรวจสอบราคารถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="stockcheck" label="เช็คสต๊อก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="motostock" label="Moto Stock Management" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="taxinvoicereport" label="รายงานใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Spare Parts" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
@@ -409,7 +428,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="subunit" label="บันทึกเพิ่มหน่วยย่อย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "bankdeposit", "vehiclepayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "bankdeposit", "vehiclepayment", "taxinvoicesalesreport", "financepayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -420,6 +439,8 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="bankdeposit" label="บันทึกรายการฝากเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="vehiclepayment" label="บันทึกรับชำระเงินค่ารถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expenserecord" label="บันทึกค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="financepayment" label="บันทึกรับชำระเงินไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","receiptreceive","searchreceiptwork","motoinsurance","cosmosinsurance","registrationbilling","receiptbilling","insurancebilling","cosmosbilling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
@@ -443,10 +464,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="searchreceiptwork" label="ค้นหางานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Accounting" pages={["accbankaccounts","accbankmovements","accbanktransfer"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Accounting" pages={["accbankaccounts","accbankmovements","accbanktransfer","accfinancetransfer"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="accbankaccounts" label="บัญชีธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbankmovements" label="รายงานการเคลื่อนไหว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbanktransfer" label="โอนเงินระหว่างบัญชี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="accfinancetransfer" label="บันทึกรับเงินโอนไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrspecialcommission","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

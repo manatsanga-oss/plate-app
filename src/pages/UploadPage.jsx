@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import TaxInvoiceUploadPage from "./TaxInvoiceUploadPage";
 
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 
@@ -60,7 +61,7 @@ function fmtDateTime(iso) {
 // items ที่รับ year_month override (ระบุเดือนเพื่อ upload ไฟล์ย้อนหลัง)
 const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
 
-export default function UploadPage() {
+export default function UploadPage({ currentUser } = {}) {
   const [statuses, setStatuses] = useState({});
   const [messages, setMessages] = useState({});
   const [lastUploads, setLastUploads] = useState(loadLastUploads);
@@ -98,7 +99,7 @@ export default function UploadPage() {
         <div className="page-title">Upload เข้าฐานข้อมูล</div>
       </div>
 
-      {UPLOAD_GROUPS.map((group) => (
+      {UPLOAD_GROUPS.map((group, gi) => (
         <div key={group.title} style={{ marginBottom: 20 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#fff", background: "#072d6b", padding: "10px 16px", borderRadius: "10px 10px 0 0", textAlign: "left" }}>
             {group.title}
@@ -156,6 +157,14 @@ export default function UploadPage() {
               );
             })}
           </div>
+          {/* Append "ใบกำกับ HONDA" panel into the last group "อื่น ๆ" */}
+          {gi === UPLOAD_GROUPS.length - 1 && (
+            <div style={{ background: "#fff", borderRadius: "0 0 14px 14px", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>📄 ใบกำกับ HONDA (รถจักรยานยนต์)</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>เลือกสาขา + เดือน + ไฟล์ใบกำกับภาษี & กำไรขั้นต้น (CSV TIS-620) — UPSERT</div>
+              <TaxInvoiceUploadPage currentUser={currentUser} embeddable />
+            </div>
+          )}
         </div>
       ))}
     </div>
