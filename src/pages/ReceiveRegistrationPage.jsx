@@ -461,12 +461,12 @@ function OcrPanel({ setMessage, currentUser }) {
           <div style={{ background: "#fff", borderRadius: 12, padding: 20, width: 720, maxWidth: "95vw", maxHeight: "85vh", boxShadow: "0 8px 32px rgba(0,0,0,0.2)", display: "flex", flexDirection: "column" }}
             onClick={e => e.stopPropagation()}>
             <div style={{ display: "flex", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ margin: 0, color: "#072d6b" }}>🔍 ค้นหาเลขตัวถัง (จากใบส่งจดทะเบียน)</h3>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>🔍 ค้นหา (จากใบส่งจดทะเบียน)</h3>
               <button onClick={() => setVinSearch(null)} style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 20, color: "#6b7280" }}>✕</button>
             </div>
 
             <input type="text" value={vinSearch.keyword} onChange={e => setVinSearch(v => ({ ...v, keyword: e.target.value }))}
-              placeholder="พิมพ์เลขตัวถังบางส่วน (เช่น MLESEK หรือ 51111)"
+              placeholder="พิมพ์ส่วนใดของ: เลขตัวถัง / ใบขาย / Run / ลูกค้า / รุ่น / เลขเครื่อง"
               autoFocus
               style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 14, boxSizing: "border-box", marginBottom: 12 }} />
 
@@ -489,7 +489,14 @@ function OcrPanel({ setMessage, currentUser }) {
                 <tbody>
                   {(() => {
                     const kw = vinSearch.keyword.trim().toUpperCase();
-                    const filtered = vinSearch.results.filter(r => !kw || String(r.chassis_no || "").toUpperCase().includes(kw));
+                    const filtered = vinSearch.results.filter(r => {
+                      if (!kw) return true;
+                      const hay = [
+                        r.chassis_no, r.invoice_no, r.run_code,
+                        r.customer_name, r.model_series, r.engine_no,
+                      ].filter(Boolean).join(" ").toUpperCase();
+                      return hay.includes(kw);
+                    });
                     if (filtered.length === 0) return (
                       <tr><td colSpan={6} style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>{kw ? "ไม่พบ" : "โหลดรายการ..."}</td></tr>
                     );
@@ -1078,6 +1085,7 @@ function NotifyPanel({ setMessage, currentUser }) {
   const [branchFilter, setBranchFilter] = useState("");
   const [runFilter, setRunFilter] = useState("");
   const [receiveDateFilter, setReceiveDateFilter] = useState("");
+  const [brandFilter, setBrandFilter] = useState("");
   const [sentDate, setSentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [savingSent, setSavingSent] = useState(false);
   const [viewMode, setViewMode] = useState("pending"); // pending | sent | all
@@ -1106,6 +1114,7 @@ function NotifyPanel({ setMessage, currentUser }) {
   const filtered = pendingRows.filter(r => {
     if (branchFilter && fmtBranch(r.branch_code) !== branchFilter) return false;
     if (runFilter && r.run_code !== runFilter) return false;
+    if (brandFilter && r.brand !== brandFilter) return false;
     if (receiveDateFilter) {
       const rd = r.received_at ? String(r.received_at).slice(0, 10) : "";
       if (rd !== receiveDateFilter) return false;
@@ -1118,9 +1127,10 @@ function NotifyPanel({ setMessage, currentUser }) {
 
   const branchOpts = [...new Set(pendingRows.map(r => fmtBranch(r.branch_code)).filter(v => v && v !== "-"))].sort();
   const runOpts = [...new Set(pendingRows.map(r => r.run_code).filter(Boolean))].sort().reverse();
+  const brandOpts = [...new Set(pendingRows.map(r => r.brand).filter(Boolean))].sort();
   const receiveDateOpts = [...new Set(pendingRows.map(r => r.received_at ? String(r.received_at).slice(0, 10) : "").filter(Boolean))].sort().reverse();
 
-  function clearFilters() { setSearch(""); setBranchFilter(""); setRunFilter(""); setReceiveDateFilter(""); }
+  function clearFilters() { setSearch(""); setBranchFilter(""); setRunFilter(""); setReceiveDateFilter(""); setBrandFilter(""); }
   const selectedRows = filtered.filter(r => selected[r.submission_id]);
   const selCount = selectedRows.length;
 
@@ -1209,12 +1219,17 @@ function NotifyPanel({ setMessage, currentUser }) {
           <option value="">วันที่รับทะเบียน (ทั้งหมด)</option>
           {receiveDateOpts.map(d => <option key={d} value={d}>{fmtDate(d)}</option>)}
         </select>
+        <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)}
+          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, minWidth: 120 }}>
+          <option value="">ยี่ห้อ (ทั้งหมด)</option>
+          {brandOpts.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
         <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
           style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, minWidth: 130 }}>
           <option value="">ร้านที่ขาย (ทั้งหมด)</option>
           {branchOpts.map(b => <option key={b} value={b}>{b}</option>)}
         </select>
-        {(search || branchFilter || runFilter || receiveDateFilter) && (
+        {(search || branchFilter || runFilter || receiveDateFilter || brandFilter) && (
           <button onClick={clearFilters}
             style={{ padding: "6px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
             ✕ ล้าง
