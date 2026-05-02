@@ -63,6 +63,7 @@ function OcrPanel({ setMessage, currentUser }) {
   const [defaultProvince, setDefaultProvince] = useState("");
   const [editingRow, setEditingRow] = useState(null); // row being edited in popup
   const fileRef = useRef();
+  const lastRefreshKeyRef = useRef(""); // track last set of chassis_no we refreshed for, to avoid loops
 
   function applyDefaults() {
     if (!defaultCategory && !defaultProvince) {
@@ -100,10 +101,10 @@ function OcrPanel({ setMessage, currentUser }) {
     setEditingRow(r => ({ ...r, chassis_no: String(chassis || "").toUpperCase() }));
     setVinSearch(null);
   }
-  async function refreshMatch() {
+  async function refreshMatch(silent = false) {
     if (ocrItems.length === 0) return;
     setRefreshing(true);
-    setMessage("");
+    if (!silent) setMessage("");
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -121,12 +122,26 @@ function OcrPanel({ setMessage, currentUser }) {
         return { ...it, invoice_no: m?.invoice_no || "", run_code: m?.run_code || "", customer_name: m?.customer_name || "" };
       }));
       const matched = ocrItems.filter(it => byChassis[String(it.chassis_no || "").toUpperCase().trim()]?.invoice_no).length;
-      setMessage(`🔄 Refresh สำเร็จ — จับคู่ใหม่ได้ ${matched} / ${ocrItems.length} รายการ`);
+      if (!silent) setMessage(`🔄 Refresh สำเร็จ — จับคู่ใหม่ได้ ${matched} / ${ocrItems.length} รายการ`);
     } catch (e) {
-      setMessage("❌ Refresh ไม่สำเร็จ");
+      if (!silent) setMessage("❌ Refresh ไม่สำเร็จ");
     }
     setRefreshing(false);
   }
+
+  // Auto-refresh จับคู่ เมื่อ chassis_no ใน ocrItems เปลี่ยน (debounce 600ms)
+  useEffect(() => {
+    if (ocrItems.length === 0) return;
+    const key = ocrItems.map(it => String(it.chassis_no || "").toUpperCase().trim()).join("|");
+    if (key === lastRefreshKeyRef.current) return;
+    if (!key.replace(/\|/g, "")) return; // ทุกตัวเป็น empty → skip
+    const t = setTimeout(() => {
+      lastRefreshKeyRef.current = key;
+      refreshMatch(true); // silent — ไม่ขึ้น message รบกวน
+    }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ocrItems.map(it => it.chassis_no).join("|")]);
 
   async function runOcr() {
     if (!pdfFile) { setMessage("เลือกไฟล์ PDF ก่อน"); return; }
@@ -258,13 +273,11 @@ function OcrPanel({ setMessage, currentUser }) {
         <>
           <div style={{ padding: "12px 16px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <strong style={{ fontSize: 14, color: "#374151" }}>ขั้นตอนที่ 2 — ตรวจสอบข้อมูล ({selCount}/{ocrItems.length} เลือก)</strong>
-            <button onClick={refreshMatch} disabled={refreshing || ocrItems.length === 0}
-              style={{ marginLeft: "auto", padding: "8px 16px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, cursor: refreshing ? "not-allowed" : "pointer", opacity: refreshing ? 0.6 : 1, fontFamily: "Tahoma", fontSize: 13, fontWeight: 600 }}
-              title="จับคู่เลขที่ใบขาย/ใบส่งจด ใหม่ตาม VIN ล่าสุด (ไม่ต้อง OCR ซ้ำ)">
-              🔄 {refreshing ? "กำลังจับคู่..." : "Refresh จับคู่"}
-            </button>
+            {refreshing && (
+              <span style={{ marginLeft: "auto", fontSize: 12, color: "#6366f1", fontStyle: "italic" }}>🔄 กำลังจับคู่อัตโนมัติ...</span>
+            )}
             <button onClick={saveBatch} disabled={!selCount || saving}
-              style={{ padding: "8px 20px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: (!selCount || saving) ? "not-allowed" : "pointer", opacity: (!selCount || saving) ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>
+              style={{ marginLeft: refreshing ? 0 : "auto", padding: "8px 20px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: (!selCount || saving) ? "not-allowed" : "pointer", opacity: (!selCount || saving) ? 0.5 : 1, fontFamily: "Tahoma", fontSize: 14, fontWeight: 600 }}>
               💾 {saving ? "กำลังบันทึก..." : "บันทึกรับคืน"}
             </button>
           </div>
