@@ -731,12 +731,22 @@ function HistoryPanel({ setMessage, currentUser }) {
   async function fetchHistory() {
     setLoading(true);
     try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_submissions", status: "received" }),
-      });
-      const data = await res.json();
-      setRows(Array.isArray(data) ? data : []);
+      // ดึงทั้ง status "received" (รับคืน) และ "returned" (ส่งคืน) พร้อมกัน
+      const [rRecv, rRet] = await Promise.all([
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_submissions", status: "received" }),
+        }).then(r => r.json()).catch(() => []),
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_submissions", status: "returned" }),
+        }).then(r => r.json()).catch(() => []),
+      ]);
+      const all = [
+        ...(Array.isArray(rRecv) ? rRecv : []),
+        ...(Array.isArray(rRet) ? rRet : []),
+      ];
+      setRows(all);
     } catch {
       setRows([]);
     }
@@ -751,11 +761,30 @@ function HistoryPanel({ setMessage, currentUser }) {
     rows.forEach(r => {
       const key = r.run_code || `_${r.submission_id}`;
       if (!map.has(key)) {
-        map.set(key, { run_code: r.run_code, submit_date: r.submit_date, brand: r.brand, items: [] });
+        map.set(key, {
+          run_code: r.run_code,
+          submit_date: r.submit_date,
+          received_at: r.received_at,
+          brand: r.brand,
+          items: [],
+        });
       }
-      map.get(key).items.push(r);
+      const g = map.get(key);
+      // Track the latest received_at within this run (for sorting + display)
+      if (r.received_at && (!g.received_at || r.received_at > g.received_at)) {
+        g.received_at = r.received_at;
+      }
+      g.items.push(r);
     });
-    return Array.from(map.values()).sort((a, b) => (b.run_code || "").localeCompare(a.run_code || ""));
+    // Sort by received_at desc (latest received first), fallback to run_code
+    return Array.from(map.values()).sort((a, b) => {
+      const av = a.received_at || "";
+      const bv = b.received_at || "";
+      if (av && bv) return bv.localeCompare(av);
+      if (av) return -1;
+      if (bv) return 1;
+      return (b.run_code || "").localeCompare(a.run_code || "");
+    });
   }, [rows]);
 
   const kw = search.trim().toLowerCase();
@@ -844,7 +873,9 @@ function HistoryPanel({ setMessage, currentUser }) {
           style={{ flex: 1, padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
         <button onClick={fetchHistory}
           style={{ padding: "8px 14px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔄 Refresh</button>
-        <span style={{ fontSize: 12, color: "#6b7280" }}>{rows.length} รายการรับคืนแล้ว</span>
+        <span style={{ fontSize: 12, color: "#6b7280" }}>
+          รับคืน {rows.filter(r => r.status === 'received').length} · ส่งคืน {rows.filter(r => r.status === 'returned').length} · รวม {rows.length} รายการ
+        </span>
       </div>
 
       {loading ? (
@@ -863,12 +894,38 @@ function HistoryPanel({ setMessage, currentUser }) {
                   onClick={() => setExpandedRun(isOpen ? null : g.run_code)}>
                   <span style={{ fontSize: 14, color: "#6b7280" }}>{isOpen ? "▾" : "▸"}</span>
                   <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 15, color: "#072d6b" }}>{g.run_code}</span>
-                  <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#10b98122", color: "#065f46", fontWeight: 600 }}>รับคืนแล้ว</span>
-                  <span style={{ fontSize: 13, color: "#374151" }}>{fmtDate(g.submit_date)}</span>
+                  {(() => {
+                    const recvCount = g.items.filter(it => it.status === 'received').length;
+                    const retCount = g.items.filter(it => it.status === 'returned').length;
+                    if (retCount === g.items.length) {
+                      return <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#ede9fe", color: "#5b21b6", fontWeight: 600 }}>ส่งคืนแล้ว</span>;
+                    }
+                    if (recvCount === g.items.length) {
+                      return <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#10b98122", color: "#065f46", fontWeight: 600 }}>รับคืน</span>;
+                    }
+                    return (
+                      <>
+                        <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#10b98122", color: "#065f46", fontWeight: 600 }}>รับคืน {recvCount}</span>
+                        <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#ede9fe", color: "#5b21b6", fontWeight: 600 }}>ส่งคืน {retCount}</span>
+                      </>
+                    );
+                  })()}
+                  <span style={{ fontSize: 13, color: "#374151" }} title={g.submit_date ? `ส่งจด: ${fmtDate(g.submit_date)}` : ""}>
+                    📥 {fmtDate(g.received_at || g.submit_date)}
+                  </span>
                   <span style={{ fontSize: 13, color: "#6b7280" }}>{g.brand}</span>
                   <span style={{ marginLeft: "auto", fontSize: 13, color: "#111", fontWeight: 600 }}>{g.items.length} คัน</span>
                   {(() => {
                     const billedCount = g.items.filter(it => it.billed_at).length;
+                    const returnedCount = g.items.filter(it => it.status === 'returned').length;
+                    if (returnedCount > 0) {
+                      return (
+                        <span style={{ padding: "5px 12px", background: "#ede9fe", color: "#5b21b6", borderRadius: 6, fontSize: 12, fontWeight: 600, border: "1px solid #c4b5fd" }}
+                          title={`มี ${returnedCount} รายการส่งคืนแล้ว — ยกเลิกการรับคืนไม่ได้`}>
+                          📤 ส่งคืนแล้ว ({returnedCount})
+                        </span>
+                      );
+                    }
                     if (billedCount > 0) {
                       return (
                         <span style={{ padding: "5px 12px", background: "#fef3c7", color: "#92400e", borderRadius: 6, fontSize: 12, fontWeight: 600, border: "1px solid #fbbf24" }}
@@ -898,12 +955,15 @@ function HistoryPanel({ setMessage, currentUser }) {
                           <th>จังหวัด</th>
                           <th>วันจด</th>
                           <th>วันส่งสาขา</th>
+                          <th style={{ width: 90 }}>สถานะ</th>
                           <th style={{ width: 150 }}>จัดการ</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {g.items.map((it, i) => (
-                          <tr key={it.submission_id} style={{ background: it.sent_to_branch_at ? "#ecfdf5" : undefined }}>
+                        {g.items.map((it, i) => {
+                          const isReturned = it.status === 'returned';
+                          return (
+                          <tr key={it.submission_id} style={{ background: isReturned ? "#faf5ff" : it.sent_to_branch_at ? "#ecfdf5" : undefined }}>
                             <td style={{ textAlign: "center" }}>{i + 1}</td>
                             <td>{it.customer_name || "-"}</td>
                             <td style={{ fontFamily: "monospace", fontSize: 12 }}>{it.chassis_no || "-"}</td>
@@ -915,13 +975,23 @@ function HistoryPanel({ setMessage, currentUser }) {
                               {it.sent_to_branch_at ? fmtDate(it.sent_to_branch_at) : "—"}
                             </td>
                             <td style={{ textAlign: "center" }}>
-                              <button onClick={() => openEdit(it)}
-                                style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>✏️ แก้</button>
-                              <button onClick={() => revertToSubmitted(it.submission_id, it.run_code)}
-                                style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>↩️ ย้อน</button>
+                              {isReturned ? (
+                                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#ede9fe", color: "#5b21b6", fontWeight: 600 }}>ส่งคืน</span>
+                              ) : (
+                                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#10b98122", color: "#065f46", fontWeight: 600 }}>รับคืน</span>
+                              )}
+                            </td>
+                            <td style={{ textAlign: "center" }}>
+                              <button onClick={() => openEdit(it)} disabled={isReturned}
+                                title={isReturned ? "ส่งคืนแล้ว — แก้ไม่ได้" : "แก้ไข"}
+                                style={{ padding: "3px 10px", background: isReturned ? "#d1d5db" : "#f59e0b", color: isReturned ? "#9ca3af" : "#fff", border: "none", borderRadius: 4, cursor: isReturned ? "not-allowed" : "pointer", fontSize: 11, marginRight: 4 }}>✏️ แก้</button>
+                              <button onClick={() => revertToSubmitted(it.submission_id, it.run_code)} disabled={isReturned}
+                                title={isReturned ? "ส่งคืนแล้ว — ย้อนไม่ได้" : "ย้อนกลับเป็น 'ส่งจด'"}
+                                style={{ padding: "3px 10px", background: isReturned ? "#d1d5db" : "#ef4444", color: isReturned ? "#9ca3af" : "#fff", border: "none", borderRadius: 4, cursor: isReturned ? "not-allowed" : "pointer", fontSize: 11 }}>↩️ ย้อน</button>
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
