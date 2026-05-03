@@ -2,15 +2,16 @@ import React, { useState } from "react";
 
 // ใช้ webhook เดียวกับ Upload Registration Receipts workflow
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/upload-tax-invoices";
+const CHECK_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/check-tax-invoices-exist";
 
 const BRANCH_OPTS = [
-  { value: "PAPAO", label: "ป.เปา", table: "tax_invoices_papao" },
-  { value: "NAKORNLUANG", label: "นครหลวง", table: "tax_invoices_nakornluang" },
-  { value: "SINGCHAI", label: "สิงห์ชัย (ยังไม่พร้อม)", table: "tax_invoices_singchai", disabled: true },
+  { value: "PAPAO", label: "ป.เปา", table: "tax_invoices_papao", format: "NID" },
+  { value: "NAKORNLUANG", label: "นครหลวง", table: "tax_invoices_nakornluang", format: "NID" },
+  { value: "SINGCHAI", label: "สิงห์ชัย", table: "tax_invoices_singchai", format: "MIC" },
 ];
 
 /* -------------------------------- CSV parser -------------------------------- */
-function parseCsvText(text) {
+function parseCsvText(text, delimiter = ",") {
   const rows = [];
   let row = [];
   let cur = "";
@@ -24,7 +25,7 @@ function parseCsvText(text) {
       } else cur += c;
     } else {
       if (c === '"') inQuotes = true;
-      else if (c === ',') { row.push(cur); cur = ""; }
+      else if (c === delimiter) { row.push(cur); cur = ""; }
       else if (c === '\r') { /* skip */ }
       else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ""; }
       else cur += c;
@@ -34,10 +35,10 @@ function parseCsvText(text) {
   return rows;
 }
 
-async function readCsvAsTis620(file) {
+async function readCsvAsTis620(file, delimiter = ",") {
   const buf = await file.arrayBuffer();
   const decoder = new TextDecoder("windows-874"); // ≈ TIS-620
-  return parseCsvText(decoder.decode(buf));
+  return parseCsvText(decoder.decode(buf), delimiter);
 }
 
 function thaiDateToIso(s) {
@@ -83,6 +84,61 @@ function extractTaxInvoices(rows, sourceFile) {
   return out;
 }
 
+// MIC-รายงานขายรถสิงห์ชัย (single file มีทั้ง tax + profit)
+// Format: ;-delimited
+//   Group header: [0] = "ยี่ห้อ ... รุ่น ..."
+//   Data row: [0]=วันที่, [2]=engine_no, [4]=chassis_no, [6]=tax_invoice_no, [9]=ราคาขาย, [10]=ทุน, [12]=กำไร
+function extractMicSingchai(rows, sourceFile) {
+  const taxOut = [];
+  const profitOut = [];
+  let currentModel = null;
+  for (const r of rows) {
+    const c0 = (r[0] || "").trim();
+    // Detect model header
+    if (/^ยี่ห้อ.+รุ่น/.test(c0)) {
+      currentModel = c0.replace(/^ยี่ห้อ\s*/, "");
+      continue;
+    }
+    // Data row: c0 = DD/MM/YYYY
+    const dateStr = c0;
+    if (!/^\d{2}\/\d{2}\/\d{4}/.test(dateStr)) continue;
+    const invNo = (r[6] || "").trim();
+    if (!invNo) continue;
+    const engineNo = (r[2] || "").trim() || null;
+    const chassisNo = (r[4] || "").trim() || null;
+    const salePrice = num(r[9]); // ราคาขาย — ใช้เป็น amount_before_vat (ตาม MIC, 7% VAT)
+    const costPrice = num(r[10]);
+    const grossProfit = num(r[12]);
+    const vat = salePrice ? Math.round(salePrice * 0.07 * 100) / 100 : null;
+    const total = salePrice ? Math.round((salePrice + (vat || 0)) * 100) / 100 : null;
+
+    // Tax invoice row (no customer in MIC file)
+    taxOut.push({
+      tax_invoice_no: invNo,
+      invoice_date: thaiDateToIso(dateStr),
+      customer_name: null,
+      customer_tax_id: null,
+      customer_branch: null,
+      amount_before_vat: salePrice,
+      vat_amount: vat,
+      total_amount: total,
+      status: "active",
+      source_file_tax: sourceFile,
+    });
+    // Profit row
+    profitOut.push({
+      tax_invoice_no: invNo,
+      chassis_no: chassisNo,
+      engine_no: engineNo,
+      model_name: currentModel,
+      cost_price: costPrice,
+      gross_profit: grossProfit,
+      source_file_profit: sourceFile,
+    });
+  }
+  return { taxOut, profitOut };
+}
+
 // NID-รายงานกำไรขั้นต้น: col 16/17/18/19/20/21/22/23
 function extractGrossProfit(rows, sourceFile) {
   const out = [];
@@ -118,34 +174,63 @@ export default function TaxInvoiceUploadPage({ currentUser, embeddable = false }
 
   // File 1: ใบกำกับภาษี
   const [taxFile, setTaxFile] = useState(null);
+  const [taxFolder, setTaxFolder] = useState(""); // folder name
   const [previewTax, setPreviewTax] = useState([]);
   const [parsingTax, setParsingTax] = useState(false);
   const [uploadingTax, setUploadingTax] = useState(false);
   const [msgTax, setMsgTax] = useState("");
+  const [duplicates, setDuplicates] = useState([]); // existing rows ที่ซ้ำ
+  const [allowOverwrite, setAllowOverwrite] = useState(false);
 
   // File 2: กำไรขั้นต้น
   const [profitFile, setProfitFile] = useState(null);
+  const [profitFolder, setProfitFolder] = useState("");
   const [previewProfit, setPreviewProfit] = useState([]);
   const [parsingProfit, setParsingProfit] = useState(false);
   const [uploadingProfit, setUploadingProfit] = useState(false);
   const [msgProfit, setMsgProfit] = useState("");
+
+  // helper: extract folder name from File via webkitRelativePath
+  function getFolderName(file) {
+    if (!file) return "";
+    const rel = file.webkitRelativePath || "";
+    if (rel && rel.includes("/")) {
+      // e.g. "รายงานภาษีขาย/04-2569.CSV" → "รายงานภาษีขาย"
+      // หรือ "Parent/Sub/file.csv" → "Parent/Sub"
+      const parts = rel.split("/");
+      return parts.slice(0, parts.length - 1).join("/");
+    }
+    return "";
+  }
 
   function validateBranch() {
     if (!branch) return "เลือกสาขาก่อน";
     return "";
   }
 
+  const isMic = branch === "SINGCHAI";
+
   /* ======== Tax Invoice flow ======== */
   async function previewTaxFile() {
     setMsgTax("");
     setPreviewTax([]);
+    if (isMic) setPreviewProfit([]);
     if (!taxFile) { setMsgTax("⚠️ เลือกไฟล์ก่อน"); return; }
     setParsingTax(true);
     try {
-      const rows = await readCsvAsTis620(taxFile);
-      const data = extractTaxInvoices(rows, taxFile.name);
-      setPreviewTax(data);
-      setMsgTax(`✅ อ่านสำเร็จ — พบ ${data.length} รายการ`);
+      if (isMic) {
+        // MIC: ใช้ ; delimiter + parse เป็นทั้ง tax และ profit
+        const rows = await readCsvAsTis620(taxFile, ";");
+        const { taxOut, profitOut } = extractMicSingchai(rows, taxFile.name);
+        setPreviewTax(taxOut);
+        setPreviewProfit(profitOut);
+        setMsgTax(`✅ อ่านสำเร็จ (MIC) — ${taxOut.length} ใบกำกับ + ${profitOut.length} รายการกำไร`);
+      } else {
+        const rows = await readCsvAsTis620(taxFile);
+        const data = extractTaxInvoices(rows, taxFile.name);
+        setPreviewTax(data);
+        setMsgTax(`✅ อ่านสำเร็จ — พบ ${data.length} รายการ`);
+      }
     } catch (e) {
       setMsgTax("❌ อ่านล้มเหลว: " + e.message);
     }
@@ -158,22 +243,69 @@ export default function TaxInvoiceUploadPage({ currentUser, embeddable = false }
     if (previewTax.length === 0) { setMsgTax("⚠️ กดอ่านไฟล์ก่อน"); return; }
     setUploadingTax(true);
     setMsgTax("");
+
+    // ── Step 0: Check duplicate ก่อน upload ──
+    if (!allowOverwrite) {
+      try {
+        const invNos = previewTax.map(t => t.tax_invoice_no).filter(Boolean);
+        const resCk = await fetch(CHECK_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ branch, invoice_nos: invNos }),
+        });
+        const dCk = await resCk.json();
+        const existing = (Array.isArray(dCk) ? dCk[0] : dCk)?.existing || [];
+        if (existing.length > 0) {
+          setDuplicates(existing);
+          setMsgTax(`⚠️ พบเลขที่ใบกำกับซ้ำในฐานข้อมูล ${existing.length}/${invNos.length} ใบ — ไม่ upload เพื่อกันซ้ำ (ถ้าต้องการ overwrite ติ๊ก checkbox แล้วกด Upload อีกครั้ง)`);
+          setUploadingTax(false);
+          return;
+        }
+        setDuplicates([]);
+      } catch (e) {
+        setMsgTax("❌ เช็คซ้ำล้มเหลว: " + e.message);
+        setUploadingTax(false);
+        return;
+      }
+    }
+
     try {
-      const res = await fetch(API_URL, {
+      // Step 1: upload tax
+      const res1 = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "upload_tax_invoices",
           mode: "tax",
           branch,
-          // invoice_year_month เก็บแยกราย row จาก invoice_date
           tax_invoices: previewTax.map(t => ({ ...t, invoice_year_month: deriveYearMonth(t.invoice_date) })),
           uploaded_by: currentUser?.user_id || currentUser?.name || "",
         }),
       });
-      const data = await res.json();
-      const ok = Array.isArray(data) ? data[0] : data;
-      if (ok?.success === false) setMsgTax("❌ " + (ok?.error || "บันทึกล้มเหลว"));
-      else setMsgTax(`✅ บันทึกใบกำกับภาษี ${ok?.upserted ?? previewTax.length} รายการสำเร็จ`);
+      const d1 = await res1.json();
+      const ok1 = Array.isArray(d1) ? d1[0] : d1;
+      if (ok1?.success === false) { setMsgTax("❌ " + (ok1?.error || "บันทึกใบกำกับล้มเหลว")); setUploadingTax(false); return; }
+
+      // Step 2 (MIC only): upload profit ในครั้งเดียวกัน
+      if (isMic && previewProfit.length > 0) {
+        const res2 = await fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "upload_tax_invoices",
+            mode: "profit",
+            branch,
+            gross_profit: previewProfit,
+            uploaded_by: currentUser?.user_id || currentUser?.name || "",
+          }),
+        });
+        const d2 = await res2.json();
+        const ok2 = Array.isArray(d2) ? d2[0] : d2;
+        if (ok2?.success === false) {
+          setMsgTax(`✅ ใบกำกับ ${previewTax.length} ⚠️ profit ล้มเหลว: ${ok2?.error || ""}`);
+        } else {
+          setMsgTax(`✅ บันทึก MIC สำเร็จ: ใบกำกับ ${previewTax.length} + กำไร ${previewProfit.length} รายการ`);
+        }
+      } else {
+        setMsgTax(`✅ บันทึกใบกำกับภาษี ${ok1?.upserted ?? previewTax.length} รายการสำเร็จ`);
+      }
     } catch (e) {
       setMsgTax("❌ " + e.message);
     }
@@ -250,11 +382,15 @@ export default function TaxInvoiceUploadPage({ currentUser, embeddable = false }
           </div>
         </div>
 
-        {/* File 1: ใบกำกับภาษี */}
+        {/* File 1: ใบกำกับภาษี (NID format) หรือ MIC ทั้งไฟล์เดียว */}
         <div style={{ padding: "14px 16px", background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, marginBottom: 12 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#15803d", marginBottom: 8 }}>📑 ขั้นตอนที่ 1 — ใบกำกับภาษี (NID-รายงานภาษีขาย)</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#15803d", marginBottom: 8 }}>
+            {isMic
+              ? "📑 ไฟล์ MIC (สิงห์ชัย) — รวมใบกำกับ + กำไรขั้นต้น (1 ไฟล์)"
+              : "📑 ขั้นตอนที่ 1 — ใบกำกับภาษี (NID-รายงานภาษีขาย)"}
+          </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <input type="file" accept=".csv" onChange={e => { setTaxFile(e.target.files?.[0] || null); setPreviewTax([]); setMsgTax(""); }}
+            <input type="file" accept=".csv" onChange={e => { setTaxFile(e.target.files?.[0] || null); setPreviewTax([]); setMsgTax(""); setDuplicates([]); setAllowOverwrite(false); }}
               style={{ flex: "0 0 auto" }} />
             {taxFile && <span style={{ fontSize: 11, color: "#6b7280" }}>{taxFile.name} ({(taxFile.size / 1024).toFixed(1)} KB)</span>}
             <div style={{ flex: 1 }} />
@@ -268,9 +404,45 @@ export default function TaxInvoiceUploadPage({ currentUser, embeddable = false }
             </button>
           </div>
           {msgTax && <div style={{ marginTop: 8, fontSize: 12, ...statusStyle(msgTax) }}>{msgTax}</div>}
+          {duplicates.length > 0 && (
+            <div style={{ marginTop: 10, padding: 10, background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#991b1b", marginBottom: 6 }}>
+                🚫 เลขที่ใบกำกับซ้ำในฐานข้อมูล ({duplicates.length} รายการ)
+              </div>
+              <div style={{ maxHeight: 200, overflowY: "auto", fontSize: 11, marginBottom: 8 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#fee2e2" }}>
+                      <th style={{ padding: "4px 8px", textAlign: "left", border: "1px solid #fca5a5" }}>เลขที่ใบกำกับ</th>
+                      <th style={{ padding: "4px 8px", textAlign: "left", border: "1px solid #fca5a5" }}>เดือน</th>
+                      <th style={{ padding: "4px 8px", textAlign: "left", border: "1px solid #fca5a5" }}>ลูกค้า</th>
+                      <th style={{ padding: "4px 8px", textAlign: "right", border: "1px solid #fca5a5" }}>ยอดรวม</th>
+                      <th style={{ padding: "4px 8px", textAlign: "left", border: "1px solid #fca5a5" }}>upload เมื่อ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {duplicates.map((d, i) => (
+                      <tr key={i}>
+                        <td style={{ padding: "3px 8px", fontFamily: "monospace", fontWeight: 600, color: "#991b1b", border: "1px solid #fecaca" }}>{d.tax_invoice_no}</td>
+                        <td style={{ padding: "3px 8px", border: "1px solid #fecaca", fontFamily: "monospace" }}>{d.invoice_year_month || "-"}</td>
+                        <td style={{ padding: "3px 8px", border: "1px solid #fecaca" }}>{d.customer_name || "-"}</td>
+                        <td style={{ padding: "3px 8px", border: "1px solid #fecaca", textAlign: "right" }}>{Number(d.total_amount || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
+                        <td style={{ padding: "3px 8px", border: "1px solid #fecaca", color: "#6b7280" }}>{d.uploaded_at ? String(d.uploaded_at).slice(0, 19).replace("T", " ") : "-"} {d.uploaded_by ? `by ${d.uploaded_by}` : ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <label style={{ fontSize: 12, color: "#7c2d12", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={allowOverwrite} onChange={e => setAllowOverwrite(e.target.checked)} />
+                ✅ อนุญาตให้เขียนทับ (overwrite) ข้อมูลเดิม — กด "Upload" อีกครั้งเพื่อยืนยัน
+              </label>
+            </div>
+          )}
         </div>
 
-        {/* File 2: กำไรขั้นต้น */}
+        {/* File 2: กำไรขั้นต้น — ซ่อนเมื่อเป็น MIC */}
+        {!isMic && (
         <div style={{ padding: "14px 16px", background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 10, marginBottom: 4 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#1e40af", marginBottom: 8 }}>📊 ขั้นตอนที่ 2 — กำไรขั้นต้น (NID-รายงานกำไรขั้นต้น) — UPDATE chassis/engine/model</div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -289,6 +461,7 @@ export default function TaxInvoiceUploadPage({ currentUser, embeddable = false }
           </div>
           {msgProfit && <div style={{ marginTop: 8, fontSize: 12, ...statusStyle(msgProfit) }}>{msgProfit}</div>}
         </div>
+        )}
       </div>
 
       {/* Preview */}

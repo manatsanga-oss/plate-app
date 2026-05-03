@@ -157,10 +157,13 @@ export default function FinancePaymentMatchPage({ currentUser }) {
           try { data = JSON.parse(text); }
           catch { errors.push(`${branch}: invalid JSON`); continue; }
           const arr = Array.isArray(data) ? data : [];
-          // กรอง: ยังไม่ตัดรับ + customer_name (ไฟแนนท์) match แบบยืดหยุ่น
+          // กรอง: ยังไม่ตัดรับ + ไฟแนนท์ match แบบยืดหยุ่น
+          // PAPAO/นครหลวง: customer_name = ไฟแนนท์
+          // สิงห์ชัย (MIC): customer_name = NULL → ใช้ sale_finance_company จาก moto_sales JOIN
           const matched = arr.filter(r => {
             if (r.paid_from_ft_id) return false;
-            const cust = (r.customer_name || "").toLowerCase();
+            const cust = String(r.customer_name || r.sale_finance_company || "").toLowerCase();
+            if (!cust) return false;
             const target = companyKey.toLowerCase();
             const targetShort = shortKey.toLowerCase();
             return cust.includes(target) || cust.includes(targetShort) || target.includes(cust);
@@ -240,7 +243,7 @@ export default function FinancePaymentMatchPage({ currentUser }) {
     const kw = searchKeyword.trim().toLowerCase();
     if (!kw) return searchResults;
     return searchResults.filter(r => {
-      const hay = [r.tax_invoice_no, r.engine_no, r.chassis_no, r.customer_name, r.sale_customer_name, r.model_name, r.plate_number]
+      const hay = [r.tax_invoice_no, r.engine_no, r.chassis_no, r.customer_name, r.sale_customer_name, r.sale_finance_company, r.model_name, r.plate_number]
         .filter(Boolean).join(" ").toLowerCase();
       return hay.includes(kw);
     });
@@ -284,8 +287,8 @@ export default function FinancePaymentMatchPage({ currentUser }) {
           amount: Number(amount),
           chassis_no: r?.chassis_no || null,
           engine_no: r?.engine_no || null,
-          customer_name: r?.sale_customer_name || r?.customer_name || null,  // ใช้ลูกค้าจริงจาก moto_sales ก่อน
-          finance_company: r?.customer_name || null,  // ไฟแนนท์จาก tax_invoices
+          customer_name: r?.sale_customer_name || r?.customer_name || null,  // ลูกค้าจริงจาก moto_sales
+          finance_company: r?.customer_name || r?.sale_finance_company || null,  // ไฟแนนท์ (tax invoice หรือ sales)
           plate_number: r?.plate_number || null,
         };
       });
@@ -544,10 +547,10 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                         {r.sale_customer_name ? (
                           <>
                             <div style={{ fontWeight: 600 }}>{r.sale_customer_name}</div>
-                            <div style={{ fontSize: 10, color: "#9ca3af" }}>📋 ไฟแนนท์: {r.customer_name}</div>
+                            <div style={{ fontSize: 10, color: "#9ca3af" }}>📋 ไฟแนนท์: {r.customer_name || r.sale_finance_company || "-"}</div>
                           </>
                         ) : (
-                          <span style={{ color: "#6b7280" }}>{r.customer_name || "-"}</span>
+                          <span style={{ color: "#6b7280" }}>{r.customer_name || r.sale_finance_company || "-"}</span>
                         )}
                       </td>
                       <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.engine_no || "-"}</td>

@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import TaxInvoiceUploadPage from "./TaxInvoiceUploadPage";
+import DailyReceiptUploadPage from "./DailyReceiptUploadPage";
 
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 
@@ -159,11 +160,18 @@ export default function UploadPage({ currentUser } = {}) {
           </div>
           {/* Append "ใบกำกับ HONDA" panel into the last group "อื่น ๆ" */}
           {gi === UPLOAD_GROUPS.length - 1 && (
-            <div style={{ background: "#fff", borderRadius: "0 0 14px 14px", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>📄 ใบกำกับ HONDA (รถจักรยานยนต์)</div>
-              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>เลือกสาขา + เดือน + ไฟล์ใบกำกับภาษี & กำไรขั้นต้น (CSV TIS-620) — UPSERT</div>
-              <TaxInvoiceUploadPage currentUser={currentUser} embeddable />
-            </div>
+            <>
+              <div style={{ background: "#fff", borderRadius: 0, boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>📄 ใบกำกับ HONDA (รถจักรยานยนต์)</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>เลือกสาขา + เดือน + ไฟล์ใบกำกับภาษี & กำไรขั้นต้น (CSV TIS-620) — UPSERT</div>
+                <TaxInvoiceUploadPage currentUser={currentUser} embeddable />
+              </div>
+              <div style={{ background: "#fff", borderRadius: "0 0 14px 14px", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>📥 ใบเสร็จรายวัน (รับเงิน EX)</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ไฟล์รายงานสรุปรับเงินรายวัน (CSV UTF-8 BOM, 48 columns) — JOIN ผ่านเลขที่ใบขายเพื่อ track ว่าใบกำกับใด ชำระครบหรือยัง</div>
+                <DailyReceiptUploadPage currentUser={currentUser} embeddable />
+              </div>
+            </>
           )}
         </div>
       ))}
