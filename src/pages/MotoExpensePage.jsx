@@ -2,6 +2,13 @@ import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
+function fmtThaiDate(s) {
+  if (!s) return "-";
+  const m = String(s).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return s;
+  return `${m[3]}/${m[2]}/${(parseInt(m[1], 10) + 543).toString().slice(-2)}`;
+}
+
 const emptyForm = () => ({
   expense_name: "",
   expense_type: "fixed",
@@ -17,6 +24,7 @@ const emptyForm = () => ({
   province: "",
   province_mode: "include",
   province_target: "customer",
+  effective_date: "",
 });
 
 export default function MotoExpensePage({ currentUser }) {
@@ -37,6 +45,24 @@ export default function MotoExpensePage({ currentUser }) {
   const [form, setForm] = useState(emptyForm());
   const [editTarget, setEditTarget] = useState(null);
   const [message, setMessage] = useState("");
+  const [historyTarget, setHistoryTarget] = useState(null); // { expense_id, name }
+  const [history, setHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  async function openHistory(e) {
+    setHistoryTarget(e);
+    setHistory([]);
+    setHistoryLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_expense_history", expense_id: e.expense_id }),
+      });
+      const data = await res.json();
+      setHistory(Array.isArray(data) ? data : []);
+    } catch { setHistory([]); }
+    setHistoryLoading(false);
+  }
 
   useEffect(() => {
     fetchExpenses();
@@ -157,6 +183,8 @@ export default function MotoExpensePage({ currentUser }) {
           amount: Number(form.amount),
           note: form.note,
           status: form.status,
+          effective_date: form.effective_date || null,
+          updated_by: currentUser?.user_id || currentUser?.name || null,
         }),
       });
       setShowForm(false);
@@ -197,6 +225,7 @@ export default function MotoExpensePage({ currentUser }) {
       province: e.province || "",
       province_mode: e.province_mode || "include",
       province_target: e.province_target || "customer",
+      effective_date: e.effective_date ? String(e.effective_date).slice(0, 10) : "",
     });
     if (e.group_by === "type" && e.type_id) {
       const t = motoTypes.find(t => String(t.type_id) === String(e.type_id));
@@ -291,6 +320,7 @@ export default function MotoExpensePage({ currentUser }) {
                 <th>ยี่ห้อ</th>
                 <th>รุ่น</th>
                 <th>จำนวนเงิน</th>
+                <th>วันที่ประกาศใช้</th>
                 <th>หมายเหตุ</th>
                 <th>สถานะ</th>
                 <th>จัดการ</th>
@@ -298,7 +328,7 @@ export default function MotoExpensePage({ currentUser }) {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={10} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลค่าใช้จ่าย</td></tr>
+                <tr><td colSpan={11} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลค่าใช้จ่าย</td></tr>
               ) : filtered.map((e, i) => (
                 <tr key={e.expense_id || i}>
                   <td>{i + 1}</td>
@@ -326,6 +356,9 @@ export default function MotoExpensePage({ currentUser }) {
                   <td style={{ textAlign: "right", fontWeight: 600 }}>
                     {Number(e.amount).toLocaleString()} บาท
                   </td>
+                  <td style={{ whiteSpace: "nowrap", fontSize: 12, color: "#374151" }}>
+                    {e.effective_date ? fmtThaiDate(e.effective_date) : <span style={{ color: "#9ca3af" }}>-</span>}
+                  </td>
                   <td>{e.note || "-"}</td>
                   <td>
                     <span style={{
@@ -336,10 +369,15 @@ export default function MotoExpensePage({ currentUser }) {
                       {e.status === "active" ? "ใช้งาน" : "ไม่ใช้งาน"}
                     </span>
                   </td>
-                  <td>
+                  <td style={{ whiteSpace: "nowrap" }}>
                     <button onClick={() => openEdit(e)}
-                      style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                      style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, marginRight: 4 }}>
                       แก้ไข
+                    </button>
+                    <button onClick={() => openHistory(e)}
+                      title="ดูประวัติการแก้ไข"
+                      style={{ padding: "3px 10px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                      ประวัติ
                     </button>
                   </td>
                 </tr>
@@ -517,6 +555,15 @@ export default function MotoExpensePage({ currentUser }) {
             </div>
 
             <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>📅 วันที่ประกาศใช้</label>
+              <input type="date" value={form.effective_date} onChange={e => setForm({ ...form, effective_date: e.target.value })}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
+                วันที่อัตรานี้เริ่มมีผลบังคับใช้ — เว้นว่างไว้หากยังไม่ระบุ
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
               <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>หมายเหตุ</label>
               <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
                 placeholder="หมายเหตุ (ถ้ามี)"
@@ -548,6 +595,69 @@ export default function MotoExpensePage({ currentUser }) {
                 ปิด
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Popup: ประวัติการแก้ไข */}
+      {historyTarget && (
+        <div onClick={() => setHistoryTarget(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 12, padding: 18, width: "min(800px, 96vw)", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b" }}>
+                  📜 ประวัติการแก้ไข — {historyTarget.expense_name}
+                </div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
+                  ID: {historyTarget.expense_id} · ปัจจุบัน {Number(historyTarget.amount).toLocaleString()} บาท
+                </div>
+              </div>
+              <button onClick={() => setHistoryTarget(null)}
+                style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: "#6b7280", lineHeight: 1 }}>×</button>
+            </div>
+
+            {historyLoading ? (
+              <div style={{ textAlign: "center", padding: 30, color: "#6b7280" }}>กำลังโหลด...</div>
+            ) : history.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>ไม่มีประวัติการแก้ไข</div>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: "#072d6b", color: "#fff" }}>
+                      <th style={{ padding: "8px 10px", textAlign: "center", width: 40 }}>#</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>เปลี่ยนเมื่อ</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>โดย</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right" }}>จำนวนเงิน</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center" }}>วันที่ประกาศใช้</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center" }}>สถานะ</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left" }}>หมายเหตุ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((h, i) => (
+                      <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                        <td style={{ padding: "6px 10px", textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                        <td style={{ padding: "6px 10px", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 11 }}>
+                          {h.changed_at ? String(h.changed_at).slice(0, 19).replace("T", " ") : "-"}
+                        </td>
+                        <td style={{ padding: "6px 10px" }}>{h.changed_by || "-"}</td>
+                        <td style={{ padding: "6px 10px", textAlign: "right", fontWeight: 600 }}>{Number(h.amount || 0).toLocaleString()}</td>
+                        <td style={{ padding: "6px 10px", textAlign: "center", whiteSpace: "nowrap" }}>{fmtThaiDate(h.effective_date)}</td>
+                        <td style={{ padding: "6px 10px", textAlign: "center" }}>
+                          <span style={{ padding: "1px 8px", borderRadius: 4, fontSize: 11, background: h.status === "active" ? "#d1fae5" : "#f3f4f6", color: h.status === "active" ? "#065f46" : "#6b7280" }}>
+                            {h.status === "active" ? "ใช้งาน" : "ไม่ใช้"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "6px 10px", color: "#6b7280" }}>{h.note || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

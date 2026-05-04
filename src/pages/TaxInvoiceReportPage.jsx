@@ -4,6 +4,7 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-invo
 const LIST_RECEIPTS_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-daily-receipts";
 
 const BRANCH_OPTS = [
+  { value: "ALL", label: "ทั้งหมด", table: "ทุกสาขา" },
   { value: "PAPAO", label: "ป.เปา", table: "tax_invoices_papao" },
   { value: "NAKORNLUANG", label: "นครหลวง", table: "tax_invoices_nakornluang" },
   { value: "SINGCHAI", label: "สิงห์ชัย", table: "tax_invoices_singchai" },
@@ -22,7 +23,7 @@ function fmtN(n) {
 }
 
 export default function TaxInvoiceReportPage({ currentUser }) {
-  const [branch, setBranch] = useState("PAPAO");
+  const [branch, setBranch] = useState("ALL");
   const [yearMonth, setYearMonth] = useState(""); // 256904
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(""); // active / cancelled
@@ -60,18 +61,25 @@ export default function TaxInvoiceReportPage({ currentUser }) {
     setLoading(true);
     setMessage("");
     try {
-      const res = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "list_tax_invoices",
-          branch,
-          year_month: yearMonth || null,
-        }),
-      });
-      const data = await res.json();
-      const arr = Array.isArray(data) ? data : data?.rows || [];
-      setRows(arr);
+      // ถ้าเลือก "ทั้งหมด" → ดึงข้อมูล 3 สาขาพร้อมกัน
+      const branches = branch === "ALL" ? ["PAPAO", "NAKORNLUANG", "SINGCHAI"] : [branch];
+      const all = await Promise.all(branches.map(async (br) => {
+        const res = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "list_tax_invoices",
+            branch: br,
+            year_month: yearMonth || null,
+          }),
+        });
+        const data = await res.json();
+        const arr = Array.isArray(data) ? data : data?.rows || [];
+        // tag each row with branch source
+        return arr.map(r => ({ ...r, _branch: br }));
+      }));
+      const merged = all.flat();
+      setRows(merged);
     } catch (e) {
       setMessage("❌ โหลดไม่สำเร็จ: " + e.message);
       setRows([]);

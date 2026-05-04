@@ -9,6 +9,7 @@ const emptyForm = () => ({
   address: "",
   note: "",
   status: "active",
+  payout_mode: "per_unit",  // per_unit = ออกค่าส่งเสริมรายคัน, total = ออกค่าส่งเสริมรวม
 });
 
 export default function FinancePage({ currentUser }) {
@@ -62,7 +63,7 @@ export default function FinancePage({ currentUser }) {
 
   function openEdit(c) {
     setEditTarget(c);
-    setForm({ company_name: c.company_name || "", contact_name: c.contact_name || "", phone: c.phone || "", address: c.address || "", note: c.note || "", status: c.status || "active" });
+    setForm({ company_name: c.company_name || "", contact_name: c.contact_name || "", phone: c.phone || "", address: c.address || "", note: c.note || "", status: c.status || "active", payout_mode: c.payout_mode || "per_unit" });
     setShowForm(true);
     setMessage("");
   }
@@ -95,6 +96,7 @@ export default function FinancePage({ currentUser }) {
                 <th>ผู้ติดต่อ</th>
                 <th>เบอร์โทร</th>
                 <th>ที่อยู่</th>
+                <th>วิธีออกค่าส่งเสริม</th>
                 <th>หมายเหตุ</th>
                 <th>สถานะ</th>
                 <th>จัดการ</th>
@@ -102,7 +104,7 @@ export default function FinancePage({ currentUser }) {
             </thead>
             <tbody>
               {companies.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลบริษัทไฟแนนท์</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลบริษัทไฟแนนท์</td></tr>
               ) : companies.map((c, i) => (
                 <tr key={c.company_id || i}>
                   <td>{i + 1}</td>
@@ -110,6 +112,13 @@ export default function FinancePage({ currentUser }) {
                   <td>{c.contact_name || "-"}</td>
                   <td>{c.phone || "-"}</td>
                   <td style={{ maxWidth: 300, whiteSpace: "normal" }}>{c.address || "-"}</td>
+                  <td>
+                    {c.payout_mode === "total" ? (
+                      <span style={{ padding: "2px 10px", borderRadius: 12, fontSize: 12, background: "#fef3c7", color: "#92400e" }}>📊 รวม</span>
+                    ) : (
+                      <span style={{ padding: "2px 10px", borderRadius: 12, fontSize: 12, background: "#dbeafe", color: "#1e40af" }}>💰 รายคัน</span>
+                    )}
+                  </td>
                   <td>{c.note || "-"}</td>
                   <td>
                     <span style={{
@@ -165,6 +174,23 @@ export default function FinancePage({ currentUser }) {
                 placeholder="ที่อยู่บริษัท (สำหรับใบกำกับภาษี)"
                 rows={3}
                 style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box", resize: "vertical" }} />
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>วิธีออกค่าส่งเสริม</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {[
+                  ["per_unit", "💰 ออกค่าส่งเสริมรายคัน — จ่ายต่อรถแต่ละคันที่ขาย"],
+                  ["total",    "📊 ออกค่าส่งเสริมรวม — จ่ายเป็นยอดรวมไม่ขึ้นกับจำนวนคัน"],
+                ].map(([val, label]) => (
+                  <label key={val} style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer", fontWeight: "normal", fontSize: 13, padding: "6px 8px", border: form.payout_mode === val ? "1.5px solid #072d6b" : "1px solid #e5e7eb", borderRadius: 6, background: form.payout_mode === val ? "#eff6ff" : "#fff" }}>
+                    <input type="radio" name="payoutMode" value={val} checked={form.payout_mode === val}
+                      onChange={() => setForm({ ...form, payout_mode: val })}
+                      style={{ marginTop: 2 }} />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div style={{ marginBottom: 12 }}>

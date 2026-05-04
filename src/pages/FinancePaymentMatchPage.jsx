@@ -42,9 +42,20 @@ export default function FinancePaymentMatchPage({ currentUser }) {
 
   // step 4-5: selected items
   const [selectedItems, setSelectedItems] = useState({}); // { "BRANCH|tax_invoice_no": amount }
+  const [itemBreakdowns, setItemBreakdowns] = useState({}); // { key: { vehicle_price, promotion_fee, wht } }
+
+  // popup สำหรับกรอกแยกย่อย (เฉพาะไฟแนนท์ payout_mode === 'per_unit')
+  const [breakdownPopup, setBreakdownPopup] = useState(null); // { row, key, vehicle_price, promotion_fee, wht }
 
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+
+  // หา payout_mode ของไฟแนนท์ที่เลือก
+  const selectedCompanyInfo = useMemo(
+    () => financeCompanies.find(c => c.company_name === selectedCompany),
+    [financeCompanies, selectedCompany]
+  );
+  const isPerUnit = (selectedCompanyInfo?.payout_mode || "per_unit") === "per_unit";
 
   useEffect(() => {
     fetchFinanceCompanies();
@@ -251,12 +262,51 @@ export default function FinancePaymentMatchPage({ currentUser }) {
 
   function toggleItem(r) {
     const key = `${r.branch}|${r.tax_invoice_no}`;
-    setSelectedItems(prev => {
-      const next = { ...prev };
-      if (next[key] != null) delete next[key];
-      else next[key] = Number(r.total_amount || 0); // default amount = ยอดรวม
-      return next;
-    });
+    // ถ้ามีอยู่แล้ว → ยกเลิก
+    if (selectedItems[key] != null) {
+      setSelectedItems(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setItemBreakdowns(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      return;
+    }
+
+    // ถ้าเป็นไฟแนนท์ที่ออกค่าส่งเสริมรายคัน → เปิด popup
+    if (isPerUnit) {
+      setBreakdownPopup({
+        row: r,
+        key,
+        vehicle_price: Number(r.total_amount || 0),
+        promotion_fee: 0,
+        wht: 0, // จะถูกคำนวณอัตโนมัติเมื่อใส่ค่าส่งเสริม
+      });
+      return;
+    }
+
+    // ปกติ (โหมดรวม): เลือกและใช้ยอดรวมเป็น default
+    setSelectedItems(prev => ({ ...prev, [key]: Number(r.total_amount || 0) }));
+  }
+
+  function confirmBreakdown() {
+    if (!breakdownPopup) return;
+    const { key, vehicle_price, promotion_fee, wht } = breakdownPopup;
+    const v = Number(vehicle_price) || 0;
+    const p = Number(promotion_fee) || 0;
+    const w = Number(wht) || 0;
+    // ยอดที่จะ match = ค่ารถ + ค่าส่งเสริม (ค่าส่งเสริมหัก WHT แล้ว)
+    const amount = v + p;
+    setSelectedItems(prev => ({ ...prev, [key]: amount }));
+    setItemBreakdowns(prev => ({
+      ...prev,
+      [key]: { vehicle_price: v, promotion_fee: p, wht: w }
+    }));
+    setBreakdownPopup(null);
   }
 
   function setItemAmount(key, value) {
@@ -281,15 +331,20 @@ export default function FinancePaymentMatchPage({ currentUser }) {
       const items = Object.entries(selectedItems).map(([key, amount]) => {
         const [branch, tax_invoice_no] = key.split("|");
         const r = searchResults.find(x => x.branch === branch && x.tax_invoice_no === tax_invoice_no);
+        const bd = itemBreakdowns[key] || null;
         return {
           branch,
           tax_invoice_no,
           amount: Number(amount),
           chassis_no: r?.chassis_no || null,
           engine_no: r?.engine_no || null,
-          customer_name: r?.sale_customer_name || r?.customer_name || null,  // ลูกค้าจริงจาก moto_sales
-          finance_company: r?.customer_name || r?.sale_finance_company || null,  // ไฟแนนท์ (tax invoice หรือ sales)
+          customer_name: r?.sale_customer_name || r?.customer_name || null,
+          finance_company: r?.customer_name || r?.sale_finance_company || null,
           plate_number: r?.plate_number || null,
+          // breakdown (เฉพาะ payout_mode = per_unit)
+          vehicle_price: bd?.vehicle_price ?? null,
+          promotion_fee: bd?.promotion_fee ?? null,
+          wht_amount:    bd?.wht           ?? null,
         };
       });
       const res = await fetch(ACC_URL, {
@@ -524,6 +579,8 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                   <th style={th}>รุ่น</th>
                   <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
                   <th style={{ ...th, textAlign: "right" }}>จำนวนที่รับชำระ</th>
+                  {isPerUnit && <th style={{ ...th, textAlign: "right" }}>ค่าส่งเสริม</th>}
+                  {isPerUnit && <th style={{ ...th, textAlign: "right" }}>WHT</th>}
                   <th style={{ ...th, textAlign: "right" }}>คงเหลือ</th>
                 </tr>
               </thead>
@@ -564,6 +621,20 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                             style={{ ...inp, width: 110, fontFamily: "monospace", textAlign: "right", color: "#15803d", fontWeight: 700 }} />
                         ) : "-"}
                       </td>
+                      {isPerUnit && (
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontSize: 12 }}>
+                          {isChecked && itemBreakdowns[key] ? (
+                            <span style={{ color: "#a16207", fontWeight: 600 }}>{fmt(itemBreakdowns[key].promotion_fee)}</span>
+                          ) : "-"}
+                        </td>
+                      )}
+                      {isPerUnit && (
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontSize: 12 }}>
+                          {isChecked && itemBreakdowns[key] ? (
+                            <span style={{ color: "#dc2626" }}>{fmt(itemBreakdowns[key].wht)}</span>
+                          ) : "-"}
+                        </td>
+                      )}
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>
                         {isChecked ? (() => {
                           const remain = Number(r.total_amount || 0) - Number(selectedItems[key] || 0);
@@ -600,6 +671,89 @@ export default function FinancePaymentMatchPage({ currentUser }) {
         </div>
       )}
       </>)}
+
+      {/* Popup: กรอกแยกย่อย ค่ารถ + ค่าส่งเสริม + WHT */}
+      {breakdownPopup && (() => {
+        const r = breakdownPopup.row;
+        const v = Number(breakdownPopup.vehicle_price) || 0;
+        const p = Number(breakdownPopup.promotion_fee) || 0;
+        const w = Number(breakdownPopup.wht) || 0;
+        // ค่าส่งเสริมที่ป้อนคือยอดหัก WHT แล้ว (ยอดโอนจริง) — ไม่ต้องลบ WHT อีก
+        const net = v + p;
+        return (
+          <div onClick={() => setBreakdownPopup(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: "#fff", borderRadius: 12, padding: 22, width: "min(520px, 96vw)", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b", marginBottom: 4 }}>
+                💰 บันทึกแยกย่อย — {r.tax_invoice_no}
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 16 }}>
+                ลูกค้า: {r.sale_customer_name || r.customer_name || "-"} ·
+                ยอดใบกำกับ: <strong>฿ {fmt(Number(r.total_amount || 0))}</strong>
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 13 }}>🚗 จำนวนเงินค่ารถ</label>
+                <input type="number" step="0.01" value={breakdownPopup.vehicle_price}
+                  onChange={e => setBreakdownPopup({ ...breakdownPopup, vehicle_price: e.target.value })}
+                  style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 15, boxSizing: "border-box", textAlign: "right" }} />
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 13 }}>🎁 จำนวนเงินค่าส่งเสริม (หัก WHT แล้ว — ยอดโอนจริง)</label>
+                <input type="number" step="0.01" value={breakdownPopup.promotion_fee}
+                  onChange={e => {
+                    const val = e.target.value;
+                    const promoAfterWht = Number(val) || 0;
+                    // WHT = after_wht × 0.03 / 1.04
+                    const whtAuto = +((promoAfterWht * 0.03) / 1.04).toFixed(2);
+                    setBreakdownPopup({ ...breakdownPopup, promotion_fee: val, wht: whtAuto });
+                  }}
+                  style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 15, boxSizing: "border-box", textAlign: "right" }} />
+                {Number(breakdownPopup.promotion_fee) > 0 && (() => {
+                  const afterWht = Number(breakdownPopup.promotion_fee);
+                  const wht = (afterWht * 0.03) / 1.04;
+                  const gross = afterWht + wht;
+                  const beforeVat = gross / 1.07;
+                  return (
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3, textAlign: "right" }}>
+                      ค่าส่งเสริม gross (รวม VAT): {fmt(gross)} · ก่อน VAT: {fmt(beforeVat)} · WHT (3%) คำนวณอัตโนมัติ
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 13 }}>🧾 ภาษีหัก ณ ที่จ่าย (WHT) <span style={{ fontWeight: 400, fontSize: 11, color: "#6b7280" }}>— อัตโนมัติ</span></label>
+                <input type="number" step="0.01" value={breakdownPopup.wht}
+                  onChange={e => setBreakdownPopup({ ...breakdownPopup, wht: e.target.value })}
+                  style={{ width: "100%", padding: "10px 12px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 15, boxSizing: "border-box", textAlign: "right", background: "#f9fafb", color: "#374151" }}
+                  title="คำนวณอัตโนมัติ = (ค่าส่งเสริม / 1.07) × 3%  |  สามารถปรับแก้ได้" />
+              </div>
+
+              <div style={{ marginTop: 16, padding: "10px 14px", background: "#eff6ff", borderRadius: 8, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>💵 ยอดสุทธิที่ตัดรับชำระ:</span>
+                <strong style={{ fontSize: 18, color: "#072d6b" }}>฿ {fmt(net)}</strong>
+              </div>
+              <div style={{ marginTop: 4, fontSize: 11, color: "#6b7280", textAlign: "right" }}>
+                = ค่ารถ + ค่าส่งเสริม (หัก WHT แล้ว)
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+                <button onClick={confirmBreakdown}
+                  style={{ flex: 1, padding: "10px 0", background: "#15803d", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                  ✅ บันทึกและเลือก
+                </button>
+                <button onClick={() => setBreakdownPopup(null)}
+                  style={{ flex: 1, padding: "10px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
+                  ยกเลิก
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
