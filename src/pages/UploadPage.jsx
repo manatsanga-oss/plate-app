@@ -59,14 +59,25 @@ function fmtDateTime(iso) {
 
 // items ที่รับ year_month override (ระบุเดือนเพื่อ upload ไฟล์ย้อนหลัง)
 const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
+const FILE_UPLOAD_KEYS = new Set(["time-tracking"]); // รายการที่ต้องเลือกไฟล์เอง
 
 export default function UploadPage({ currentUser } = {}) {
   const [statuses, setStatuses] = useState({});
   const [messages, setMessages] = useState({});
   const [lastUploads, setLastUploads] = useState(loadLastUploads);
   const [yearMonths, setYearMonths] = useState({}); // {key: '6903'}
+  const [files, setFiles] = useState({}); // { key: File }
 
   async function handleUpload(item) {
+    // ถ้าเป็น item ที่ต้องเลือกไฟล์ → ตรวจสอบว่ามีไฟล์
+    if (FILE_UPLOAD_KEYS.has(item.key)) {
+      const f = files[item.key];
+      if (!f) {
+        setMessages(prev => ({ ...prev, [item.key]: "⚠️ กรุณาเลือกไฟล์ก่อน" }));
+        setStatuses(prev => ({ ...prev, [item.key]: "error" }));
+        return;
+      }
+    }
     setStatuses(prev => ({ ...prev, [item.key]: "loading" }));
     setMessages(prev => ({ ...prev, [item.key]: "" }));
     try {
@@ -75,7 +86,17 @@ export default function UploadPage({ currentUser } = {}) {
       if (ym && SUPPORTS_YEAR_MONTH.has(item.key)) {
         url += (url.includes("?") ? "&" : "?") + "year_month=" + encodeURIComponent(ym);
       }
-      const res = await fetch(url, { method: "GET" });
+
+      let res;
+      if (FILE_UPLOAD_KEYS.has(item.key)) {
+        // ส่งไฟล์เป็น multipart/form-data
+        const fd = new FormData();
+        fd.append("file", files[item.key]);
+        res = await fetch(url, { method: "POST", body: fd });
+      } else {
+        res = await fetch(url, { method: "GET" });
+      }
+
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json().catch(() => ({}));
       setMessages(prev => ({ ...prev, [item.key]: data.message || "นำเข้าข้อมูลสำเร็จ" }));
@@ -138,9 +159,24 @@ export default function UploadPage({ currentUser } = {}) {
                         style={{ width: 120, padding: "7px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6 }}
                       />
                     )}
+                    {FILE_UPLOAD_KEYS.has(item.key) && (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                        <input
+                          type="file"
+                          accept=".csv,.xlsx,.xls"
+                          onChange={e => setFiles(p => ({ ...p, [item.key]: e.target.files?.[0] || null }))}
+                          style={{ fontSize: 12, maxWidth: 240 }}
+                        />
+                        {files[item.key] && (
+                          <span style={{ fontSize: 11, color: "#6b7280" }}>
+                            📄 {files[item.key].name} ({(files[item.key].size / 1024).toFixed(1)} KB)
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <button
                       onClick={() => handleUpload(item)}
-                      disabled={st === "loading"}
+                      disabled={st === "loading" || (FILE_UPLOAD_KEYS.has(item.key) && !files[item.key])}
                       style={{
                         padding: "8px 20px", fontSize: 13, fontWeight: 700,
                         fontFamily: "Tahoma, Arial, sans-serif",
