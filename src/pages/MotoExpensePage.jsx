@@ -216,6 +216,28 @@ export default function MotoExpensePage({ currentUser }) {
     if (tab === "province")          return e.group_by === "province" && (e.province_target || "customer") === "customer";
     if (tab === "register_province") return e.group_by === "province" && e.province_target === "registered";
     return e.group_by === tab;
+  }).slice().sort((a, b) => {
+    // เรียงแบบลำดับชั้น Type: ยี่ห้อ → รุ่น (series + model) → type → ชื่อรายการ
+    const ta = a.type_id ? motoTypes.find(x => String(x.type_id) === String(a.type_id)) : null;
+    const tb = b.type_id ? motoTypes.find(x => String(x.type_id) === String(b.type_id)) : null;
+
+    const brandA = String(a.brand_name || ta?.brand_name || "").toLowerCase();
+    const brandB = String(b.brand_name || tb?.brand_name || "").toLowerCase();
+    if (brandA !== brandB) return brandA < brandB ? -1 : 1;
+
+    const seriesA = String(ta?.marketing_name || ta?.series_name || "").toLowerCase();
+    const seriesB = String(tb?.marketing_name || tb?.series_name || "").toLowerCase();
+    if (seriesA !== seriesB) return seriesA < seriesB ? -1 : 1;
+
+    const modelA = String(ta?.model_name || "").toLowerCase();
+    const modelB = String(tb?.model_name || "").toLowerCase();
+    if (modelA !== modelB) return modelA < modelB ? -1 : 1;
+
+    const typeA = String(a.type_name || ta?.type_name || "").toLowerCase();
+    const typeB = String(b.type_name || tb?.type_name || "").toLowerCase();
+    if (typeA !== typeB) return typeA < typeB ? -1 : 1;
+
+    return String(a.expense_name || "").localeCompare(String(b.expense_name || ""), "th");
   });
 
   const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", type: "Type", province: "จังหวัดลูกค้า", register_province: "จังหวัดจดทะเบียน" };
@@ -226,6 +248,16 @@ export default function MotoExpensePage({ currentUser }) {
     if (e.group_by === "type") return e.type_name || "-";
     if (e.group_by === "province") return e.province || "-";
     return "-";
+  };
+
+  // ดึงชื่อยี่ห้อ + รุ่น จากการ lookup motoTypes (ผูก type_id)
+  const lookupTypeInfo = (e) => {
+    const t = e.type_id ? motoTypes.find(x => String(x.type_id) === String(e.type_id)) : null;
+    const brand = e.brand_name || t?.brand_name || (e.group_by === "brand" ? e.brand_name : "");
+    const series = t?.marketing_name || t?.series_name || e.series_name || "";
+    const model = t?.model_name || e.model_name || "";
+    const modelLabel = [series, model].filter(Boolean).join(" ");
+    return { brand: brand || "-", model: modelLabel || "-" };
   };
 
   return (
@@ -256,6 +288,8 @@ export default function MotoExpensePage({ currentUser }) {
                 <th>หมวด</th>
                 <th>ประเภท</th>
                 <th>{tabLabel[tab]}</th>
+                <th>ยี่ห้อ</th>
+                <th>รุ่น</th>
                 <th>จำนวนเงิน</th>
                 <th>หมายเหตุ</th>
                 <th>สถานะ</th>
@@ -264,7 +298,7 @@ export default function MotoExpensePage({ currentUser }) {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลค่าใช้จ่าย</td></tr>
+                <tr><td colSpan={10} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลค่าใช้จ่าย</td></tr>
               ) : filtered.map((e, i) => (
                 <tr key={e.expense_id || i}>
                   <td>{i + 1}</td>
@@ -280,6 +314,15 @@ export default function MotoExpensePage({ currentUser }) {
                     </span>
                   </td>
                   <td>{groupLabel(e)}</td>
+                  {(() => {
+                    const info = lookupTypeInfo(e);
+                    return (
+                      <>
+                        <td style={{ fontSize: 12 }}>{info.brand}</td>
+                        <td style={{ fontSize: 12 }}>{info.model}</td>
+                      </>
+                    );
+                  })()}
                   <td style={{ textAlign: "right", fontWeight: 600 }}>
                     {Number(e.amount).toLocaleString()} บาท
                   </td>

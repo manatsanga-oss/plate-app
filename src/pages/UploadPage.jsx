@@ -30,8 +30,6 @@ const UPLOAD_GROUPS = [
   {
     title: "อื่น ๆ",
     items: [
-      { key: "fast-moving", label: "รหัสอะไหล่หมุนเวียนเร็ว", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "fast_moving_parts", url: `${BASE}/upload-fast-moving` },
-      { key: "motoprice", label: "ตารางราคารถจักรยานยนต์", desc: "อัปเดตข้อมูลราคารถ", db: "moto_prices", url: `${BASE}/upload-moto-price` },
       { key: "registration-receipts", label: "รับเรื่องงานทะเบียน/พรบ", desc: "Header + Line items (upsert)", db: "registration_receipts", url: `${BASE}/upload-registration-receipts` },
       { key: "time-tracking", label: "บันทึกเวลาทำงาน", desc: "เดือนปัจจุบัน · upsert (พนักงาน + วันที่)", db: "time_tracking_records", url: `${BASE}/upload-time-tracking` },
       { key: "honda-warranty", label: "ลงทะเบียนรับประกันคุณภาพ HONDA", desc: "radee14b.xls · 4 fields · upsert (warrantee_code)", db: "honda_warranty_registrations", url: `${BASE}/upload-vehicle-registrations` },
