@@ -48,7 +48,9 @@ import RegistrationSubmitReceiptPage from "./pages/RegistrationSubmitReceiptPage
 import SupplierPage from "./pages/SupplierPage";
 import ServiceExpensePage from "./pages/ServiceExpensePage";
 import GeneralExpensePage from "./pages/GeneralExpensePage";
+import IncomeCategoryPage from "./pages/IncomeCategoryPage";
 import ExpenseRecordPage from "./pages/ExpenseRecordPage";
+import IncomeRecordPage from "./pages/IncomeRecordPage";
 import TimeTrackingPage from "./pages/TimeTrackingPage";
 import HrEmployeesPage from "./pages/HrEmployeesPage";
 import HrHolidaysPage from "./pages/HrHolidaysPage";
@@ -128,7 +130,7 @@ export default function App() {
     if (page === "financepayment") return false;
     if (page === "convert") return false;
     if (page === "subunit") return false;
-    if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "expenserecord" || page === "position" || page === "motostock") return false;
+    if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "incomecategory" || page === "expenserecord" || page === "position" || page === "motostock") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
@@ -203,6 +205,9 @@ export default function App() {
         {activeMenu === "generalexpense" && canAccess("generalexpense") && (
           <GeneralExpensePage currentUser={currentUser} />
         )}
+        {activeMenu === "incomecategory" && canAccess("incomecategory") && (
+          <IncomeCategoryPage currentUser={currentUser} />
+        )}
         {activeMenu === "bankdeposit" && canAccess("bankdeposit") && (
           <BankDepositPage currentUser={currentUser} />
         )}
@@ -211,6 +216,9 @@ export default function App() {
         )}
         {activeMenu === "expenserecord" && canAccess("expenserecord") && (
           <ExpenseRecordPage currentUser={currentUser} />
+        )}
+        {activeMenu === "otherincome" && canAccess("otherincome") && (
+          <IncomeRecordPage currentUser={currentUser} />
         )}
         {activeMenu === "pricecheck" && canAccess("pricecheck") && (
           <MotoPriceCheckPage currentUser={currentUser} />
@@ -387,7 +395,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "stockcheck", "motostock", "customer"];
   const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "claim"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
-  const masterPages = ["motomodel", "motoprice", "motoexpense", "serviceexpense", "generalexpense", "finance", "supplier", "driver", "position", "users"];
+  const masterPages = ["motomodel", "motoprice", "motoexpense", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users"];
   const uploadPages = ["upload"];
 
   return (
@@ -504,6 +512,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="motoexpense" label="ค่าใช้จ่ายการขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="serviceexpense" label="ค่าใช้จ่ายงานบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="generalexpense" label="ค่าใช้จ่ายทั่วไป" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="incomecategory" label="หมวดรายได้" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="finance" label="บริษัทไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="supplier" label="Supplier (ผู้ขาย)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="driver" label="พนักงานขับรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
