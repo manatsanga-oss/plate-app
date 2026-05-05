@@ -195,7 +195,8 @@ th { background: #f0f4f9; }
   }
 
   async function saveBilling() {
-    const items = filtered.filter(r => selected[r.item_id]).map(r => {
+    // ใช้ ALL rows ที่เลือกไว้ (ไม่ใช่ filtered) — กันรายการหายเมื่อเปลี่ยน filter
+    const items = rows.filter(r => selected[r.item_id]).map(r => {
       const billItems = Array.isArray(r.bill_items) ? r.bill_items : (r.bill_items ? (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : r.bill_items) : []);
       return {
         item_id: r.item_id,
@@ -289,7 +290,8 @@ th { background: #f0f4f9; }
     return hay.includes(kw);
   });
 
-  const selectedRows = filtered.filter(r => selected[r.item_id]);
+  // ใช้ ALL rows ที่เลือกไว้ (ไม่ใช่แค่ที่อยู่ใน filtered) → กันยอดหายเมื่อเปลี่ยน filter/search
+  const selectedRows = rows.filter(r => selected[r.item_id]);
   const selCount = selectedRows.length;
   const selTotal = selectedRows.reduce((s, r) => s + Number(r.bill_amount || 0), 0);
 
