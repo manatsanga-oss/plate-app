@@ -6,6 +6,7 @@ const emptyForm = () => ({
   income_code: "",
   income_name: "",
   description: "",
+  wht_rate: 0,
   status: "active",
 });
 
@@ -62,6 +63,7 @@ export default function IncomeCategoryPage({ currentUser }) {
       income_code: r.income_code || "",
       income_name: r.income_name || "",
       description: r.description || "",
+      wht_rate: r.wht_rate || 0,
       status: r.status || "active",
     });
     setShowForm(true);
@@ -125,6 +127,7 @@ export default function IncomeCategoryPage({ currentUser }) {
               <th style={th}>รหัส</th>
               <th style={th}>หมวดรายได้</th>
               <th style={th}>รายละเอียด</th>
+              <th style={{ ...th, textAlign: "right" }}>WHT %</th>
               <th style={th}>สถานะ</th>
               <th style={{ ...th, width: 140 }}>จัดการ</th>
             </tr>
@@ -136,6 +139,7 @@ export default function IncomeCategoryPage({ currentUser }) {
                 <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#072d6b" }}>{r.income_code}</td>
                 <td style={td}>{r.income_name}</td>
                 <td style={{ ...td, color: "#6b7280", fontSize: 12 }}>{r.description || "-"}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{Number(r.wht_rate || 0) > 0 ? `${Number(r.wht_rate)}%` : "-"}</td>
                 <td style={td}>
                   <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
                     background: r.status === "active" ? "#d1fae5" : "#fee2e2",
@@ -178,6 +182,18 @@ export default function IncomeCategoryPage({ currentUser }) {
                 <input type="text" value={form.income_name} onChange={e => setForm(p => ({ ...p, income_name: e.target.value }))}
                   placeholder="เช่น ค่าตรวจรถ, ค่าโอน, ดอกเบี้ย" style={inp} />
               </div>
+              <div>
+                <label style={lbl}>อัตราภาษีหัก ณ ที่จ่าย (%)</label>
+                <input type="number" step="0.01" min="0" max="100"
+                  value={form.wht_rate}
+                  onChange={e => setForm(p => ({ ...p, wht_rate: e.target.value }))}
+                  placeholder="0 = ไม่หัก, เช่น 3 = 3%"
+                  style={{ ...inp, textAlign: "right" }} />
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
+                  💡 0% = ไม่หักภาษี · 1%, 3%, 5% ตามประเภทรายได้
+                </div>
+              </div>
+              <div></div>
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label style={lbl}>รายละเอียด</label>
                 <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}

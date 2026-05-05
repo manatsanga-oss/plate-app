@@ -16,7 +16,7 @@ function fmtDate(v) {
 }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
-const emptyItem = () => ({ income_code: "", income_name: "", description: "", qty: 1, unit_price: 0, amount: 0 });
+const emptyItem = () => ({ income_code: "", income_name: "", description: "", qty: 1, unit_price: 0, amount: 0, wht_rate: 0 });
 const emptyForm = () => ({
   income_doc_no: "",  // generated on save
   doc_date: todayISO(),
@@ -186,10 +186,13 @@ export default function IncomeRecordPage({ currentUser }) {
       if (field === "qty" || field === "unit_price") {
         items[idx].amount = (Number(items[idx].qty) || 0) * (Number(items[idx].unit_price) || 0);
       }
-      // ถ้าเลือก income_code → fill income_name
+      // ถ้าเลือก income_code → fill income_name + wht_rate (อัตโนมัติจากหมวด)
       if (field === "income_code") {
         const ge = incomeCategories.find(g => g.income_code === val);
-        if (ge) items[idx].income_name = ge.income_name;
+        if (ge) {
+          items[idx].income_name = ge.income_name;
+          items[idx].wht_rate = Number(ge.wht_rate) || 0;
+        }
       }
       return { ...f, items };
     });
@@ -203,8 +206,23 @@ export default function IncomeRecordPage({ currentUser }) {
   const afterDiscount = subtotal - discountAmount;
   const vatAmount = afterDiscount * (Number(form.vat_pct) || 0) / 100;
   const totalIncVat = afterDiscount + vatAmount;
-  const whtBase = afterDiscount; // WHT คำนวณจากยอดหลังส่วนลด ก่อน VAT
-  const whtAmount = whtBase * (Number(form.wht_rate) || 0) / 100;
+  // WHT คำนวณต่อ item — เฉพาะ items ที่มี wht_rate > 0
+  // หาก discount > 0 จะกระจายส่วนลดลงตามสัดส่วน
+  const whtAmount = form.items.reduce((s, it) => {
+    const rate = Number(it.wht_rate) || 0;
+    if (rate <= 0) return s;
+    const itemAmt = Number(it.amount) || 0;
+    // ส่วนลดเฉลี่ย proportional
+    const itemAfterDisc = subtotal > 0 ? itemAmt * (afterDiscount / subtotal) : itemAmt;
+    return s + (itemAfterDisc * rate / 100);
+  }, 0);
+  const whtBase = form.items.reduce((s, it) => {
+    const rate = Number(it.wht_rate) || 0;
+    if (rate <= 0) return s;
+    const itemAmt = Number(it.amount) || 0;
+    const itemAfterDisc = subtotal > 0 ? itemAmt * (afterDiscount / subtotal) : itemAmt;
+    return s + itemAfterDisc;
+  }, 0);
   const netToPay = totalIncVat - whtAmount;
 
   async function handleSave() {
@@ -712,7 +730,7 @@ function FormModal({ form, setForm, editTarget, customers, incomeCategories, ban
             <RowInput label="ภาษีมูลค่าเพิ่ม %" value={form.vat_pct} onChange={v => setForm(f => ({ ...f, vat_pct: v }))} suffix={`= ${fmt(vatAmount)}`} />
             <Row label="จำนวนเงินรวมทั้งสิ้น" value={fmt(totalIncVat)} bold />
             <div style={{ height: 1, background: "#e5e7eb", margin: "8px 0" }} />
-            <RowInput label="หัก ณ ที่จ่าย %" value={form.wht_rate} onChange={v => setForm(f => ({ ...f, wht_rate: v }))} suffix={`= ${fmt(whtAmount)}`} />
+            <Row label="หัก ณ ที่จ่าย" value={`= ${fmt(whtAmount)}`} title="คำนวณอัตโนมัติจากอัตรา WHT ของหมวดรายได้แต่ละรายการ" />
             <Row label="ยอดเงินสุทธิที่ได้รับ" value={fmt(netToPay)} bold color="#059669" />
           </div>
         </div>
