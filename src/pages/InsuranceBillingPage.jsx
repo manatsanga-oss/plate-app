@@ -331,6 +331,19 @@ export default function InsuranceBillingPage({ currentUser }) {
     }
   }
 
+  // ยกเลิกบันทึกวางบิลทั้ง batch (INSREC-...)
+  async function cancelBatchBilling(batchNo, count) {
+    if (!batchNo) return;
+    if (!window.confirm(`ยกเลิกการวางบิลทั้ง batch "${batchNo}"?\nรายการ พรบ. ${count} ใบ จะกลับเป็น "ยังไม่วางบิล"\n\n⚠ Action นี้ undo ไม่ได้`)) return;
+    try {
+      await post({ action: "cancel_insurance_billing_batch", record_batch_no: batchNo });
+      setMessage(`✅ ยกเลิกบันทึกวางบิล ${batchNo} แล้ว (${count} ใบ)`);
+      fetchData();
+    } catch {
+      setMessage("❌ ยกเลิกไม่สำเร็จ");
+    }
+  }
+
   function printBilling() {
     if (selCount === 0) { setMessage("เลือกรายการก่อนพิมพ์"); return; }
     const html = buildBillingHTML({ rows: selectedRows, totalPremium: selTotalPremium, commission: selCommission, remit: selRemit });
@@ -519,11 +532,18 @@ export default function InsuranceBillingPage({ currentUser }) {
                         <span style={{ padding: "2px 8px", background: "#e0e7ff", color: "#3730a3", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>⏳ รอวางบิล</span>
                       )}
                     </td>
-                    <td style={{ ...td, textAlign: "center" }}>
+                    <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
                       <button onClick={() => setOpenBatchDetail(g)}
-                        style={{ padding: "5px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                        style={{ padding: "5px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, marginRight: 4 }}>
                         📁 ดู
                       </button>
+                      {(fullyBilled || partial) && (
+                        <button onClick={() => cancelBatchBilling(g.batch_no, g.count)}
+                          title="ยกเลิกบันทึกวางบิลทั้ง batch — รายการจะกลับเป็น 'ยังไม่วางบิล'"
+                          style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                          ✗ ยกเลิก
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
