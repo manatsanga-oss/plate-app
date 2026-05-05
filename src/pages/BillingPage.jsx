@@ -26,6 +26,9 @@ export default function BillingPage({ currentUser }) {
   const [savingPayment, setSavingPayment] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
+  // ประวัติการจ่ายผ่านงานรับเรื่อง (จากตาราง receipt_billing_payments)
+  const [receiptGroupedPayments, setReceiptGroupedPayments] = useState([]);
+  const [editingReceiptGrouped, setEditingReceiptGrouped] = useState(null); // row ที่กำลังแก้
   const [receiptDetail, setReceiptDetail] = useState(null); // ข้อมูลใบรับเรื่องที่จะแสดงใน popup
   const [editingPayDocNo, setEditingPayDocNo] = useState(null); // paid_doc_no ที่กำลัง edit (null = new payment mode)
   const [receiptSelectedKeys, setReceiptSelectedKeys] = useState(new Set()); // checkbox ใน popup
@@ -67,6 +70,40 @@ export default function BillingPage({ currentUser }) {
 
   useEffect(() => { fetchCategories(); }, []);
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [brand, category, showBilled]);
+  useEffect(() => { fetchReceiptGroupedPayments(); }, []);
+
+  async function fetchReceiptGroupedPayments() {
+    try {
+      const data = await post({ action: "list_receipt_billing_grouped" });
+      setReceiptGroupedPayments(Array.isArray(data) ? data : []);
+    } catch { setReceiptGroupedPayments([]); }
+  }
+
+  async function cancelReceiptGrouped(row) {
+    if (!window.confirm(`ยกเลิกการจ่ายเงิน "${row.billing_doc_no}"\nรับเรื่อง: ${row.receipt_no}\nยอด: ${Number(row.total_amount).toLocaleString()} บาท\n\n⚠ ลบจากประวัติ — undo ไม่ได้`)) return;
+    try {
+      await post({ action: "cancel_receipt_billing_grouped", id: row.id });
+      setMessage(`✅ ยกเลิกเรียบร้อย — ${row.billing_doc_no}`);
+      fetchReceiptGroupedPayments();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
+  async function saveEditReceiptGrouped() {
+    if (!editingReceiptGrouped?.id) return;
+    try {
+      await post({
+        action: "update_receipt_billing_grouped",
+        id: editingReceiptGrouped.id,
+        total_amount: editingReceiptGrouped.total_amount,
+        payment_note: editingReceiptGrouped.payment_note,
+        category: editingReceiptGrouped.category,
+        paid_at: editingReceiptGrouped.paid_at,
+      });
+      setMessage(`✅ แก้ไขเรียบร้อย — ${editingReceiptGrouped.billing_doc_no}`);
+      setEditingReceiptGrouped(null);
+      fetchReceiptGroupedPayments();
+    } catch { setMessage("❌ แก้ไขไม่สำเร็จ"); }
+  }
   useEffect(() => {
     // เปลี่ยน tab → set showBilled อัตโนมัติ
     if (viewMode === "history" || viewMode === "paidHistory") {
@@ -409,23 +446,75 @@ export default function BillingPage({ currentUser }) {
   async function saveBilling() {
     if (selCount === 0) { setMessage("เลือกรายการก่อน"); return; }
     const now = new Date();
-    const docNo = `BILL-${(now.getFullYear() + 543).toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
-    if (!window.confirm(`บันทึกวางบิล ${selCount} รายการ\nหมวด: ${category}\nยอดรวม: ${selTotal.toLocaleString()} บาท\nเลขที่ใบ: ${docNo}`)) return;
+    const baseDocNo = `BILL-${(now.getFullYear() + 543).toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
+
+    // ── แยกรายการที่มี / ไม่มี เลขที่รับเรื่อง ──
+    const withReceipt = [];
+    const withoutReceipt = [];
+    selectedRows.forEach(r => {
+      const recNo = r.linked_receipt_no || r.receipt_no;
+      if (recNo) withReceipt.push({ row: r, receipt_no: recNo });
+      else withoutReceipt.push(r);
+    });
+
+    // จัดกลุ่มตามเลขที่รับเรื่อง
+    const receiptGroups = new Map();
+    withReceipt.forEach(({ row, receipt_no }) => {
+      if (!receiptGroups.has(receipt_no)) receiptGroups.set(receipt_no, []);
+      receiptGroups.get(receipt_no).push(row);
+    });
+
+    const confirmLines = [`บันทึกวางบิล ${selCount} รายการ`];
+    if (withoutReceipt.length > 0) confirmLines.push(`📋 วางบิลปกติ: ${withoutReceipt.length} รายการ`);
+    if (receiptGroups.size > 0) confirmLines.push(`📥 ผ่านงานรับเรื่อง ${receiptGroups.size} ใบ (${withReceipt.length} รายการ — บันทึกจ่ายอัตโนมัติ ไม่ผ่านแท็บบันทึกจ่ายเงิน)`);
+    confirmLines.push(`หมวด: ${category}`, `ยอดรวม: ${selTotal.toLocaleString()} บาท`, `เลขที่ใบฐาน: ${baseDocNo}`);
+    if (!window.confirm(confirmLines.join('\n'))) return;
+
     setSaving(true);
     setMessage("");
     try {
-      // groupby brand to compute amount per row (each row's bill_amount)
-      // backend stores billing_amount per submission
-      await Promise.all(selectedRows.map(r =>
-        post({
-          action: "save_billing",
-          submission_ids: [r.submission_id],
-          billing_doc_no: docNo,
+      const today = now.toISOString().slice(0, 10);
+      const successMsgs = [];
+
+      // 1) บันทึกวางบิลปกติ (ไม่มี receipt_no) → ไปแท็บบันทึกจ่ายเงิน ตามปกติ
+      if (withoutReceipt.length > 0) {
+        await Promise.all(withoutReceipt.map(r =>
+          post({
+            action: "save_billing",
+            submission_ids: [r.submission_id],
+            billing_doc_no: baseDocNo,
+            category,
+            amount: r.bill_amount || 0,
+          })
+        ));
+        successMsgs.push(`📋 วางบิลปกติ ${withoutReceipt.length} รายการ (${baseDocNo})`);
+      }
+
+      // 2) บันทึกผ่านงานรับเรื่อง — 1 ใบ/receipt_no พร้อมยอดรวม (ไปตารางแยก receipt_billing_payments)
+      if (receiptGroups.size > 0) {
+        const groups = [];
+        for (const [receiptNo, rows] of receiptGroups.entries()) {
+          const totalForReceipt = rows.reduce((s, r) => s + Number(r.bill_amount || 0), 0);
+          groups.push({
+            receipt_no: receiptNo,
+            total_amount: totalForReceipt,
+            item_count: rows.length,
+            source_submission_ids: rows.map(r => r.submission_id),
+          });
+        }
+        const res = await post({
+          action: "save_receipt_billing_grouped",
+          groups,
           category,
-          amount: r.bill_amount || 0,
-        })
-      ));
-      setMessage(`✅ บันทึกใบวางบิล ${docNo} สำเร็จ ${selCount} รายการ`);
+          payment_note: "บันทึกการจ่ายผ่านวางบิลงานรับเรื่อง",
+          paid_by: currentUser?.username || "system",
+        });
+        const docNo = res?.doc_no || res?.[0]?.doc_no || "";
+        successMsgs.push(`📥 จ่ายผ่านงานรับเรื่อง ${receiptGroups.size} ใบ (${docNo})`);
+        fetchReceiptGroupedPayments();
+      }
+
+      setMessage(`✅ ${successMsgs.join(' + ')} สำเร็จ`);
       fetchData();
     } catch {
       setMessage("❌ บันทึกไม่สำเร็จ");
@@ -610,6 +699,62 @@ export default function BillingPage({ currentUser }) {
           const totalRowCount = groups.reduce((s, g) => s + g.items.length, 0);
           return (
             <div>
+              {/* ── ประวัติการจ่ายผ่านงานรับเรื่อง (paidHistory เท่านั้น) ── */}
+              {viewMode === "paidHistory" && receiptGroupedPayments.length > 0 && (
+                <div style={{ marginBottom: 12, padding: 12, background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#7c3aed", marginBottom: 10 }}>
+                    📥 บันทึกการจ่ายผ่านวางบิลงานรับเรื่อง ({receiptGroupedPayments.length} รายการ)
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ background: "#faf5ff", color: "#581c87" }}>
+                          <th style={{ padding: "6px 8px", textAlign: "left" }}>เลขที่ใบ</th>
+                          <th style={{ padding: "6px 8px", textAlign: "left" }}>เลขที่รับเรื่อง</th>
+                          <th style={{ padding: "6px 8px", textAlign: "left" }}>หมวด</th>
+                          <th style={{ padding: "6px 8px", textAlign: "right" }}>ยอดรวม</th>
+                          <th style={{ padding: "6px 8px", textAlign: "center" }}>จำนวน</th>
+                          <th style={{ padding: "6px 8px", textAlign: "left" }}>วันที่จ่าย</th>
+                          <th style={{ padding: "6px 8px", textAlign: "left" }}>หมายเหตุ</th>
+                          <th style={{ padding: "6px 8px", textAlign: "center", whiteSpace: "nowrap" }}>จัดการ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {receiptGroupedPayments.map((r, i) => (
+                          <tr key={r.id || i} style={{ borderBottom: "1px solid #f3e8ff" }}>
+                            <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11, fontWeight: 600, color: "#7c3aed" }}>
+                              <span style={{ display: "inline-block", padding: "1px 6px", background: "#ede9fe", color: "#6d28d9", borderRadius: 4, marginRight: 4, fontSize: 10 }}>📥 รับเรื่อง</span>
+                              {r.billing_doc_no}
+                            </td>
+                            <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{r.receipt_no}</td>
+                            <td style={{ padding: "6px 8px" }}>{r.category || "-"}</td>
+                            <td style={{ padding: "6px 8px", textAlign: "right", fontWeight: 700 }}>{Number(r.total_amount).toLocaleString()}</td>
+                            <td style={{ padding: "6px 8px", textAlign: "center" }}>{r.item_count || 0}</td>
+                            <td style={{ padding: "6px 8px", whiteSpace: "nowrap", fontSize: 11 }}>{r.paid_at ? new Date(r.paid_at).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-"}</td>
+                            <td style={{ padding: "6px 8px", fontSize: 11, color: "#6b7280" }}>{r.payment_note || "-"}</td>
+                            <td style={{ padding: "6px 8px", whiteSpace: "nowrap", textAlign: "center" }}>
+                              <button onClick={() => setEditingReceiptGrouped({ ...r, total_amount: r.total_amount, paid_at: r.paid_at ? String(r.paid_at).slice(0, 10) : "" })}
+                                style={{ padding: "3px 8px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>แก้ไข</button>
+                              <button onClick={() => cancelReceiptGrouped(r)}
+                                style={{ padding: "3px 8px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>ยกเลิก</button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot>
+                        <tr style={{ background: "#faf5ff", fontWeight: 700 }}>
+                          <td colSpan={3} style={{ padding: "6px 8px", textAlign: "right" }}>รวม {receiptGroupedPayments.length} ใบ</td>
+                          <td style={{ padding: "6px 8px", textAlign: "right", color: "#7c3aed" }}>
+                            {receiptGroupedPayments.reduce((s, r) => s + Number(r.total_amount || 0), 0).toLocaleString()}
+                          </td>
+                          <td colSpan={4}></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               <div style={{ marginBottom: 10, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", display: "flex", gap: 18, fontSize: 13, alignItems: "center", flexWrap: "wrap" }}>
                 <span>{viewMode === "paidHistory" ? "💵 ใบจ่ายเงิน" : "📑 ใบวางบิล"}: <strong>{groups.length}</strong></span>
                 <span>📋 รายการรวม: <strong>{totalRowCount}</strong></span>
@@ -1094,6 +1239,61 @@ export default function BillingPage({ currentUser }) {
         </div>
         );
       })()}
+
+      {/* Edit dialog: receipt-grouped payment */}
+      {editingReceiptGrouped && (
+        <div onClick={() => setEditingReceiptGrouped(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", padding: 22, borderRadius: 12, width: 480, maxWidth: "94vw", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#7c3aed", marginBottom: 4 }}>
+              ✏️ แก้ไขการจ่ายผ่านงานรับเรื่อง
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>
+              {editingReceiptGrouped.billing_doc_no} · 📥 {editingReceiptGrouped.receipt_no}
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>ยอดรวม</label>
+              <input type="number" step="0.01" value={editingReceiptGrouped.total_amount}
+                onChange={e => setEditingReceiptGrouped({ ...editingReceiptGrouped, total_amount: e.target.value })}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14, textAlign: "right" }} />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>หมวด</label>
+              <input value={editingReceiptGrouped.category || ""}
+                onChange={e => setEditingReceiptGrouped({ ...editingReceiptGrouped, category: e.target.value })}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14 }} />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>วันที่จ่าย</label>
+              <input type="date" value={editingReceiptGrouped.paid_at || ""}
+                onChange={e => setEditingReceiptGrouped({ ...editingReceiptGrouped, paid_at: e.target.value })}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14 }} />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4 }}>หมายเหตุ</label>
+              <input value={editingReceiptGrouped.payment_note || ""}
+                onChange={e => setEditingReceiptGrouped({ ...editingReceiptGrouped, payment_note: e.target.value })}
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14 }} />
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setEditingReceiptGrouped(null)}
+                style={{ flex: 1, padding: "10px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
+                ยกเลิก
+              </button>
+              <button onClick={saveEditReceiptGrouped}
+                style={{ flex: 1, padding: "10px 0", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>
+                💾 บันทึก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Payment Dialog */}
       {paymentDialog && (() => {
