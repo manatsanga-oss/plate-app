@@ -100,6 +100,9 @@ export default function TimeTrackingPage({ currentUser }) {
 
   async function saveStatusOverride() {
     if (!editingStatus) return;
+    // อนุญาต medical_cert ทั้งกรณี override=ลาป่วย และ auto-calc=ลาป่วย
+    const autoIsSick = /ป่วย|sick/i.test(editingStatus?.auto_calc || "");
+    const isSickLeave = statusValue === "ลาป่วย" || (!statusValue && autoIsSick);
     setSavingStatus(true);
     try {
       await fetch(API_URL, {
@@ -111,7 +114,7 @@ export default function TimeTrackingPage({ currentUser }) {
           override_note: statusNote || "",
           override_by: currentUser?.username || "system",
           hide_clock_in: statusValue === "มา" ? hideClockIn : false,
-          medical_cert: statusValue === "ลาป่วย" ? medicalCert : "",
+          medical_cert: isSickLeave ? medicalCert : "",
         }),
       });
       setMessage("✅ บันทึกสถานะเรียบร้อย");
@@ -392,8 +395,8 @@ export default function TimeTrackingPage({ currentUser }) {
           <div style={{ display: "flex", gap: 18, marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
             <span style={{ fontSize: 13 }}>📋 รายการ: <strong>{filteredDetail.length}</strong></span>
             <span style={{ fontSize: 13 }}>👥 พนักงาน: <strong>{new Set(filteredDetail.map(r => r.employee_name)).size}</strong></span>
-            <span style={{ fontSize: 13, color: "#dc2626" }}>❌ ขาด: <strong>{filteredDetail.filter(r => r.absence === "Absence").length}</strong></span>
-            <span style={{ fontSize: 13, color: "#ea580c" }}>⏰ มาสาย: <strong>{filteredDetail.filter(r => !isZero(r.clock_late)).length}</strong></span>
+            <span style={{ fontSize: 13, color: "#dc2626" }}>❌ ขาด: <strong>{filteredDetail.filter(r => rowStatusCategory(r) === "ขาด").length}</strong></span>
+            <span style={{ fontSize: 13, color: "#ea580c" }}>⏰ มาสาย: <strong>{filteredDetail.filter(r => rowStatusCategory(r) === "สาย" || (!isZero(r.clock_late) && rowStatusCategory(r) !== "ขาด")).length}</strong></span>
             <span style={{ fontSize: 13, color: "#7c3aed" }}>⏱️ OT: <strong>{filteredDetail.filter(r => !isZero(r.over_time)).length}</strong></span>
           </div>
 
@@ -599,37 +602,45 @@ export default function TimeTrackingPage({ currentUser }) {
               </label>
             )}
 
-            {statusValue === "ลาป่วย" && (
-              <div style={{ marginBottom: 10, padding: "10px 12px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 6 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#9a3412", marginBottom: 6 }}>
-                  🩺 ใบรับรองแพทย์
+            {(() => {
+              // โชว์ radio ใบรับรองแพทย์ทั้งกรณี:
+              //   1) ผู้ใช้เลือก override = ลาป่วย
+              //   2) auto-calc ตรวจว่าเป็นลาป่วย (จาก leave_text เช่น "ลาป่วย (08:00 - 17:30)")
+              const autoIsSick = /ป่วย|sick/i.test(editingStatus?.auto_calc || "");
+              const isSickLeave = statusValue === "ลาป่วย" || (!statusValue && autoIsSick);
+              if (!isSickLeave) return null;
+              return (
+                <div style={{ marginBottom: 10, padding: "10px 12px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 6 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#9a3412", marginBottom: 6 }}>
+                    🩺 ใบรับรองแพทย์
+                  </div>
+                  <div style={{ display: "flex", gap: 14, fontSize: 13 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                      <input
+                        type="radio"
+                        name="medicalCert"
+                        value="มี"
+                        checked={medicalCert === "มี"}
+                        onChange={() => setMedicalCert("มี")}
+                        style={{ cursor: "pointer" }}
+                      />
+                      <span style={{ color: "#15803d", fontWeight: 600 }}>✅ มีใบรับรองแพทย์</span>
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                      <input
+                        type="radio"
+                        name="medicalCert"
+                        value="ไม่มี"
+                        checked={medicalCert === "ไม่มี"}
+                        onChange={() => setMedicalCert("ไม่มี")}
+                        style={{ cursor: "pointer" }}
+                      />
+                      <span style={{ color: "#b91c1c", fontWeight: 600 }}>❌ ไม่มีใบรับรองแพทย์</span>
+                    </label>
+                  </div>
                 </div>
-                <div style={{ display: "flex", gap: 14, fontSize: 13 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                    <input
-                      type="radio"
-                      name="medicalCert"
-                      value="มี"
-                      checked={medicalCert === "มี"}
-                      onChange={() => setMedicalCert("มี")}
-                      style={{ cursor: "pointer" }}
-                    />
-                    <span style={{ color: "#15803d", fontWeight: 600 }}>✅ มีใบรับรองแพทย์</span>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-                    <input
-                      type="radio"
-                      name="medicalCert"
-                      value="ไม่มี"
-                      checked={medicalCert === "ไม่มี"}
-                      onChange={() => setMedicalCert("ไม่มี")}
-                      style={{ cursor: "pointer" }}
-                    />
-                    <span style={{ color: "#b91c1c", fontWeight: 600 }}>❌ ไม่มีใบรับรองแพทย์</span>
-                  </label>
-                </div>
-              </div>
-            )}
+              );
+            })()}
 
             <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
               หมายเหตุ
