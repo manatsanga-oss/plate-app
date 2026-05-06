@@ -450,16 +450,19 @@ export default function MotoBookingPage({ currentUser }) {
     if (d.receipt_no) depositMap[d.receipt_no] = { remaining_amount: Number(d.remaining_amount) || 0 };
   });
 
+  // normalize: TRIM + ยุบทุก whitespace (รวม newline) เป็น space เดียว — กันชื่อ/รหัสที่มี space เกินหรือ newline
+  const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
+
   const filtered = bookings.filter((b) => {
     // การกรองขาย/ยกเลิกเกิน 1 เดือน ทำที่ backend (n8n) แล้ว
     if (filterStatus === "รถถึงคิว") return isQueueReady(b);
     if (filterStatus !== "all" && b.status !== filterStatus) return false;
     if (filterBranch && b.branch !== filterBranch) return false;
     if (filterDate && b.booking_date && b.booking_date.slice(0, 7) !== filterDate) return false;
-    if (filterBrand && b.brand !== filterBrand) return false;
-    if (filterMarketing && b.marketing_name !== filterMarketing) return false;
-    if (filterModelCode && b.model_code !== filterModelCode) return false;
-    if (filterColor && b.color_name !== filterColor) return false;
+    if (filterBrand && norm(b.brand) !== norm(filterBrand)) return false;
+    if (filterMarketing && norm(b.marketing_name) !== norm(filterMarketing)) return false;
+    if (filterModelCode && norm(b.model_code) !== norm(filterModelCode)) return false;
+    if (filterColor && norm(b.color_name) !== norm(filterColor)) return false;
     return true;
   }).sort((a, b) => {
     if (filterStatus === "ขาย") {
@@ -495,11 +498,11 @@ export default function MotoBookingPage({ currentUser }) {
     return 0;
   });
 
-  // Dynamic options from loaded bookings (deduplicated)
-  const brandOpts = [...new Set(bookings.map(b => b.brand).filter(Boolean))].sort();
-  const marketingOpts = [...new Set(bookings.filter(b => !filterBrand || b.brand === filterBrand).map(b => b.marketing_name).filter(Boolean))].sort();
-  const modelCodeOpts = [...new Set(bookings.filter(b => (!filterBrand || b.brand === filterBrand) && (!filterMarketing || b.marketing_name === filterMarketing)).map(b => b.model_code).filter(Boolean))].sort();
-  const colorOpts = [...new Set(bookings.filter(b => (!filterBrand || b.brand === filterBrand) && (!filterMarketing || b.marketing_name === filterMarketing) && (!filterModelCode || b.model_code === filterModelCode)).map(b => b.color_name).filter(Boolean))].sort();
+  // Dynamic options from loaded bookings (deduplicated + normalized — กันค่าซ้ำที่ต่างกันแค่ space/newline)
+  const brandOpts = [...new Set(bookings.map(b => norm(b.brand)).filter(Boolean))].sort();
+  const marketingOpts = [...new Set(bookings.filter(b => !filterBrand || norm(b.brand) === norm(filterBrand)).map(b => norm(b.marketing_name)).filter(Boolean))].sort();
+  const modelCodeOpts = [...new Set(bookings.filter(b => (!filterBrand || norm(b.brand) === norm(filterBrand)) && (!filterMarketing || norm(b.marketing_name) === norm(filterMarketing))).map(b => norm(b.model_code)).filter(Boolean))].sort();
+  const colorOpts = [...new Set(bookings.filter(b => (!filterBrand || norm(b.brand) === norm(filterBrand)) && (!filterMarketing || norm(b.marketing_name) === norm(filterMarketing)) && (!filterModelCode || norm(b.model_code) === norm(filterModelCode))).map(b => norm(b.color_name)).filter(Boolean))].sort();
 
   /* ── ADD FORM ── */
   if (mode === "add") {
