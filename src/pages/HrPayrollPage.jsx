@@ -144,6 +144,7 @@ export default function HrPayrollPage({ currentUser }) {
                 <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>SSO</th>
                 <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>ภาษี</th>
                 <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>กองทุนฯ</th>
+                <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>กยศ.</th>
                 <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>ผู้บริหาร</th>
                 <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>ของหาย</th>
                 <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>อื่นๆ</th>
@@ -178,6 +179,7 @@ export default function HrPayrollPage({ currentUser }) {
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.sso_amount)}</td>
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.tax)}</td>
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.pf_amount)}</td>
+                  <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.study_loan)}</td>
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.admin_expense)}</td>
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.lost_items)}</td>
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.other_expense)}</td>
@@ -206,6 +208,7 @@ export default function HrPayrollPage({ currentUser }) {
                 <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(sum("sso_amount"))}</td>
                 <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(sum("tax"))}</td>
                 <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(sum("pf_amount"))}</td>
+                <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(sum("study_loan"))}</td>
                 <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(sum("admin_expense"))}</td>
                 <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(sum("lost_items"))}</td>
                 <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(sum("other_expense"))}</td>
@@ -254,6 +257,7 @@ export default function HrPayrollPage({ currentUser }) {
               <RowKV label="ประกันสังคม (cap 750)" value={fmtNum(detailRow.sso_amount)} />
               <RowKV label="ภาษี" value={fmtNum(detailRow.tax)} />
               <RowKV label="กองทุนสำรองฯ" value={fmtNum(detailRow.pf_amount)} />
+              <RowKV label="กยศ. (เงินกู้การศึกษา)" value={fmtNum(detailRow.study_loan)} />
               <RowKV label="ค่าใช้จ่ายผู้บริหาร" value={fmtNum(detailRow.admin_expense)} />
               <RowKV label="ของหาย" value={fmtNum(detailRow.lost_items)} />
               <RowKV label="รายจ่ายอื่นๆ" value={fmtNum(detailRow.other_expense)} />

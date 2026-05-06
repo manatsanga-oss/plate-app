@@ -17,8 +17,8 @@ const emptyForm = () => ({
   diligence_allowance: 0,
   sso_rate: 0.05,
   provident_fund_rate: 0,
-  commission_method: "",
-  special_commission: "",
+  commission_method: false,
+  special_commission: false,
   salary_per_period: 0,
   extra_bonus: 0,
   ot_workday: 0,
@@ -39,8 +39,23 @@ export default function HrEmployeesPage({ currentUser }) {
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
   const [message, setMessage] = useState("");
+  const [ttNames, setTtNames] = useState([]); // ชื่อพนักงานจาก time_tracking_records
 
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [includeInactive]);
+  useEffect(() => { fetchTimeTrackingNames(); }, []);
+
+  async function fetchTimeTrackingNames() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_employees" }),
+      });
+      const data = await res.json();
+      const names = (Array.isArray(data) ? data : []).map(x => x.employee_name).filter(Boolean);
+      // unique + sorted
+      setTtNames([...new Set(names)].sort((a, b) => a.localeCompare(b, "th")));
+    } catch { setTtNames([]); }
+  }
 
   async function fetchData() {
     setLoading(true); setMessage("");
@@ -101,8 +116,8 @@ export default function HrEmployeesPage({ currentUser }) {
       diligence_allowance: r.diligence_allowance || 0,
       sso_rate: r.sso_rate || 0.05,
       provident_fund_rate: r.provident_fund_rate || 0,
-      commission_method: r.commission_method || "",
-      special_commission: r.special_commission || "",
+      commission_method: !!r.commission_method && r.commission_method !== "" && r.commission_method !== "false",
+      special_commission: !!r.special_commission && r.special_commission !== "" && r.special_commission !== "false",
       salary_per_period: r.salary_per_period || 0,
       extra_bonus: r.extra_bonus || 0,
       ot_workday: r.ot_workday || 0,
@@ -238,7 +253,21 @@ export default function HrEmployeesPage({ currentUser }) {
             <Section title="ข้อมูลทั่วไป">
               <div style={grid3}>
                 <Field label="ชื่อพนักงาน *">
-                  <input value={form.employee_name} onChange={e => setForm(f => ({ ...f, employee_name: e.target.value }))} style={inp} />
+                  <select value={form.employee_name}
+                    onChange={e => setForm(f => ({ ...f, employee_name: e.target.value }))}
+                    style={inp}>
+                    <option value="">-- เลือกพนักงาน --</option>
+                    {/* แสดงชื่อปัจจุบัน (กรณี edit) ถ้าไม่อยู่ใน list */}
+                    {form.employee_name && !ttNames.includes(form.employee_name) && (
+                      <option value={form.employee_name}>{form.employee_name}</option>
+                    )}
+                    {ttNames.map(name => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                    📋 รายชื่อจากบันทึกเวลาทำงาน ({ttNames.length} คน)
+                  </div>
                 </Field>
                 <Field label="ทีม">
                   <input value={form.team_name} onChange={e => setForm(f => ({ ...f, team_name: e.target.value }))} style={inp} />
@@ -247,10 +276,21 @@ export default function HrEmployeesPage({ currentUser }) {
                   <input value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))} style={inp} />
                 </Field>
                 <Field label="รหัสร้าน">
-                  <input value={form.branch_code} onChange={e => setForm(f => ({ ...f, branch_code: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <select value={form.branch_code} onChange={e => setForm(f => ({ ...f, branch_code: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }}>
+                    <option value="">-- เลือกรหัสร้าน --</option>
+                    <option value="SCY01">SCY01 — ศูนย์ยามาฮ่า</option>
+                    <option value="SCY04">SCY04 — สีขวา</option>
+                    <option value="SCY05">SCY05 — ป.เปา นครหลวง</option>
+                    <option value="SCY06">SCY06 — ป.เปา วังน้อย</option>
+                    <option value="SCY07">SCY07 — สิงห์ชัยตลาด</option>
+                  </select>
                 </Field>
                 <Field label="สังกัด">
-                  <input value={form.affiliation} onChange={e => setForm(f => ({ ...f, affiliation: e.target.value }))} style={inp} />
+                  <select value={form.affiliation} onChange={e => setForm(f => ({ ...f, affiliation: e.target.value }))} style={inp}>
+                    <option value="">-- เลือกสังกัด --</option>
+                    <option value="ป.เปา">ป.เปา</option>
+                    <option value="สิงห์ชัย">สิงห์ชัย</option>
+                  </select>
                 </Field>
                 <Field label="สถานะ">
                   <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inp}>
@@ -272,8 +312,11 @@ export default function HrEmployeesPage({ currentUser }) {
                     {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
                   </select>
                 </Field>
-                <Field label="วันหยุดกลางเดือน (ชื่อวัน หรือเลขวัน)">
-                  <input value={form.monthly_day_off} onChange={e => setForm(f => ({ ...f, monthly_day_off: e.target.value }))} placeholder="เช่น Friday หรือ 15" style={inp} />
+                <Field label="วันหยุดกลางเดือน (ชื่อวัน)">
+                  <select value={form.monthly_day_off} onChange={e => setForm(f => ({ ...f, monthly_day_off: e.target.value }))} style={inp}>
+                    <option value="">-- ไม่มี --</option>
+                    {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                  </select>
                 </Field>
               </div>
             </Section>
@@ -318,10 +361,20 @@ export default function HrEmployeesPage({ currentUser }) {
             <Section title="🧮 คำนวณ Commission">
               <div style={grid2}>
                 <Field label="คำนวณค่าคอมปกติ">
-                  <input value={form.commission_method} onChange={e => setForm(f => ({ ...f, commission_method: e.target.value }))} style={inp} />
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer", background: form.commission_method ? "#dcfce7" : "#fff" }}>
+                    <input type="checkbox" checked={!!form.commission_method}
+                      onChange={e => setForm(f => ({ ...f, commission_method: e.target.checked }))}
+                      style={{ width: 18, height: 18, cursor: "pointer" }} />
+                    <span style={{ fontSize: 13 }}>{form.commission_method ? "✅ ได้" : "ไม่ได้"}</span>
+                  </label>
                 </Field>
                 <Field label="คำนวณค่าคอมพิเศษ">
-                  <input value={form.special_commission} onChange={e => setForm(f => ({ ...f, special_commission: e.target.value }))} style={inp} />
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer", background: form.special_commission ? "#dcfce7" : "#fff" }}>
+                    <input type="checkbox" checked={!!form.special_commission}
+                      onChange={e => setForm(f => ({ ...f, special_commission: e.target.checked }))}
+                      style={{ width: 18, height: 18, cursor: "pointer" }} />
+                    <span style={{ fontSize: 13 }}>{form.special_commission ? "✅ ได้" : "ไม่ได้"}</span>
+                  </label>
                 </Field>
               </div>
             </Section>
