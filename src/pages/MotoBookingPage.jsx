@@ -46,6 +46,11 @@ export default function MotoBookingPage({ currentUser }) {
   const [filterColor, setFilterColor] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 15;
+
+  // Reset to page 1 when any filter changes — เลี่ยง slice() ตกขอบจนตารางว่าง
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterDate, filterBranch, filterBrand, filterMarketing, filterModelCode, filterColor]);
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [depositAction, setDepositAction] = useState("ยึดเงินมัดจำ");
