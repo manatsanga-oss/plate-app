@@ -466,8 +466,9 @@ export default function MotoBookingPage({ currentUser }) {
     if (filterDate && b.booking_date && b.booking_date.slice(0, 7) !== filterDate) return false;
     if (filterBrand && norm(b.brand) !== norm(filterBrand)) return false;
     if (filterMarketing && norm(b.marketing_name) !== norm(filterMarketing)) return false;
-    if (filterModelCode && norm(b.model_code) !== norm(filterModelCode)) return false;
-    if (filterColor && norm(b.color_name) !== norm(filterColor)) return false;
+    // ใช้ new_model_code/new_color_name (ถ้ามี) — ตรงกับที่แสดงในตาราง — กันเคสเปลี่ยนรุ่น/สี
+    if (filterModelCode && norm(b.new_model_code || b.model_code) !== norm(filterModelCode)) return false;
+    if (filterColor && norm(b.new_color_name || b.color_name) !== norm(filterColor)) return false;
     return true;
   }).sort((a, b) => {
     if (filterStatus === "ขาย") {
@@ -506,8 +507,9 @@ export default function MotoBookingPage({ currentUser }) {
   // Dynamic options from loaded bookings (deduplicated + normalized — กันค่าซ้ำที่ต่างกันแค่ space/newline)
   const brandOpts = [...new Set(bookings.map(b => norm(b.brand)).filter(Boolean))].sort();
   const marketingOpts = [...new Set(bookings.filter(b => !filterBrand || norm(b.brand) === norm(filterBrand)).map(b => norm(b.marketing_name)).filter(Boolean))].sort();
-  const modelCodeOpts = [...new Set(bookings.filter(b => (!filterBrand || norm(b.brand) === norm(filterBrand)) && (!filterMarketing || norm(b.marketing_name) === norm(filterMarketing))).map(b => norm(b.model_code)).filter(Boolean))].sort();
-  const colorOpts = [...new Set(bookings.filter(b => (!filterBrand || norm(b.brand) === norm(filterBrand)) && (!filterMarketing || norm(b.marketing_name) === norm(filterMarketing)) && (!filterModelCode || norm(b.model_code) === norm(filterModelCode))).map(b => norm(b.color_name)).filter(Boolean))].sort();
+  // dropdown ใช้ new_X || X (เดียวกับที่แสดง) เพื่อให้กรองได้ถูกเมื่อ user เลือกค่าจาก dropdown
+  const modelCodeOpts = [...new Set(bookings.filter(b => (!filterBrand || norm(b.brand) === norm(filterBrand)) && (!filterMarketing || norm(b.marketing_name) === norm(filterMarketing))).map(b => norm(b.new_model_code || b.model_code)).filter(Boolean))].sort();
+  const colorOpts = [...new Set(bookings.filter(b => (!filterBrand || norm(b.brand) === norm(filterBrand)) && (!filterMarketing || norm(b.marketing_name) === norm(filterMarketing)) && (!filterModelCode || norm(b.new_model_code || b.model_code) === norm(filterModelCode))).map(b => norm(b.new_color_name || b.color_name)).filter(Boolean))].sort();
 
   /* ── ADD FORM ── */
   if (mode === "add") {
