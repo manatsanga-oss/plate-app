@@ -20,6 +20,7 @@ export default function ReceiveRegistrationPage({ currentUser }) {
           ["manual", "🖱️ เลือกด้วยมือ"],
           ["history", "📋 ประวัติรับคืน"],
           ["notify", "🖨️ ใบนำส่งป้าย"],
+          ["finance", "🏦 รอส่งเล่มไฟแนนท์"],
         ].map(([v, label]) => (
           <button key={v} onClick={() => { setMode(v); setMessage(""); }}
             style={{ padding: "10px 20px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
@@ -43,8 +44,10 @@ export default function ReceiveRegistrationPage({ currentUser }) {
         <ManualPanel setMessage={setMessage} currentUser={currentUser} />
       ) : mode === "history" ? (
         <HistoryPanel setMessage={setMessage} currentUser={currentUser} />
-      ) : (
+      ) : mode === "notify" ? (
         <NotifyPanel setMessage={setMessage} currentUser={currentUser} />
+      ) : (
+        <FinancePanel setMessage={setMessage} currentUser={currentUser} />
       )}
     </div>
   );
@@ -1317,6 +1320,396 @@ function NotifyPanel({ setMessage, currentUser }) {
       )}
     </div>
   );
+}
+
+/* ============================================================================
+   FINANCE DISPATCH TAB — รอส่งเล่มไฟแนนท์
+   ============================================================================ */
+function FinancePanel({ setMessage, currentUser }) {
+  const [rows, setRows] = useState([]);
+  const [history, setHistory] = useState([]);   // dispatch history
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState({});
+  const [financeFilter, setFinanceFilter] = useState("");
+  const [brandFilter, setBrandFilter] = useState("");
+  const [runFilter, setRunFilter] = useState("");
+  const [dispatchedAt, setDispatchedAt] = useState(() => new Date().toISOString().slice(0, 10));
+  const [savingDispatch, setSavingDispatch] = useState(false);
+  const [viewMode, setViewMode] = useState("pending"); // pending | sent | all | history
+
+  async function fetchReceived() {
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_submissions", status: "received" }),
+      });
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data : []);
+    } catch { setRows([]); }
+    setLoading(false);
+  }
+
+  async function fetchHistory() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_finance_dispatch", limit: 500 }),
+      });
+      const data = await res.json();
+      setHistory(Array.isArray(data) ? data : []);
+    } catch { setHistory([]); }
+  }
+
+  useEffect(() => { fetchReceived(); fetchHistory(); }, []);
+
+  // เฉพาะที่มี finance_company (คือเป็น "ผ่อน")
+  const eligibleRows = rows.filter(r => r.finance_company && String(r.finance_company).trim() !== "");
+
+  const pendingRows = viewMode === "pending" ? eligibleRows.filter(r => !r.sent_to_finance_at)
+                    : viewMode === "sent" ? eligibleRows.filter(r => r.sent_to_finance_at)
+                    : eligibleRows;
+
+  const kw = search.trim().toLowerCase();
+  const filtered = pendingRows.filter(r => {
+    if (financeFilter && r.finance_company !== financeFilter) return false;
+    if (brandFilter && r.brand !== brandFilter) return false;
+    if (runFilter && r.run_code !== runFilter) return false;
+    if (!kw) return true;
+    const hay = [r.customer_name, r.customer_phone, r.engine_no, r.plate_number, r.run_code, r.finance_company]
+      .filter(Boolean).join(" ").toLowerCase();
+    return hay.includes(kw);
+  });
+
+  const financeOpts = [...new Set(eligibleRows.map(r => r.finance_company).filter(Boolean))].sort();
+  const brandOpts = [...new Set(pendingRows.map(r => r.brand).filter(Boolean))].sort();
+  const runOpts = [...new Set(pendingRows.map(r => r.run_code).filter(Boolean))].sort().reverse();
+
+  function clearFilters() { setSearch(""); setFinanceFilter(""); setBrandFilter(""); setRunFilter(""); }
+  const selectedRows = filtered.filter(r => selected[r.submission_id]);
+  const selCount = selectedRows.length;
+
+  function toggleOne(id) { setSelected(s => ({ ...s, [id]: !s[id] })); }
+  function toggleAll() {
+    if (filtered.every(r => selected[r.submission_id])) {
+      const next = { ...selected };
+      filtered.forEach(r => delete next[r.submission_id]);
+      setSelected(next);
+    } else {
+      const next = { ...selected };
+      filtered.forEach(r => { next[r.submission_id] = true; });
+      setSelected(next);
+    }
+  }
+
+  // group selected rows by finance_company — 1 ใบนำส่งต่อ 1 ไฟแนนท์
+  function groupByFinance(rs) {
+    const map = {};
+    rs.forEach(r => {
+      const key = r.finance_company || "(ไม่ระบุ)";
+      if (!map[key]) map[key] = [];
+      map[key].push(r);
+    });
+    return map;
+  }
+
+  function printDispatch() {
+    const rowsToPrint = selCount > 0 ? selectedRows : filtered;
+    if (rowsToPrint.length === 0) { setMessage("ไม่มีรายการให้พิมพ์"); return; }
+    const groups = groupByFinance(rowsToPrint);
+    const html = buildFinanceDispatchHTML({ groups });
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) { setMessage("popup blocked"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
+  async function saveDispatch() {
+    if (selCount === 0) { setMessage("เลือกรายการก่อนบันทึก"); return; }
+    if (!dispatchedAt) { setMessage("กรอกวันที่นำส่ง"); return; }
+    const groups = groupByFinance(selectedRows);
+    const finCount = Object.keys(groups).length;
+    if (!window.confirm(`บันทึกการนำส่งวันที่ ${fmtDate(dispatchedAt)}\nไฟแนนท์ ${finCount} แห่ง · ${selCount} รายการ\n\nระบบจะสร้าง 1 ใบนำส่งต่อ 1 ไฟแนนท์`)) return;
+    setSavingDispatch(true);
+    try {
+      // 1 batch ต่อ 1 ไฟแนนท์
+      const results = await Promise.all(Object.entries(groups).map(([finCo, items]) =>
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "save_finance_dispatch",
+            finance_company: finCo,
+            dispatched_at: dispatchedAt,
+            dispatched_by: currentUser?.username || "system",
+            submission_ids: items.map(r => r.submission_id),
+          }),
+        }).then(x => x.json())
+      ));
+      const docs = results.flatMap(r => Array.isArray(r) ? r : [r]).map(r => r.dispatch_no).filter(Boolean);
+      setMessage(`✅ บันทึกการนำส่ง ${docs.length} ใบ — ${docs.join(", ")}`);
+      setSelected({});
+      fetchReceived(); fetchHistory();
+    } catch {
+      setMessage("❌ บันทึกไม่สำเร็จ");
+    }
+    setSavingDispatch(false);
+  }
+
+  async function cancelDispatch(doc) {
+    if (!doc) return;
+    if (!window.confirm(`ยกเลิกใบนำส่ง ${doc}?\n\nรายการในใบจะถูกย้อนกลับไปสถานะ "รอส่ง" ทันที`)) return;
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel_finance_dispatch", dispatch_no: doc }),
+      });
+      setMessage(`✅ ยกเลิกใบ ${doc} แล้ว`);
+      fetchReceived(); fetchHistory();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
+  return (
+    <div>
+      {/* Sub-tabs */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        {[
+          ["pending", "📮 รอส่งเล่มไฟแนนท์", eligibleRows.filter(r => !r.sent_to_finance_at).length],
+          ["sent", "✅ ส่งแล้ว", eligibleRows.filter(r => r.sent_to_finance_at).length],
+          ["all", "📋 ทั้งหมด", eligibleRows.length],
+          ["history", "🗂️ ประวัติใบนำส่ง", history.length],
+        ].map(([v, label, n]) => (
+          <button key={v} onClick={() => setViewMode(v)}
+            style={{ padding: "6px 14px", border: "1px solid " + (viewMode === v ? "#072d6b" : "#d1d5db"), background: viewMode === v ? "#072d6b" : "#fff", color: viewMode === v ? "#fff" : "#374151", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+            {label} ({n})
+          </button>
+        ))}
+      </div>
+
+      {viewMode === "history" ? (
+        <FinanceDispatchHistory history={history} onCancel={cancelDispatch} />
+      ) : (
+        <>
+          {/* Filter bar */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+            <select value={financeFilter} onChange={e => setFinanceFilter(e.target.value)}
+              style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, minWidth: 180 }}>
+              <option value="">ไฟแนนท์ (ทั้งหมด)</option>
+              {financeOpts.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+            <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)}
+              style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, minWidth: 120 }}>
+              <option value="">ยี่ห้อ (ทั้งหมด)</option>
+              {brandOpts.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+            <select value={runFilter} onChange={e => setRunFilter(e.target.value)}
+              style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, minWidth: 140 }}>
+              <option value="">เลข run (ทั้งหมด)</option>
+              {runOpts.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {(search || financeFilter || brandFilter || runFilter) && (
+              <button onClick={clearFilters}
+                style={{ padding: "6px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                ✕ ล้าง
+              </button>
+            )}
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="🔍 ลูกค้า / เบอร์ / เครื่อง / ทะเบียน / ไฟแนนท์"
+              style={{ flex: 1, minWidth: 200, padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+            <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>{selCount > 0 ? `เลือก ${selCount}/` : ""}{filtered.length} / {eligibleRows.length} รายการ</span>
+            <button onClick={printDispatch} disabled={filtered.length === 0}
+              style={{ padding: "8px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              🖨️ พิมพ์ใบนำส่งเล่มทะเบียน {selCount > 0 ? `(${selCount})` : "ทั้งหมด"}
+            </button>
+            <button onClick={() => { fetchReceived(); fetchHistory(); }}
+              style={{ padding: "8px 14px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔄</button>
+          </div>
+
+          {/* Save dispatch — แสดงเฉพาะ view รอส่ง */}
+          {viewMode === "pending" && (
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#fef3c7", borderRadius: 10, border: "1px solid #fbbf24" }}>
+              <strong style={{ fontSize: 13, color: "#92400e" }}>🏦 บันทึกวันที่นำส่งเล่มทะเบียน:</strong>
+              <input type="date" value={dispatchedAt} onChange={e => setDispatchedAt(e.target.value)}
+                style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+              <button onClick={saveDispatch} disabled={selCount === 0 || savingDispatch}
+                style={{ padding: "7px 16px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, cursor: (selCount === 0 || savingDispatch) ? "not-allowed" : "pointer", opacity: (selCount === 0 || savingDispatch) ? 0.5 : 1, fontSize: 13, fontWeight: 600 }}>
+                💾 {savingDispatch ? "กำลังบันทึก..." : `บันทึก (${selCount})`}
+              </button>
+              <span style={{ fontSize: 11, color: "#78350f", fontStyle: "italic" }}>
+                เลือกรายการก่อนบันทึก · ระบบจะสร้าง 1 ใบนำส่งต่อ 1 ไฟแนนท์ (เลข FNDP-YYMMDD-####)
+              </span>
+            </div>
+          )}
+
+          {loading ? (
+            <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+          ) : filtered.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+              {eligibleRows.length === 0 ? "ยังไม่มีรายการที่ผ่อนกับไฟแนนท์รับคืนทะเบียนแล้ว" : "ไม่พบรายการตามที่ค้นหา"}
+            </div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: 40 }}><input type="checkbox" checked={filtered.length > 0 && filtered.every(r => selected[r.submission_id])} onChange={toggleAll} /></th>
+                    <th style={{ width: 40 }}>#</th>
+                    <th>ไฟแนนท์</th>
+                    <th>ลูกค้า</th>
+                    <th>เลขเครื่อง</th>
+                    <th>หมวด</th>
+                    <th>เลขทะเบียน</th>
+                    <th>run</th>
+                    <th>วันส่ง</th>
+                    <th>เลขใบนำส่ง</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r, i) => (
+                    <tr key={r.submission_id} style={{ background: selected[r.submission_id] ? "#eff6ff" : (r.sent_to_finance_at ? "#ecfdf5" : undefined), cursor: "pointer" }}
+                      onClick={() => toggleOne(r.submission_id)}>
+                      <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                        <input type="checkbox" checked={!!selected[r.submission_id]} onChange={() => toggleOne(r.submission_id)} />
+                      </td>
+                      <td style={{ textAlign: "center" }}>{i + 1}</td>
+                      <td style={{ fontWeight: 600, color: "#92400e" }}>{r.finance_company || "-"}</td>
+                      <td>{r.customer_name || "-"}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
+                      <td style={{ textAlign: "center" }}>{r.plate_category || "-"}</td>
+                      <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.run_code}</td>
+                      <td style={{ fontSize: 12, color: r.sent_to_finance_at ? "#065f46" : "#9ca3af", fontWeight: r.sent_to_finance_at ? 600 : 400 }}>
+                        {r.sent_to_finance_at ? fmtDate(r.sent_to_finance_at) : "—"}
+                      </td>
+                      <td style={{ fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{r.finance_dispatch_doc_no || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function FinanceDispatchHistory({ history, onCancel }) {
+  if (!history.length) {
+    return <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+      ยังไม่มีประวัติการนำส่ง
+    </div>;
+  }
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th style={{ width: 40 }}>#</th>
+            <th>เลขใบนำส่ง</th>
+            <th>วันที่นำส่ง</th>
+            <th>ไฟแนนท์</th>
+            <th style={{ textAlign: "right" }}>จำนวน</th>
+            <th>ผู้บันทึก</th>
+            <th>หมายเหตุ</th>
+            <th style={{ width: 100 }}>จัดการ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {history.map((h, i) => (
+            <tr key={h.dispatch_id}>
+              <td style={{ textAlign: "center" }}>{i + 1}</td>
+              <td style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{h.dispatch_no}</td>
+              <td>{fmtDate(h.dispatched_at)}</td>
+              <td style={{ fontWeight: 600 }}>{h.finance_company || "-"}</td>
+              <td style={{ textAlign: "right", fontFamily: "monospace" }}>{h.total_count}</td>
+              <td style={{ fontSize: 12 }}>{h.dispatched_by || "-"}</td>
+              <td style={{ fontSize: 12, color: "#6b7280" }}>{h.note || "-"}</td>
+              <td style={{ textAlign: "center" }}>
+                <button onClick={() => onCancel(h.dispatch_no)}
+                  style={{ padding: "4px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+                  ✕ ยกเลิก
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function buildFinanceDispatchHTML({ groups }) {
+  const today = new Date();
+  const dstr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear() + 543}`;
+  const safe = s => s === null || s === undefined ? "" : String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const sections = Object.entries(groups).map(([finCo, rows]) => {
+    const tr = rows.map((r, i) => `
+      <tr>
+        <td class="c">${i + 1}</td>
+        <td>${safe(r.customer_name)}</td>
+        <td class="mono">${safe(r.engine_no)}</td>
+        <td class="mono">${safe(r.chassis_no)}</td>
+        <td class="c">${safe(r.plate_category)}</td>
+        <td class="c b">${safe(r.plate_number)}</td>
+        <td class="mono">${safe(r.run_code)}</td>
+        <td class="sig"></td>
+      </tr>`).join("");
+    return `
+    <div class="section">
+      <div class="header">
+        <h1>ใบนำส่งเล่มทะเบียนรถ</h1>
+        <div class="meta">
+          <strong>ส่งถึง:</strong> ${safe(finCo)}
+          &nbsp;&nbsp; <strong>วันที่พิมพ์:</strong> ${dstr}
+          &nbsp;&nbsp; <strong>จำนวน:</strong> ${rows.length} ราย
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px">#</th>
+            <th>ชื่อลูกค้า</th>
+            <th style="width:110px">เลขเครื่อง</th>
+            <th style="width:110px">เลขตัวถัง</th>
+            <th style="width:50px">หมวด</th>
+            <th style="width:70px">เลขทะเบียน</th>
+            <th style="width:90px">เลข run</th>
+            <th style="width:130px">ลายเซ็นผู้รับ</th>
+          </tr>
+        </thead>
+        <tbody>${tr}</tbody>
+      </table>
+      <div class="footer">
+        <div>ผู้นำส่ง: ____________________________</div>
+        <div>ผู้รับ: ____________________________</div>
+      </div>
+    </div>
+    <div class="page-break"></div>`;
+  }).join("");
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>ใบนำส่งเล่มทะเบียนรถ</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm 12mm; }
+  * { box-sizing: border-box; }
+  body { font-family: "Sarabun","Tahoma",sans-serif; font-size: 13px; color: #111; margin: 0; }
+  .section { max-width: 297mm; margin: 0 auto 15px; }
+  .header { border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 10px; }
+  .header h1 { margin: 0; font-size: 18px; }
+  .header .meta { font-size: 13px; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th,td { border: 1px solid #333; padding: 5px 6px; vertical-align: middle; }
+  th { background: #fef3c7; text-align: center; font-weight: 600; }
+  .c { text-align: center; }
+  .mono { font-family: "Consolas",monospace; font-size: 11px; }
+  .b { font-weight: 700; }
+  tbody tr { min-height: 32px; }
+  .footer { display: flex; justify-content: space-between; margin-top: 30px; padding: 0 30px; font-size: 12px; }
+  .page-break { page-break-after: always; }
+  .page-break:last-child { page-break-after: auto; }
+</style></head><body>
+${sections}
+</body></html>`;
 }
 
 function buildNotifyHTML({ rows, branch }) {
