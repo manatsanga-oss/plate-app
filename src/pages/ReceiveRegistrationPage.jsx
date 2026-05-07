@@ -1489,7 +1489,7 @@ function FinancePanel({ setMessage, currentUser }) {
       </div>
 
       {viewMode === "history" ? (
-        <FinanceDispatchHistory history={history} onCancel={cancelDispatch} />
+        <FinanceDispatchHistory history={history} rows={eligibleRows} onCancel={cancelDispatch} />
       ) : (
         <>
           {/* Filter bar */}
@@ -1599,12 +1599,35 @@ function FinancePanel({ setMessage, currentUser }) {
   );
 }
 
-function FinanceDispatchHistory({ history, onCancel }) {
+function FinanceDispatchHistory({ history, rows = [], onCancel }) {
   if (!history.length) {
     return <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
       ยังไม่มีประวัติการนำส่ง
     </div>;
   }
+
+  function reprintDispatch(h) {
+    // ดึง submission_ids จาก source_submission_ids (jsonb array)
+    let ids = [];
+    try {
+      ids = Array.isArray(h.source_submission_ids) ? h.source_submission_ids
+          : typeof h.source_submission_ids === "string" ? JSON.parse(h.source_submission_ids)
+          : [];
+    } catch { ids = []; }
+    const items = rows.filter(r => ids.includes(r.submission_id));
+    if (items.length === 0) {
+      alert("ไม่พบรายการในใบนำส่งนี้ — อาจถูกยกเลิก/ลบ");
+      return;
+    }
+    const finCo = h.finance_company || "(ไม่ระบุ)";
+    const groups = { [finCo]: items };
+    const html = buildFinanceDispatchHTML({ groups });
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) { alert("popup blocked"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
   return (
     <div style={{ overflowX: "auto" }}>
       <table className="data-table">
@@ -1613,7 +1636,7 @@ function FinanceDispatchHistory({ history, onCancel }) {
             <th>วันที่ส่ง</th>
             <th>ชื่อไฟแนนท์</th>
             <th style={{ textAlign: "right" }}>จำนวนที่ส่ง</th>
-            <th style={{ width: 100 }}>จัดการ</th>
+            <th style={{ width: 180, textAlign: "center" }}>จัดการ</th>
           </tr>
         </thead>
         <tbody>
@@ -1623,6 +1646,10 @@ function FinanceDispatchHistory({ history, onCancel }) {
               <td style={{ fontWeight: 600 }}>{h.finance_company || "-"}</td>
               <td style={{ textAlign: "right", fontFamily: "monospace" }}>{h.total_count}</td>
               <td style={{ textAlign: "center" }}>
+                <button onClick={() => reprintDispatch(h)}
+                  style={{ padding: "4px 10px", background: "#10b981", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>
+                  🖨️ พิมพ์
+                </button>
                 <button onClick={() => onCancel(h.dispatch_no)}
                   style={{ padding: "4px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
                   ✕ ยกเลิก
@@ -1649,8 +1676,7 @@ function buildFinanceDispatchHTML({ groups }) {
         <td class="mono">${safe(r.chassis_no)}</td>
         <td class="c">${safe(r.plate_category)}</td>
         <td class="c b">${safe(r.plate_number)}</td>
-        <td class="mono">${safe(r.run_code)}</td>
-        <td class="sig"></td>
+        <td class="c">${safe(r.color_name)}</td>
       </tr>`).join("");
     return `
     <div class="section">
@@ -1671,8 +1697,7 @@ function buildFinanceDispatchHTML({ groups }) {
             <th style="width:110px">เลขตัวถัง</th>
             <th style="width:50px">หมวด</th>
             <th style="width:70px">เลขทะเบียน</th>
-            <th style="width:90px">เลข run</th>
-            <th style="width:130px">ลายเซ็นผู้รับ</th>
+            <th style="width:80px">สี</th>
           </tr>
         </thead>
         <tbody>${tr}</tbody>
