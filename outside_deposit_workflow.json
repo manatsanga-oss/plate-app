@@ -73,7 +73,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "INSERT INTO outside_deposit_orders (doc_no, customer_name, customer_phone, license_plate, job_no, technician, model_name, parking_status, status, created_by, branch) VALUES ('{{ $json.doc_no }}', '{{ $json.customer_name }}', '{{ $json.customer_phone }}', '{{ $json.license_plate }}', '{{ $json.job_no }}', '{{ $json.technician }}', '{{ $json.model_name }}', '{{ $json.parking_status }}', '{{ $json.status }}', '{{ $json.created_by }}', '{{ $json.branch }}') RETURNING order_id, doc_no;"
+        "query": "INSERT INTO outside_deposit_orders (doc_no, customer_name, customer_phone, license_plate, job_no, technician, model_name, parking_status, status, note, created_by, branch) VALUES ('{{ $json.doc_no }}', '{{ $json.customer_name }}', '{{ $json.customer_phone }}', '{{ $json.license_plate }}', '{{ $json.job_no }}', '{{ $json.technician }}', '{{ $json.model_name }}', '{{ $json.parking_status }}', '{{ $json.status }}', '{{ $json.note }}', '{{ $json.created_by }}', '{{ $json.branch }}') RETURNING order_id, doc_no;"
       },
       "id": "pg-insert-order",
       "name": "PG: Insert Order",
@@ -106,7 +106,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// build UPDATE header + DELETE items + INSERT items\nconst body = $items('Webhook')[0].json.body;\nconst id = body.order_id;\nconst esc = s => String(s||'').replace(/'/g,\"''\");\nconst items = (body.items||[]).filter(it => it.part_code || it.part_name);\nlet sql = `UPDATE outside_deposit_orders SET customer_name='${esc(body.customer_name)}', customer_phone='${esc(body.customer_phone)}', license_plate='${esc(body.license_plate)}', job_no='${esc(body.job_no)}', technician='${esc(body.technician)}', model_name='${esc(body.model_name)}', parking_status='${esc(body.parking_status)}', status='${esc(body.status)}', updated_at=NOW() WHERE order_id=${id};`;\nsql += ` DELETE FROM outside_deposit_items WHERE order_id=${id};`;\nif (items.length) {\n  const vals = items.map(it => `(${id}, '${esc(it.part_code)}', '${esc(it.part_name)}', ${Number(it.quantity)||1})`).join(',');\n  sql += ` INSERT INTO outside_deposit_items (order_id, part_code, part_name, quantity) VALUES ${vals};`;\n}\nreturn [{ json: { sql, order_id: id } }];"
+        "functionCode": "// build UPDATE header + DELETE items + INSERT items\nconst body = $items('Webhook')[0].json.body;\nconst id = body.order_id;\nconst esc = s => String(s||'').replace(/'/g,\"''\");\nconst items = (body.items||[]).filter(it => it.part_code || it.part_name);\nlet sql = `UPDATE outside_deposit_orders SET customer_name='${esc(body.customer_name)}', customer_phone='${esc(body.customer_phone)}', license_plate='${esc(body.license_plate)}', job_no='${esc(body.job_no)}', technician='${esc(body.technician)}', model_name='${esc(body.model_name)}', parking_status='${esc(body.parking_status)}', status='${esc(body.status)}', note='${esc(body.note)}', updated_at=NOW() WHERE order_id=${id};`;\nsql += ` DELETE FROM outside_deposit_items WHERE order_id=${id};`;\nif (items.length) {\n  const vals = items.map(it => `(${id}, '${esc(it.part_code)}', '${esc(it.part_name)}', ${Number(it.quantity)||1})`).join(',');\n  sql += ` INSERT INTO outside_deposit_items (order_id, part_code, part_name, quantity) VALUES ${vals};`;\n}\nreturn [{ json: { sql, order_id: id } }];"
       },
       "id": "fn-build-update",
       "name": "Build Update SQL",
