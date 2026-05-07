@@ -1559,9 +1559,7 @@ function FinancePanel({ setMessage, currentUser }) {
                     <th>เลขเครื่อง</th>
                     <th>หมวด</th>
                     <th>เลขทะเบียน</th>
-                    <th>run</th>
-                    <th>วันส่ง</th>
-                    <th>เลขใบนำส่ง</th>
+                    <th>สี</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1577,11 +1575,7 @@ function FinancePanel({ setMessage, currentUser }) {
                       <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
                       <td style={{ textAlign: "center" }}>{r.plate_category || "-"}</td>
                       <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
-                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.run_code}</td>
-                      <td style={{ fontSize: 12, color: r.sent_to_finance_at ? "#065f46" : "#9ca3af", fontWeight: r.sent_to_finance_at ? 600 : 400 }}>
-                        {r.sent_to_finance_at ? fmtDate(r.sent_to_finance_at) : "—"}
-                      </td>
-                      <td style={{ fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{r.finance_dispatch_doc_no || "—"}</td>
+                      <td>{r.color_name || "-"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1605,26 +1599,18 @@ function FinanceDispatchHistory({ history, onCancel }) {
       <table className="data-table">
         <thead>
           <tr>
-            <th style={{ width: 40 }}>#</th>
-            <th>เลขใบนำส่ง</th>
-            <th>วันที่นำส่ง</th>
-            <th>ไฟแนนท์</th>
-            <th style={{ textAlign: "right" }}>จำนวน</th>
-            <th>ผู้บันทึก</th>
-            <th>หมายเหตุ</th>
+            <th>วันที่ส่ง</th>
+            <th>ชื่อไฟแนนท์</th>
+            <th style={{ textAlign: "right" }}>จำนวนที่ส่ง</th>
             <th style={{ width: 100 }}>จัดการ</th>
           </tr>
         </thead>
         <tbody>
-          {history.map((h, i) => (
+          {history.map(h => (
             <tr key={h.dispatch_id}>
-              <td style={{ textAlign: "center" }}>{i + 1}</td>
-              <td style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{h.dispatch_no}</td>
               <td>{fmtDate(h.dispatched_at)}</td>
               <td style={{ fontWeight: 600 }}>{h.finance_company || "-"}</td>
               <td style={{ textAlign: "right", fontFamily: "monospace" }}>{h.total_count}</td>
-              <td style={{ fontSize: 12 }}>{h.dispatched_by || "-"}</td>
-              <td style={{ fontSize: 12, color: "#6b7280" }}>{h.note || "-"}</td>
               <td style={{ textAlign: "center" }}>
                 <button onClick={() => onCancel(h.dispatch_no)}
                   style={{ padding: "4px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
