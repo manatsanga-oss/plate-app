@@ -171,7 +171,14 @@ export default function HrPayrollPage({ currentUser }) {
                   <td style={tdNum}>{fmtNum(r.ot_workday)}</td>
                   <td style={tdNum}>{fmtNum(r.ot_holiday)}</td>
                   <td style={tdNum}>{fmtNum(r.meal_allowance)}</td>
-                  <td style={tdNum}>{fmtNum(r.laundry_allowance)}</td>
+                  <td style={tdNum} title={`อัตรา ${fmtNum(r.laundry_rate)} × ${r.work_days_weekday || 0} วัน (จ-ศ)`}>
+                    <div>{fmtNum(r.laundry_allowance)}</div>
+                    {Number(r.laundry_rate) > 0 && (
+                      <div style={{ fontSize: 9, color: "#6b7280", fontWeight: 400 }}>
+                        {fmtNum(r.laundry_rate)}×{r.work_days_weekday || 0}
+                      </div>
+                    )}
+                  </td>
                   <td style={tdNum}>{fmtNum(r.diligence_allowance)}</td>
                   <td style={tdNum}>{fmtNum(r.extra_bonus)}</td>
                   <td style={tdNum}>{fmtNum(r.other_income)}</td>
@@ -245,7 +252,10 @@ export default function HrPayrollPage({ currentUser }) {
               <RowKV label="OT-วันทำงาน" value={fmtNum(detailRow.ot_workday)} />
               <RowKV label="OT-ปกติ" value={fmtNum(detailRow.ot_holiday)} />
               <RowKV label="ค่าข้าว" value={fmtNum(detailRow.meal_allowance)} />
-              <RowKV label="ค่าซักเสื้อ" value={fmtNum(detailRow.laundry_allowance)} />
+              <RowKV
+                label={`ค่าซักเสื้อ${Number(detailRow.laundry_rate) > 0 ? ` (${fmtNum(detailRow.laundry_rate)} × ${detailRow.work_days_weekday || 0} วัน จ-ศ)` : ""}`}
+                value={fmtNum(detailRow.laundry_allowance)}
+              />
               <RowKV label="ค่าเบี้ยขยัน" value={fmtNum(detailRow.diligence_allowance)} />
               <RowKV label="เงินเพิ่มพิเศษ" value={fmtNum(detailRow.extra_bonus)} />
               <RowKV label="รายได้อื่นๆ" value={fmtNum(detailRow.other_income)} />
