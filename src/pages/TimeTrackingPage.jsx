@@ -132,6 +132,7 @@ export default function TimeTrackingPage({ currentUser }) {
         body: JSON.stringify({
           action: "summary_time_tracking",
           date_from: dateFrom, date_to: dateTo,
+          affiliation: affilFilter || null,
         }),
       });
       const data = await res.json();
@@ -193,19 +194,20 @@ export default function TimeTrackingPage({ currentUser }) {
       const rows = summary.map(s => {
         const cells = [
           s.employee_name || "",
-          s.team_name || "-",
           s.total_days, s.present_days, s.absence_days,
-          s.hide_clock_days || 0, s.sick_days || 0,
-          s.sick_with_cert || 0, s.sick_no_cert || 0,
-          s.late_days, s.early_leave_days,
-          s.monthly_off_days || 0, s.ot_days,
+          s.monthly_off_days || 0,
+          s.personal_leave_days || 0,
+          s.vacation_days || 0,
+          s.sick_days || 0, s.sick_with_cert || 0, s.sick_no_cert || 0,
+          s.late_days, s.hide_clock_days || 0, s.early_leave_days,
         ].map(escapeHtml);
         return `<tr><td>${cells.join("</td><td>")}</td></tr>`;
       }).join("");
       tableHtml = `<table><thead><tr>
-        <th>พนักงาน</th><th>ทีม</th><th>วันรวม</th><th>มา</th><th>ขาด</th>
-        <th>ไม่สแกนเข้างาน</th><th>ลาป่วย</th><th>มีใบรับรอง</th><th>ไม่มีใบรับรอง</th>
-        <th>สาย</th><th>กลับก่อน</th><th>วันหยุดกลางเดือน</th><th>OT</th>
+        <th>พนักงาน</th><th>วันรวม</th><th>มา</th><th>ขาด</th>
+        <th>วันหยุดกลางเดือน</th><th>ลากิจ</th><th>ลาพักร้อน</th>
+        <th>ลาป่วย</th><th>มีใบรับรอง</th><th>ไม่มีใบรับรอง</th>
+        <th>สาย</th><th>ไม่สแกนเข้างาน</th><th>กลับก่อน</th>
         </tr></thead><tbody>${rows}</tbody></table>`;
     }
 
@@ -321,25 +323,23 @@ export default function TimeTrackingPage({ currentUser }) {
         <span>ถึง</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
 
-        {tab === "detail" && (
-          <select
-            value={affilFilter}
-            onChange={e => {
-              const v = e.target.value;
-              setAffilFilter(v);
-              // ถ้าพนักงานปัจจุบันไม่ตรงสังกัดที่เลือก → reset
-              if (v && empFilter) {
-                const cur = employees.find(x => x.employee_name === empFilter);
-                if (cur && cur.affiliation !== v) setEmpFilter("");
-              }
-            }}
-            style={{ ...inp, minWidth: 130 }}
-          >
-            <option value="">ทุกสังกัด</option>
-            <option value="ป.เปา">ป.เปา</option>
-            <option value="สิงห์ชัย">สิงห์ชัย</option>
-          </select>
-        )}
+        <select
+          value={affilFilter}
+          onChange={e => {
+            const v = e.target.value;
+            setAffilFilter(v);
+            // ถ้าพนักงานปัจจุบันไม่ตรงสังกัดที่เลือก → reset
+            if (v && empFilter) {
+              const cur = employees.find(x => x.employee_name === empFilter);
+              if (cur && cur.affiliation !== v) setEmpFilter("");
+            }
+          }}
+          style={{ ...inp, minWidth: 130 }}
+        >
+          <option value="">ทุกสังกัด</option>
+          <option value="ป.เปา">ป.เปา</option>
+          <option value="สิงห์ชัย">สิงห์ชัย</option>
+        </select>
 
         {tab === "detail" && (() => {
           const empOptions = affilFilter
@@ -503,53 +503,54 @@ export default function TimeTrackingPage({ currentUser }) {
               <thead style={{ background: "#072d6b", color: "#fff" }}>
                 <tr>
                   <th style={th}>พนักงาน</th>
-                  <th style={th}>ทีม</th>
                   <th style={{ ...th, textAlign: "right" }}>วันรวม</th>
                   <th style={{ ...th, textAlign: "right", color: "#86efac" }}>มา</th>
                   <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>ขาด</th>
-                  <th style={{ ...th, textAlign: "right", color: "#fbbf24" }}>ไม่สแกนเข้างาน</th>
+                  <th style={{ ...th, textAlign: "right", color: "#c4b5fd" }}>วันหยุดกลางเดือน</th>
+                  <th style={{ ...th, textAlign: "right", color: "#fcd34d" }}>ลากิจ</th>
+                  <th style={{ ...th, textAlign: "right", color: "#5eead4" }}>ลาพักร้อน</th>
                   <th style={{ ...th, textAlign: "right", color: "#fbbf24" }}>ลาป่วย</th>
                   <th style={{ ...th, textAlign: "right", color: "#86efac" }}>มีใบรับรอง</th>
                   <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>ไม่มีใบรับรอง</th>
                   <th style={{ ...th, textAlign: "right", color: "#fdba74" }}>สาย</th>
+                  <th style={{ ...th, textAlign: "right", color: "#fbbf24" }}>ไม่สแกนเข้างาน</th>
                   <th style={{ ...th, textAlign: "right", color: "#fde047" }}>กลับก่อน</th>
-                  <th style={{ ...th, textAlign: "right", color: "#c4b5fd" }}>วันหยุดกลางเดือน</th>
-                  <th style={{ ...th, textAlign: "right", color: "#d8b4fe" }}>OT</th>
                 </tr>
               </thead>
               <tbody>
                 {summary.map((s, i) => (
                   <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                     <td style={{ ...td, fontWeight: 600 }}>{s.employee_name}</td>
-                    <td style={td}>{s.team_name || "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{s.total_days}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#065f46", fontWeight: 600 }}>{s.present_days}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.absence_days) > 0 ? "#dc2626" : "#9ca3af", fontWeight: Number(s.absence_days) > 0 ? 600 : 400 }}>{s.absence_days}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.hide_clock_days) > 0 ? "#92400e" : "#9ca3af", fontWeight: Number(s.hide_clock_days) > 0 ? 600 : 400 }}>{s.hide_clock_days || 0}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.monthly_off_days) > 0 ? "#5b21b6" : "#9ca3af", fontWeight: Number(s.monthly_off_days) > 0 ? 600 : 400 }}>{s.monthly_off_days || 0}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.personal_leave_days) > 0 ? "#ca8a04" : "#9ca3af", fontWeight: Number(s.personal_leave_days) > 0 ? 600 : 400 }}>{s.personal_leave_days || 0}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.vacation_days) > 0 ? "#0d9488" : "#9ca3af", fontWeight: Number(s.vacation_days) > 0 ? 600 : 400 }}>{s.vacation_days || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.sick_days) > 0 ? "#d97706" : "#9ca3af", fontWeight: Number(s.sick_days) > 0 ? 600 : 400 }}>{s.sick_days || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.sick_with_cert) > 0 ? "#15803d" : "#9ca3af", fontWeight: Number(s.sick_with_cert) > 0 ? 600 : 400 }}>{s.sick_with_cert || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.sick_no_cert) > 0 ? "#b91c1c" : "#9ca3af", fontWeight: Number(s.sick_no_cert) > 0 ? 600 : 400 }}>{s.sick_no_cert || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.late_days) > 0 ? "#ea580c" : "#9ca3af", fontWeight: Number(s.late_days) > 0 ? 600 : 400 }}>{s.late_days}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.hide_clock_days) > 0 ? "#92400e" : "#9ca3af", fontWeight: Number(s.hide_clock_days) > 0 ? 600 : 400 }}>{s.hide_clock_days || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.early_leave_days) > 0 ? "#dc2626" : "#9ca3af", fontWeight: Number(s.early_leave_days) > 0 ? 600 : 400 }}>{s.early_leave_days}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.monthly_off_days) > 0 ? "#5b21b6" : "#9ca3af", fontWeight: Number(s.monthly_off_days) > 0 ? 600 : 400 }}>{s.monthly_off_days || 0}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.ot_days) > 0 ? "#7c3aed" : "#9ca3af", fontWeight: Number(s.ot_days) > 0 ? 600 : 400 }}>{s.ot_days}</td>
                   </tr>
                 ))}
               </tbody>
               <tfoot style={{ background: "#f3f4f6", fontWeight: 700 }}>
                 <tr>
-                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>รวม {summary.length} คน</td>
+                  <td style={{ ...td, textAlign: "right" }}>รวม {summary.length} คน</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{summary.reduce((s, x) => s + Number(x.total_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#065f46" }}>{summary.reduce((s, x) => s + Number(x.present_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{summary.reduce((s, x) => s + Number(x.absence_days || 0), 0)}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#92400e" }}>{summary.reduce((s, x) => s + Number(x.hide_clock_days || 0), 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6" }}>{summary.reduce((s, x) => s + Number(x.monthly_off_days || 0), 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#ca8a04" }}>{summary.reduce((s, x) => s + Number(x.personal_leave_days || 0), 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0d9488" }}>{summary.reduce((s, x) => s + Number(x.vacation_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#d97706" }}>{summary.reduce((s, x) => s + Number(x.sick_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d" }}>{summary.reduce((s, x) => s + Number(x.sick_with_cert || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#b91c1c" }}>{summary.reduce((s, x) => s + Number(x.sick_no_cert || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#ea580c" }}>{summary.reduce((s, x) => s + Number(x.late_days || 0), 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#92400e" }}>{summary.reduce((s, x) => s + Number(x.hide_clock_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{summary.reduce((s, x) => s + Number(x.early_leave_days || 0), 0)}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6" }}>{summary.reduce((s, x) => s + Number(x.monthly_off_days || 0), 0)}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#7c3aed" }}>{summary.reduce((s, x) => s + Number(x.ot_days || 0), 0)}</td>
                 </tr>
               </tfoot>
             </table>

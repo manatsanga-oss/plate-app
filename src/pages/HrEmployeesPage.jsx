@@ -23,6 +23,7 @@ const emptyForm = () => ({
   extra_bonus: 0,
   ot_workday: 0,
   kosor: 0,
+  monthly_tax: 0,
   bank_account_no: "",
   bank_name: "",
   is_executive: false,
@@ -122,6 +123,7 @@ export default function HrEmployeesPage({ currentUser }) {
       extra_bonus: r.extra_bonus || 0,
       ot_workday: r.ot_workday || 0,
       kosor: r.kosor || 0,
+      monthly_tax: r.monthly_tax || 0,
       bank_account_no: r.bank_account_no || "",
       bank_name: r.bank_name || "",
       is_executive: r.is_executive === true,
@@ -354,6 +356,9 @@ export default function HrEmployeesPage({ currentUser }) {
                 </Field>
                 <Field label="ก.ย.ศ (จำนวนเงิน)">
                   <input type="number" step="0.01" value={form.kosor} onChange={e => setForm(f => ({ ...f, kosor: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                </Field>
+                <Field label="ภงด.1 / ภาษี (จำนวนเงิน)">
+                  <input type="number" step="0.01" value={form.monthly_tax || 0} onChange={e => setForm(f => ({ ...f, monthly_tax: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
                 </Field>
               </div>
             </Section>

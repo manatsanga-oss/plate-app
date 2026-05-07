@@ -399,18 +399,9 @@ export default function HrPayrollPage({ currentUser }) {
           style={{ padding: "7px 14px", background: (saving || savingLocked || !!snapshotMode) ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: (saving || savingLocked || !!snapshotMode) ? "not-allowed" : "pointer", fontWeight: 600 }}>
           {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
         </button>
-        <button onClick={openSaveAndLockPreview} disabled={saving || savingLocked || filtered.length === 0 || payablesCreated > 0}
-          title={payablesCreated > 0 ? "ตั้งจ่ายแล้ว — ดูที่หน้าบันทึกการจ่าย" : "บันทึก + ตั้งจ่าย"}
-          style={{ padding: "7px 14px", background: (saving || savingLocked || payablesCreated > 0) ? "#9ca3af" : "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: (saving || savingLocked || payablesCreated > 0) ? "not-allowed" : "pointer", fontWeight: 600 }}>
-          {savingLocked ? "กำลังบันทึก+ตั้งจ่าย..." : "📝 บันทึกตั้งจ่าย"}
-        </button>
         <button onClick={openHistory}
           style={{ padding: "7px 14px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
           📜 ประวัติ
-        </button>
-        <button onClick={exportCSV} disabled={filtered.length === 0}
-          style={{ padding: "7px 14px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
-          📥 Export CSV
         </button>
       </div>
 
