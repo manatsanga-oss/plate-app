@@ -28,7 +28,65 @@ export default function FastMovingPage() {
   const [iCustomName, setICustomName] = useState("");
   const [iStockType, setIStockType] = useState("สต๊อก");
   const [iStockNakhonluang, setIStockNakhonluang] = useState(false);
+  const [iDiscontinued, setIDiscontinued] = useState(false);
+  const [filterDiscontinued, setFilterDiscontinued] = useState("active"); // active | discontinued | all
+  // ===== Add Part Popup =====
+  const [addPopup, setAddPopup] = useState(false);
+  const [aBrand, setABrand] = useState("HONDA");
+  const [aPartCode, setAPartCode] = useState("");
+  const [aRefCode, setARefCode] = useState("");
+  const [aCategory, setACategory] = useState("");
+  const [aProductGroup, setAProductGroup] = useState("");
+  const [aCustomName, setACustomName] = useState("");
+  const [aStockType, setAStockType] = useState("สต๊อก");
+  const [aStockNakhonluang, setAStockNakhonluang] = useState(false);
+  const [aDiscontinued, setADiscontinued] = useState(false);
+  const [aSaving, setASaving] = useState(false);
+  const [aError, setAError] = useState("");
   const PAGE_SIZE = 30;
+
+  function openAddPopup() {
+    setAddPopup(true);
+    setABrand("HONDA"); setAPartCode(""); setARefCode("");
+    setACategory(""); setAProductGroup(""); setACustomName("");
+    setAStockType("สต๊อก"); setAStockNakhonluang(false); setADiscontinued(false);
+    setAError("");
+  }
+
+  async function saveNewPart() {
+    if (!aPartCode.trim()) { setAError("กรุณากรอกรหัสอะไหล่"); return; }
+    setASaving(true);
+    setAError("");
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "add_part",
+          brand: aBrand,
+          part_code: aPartCode.trim(),
+          ref_code: (aRefCode || aPartCode).trim(),
+          category: aCategory.trim(),
+          product_group: aProductGroup,
+          custom_name: aCustomName.trim(),
+          stock_type: aStockType,
+          is_stock_nakhonluang: aStockNakhonluang,
+          is_discontinued: aDiscontinued,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.error || (Array.isArray(data) && data[0]?.error)) {
+        setAError(data?.error || data[0]?.error || "บันทึกไม่สำเร็จ");
+        setASaving(false);
+        return;
+      }
+      setAddPopup(false);
+      fetchData();
+    } catch (e) {
+      setAError("เกิดข้อผิดพลาด: " + e.message);
+    }
+    setASaving(false);
+  }
 
   useEffect(() => { fetchData(); fetchCarModels(); fetchProductGroups(); }, []);
 
@@ -118,6 +176,7 @@ export default function FastMovingPage() {
     setICustomName(row.product_name || "");
     setIStockType(row.stock_type || "สต๊อก");
     setIStockNakhonluang(!!row.is_stock_nakhonluang);
+    setIDiscontinued(!!row.is_discontinued);
   }
 
   async function saveInfo() {
@@ -126,7 +185,7 @@ export default function FastMovingPage() {
       await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName, stock_type: iStockType, is_stock_nakhonluang: iStockNakhonluang }),
+        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName, stock_type: iStockType, is_stock_nakhonluang: iStockNakhonluang, is_discontinued: iDiscontinued }),
       });
       fetchData();
     } catch {}
@@ -195,6 +254,8 @@ export default function FastMovingPage() {
 
   const filtered = rows.filter(r => {
     if (filterProductGroup !== "all" && r.product_group !== filterProductGroup) return false;
+    if (filterDiscontinued === "active" && r.is_discontinued) return false;
+    if (filterDiscontinued === "discontinued" && !r.is_discontinued) return false;
     if (!rowMatchesScope(r)) return false;
     if (search.trim()) {
       const s = search.toLowerCase();
@@ -266,7 +327,14 @@ export default function FastMovingPage() {
           <option value="all">ทุกแบบ</option>
           {codeOpts.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+        <select value={filterDiscontinued} onChange={e => { setFilterDiscontinued(e.target.value); setCurrentPage(1); }}
+          style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #ef4444", borderRadius: 8 }}>
+          <option value="active">🟢 ยังผลิต</option>
+          <option value="discontinued">🚫 เลิกผลิต</option>
+          <option value="all">ทั้งหมด</option>
+        </select>
         <button onClick={fetchData} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
+        <button onClick={openAddPopup} style={{ padding: "8px 16px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>+ เพิ่มอะไหล่</button>
         <button onClick={() => { setSearch(""); setFilterProductGroup("all"); setFilterBrand("all"); setFilterRun("all"); setFilterCode("all"); setCurrentPage(1); }}
           style={{ padding: "8px 16px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>✕ ล้างกรอง</button>
         <span style={{ fontSize: 13, color: "#374151" }}>
@@ -302,7 +370,14 @@ export default function FastMovingPage() {
                   <td style={{ ...td, textAlign: "center" }}>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
                   <td onClick={() => openInfoEdit(r)} style={{ ...td, cursor: "pointer", color: "#1e40af" }}>{r.product_group || "-"}</td>
                   <td style={td}>{r.part_code}</td>
-                  <td onClick={() => openInfoEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer", color: "#1e40af" }}>{r.product_name || <span style={{ color: "#9ca3af" }}>ไม่พบในสต๊อก</span>}</td>
+                  <td onClick={() => openInfoEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer", color: "#1e40af" }}>
+                    {r.product_name || <span style={{ color: "#9ca3af" }}>ไม่พบในสต๊อก</span>}
+                    {r.is_discontinued && (
+                      <span style={{ marginLeft: 6, padding: "1px 6px", background: "#fee2e2", color: "#b91c1c", fontSize: 10, borderRadius: 8, fontWeight: 700, whiteSpace: "nowrap" }}>
+                        🚫 เลิกผลิต
+                      </span>
+                    )}
+                  </td>
                   <td onClick={() => openEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer" }}>
                     {Array.isArray(r.models) && r.models.length > 0 ? (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
@@ -342,6 +417,95 @@ export default function FastMovingPage() {
                 </button>
               </React.Fragment>
             ))}
+        </div>
+      )}
+
+      {/* ===== Popup เพิ่มอะไหล่ใหม่ ===== */}
+      {addPopup && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 460, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>➕ เพิ่มอะไหล่หมุนเร็ว</h3>
+              <button onClick={() => setAddPopup(false)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>ยี่ห้อ *</label>
+              <select value={aBrand} onChange={e => setABrand(e.target.value)} style={selectStyle}>
+                <option value="HONDA">HONDA (ฮอนด้า)</option>
+                <option value="YAMAHA">YAMAHA (ยามาฮ่า)</option>
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>รหัสอะไหล่ * <span style={{ color: "#9ca3af", fontWeight: 400 }}>(เช่น 31500-KVB-T02)</span></label>
+              <input value={aPartCode} onChange={e => setAPartCode(e.target.value)} placeholder="31500-KVB-T02" style={selectStyle} />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>รหัสอ้างอิงคลัง <span style={{ color: "#9ca3af", fontWeight: 400 }}>(ใช้ join สต๊อก, ปกติเหมือนรหัสอะไหล่)</span></label>
+              <input value={aRefCode} onChange={e => setARefCode(e.target.value)} placeholder="ใส่ถ้าต่างจากรหัสอะไหล่" style={selectStyle} />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>หมวดหมู่</label>
+              <input value={aCategory} onChange={e => setACategory(e.target.value)} list="add-cat-list" placeholder="01.1 แบตเตอรี่" style={selectStyle} />
+              <datalist id="add-cat-list">
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              </datalist>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>กลุ่มสินค้า</label>
+              <select value={aProductGroup} onChange={e => setAProductGroup(e.target.value)} style={selectStyle}>
+                <option value="">-- เลือกกลุ่มสินค้า --</option>
+                {productGroups.filter(g => g.status !== "inactive").map(g => (
+                  <option key={g.group_code || g.id} value={`${g.group_code} ${g.group_name}`}>
+                    {g.group_code} {g.group_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>ชื่อสินค้า <span style={{ color: "#9ca3af", fontWeight: 400 }}>(ถ้าไม่ใส่จะดึงจากคลังอัตโนมัติ)</span></label>
+              <input value={aCustomName} onChange={e => setACustomName(e.target.value)} placeholder="แบตเตอรี่ (YTZ4V)(YUASA)" style={selectStyle} />
+            </div>
+
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 6, display: "block" }}>ประเภทอะไหล่</label>
+              <div style={{ display: "flex", gap: 16 }}>
+                {["สต๊อก", "ไม่สต๊อก"].map(val => (
+                  <label key={val} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 14 }}>
+                    <input type="radio" name="aStockType" value={val} checked={aStockType === val} onChange={() => setAStockType(val)} />
+                    {val === "สต๊อก" ? "อะไหล่สต๊อก" : "อะไหล่ไม่สต๊อก"}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, fontWeight: 600, color: aStockNakhonluang ? "#065f46" : "#374151" }}>
+                <input type="checkbox" checked={aStockNakhonluang} onChange={e => setAStockNakhonluang(e.target.checked)} />
+                🏪 เป็นอะไหล่สต๊อกนครหลวง
+              </label>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, fontWeight: 600, color: aDiscontinued ? "#b91c1c" : "#374151" }}>
+                <input type="checkbox" checked={aDiscontinued} onChange={e => setADiscontinued(e.target.checked)} />
+                🚫 ยกเลิกผลิตแล้ว
+              </label>
+            </div>
+
+            {aError && <div style={{ marginBottom: 10, padding: "6px 10px", background: "#fef2f2", color: "#b91c1c", borderRadius: 6, fontSize: 13 }}>{aError}</div>}
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={saveNewPart} disabled={aSaving} style={{ flex: 1, padding: "9px", fontSize: 14, background: aSaving ? "#9ca3af" : "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: aSaving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                {aSaving ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+              <button onClick={() => setAddPopup(false)} disabled={aSaving} style={{ padding: "9px 16px", fontSize: 13, background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ปิด</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -387,10 +551,16 @@ export default function FastMovingPage() {
                 ))}
               </div>
             </div>
-            <div style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 10 }}>
               <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, fontWeight: 600, color: iStockNakhonluang ? "#065f46" : "#374151" }}>
                 <input type="checkbox" checked={iStockNakhonluang} onChange={e => setIStockNakhonluang(e.target.checked)} />
                 🏪 เป็นอะไหล่สต๊อกนครหลวง
+              </label>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, fontWeight: 600, color: iDiscontinued ? "#b91c1c" : "#374151" }}>
+                <input type="checkbox" checked={iDiscontinued} onChange={e => setIDiscontinued(e.target.checked)} />
+                🚫 ยกเลิกผลิตแล้ว
               </label>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
