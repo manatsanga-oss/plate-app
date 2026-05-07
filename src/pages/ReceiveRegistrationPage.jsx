@@ -1387,8 +1387,10 @@ function FinancePanel({ setMessage, currentUser }) {
   const runOpts = [...new Set(pendingRows.map(r => r.run_code).filter(Boolean))].sort().reverse();
 
   function clearFilters() { setSearch(""); setFinanceFilter(""); setBrandFilter(""); setRunFilter(""); }
-  const selectedRows = filtered.filter(r => selected[r.submission_id]);
+  // เลือกทั้งหมดที่เคย tick — ไม่ขึ้นกับ filter ปัจจุบัน (ค้นหา/กรองใหม่ ยังจำที่เลือกไว้)
+  const selectedRows = pendingRows.filter(r => selected[r.submission_id]);
   const selCount = selectedRows.length;
+  const selCountInView = filtered.filter(r => selected[r.submission_id]).length;
 
   function toggleOne(id) { setSelected(s => ({ ...s, [id]: !s[id] })); }
   function toggleAll() {
@@ -1516,7 +1518,16 @@ function FinancePanel({ setMessage, currentUser }) {
             <input type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="🔍 ลูกค้า / เบอร์ / เครื่อง / ทะเบียน / ไฟแนนท์"
               style={{ flex: 1, minWidth: 200, padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
-            <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>{selCount > 0 ? `เลือก ${selCount}/` : ""}{filtered.length} / {eligibleRows.length} รายการ</span>
+            <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>
+              {selCount > 0 && <span style={{ color: "#7c3aed", fontWeight: 600 }}>เลือก {selCount}{selCount !== selCountInView ? ` (${selCountInView} ในมุมมอง)` : ""} • </span>}
+              {filtered.length} / {eligibleRows.length} รายการ
+            </span>
+            {selCount > 0 && (
+              <button onClick={() => setSelected({})}
+                style={{ padding: "5px 10px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>
+                ล้างที่เลือก ({selCount})
+              </button>
+            )}
             <button onClick={printDispatch} disabled={filtered.length === 0}
               style={{ padding: "8px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
               🖨️ พิมพ์ใบนำส่งเล่มทะเบียน {selCount > 0 ? `(${selCount})` : "ทั้งหมด"}
@@ -1560,9 +1571,6 @@ function FinancePanel({ setMessage, currentUser }) {
                     <th>หมวด</th>
                     <th>เลขทะเบียน</th>
                     <th>สี</th>
-                    <th>run</th>
-                    <th>วันส่ง</th>
-                    <th>เลขใบนำส่ง</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1579,11 +1587,6 @@ function FinancePanel({ setMessage, currentUser }) {
                       <td style={{ textAlign: "center" }}>{r.plate_category || "-"}</td>
                       <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
                       <td>{r.color_name || "-"}</td>
-                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.run_code}</td>
-                      <td style={{ fontSize: 12, color: r.sent_to_finance_at ? "#065f46" : "#9ca3af", fontWeight: r.sent_to_finance_at ? 600 : 400 }}>
-                        {r.sent_to_finance_at ? fmtDate(r.sent_to_finance_at) : "—"}
-                      </td>
-                      <td style={{ fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{r.finance_dispatch_doc_no || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
