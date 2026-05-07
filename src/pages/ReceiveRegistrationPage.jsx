@@ -1560,6 +1560,9 @@ function FinancePanel({ setMessage, currentUser }) {
                     <th>หมวด</th>
                     <th>เลขทะเบียน</th>
                     <th>สี</th>
+                    <th>run</th>
+                    <th>วันส่ง</th>
+                    <th>เลขใบนำส่ง</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1576,6 +1579,11 @@ function FinancePanel({ setMessage, currentUser }) {
                       <td style={{ textAlign: "center" }}>{r.plate_category || "-"}</td>
                       <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
                       <td>{r.color_name || "-"}</td>
+                      <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.run_code}</td>
+                      <td style={{ fontSize: 12, color: r.sent_to_finance_at ? "#065f46" : "#9ca3af", fontWeight: r.sent_to_finance_at ? 600 : 400 }}>
+                        {r.sent_to_finance_at ? fmtDate(r.sent_to_finance_at) : "—"}
+                      </td>
+                      <td style={{ fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{r.finance_dispatch_doc_no || "—"}</td>
                     </tr>
                   ))}
                 </tbody>
