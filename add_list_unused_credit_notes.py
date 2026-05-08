@@ -42,21 +42,24 @@ for n in wf['nodes']:
         postgres_creds = n['credentials']
         break
 
-# 3. เพิ่ม Postgres node
-existing = {n['name'] for n in wf['nodes']}
-if 'Q: List Unused Credit Notes' not in existing:
+# 3. เพิ่ม/อัปเดต Postgres node
+PG_QUERY = (
+    "SELECT cn.cn_id, cn.credit_note_no, cn.credit_note_date, cn.paid_doc_no, "
+    "cn.vendor_name, cn.amount, cn.note "
+    "FROM credit_notes_received cn "
+    "WHERE cn.status = 'active' "
+    "  AND NOT EXISTS (SELECT 1 FROM income_payment_breakdowns ipb WHERE ipb.credit_note_no = cn.credit_note_no) "
+    "ORDER BY cn.credit_note_date DESC, cn.cn_id DESC LIMIT 1000"
+)
+existing_pg = next((n for n in wf['nodes'] if n['name'] == 'Q: List Unused Credit Notes'), None)
+if existing_pg:
+    existing_pg['parameters']['query'] = PG_QUERY
+    print("OK: updated Q: List Unused Credit Notes query")
+else:
     pg = {
         "parameters": {
             "operation": "executeQuery",
-            "query": (
-                "SELECT cn.cn_id, cn.credit_note_no, cn.credit_note_date, cn.paid_doc_no, "
-                "cn.vendor_name, cn.amount, cn.note "
-                "FROM credit_notes_received cn "
-                "WHERE cn.status = 'active' "
-                "  AND NOT EXISTS (SELECT 1 FROM expense_payment_breakdowns pb WHERE pb.credit_note_no = cn.credit_note_no) "
-                "  AND NOT EXISTS (SELECT 1 FROM income_payment_breakdowns ipb WHERE ipb.credit_note_no = cn.credit_note_no) "
-                "ORDER BY cn.credit_note_date DESC, cn.cn_id DESC LIMIT 1000"
-            ),
+            "query": PG_QUERY,
             "options": {},
         },
         "type": "n8n-nodes-base.postgres",

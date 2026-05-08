@@ -572,7 +572,7 @@ export default function IncomeRecordPage({ currentUser }) {
       {payDialog && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
           onClick={() => !savingPay && setPayDialog(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 760, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 720, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto", overflowX: "hidden", boxSizing: "border-box" }}>
             <h3 style={{ margin: "0 0 14px", color: editPayDocNo ? "#7c3aed" : "#072d6b" }}>
               {editPayDocNo ? `✏️ แก้ไขใบรับเงิน — ${editPayDocNo}` : "💵 บันทึกรับเงิน"}
             </h3>
@@ -622,7 +622,7 @@ export default function IncomeRecordPage({ currentUser }) {
                       // exclude credit notes ที่ถูกเลือกในแถวอื่นแล้ว
                       const usedCnInOtherRows = payments.filter((_, i) => i !== idx).map(x => x.credit_note_no).filter(Boolean);
                       return (
-                      <div key={idx} style={{ display: "grid", gridTemplateColumns: "130px 140px 1fr 32px", gap: 10, alignItems: "center" }}>
+                      <div key={idx} style={{ display: "grid", gridTemplateColumns: "110px 110px minmax(0, 1fr) 30px", gap: 8, alignItems: "center", minWidth: 0 }}>
                         <select value={p.method}
                           onChange={e => updatePayment(idx, { method: e.target.value, from_bank_account_id: e.target.value === "โอน" ? p.from_bank_account_id : "", credit_note_no: e.target.value === "ใบลดหนี้" ? p.credit_note_no : "" })}
                           style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
@@ -652,8 +652,9 @@ export default function IncomeRecordPage({ currentUser }) {
                             {availableCreditNotes
                               .filter(cn => !usedCnInOtherRows.includes(cn.credit_note_no))
                               .map(cn => (
-                                <option key={cn.credit_note_no} value={cn.credit_note_no}>
-                                  📄 {cn.credit_note_no} · ฿{fmt(cn.amount)} · {cn.vendor_name || "-"} ({fmtDate(cn.credit_note_date)})
+                                <option key={cn.credit_note_no} value={cn.credit_note_no}
+                                  title={`${cn.credit_note_no} | ฿${fmt(cn.amount)} | ${cn.vendor_name || "-"} | ${fmtDate(cn.credit_note_date)}`}>
+                                  {cn.credit_note_no} · ฿{fmt(cn.amount)} · {fmtDate(cn.credit_note_date)}
                                 </option>
                               ))}
                           </select>
