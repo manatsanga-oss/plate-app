@@ -752,7 +752,7 @@ export default function YamahaOrderPage({ currentUser }) {
                     );
                     return eligible;
                   })().map(d => (
-                    <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
+                    <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.deposit_date ? fmtDate(d.deposit_date) : "-"} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
                   ))}
                 </select>
               </div>
@@ -780,7 +780,7 @@ export default function YamahaOrderPage({ currentUser }) {
                       && Number(d.remaining_amount || 0) > 0
                     )
                     .map(d => (
-                      <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
+                      <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.deposit_date ? fmtDate(d.deposit_date) : "-"} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
                     ))}
                 </select>
               </div>
