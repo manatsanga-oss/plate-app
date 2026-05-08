@@ -77,7 +77,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       const allOrders = norm(r);
       setOrders(allOrders);
       // เช็ค DCS อัตโนมัติสำหรับใบที่สถานะ "สั่งซื้อแล้ว"
-      const toCheck = allOrders.filter(o => (o.status === "สั่งซื้อแล้ว" || o.status === "มาครบ") && o.vendor_po_no);
+      const toCheck = allOrders.filter(o => (o.status === "สั่งซื้อแล้ว" || o.status === "มาครบ" || o.status === "อะไหล่ค้างส่ง") && o.vendor_po_no);
       const mismatchSet = new Set();
       for (const o of toCheck) {
         try {
@@ -102,6 +102,9 @@ export default function SparePartsOrderPage({ currentUser }) {
           } else if (hasBackorder && o.status === "มาครบ") {
             // เปลี่ยนจาก "มาครบ" เป็น "อะไหล่ค้างส่ง" ถ้าพบ backorder
             await api("update_order_status", { order_id: o.order_id, status: "อะไหล่ค้างส่ง" });
+          } else if (!hasBackorder && dcsItems.length > 0 && o.status === "อะไหล่ค้างส่ง") {
+            // เปลี่ยนจาก "อะไหล่ค้างส่ง" → "มาครบ" เมื่อ backorder หายและมี DCS items แล้ว
+            await api("update_order_status", { order_id: o.order_id, status: "มาครบ" });
           }
           if (!allCorrect && dcsItems.length > 0) {
             mismatchSet.add(o.order_id);
@@ -859,7 +862,17 @@ export default function SparePartsOrderPage({ currentUser }) {
                     color: s === "ปิดงานซ่อม" ? "#fff" : s === "อะไหล่ค้างส่ง" ? "#fff" : s === "เปิดงาน" ? "#fff" : s === "มาครบ" ? "#1e40af" : s === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
                   }}>{s}</span>;
                 })()}</td>
-                <td style={td}>{o.vendor_po_no || "-"}</td>
+                <td style={td}>
+                  {currentUser?.role === "admin" ? (
+                    <span style={{ cursor: "pointer", color: o.vendor_po_no ? "#0369a1" : "#9ca3af", textDecoration: o.vendor_po_no ? "underline dotted" : "none" }}
+                      title="คลิกเพื่อแก้ไข (admin)"
+                      onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }}>
+                      {o.vendor_po_no || "✏️ ระบุ"}
+                    </span>
+                  ) : (
+                    o.vendor_po_no || "-"
+                  )}
+                </td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
                 <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
