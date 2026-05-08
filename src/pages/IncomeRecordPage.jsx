@@ -56,9 +56,15 @@ export default function IncomeRecordPage({ currentUser }) {
   const [tab, setTab] = useState("draft"); // draft | pay | history
   const [selected, setSelected] = useState({}); // { income_doc_id: true }
   const [payDialog, setPayDialog] = useState(false);
-  const [payForm, setPayForm] = useState({ paid_date: todayISO(), payment_method: "โอน", payment_note: "", from_bank_account_id: "" });
+  const [payForm, setPayForm] = useState({ paid_date: todayISO(), payment_note: "" });
+  // payments: array ของวิธีรับเงิน — รองรับการรับผสม
+  const [payments, setPayments] = useState([{ method: "โอน", amount: 0, from_bank_account_id: "", credit_note_no: "" }]);
+  const [editTotalRequired, setEditTotalRequired] = useState(0);
   const [savingPay, setSavingPay] = useState(false);
   const [editPayDocNo, setEditPayDocNo] = useState(null);
+  // ใบลดหนี้ที่ยังไม่ถูกใช้ — โหลดจาก accounting-api เมื่อเปิด popup
+  const [availableCreditNotes, setAvailableCreditNotes] = useState([]);
+  const [loadingCreditNotes, setLoadingCreditNotes] = useState(false);
 
   useEffect(() => {
     const now = new Date();
@@ -318,37 +324,88 @@ export default function IncomeRecordPage({ currentUser }) {
     draftDocs.forEach(d => { next[d.income_doc_id] = true; });
     setSelected(next);
   }
+  async function fetchAvailableCreditNotes() {
+    setLoadingCreditNotes(true);
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_unused_credit_notes" }),
+      });
+      const data = await res.json();
+      setAvailableCreditNotes(Array.isArray(data) ? data : (data?.rows || []));
+    } catch { setAvailableCreditNotes([]); }
+    setLoadingCreditNotes(false);
+  }
   function openPayDialog() {
     if (selectedIds.length === 0) { setMessage("❌ เลือกเอกสารก่อน"); return; }
     setEditPayDocNo(null);
-    setPayForm({ paid_date: todayISO(), payment_method: "โอน", payment_note: "", from_bank_account_id: "" });
+    setEditTotalRequired(0);
+    setPayForm({ paid_date: todayISO(), payment_note: "" });
+    setPayments([{ method: "โอน", amount: Number(selectedNet) || 0, from_bank_account_id: "", credit_note_no: "" }]);
     setPayDialog(true);
+    fetchAvailableCreditNotes();
   }
   function openEditPayDialog(g) {
     if (!g.paid_doc_no) return;
+    const total = Number(g.net || g.total || 0);
     setEditPayDocNo(g.paid_doc_no);
+    setEditTotalRequired(total);
     setPayForm({
       paid_date: g.paid_at ? String(g.paid_at).slice(0, 10) : todayISO(),
-      payment_method: g.payment_method || "โอน",
       payment_note: "",
-      from_bank_account_id: g.from_bank_account_id || "",
     });
+    const method = g.payment_method && g.payment_method !== "ผสม" ? g.payment_method : "โอน";
+    setPayments([{ method, amount: total, from_bank_account_id: g.from_bank_account_id || "", credit_note_no: "" }]);
     setPayDialog(true);
+    fetchAvailableCreditNotes();
+  }
+  function updatePayment(idx, patch) {
+    setPayments(prev => prev.map((p, i) => i === idx ? { ...p, ...patch } : p));
+  }
+  function addPayment() {
+    setPayments(prev => [...prev, { method: "เงินสด", amount: 0, from_bank_account_id: "", credit_note_no: "" }]);
+  }
+  function removePayment(idx) {
+    setPayments(prev => prev.length === 1 ? prev : prev.filter((_, i) => i !== idx));
   }
   async function savePayment() {
-    if (!payForm.from_bank_account_id) { setMessage("❌ เลือกบัญชีโอนจาก"); return; }
+    const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
+    const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    if (Math.abs(sum - totalRequired) > 0.01) {
+      setMessage(`❌ ยอดรวมของวิธีรับเงิน (${sum.toFixed(2)}) ต้องเท่ากับยอดที่จะรับ (${totalRequired.toFixed(2)})`);
+      return;
+    }
+    for (let i = 0; i < payments.length; i++) {
+      const p = payments[i];
+      if (!p.method) { setMessage(`❌ แถวที่ ${i + 1}: เลือกวิธีรับเงิน`); return; }
+      if (Number(p.amount) <= 0) { setMessage(`❌ แถวที่ ${i + 1}: จำนวนเงินต้องมากกว่า 0`); return; }
+      if (p.method === "โอน" && !p.from_bank_account_id) {
+        setMessage(`❌ แถวที่ ${i + 1} (โอน): เลือกบัญชี`); return;
+      }
+      if (p.method === "ใบลดหนี้" && !p.credit_note_no) {
+        setMessage(`❌ แถวที่ ${i + 1} (ใบลดหนี้): เลือกเลขใบลดหนี้`); return;
+      }
+    }
     setSavingPay(true);
     try {
+      const single = payments.length === 1 ? payments[0] : null;
       const body = {
         action: "income_record",
         op: editPayDocNo ? "edit_payment" : "save_payment",
         paid_doc_no: editPayDocNo || undefined,
         income_doc_ids: editPayDocNo ? undefined : selectedIds,
         paid_date: payForm.paid_date,
-        payment_method: payForm.payment_method,
+        payment_method: single ? single.method : "ผสม",
         payment_note: payForm.payment_note,
-        from_bank_account_id: Number(payForm.from_bank_account_id) || null,
+        from_bank_account_id: single && single.method === "โอน" ? (Number(single.from_bank_account_id) || null) : null,
         paid_by: currentUser?.username || currentUser?.name || "system",
+        // multi-method breakdown
+        payments: payments.map(p => ({
+          method: p.method,
+          amount: Number(p.amount) || 0,
+          from_bank_account_id: p.method === "โอน" ? (Number(p.from_bank_account_id) || null) : null,
+          credit_note_no: p.method === "ใบลดหนี้" ? p.credit_note_no : null,
+        })),
       };
       const res = await fetch(ACC_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -515,7 +572,7 @@ export default function IncomeRecordPage({ currentUser }) {
       {payDialog && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
           onClick={() => !savingPay && setPayDialog(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 540, maxWidth: "95vw" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 760, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto" }}>
             <h3 style={{ margin: "0 0 14px", color: editPayDocNo ? "#7c3aed" : "#072d6b" }}>
               {editPayDocNo ? `✏️ แก้ไขใบรับเงิน — ${editPayDocNo}` : "💵 บันทึกรับเงิน"}
             </h3>
@@ -527,36 +584,118 @@ export default function IncomeRecordPage({ currentUser }) {
             )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
-                <label style={lbl}>วันที่จ่าย *</label>
+                <label style={lbl}>วันที่รับ *</label>
                 <input type="date" value={payForm.paid_date} onChange={e => setPayForm(p => ({ ...p, paid_date: e.target.value }))} style={inp} />
-              </div>
-              <div>
-                <label style={lbl}>วิธีจ่าย</label>
-                <select value={payForm.payment_method} onChange={e => setPayForm(p => ({ ...p, payment_method: e.target.value }))} style={inp}>
-                  <option value="โอน">โอน</option>
-                  <option value="เงินสด">เงินสด</option>
-                  <option value="เช็ค">เช็ค</option>
-                </select>
-              </div>
-              <div style={{ gridColumn: "1 / span 2" }}>
-                <label style={lbl}>โอนจาก (บัญชีบริษัท) *</label>
-                <select value={payForm.from_bank_account_id} onChange={e => setPayForm(p => ({ ...p, from_bank_account_id: e.target.value }))} style={inp}>
-                  <option value="">-- เลือกบัญชี --</option>
-                  {bankAccounts.map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
-                </select>
               </div>
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label style={lbl}>หมายเหตุ</label>
                 <textarea value={payForm.payment_note} onChange={e => setPayForm(p => ({ ...p, payment_note: e.target.value }))} rows={2} style={inp} />
               </div>
             </div>
+
+            {/* Multi-method payment table */}
+            {(() => {
+              const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
+              const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+              const diff = totalRequired - sum;
+              const exact = Math.abs(diff) < 0.01;
+              return (
+                <div style={{ marginTop: 14, padding: 12, background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a" }}>💳 วิธีรับเงิน</div>
+                    <button type="button" onClick={addPayment}
+                      style={{ padding: "5px 10px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                      + เพิ่มวิธี
+                    </button>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {payments.map((p, idx) => {
+                      // เลือกใบลดหนี้ — set amount ตามใบที่เลือก
+                      const onCnSelect = (cnNo) => {
+                        const cn = availableCreditNotes.find(c => c.credit_note_no === cnNo);
+                        if (cn) {
+                          updatePayment(idx, { credit_note_no: cnNo, amount: Number(cn.amount) || 0 });
+                        } else {
+                          updatePayment(idx, { credit_note_no: cnNo });
+                        }
+                      };
+                      // exclude credit notes ที่ถูกเลือกในแถวอื่นแล้ว
+                      const usedCnInOtherRows = payments.filter((_, i) => i !== idx).map(x => x.credit_note_no).filter(Boolean);
+                      return (
+                      <div key={idx} style={{ display: "grid", gridTemplateColumns: "130px 140px 1fr 32px", gap: 10, alignItems: "center" }}>
+                        <select value={p.method}
+                          onChange={e => updatePayment(idx, { method: e.target.value, from_bank_account_id: e.target.value === "โอน" ? p.from_bank_account_id : "", credit_note_no: e.target.value === "ใบลดหนี้" ? p.credit_note_no : "" })}
+                          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
+                          <option value="โอน">เงินโอน</option>
+                          <option value="เงินสด">เงินสด</option>
+                          <option value="เช็ค">เช็ค</option>
+                          <option value="ใบลดหนี้">ใบลดหนี้</option>
+                        </select>
+                        <input type="number" step="0.01" min="0" value={p.amount}
+                          onChange={e => updatePayment(idx, { amount: e.target.value })}
+                          placeholder="0.00"
+                          readOnly={p.method === "ใบลดหนี้"}
+                          title={p.method === "ใบลดหนี้" ? "จำนวนเงินจะถูกตั้งจากใบลดหนี้ที่เลือก" : ""}
+                          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", background: p.method === "ใบลดหนี้" ? "#f3f4f6" : "#fff" }} />
+                        {p.method === "โอน" ? (
+                          <select value={p.from_bank_account_id || ""}
+                            onChange={e => updatePayment(idx, { from_bank_account_id: e.target.value })}
+                            style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
+                            <option value="">-- เลือกบัญชีรับเข้า --</option>
+                            {bankAccounts.map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
+                          </select>
+                        ) : p.method === "ใบลดหนี้" ? (
+                          <select value={p.credit_note_no || ""}
+                            onChange={e => onCnSelect(e.target.value)}
+                            style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #fb923c", fontFamily: "Tahoma", fontSize: 13, background: "#fff7ed" }}>
+                            <option value="">{loadingCreditNotes ? "กำลังโหลด..." : "-- เลือกใบลดหนี้รับ --"}</option>
+                            {availableCreditNotes
+                              .filter(cn => !usedCnInOtherRows.includes(cn.credit_note_no))
+                              .map(cn => (
+                                <option key={cn.credit_note_no} value={cn.credit_note_no}>
+                                  📄 {cn.credit_note_no} · ฿{fmt(cn.amount)} · {cn.vendor_name || "-"} ({fmtDate(cn.credit_note_date)})
+                                </option>
+                              ))}
+                          </select>
+                        ) : (
+                          <div style={{ padding: "7px 10px", color: "#9ca3af", fontSize: 12 }}>—</div>
+                        )}
+                        <button type="button" onClick={() => removePayment(idx)} disabled={payments.length === 1}
+                          title="ลบแถวนี้"
+                          style={{ padding: "5px 8px", background: payments.length === 1 ? "#e5e7eb" : "#fee2e2", color: "#991b1b", border: "none", borderRadius: 6, cursor: payments.length === 1 ? "not-allowed" : "pointer", fontSize: 14 }}>
+                          ✕
+                        </button>
+                      </div>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 10, padding: "8px 12px", background: exact ? "#d1fae5" : Math.abs(diff) > 0 ? "#fef9c3" : "#fff", borderRadius: 6, fontSize: 13, display: "flex", justifyContent: "space-between" }}>
+                    <span>ยอดที่ต้องรับ: <strong>฿ {fmt(totalRequired)}</strong></span>
+                    <span>รวมที่ระบุ: <strong style={{ color: exact ? "#065f46" : "#dc2626" }}>฿ {fmt(sum)}</strong></span>
+                    <span style={{ fontWeight: 700, color: exact ? "#065f46" : "#dc2626" }}>
+                      {exact ? "✓ ครบ" : diff > 0 ? `ขาดอีก ฿ ${fmt(diff)}` : `เกิน ฿ ${fmt(-diff)}`}
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
               <button onClick={() => { setPayDialog(false); setEditPayDocNo(null); }} disabled={savingPay}
                 style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
-              <button onClick={savePayment} disabled={savingPay || !payForm.from_bank_account_id}
-                style={{ padding: "8px 20px", background: savingPay || !payForm.from_bank_account_id ? "#9ca3af" : (editPayDocNo ? "#7c3aed" : "#059669"), color: "#fff", border: "none", borderRadius: 8, cursor: savingPay || !payForm.from_bank_account_id ? "not-allowed" : "pointer", fontWeight: 700 }}>
+              {(() => {
+                const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
+                const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+                const exact = Math.abs(sum - totalRequired) < 0.01;
+                const disabled = savingPay || !exact;
+                return (
+              <button onClick={savePayment} disabled={disabled}
+                title={!exact ? "ยอดรวมต้องเท่ากับยอดที่จะรับ" : ""}
+                style={{ padding: "8px 20px", background: disabled ? "#9ca3af" : (editPayDocNo ? "#7c3aed" : "#059669"), color: "#fff", border: "none", borderRadius: 8, cursor: disabled ? "not-allowed" : "pointer", fontWeight: 700 }}>
                 {savingPay ? "กำลังบันทึก..." : (editPayDocNo ? "💾 บันทึกแก้ไข" : "💾 บันทึกรับเงิน")}
               </button>
+                );
+              })()}
             </div>
           </div>
         </div>
