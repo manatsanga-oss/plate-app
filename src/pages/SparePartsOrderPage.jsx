@@ -972,7 +972,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                     return Object.values(byCustomer);
                   })().map(d => (
                     <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
-                      {d.deposit_doc_no} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
+                      {d.deposit_doc_no} | {fmtDate(d.deposit_date)} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
                     </option>
                   ))}
                 </select>
@@ -1002,7 +1002,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                     )
                     .map(d => (
                       <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
-                        {d.deposit_doc_no} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
+                        {d.deposit_doc_no} | {fmtDate(d.deposit_date)} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
                       </option>
                     ))}
                 </select>
@@ -1413,7 +1413,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                     && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no))
                   .map(d => (
                     <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
-                      {d.deposit_doc_no} | {d.customer_name} | {fmt(d.deposit_amount)}
+                      {d.deposit_doc_no} | {fmtDate(d.deposit_date)} | {d.customer_name} | {fmt(d.deposit_amount)}
                     </option>
                   ))}
               </select>
