@@ -22,7 +22,7 @@ export default function BillingPage({ currentUser }) {
   const [savingDiscount, setSavingDiscount] = useState(false);
   const [selectedBills, setSelectedBills] = useState({});  // {billing_doc_no: true}
   const [paymentDialog, setPaymentDialog] = useState(false);
-  const [paymentForm, setPaymentForm] = useState({ paid_date: "", payment_method: "โอน", payment_note: "", paid_to_vendor: "", wht_rate: 0, wht_amount: 0, wht_base: 0, from_bank_account_id: "" });
+  const [paymentForm, setPaymentForm] = useState({ paid_date: "", payment_method: "โอน", payment_note: "", paid_to_vendor: "", wht_rate: 0, wht_amount: 0, wht_base: 0, from_bank_account_id: "", credit_note_no: "", credit_note_date: "" });
   const [savingPayment, setSavingPayment] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -178,7 +178,7 @@ export default function BillingPage({ currentUser }) {
     if (vendors.length === 0) fetchVendors();
     if (bankAccounts.length === 0) fetchBankAccounts();
     const today = new Date().toISOString().slice(0, 10);
-    setPaymentForm({ paid_date: today, payment_method: "โอน", payment_note: "", paid_to_vendor: "", wht_rate: 0, wht_amount: 0, wht_base: calcWhtBase(), from_bank_account_id: "" });
+    setPaymentForm({ paid_date: today, payment_method: "โอน", payment_note: "", paid_to_vendor: "", wht_rate: 0, wht_amount: 0, wht_base: calcWhtBase(), from_bank_account_id: "", credit_note_no: "", credit_note_date: today });
     setPaymentDialog(true);
   }
 
@@ -186,6 +186,11 @@ export default function BillingPage({ currentUser }) {
     const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
     if (selectedDocNos.length === 0) return;
     if (!paymentForm.paid_to_vendor) { setMessage("❌ กรุณาเลือก Vendor"); return; }
+    const isCreditNote = paymentForm.payment_method === "ใบลดหนี้";
+    if (isCreditNote) {
+      if (!paymentForm.credit_note_no.trim()) { setMessage("❌ กรุณากรอกเลขที่ใบลดหนี้"); return; }
+      if (!paymentForm.credit_note_date) { setMessage("❌ กรุณาเลือกวันที่ใบลดหนี้"); return; }
+    }
     setSavingPayment(true);
     try {
       const res = await post({
@@ -197,8 +202,13 @@ export default function BillingPage({ currentUser }) {
         paid_to_vendor: paymentForm.paid_to_vendor,
         wht_rate: Number(paymentForm.wht_rate) || 0,
         wht_amount: Number(paymentForm.wht_amount) || 0,
-        from_bank_account_id: Number(paymentForm.from_bank_account_id) || null,
+        from_bank_account_id: isCreditNote ? null : (Number(paymentForm.from_bank_account_id) || null),
         paid_by: currentUser?.username || "system",
+        // ใบลดหนี้: ส่ง field พิเศษให้ backend INSERT ลง credit_notes_received
+        is_credit_note: isCreditNote,
+        credit_note_no: isCreditNote ? paymentForm.credit_note_no.trim() : null,
+        credit_note_date: isCreditNote ? paymentForm.credit_note_date : null,
+        credit_note_amount: isCreditNote ? selSum : null,
       });
       const payNo = res?.paid_doc_no || res?.[0]?.paid_doc_no || "";
       setMessage(`✅ บันทึกจ่ายเงิน ${payNo} สำเร็จ`);
@@ -1334,8 +1344,26 @@ export default function BillingPage({ currentUser }) {
                     <option value="เงินสด">เงินสด</option>
                     <option value="เช็ค">เช็ค</option>
                     <option value="หักบัญชี">หักบัญชี</option>
+                    <option value="ใบลดหนี้">ใบลดหนี้</option>
                   </select>
                 </div>
+                {paymentForm.payment_method === "ใบลดหนี้" && (
+                  <>
+                    <div>
+                      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3, color: "#7c2d12" }}>เลขที่ใบลดหนี้ *</label>
+                      <input type="text" value={paymentForm.credit_note_no}
+                        onChange={e => setPaymentForm(p => ({ ...p, credit_note_no: e.target.value }))}
+                        placeholder="เช่น CN-26050001"
+                        style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #fb923c", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box", background: "#fff7ed" }} />
+                    </div>
+                    <div>
+                      <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3, color: "#7c2d12" }}>วันที่ใบลดหนี้ *</label>
+                      <input type="date" value={paymentForm.credit_note_date}
+                        onChange={e => setPaymentForm(p => ({ ...p, credit_note_date: e.target.value }))}
+                        style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #fb923c", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box", background: "#fff7ed" }} />
+                    </div>
+                  </>
+                )}
                 <div style={{ gridColumn: "1 / span 2" }}>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>Vendor (จ่ายให้) *</label>
                   <select value={paymentForm.paid_to_vendor} onChange={e => onVendorChange(e.target.value)}
@@ -1356,7 +1384,8 @@ export default function BillingPage({ currentUser }) {
                 </div>
               </div>
 
-              {/* Bank Accounts block */}
+              {/* Bank Accounts + WHT block — ซ่อนเมื่อเลือกใบลดหนี้ (ไม่ใช่การโอนเงิน) */}
+              {paymentForm.payment_method !== "ใบลดหนี้" && (<>
               <div style={{ marginTop: 12, padding: 10, background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8 }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#1e40af", marginBottom: 6 }}>🏦 บัญชีธนาคาร</div>
 
@@ -1432,6 +1461,20 @@ export default function BillingPage({ currentUser }) {
                   <span style={{ marginLeft: 14, color: "#059669", fontWeight: 700 }}>= ยอดโอนจริง: {(selSum - Number(paymentForm.wht_amount || 0)).toLocaleString()}</span>
                 </div>
               </div>
+              </>)}
+
+              {/* Credit note info — แสดงเมื่อเลือกใบลดหนี้ */}
+              {paymentForm.payment_method === "ใบลดหนี้" && (
+                <div style={{ marginTop: 12, padding: 10, background: "#fff7ed", border: "1px solid #fb923c", borderRadius: 8, fontSize: 13 }}>
+                  <div style={{ fontWeight: 700, color: "#7c2d12", marginBottom: 6 }}>📄 ใบลดหนี้รับ</div>
+                  <div style={{ color: "#374151" }}>
+                    บันทึกการลดหนี้แทนการจ่ายเงิน — ระบบจะสร้างเอกสาร "ใบลดหนี้รับ" อ้างอิงเลขใบจ่าย/ใบวางบิลที่เลือก
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: "#7c2d12" }}>
+                    ยอดลดหนี้: <strong>฿ {selSum.toLocaleString()}</strong> · ใบวางบิลที่อ้างอิง: <strong>{Object.keys(selectedBills).filter(k => selectedBills[k]).length}</strong> ใบ
+                  </div>
+                </div>
+              )}
 
               {/* Preview docs (hide in edit mode) */}
               {!isEditMode && (
