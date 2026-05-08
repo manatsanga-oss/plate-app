@@ -63,8 +63,8 @@ SELECT (SELECT pay_no FROM gen) AS paid_doc_no, (SELECT COUNT(*) FROM upd) AS up
   const pbValuesArr = paymentsArr.map((p, i) => {
     const m = esc(p.method || '');
     const amt = num(p.amount);
-    const ba = p.from_bank_account_id ? Number(p.from_bank_account_id) : 'NULL';
-    return `(${m}, ${amt}, ${ba}, ${i + 1})`;
+    const ba = p.from_bank_account_id ? Number(p.from_bank_account_id) + '::integer' : 'NULL::integer';
+    return `(${m}::text, ${amt}::numeric, ${ba}, ${i + 1}::integer)`;
   });
   const hasPayments = pbValuesArr.length > 0;
 

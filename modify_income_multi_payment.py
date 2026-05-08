@@ -62,9 +62,9 @@ new_block = """else if (op === 'pay' || op === 'save_payment' || op === 'edit_pa
   const pbValues = paymentsArr.map((p, i) => {
     const m = escSql(p.method);
     const amt = Number(p.amount) || 0;
-    const ba = p.from_bank_account_id ? Number(p.from_bank_account_id) : 'NULL';
-    const cn = escSql(p.credit_note_no);
-    return `(${m}, ${amt}, ${ba}, ${cn}, ${i + 1})`;
+    const ba = p.from_bank_account_id ? Number(p.from_bank_account_id) + '::integer' : 'NULL::integer';
+    const cn = p.credit_note_no ? escSql(p.credit_note_no) + '::text' : 'NULL::text';
+    return `(${m}::text, ${amt}::numeric, ${ba}, ${cn}, ${i + 1}::integer)`;
   });
   const hasPayments = pbValues.length > 0;
 
