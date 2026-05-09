@@ -13,6 +13,8 @@ export default function ReceiveReceiptPage({ currentUser }) {
   const [expanded, setExpanded] = useState({});
   const [selected, setSelected] = useState({}); // { item_id: true }
   const [lastSavedIds, setLastSavedIds] = useState(null); // ids ของรายการที่เพิ่ง save (สำหรับกรองหลัง save)
+  const [tab, setTab] = useState("pending"); // pending = รอส่งคืน, history = ประวัติส่งคืน
+  const [filterBranch, setFilterBranch] = useState("all"); // SCY01 / SCY04 / ...
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -93,7 +95,6 @@ export default function ReceiveReceiptPage({ currentUser }) {
     const today = new Date();
     const pad = n => String(n).padStart(2, "0");
     const printDate = `${pad(today.getDate())}/${pad(today.getMonth() + 1)}/${today.getFullYear() + 543} ${pad(today.getHours())}:${pad(today.getMinutes())}`;
-    const total = returnedItems.reduce((s, it) => s + Number(it.net_price || 0), 0);
     const trs = returnedItems.map((it, i) => `<tr>
       <td>${i + 1}</td>
       <td class="mono">${safe(it.receipt_no)}</td>
@@ -101,7 +102,6 @@ export default function ReceiveReceiptPage({ currentUser }) {
       <td class="mono">${safe(it.chassis_no)}</td>
       <td>${safe(it.plate_number || "-")}</td>
       <td>${safe(it.income_name || it.income_type || "-")}</td>
-      <td class="num">${Number(it.net_price || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td>
     </tr>`).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>ใบส่งคืน ${safe(batch.batch_code)}</title>
 <style>
@@ -123,14 +123,12 @@ th { background: #f0f4f9; }
 <div class="info">
   <div><strong>ร้านรับเรื่อง:</strong> ${safe(batch.destination || "-")}</div>
   <div><strong>จำนวนรายการ:</strong> ${returnedItems.length}</div>
-  <div><strong>ผู้ดำเนินการ:</strong> ${safe(batch.created_by || "-")}</div>
-  <div><strong>ยอดรวม:</strong> ${total.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท</div>
+  <div style="grid-column: 1 / span 2;"><strong>ผู้ดำเนินการ:</strong> ${safe(batch.created_by || "-")}</div>
 </div>
 <table>
-  <thead><tr><th>#</th><th>เลขที่รับเรื่อง</th><th>ลูกค้า</th><th>เลขถัง</th><th>ทะเบียน</th><th>รายการ</th><th>ยอด</th></tr></thead>
+  <thead><tr><th>#</th><th>เลขที่รับเรื่อง</th><th>ลูกค้า</th><th>เลขถัง</th><th>ทะเบียน</th><th>รายการ</th></tr></thead>
   <tbody>
     ${trs}
-    <tr class="total"><td colspan="6" style="text-align:right">รวมทั้งสิ้น</td><td class="num">${total.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</td></tr>
   </tbody>
 </table>
 <div style="margin-top:25px;">
@@ -194,6 +192,31 @@ th { background: #f0f4f9; }
         <h2 className="page-title">📥 บันทึกรับ/ส่งคืน งานรับเรื่องงานทะเบียน</h2>
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, borderBottom: "2px solid #e5e7eb" }}>
+        {(() => {
+          const pendingCount = batches.filter(b => {
+            const total = b.items_count || (b.items?.length || 0);
+            return !(total > 0 && (b.returned_count || 0) === total);
+          }).length;
+          const historyCount = batches.filter(b => {
+            const total = b.items_count || (b.items?.length || 0);
+            return total > 0 && (b.returned_count || 0) === total;
+          }).length;
+          return [
+            ["pending", "⏳ รอส่งคืนงานทะเบียน", pendingCount],
+            ["history", "📚 ประวัติการส่งคืน", historyCount],
+          ].map(([v, label, count]) => (
+            <button key={v} onClick={() => setTab(v)}
+              style={{ padding: "10px 22px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
+                color: tab === v ? "#072d6b" : "#6b7280",
+                borderBottom: tab === v ? "3px solid #072d6b" : "3px solid transparent", marginBottom: -2 }}>
+              {label} ({count})
+            </button>
+          ));
+        })()}
+      </div>
+
       {message && (
         <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8, background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : "#991b1b", display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ flex: 1 }}>{message}</span>
@@ -220,6 +243,16 @@ th { background: #f0f4f9; }
           <option value="returned">✅ ส่งคืนร้านรับเรื่องแล้ว</option>
         </select>
 
+        {(() => {
+          const branchCodes = [...new Set(batches.flatMap(b => (b.items || []).map(it => String(it.receipt_no || "").substring(0, 5)).filter(Boolean)))].sort();
+          return (
+            <select value={filterBranch} onChange={e => setFilterBranch(e.target.value)} style={inp}>
+              <option value="all">🏢 ทุกสาขา</option>
+              {branchCodes.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          );
+        })()}
+
         <input type="text" placeholder="🔍 ค้นหา (เลข batch, supplier)"
           value={search} onChange={e => setSearch(e.target.value)}
           onKeyDown={e => e.key === "Enter" && fetchData()}
@@ -244,20 +277,44 @@ th { background: #f0f4f9; }
       </div>
 
       {/* Batches list */}
-      {loading ? (
-        <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
-      ) : batches.length === 0 ? (
-        <div style={{ padding: 60, textAlign: "center", color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
-          ไม่มี batch
-        </div>
-      ) : (
+      {(() => {
+        const visibleBatches = batches.filter(b => {
+          const total = b.items_count || (b.items?.length || 0);
+          const fullyReturned = total > 0 && (b.returned_count || 0) === total;
+          if (tab === "history" ? !fullyReturned : fullyReturned) return false;
+          if (filterBranch !== "all") {
+            const has = (b.items || []).some(it => String(it.receipt_no || "").substring(0, 5) === filterBranch);
+            if (!has) return false;
+          }
+          return true;
+        });
+        if (loading) return <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>;
+        if (visibleBatches.length === 0) return (
+          <div style={{ padding: 60, textAlign: "center", color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+            {tab === "history" ? "ยังไม่มีประวัติการส่งคืน" : "ไม่มี batch ที่รอส่งคืน"}
+          </div>
+        );
+        return null;
+      })()}
+      {!loading && batches.length > 0 && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {batches.map(b => {
+          {batches.filter(b => {
+            const total = b.items_count || (b.items?.length || 0);
+            const returned = b.returned_count || 0;
+            const fullyReturned = total > 0 && returned === total;
+            if (tab === "history" ? !fullyReturned : fullyReturned) return false;
+            if (filterBranch !== "all") {
+              const has = (b.items || []).some(it => String(it.receipt_no || "").substring(0, 5) === filterBranch);
+              if (!has) return false;
+            }
+            return true;
+          }).map(b => {
             const st = batchStatusBadge(b);
             const isOpen = !!expanded[b.batch_id];
             const allItems = b.items || [];
             // Filter items ตาม filterStatus — แสดงเฉพาะรายการที่ตรงกับ filter
             let items = allItems.filter(it => {
+              if (filterBranch !== "all" && String(it.receipt_no || "").substring(0, 5) !== filterBranch) return false;
               if (filterStatus === "pending") return !it.received_back_at;
               if (filterStatus === "received") return it.received_back_at && !it.returned_at;
               if (filterStatus === "returned") return !!it.returned_at;

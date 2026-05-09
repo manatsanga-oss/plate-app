@@ -71,6 +71,8 @@ import MyMotoReportPage from "./pages/MyMotoReportPage";
 import MyMotorRegisterPage from "./pages/MyMotorRegisterPage";
 import ReportAdminPage from "./pages/ReportAdminPage";
 import CreditNoteReportPage from "./pages/CreditNoteReportPage";
+import CarPaymentReportPage from "./pages/CarPaymentReportPage";
+import RegistrationSummaryReportPage from "./pages/RegistrationSummaryReportPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
 import CosmosInsurancePage from "./pages/CosmosInsurancePage";
@@ -133,6 +135,8 @@ export default function App() {
     if (page === "taxinvoicereport") return false;
     if (page === "taxinvoicesalesreport") return false;
     if (page === "creditnotereport") return false;  // เฉพาะ admin (ใบลดหนี้รับ)
+    if (page === "carpaymentreport") return false;   // เฉพาะ admin (รายงานรับชำระเงินรายคัน)
+    if (page === "registrationsummaryreport") return false;  // เฉพาะ admin (รายงานสรุปงานทะเบียน)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
     if (page === "financepayment") return false;
     if (page === "convert") return false;
@@ -184,6 +188,12 @@ export default function App() {
         )}
         {activeMenu === "creditnotereport" && canAccess("creditnotereport") && (
           <CreditNoteReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "carpaymentreport" && canAccess("carpaymentreport") && (
+          <CarPaymentReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "registrationsummaryreport" && canAccess("registrationsummaryreport") && (
+          <RegistrationSummaryReportPage currentUser={currentUser} />
         )}
         {activeMenu === "stockcheck" && canAccess("stockcheck") && (
           <StockCheckPage currentUser={currentUser} />
@@ -430,10 +440,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="mymotoregister" label="บันทึกลงทะเบียน MyMoto" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","taxinvoicesalesreport","creditnotereport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","taxinvoicesalesreport","creditnotereport","carpaymentreport","registrationsummaryreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="creditnotereport" label="รายงานใบลดหนี้รับ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="carpaymentreport" label="รายงานรับชำระเงินรายคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="registrationsummaryreport" label="รายงานสรุปงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Sales" pages={salesPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

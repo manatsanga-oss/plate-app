@@ -547,11 +547,12 @@ export default function ClaimPage({ currentUser }) {
           <thead><tr>
             <th>#</th><th>เลขที่เคลม</th><th>วันที่</th><th>ผู้ติดต่อ</th>
             <th>รุ่นรถ</th><th>เลขเครื่อง/ตัวถัง</th><th>ช่าง</th>
+            <th>เลขที่ใบเคลม (ศูนย์)</th>
             <th style={{ width: 180 }}>ขั้นตอน</th><th>จัดการ</th>
           </tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={9} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
-              : filtered.length === 0 ? <tr><td colSpan={9} style={{ textAlign: "center", padding: 20 }}>ไม่มีรายการ</td></tr>
+            {loading ? <tr><td colSpan={10} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
+              : filtered.length === 0 ? <tr><td colSpan={10} style={{ textAlign: "center", padding: 20 }}>ไม่มีรายการ</td></tr>
               : filtered.map((c, i) => {
                 const doneSteps = TRACKING_STEPS.filter(s => c[s.key]).length;
                 const pct = (doneSteps / TRACKING_STEPS.length) * 100;
@@ -567,6 +568,7 @@ export default function ClaimPage({ currentUser }) {
                   <td>{c.car_model}</td>
                   <td style={{ fontSize: 11 }}>{c.engine_chassis_no}</td>
                   <td>{c.technician || "-"}</td>
+                  <td style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{c.submit_claim_no || "-"}</td>
                   <td>
                     <div style={{ display: "flex", gap: 2, marginBottom: 4 }}>
                       {TRACKING_STEPS.map(s => (

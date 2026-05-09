@@ -128,7 +128,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
   return (
     <div className="page-container">
       <div className="page-topbar">
-        <div className="page-title">📊 รายงานใบกำกับภาษี (HONDA)</div>
+        <div className="page-title">📊 รายงานใบกำกับภาษี</div>
       </div>
 
       {/* Filters */}
