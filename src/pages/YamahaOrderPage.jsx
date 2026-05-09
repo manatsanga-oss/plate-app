@@ -436,10 +436,12 @@ export default function YamahaOrderPage({ currentUser }) {
     setSavingPO(true);
     setMessage("");
     try {
-      await api("confirm_yamaha_order", { order_id: showPOModal.order_id, vendor_po_no: poNumber.trim() });
+      // edit mode: ใช้ update_yamaha_po (อัปเดตเฉพาะ vendor_po_no, ไม่กระทบ status)
+      const action = showPOModal?.editMode ? "update_yamaha_po" : "confirm_yamaha_order";
+      await api(action, { order_id: showPOModal.order_id, vendor_po_no: poNumber.trim() });
       setShowPOModal(null);
       setPoNumber("");
-      setMessage("บันทึกการสั่งซื้อสำเร็จ");
+      setMessage(showPOModal?.editMode ? "แก้ไขเลขที่ใบรับสั่งซื้อสำเร็จ" : "บันทึกการสั่งซื้อสำเร็จ");
       loadAll();
     } catch { setMessage("เกิดข้อผิดพลาด"); }
     setSavingPO(false);
@@ -686,6 +688,13 @@ export default function YamahaOrderPage({ currentUser }) {
                       <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
                       <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
                     </>
+                  )}
+                  {currentUser?.role === "admin" && !isClosed && o.status !== "รอดำเนินการ" && o.vendor_po_no && (
+                    <button onClick={() => { setShowPOModal({ ...o, editMode: true }); setPoNumber(o.vendor_po_no || ""); setMessage(""); }}
+                      title="แก้ไขเลขที่ใบรับสั่งซื้อ (admin)"
+                      style={{ background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>
+                      ✏️ แก้ PO
+                    </button>
                   )}
                   {!isClosed && (o.status === "มาครบ" || o.status === "มาไม่ครบ") && (
                     <button onClick={() => { setShowAppointmentModal(o); setAppointmentDate(o.appointment_date || ""); setMessage(""); }}
@@ -1071,7 +1080,9 @@ export default function YamahaOrderPage({ currentUser }) {
       {showPOModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
-            <h3 style={{ marginTop: 0, color: "#072d6b" }}>บันทึกการสั่งซื้อ</h3>
+            <h3 style={{ marginTop: 0, color: showPOModal.editMode ? "#0ea5e9" : "#072d6b" }}>
+              {showPOModal.editMode ? "✏️ แก้ไขเลขที่ใบรับสั่งซื้อ" : "บันทึกการสั่งซื้อ"}
+            </h3>
             <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 16 }}>
               <div>ใบสั่งซื้อ: <b>{showPOModal.order_no || `#${showPOModal.order_id}`}</b></div>
               <div>ลูกค้า: <b>{showPOModal.customer_name}</b></div>

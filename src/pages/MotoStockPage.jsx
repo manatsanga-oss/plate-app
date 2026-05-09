@@ -228,6 +228,19 @@ export default function MotoStockPage() {
           {branches.filter(b => b.code !== filterBranch && b.code !== filterBranch2).map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
         </select>
         <button onClick={fetchData} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
+        <button onClick={() => {
+          setFilterBrand("all");
+          setFilterSeries("all");
+          setFilterBranch("all");
+          setFilterBranch2("all");
+          setFilterBranch3("all");
+          setFilterQty([]);
+          setFilterQty2([]);
+          setCurrentPage(1);
+        }}
+          style={{ padding: "8px 16px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+          ✕ ล้างกรอง
+        </button>
         {selectedRows.size > 0 && (
           <>
             <button onClick={() => setShowOnlySelected(v => !v)}
