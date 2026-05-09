@@ -24,6 +24,8 @@ export default function RegistrationSummaryReportPage() {
   const [dateFrom, setDateFrom] = useState(firstOfMonth());
   const [dateTo, setDateTo] = useState(todayISO());
   const [branchFilter, setBranchFilter] = useState("all");
+  const [regPaidMonth, setRegPaidMonth] = useState("");  // YYYY-MM
+  const [insPaidMonth, setInsPaidMonth] = useState("");  // YYYY-MM
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
 
@@ -53,13 +55,26 @@ export default function RegistrationSummaryReportPage() {
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
 
   const kw = search.trim().toLowerCase();
+  const monthOf = (v) => v ? String(v).slice(0, 7) : "";  // YYYY-MM
   const filtered = rows.filter(r => {
     if (branchFilter !== "all" && r.branch !== branchFilter) return false;
+    if (regPaidMonth && monthOf(r.reg_paid_at) !== regPaidMonth) return false;
+    if (insPaidMonth && monthOf(r.ins_paid_at) !== insPaidMonth) return false;
     if (!kw) return true;
     const hay = [r.tax_invoice_no, r.customer_name, r.sale_customer_name, r.chassis_no, r.engine_no, r.model_name, r.sale_finance_company, r.sale_invoice_no]
       .filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
+
+  // คำนวณ list ของเดือนที่มีในข้อมูล
+  const regPaidMonthOpts = [...new Set(rows.map(r => monthOf(r.reg_paid_at)).filter(Boolean))].sort().reverse();
+  const insPaidMonthOpts = [...new Set(rows.map(r => monthOf(r.ins_paid_at)).filter(Boolean))].sort().reverse();
+  const fmtMonth = (ym) => {
+    if (!ym) return "";
+    const [y, m] = ym.split("-");
+    const months = ["", "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+    return `${months[Number(m)] || m} ${(Number(y) + 543).toString().slice(-2)}`;
+  };
 
   // ยอดจดทะเบียนรวม + ค่า พรบ. รวม
   const totalRegFee = filtered.reduce((s, r) => s + Number(r.total_registration_fee || 0), 0);
@@ -133,6 +148,18 @@ export default function RegistrationSummaryReportPage() {
           <option value="PAPAO">ป.เปา</option>
           <option value="NAKORNLUANG">นครหลวง</option>
           <option value="SINGCHAI">สิงห์ชัย</option>
+        </select>
+        <select value={regPaidMonth} onChange={e => setRegPaidMonth(e.target.value)}
+          title="กรองเดือนที่จ่ายค่าจดทะเบียน"
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #fbbf24", fontSize: 13, color: "#92400e", background: "#fef3c7" }}>
+          <option value="">📅 จ่ายทะเบียน: ทุกเดือน</option>
+          {regPaidMonthOpts.map(m => <option key={m} value={m}>📅 ทะเบียน · {fmtMonth(m)}</option>)}
+        </select>
+        <select value={insPaidMonth} onChange={e => setInsPaidMonth(e.target.value)}
+          title="กรองเดือนที่จ่ายค่า พรบ."
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #86efac", fontSize: 13, color: "#065f46", background: "#dcfce7" }}>
+          <option value="">🛡️ จ่าย พรบ.: ทุกเดือน</option>
+          {insPaidMonthOpts.map(m => <option key={m} value={m}>🛡️ พรบ. · {fmtMonth(m)}</option>)}
         </select>
         <input type="text" value={search} onChange={e => setSearch(e.target.value)}
           placeholder="🔍 ค้นหา (เลขกำกับ / ลูกค้า / เลขถัง / เลขเครื่อง / รุ่น / ไฟแนนท์)"
@@ -228,9 +255,19 @@ export default function RegistrationSummaryReportPage() {
                     <td style={td}>{fmtDate(r.sale_date)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.total_registration_fee) > 0 ? "#92400e" : "#9ca3af" }}>
                       {Number(r.total_registration_fee) > 0 ? fmt(r.total_registration_fee) : "-"}
+                      {r.reg_paid_at && (
+                        <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "Tahoma", fontWeight: 400 }}>
+                          จ่าย: {fmtDate(r.reg_paid_at)}
+                        </div>
+                      )}
                     </td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.total_insurance_premium) > 0 ? "#065f46" : "#9ca3af" }}>
                       {Number(r.total_insurance_premium) > 0 ? fmt(r.total_insurance_premium) : "-"}
+                      {r.ins_paid_at && (
+                        <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "Tahoma", fontWeight: 400 }}>
+                          จ่าย: {fmtDate(r.ins_paid_at)}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

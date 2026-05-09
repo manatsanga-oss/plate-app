@@ -40,13 +40,36 @@ export default function ReceiptBillingPage({ currentUser }) {
     setSelectedBills({});
   }, [viewMode]);
 
-  function printBillingDoc(group) {
+  async function printBillingDoc(group) {
     const safe = s => String(s ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const today = new Date();
     const pad = n => String(n).padStart(2, "0");
     const dateStr = `${pad(today.getDate())}/${pad(today.getMonth() + 1)}/${today.getFullYear() + 543} ${pad(today.getHours())}:${pad(today.getMinutes())}`;
     const billDate = group.billed_at ? new Date(group.billed_at) : null;
     const billDateStr = billDate ? `${pad(billDate.getDate())}/${pad(billDate.getMonth() + 1)}/${billDate.getFullYear() + 543}` : "-";
+
+    // ดึงสรุปยอดเงินโอนต่อบัญชีจาก receipt_transfers
+    let transferSummary = [];
+    try {
+      const receiptNos = [...new Set(group.items.map(it => it.receipt_no).filter(Boolean))];
+      if (receiptNos.length > 0) {
+        const tres = await fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_receipt_transfer_summary", receipt_nos: receiptNos }),
+        });
+        const tdata = await tres.json();
+        transferSummary = Array.isArray(tdata) ? tdata : [];
+      }
+    } catch {}
+    const totalTransfer = transferSummary.reduce((s, t) => s + Number(t.total_amount || 0), 0);
+    const transferRows = transferSummary.map((t, i) => `<tr>
+      <td>${i + 1}</td>
+      <td>${safe(t.paid_to_vendor || "-")}</td>
+      <td>${safe(t.bank_name || "-")}</td>
+      <td class="mono">${safe(t.account_no || "-")}</td>
+      <td class="num">${fmtNum(t.total_amount)}</td>
+    </tr>`).join("");
+
     const trs = group.items.map((r, i) => `<tr>
       <td>${i + 1}</td>
       <td class="mono">${safe(r.receipt_no)}</td>
@@ -70,8 +93,18 @@ th { background: #f0f4f9; }
 .total { font-weight: 700; background: #fef9c3; }
 .sign-box { display: inline-block; width: 45%; margin-top: 30px; padding: 0 10px; vertical-align: top; }
 </style></head><body>
-<h1>ใบวางบิล — งานรับเรื่อง</h1>
+<h1>สรุปการจ่ายเงิน</h1>
 <div class="head">เลขใบวางบิล: <strong>${safe(group.billing_doc_no)}</strong> · วันที่: ${billDateStr}<br/>พิมพ์: ${dateStr}</div>
+${transferSummary.length > 0 ? `
+<table style="margin-bottom:14px;">
+  <thead><tr><th style="width:30px">#</th><th>ผู้รับเงิน</th><th>ธนาคาร</th><th>เลขที่บัญชี</th><th>ยอดโอน</th></tr></thead>
+  <tbody>
+    ${transferRows}
+    <tr class="total"><td colspan="4" style="text-align:right">รวมโอนทั้งสิ้น</td><td class="num">${fmtNum(totalTransfer)}</td></tr>
+  </tbody>
+</table>
+` : ''}
+<h3 style="margin-top:0;margin-bottom:6px;font-size:12pt;color:#072d6b;">รายละเอียด</h3>
 <table>
   <thead><tr><th>#</th><th>เลขที่รับ</th><th>ลูกค้า</th><th>ชื่อรายได้</th><th>ยอดรายได้</th><th>ยอดบิล</th></tr></thead>
   <tbody>
