@@ -17,7 +17,16 @@ function fmtDate(v) {
 const BRANCH_OPTS = [
   { value: "PAPAO", label: "ป.เปา" },
   { value: "NAKORNLUANG", label: "นครหลวง" },
+  { value: "SINGCHAI", label: "สิงห์ชัย" },
 ];
+
+// helper: branch → ป้ายสี + ชื่อย่อ
+const BRANCH_BADGE = {
+  PAPAO:       { label: "ป.เปา",   bg: "#dbeafe", color: "#1e40af" },
+  NAKORNLUANG: { label: "นครหลวง", bg: "#fef3c7", color: "#92400e" },
+  SINGCHAI:    { label: "สิงห์ชัย", bg: "#fce7f3", color: "#9d174d" },
+};
+const branchBadge = (b) => BRANCH_BADGE[b] || { label: b || "-", bg: "#e5e7eb", color: "#374151" };
 
 export default function FinancePaymentMatchPage({ currentUser }) {
   // tab: "match" = บันทึกใหม่ / "history" = ประวัติการตัด
@@ -136,7 +145,19 @@ export default function FinancePaymentMatchPage({ currentUser }) {
     setSearching(true);
     setMessage("");
     try {
-      const branches = ["PAPAO", "NAKORNLUANG"];
+      // เลือกสาขาที่จะดึงตาม account_name ของเงินโอนที่เลือก
+      // - ชื่อบัญชี "สิงห์ชัยสยามยนต์" → ดึงเฉพาะ SINGCHAI
+      // - ชื่อบัญชี "ป.เปา มอเตอร์เซอร์วิส" → ดึง PAPAO + NAKORNLUANG
+      // - อื่นๆ → ดึงทั้ง 3 สาขา
+      const accName = String(selectedTransfer?.account_name || "").toLowerCase();
+      let branches;
+      if (accName.includes("สิงห์ชัย")) {
+        branches = ["SINGCHAI"];
+      } else if (accName.includes("ป.เปา") || accName.includes("ป เปา") || accName.includes("เปา")) {
+        branches = ["PAPAO", "NAKORNLUANG"];
+      } else {
+        branches = ["PAPAO", "NAKORNLUANG", "SINGCHAI"];
+      }
       const results = [];
       const errors = [];
       // ตัดข้อความเหลือเฉพาะคำสำคัญ (กรณีสะกดต่างกันเล็กน้อย เช่น กรุ๊ปลีส vs กรุ๊ปลิส)
@@ -454,9 +475,11 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                             <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                               <td style={{ ...td, textAlign: "center" }}>{i + 1}</td>
                               <td style={td}>
-                                <span style={{ display: "inline-block", padding: "2px 8px", background: it.branch === "PAPAO" ? "#dbeafe" : "#fef3c7", color: it.branch === "PAPAO" ? "#1e40af" : "#92400e", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
-                                  {it.branch === "PAPAO" ? "ป.เปา" : "นครหลวง"}
+                                {(() => { const b = branchBadge(it.branch); return (
+                                <span style={{ display: "inline-block", padding: "2px 8px", background: b.bg, color: b.color, borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                                  {b.label}
                                 </span>
+                                ); })()}
                               </td>
                               <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{it.tax_invoice_no}</td>
                               <td style={td}>{it.customer_name || "-"}</td>
@@ -521,7 +544,10 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                       onChange={() => { setSelectedTransfer(t); setSelectedItems({}); }} />
                     <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#072d6b", minWidth: 130 }}>{t.doc_no || `FT-${t.ft_id}`}</span>
                     <span style={{ minWidth: 90 }}>{fmtDate(t.transfer_date)}</span>
-                    <span style={{ flex: 1, fontSize: 13, color: "#6b7280" }}>{t.bank_name} · {t.account_no}</span>
+                    <span style={{ flex: 1, fontSize: 13, color: "#6b7280" }}>
+                      {t.bank_name} · {t.account_no}
+                      {t.account_name && <span style={{ marginLeft: 6, color: "#374151", fontWeight: 600 }}>· {t.account_name}</span>}
+                    </span>
                     <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#15803d", fontSize: 16 }}>฿ {fmt(t.amount)}</span>
                   </label>
                 );
@@ -594,9 +620,11 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                         <input type="checkbox" checked={isChecked} onChange={() => toggleItem(r)} />
                       </td>
                       <td style={{ ...td, fontSize: 11 }}>
-                        <span style={{ display: "inline-block", padding: "2px 8px", background: r.branch === "PAPAO" ? "#dbeafe" : "#fef3c7", color: r.branch === "PAPAO" ? "#1e40af" : "#92400e", borderRadius: 4, fontWeight: 600 }}>
-                          {r.branch === "PAPAO" ? "ป.เปา" : "นครหลวง"}
+                        {(() => { const b = branchBadge(r.branch); return (
+                        <span style={{ display: "inline-block", padding: "2px 8px", background: b.bg, color: b.color, borderRadius: 4, fontWeight: 600 }}>
+                          {b.label}
                         </span>
+                        ); })()}
                       </td>
                       <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#072d6b" }}>{r.tax_invoice_no}</td>
                       <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(r.invoice_date)}</td>

@@ -18,6 +18,7 @@ export default function CreditNoteReportPage() {
   const [dateFrom, setDateFrom] = useState(firstOfMonth());
   const [dateTo, setDateTo] = useState(todayISO());
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all"); // all | available | used | cancelled
   const [message, setMessage] = useState("");
 
   async function fetchData() {
@@ -47,6 +48,9 @@ export default function CreditNoteReportPage() {
 
   const kw = search.trim().toLowerCase();
   const filtered = rows.filter(r => {
+    if (statusFilter === "available" && (r.status === "cancelled" || r.used_in_income)) return false;
+    if (statusFilter === "used" && !r.used_in_income) return false;
+    if (statusFilter === "cancelled" && r.status !== "cancelled") return false;
     if (!kw) return true;
     const hay = [r.credit_note_no, r.paid_doc_no, r.billing_doc_nos, r.vendor_name, r.note]
       .filter(Boolean).join(" ").toLowerCase();
@@ -54,6 +58,11 @@ export default function CreditNoteReportPage() {
   });
 
   const totalAmount = filtered.reduce((s, r) => s + Number(r.amount || 0), 0);
+  // counts by status (จาก rows ทั้งหมด ไม่ใช่ filtered)
+  const countAll = rows.length;
+  const countAvailable = rows.filter(r => r.status !== "cancelled" && !r.used_in_income).length;
+  const countUsed = rows.filter(r => !!r.used_in_income).length;
+  const countCancelled = rows.filter(r => r.status === "cancelled").length;
 
   const th = { padding: "10px 8px", textAlign: "left", whiteSpace: "nowrap", fontSize: 12, background: "#072d6b", color: "#fff" };
   const td = { padding: "8px", borderBottom: "1px solid #e5e7eb", fontSize: 13 };
@@ -115,6 +124,23 @@ export default function CreditNoteReportPage() {
         </button>
       </div>
 
+      {/* Status filter chips */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        {[
+          { key: "all", label: "ทั้งหมด", count: countAll, bg: "#072d6b" },
+          { key: "available", label: "💰 คงเหลือ", count: countAvailable, bg: "#10b981" },
+          { key: "used", label: "✓ ใช้แล้ว", count: countUsed, bg: "#3b82f6" },
+          { key: "cancelled", label: "❌ ยกเลิก", count: countCancelled, bg: "#ef4444" },
+        ].map(f => (
+          <button key={f.key} onClick={() => setStatusFilter(f.key)}
+            style={{ padding: "6px 16px", borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none",
+              background: statusFilter === f.key ? f.bg : "#e5e7eb",
+              color: statusFilter === f.key ? "#fff" : "#374151" }}>
+            {f.label} ({f.count})
+          </button>
+        ))}
+      </div>
+
       {/* Summary */}
       <div style={{ display: "flex", gap: 20, marginBottom: 12, padding: "10px 14px", background: "#fef3c7", borderRadius: 10, border: "1px solid #fbbf24", fontSize: 14 }}>
         <span>📋 จำนวนใบลดหนี้: <strong>{filtered.length}</strong></span>
@@ -143,6 +169,7 @@ export default function CreditNoteReportPage() {
                 <th style={th}>เลขที่ใบลดหนี้</th>
                 <th style={th}>วันที่</th>
                 <th style={{ ...th, textAlign: "right" }}>ยอดเงิน</th>
+                <th style={{ ...th, textAlign: "center" }}>สถานะ</th>
                 <th style={th}>เลขใบจ่ายอ้างอิง</th>
                 <th style={th}>เอกสารที่อ้างอิง</th>
                 <th style={th}>Vendor</th>
@@ -153,12 +180,30 @@ export default function CreditNoteReportPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r, i) => (
-                <tr key={r.cn_id || i} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+              {filtered.map((r, i) => {
+                // status logic: cancelled > used > available
+                const isCancelled = r.status === "cancelled";
+                const isUsed = !!r.used_in_income;
+                const badge = isCancelled
+                  ? { label: "❌ ยกเลิก", bg: "#fee2e2", color: "#991b1b" }
+                  : isUsed
+                  ? { label: "✓ ใช้แล้ว", bg: "#dbeafe", color: "#1e40af", subtitle: r.used_in_income }
+                  : { label: "💰 คงเหลือ", bg: "#d1fae5", color: "#065f46" };
+                return (
+                <tr key={r.cn_id || i} style={{ background: isCancelled ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb", opacity: isCancelled ? 0.7 : 1 }}>
                   <td style={{ ...td, textAlign: "center" }}>{i + 1}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#7c2d12" }}>{r.credit_note_no || "-"}</td>
                   <td style={td}>{fmtDate(r.credit_note_date)}</td>
                   <td style={{ ...tdNum, fontWeight: 700, color: "#dc2626" }}>{fmt(r.amount)}</td>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 12, background: badge.bg, color: badge.color, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}
+                      title={badge.subtitle ? `ใช้ใน ${badge.subtitle}` : ""}>
+                      {badge.label}
+                    </span>
+                    {badge.subtitle && (
+                      <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, fontFamily: "monospace" }}>{badge.subtitle}</div>
+                    )}
+                  </td>
                   <td style={{ ...td, fontFamily: "monospace", fontSize: 12, color: "#0369a1" }}>{r.paid_doc_no || "-"}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.billing_doc_nos || "-"}</td>
                   <td style={td}>{r.vendor_name || "-"}</td>
@@ -167,13 +212,14 @@ export default function CreditNoteReportPage() {
                   <td style={td}>{r.created_by || "-"}</td>
                   <td style={{ ...td, fontSize: 11, color: "#6b7280" }}>{r.created_at ? new Date(r.created_at).toLocaleString("th-TH") : "-"}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
             <tfoot style={{ background: "#fef9c3", fontWeight: 700 }}>
               <tr>
                 <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} ใบ</td>
                 <td style={{ ...tdNum, color: "#dc2626", fontSize: 15 }}>{fmt(totalAmount)}</td>
-                <td colSpan={7}></td>
+                <td colSpan={8}></td>
               </tr>
             </tfoot>
           </table>

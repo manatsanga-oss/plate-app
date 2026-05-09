@@ -68,11 +68,26 @@ existing_names = {n['name'] for n in wf['nodes']}
 # วางไกลๆ จาก node อื่น
 base_y = 3000
 
-if 'Q: List Credit Notes' not in existing_names:
+LIST_CN_QUERY = (
+    "SELECT cn.cn_id, cn.credit_note_no, cn.credit_note_date, cn.paid_doc_no, "
+    "cn.billing_doc_nos, cn.vendor_name, cn.amount, cn.category, cn.note, "
+    "cn.created_by, cn.created_at, cn.status, "
+    "ipb.paid_doc_no AS used_in_income "
+    "FROM credit_notes_received cn "
+    "LEFT JOIN income_payment_breakdowns ipb ON ipb.credit_note_no = cn.credit_note_no "
+    "WHERE cn.credit_note_date >= COALESCE(NULLIF('{{ $json.body.date_from }}','')::date, '1900-01-01'::date) "
+    "  AND cn.credit_note_date <= COALESCE(NULLIF('{{ $json.body.date_to }}','')::date, '9999-12-31'::date) "
+    "ORDER BY cn.credit_note_date DESC, cn.cn_id DESC LIMIT 5000"
+)
+existing_pg_lcn = next((n for n in wf['nodes'] if n['name'] == 'Q: List Credit Notes'), None)
+if existing_pg_lcn:
+    existing_pg_lcn['parameters']['query'] = LIST_CN_QUERY
+    print("OK: updated 'Q: List Credit Notes' query")
+elif 'Q: List Credit Notes' not in existing_names:
     pg_node = {
         "parameters": {
             "operation": "executeQuery",
-            "query": "SELECT cn_id, credit_note_no, credit_note_date, paid_doc_no, billing_doc_nos, vendor_name, amount, category, note, created_by, created_at, status FROM credit_notes_received WHERE status = 'active' AND credit_note_date >= COALESCE(NULLIF('{{ $json.body.date_from }}','')::date, '1900-01-01'::date) AND credit_note_date <= COALESCE(NULLIF('{{ $json.body.date_to }}','')::date, '9999-12-31'::date) ORDER BY credit_note_date DESC, cn_id DESC LIMIT 5000",
+            "query": LIST_CN_QUERY,
             "options": {},
         },
         "type": "n8n-nodes-base.postgres",
