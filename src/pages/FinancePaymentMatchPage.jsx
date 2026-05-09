@@ -192,13 +192,19 @@ export default function FinancePaymentMatchPage({ currentUser }) {
           // กรอง: ยังไม่ตัดรับ + ไฟแนนท์ match แบบยืดหยุ่น
           // PAPAO/นครหลวง: customer_name = ไฟแนนท์
           // สิงห์ชัย (MIC): customer_name = NULL → ใช้ sale_finance_company จาก moto_sales JOIN
+          // normalize: ลบช่องว่างทุกชนิด + ลบคำว่า บริษัท/จำกัด/มหาชน/() เพื่อเทียบชื่อแบบหลวม
+          const norm = (s) => String(s || "")
+            .toLowerCase()
+            .replace(/\s+/g, "")
+            .replace(/บริษัท|จำกัด|มหาชน|\(|\)/g, "")
+            .trim();
           const matched = arr.filter(r => {
             if (r.paid_from_ft_id) return false;
-            const cust = String(r.customer_name || r.sale_finance_company || "").toLowerCase();
-            if (!cust) return false;
-            const target = companyKey.toLowerCase();
-            const targetShort = shortKey.toLowerCase();
-            return cust.includes(target) || cust.includes(targetShort) || target.includes(cust);
+            const custN = norm(r.customer_name || r.sale_finance_company || "");
+            if (!custN) return false;
+            const targetN = norm(companyKey);
+            const targetShortN = norm(shortKey);
+            return custN.includes(targetN) || custN.includes(targetShortN) || targetN.includes(custN);
           });
           matched.forEach(r => results.push({ ...r, branch }));
         } catch (e) {
