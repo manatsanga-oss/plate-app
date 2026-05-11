@@ -79,6 +79,7 @@ import SpecialCommissionReportPage from "./pages/SpecialCommissionReportPage";
 import NormalCommissionReportPage from "./pages/NormalCommissionReportPage";
 import BranchMasterPage from "./pages/BranchMasterPage";
 import YamahaRepairReportPage from "./pages/YamahaRepairReportPage";
+import HondaRepairReportPage from "./pages/HondaRepairReportPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
 import CosmosInsurancePage from "./pages/CosmosInsurancePage";
@@ -146,6 +147,7 @@ export default function App() {
     if (page === "receipttransferreport") return false;       // เฉพาะ admin (รายงานสรุปรับชำระเงิน)
     if (page === "salesextrapay") return true;                // user ดูได้ (read-only) — admin/WARUT แก้ได้
     if (page === "yamaharepairreport") return true;           // ทุก user เห็นรายงานใบแจ้งซ่อม
+    if (page === "hondarepairreport") return true;
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
     if (page === "financepayment") return false;
@@ -216,6 +218,9 @@ export default function App() {
         )}
         {activeMenu === "yamaharepairreport" && canAccess("yamaharepairreport") && (
           <YamahaRepairReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "hondarepairreport" && canAccess("hondarepairreport") && (
+          <HondaRepairReportPage currentUser={currentUser} />
         )}
         {activeMenu === "stockcheck" && canAccess("stockcheck") && (
           <StockCheckPage currentUser={currentUser} />
@@ -552,8 +557,9 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="accfinancetransfer" label="บันทึกรับเงินโอนไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Service" pages={["yamaharepairreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="yamaharepairreport" label="รายงานใบแจ้งซ่อม YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hondarepairreport" label="รายงานใบแจ้งซ่อม HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrspecialcommission","hrnormalcommission","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
