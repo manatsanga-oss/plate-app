@@ -96,13 +96,13 @@ export default function LoanInterestPaymentPage({ currentUser }) {
 
   async function handleSave() {
     const isOD = form.loan_id === "OD";
-    if (!form.loan_id) { setMessage("❌ กรุณาเลือกบัญชีเงินกู้ หรือเลือกดอกเบี้ย OD"); return; }
+    const isFEE = form.loan_id === "FEE";
+    if (!form.loan_id) { setMessage("❌ กรุณาเลือกบัญชีเงินกู้ / ดอกเบี้ย OD / ค่าธรรมเนียมธนาคาร"); return; }
     const interest = Number(form.interest_amount) || 0;
     const principal = Number(form.principal_amount) || 0;
-    if (isOD) {
-      // OD: ดอกเบี้ยอย่างเดียว
-      if (interest <= 0) { setMessage("❌ กรุณากรอกยอดดอกเบี้ย"); return; }
-      if (principal > 0) { setMessage("❌ ดอกเบี้ย OD ไม่มีเงินต้น (ตั้งเป็น 0)"); return; }
+    if (isOD || isFEE) {
+      if (interest <= 0) { setMessage(`❌ กรุณากรอกยอด${isFEE ? "ค่าธรรมเนียม" : "ดอกเบี้ย"}`); return; }
+      if (principal > 0) { setMessage(`❌ ${isFEE ? "ค่าธรรมเนียม" : "ดอกเบี้ย OD"} ไม่มีเงินต้น (ตั้งเป็น 0)`); return; }
     } else {
       if (interest <= 0 && principal <= 0) {
         setMessage("❌ กรุณากรอกยอดดอกเบี้ยหรือเงินต้นอย่างน้อย 1 ช่อง");
@@ -119,15 +119,16 @@ export default function LoanInterestPaymentPage({ currentUser }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save_loan_interest_payment",
-          loan_id: isOD ? null : Number(form.loan_id),
+          loan_id: (isOD || isFEE) ? null : Number(form.loan_id),
           is_od: isOD,
+          is_fee: isFEE,
           payment_date: form.payment_date,
           interest_amount: interest,
           principal_amount: principal,
           total_amount: interest + principal,
           from_bank_account_id: form.from_bank_account_id ? Number(form.from_bank_account_id) : null,
           payment_method: form.payment_method,
-          note: isOD ? `[ดอกเบี้ย OD] ${form.note || ""}`.trim() : form.note,
+          note: isFEE ? `[ค่าธรรมเนียมธนาคาร] ${form.note || ""}`.trim() : (isOD ? `[ดอกเบี้ย OD] ${form.note || ""}`.trim() : form.note),
           created_by: currentUser?.username || currentUser?.name || "system",
         }),
       });
@@ -219,6 +220,7 @@ export default function LoanInterestPaymentPage({ currentUser }) {
                 style={inp}>
                 <option value="">{loadingLoans ? "กำลังโหลด..." : "-- เลือกบัญชีเงินกู้ --"}</option>
                 <option value="OD">💳 ดอกเบี้ย OD (จ่ายดอกของบัญชี OD ที่เลือก "โอนจาก")</option>
+                <option value="FEE">🏦 ค่าธรรมเนียมธนาคาร (จ่ายค่าธรรมเนียมของบัญชีที่เลือก "โอนจาก")</option>
                 {loans.length > 0 && <option disabled>──────────</option>}
                 {loans.map(l => (
                   <option key={l.loan_id} value={l.loan_id}>
@@ -230,6 +232,12 @@ export default function LoanInterestPaymentPage({ currentUser }) {
                 <div style={{ marginTop: 6, padding: "8px 12px", background: "#dbeafe", border: "1px solid #3b82f6", borderRadius: 6, fontSize: 12, color: "#1e40af" }}>
                   💳 <strong>ดอกเบี้ย OD</strong> — จ่ายดอกเบี้ยของบัญชี OD โดยตรง (เลือกบัญชี OD ในช่อง "โอนจาก" ด้านล่าง)
                   <br />ไม่มีเงินต้น · ไม่กระทบยอดคงเหลือบัญชีกู้
+                </div>
+              )}
+              {form.loan_id === "FEE" && (
+                <div style={{ marginTop: 6, padding: "8px 12px", background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 6, fontSize: 12, color: "#92400e" }}>
+                  🏦 <strong>ค่าธรรมเนียมธนาคาร</strong> — บันทึกค่าธรรมเนียมของบัญชีที่เลือก "โอนจาก"
+                  <br />กรอกยอดในช่อง "ดอกเบี้ย" · ไม่มีเงินต้น · ไม่กระทบยอดคงเหลือ
                 </div>
               )}
               {selectedLoan && (
@@ -255,7 +263,7 @@ export default function LoanInterestPaymentPage({ currentUser }) {
             </div>
 
             <div>
-              <label style={{ ...lbl, color: "#7c3aed" }}>📈 ดอกเบี้ย</label>
+              <label style={{ ...lbl, color: "#7c3aed" }}>📈 {form.loan_id === "FEE" ? "ค่าธรรมเนียม" : "ดอกเบี้ย"}</label>
               <input type="number" step="0.01" min="0" value={form.interest_amount}
                 onChange={e => setForm(p => ({ ...p, interest_amount: e.target.value }))}
                 style={{ ...inp, textAlign: "right", borderColor: "#a78bfa", background: "#f5f3ff" }} />
@@ -264,9 +272,9 @@ export default function LoanInterestPaymentPage({ currentUser }) {
               <label style={{ ...lbl, color: "#dc2626" }}>💵 เงินต้น (จะหักจากคงเหลือ)</label>
               <input type="number" step="0.01" min="0" value={form.principal_amount}
                 onChange={e => setForm(p => ({ ...p, principal_amount: e.target.value }))}
-                disabled={form.loan_id === "OD"}
-                title={form.loan_id === "OD" ? "ดอกเบี้ย OD ไม่มีเงินต้น" : ""}
-                style={{ ...inp, textAlign: "right", borderColor: "#fca5a5", background: form.loan_id === "OD" ? "#f3f4f6" : "#fef2f2", cursor: form.loan_id === "OD" ? "not-allowed" : "auto" }} />
+                disabled={form.loan_id === "OD" || form.loan_id === "FEE"}
+                title={(form.loan_id === "OD" || form.loan_id === "FEE") ? "ไม่มีเงินต้น" : ""}
+                style={{ ...inp, textAlign: "right", borderColor: "#fca5a5", background: (form.loan_id === "OD" || form.loan_id === "FEE") ? "#f3f4f6" : "#fef2f2", cursor: (form.loan_id === "OD" || form.loan_id === "FEE") ? "not-allowed" : "auto" }} />
             </div>
 
             <div style={{ gridColumn: "1 / span 2" }}>

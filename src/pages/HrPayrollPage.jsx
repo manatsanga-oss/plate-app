@@ -97,6 +97,98 @@ export default function HrPayrollPage({ currentUser }) {
   // totals
   const sum = (key) => filtered.reduce((s, r) => s + Number(r[key] || 0), 0);
 
+  // ===== Print =====
+  function printPayroll() {
+    if (filtered.length === 0) return;
+    const safe = (v) => String(v ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+    const fmt = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const rowsHtml = filtered.map((r, i) => `<tr${r.is_executive ? ' style="background:#fef3c7"' : ''}>
+      <td>${i + 1}</td>
+      <td>${safe(r.affiliation || "-")}</td>
+      <td>${safe(r.employee_name)}${r.is_executive ? ' <span style="font-size:9px;background:#fde68a;padding:1px 4px;border-radius:3px;">ผบ.</span>' : ''}</td>
+      <td>${safe(r.bank_name || "-")}<br/><span style="font-family:monospace;font-size:9px;color:#0369a1">${safe(r.bank_account_no || "-")}</span></td>
+      <td class="num">${fmt(r.salary)}</td>
+      <td class="num">${fmt(r.bonus)}</td>
+      <td class="num">${fmt(r.ot_workday)}</td>
+      <td class="num">${fmt(r.ot_holiday)}</td>
+      <td class="num">${fmt(r.meal_allowance)}</td>
+      <td class="num">${fmt(r.laundry_allowance)}</td>
+      <td class="num">${fmt(r.diligence_allowance)}</td>
+      <td class="num">${fmt(r.extra_bonus)}</td>
+      <td class="num">${fmt(r.other_income)}</td>
+      <td class="num totalin">${fmt(r.total_income)}</td>
+      <td class="num neg">${fmt(r.sso_amount)}</td>
+      <td class="num neg">${fmt(r.tax)}</td>
+      <td class="num neg">${fmt(r.pf_amount)}</td>
+      <td class="num neg">${fmt(r.gysorsor)}</td>
+      <td class="num neg">${fmt(r.exec_deduct)}</td>
+      <td class="num neg">${fmt(r.lost_deduct)}</td>
+      <td class="num neg">${fmt(r.other_expense)}</td>
+      <td class="num neg">${fmt(r.late_absent_deduct)}</td>
+      <td class="num totalex">${fmt(r.total_expense)}</td>
+      <td class="num net">${fmt(r.net_income)}</td>
+    </tr>`).join("");
+
+    const totals = `<tr class="totalrow">
+      <td colspan="4" style="text-align:right">รวม ${filtered.length} คน</td>
+      <td class="num">${fmt(sum("salary"))}</td>
+      <td class="num">${fmt(sum("bonus"))}</td>
+      <td class="num">${fmt(sum("ot_workday"))}</td>
+      <td class="num">${fmt(sum("ot_holiday"))}</td>
+      <td class="num">${fmt(sum("meal_allowance"))}</td>
+      <td class="num">${fmt(sum("laundry_allowance"))}</td>
+      <td class="num">${fmt(sum("diligence_allowance"))}</td>
+      <td class="num">${fmt(sum("extra_bonus"))}</td>
+      <td class="num">${fmt(sum("other_income"))}</td>
+      <td class="num totalin">${fmt(sum("total_income"))}</td>
+      <td class="num neg">${fmt(sum("sso_amount"))}</td>
+      <td class="num neg">${fmt(sum("tax"))}</td>
+      <td class="num neg">${fmt(sum("pf_amount"))}</td>
+      <td class="num neg">${fmt(sum("gysorsor"))}</td>
+      <td class="num neg">${fmt(sum("exec_deduct"))}</td>
+      <td class="num neg">${fmt(sum("lost_deduct"))}</td>
+      <td class="num neg">${fmt(sum("other_expense"))}</td>
+      <td class="num neg">${fmt(sum("late_absent_deduct"))}</td>
+      <td class="num totalex">${fmt(sum("total_expense"))}</td>
+      <td class="num net">${fmt(sum("net_income"))}</td>
+    </tr>`;
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>คำนวณเงินเดือน ${monthDisplay(month)}</title>
+<style>
+@page { size: A3 landscape; margin: 8mm; }
+body { font-family: 'Tahoma','Arial',sans-serif; font-size: 9pt; }
+h1 { text-align: center; margin: 0 0 4px; font-size: 14pt; color: #072d6b; }
+.head { text-align: center; margin-bottom: 10px; font-size: 10pt; color: #444; }
+table { width: 100%; border-collapse: collapse; }
+th, td { border: 1px solid #555; padding: 3px 5px; font-size: 8pt; text-align: left; vertical-align: top; }
+th { background: #072d6b; color: #fff; font-weight: 700; white-space: nowrap; }
+.num { text-align: right; font-family: monospace; }
+.totalin { background: #d1fae5; font-weight: 700; color: #065f46; }
+.totalex { background: #fee2e2; font-weight: 700; color: #7f1d1d; }
+.net { background: #ede9fe; font-weight: 700; color: #581c87; }
+.neg { color: #dc2626; }
+.totalrow { background: #fef9c3; font-weight: 700; }
+</style></head><body>
+<h1>คำนวณเงินเดือน — ${monthDisplay(month)}</h1>
+<div class="head">${filterBranch ? `สังกัด: ${safe(filterBranch)} · ` : ""}พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
+<table>
+  <thead><tr>
+    <th>#</th><th>สังกัด</th><th>ชื่อ</th><th>ธนาคาร / เลขบัญชี</th>
+    <th>เงินเดือน</th><th>โบนัส</th><th>OT-ปท.</th><th>OT-นอก</th>
+    <th>ค่าข้าว</th><th>ซักเสื้อ</th><th>เบี้ยขยัน</th><th>พิเศษ</th><th>อื่นๆ</th>
+    <th>รวมรายได้</th>
+    <th>SSO</th><th>ภาษี</th><th>กองทุนฯ</th><th>กยศ.</th><th>ผู้บริหาร</th><th>ของหาย</th><th>อื่นๆ</th><th>ขาด-สาย</th>
+    <th>รวมรายจ่าย</th><th>สุทธิ</th>
+  </tr></thead>
+  <tbody>${rowsHtml}${totals}</tbody>
+</table>
+</body></html>`;
+    const w = window.open("", "_blank", "width=1200,height=900");
+    if (!w) { setMessage("popup ถูกบล็อก"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
   // ===== Snapshot Functions =====
   async function handleSaveClick() {
     if (filtered.length === 0) { setMessage("ไม่มีข้อมูลให้บันทึก"); return; }
@@ -402,6 +494,10 @@ export default function HrPayrollPage({ currentUser }) {
         <button onClick={openHistory}
           style={{ padding: "7px 14px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
           📜 ประวัติ
+        </button>
+        <button onClick={printPayroll} disabled={filtered.length === 0}
+          style={{ padding: "7px 14px", background: filtered.length === 0 ? "#9ca3af" : "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: filtered.length === 0 ? "not-allowed" : "pointer", fontWeight: 600 }}>
+          🖨️ พิมพ์
         </button>
       </div>
 

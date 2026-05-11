@@ -1,0 +1,228 @@
+import React, { useEffect, useState, useMemo } from "react";
+
+const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/service-api";
+
+function fmt(v) { return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+async function postAPI(body) {
+  const r = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+
+const NOW = new Date();
+
+export default function YamahaRepairReportPage() {
+  const [year, setYear] = useState(NOW.getFullYear());
+  const [month, setMonth] = useState(NOW.getMonth() + 1);
+  const [branch, setBranch] = useState("");
+  const [status, setStatus] = useState("");
+  const [search, setSearch] = useState("");
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [detail, setDetail] = useState(null);
+
+  async function fetchData() {
+    setLoading(true); setMessage("");
+    try {
+      const data = await postAPI({
+        action: "list_yamaha_repair_invoices",
+        year: year || "", month: month || "",
+        branch_code: branch, status, search,
+      });
+      const arr = Array.isArray(data) ? data.filter(r => r && r.id) : [];
+      setRows(arr);
+    } catch { setRows([]); setMessage("❌ โหลดไม่สำเร็จ"); }
+    setLoading(false);
+  }
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
+
+  // group by job_no for summary
+  const byJob = useMemo(() => {
+    const map = new Map();
+    for (const r of rows) {
+      const k = r.job_no;
+      if (!map.has(k)) map.set(k, { ...r, lines: [], total_revenue: 0, total_outstanding: 0, total_labor: 0 });
+      const g = map.get(k);
+      g.lines.push(r);
+      g.total_revenue += Number(r.net_revenue || 0);
+      g.total_outstanding += Number(r.outstanding || 0);
+      g.total_labor += Number(r.labor_total || 0);
+    }
+    return [...map.values()];
+  }, [rows]);
+
+  const totalRevenue = byJob.reduce((s, j) => s + j.total_revenue, 0);
+  const totalOutstanding = byJob.reduce((s, j) => s + j.total_outstanding, 0);
+  const branches = [...new Set(rows.map(r => r.branch_code).filter(Boolean))];
+  const statuses = [...new Set(rows.map(r => r.status).filter(Boolean))];
+
+  return (
+    <div className="page-container">
+      <div className="page-topbar">
+        <h2 className="page-title">🔧 รายงานใบแจ้งซ่อม Yamaha</h2>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: 12, background: "#f1f5f9", borderRadius: 8 }}>
+        <span>ปี:</span>
+        <input type="number" value={year} onChange={e => setYear(e.target.value)} style={{ ...inp, width: 90 }} />
+        <span>เดือน:</span>
+        <select value={month} onChange={e => setMonth(e.target.value)} style={{ ...inp, width: 100 }}>
+          <option value="">ทั้งปี</option>
+          {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+        <input type="text" placeholder="รหัสสาขา" value={branch} onChange={e => setBranch(e.target.value.toUpperCase())} style={{ ...inp, width: 130, fontFamily: "monospace" }} />
+        <select value={status} onChange={e => setStatus(e.target.value)} style={{ ...inp, minWidth: 200 }}>
+          <option value="">-- ทุกสถานะ --</option>
+          <option value="ปิดใบงาน (มีค่าใช้จ่าย)">ปิดใบงาน (มีค่าใช้จ่าย)</option>
+          <option value="ปิดใบงาน (ไม่มีค่าใช้จ่าย)">ปิดใบงาน (ไม่มีค่าใช้จ่าย)</option>
+          <option value="เปิดใบงาน">เปิดใบงาน</option>
+          <option value="ยกเลิกใบงาน">ยกเลิกใบงาน</option>
+        </select>
+        <input type="text" placeholder="🔍 ค้นหา (ใบแจ้ง/ลูกค้า/เลขถัง/ทะเบียน/ช่าง)" value={search} onChange={e => setSearch(e.target.value)} style={{ ...inp, minWidth: 280 }} />
+        <button onClick={fetchData} disabled={loading} style={btnBlue}>{loading ? "..." : "🔄 ค้นหา"}</button>
+      </div>
+
+      {message && <div style={{ padding: 10, marginBottom: 10, color: "#b91c1c" }}>{message}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 10, marginBottom: 12 }}>
+        <Card label="📋 ใบแจ้งซ่อม" value={byJob.length} color="#1e40af" />
+        <Card label="📌 รายการ (lines)" value={rows.length} color="#0369a1" />
+        <Card label="💰 รายได้สุทธิรวม" value={fmt(totalRevenue)} color="#059669" highlight />
+        <Card label="⏳ ค้างชำระรวม" value={fmt(totalOutstanding)} color="#dc2626" />
+      </div>
+
+      <div style={{ overflowX: "auto", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead style={{ background: "#072d6b", color: "#fff" }}>
+            <tr>
+              <th style={th}>#</th>
+              <th style={th}>สาขา</th>
+              <th style={th}>เลขที่ใบแจ้งซ่อม</th>
+              <th style={th}>วันที่</th>
+              <th style={th}>สถานะ</th>
+              <th style={th}>ลูกค้า</th>
+              <th style={th}>เลขทะเบียน</th>
+              <th style={th}>เลขเครื่อง</th>
+              <th style={th}>เลขถัง</th>
+              <th style={th}>รุ่น/แบบ</th>
+              <th style={th}>ช่างซ่อม</th>
+              <th style={{ ...th, textAlign: "right" }}>รายได้สุทธิ</th>
+              <th style={{ ...th, textAlign: "right" }}>ค้างชำระ</th>
+              <th style={th}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading && <tr><td colSpan={14} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+            {!loading && byJob.length === 0 && <tr><td colSpan={14} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+            {byJob.map((j, i) => (
+              <tr key={j.job_no} style={{ borderTop: "1px solid #e5e7eb" }}>
+                <td style={td}>{i + 1}</td>
+                <td style={{ ...td, fontFamily: "monospace" }}>{j.branch_code}</td>
+                <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{j.job_no}</td>
+                <td style={td}>{j.repair_day}/{j.repair_month}/{j.repair_year}</td>
+                <td style={td}>{j.status}</td>
+                <td style={td}>{j.customer || "-"}</td>
+                <td style={{ ...td, fontFamily: "monospace" }}>{j.license_plate || "-"}</td>
+                <td style={{ ...td, fontFamily: "monospace" }}>{j.engine_no || "-"}</td>
+                <td style={{ ...td, fontFamily: "monospace" }}>{j.chassis_no || "-"}</td>
+                <td style={td}>{j.series} · {j.model_code}</td>
+                <td style={td}>{j.mechanic_name || "-"}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669", fontWeight: 600 }}>{fmt(j.total_revenue)}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{fmt(j.total_outstanding)}</td>
+                <td style={td}><button onClick={() => setDetail(j)} style={btnSmBlue}>📋 ดูรายการ ({j.lines.length})</button></td>
+              </tr>
+            ))}
+            {byJob.length > 0 && (
+              <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
+                <td colSpan={11} style={{ ...td, textAlign: "right" }}>รวม {byJob.length} ใบแจ้ง · {rows.length} รายการ</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(totalRevenue)}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(totalOutstanding)}</td>
+                <td></td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Detail popup */}
+      {detail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
+             onClick={() => setDetail(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1400, width: "95%", maxHeight: "90vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>📋 {detail.job_no} · {detail.customer} · {detail.repair_day}/{detail.repair_month}/{detail.repair_year}</h3>
+              <button onClick={() => setDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            <div style={{ background: "#f0f4f9", padding: 10, borderRadius: 6, marginBottom: 10, fontSize: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+              <div><strong>สาขา:</strong> {detail.branch_code} · {detail.branch_name}</div>
+              <div><strong>ทะเบียน:</strong> {detail.license_plate || "-"}</div>
+              <div><strong>เครื่อง:</strong> {detail.engine_no || "-"}</div>
+              <div><strong>ถัง:</strong> {detail.chassis_no || "-"}</div>
+              <div><strong>รุ่น:</strong> {detail.brand} · {detail.series} · {detail.model_code}</div>
+              <div><strong>สี:</strong> {detail.color || "-"}</div>
+              <div><strong>ระยะ:</strong> {detail.mileage || "-"}</div>
+              <div><strong>โทร:</strong> {detail.customer_phone || "-"}</div>
+              <div><strong>ช่าง:</strong> {detail.mechanic_code} · {detail.mechanic_name}</div>
+              <div><strong>แท่น:</strong> {detail.bay_no || "-"}</div>
+              <div><strong>สถานะ:</strong> {detail.status}</div>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead style={{ background: "#f0f4f9" }}>
+                <tr>
+                  <th style={th}>#</th>
+                  <th style={th}>ประเภทรายการ</th>
+                  <th style={th}>รหัสซ่อม</th>
+                  <th style={th}>ประเภทการซ่อม</th>
+                  <th style={{ ...th, textAlign: "right" }}>FlatRate</th>
+                  <th style={{ ...th, textAlign: "right" }}>ค่าแรง</th>
+                  <th style={{ ...th, textAlign: "right" }}>ส่วนลด</th>
+                  <th style={{ ...th, textAlign: "right" }}>ค่าแรงรวม</th>
+                  <th style={{ ...th, textAlign: "right" }}>รายได้สุทธิ</th>
+                  <th style={{ ...th, textAlign: "right" }}>ค้างชำระ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {detail.lines.map((r, i) => (
+                  <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                    <td style={td}>{i + 1}</td>
+                    <td style={td}>{r.item_type}</td>
+                    <td style={{ ...td, fontFamily: "monospace" }}>{r.repair_type_code}</td>
+                    <td style={td}>{r.repair_type}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.flat_rate)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.labor_price)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.labor_discount)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.labor_total)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(r.net_revenue)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{fmt(r.outstanding)}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
+                  <td colSpan={7} style={{ ...td, textAlign: "right" }}>รวม</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(detail.total_labor)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(detail.total_revenue)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{fmt(detail.total_outstanding)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Card({ label, value, color, highlight }) {
+  return (
+    <div style={{ padding: "12px 14px", background: "#fff", borderRadius: 10, border: highlight ? `2px solid ${color}` : "1px solid #e5e7eb" }}>
+      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: highlight ? 22 : 18, fontWeight: 700, color, fontFamily: "monospace" }}>{value}</div>
+    </div>
+  );
+}
+
+const inp = { padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 };
+const th = { padding: "10px 8px", textAlign: "left", fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" };
+const td = { padding: "8px", fontSize: 12 };
+const btnBlue = { padding: "7px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 };
+const btnSmBlue = { padding: "4px 10px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" };

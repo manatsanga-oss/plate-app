@@ -25,6 +25,7 @@ const UPLOAD_GROUPS = [
       { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
       { key: "yamaha-b2b-backorders", label: "รายงานอะไหล่ค้างส่ง YAMAHA B2B", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "yamaha_b2b_backorders", url: `${BASE}/upload-yamaha-b2b-backorders` },
       { key: "pending-job", label: "รายการอะไหล่เบิกค้างปิด JOB", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "pending_job_parts", url: `${BASE}/upload-pending-job` },
+      { key: "yamaha-repair", label: "Upload ใบแจ้งซ่อม Yamaha", desc: "39 คอลัมน์ · UPSERT (job_no + item_type + repair_type_code + mechanic_code)", db: "yamaha_repair_invoices", url: `${BASE}/upload-yamaha-repair` },
     ],
   },
   {
@@ -59,7 +60,7 @@ function fmtDateTime(iso) {
 
 // items ที่รับ year_month override (ระบุเดือนเพื่อ upload ไฟล์ย้อนหลัง)
 const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
-const FILE_UPLOAD_KEYS = new Set(["time-tracking"]); // รายการที่ต้องเลือกไฟล์เอง
+const FILE_UPLOAD_KEYS = new Set(["time-tracking", "yamaha-repair"]); // รายการที่ต้องเลือกไฟล์เอง
 
 export default function UploadPage({ currentUser } = {}) {
   const [statuses, setStatuses] = useState({});

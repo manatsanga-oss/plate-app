@@ -10,6 +10,79 @@ export default function BankMovementsPage({ currentUser }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [message, setMessage] = useState("");
+  const [ccDetail, setCcDetail] = useState(null); // { date, rows, loading }
+  const [editDate, setEditDate] = useState(null); // { original_date, current_settlement, hasOverride }
+  const [savingDate, setSavingDate] = useState(false);
+
+  function openEditDate(originalDate, currentSettlement, hasOverride) {
+    setEditDate({
+      original_date: originalDate,
+      settlement_date: currentSettlement || originalDate,
+      hasOverride: !!hasOverride,
+    });
+  }
+
+  async function saveOverride() {
+    if (!editDate?.settlement_date) return;
+    setSavingDate(true);
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_cc_settlement_override",
+          account_id: Number(accountId),
+          original_date: editDate.original_date,
+          settlement_date: editDate.settlement_date,
+          updated_by: currentUser || "",
+        }),
+      });
+      setEditDate(null);
+      await fetchMovements();
+    } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+    setSavingDate(false);
+  }
+
+  async function deleteOverride() {
+    if (!window.confirm("ลบการแก้วันที่ — กลับเป็น auto +1 วันทำการ ?")) return;
+    setSavingDate(true);
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete_cc_settlement_override",
+          account_id: Number(accountId),
+          original_date: editDate.original_date,
+        }),
+      });
+      setEditDate(null);
+      await fetchMovements();
+    } catch { setMessage("❌ ลบไม่สำเร็จ"); }
+    setSavingDate(false);
+  }
+
+  // doc_no = 'CC-YYMMDD' → return ISO original_date '20YY-MM-DD'
+  function parseOriginalDate(docNo) {
+    const m = String(docNo || "").match(/^CC-(\d{2})(\d{2})(\d{2})$/);
+    if (!m) return null;
+    return `20${m[1]}-${m[2]}-${m[3]}`;
+  }
+  async function openCcDetail(originalDateISO, settlementDateStr, hasOverride) {
+    setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, rows: [], loading: true });
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "list_credit_card_detail",
+          account_id: Number(accountId),
+          receipt_date: originalDateISO,
+        }),
+      });
+      const data = await res.json();
+      setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, rows: Array.isArray(data) ? data : [], loading: false });
+    } catch {
+      setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, rows: [], loading: false });
+    }
+  }
 
   useEffect(() => {
     fetchAccounts();
@@ -165,7 +238,14 @@ export default function BankMovementsPage({ currentUser }) {
                 return (
                   <tr key={i} style={{ borderTop: "1px solid #e5e7eb", background: isIn ? "#f0fdf4" : "#fef2f2" }}>
                     <td style={td}>{fmtDate(m.movement_date)}</td>
-                    <td style={{ ...td, fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{m.doc_no || "-"}</td>
+                    <td style={{ ...td, fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>
+                      {String(m.doc_no || "").startsWith("CC-") ? (
+                        <span style={{ cursor: "pointer", textDecoration: "underline" }}
+                              onClick={() => openCcDetail(parseOriginalDate(m.doc_no), String(m.movement_date).slice(0, 10), false)}>
+                          {m.doc_no}
+                        </span>
+                      ) : (m.doc_no || "-")}
+                    </td>
                     <td style={td}>{m.movement_type}</td>
                     <td style={td}>{m.counterparty || "-"}</td>
                     <td style={td}>{m.payment_method || "-"}</td>
@@ -188,6 +268,93 @@ export default function BankMovementsPage({ currentUser }) {
           </table>
         )}
       </div>
+
+      {/* Edit settlement date popup */}
+      {editDate && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1100 }}
+             onClick={() => setEditDate(null)}>
+          <div onClick={e => e.stopPropagation()}
+               style={{ background: "#fff", borderRadius: 10, width: 420, padding: 20 }}>
+            <h3 style={{ margin: "0 0 12px", color: "#072d6b" }}>✏️ แก้วันที่เงินเข้าบัญชี</h3>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
+              วันที่รับชำระ (ใบเสร็จ): <strong>{editDate.original_date}</strong>
+            </div>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>วันที่เงินเข้าบัญชี:</label>
+            <input type="date" value={editDate.settlement_date}
+                   onChange={e => setEditDate({ ...editDate, settlement_date: e.target.value })}
+                   style={{ ...inp, width: "100%", marginTop: 6, marginBottom: 14 }} />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              {editDate.hasOverride && (
+                <button onClick={deleteOverride} disabled={savingDate}
+                        style={{ padding: "7px 14px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>
+                  🗑️ ลบ override (กลับ auto)
+                </button>
+              )}
+              <button onClick={() => setEditDate(null)} disabled={savingDate}
+                      style={{ padding: "7px 14px", background: "#9ca3af", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>
+                ยกเลิก
+              </button>
+              <button onClick={saveOverride} disabled={savingDate}
+                      style={{ padding: "7px 14px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700 }}>
+                {savingDate ? "..." : "💾 บันทึก"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CC Detail Popup */}
+      {ccDetail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
+             onClick={() => setCcDetail(null)}>
+          <div onClick={e => e.stopPropagation()}
+               style={{ background: "#fff", borderRadius: 10, maxWidth: 1100, width: "92%", maxHeight: "85vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>💳 รายละเอียดรับชำระบัตรเครดิต — {ccDetail.date}</h3>
+              <button onClick={() => setCcDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            {ccDetail.loading ? (
+              <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+            ) : ccDetail.rows.length === 0 ? (
+              <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead style={{ background: "#f0f4f9" }}>
+                  <tr>
+                    <th style={th}>#</th>
+                    <th style={th}>วันที่รับชำระ</th>
+                    <th style={th}>เลขที่ใบเสร็จ</th>
+                    <th style={th}>ลูกค้า</th>
+                    <th style={th}>เลขใบขาย</th>
+                    <th style={th}>เลขที่บัญชี</th>
+                    <th style={{ ...th, textAlign: "right" }}>ยอดเงิน</th>
+                    <th style={th}>หมายเหตุ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ccDetail.rows.map((r, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <td style={td}>{i + 1}</td>
+                      <td style={td}>{fmtDate(r.original_date || r.receipt_date)}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{r.receipt_no || "-"}</td>
+                      <td style={td}>{r.customer_name || "-"}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{r.sale_invoice_no || "-"}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{r.bank_account_no || "-"}</td>
+                      <td style={{ ...tdNum, fontWeight: 700 }}>{fmtNum(r.amount)}</td>
+                      <td style={td}>{r.note || "-"}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
+                    <td colSpan={6} style={{ ...td, textAlign: "right" }}>รวม {ccDetail.rows.length} รายการ</td>
+                    <td style={tdNum}>{fmtNum(ccDetail.rows.reduce((s, r) => s + Number(r.amount || 0), 0))}</td>
+                    <td style={td}></td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
