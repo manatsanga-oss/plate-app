@@ -120,11 +120,11 @@ export default function HrPayrollPage({ currentUser }) {
       <td class="num neg">${fmt(r.sso_amount)}</td>
       <td class="num neg">${fmt(r.tax)}</td>
       <td class="num neg">${fmt(r.pf_amount)}</td>
-      <td class="num neg">${fmt(r.gysorsor)}</td>
-      <td class="num neg">${fmt(r.exec_deduct)}</td>
-      <td class="num neg">${fmt(r.lost_deduct)}</td>
+      <td class="num neg">${fmt(r.study_loan)}</td>
+      <td class="num neg">${fmt(r.admin_expense)}</td>
+      <td class="num neg">${fmt(r.lost_items)}</td>
       <td class="num neg">${fmt(r.other_expense)}</td>
-      <td class="num neg">${fmt(r.late_absent_deduct)}</td>
+      <td class="num neg">${fmt(r.absence_late)}</td>
       <td class="num totalex">${fmt(r.total_expense)}</td>
       <td class="num net">${fmt(r.net_income)}</td>
     </tr>`).join("");
@@ -144,11 +144,11 @@ export default function HrPayrollPage({ currentUser }) {
       <td class="num neg">${fmt(sum("sso_amount"))}</td>
       <td class="num neg">${fmt(sum("tax"))}</td>
       <td class="num neg">${fmt(sum("pf_amount"))}</td>
-      <td class="num neg">${fmt(sum("gysorsor"))}</td>
-      <td class="num neg">${fmt(sum("exec_deduct"))}</td>
-      <td class="num neg">${fmt(sum("lost_deduct"))}</td>
+      <td class="num neg">${fmt(sum("study_loan"))}</td>
+      <td class="num neg">${fmt(sum("admin_expense"))}</td>
+      <td class="num neg">${fmt(sum("lost_items"))}</td>
       <td class="num neg">${fmt(sum("other_expense"))}</td>
-      <td class="num neg">${fmt(sum("late_absent_deduct"))}</td>
+      <td class="num neg">${fmt(sum("absence_late"))}</td>
       <td class="num totalex">${fmt(sum("total_expense"))}</td>
       <td class="num net">${fmt(sum("net_income"))}</td>
     </tr>`;

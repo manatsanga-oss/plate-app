@@ -302,8 +302,16 @@ export default function ExpenseRecordPage({ currentUser }) {
     const total = Number(g.net || g.total || 0);
     setEditPayDocNo(g.paid_doc_no);
     setEditTotalRequired(total);  // ใช้ยอดของใบจ่ายที่กำลังแก้
+    // แปลงเป็น YYYY-MM-DD โดยใช้ local timezone (กัน UTC shift)
+    const toLocalISO = (v) => {
+      if (!v) return todayISO();
+      const d = new Date(v);
+      if (isNaN(d)) return String(v).slice(0, 10);
+      const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), dd = String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${dd}`;
+    };
     setPayForm({
-      paid_date: g.paid_at ? String(g.paid_at).slice(0, 10) : todayISO(),
+      paid_date: toLocalISO(g.paid_at),
       payment_note: "",
     });
     // edit mode: เริ่มต้นด้วย 1 row method เดิม + amount เต็ม (ถ้า payment_method='ผสม' ใช้ 'โอน' default)
