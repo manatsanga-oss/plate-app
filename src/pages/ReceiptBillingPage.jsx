@@ -29,7 +29,7 @@ export default function ReceiptBillingPage({ currentUser }) {
   });
   const [bankAccounts, setBankAccounts] = useState([]);
   const [savingPayment, setSavingPayment] = useState(false);
-  const [editingPayDocNo] = useState(null); // ยังไม่รองรับ edit mode ใน receipt billing
+  const [editingPayDocNo, setEditingPayDocNo] = useState(null); // paid_doc_no ที่กำลังแก้ไข
 
   useEffect(() => { fetchVendors(); fetchBankAccounts(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [vendor, incomeType, showBilled]);
@@ -176,6 +176,13 @@ ${transferSummary.length > 0 ? `
     if (!g?.paid_doc_no) { setMessage("❌ ไม่มีเลขที่ใบจ่าย"); return; }
     if (vendors.length === 0) fetchVendors();
     if (bankAccounts.length === 0) fetchBankAccounts();
+    // เลือกทุก billing_doc_no ที่อยู่ใน paid_doc_no เดียวกัน → ให้สรุปยอดทำงานได้
+    const sameDocBills = {};
+    rows.forEach(r => {
+      if (r.billing_doc_no && r.paid_doc_no === g.paid_doc_no) sameDocBills[r.billing_doc_no] = true;
+    });
+    setSelectedBills(sameDocBills);
+    setEditingPayDocNo(g.paid_doc_no);
     setPaymentForm({
       _editMode: true,
       _paidDocNo: g.paid_doc_no,
@@ -186,7 +193,7 @@ ${transferSummary.length > 0 ? `
       wht_rate: g.wht_rate || 0,
       wht_amount: g.wht_amount || 0,
       wht_base: g.wht_amount && g.wht_rate ? Number(g.wht_amount) / Number(g.wht_rate) * 100 : calcWhtBase(),
-      from_bank_account_id: g.from_bank_account_id || "",
+      from_bank_account_id: g.from_bank_account_id != null ? String(g.from_bank_account_id) : "",
     });
     setPaymentDialog(true);
   }
@@ -805,7 +812,7 @@ ${transferSummary.length > 0 ? `
                     style={{ ...inp, width: "100%" }}>
                     <option value="">-- เลือกบัญชีโอนจาก --</option>
                     {bankAccounts.map(b => (
-                      <option key={b.account_id} value={b.account_id}>
+                      <option key={b.account_id} value={String(b.account_id)}>
                         {b.bank_name} · {b.account_no} · {b.account_name}
                       </option>
                     ))}

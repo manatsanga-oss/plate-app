@@ -118,6 +118,16 @@ export default function InsuranceBillingPage({ currentUser }) {
     if (!g?.paid_doc_no) { setMessage("❌ ไม่มีเลขที่ใบจ่าย"); return; }
     if (vendors.length === 0) fetchVendors();
     if (bankAccounts.length === 0) fetchBankAccounts();
+    // เลือกทุกใบวางบิลที่อยู่ใน paid_doc_no เดียวกัน → ให้สรุปยอดทำงานได้
+    const sameDocBills = {};
+    rows.forEach(r => {
+      if (r.billing_doc_no && r.paid_doc_no === g.paid_doc_no) sameDocBills[r.billing_doc_no] = true;
+    });
+    setSelectedBills(sameDocBills);
+    // คำนวณ wht_base จาก commission ของทุก billing_doc ใน paid_doc_no
+    const baseFromBills = rows
+      .filter(r => r.billing_doc_no && r.paid_doc_no === g.paid_doc_no)
+      .reduce((s, r) => s + Number(r.commission || 0), 0);
     setPaymentForm({
       _editMode: true,
       _paidDocNo: g.paid_doc_no,
@@ -127,8 +137,8 @@ export default function InsuranceBillingPage({ currentUser }) {
       paid_to_vendor: g.paid_to_vendor || "",
       wht_rate: g.wht_rate || 0,
       wht_amount: g.wht_amount || 0,
-      wht_base: g.wht_amount && g.wht_rate ? Number(g.wht_amount) / Number(g.wht_rate) * 100 : calcCommissionBase(),
-      from_bank_account_id: g.from_bank_account_id || "",
+      wht_base: baseFromBills,
+      from_bank_account_id: g.from_bank_account_id != null ? String(g.from_bank_account_id) : "",
     });
     setPaymentDialog(true);
   }
@@ -1000,7 +1010,9 @@ export default function InsuranceBillingPage({ currentUser }) {
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
             onClick={() => !savingPayment && setPaymentDialog(false)}>
             <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 24, borderRadius: 12, width: 640, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}>
-              <h3 style={{ margin: "0 0 16px", color: "#15803d", textAlign: "center", fontSize: 18 }}>📊 บันทึกจ่ายเงิน</h3>
+              <h3 style={{ margin: "0 0 16px", color: paymentForm._editMode ? "#d97706" : "#15803d", textAlign: "center", fontSize: 18 }}>
+                {paymentForm._editMode ? `✏️ แก้ไขการจ่ายเงิน · ${paymentForm._paidDocNo}` : "📊 บันทึกจ่ายเงิน"}
+              </h3>
 
               <div style={{ background: "#f8fafc", padding: 14, borderRadius: 10, marginBottom: 16, fontSize: 14, textAlign: "center" }}>
                 <div>📑 ใบที่จ่าย: <strong>{selectedDocNos.length}</strong> ใบ</div>
@@ -1053,7 +1065,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                     style={{ ...inpStyle, width: "100%" }}>
                     <option value="">-- เลือกบัญชีโอนจาก --</option>
                     {bankAccounts.map(b => (
-                      <option key={b.account_id} value={b.account_id}>
+                      <option key={b.account_id} value={String(b.account_id)}>
                         {b.bank_name} · {b.account_no} · {b.account_name}
                       </option>
                     ))}
@@ -1116,7 +1128,7 @@ export default function InsuranceBillingPage({ currentUser }) {
               </div>
 
               <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
-                <button onClick={() => setPaymentDialog(false)} disabled={savingPayment}
+                <button onClick={() => { setPaymentDialog(false); if (paymentForm._editMode) setSelectedBills({}); }} disabled={savingPayment}
                   style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
                 <button onClick={savePayment} disabled={savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id}
                   style={{ padding: "8px 20px", background: savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: (savingPayment || !paymentForm.paid_to_vendor || !paymentForm.from_bank_account_id) ? "not-allowed" : "pointer", fontWeight: 700 }}>
