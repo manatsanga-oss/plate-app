@@ -214,7 +214,7 @@ export default function InsuranceBillingPage({ currentUser }) {
   });
 
   // Group by record_batch_no (INSREC-...) — แสดงทุก batch
-  const groupedByBatch = React.useMemo(() => {
+  const groupedByBatchAll = React.useMemo(() => {
     const map = new Map();
     rows.forEach(r => {
       const key = r.record_batch_no || `_no_batch_${r.insurance_id}`;
@@ -226,6 +226,7 @@ export default function InsuranceBillingPage({ currentUser }) {
           count: 0,
           unbilled_count: 0,
           billed_count: 0,
+          paid_count: 0,
           premium: 0,
           total_premium: 0,
           commission: 0,
@@ -237,6 +238,7 @@ export default function InsuranceBillingPage({ currentUser }) {
       g.count += 1;
       if (r.billing_doc_no) g.billed_count += 1;
       else g.unbilled_count += 1;
+      if (r.paid_at) g.paid_count += 1;
       g.premium += Number(r.premium || 0);
       g.total_premium += Number(r.total_premium || 0);
       g.commission += Number(r.commission || 0);
@@ -247,6 +249,12 @@ export default function InsuranceBillingPage({ currentUser }) {
     // sort by batch_no DESC (ใหม่อยู่บน)
     return Array.from(map.values()).sort((a, b) => (b.batch_no || "").localeCompare(a.batch_no || ""));
   }, [rows]);
+
+  // ในแท็บ "บันทึกการจ่าย" (billed) แสดงเฉพาะ batch ที่มี record ที่วางบิลแล้วและยังไม่จ่าย
+  const groupedByBatch = React.useMemo(() => {
+    if (viewTab === "billed") return groupedByBatchAll.filter(g => g.billed_count > g.paid_count);
+    return groupedByBatchAll;
+  }, [groupedByBatchAll, viewTab]);
 
   // Group by billing_doc_no for summary view
   const groupedByBill = React.useMemo(() => {
@@ -352,18 +360,10 @@ export default function InsuranceBillingPage({ currentUser }) {
         record_batch_no: inheritedBatchNo || "",
         billed_by: currentUser?.username || currentUser?.name || "system",
       });
-      // pre-select ใบที่เพิ่งสร้าง + เตรียม form
-      setSelectedBills({ [docNo]: true });
+      const totalCount = ids.length + extraIds.length;
+      setMessage(`✅ บันทึกใบวางบิล ${docNo} สำเร็จ (${totalCount} รายการ · ${totalRemit.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท) — ไปที่แท็บ "บันทึกการจ่าย" เพื่อจ่ายเงิน`);
       setSelectedBatches({});
-      const today = new Date().toISOString().slice(0, 10);
-      setPaymentForm({
-        paid_date: today, payment_method: "โอน", payment_note: "",
-        paid_to_vendor: "", wht_rate: 0, wht_amount: 0,
-        wht_base: totalCommission, from_bank_account_id: "",
-      });
       await fetchData();
-      // เปิด Payment Dialog ทันที (ไม่ confirm)
-      setPaymentDialog(true);
     } catch {
       setMessage("❌ บันทึกไม่สำเร็จ");
     }
@@ -458,7 +458,7 @@ export default function InsuranceBillingPage({ currentUser }) {
       <div style={{ display: "flex", gap: 8, marginBottom: 14, borderBottom: "2px solid #e5e7eb" }}>
         {[
           ["pending", "📋 รอวางบิล"],
-          ["billed", "📝 บันทึกวางบิล พรบ."],
+          ["billed", "📝 บันทึกการจ่าย"],
           ["paid", "📜 ประวัติการจ่ายเงิน"],
         ].map(([v, label]) => (
           <button key={v} onClick={() => setViewTab(v)}
@@ -530,7 +530,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                 </span>
                 <button onClick={billAndPayFromBatches} disabled={saving || selUnbilledCount === 0}
                   style={{ marginLeft: "auto", padding: "8px 18px", background: saving || selUnbilledCount === 0 ? "#9ca3af" : "#15803d", color: "#fff", border: "none", borderRadius: 8, cursor: saving || selUnbilledCount === 0 ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700 }}>
-                  💰 {saving ? "กำลังบันทึก..." : `บันทึกการจ่ายเงิน (${selUnbilledCount})`}
+                  📝 {saving ? "กำลังบันทึก..." : `บันทึกวางบิล (${selUnbilledCount})`}
                 </button>
               </>
             )}
@@ -563,7 +563,7 @@ export default function InsuranceBillingPage({ currentUser }) {
         ) : viewTab === "pending" && filtered.length === 0 ? (
           <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีรายการ พรบ. รอวางบิล</div>
         ) : viewTab === "billed" ? (
-          // === Tab "บันทึกวางบิล พรบ." — Group by INSREC batch ===
+          // === Tab "บันทึกการจ่าย" — Group by INSREC batch ===
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead style={{ background: "#072d6b", color: "#fff" }}>
               <tr>
@@ -1009,8 +1009,18 @@ export default function InsuranceBillingPage({ currentUser }) {
       {/* Payment Dialog */}
       {paymentDialog && (() => {
         const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
-        const selGroups = groupedByBill.filter(g => selectedBills[g.billing_doc_no]);
-        const selRemit = selGroups.reduce((s, g) => s + Number(g.premium_remit || 0), 0);
+        // คำนวณจาก rows ทุก record ที่มี billing_doc_no ตรง (รวมทั้ง insurance + extras)
+        const selRows = rows.filter(r => r.billing_doc_no && selectedBills[r.billing_doc_no]);
+        const selRemit = selRows.reduce((s, r) => s + Number(r.premium_remit || 0), 0);
+        const selGroups = selectedDocNos.map(docNo => {
+          const drows = selRows.filter(r => r.billing_doc_no === docNo);
+          return {
+            billing_doc_no: docNo,
+            count: drows.length,
+            premium_remit: drows.reduce((s, r) => s + Number(r.premium_remit || 0), 0),
+            commission: drows.reduce((s, r) => s + Number(r.commission || 0), 0),
+          };
+        });
         return (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
             onClick={() => !savingPayment && setPaymentDialog(false)}>
