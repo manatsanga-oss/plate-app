@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-insurance-extra-api";
+const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 
 export default function InsuranceBillingPage({ currentUser }) {
   const [rows, setRows] = useState([]);
