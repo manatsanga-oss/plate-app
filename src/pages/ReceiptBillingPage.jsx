@@ -252,10 +252,16 @@ ${transferSummary.length > 0 ? `
         body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
-      const payNo = data?.paid_doc_no || data?.[0]?.paid_doc_no || "";
-      setMessage(isEdit ? `✅ แก้ไขการจ่าย ${payNo} สำเร็จ` : `✅ บันทึกจ่ายเงิน ${payNo || ""} สำเร็จ ${selectedDocNos.length} ใบ`);
+      const first = Array.isArray(data) ? data[0] : data;
+      const payNo = first?.paid_doc_no || "";
+      const updated = first?.updated_count ?? null;
+      const err = first?.error_msg || first?.error;
+      if (err) { setMessage(`❌ ${err}`); setSavingPayment(false); return; }
+      if (isEdit && updated === 0) { setMessage("⚠️ ไม่มี record ถูกอัปเดต — workflow ยังไม่ support edit หรือ paid_doc_no ไม่พบ"); setSavingPayment(false); return; }
+      setMessage(isEdit ? `✅ แก้ไขการจ่าย ${payNo} สำเร็จ (${updated ?? "?"} records)` : `✅ บันทึกจ่ายเงิน ${payNo || ""} สำเร็จ ${selectedDocNos.length} ใบ`);
       setPaymentDialog(false);
       setSelectedBills({});
+      setEditingPayDocNo(null);
       fetchData();
     } catch {
       setMessage("❌ บันทึกไม่สำเร็จ");
