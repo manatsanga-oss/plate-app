@@ -172,31 +172,81 @@ ${transferSummary.length > 0 ? `
     setPaymentDialog(true);
   }
 
-  async function savePayment() {
-    const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
-    if (selectedDocNos.length === 0) return;
-    if (!paymentForm.paid_to_vendor) { setMessage("❌ กรุณาเลือก Vendor"); return; }
-    if (!paymentForm.from_bank_account_id) { setMessage("❌ กรุณาเลือกบัญชีโอนจาก"); return; }
-    setSavingPayment(true);
+  function openEditPayment(g) {
+    if (!g?.paid_doc_no) { setMessage("❌ ไม่มีเลขที่ใบจ่าย"); return; }
+    if (vendors.length === 0) fetchVendors();
+    if (bankAccounts.length === 0) fetchBankAccounts();
+    setPaymentForm({
+      _editMode: true,
+      _paidDocNo: g.paid_doc_no,
+      paid_date: g.paid_at ? String(g.paid_at).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      payment_method: g.payment_method || "โอน",
+      payment_note: g.payment_note || "",
+      paid_to_vendor: g.paid_to_vendor || "",
+      wht_rate: g.wht_rate || 0,
+      wht_amount: g.wht_amount || 0,
+      wht_base: g.wht_amount && g.wht_rate ? Number(g.wht_amount) / Number(g.wht_rate) * 100 : calcWhtBase(),
+      from_bank_account_id: g.from_bank_account_id || "",
+    });
+    setPaymentDialog(true);
+  }
+
+  async function cancelPayment(g) {
+    if (!g?.paid_doc_no) { setMessage("❌ ไม่มีเลขที่ใบจ่าย"); return; }
+    if (!window.confirm(`ยกเลิกการจ่ายเงิน ${g.paid_doc_no}?\n\nใบวางบิล ${g.billing_doc_no} จะกลับเป็น "รอจ่ายเงิน"`)) return;
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "save_receipt_payment",
-          billing_doc_nos: selectedDocNos,
-          paid_date: paymentForm.paid_date,
-          payment_method: paymentForm.payment_method,
-          payment_note: paymentForm.payment_note,
-          paid_to_vendor: paymentForm.paid_to_vendor,
-          wht_rate: Number(paymentForm.wht_rate) || 0,
-          wht_amount: Number(paymentForm.wht_amount) || 0,
-          from_bank_account_id: Number(paymentForm.from_bank_account_id) || null,
-          paid_by: currentUser?.username || currentUser?.name || "system",
+          action: "save_receipt_payment", mode: "cancel", paid_doc_no: g.paid_doc_no,
         }),
+      });
+      if (!res.ok) throw new Error("cancel fail");
+      setMessage(`✅ ยกเลิกการจ่ายเงิน ${g.paid_doc_no} แล้ว`);
+      fetchData();
+    } catch {
+      setMessage("❌ ยกเลิกไม่สำเร็จ");
+    }
+  }
+
+  async function savePayment() {
+    const isEdit = !!paymentForm._editMode;
+    const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
+    if (!isEdit && selectedDocNos.length === 0) return;
+    if (!paymentForm.paid_to_vendor) { setMessage("❌ กรุณาเลือก Vendor"); return; }
+    if (!paymentForm.from_bank_account_id) { setMessage("❌ กรุณาเลือกบัญชีโอนจาก"); return; }
+    setSavingPayment(true);
+    try {
+      const body = isEdit
+        ? {
+            action: "save_receipt_payment", mode: "edit", paid_doc_no: paymentForm._paidDocNo,
+            paid_date: paymentForm.paid_date,
+            payment_method: paymentForm.payment_method,
+            payment_note: paymentForm.payment_note,
+            paid_to_vendor: paymentForm.paid_to_vendor,
+            wht_rate: Number(paymentForm.wht_rate) || 0,
+            wht_amount: Number(paymentForm.wht_amount) || 0,
+            from_bank_account_id: Number(paymentForm.from_bank_account_id) || null,
+          }
+        : {
+            action: "save_receipt_payment",
+            billing_doc_nos: selectedDocNos,
+            paid_date: paymentForm.paid_date,
+            payment_method: paymentForm.payment_method,
+            payment_note: paymentForm.payment_note,
+            paid_to_vendor: paymentForm.paid_to_vendor,
+            wht_rate: Number(paymentForm.wht_rate) || 0,
+            wht_amount: Number(paymentForm.wht_amount) || 0,
+            from_bank_account_id: Number(paymentForm.from_bank_account_id) || null,
+            paid_by: currentUser?.username || currentUser?.name || "system",
+          };
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
       });
       const data = await res.json().catch(() => ({}));
       const payNo = data?.paid_doc_no || data?.[0]?.paid_doc_no || "";
-      setMessage(`✅ บันทึกจ่ายเงิน ${payNo || ""} สำเร็จ ${selectedDocNos.length} ใบ`);
+      setMessage(isEdit ? `✅ แก้ไขการจ่าย ${payNo} สำเร็จ` : `✅ บันทึกจ่ายเงิน ${payNo || ""} สำเร็จ ${selectedDocNos.length} ใบ`);
       setPaymentDialog(false);
       setSelectedBills({});
       fetchData();
@@ -446,7 +496,13 @@ ${transferSummary.length > 0 ? `
             if (viewMode === "history" && r.paid_at) return;
             if (viewMode === "paidHistory" && !r.paid_at) return;
             const key = r.billing_doc_no;
-            if (!grouped[key]) grouped[key] = { billing_doc_no: key, billed_at: r.billed_at, items: [], total: 0, paid_at: r.paid_at, paid_doc_no: r.paid_doc_no, paid_to_vendor: r.paid_to_vendor };
+            if (!grouped[key]) grouped[key] = {
+              billing_doc_no: key, billed_at: r.billed_at, items: [], total: 0,
+              paid_at: r.paid_at, paid_doc_no: r.paid_doc_no, paid_to_vendor: r.paid_to_vendor,
+              payment_method: r.payment_method, payment_note: r.payment_note,
+              wht_rate: r.wht_rate, wht_amount: r.wht_amount,
+              from_bank_account_id: r.from_bank_account_id,
+            };
             grouped[key].items.push(r);
             grouped[key].total += Number(r.bill_amount || 0);
           });
@@ -497,9 +553,14 @@ ${transferSummary.length > 0 ? `
                         </span>
                         <span style={{ fontSize: 13 }}>📋 {g.items.length} รายการ</span>
                         {isPaid && (
-                          <span style={{ background: "#fff3", padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
-                            ✓ จ่ายแล้ว · {g.paid_doc_no || ""}{g.paid_to_vendor ? ` · ${g.paid_to_vendor}` : ""}
-                          </span>
+                          <>
+                            <span style={{ background: "#fbbf24", color: "#78350f", padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 700 }} title="วันที่จ่ายเงินจริง">
+                              💵 จ่ายเมื่อ {new Date(g.paid_at).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" })}
+                            </span>
+                            <span style={{ background: "#fff3", padding: "2px 10px", borderRadius: 4, fontSize: 11, fontWeight: 600 }}>
+                              ✓ {g.paid_doc_no || ""}{g.paid_to_vendor ? ` · ${g.paid_to_vendor}` : ""}
+                            </span>
+                          </>
                         )}
                         <div style={{ flex: 1 }} />
                         <span style={{ fontWeight: 700, fontSize: 15 }}>฿ {g.total.toLocaleString()}</span>
@@ -514,6 +575,20 @@ ${transferSummary.length > 0 ? `
                             style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "1px solid #dc2626", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
                             🚫 ยกเลิกใบวางบิล
                           </button>
+                        )}
+                        {isPaid && (
+                          <>
+                            <button onClick={e => { e.stopPropagation(); openEditPayment(g); }}
+                              title="แก้ไขรายละเอียดการจ่ายเงิน"
+                              style={{ padding: "4px 10px", background: "#fff", color: "#065f46", border: "1px solid #fff", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                              ✏️ แก้ไขการจ่าย
+                            </button>
+                            <button onClick={e => { e.stopPropagation(); cancelPayment(g); }}
+                              title="ยกเลิกการจ่ายเงิน — กลับเป็น 'รอจ่ายเงิน'"
+                              style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "1px solid #dc2626", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                              🚫 ยกเลิกการจ่าย
+                            </button>
+                          </>
                         )}
                       </div>
                       {open && (

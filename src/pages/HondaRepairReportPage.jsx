@@ -41,15 +41,17 @@ export default function HondaRepairReportPage() {
   const totalLabor = rows.reduce((s, r) => s + Number(r.labor_amount || 0), 0);
   const totalNet = rows.reduce((s, r) => s + Number(r.net_sale || 0), 0);
 
-  // pivot: mechanic × service_type (count + labor) — PDI ใช้ count × 40
+  // pivot: mechanic × service_type (count + labor) — PDI ใช้ count × 50
   const mechanicPivot = useMemo(() => {
     const types = [...new Set(rows.map(r => r.service_type).filter(Boolean))].sort();
     const isPDIType = (t) => t && t.toUpperCase().includes("PDI");
+    // ป.เปา (PMOTOR) ไม่คิดค่า PDI
+    const isPMotor = (code, name) => String(code || "").toUpperCase() === "PMOTOR" || String(name || "").includes("ป.เปา");
     const map = new Map();
     for (const r of rows) {
       const name = r.mechanic_name || "(ไม่ระบุ)";
       if (!map.has(name)) {
-        const entry = { mechanic_code: r.mechanic_code, mechanic_name: name, total_jobs: 0, total_labor: 0, total_net: 0 };
+        const entry = { mechanic_code: r.mechanic_code, mechanic_name: name, total_jobs: 0, total_labor: 0, total_net: 0, is_pmotor: isPMotor(r.mechanic_code, name) };
         for (const t of types) entry[t] = { count: 0, labor: 0 };
         map.set(name, entry);
       }
@@ -60,8 +62,8 @@ export default function HondaRepairReportPage() {
         g[t].labor += Number(r.labor_amount || 0);
       }
       g.total_jobs += 1;
-      // total_labor: PDI ใช้ ×40 อื่น ๆ ใช้ labor_amount
-      g.total_labor += isPDIType(t) ? 40 : Number(r.labor_amount || 0);
+      // total_labor: PDI ใช้ ×50 อื่น ๆ ใช้ labor_amount — ยกเว้น ป.เปา ไม่คิด PDI
+      g.total_labor += (isPDIType(t) ? (g.is_pmotor ? 0 : 50) : Number(r.labor_amount || 0));
       g.total_net += Number(r.net_sale || 0);
     }
     return { types, data: [...map.values()].sort((a, b) => b.total_labor - a.total_labor) };
@@ -106,8 +108,9 @@ export default function HondaRepairReportPage() {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 10, marginBottom: 12 }}>
         <Card label="📋 Jobs" value={totalJobs} color="#1e40af" />
         <Card label="🧰 ค่าสินค้ารวม" value={fmt(totalParts)} color="#7c3aed" />
-        <Card label="🛠️ ค่าบริการรวม" value={fmt(totalLabor)} color="#0369a1" />
-        <Card label="💰 ขายสุทธิรวม" value={fmt(totalNet)} color="#059669" highlight />
+        <Card label="🛠️ ค่าบริการรวม (รวม PDI×50)" value={fmt(mechanicPivot.data.reduce((s, g) => s + g.total_labor, 0))} color="#0369a1" />
+        <Card label="💰 ขายสุทธิรวม" value={fmt(totalNet)} color="#059669" />
+        <Card label="💵 ค่าคอมมิชชั่นรวม (65%)" value={fmt(mechanicPivot.data.reduce((s, g) => s + g.total_labor, 0) * 0.65)} color="#15803d" highlight />
       </div>
 
       {/* Pivot: ช่างซ่อม × ประเภทบริการ */}
@@ -123,6 +126,7 @@ export default function HondaRepairReportPage() {
                   {mechanicPivot.types.map(t => <th key={t} style={{ ...th, textAlign: "right" }}>{t}</th>)}
                   <th style={{ ...th, textAlign: "right", background: "#fef9c3" }}>รวม Jobs</th>
                   <th style={{ ...th, textAlign: "right", background: "#fef9c3" }}>ค่าบริการรวม</th>
+                  <th style={{ ...th, textAlign: "right", background: "#dcfce7" }}>ค่าคอมมิชชั่น (65%)</th>
                 </tr>
               </thead>
               <tbody>
@@ -132,13 +136,16 @@ export default function HondaRepairReportPage() {
                     <td style={{ ...td, fontWeight: 600 }}>{g.mechanic_name}</td>
                     {mechanicPivot.types.map(t => {
                       const isPDI = t && t.toUpperCase().includes("PDI");
-                      const displayValue = isPDI ? (g[t]?.count || 0) * 40 : (g[t]?.labor || 0);
+                      const skipPDI = isPDI && g.is_pmotor;  // ป.เปา ไม่คิด PDI
+                      const displayValue = isPDI ? (g[t]?.count || 0) * 50 : (g[t]?.labor || 0);
                       return (
                         <td key={t} style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
-                          {g[t]?.count > 0 ? (
+                          {skipPDI ? (
+                            <span style={{ color: "#9ca3af" }}>-</span>
+                          ) : g[t]?.count > 0 ? (
                             <>
                               <div style={isPDI ? { color: "#f59e0b", fontWeight: 600 } : {}}>{fmt(displayValue)}</div>
-                              <div style={{ fontSize: 10, color: "#6b7280" }}>({g[t].count} jobs{isPDI ? " ×40" : ""})</div>
+                              <div style={{ fontSize: 10, color: "#6b7280" }}>({g[t].count} jobs{isPDI ? " ×50" : ""})</div>
                             </>
                           ) : "-"}
                         </td>
@@ -146,6 +153,7 @@ export default function HondaRepairReportPage() {
                     })}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3" }}>{g.total_jobs}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3", color: "#059669" }}>{fmt(g.total_labor)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#dcfce7", color: "#15803d" }}>{fmt(g.total_labor * 0.65)}</td>
                   </tr>
                 ))}
               </tbody>

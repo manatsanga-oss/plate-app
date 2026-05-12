@@ -58,7 +58,7 @@ export default function YamahaRepairReportPage() {
   const statuses = [...new Set(rows.map(r => r.status).filter(Boolean))];
 
   // Pivot: rows=ช่างซ่อม, columns=item_type (เป็นยอดเงิน)
-  // รายการค่าแรง → labor_total | ใบแจ้งซ่อม → net_revenue | คูปอง → count×20
+  // รายการค่าแรง → labor_total | ใบแจ้งซ่อม → net_revenue | คูปอง → count×40
   const mechanicPivot = useMemo(() => {
     const map = new Map();
     for (const r of rows) {
@@ -75,8 +75,8 @@ export default function YamahaRepairReportPage() {
     }
     const list = [...map.values()].map(g => ({
       ...g,
-      coupon_amount: g.coupon_count * 20,
-      total: g.labor_amount + g.invoice_amount + g.coupon_count * 20,
+      coupon_amount: g.coupon_count * 40,
+      total: g.labor_amount + g.invoice_amount + g.coupon_count * 40,
     }));
     return list.sort((a, b) => b.total - a.total);
   }, [rows]);
@@ -94,8 +94,8 @@ export default function YamahaRepairReportPage() {
     }
     return [...map.values()].map(g => ({
       ...g,
-      // คูปอง: ใช้ count × 20
-      coupon_value: g.item_type === "คูปอง" ? g.count * 20 : null,
+      // คูปอง: ใช้ count × 40
+      coupon_value: g.item_type === "คูปอง" ? g.count * 40 : null,
     })).sort((a, b) => b.count - a.count);
   }, [rows]);
 
@@ -144,32 +144,46 @@ export default function YamahaRepairReportPage() {
                   <th style={th}>#</th>
                   <th style={th}>ช่างซ่อม</th>
                   <th style={{ ...th, textAlign: "right" }}>รายการค่าแรง</th>
+                  <th style={{ ...th, textAlign: "right" }}>คูปอง (×40)</th>
+                  <th style={{ ...th, textAlign: "right", background: "#fef9c3", color: "#072d6b" }}>รวมค่าแรง</th>
+                  <th style={{ ...th, textAlign: "right", background: "#dcfce7", color: "#15803d" }}>ค่าคอมมิชชั่น (65%)</th>
                   <th style={{ ...th, textAlign: "right" }}>ใบแจ้งซ่อม</th>
-                  <th style={{ ...th, textAlign: "right" }}>คูปอง (×20)</th>
                   <th style={{ ...th, textAlign: "right", background: "#fef9c3", color: "#072d6b" }}>รวม</th>
                 </tr>
               </thead>
               <tbody>
-                {mechanicPivot.map((g, i) => (
+                {mechanicPivot.map((g, i) => {
+                  const laborTotal = (g.labor_amount || 0) + (g.coupon_amount || 0);
+                  return (
                   <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
                     <td style={{ ...td, fontWeight: 600 }}>{g.mechanic_name}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.labor_amount ? fmt(g.labor_amount) : "-"}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{g.invoice_amount ? fmt(g.invoice_amount) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#f59e0b", fontWeight: 600 }}>
                       {g.coupon_amount ? fmt(g.coupon_amount) : "-"}
                       {g.coupon_count > 0 && <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 400, marginLeft: 4 }}>({g.coupon_count})</span>}
                     </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3" }}>{laborTotal ? fmt(laborTotal) : "-"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#dcfce7", color: "#15803d" }}>{laborTotal ? fmt(laborTotal * 0.65) : "-"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{g.invoice_amount ? fmt(g.invoice_amount) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3" }}>{fmt(g.total)}</td>
                   </tr>
-                ))}
-                <tr style={{ background: "#fde68a", fontWeight: 700, borderTop: "2px solid #cbd5e1" }}>
-                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>รวม</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.labor_amount,0))}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.invoice_amount,0))}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#f59e0b" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.coupon_amount,0))}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.total,0))}</td>
-                </tr>
+                )})}
+                {(() => {
+                  const sumLabor = mechanicPivot.reduce((s,g)=>s+(g.labor_amount||0),0);
+                  const sumCoupon = mechanicPivot.reduce((s,g)=>s+(g.coupon_amount||0),0);
+                  const sumLaborTotal = sumLabor + sumCoupon;
+                  return (
+                  <tr style={{ background: "#fde68a", fontWeight: 700, borderTop: "2px solid #cbd5e1" }}>
+                    <td colSpan={2} style={{ ...td, textAlign: "right" }}>รวม</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumLabor)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#f59e0b" }}>{fmt(sumCoupon)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumLaborTotal)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d" }}>{fmt(sumLaborTotal * 0.65)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.invoice_amount,0))}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.total,0))}</td>
+                  </tr>
+                )})()}
               </tbody>
             </table>
           </div>
@@ -189,7 +203,7 @@ export default function YamahaRepairReportPage() {
                   <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
                   <th style={{ ...th, textAlign: "right" }}>ค่าแรงรวม</th>
                   <th style={{ ...th, textAlign: "right" }}>รายได้สุทธิ</th>
-                  <th style={{ ...th, textAlign: "right" }}>คูปอง (×20)</th>
+                  <th style={{ ...th, textAlign: "right" }}>คูปอง (×40)</th>
                 </tr>
               </thead>
               <tbody>
@@ -284,7 +298,7 @@ export default function YamahaRepairReportPage() {
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1400, width: "95%", maxHeight: "90vh", overflow: "auto", padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <h3 style={{ margin: 0, color: "#072d6b" }}>📋 รายละเอียด — {itemTypeDetail.item_type} ({itemTypeDetail.rows.length} รายการ)
-                {itemTypeDetail.coupon_value !== null && <span style={{ marginLeft: 10, color: "#f59e0b" }}>· คูปอง × 20 = {fmt(itemTypeDetail.coupon_value)}</span>}
+                {itemTypeDetail.coupon_value !== null && <span style={{ marginLeft: 10, color: "#f59e0b" }}>· คูปอง × 40 = {fmt(itemTypeDetail.coupon_value)}</span>}
               </h3>
               <button onClick={() => setItemTypeDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
             </div>

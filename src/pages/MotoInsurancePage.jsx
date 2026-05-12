@@ -285,6 +285,7 @@ function OcrPanel({ setMessage }) {
   const [searchKeyword, setSearchKeyword] = useState("");
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [dupCheckResult, setDupCheckResult] = useState(null); // { dups: [...], toSave: [...] }
   const fileRef = useRef();
   const xlsxRef = useRef();
 
@@ -477,7 +478,30 @@ function OcrPanel({ setMessage }) {
   async function saveBatch() {
     const toSave = items.filter(it => it._selected);
     if (!toSave.length) { setMessage("เลือกรายการก่อน"); return; }
-    if (!window.confirm(`บันทึก ${toSave.length} รายการ?`)) return;
+    setSaving(true);
+    try {
+      // ตรวจซ้ำก่อน
+      const policy_nos = toSave.map(it => it.policy_no).filter(Boolean);
+      const checkRes = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "check_duplicate_policies", policy_nos }),
+      });
+      const dupRows = await checkRes.json();
+      const dups = Array.isArray(dupRows) ? dupRows.filter(r => r && r.policy_no) : [];
+      if (dups.length > 0) {
+        setDupCheckResult({ dups, toSave });
+        setSaving(false);
+        return;
+      }
+      // ไม่ซ้ำ → save เลย
+      await doSave(toSave);
+    } catch {
+      setMessage("❌ บันทึกไม่สำเร็จ");
+      setSaving(false);
+    }
+  }
+
+  async function doSave(toSave) {
     setSaving(true);
     try {
       const res = await fetch(API_URL, {
@@ -485,7 +509,6 @@ function OcrPanel({ setMessage }) {
         body: JSON.stringify({ action: "save_insurance_batch", items: toSave.map(({ _key, _selected, customer_name, invoice_no, ...rest }) => rest) }),
       });
       const data = await res.json();
-      // n8n อาจตอบกลับเป็น array หรือ object — รองรับทั้ง 2 แบบ
       const rows = Array.isArray(data) ? data : (data?.rows || []);
       const n = data?.inserted ?? rows.length;
       const matched = rows.filter(r => r.sale_id).length;
@@ -496,6 +519,7 @@ function OcrPanel({ setMessage }) {
       setXlsxFile(null);
       if (fileRef.current) fileRef.current.value = "";
       if (xlsxRef.current) xlsxRef.current.value = "";
+      setDupCheckResult(null);
     } catch {
       setMessage("❌ บันทึกไม่สำเร็จ");
     }
@@ -749,6 +773,85 @@ function OcrPanel({ setMessage }) {
             {searchResults.length > 0 && (
               <div style={{ fontSize: 11, color: "#6b7280", marginTop: 8 }}>พบ {searchResults.length} รายการ — คลิกแถวเพื่อเลือก</div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Popup: เตือนซ้ำก่อนบันทึก */}
+      {dupCheckResult && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 2000 }}
+             onClick={() => setDupCheckResult(null)}>
+          <div onClick={e => e.stopPropagation()}
+               style={{ background: "#fff", borderRadius: 12, width: "92%", maxWidth: 1100, maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ padding: "14px 18px", background: "linear-gradient(135deg, #f59e0b, #d97706)", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>⚠️ พบเลขกรมธรรม์ที่บันทึกไว้แล้ว — {dupCheckResult.dups.length} รายการ</div>
+                <div style={{ fontSize: 12, marginTop: 3, opacity: 0.95 }}>
+                  รายการเหล่านี้จะถูกย้ายเข้า batch ใหม่ (ของเดิมที่ "วางบิลแล้ว" จะถูก reset)
+                </div>
+              </div>
+              <button onClick={() => setDupCheckResult(null)}
+                style={{ padding: "5px 12px", background: "rgba(255,255,255,0.25)", color: "#fff", border: "1px solid rgba(255,255,255,0.5)", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+                ✕ ปิด
+              </button>
+            </div>
+
+            <div style={{ overflow: "auto", flex: 1, padding: "10px 14px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead style={{ background: "#fef3c7", position: "sticky", top: 0 }}>
+                  <tr>
+                    <th style={{ padding: 8, textAlign: "left" }}>#</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>เลขกรมธรรม์</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>ผู้เอาประกัน</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>วันสัญญา</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>batch เดิม</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>สถานะเดิม</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>เลขที่วางบิล</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dupCheckResult.dups.map((d, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: 7 }}>{i + 1}</td>
+                      <td style={{ padding: 7, fontFamily: "monospace", fontWeight: 600 }}>{d.policy_no}</td>
+                      <td style={{ padding: 7 }}>{d.insured_name || "-"}</td>
+                      <td style={{ padding: 7 }}>{d.contract_date ? String(d.contract_date).slice(0, 10) : "-"}</td>
+                      <td style={{ padding: 7, fontFamily: "monospace", color: "#0369a1" }}>{d.record_batch_no || "-"}</td>
+                      <td style={{ padding: 7 }}>
+                        <span style={{
+                          padding: "2px 8px", borderRadius: 12, fontSize: 11,
+                          background: d.status === "cancelled" ? "#fee2e2" : (d.is_billed ? "#dbeafe" : "#dcfce7"),
+                          color: d.status === "cancelled" ? "#991b1b" : (d.is_billed ? "#1e40af" : "#166534"),
+                        }}>
+                          {d.status_label || d.status}
+                        </span>
+                      </td>
+                      <td style={{ padding: 7, fontFamily: "monospace", color: "#dc2626", fontWeight: 600 }}>
+                        {d.billing_doc_no || "-"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ padding: "12px 18px", borderTop: "1px solid #e5e7eb", background: "#f9fafb", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>
+                จะบันทึกทั้งหมด <strong>{dupCheckResult.toSave.length}</strong> รายการ —
+                ใหม่ <strong style={{ color: "#059669" }}>{dupCheckResult.toSave.length - dupCheckResult.dups.length}</strong> รายการ ·
+                ซ้ำ <strong style={{ color: "#d97706" }}>{dupCheckResult.dups.length}</strong> รายการ (จะ overwrite)
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => setDupCheckResult(null)}
+                  style={{ padding: "8px 18px", background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+                  ❌ ยกเลิก
+                </button>
+                <button onClick={() => doSave(dupCheckResult.toSave)} disabled={saving}
+                  style={{ padding: "8px 22px", background: "#d97706", color: "#fff", border: "none", borderRadius: 6, cursor: saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700, opacity: saving ? 0.6 : 1 }}>
+                  {saving ? "กำลังบันทึก..." : "✅ ยืนยันบันทึกต่อ (overwrite)"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

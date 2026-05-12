@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
+const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-insurance-extra-api";
 
 export default function InsuranceBillingPage({ currentUser }) {
   const [rows, setRows] = useState([]);
@@ -33,6 +33,7 @@ export default function InsuranceBillingPage({ currentUser }) {
   const [vendors, setVendors] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
   const [savingPayment, setSavingPayment] = useState(false);
+
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -113,27 +114,71 @@ export default function InsuranceBillingPage({ currentUser }) {
     setPaymentDialog(true);
   }
 
+  function openEditPayment(g) {
+    if (!g?.paid_doc_no) { setMessage("❌ ไม่มีเลขที่ใบจ่าย"); return; }
+    if (vendors.length === 0) fetchVendors();
+    if (bankAccounts.length === 0) fetchBankAccounts();
+    setPaymentForm({
+      _editMode: true,
+      _paidDocNo: g.paid_doc_no,
+      paid_date: g.paid_at ? String(g.paid_at).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      payment_method: g.payment_method || "โอน",
+      payment_note: g.payment_note || "",
+      paid_to_vendor: g.paid_to_vendor || "",
+      wht_rate: g.wht_rate || 0,
+      wht_amount: g.wht_amount || 0,
+      wht_base: g.wht_amount && g.wht_rate ? Number(g.wht_amount) / Number(g.wht_rate) * 100 : calcCommissionBase(),
+      from_bank_account_id: g.from_bank_account_id || "",
+    });
+    setPaymentDialog(true);
+  }
+
+  async function cancelPayment(g) {
+    if (!g?.paid_doc_no) { setMessage("❌ ไม่มีเลขที่ใบจ่าย"); return; }
+    if (!window.confirm(`ยกเลิกการจ่ายเงิน ${g.paid_doc_no}?\n\nใบวางบิล ${g.billing_doc_no} จะกลับเป็น "รอจ่ายเงิน"`)) return;
+    try {
+      await post({ action: "save_insurance_payment", mode: "cancel", paid_doc_no: g.paid_doc_no });
+      setMessage(`✅ ยกเลิกการจ่ายเงิน ${g.paid_doc_no} แล้ว`);
+      fetchData();
+    } catch {
+      setMessage("❌ ยกเลิกไม่สำเร็จ");
+    }
+  }
+
   async function savePayment() {
+    const isEdit = !!paymentForm._editMode;
     const docNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
-    if (docNos.length === 0) return;
+    if (!isEdit && docNos.length === 0) return;
     if (!paymentForm.paid_to_vendor) { setMessage("❌ กรุณาเลือก Vendor"); return; }
     if (!paymentForm.from_bank_account_id) { setMessage("❌ กรุณาเลือกบัญชีโอนจาก"); return; }
     setSavingPayment(true);
     try {
-      const res = await post({
-        action: "save_insurance_payment",
-        billing_doc_nos: docNos,
-        paid_date: paymentForm.paid_date,
-        payment_method: paymentForm.payment_method,
-        payment_note: paymentForm.payment_note,
-        paid_to_vendor: paymentForm.paid_to_vendor,
-        wht_rate: Number(paymentForm.wht_rate) || 0,
-        wht_amount: Number(paymentForm.wht_amount) || 0,
-        from_bank_account_id: Number(paymentForm.from_bank_account_id) || null,
-        paid_by: currentUser?.username || currentUser?.name || "system",
-      });
+      const body = isEdit
+        ? {
+            action: "save_insurance_payment", mode: "edit", paid_doc_no: paymentForm._paidDocNo,
+            paid_date: paymentForm.paid_date,
+            payment_method: paymentForm.payment_method,
+            payment_note: paymentForm.payment_note,
+            paid_to_vendor: paymentForm.paid_to_vendor,
+            wht_rate: Number(paymentForm.wht_rate) || 0,
+            wht_amount: Number(paymentForm.wht_amount) || 0,
+            from_bank_account_id: Number(paymentForm.from_bank_account_id) || null,
+          }
+        : {
+            action: "save_insurance_payment",
+            billing_doc_nos: docNos,
+            paid_date: paymentForm.paid_date,
+            payment_method: paymentForm.payment_method,
+            payment_note: paymentForm.payment_note,
+            paid_to_vendor: paymentForm.paid_to_vendor,
+            wht_rate: Number(paymentForm.wht_rate) || 0,
+            wht_amount: Number(paymentForm.wht_amount) || 0,
+            from_bank_account_id: Number(paymentForm.from_bank_account_id) || null,
+            paid_by: currentUser?.username || currentUser?.name || "system",
+          };
+      const res = await post(body);
       const payNo = res?.paid_doc_no || res?.[0]?.paid_doc_no || "";
-      setMessage(`✅ บันทึกจ่ายเงิน ${payNo} สำเร็จ ${docNos.length} ใบ`);
+      setMessage(isEdit ? `✅ แก้ไขการจ่าย ${payNo} สำเร็จ` : `✅ บันทึกจ่ายเงิน ${payNo} สำเร็จ ${docNos.length} ใบ`);
       setPaymentDialog(false);
       setSelectedBills({});
       fetchData();
@@ -205,6 +250,11 @@ export default function InsuranceBillingPage({ currentUser }) {
           paid_at: r.paid_at,
           paid_doc_no: r.paid_doc_no,
           paid_to_vendor: r.paid_to_vendor,
+          payment_method: r.payment_method,
+          payment_note: r.payment_note,
+          wht_rate: r.wht_rate,
+          wht_amount: r.wht_amount,
+          from_bank_account_id: r.from_bank_account_id,
           count: 0,
           premium: 0,
           total_premium: 0,
@@ -252,22 +302,28 @@ export default function InsuranceBillingPage({ currentUser }) {
     const selBatchNos = Object.keys(selectedBatches).filter(k => selectedBatches[k]);
     if (selBatchNos.length === 0) { setMessage("เลือก batch ก่อน"); return; }
     const ids = [];
+    const extraIds = [];
     let totalRemit = 0;
     let totalPremium = 0;
     let totalCommission = 0;
+    let inheritedBatchNo = null;
     groupedByBatch
       .filter(g => selBatchNos.includes(g.batch_no))
       .forEach(g => {
         g.rows.forEach(r => {
           if (!r.billing_doc_no) {
-            ids.push(r.insurance_id);
+            if (r.record_type === "extra") extraIds.push(r.insurance_id);
+            else {
+              ids.push(r.insurance_id);
+              if (!inheritedBatchNo && r.record_batch_no) inheritedBatchNo = r.record_batch_no;
+            }
             totalPremium += Number(r.total_premium || 0);
             totalRemit += Number(r.premium_remit || 0);
             totalCommission += Number(r.commission || 0);
           }
         });
       });
-    if (ids.length === 0) { setMessage("ใน batch ที่เลือกไม่มีรายการที่ยังไม่ได้วางบิล"); return; }
+    if (ids.length === 0 && extraIds.length === 0) { setMessage("ใน batch ที่เลือกไม่มีรายการที่ยังไม่ได้วางบิล"); return; }
     const now = new Date();
     const docNo = `INSB-${(now.getFullYear() + 543).toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
     setSaving(true);
@@ -276,7 +332,9 @@ export default function InsuranceBillingPage({ currentUser }) {
       await post({
         action: "save_insurance_billing",
         insurance_ids: ids,
+        extra_ids: extraIds,
         billing_doc_no: docNo,
+        record_batch_no: inheritedBatchNo || "",
         billed_by: currentUser?.username || currentUser?.name || "system",
       });
       // pre-select ใบที่เพิ่งสร้าง + เตรียม form
@@ -305,13 +363,19 @@ export default function InsuranceBillingPage({ currentUser }) {
     setSaving(true);
     setMessage("");
     try {
+      const insRows = selectedRows.filter(r => r.record_type !== "extra");
+      const insIds = insRows.map(r => r.insurance_id);
+      const exIds = selectedRows.filter(r => r.record_type === "extra").map(r => r.insurance_id);
+      const inheritedBatchNo = insRows.find(r => r.record_batch_no)?.record_batch_no || "";
       await post({
         action: "save_insurance_billing",
-        insurance_ids: selectedRows.map(r => r.insurance_id),
+        insurance_ids: insIds,
+        extra_ids: exIds,
         billing_doc_no: docNo,
+        record_batch_no: inheritedBatchNo,
         billed_by: currentUser?.username || currentUser?.name || "system",
       });
-      setMessage(`✅ บันทึกใบวางบิล ${docNo} สำเร็จ ${selCount} รายการ`);
+      setMessage(`✅ บันทึกใบวางบิล ${docNo} สำเร็จ ${selCount} รายการ (พรบ. ${insIds.length} + ค่าใช้จ่าย ${exIds.length})`);
       fetchData();
     } catch {
       setMessage("❌ บันทึกไม่สำเร็จ");
@@ -331,13 +395,18 @@ export default function InsuranceBillingPage({ currentUser }) {
     }
   }
 
-  // ยกเลิกบันทึกวางบิลทั้ง batch (INSREC-...)
-  async function cancelBatchBilling(batchNo, count) {
-    if (!batchNo) return;
-    if (!window.confirm(`ยกเลิกการวางบิลทั้ง batch "${batchNo}"?\nรายการ พรบ. ${count} ใบ จะกลับเป็น "ยังไม่วางบิล"\n\n⚠ Action นี้ undo ไม่ได้`)) return;
+  // ยกเลิกบันทึกวางบิลทั้ง batch (INSREC-... หรือ ใช้ billing_doc_no ถ้าไม่มี batch_no)
+  async function cancelBatchBilling(batchNo, count, billingDocNo) {
+    if (!batchNo && !billingDocNo) return;
+    const label = batchNo || billingDocNo;
+    if (!window.confirm(`ยกเลิกการวางบิล "${label}"?\nรายการ ${count} ใบ จะกลับเป็น "ยังไม่วางบิล"\n\n⚠ Action นี้ undo ไม่ได้`)) return;
     try {
-      await post({ action: "cancel_insurance_billing_batch", record_batch_no: batchNo });
-      setMessage(`✅ ยกเลิกบันทึกวางบิล ${batchNo} แล้ว (${count} ใบ)`);
+      if (batchNo) {
+        await post({ action: "cancel_insurance_billing_batch", record_batch_no: batchNo });
+      } else {
+        await post({ action: "cancel_insurance_billing", billing_doc_no: billingDocNo });
+      }
+      setMessage(`✅ ยกเลิกบันทึกวางบิล ${batchNo || billingDocNo} แล้ว (${count} ใบ)`);
       fetchData();
     } catch {
       setMessage("❌ ยกเลิกไม่สำเร็จ");
@@ -538,7 +607,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                         📁 ดู
                       </button>
                       {(fullyBilled || partial) && (
-                        <button onClick={() => cancelBatchBilling(g.batch_no, g.count)}
+                        <button onClick={() => cancelBatchBilling(g.batch_no, g.count, g.billing_doc_no || (g.rows && g.rows[0] && g.rows[0].billing_doc_no))}
                           title="ยกเลิกบันทึกวางบิลทั้ง batch — รายการจะกลับเป็น 'ยังไม่วางบิล'"
                           style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
                           ✗ ยกเลิก
@@ -589,10 +658,20 @@ export default function InsuranceBillingPage({ currentUser }) {
                   {viewTab === "paid" && <td style={td}>{fmtDate(g.paid_at)}</td>}
                   {viewTab === "paid" && <td style={td}>{g.paid_to_vendor || "-"}</td>}
                   <td style={td}>
-                    {g.billing_doc_no && (
-                      <button onClick={() => setDetailRow(g)} title="ดูรายการในใบนี้"
-                        style={{ padding: "3px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>📋 ดู</button>
-                    )}
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {g.billing_doc_no && (
+                        <button onClick={() => setDetailRow(g)} title="ดูรายการในใบนี้"
+                          style={{ padding: "3px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>📋 ดู</button>
+                      )}
+                      {viewTab === "paid" && g.paid_doc_no && (
+                        <>
+                          <button onClick={() => openEditPayment(g)} title="แก้ไขรายละเอียดการจ่ายเงิน"
+                            style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>✏️ แก้ไข</button>
+                          <button onClick={() => cancelPayment(g)} title="ยกเลิกการจ่ายเงิน"
+                            style={{ padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>🚫 ยกเลิก</button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1048,10 +1127,143 @@ export default function InsuranceBillingPage({ currentUser }) {
           </div>
         );
       })()}
+
+      {/* Extra expense form popup (DISABLED - menu page is used instead) */}
+      {false && extraDialog && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
+             onClick={() => setExtraDialog(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, width: "92%", maxWidth: 700, padding: 20 }}>
+            <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>➕ บันทึกค่าใช้จ่ายเพิ่มเติมงาน พรบ.</h3>
+            <div style={{ marginBottom: 10 }}>
+              <label style={dlbl}>ประเภทค่าใช้จ่าย *</label>
+              <select value={extraForm.expense_type} onChange={e => setExtraForm({ ...extraForm, expense_type: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma" }}>
+                <option>แก้ไข พรบ.</option>
+                <option>ยกเลิก พรบ.</option>
+                <option>ค่าธรรมเนียมแก้ไข</option>
+                <option>อื่น ๆ</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={dlbl}>เลขที่ใบรับชำระ (จากรายได้อื่น ๆ) *</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={extraForm.payment_receipt_no} onChange={e => setExtraForm({ ...extraForm, payment_receipt_no: e.target.value })}
+                  style={{ flex: 1, padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace" }} placeholder="REC..." />
+                <button onClick={async () => {
+                  setPicker(p => ({ ...p, open: true, loading: true }));
+                  try {
+                    const d = await post({ action: "list_other_income_receipts", search: picker.search || "พรบ" });
+                    setPicker(p => ({ ...p, rows: Array.isArray(d) ? d.filter(r => r && r.receipt_no) : [], loading: false }));
+                  } catch { setPicker(p => ({ ...p, rows: [], loading: false })); }
+                }} style={{ padding: "8px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>🔍 เลือก</button>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 10 }}>
+              <div>
+                <label style={dlbl}>เลขที่กรรมธรรม์ พรบ. ที่แก้ไข</label>
+                <input value={extraForm.original_policy_no} onChange={e => setExtraForm({ ...extraForm, original_policy_no: e.target.value })}
+                  style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace" }} placeholder="01250008175" />
+              </div>
+              <div>
+                <label style={dlbl}>ค่าใช้จ่าย (บาท) *</label>
+                <input type="number" step="0.01" value={extraForm.expense_amount} onChange={e => setExtraForm({ ...extraForm, expense_amount: e.target.value })}
+                  style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #d1d5db", textAlign: "right", fontWeight: 700, color: "#dc2626", fontSize: 16 }} />
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={dlbl}>หมายเหตุ</label>
+              <input value={extraForm.note} onChange={e => setExtraForm({ ...extraForm, note: e.target.value })}
+                style={{ width: "100%", padding: 8, borderRadius: 6, border: "1px solid #d1d5db" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setExtraDialog(false)} style={{ padding: "8px 18px", background: "#9ca3af", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={async () => {
+                if (!extraForm.payment_receipt_no) { setMessage("❌ เลือกเลขที่ใบรับชำระ"); return; }
+                if (!extraForm.expense_amount || Number(extraForm.expense_amount) <= 0) { setMessage("❌ กรอกยอด"); return; }
+                setSavingExtra(true);
+                try {
+                  await post({
+                    action: "save_motoinsurance_extra",
+                    expense_type: extraForm.expense_type, original_policy_no: extraForm.original_policy_no,
+                    expense_amount: Number(extraForm.expense_amount), payment_receipt_no: extraForm.payment_receipt_no,
+                    note: extraForm.note, created_by: currentUser?.username || currentUser?.name || "system",
+                  });
+                  setMessage("✅ บันทึกค่าใช้จ่ายเพิ่มสำเร็จ");
+                  setExtraDialog(false);
+                  fetchData();
+                } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+                setSavingExtra(false);
+              }} disabled={savingExtra} style={{ padding: "8px 22px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700 }}>
+                {savingExtra ? "..." : "💾 บันทึก"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Receipt picker popup (DISABLED) */}
+      {false && picker.open && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1100 }}
+             onClick={() => setPicker(p => ({ ...p, open: false }))}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1100, width: "94%", maxHeight: "85vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>🔍 เลือกใบรับชำระจากรายได้อื่น ๆ</h3>
+              <button onClick={() => setPicker(p => ({ ...p, open: false }))} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+              <input value={picker.search} onChange={e => setPicker(p => ({ ...p, search: e.target.value }))} placeholder="🔍 receipt_no / รายการ / ลูกค้า"
+                style={{ flex: 1, padding: 8, borderRadius: 6, border: "1px solid #d1d5db" }} />
+              <button onClick={async () => {
+                setPicker(p => ({ ...p, loading: true }));
+                try {
+                  const d = await post({ action: "list_other_income_receipts", search: picker.search });
+                  setPicker(p => ({ ...p, rows: Array.isArray(d) ? d.filter(r => r && r.receipt_no) : [], loading: false }));
+                } catch { setPicker(p => ({ ...p, rows: [], loading: false })); }
+              }} style={{ padding: "8px 16px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>ค้นหา</button>
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead style={{ background: "#f0f4f9" }}>
+                <tr>
+                  <th style={pTh}>#</th><th style={pTh}>วันที่</th><th style={pTh}>เลขที่ใบรับ</th>
+                  <th style={pTh}>สาขา</th><th style={pTh}>ลูกค้า</th><th style={pTh}>รายการ</th>
+                  <th style={{ ...pTh, textAlign: "right" }}>ยอด</th><th style={pTh}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {picker.loading && <tr><td colSpan={8} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+                {!picker.loading && picker.rows.length === 0 && <tr><td colSpan={8} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+                {picker.rows.map((r, i) => (
+                  <tr key={r.item_id || i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                    <td style={pTd}>{i + 1}</td>
+                    <td style={pTd}>{r.receipt_date ? new Date(r.receipt_date).toLocaleDateString("th-TH") : "-"}</td>
+                    <td style={{ ...pTd, fontFamily: "monospace", color: "#0369a1" }}>{r.receipt_no}</td>
+                    <td style={{ ...pTd, fontFamily: "monospace" }}>{r.branch_code}</td>
+                    <td style={pTd}>{r.customer_name}</td>
+                    <td style={{ ...pTd, fontSize: 11 }}>{r.description}</td>
+                    <td style={{ ...pTd, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.total || r.line_amount)}</td>
+                    <td style={pTd}>
+                      <button onClick={() => {
+                        setExtraForm(f => ({
+                          ...f, payment_receipt_no: r.receipt_no,
+                          expense_amount: f.expense_amount || (r.total || r.line_amount || ""),
+                          note: f.note || (r.description ? `[${r.description}]` : ""),
+                        }));
+                        setPicker(p => ({ ...p, open: false }));
+                      }} style={{ padding: "3px 10px", background: "#059669", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>เลือก</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
+const pTh = { padding: "8px", textAlign: "left", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" };
+const pTd = { padding: "6px 8px", fontSize: 12 };
 const dlbl = { display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 4 };
 const dlblC = { display: "block", fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 6, textAlign: "center" };
 const inpStyle = { padding: "8px 12px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" };
