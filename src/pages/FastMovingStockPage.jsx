@@ -18,17 +18,17 @@ export default function FastMovingStockPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [jobDetail, setJobDetail] = useState(null); // { item_code, item_name, loading, rows }
 
-  async function openJobDetail(item_code, item_name) {
-    setJobDetail({ item_code, item_name, loading: true, rows: [] });
+  async function openJobDetail(part_code, product_name) {
+    setJobDetail({ part_code, product_name, loading: true, rows: [] });
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_pending_jobs", item_code }),
+        body: JSON.stringify({ action: "list_pending_jobs", item_code: part_code }),
       });
       const data = await res.json();
-      setJobDetail({ item_code, item_name, loading: false, rows: Array.isArray(data) ? data.filter(r => r) : [] });
+      setJobDetail({ part_code, product_name, loading: false, rows: Array.isArray(data) ? data.filter(r => r) : [] });
     } catch {
-      setJobDetail({ item_code, item_name, loading: false, rows: [] });
+      setJobDetail({ part_code, product_name, loading: false, rows: [] });
     }
   }
   const PAGE_SIZE = 30;
@@ -275,7 +275,7 @@ export default function FastMovingStockPage() {
                   <td style={td}>{r.expected_date ? new Date(r.expected_date).toLocaleDateString("th-TH") : ""}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.pending_job_qty || 0) > 0 ? "#7c3aed" : undefined, fontWeight: Number(r.pending_job_qty || 0) > 0 ? 700 : undefined }}>
                     {Number(r.pending_job_qty || 0) > 0 ? (
-                      <span onClick={() => openJobDetail(r.item_code, r.item_name)}
+                      <span onClick={() => openJobDetail(r.part_code, r.product_name)}
                         style={{ cursor: "pointer", textDecoration: "underline" }}
                         title="คลิกดูรายละเอียด JOB">{fmtQty(r.pending_job_qty)}</span>
                     ) : ""}
@@ -311,7 +311,7 @@ export default function FastMovingStockPage() {
              onClick={() => setJobDetail(null)}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1100, width: "95%", maxHeight: "88vh", overflow: "auto", padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ margin: 0, color: "#7c3aed" }}>📋 JOB ค้างปิด · {jobDetail.item_code} · {jobDetail.item_name}</h3>
+              <h3 style={{ margin: 0, color: "#7c3aed" }}>📋 JOB ค้างปิด · {jobDetail.part_code} · {jobDetail.product_name}</h3>
               <button onClick={() => setJobDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
             </div>
             {jobDetail.loading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div> : jobDetail.rows.length === 0 ? (
