@@ -77,6 +77,7 @@ import ReceiptTransferReportPage from "./pages/ReceiptTransferReportPage";
 import SalesExtraPayPage from "./pages/SalesExtraPayPage";
 import SpecialCommissionReportPage from "./pages/SpecialCommissionReportPage";
 import NormalCommissionReportPage from "./pages/NormalCommissionReportPage";
+import SalesRecordForCommissionPage from "./pages/SalesRecordForCommissionPage";
 import BranchMasterPage from "./pages/BranchMasterPage";
 import YamahaRepairReportPage from "./pages/YamahaRepairReportPage";
 import HondaRepairReportPage from "./pages/HondaRepairReportPage";
@@ -123,7 +124,7 @@ export default function App() {
   function canAccess(page) {
     if (!currentUser) return false;
     // เมนู HR — เห็นเฉพาะ admin + SUKANYA + WARUT เท่านั้น
-    const HR_PAGES = ["hremployees", "hrholidays", "hrmonthlyextras", "hrpayroll", "hrpayrollpayment", "hrpayrollaccounts", "hrtimetracking", "hrspecialcommission", "hrnormalcommission"];
+    const HR_PAGES = ["hremployees", "hrholidays", "hrmonthlyextras", "hrpayroll", "hrpayrollpayment", "hrpayrollaccounts", "hrtimetracking", "hrspecialcommission", "hrnormalcommission", "hrsalesrecord"];
     const HR_USERS = ["admin", "SUKANYA", "WARUT"];
     if (HR_PAGES.includes(page)) {
       return HR_USERS.includes(currentUser.username);
@@ -351,6 +352,9 @@ export default function App() {
         {activeMenu === "hrnormalcommission" && canAccess("hrnormalcommission") && (
           <NormalCommissionReportPage currentUser={currentUser} />
         )}
+        {activeMenu === "hrsalesrecord" && canAccess("hrsalesrecord") && (
+          <SalesRecordForCommissionPage currentUser={currentUser} />
+        )}
         {activeMenu === "hrtimetracking" && canAccess("hrtimetracking") && (
           <TimeTrackingPage currentUser={currentUser} />
         )}
@@ -567,7 +571,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hondarepairreport" label="รายงานใบแจ้งซ่อม HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrspecialcommission","hrnormalcommission","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrspecialcommission","hrnormalcommission","hrsalesrecord","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="hremployees" label="ข้อมูลพนักงาน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrholidays" label="ปฏิทินวันหยุด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrtimetracking" label="บันทึกเวลาทำงาน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -577,6 +581,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hrpayrollaccounts" label="ตั้งค่าบัญชีจ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrspecialcommission" label="รายงานค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrnormalcommission" label="รายงานค่าคอมปกติ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hrsalesrecord" label="บันทึกรถคำนวณค่าคอม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Upload" pages={uploadPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

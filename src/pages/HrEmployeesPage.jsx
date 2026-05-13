@@ -28,6 +28,7 @@ const emptyForm = () => ({
   bank_name: "",
   is_executive: false,
   status: "active",
+  start_date: "",
 });
 
 export default function HrEmployeesPage({ currentUser }) {
@@ -128,6 +129,7 @@ export default function HrEmployeesPage({ currentUser }) {
       bank_name: r.bank_name || "",
       is_executive: r.is_executive === true,
       status: r.status || "active",
+      start_date: r.start_date ? String(r.start_date).slice(0, 10) : "",
     });
     setEditTarget(r);
     setShowForm(true);
@@ -301,10 +303,17 @@ export default function HrEmployeesPage({ currentUser }) {
                   </select>
                 </Field>
               </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 13, cursor: "pointer" }}>
-                <input type="checkbox" checked={form.is_executive} onChange={e => setForm(f => ({ ...f, is_executive: e.target.checked }))} />
-                เป็นผู้บริหาร (ใช้กฎคำนวณเงินเดือนต่างจากพนักงานทั่วไป)
-              </label>
+              <div style={{ ...grid2, marginTop: 8 }}>
+                <Field label="📅 วันที่เริ่มงาน">
+                  <input type="date" value={form.start_date || ""} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} style={inp} />
+                </Field>
+                <Field label="">
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", paddingTop: 6 }}>
+                    <input type="checkbox" checked={form.is_executive} onChange={e => setForm(f => ({ ...f, is_executive: e.target.checked }))} />
+                    เป็นผู้บริหาร (ใช้กฎคำนวณเงินเดือนต่างจากพนักงานทั่วไป)
+                  </label>
+                </Field>
+              </div>
             </Section>
 
             <Section title="🗓️ วันหยุด">

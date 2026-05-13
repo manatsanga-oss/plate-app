@@ -16,6 +16,21 @@ export default function FastMovingStockPage() {
   const [filterStoreStock, setFilterStoreStock] = useState("all");
   const [onlyStockNakhonluang, setOnlyStockNakhonluang] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
+  const [jobDetail, setJobDetail] = useState(null); // { item_code, item_name, loading, rows }
+
+  async function openJobDetail(item_code, item_name) {
+    setJobDetail({ item_code, item_name, loading: true, rows: [] });
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_pending_jobs", item_code }),
+      });
+      const data = await res.json();
+      setJobDetail({ item_code, item_name, loading: false, rows: Array.isArray(data) ? data.filter(r => r) : [] });
+    } catch {
+      setJobDetail({ item_code, item_name, loading: false, rows: [] });
+    }
+  }
   const PAGE_SIZE = 30;
 
   useEffect(() => { fetchData(); }, []);
@@ -258,7 +273,13 @@ export default function FastMovingStockPage() {
                   <td style={{ ...td, textAlign: "right" }}>{Number(r.avg_order_qty_3m || 0) > 0 ? Number(r.avg_order_qty_3m).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : ""}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.backorder_qty || 0) > 0 ? "#b91c1c" : undefined, fontWeight: Number(r.backorder_qty || 0) > 0 ? 700 : undefined }}>{Number(r.backorder_qty || 0) > 0 ? fmtQty(r.backorder_qty) : ""}</td>
                   <td style={td}>{r.expected_date ? new Date(r.expected_date).toLocaleDateString("th-TH") : ""}</td>
-                  <td style={{ ...td, textAlign: "right", color: Number(r.pending_job_qty || 0) > 0 ? "#7c3aed" : undefined, fontWeight: Number(r.pending_job_qty || 0) > 0 ? 700 : undefined }}>{Number(r.pending_job_qty || 0) > 0 ? fmtQty(r.pending_job_qty) : ""}</td>
+                  <td style={{ ...td, textAlign: "right", color: Number(r.pending_job_qty || 0) > 0 ? "#7c3aed" : undefined, fontWeight: Number(r.pending_job_qty || 0) > 0 ? 700 : undefined }}>
+                    {Number(r.pending_job_qty || 0) > 0 ? (
+                      <span onClick={() => openJobDetail(r.item_code, r.item_name)}
+                        style={{ cursor: "pointer", textDecoration: "underline" }}
+                        title="คลิกดูรายละเอียด JOB">{fmtQty(r.pending_job_qty)}</span>
+                    ) : ""}
+                  </td>
                 </tr>
               );
             })}
@@ -282,6 +303,57 @@ export default function FastMovingStockPage() {
                 </button>
               </React.Fragment>
             ))}
+        </div>
+      )}
+
+      {jobDetail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 2000 }}
+             onClick={() => setJobDetail(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1100, width: "95%", maxHeight: "88vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#7c3aed" }}>📋 JOB ค้างปิด · {jobDetail.item_code} · {jobDetail.item_name}</h3>
+              <button onClick={() => setJobDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            {jobDetail.loading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div> : jobDetail.rows.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่พบรายการ</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead style={{ background: "#f0f4f9" }}>
+                  <tr>
+                    <th style={{ padding: 8, textAlign: "left" }}>#</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>เลขที่ JOB</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>วันที่เปิด</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>ลูกค้า</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>ทะเบียน</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>ช่างซ่อม</th>
+                    <th style={{ padding: 8, textAlign: "right" }}>จำนวน</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>สาขา</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobDetail.rows.map((r, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: 7 }}>{i + 1}</td>
+                      <td style={{ padding: 7, fontFamily: "monospace", fontWeight: 600 }}>{r.job_no || "-"}</td>
+                      <td style={{ padding: 7 }}>{r.open_date ? new Date(r.open_date).toLocaleDateString("th-TH") : "-"}</td>
+                      <td style={{ padding: 7 }}>{r.customer_name || "-"}</td>
+                      <td style={{ padding: 7, fontFamily: "monospace" }}>{r.plate_number || "-"}</td>
+                      <td style={{ padding: 7 }}>{r.mechanic_name || "-"}</td>
+                      <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: "#7c3aed" }}>{Number(r.qty || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>
+                      <td style={{ padding: 7, fontFamily: "monospace" }}>{r.branch_name || r.branch_code || "-"}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#f3e8ff", fontWeight: 700 }}>
+                    <td colSpan={6} style={{ padding: 7, textAlign: "right" }}>รวม {jobDetail.rows.length} JOB</td>
+                    <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", color: "#7c3aed" }}>
+                      {jobDetail.rows.reduce((s, r) => s + Number(r.qty || 0), 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                    </td>
+                    <td></td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
         </div>
       )}
     </div>
