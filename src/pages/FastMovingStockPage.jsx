@@ -322,12 +322,13 @@ export default function FastMovingStockPage() {
                   <tr>
                     <th style={{ padding: 8, textAlign: "left" }}>#</th>
                     <th style={{ padding: 8, textAlign: "left" }}>เลขที่ JOB</th>
-                    <th style={{ padding: 8, textAlign: "left" }}>วันที่เปิด</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>วันที่เปิด JOB</th>
                     <th style={{ padding: 8, textAlign: "left" }}>ลูกค้า</th>
-                    <th style={{ padding: 8, textAlign: "left" }}>ทะเบียน</th>
-                    <th style={{ padding: 8, textAlign: "left" }}>ช่างซ่อม</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>วันที่เบิก</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>ชื่ออะไหล่</th>
                     <th style={{ padding: 8, textAlign: "right" }}>จำนวน</th>
-                    <th style={{ padding: 8, textAlign: "left" }}>สาขา</th>
+                    <th style={{ padding: 8, textAlign: "right" }}>ราคา/หน่วย</th>
+                    <th style={{ padding: 8, textAlign: "right" }}>รวม</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -337,18 +338,22 @@ export default function FastMovingStockPage() {
                       <td style={{ padding: 7, fontFamily: "monospace", fontWeight: 600 }}>{r.job_no || "-"}</td>
                       <td style={{ padding: 7 }}>{r.open_date ? new Date(r.open_date).toLocaleDateString("th-TH") : "-"}</td>
                       <td style={{ padding: 7 }}>{r.customer_name || "-"}</td>
-                      <td style={{ padding: 7, fontFamily: "monospace" }}>{r.plate_number || "-"}</td>
-                      <td style={{ padding: 7 }}>{r.mechanic_name || "-"}</td>
+                      <td style={{ padding: 7 }}>{r.issue_date ? new Date(r.issue_date).toLocaleDateString("th-TH") : "-"}</td>
+                      <td style={{ padding: 7 }}>{r.part_name || "-"}</td>
                       <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: "#7c3aed" }}>{Number(r.qty || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>
-                      <td style={{ padding: 7, fontFamily: "monospace" }}>{r.branch_name || r.branch_code || "-"}</td>
+                      <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.unit_price || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.total_price || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     </tr>
                   ))}
                   <tr style={{ background: "#f3e8ff", fontWeight: 700 }}>
-                    <td colSpan={6} style={{ padding: 7, textAlign: "right" }}>รวม {jobDetail.rows.length} JOB</td>
+                    <td colSpan={6} style={{ padding: 7, textAlign: "right" }}>รวม {jobDetail.rows.length} รายการ</td>
                     <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", color: "#7c3aed" }}>
                       {jobDetail.rows.reduce((s, r) => s + Number(r.qty || 0), 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                     </td>
                     <td></td>
+                    <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", color: "#7c3aed" }}>
+                      {jobDetail.rows.reduce((s, r) => s + Number(r.total_price || 0), 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
                   </tr>
                 </tbody>
               </table>

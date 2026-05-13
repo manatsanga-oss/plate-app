@@ -25,6 +25,7 @@ const emptyForm = () => ({
   province_mode: "include",
   province_target: "customer",
   effective_date: "",
+  end_date: "",
 });
 
 export default function MotoExpensePage({ currentUser }) {
@@ -45,6 +46,7 @@ export default function MotoExpensePage({ currentUser }) {
   const [form, setForm] = useState(emptyForm());
   const [editTarget, setEditTarget] = useState(null);
   const [message, setMessage] = useState("");
+  const [filterExpired, setFilterExpired] = useState("all"); // 'all' | 'active' | 'expired'
   const [historyTarget, setHistoryTarget] = useState(null); // { expense_id, name }
   const [history, setHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -184,6 +186,7 @@ export default function MotoExpensePage({ currentUser }) {
           note: form.note,
           status: form.status,
           effective_date: form.effective_date || null,
+          end_date: form.end_date || null,
           updated_by: currentUser?.user_id || currentUser?.name || null,
         }),
       });
@@ -226,6 +229,7 @@ export default function MotoExpensePage({ currentUser }) {
       province_mode: e.province_mode || "include",
       province_target: e.province_target || "customer",
       effective_date: e.effective_date ? String(e.effective_date).slice(0, 10) : "",
+      end_date: e.end_date ? String(e.end_date).slice(0, 10) : "",
     });
     if (e.group_by === "type" && e.type_id) {
       const t = motoTypes.find(t => String(t.type_id) === String(e.type_id));
@@ -241,10 +245,17 @@ export default function MotoExpensePage({ currentUser }) {
     setMessage("");
   }
 
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const isExpired = (e) => e.end_date && String(e.end_date).slice(0, 10) < todayStr;
   const filtered = expenses.filter(e => {
-    if (tab === "province")          return e.group_by === "province" && (e.province_target || "customer") === "customer";
-    if (tab === "register_province") return e.group_by === "province" && e.province_target === "registered";
-    return e.group_by === tab;
+    // filter by tab
+    if (tab === "province")          { if (!(e.group_by === "province" && (e.province_target || "customer") === "customer")) return false; }
+    else if (tab === "register_province") { if (!(e.group_by === "province" && e.province_target === "registered")) return false; }
+    else { if (e.group_by !== tab) return false; }
+    // filter by expired status
+    if (filterExpired === "active" && isExpired(e)) return false;
+    if (filterExpired === "expired" && !isExpired(e)) return false;
+    return true;
   }).slice().sort((a, b) => {
     // เรียงแบบลำดับชั้น Type: ยี่ห้อ → รุ่น (series + model) → type → ชื่อรายการ
     const ta = a.type_id ? motoTypes.find(x => String(x.type_id) === String(a.type_id)) : null;
@@ -303,6 +314,22 @@ export default function MotoExpensePage({ currentUser }) {
         </div>
       </div>
 
+      {/* ตัวกรอง หมดอายุ */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>📅 สถานะวัน:</span>
+        {[["all", "ทั้งหมด", "#6b7280"], ["active", "ใช้งาน (ยังไม่หมดอายุ)", "#059669"], ["expired", "หมดอายุ", "#dc2626"]].map(([k, lbl, color]) => (
+          <button key={k} onClick={() => setFilterExpired(k)}
+            style={{
+              padding: "5px 12px", borderRadius: 16, fontSize: 12, fontWeight: 600,
+              border: filterExpired === k ? `2px solid ${color}` : "1px solid #d1d5db",
+              background: filterExpired === k ? color : "#fff",
+              color: filterExpired === k ? "#fff" : "#6b7280",
+              cursor: "pointer",
+            }}>{lbl}</button>
+        ))}
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#6b7280" }}>แสดง {filtered.length} รายการ</span>
+      </div>
+
       {message && <div style={{ color: "#ef4444", marginBottom: 12, padding: "8px 12px", background: "#fef2f2", borderRadius: 8 }}>{message}</div>}
 
       {loading ? (
@@ -321,6 +348,7 @@ export default function MotoExpensePage({ currentUser }) {
                 <th>รุ่น</th>
                 <th>จำนวนเงิน</th>
                 <th>วันที่ประกาศใช้</th>
+                <th>วันที่สิ้นสุด</th>
                 <th>หมายเหตุ</th>
                 <th>สถานะ</th>
                 <th>จัดการ</th>
@@ -328,7 +356,7 @@ export default function MotoExpensePage({ currentUser }) {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={11} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลค่าใช้จ่าย</td></tr>
+                <tr><td colSpan={12} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลค่าใช้จ่าย</td></tr>
               ) : filtered.map((e, i) => (
                 <tr key={e.expense_id || i}>
                   <td>{i + 1}</td>
@@ -358,6 +386,9 @@ export default function MotoExpensePage({ currentUser }) {
                   </td>
                   <td style={{ whiteSpace: "nowrap", fontSize: 12, color: "#374151" }}>
                     {e.effective_date ? fmtThaiDate(e.effective_date) : <span style={{ color: "#9ca3af" }}>-</span>}
+                  </td>
+                  <td style={{ whiteSpace: "nowrap", fontSize: 12, color: "#b91c1c" }}>
+                    {e.end_date ? fmtThaiDate(e.end_date) : <span style={{ color: "#9ca3af" }}>-</span>}
                   </td>
                   <td>{e.note || "-"}</td>
                   <td>
@@ -554,12 +585,18 @@ export default function MotoExpensePage({ currentUser }) {
                 style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box", textAlign: "right" }} />
             </div>
 
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>📅 วันที่ประกาศใช้</label>
-              <input type="date" value={form.effective_date} onChange={e => setForm({ ...form, effective_date: e.target.value })}
-                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
-              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
-                วันที่อัตรานี้เริ่มมีผลบังคับใช้ — เว้นว่างไว้หากยังไม่ระบุ
+            <div style={{ marginBottom: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>📅 วันที่ประกาศใช้</label>
+                <input type="date" value={form.effective_date} onChange={e => setForm({ ...form, effective_date: e.target.value })}
+                  style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>วันที่เริ่มมีผลบังคับใช้</div>
+              </div>
+              <div>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>📅 วันที่สิ้นสุด</label>
+                <input type="date" value={form.end_date || ""} onChange={e => setForm({ ...form, end_date: e.target.value })}
+                  style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>เว้นว่างไว้หากใช้ตลอดไป</div>
               </div>
             </div>
 

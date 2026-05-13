@@ -238,58 +238,6 @@ export default function YamahaRepairReportPage() {
         </div>
       )}
 
-      <div style={{ overflowX: "auto", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-          <thead style={{ background: "#072d6b", color: "#fff" }}>
-            <tr>
-              <th style={th}>#</th>
-              <th style={th}>สาขา</th>
-              <th style={th}>เลขที่ใบแจ้งซ่อม</th>
-              <th style={th}>วันที่</th>
-              <th style={th}>สถานะ</th>
-              <th style={th}>ลูกค้า</th>
-              <th style={th}>เลขทะเบียน</th>
-              <th style={th}>เลขเครื่อง</th>
-              <th style={th}>เลขถัง</th>
-              <th style={th}>รุ่น/แบบ</th>
-              <th style={th}>ช่างซ่อม</th>
-              <th style={{ ...th, textAlign: "right" }}>รายได้สุทธิ</th>
-              <th style={{ ...th, textAlign: "right" }}>ค้างชำระ</th>
-              <th style={th}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && <tr><td colSpan={14} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-            {!loading && byJob.length === 0 && <tr><td colSpan={14} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
-            {byJob.map((j, i) => (
-              <tr key={j.job_no} style={{ borderTop: "1px solid #e5e7eb" }}>
-                <td style={td}>{i + 1}</td>
-                <td style={{ ...td, fontFamily: "monospace" }}>{j.branch_code}</td>
-                <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{j.job_no}</td>
-                <td style={td}>{j.repair_day}/{j.repair_month}/{j.repair_year}</td>
-                <td style={td}>{j.status}</td>
-                <td style={td}>{j.customer || "-"}</td>
-                <td style={{ ...td, fontFamily: "monospace" }}>{j.license_plate || "-"}</td>
-                <td style={{ ...td, fontFamily: "monospace" }}>{j.engine_no || "-"}</td>
-                <td style={{ ...td, fontFamily: "monospace" }}>{j.chassis_no || "-"}</td>
-                <td style={td}>{j.series} · {j.model_code}</td>
-                <td style={td}>{j.mechanic_name || "-"}</td>
-                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669", fontWeight: 600 }}>{fmt(j.total_revenue)}</td>
-                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{fmt(j.total_outstanding)}</td>
-                <td style={td}><button onClick={() => setDetail(j)} style={btnSmBlue}>📋 ดูรายการ ({j.lines.length})</button></td>
-              </tr>
-            ))}
-            {byJob.length > 0 && (
-              <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
-                <td colSpan={11} style={{ ...td, textAlign: "right" }}>รวม {byJob.length} ใบแจ้ง · {rows.length} รายการ</td>
-                <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(totalRevenue)}</td>
-                <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(byJob.reduce((s, j) => s + j.total_outstanding, 0))}</td>
-                <td></td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
 
       {/* Item type detail popup */}
       {itemTypeDetail && (

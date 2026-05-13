@@ -147,7 +147,6 @@ export default function App() {
     if (page === "carpaymentreport") return false;   // เฉพาะ admin (รายงานรับชำระเงินรายคัน)
     if (page === "registrationsummaryreport") return false;  // เฉพาะ admin (รายงานสรุปงานทะเบียน)
     if (page === "receipttransferreport") return false;       // เฉพาะ admin (รายงานสรุปรับชำระเงิน)
-    if (page === "salesextrapay") return true;                // user ดูได้ (read-only) — admin/WARUT แก้ได้
     if (page === "yamaharepairreport") return true;           // ทุก user เห็นรายงานใบแจ้งซ่อม
     if (page === "hondarepairreport") return true;
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
@@ -459,7 +458,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const salesPages = ["moto", "booking", "pricecheck", "stockcheck", "motostock", "customer", "salesextrapay"];
+  const salesPages = ["moto", "booking", "pricecheck", "stockcheck", "motostock", "customer"];
   const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "claim"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
@@ -491,7 +490,6 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="stockcheck" label="เช็คสต๊อก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="motostock" label="Moto Stock Management" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="customer" label="บันทึกข้อมูลลูกค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="salesextrapay" label="บันทึกเงินออกแทนและค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Spare Parts" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

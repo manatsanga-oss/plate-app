@@ -45,6 +45,7 @@ export default function NormalCommissionReportPage({ currentUser }) {
 
   const total = rows.reduce((s, r) => s + Number(r.total_commission || 0), 0);
   const totalSales = rows.reduce((s, r) => s + Number(r.sales_count || 0), 0);
+  const uniqueSales = Number(rows[0]?.total_unique_sales || 0);
 
   return (
     <div className="page-container">
@@ -64,7 +65,7 @@ export default function NormalCommissionReportPage({ currentUser }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 10, marginBottom: 12 }}>
         <Card label="👥 พนักงาน" value={rows.length} color="#1e40af" />
-        <Card label="🚗 ใบขาย" value={totalSales} color="#0369a1" />
+        <Card label="🚗 ใบขาย" value={uniqueSales || totalSales} color="#0369a1" />
         <Card label="💰 ค่าคอมรวม" value={fmt(total)} color="#059669" highlight />
       </div>
 
