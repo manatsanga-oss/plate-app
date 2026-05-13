@@ -182,13 +182,21 @@ export default function FastMovingPage() {
   async function saveInfo() {
     if (!infoPopup) return;
     try {
-      await fetch(API_URL, {
+      const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName, stock_type: iStockType, is_stock_nakhonluang: iStockNakhonluang, is_discontinued: iDiscontinued }),
       });
-      fetchData();
-    } catch {}
+      const data = await res.json().catch(() => null);
+      // Debug: log response to console
+      console.log("update_part_info response:", data);
+      if (!data || (Array.isArray(data) && data.length === 0)) {
+        alert("⚠️ ไม่ได้รับ response กลับ — workflow อาจไม่ทำงาน หรือ id ไม่พบ");
+      }
+      await fetchData();
+    } catch (e) {
+      alert("❌ บันทึกไม่สำเร็จ: " + e.message);
+    }
     setInfoPopup(null);
   }
 
