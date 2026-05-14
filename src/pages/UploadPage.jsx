@@ -61,7 +61,7 @@ function fmtDateTime(iso) {
 
 // items ที่รับ year_month override (ระบุเดือนเพื่อ upload ไฟล์ย้อนหลัง)
 const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
-const FILE_UPLOAD_KEYS = new Set(["time-tracking", "yamaha-repair", "honda-repair"]); // รายการที่ต้องเลือกไฟล์เอง
+const FILE_UPLOAD_KEYS = new Set(["time-tracking", "yamaha-repair", "honda-repair", "dcs-orders"]); // รายการที่ต้องเลือกไฟล์เอง
 
 export default function UploadPage({ currentUser } = {}) {
   const [statuses, setStatuses] = useState({});
