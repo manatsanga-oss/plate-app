@@ -261,6 +261,24 @@ export default function BookingPage({ currentUser }) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "notify_line", message: lineMsg }),
         }).catch(() => {});
+        // Flex Message พร้อมปุ่ม "ยืนยันถึงที่หมาย" → เปิด LIFF
+        fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "send_booking_flex",
+            bookingId: data.booking_id,
+            booker_name: currentUser?.name,
+            branch: currentUser?.branch,
+            booking_date: thaiDate,
+            booking_time: form.booking_time,
+            car_model: form.car_model,
+            driver_name: driverName,
+            destination: form.destination,
+            destination_formatted: distanceInfo?.destination_name || form.destination,
+            purpose: form.delivery_type === "อื่น ๆ" ? form.purpose : "",
+          }),
+        }).catch(() => {});
         setForm(emptyForm());
         setDistanceInfo(null);
         setMode("list");

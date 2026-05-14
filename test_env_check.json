@@ -1,0 +1,44 @@
+{
+  "name": "Test ENV Check",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [400, 300],
+      "id": "a1b2c3d4-0001-0001-0001-000000000001",
+      "name": "When clicking Execute workflow"
+    },
+    {
+      "parameters": {
+        "jsCode": "const token = $env.LINE_ACCESS_TOKEN;\nconst blockFlag = $env.N8N_BLOCK_ENV_ACCESS_IN_NODE;\nreturn [{ json: {\n  LINE_ACCESS_TOKEN: token ? 'OK len=' + token.length : 'MISSING',\n  N8N_BLOCK_ENV_ACCESS_IN_NODE: blockFlag || 'NOT SET',\n  status: (token && blockFlag === 'false') ? 'READY' : 'NEEDS_FIX',\n  hint: !token\n    ? 'env LINE_ACCESS_TOKEN ไม่มีค่า — ลืมตั้งหรือยังไม่ deploy'\n    : blockFlag !== 'false'\n    ? 'env N8N_BLOCK_ENV_ACCESS_IN_NODE ต้องเป็น false (string) — ตอนนี้เป็น: ' + blockFlag\n    : 'พร้อมใช้ — LINE token เข้าถึงได้จาก expression แล้ว'\n}}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [620, 300],
+      "id": "a1b2c3d4-0002-0002-0002-000000000002",
+      "name": "Check ENV"
+    }
+  ],
+  "connections": {
+    "When clicking Execute workflow": {
+      "main": [
+        [
+          {
+            "node": "Check ENV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "test-env-check-001",
+  "meta": {},
+  "id": "TestEnvCheck001",
+  "tags": []
+}

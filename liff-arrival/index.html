@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>ยืนยันถึงที่หมาย</title>
+<link rel="icon" href="data:," />
+<style>
+  :root {
+    --primary: #06c755;
+    --primary-dark: #04a647;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+    --bg: #f5f7fa;
+    --card: #ffffff;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --border: #e5e7eb;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Sarabun", "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+  .app {
+    min-height: 100vh;
+    padding: 20px 16px 32px;
+    max-width: 480px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 20px;
+    margin: 4px 0 16px;
+    text-align: center;
+  }
+  .card {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 16px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    margin-bottom: 16px;
+  }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    font-size: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .row:last-child { border-bottom: 0; }
+  .row .label { color: var(--muted); }
+  .row .value { font-weight: 600; text-align: right; max-width: 60%; word-break: break-word; }
+  .btn {
+    width: 100%;
+    padding: 16px;
+    font-size: 16px;
+    font-weight: 700;
+    border: 0;
+    border-radius: 12px;
+    background: var(--primary);
+    color: #fff;
+    cursor: pointer;
+    transition: background 0.15s ease;
+    margin-top: 8px;
+  }
+  .btn:active { background: var(--primary-dark); }
+  .btn:disabled {
+    background: #9ca3af;
+    cursor: not-allowed;
+  }
+  .btn.secondary {
+    background: #fff;
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+  .btn.secondary:active { background: var(--bg); }
+  .photo-section {
+    margin-bottom: 12px;
+  }
+  .photo-thumb {
+    position: relative;
+    width: 100%;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #000;
+    margin-bottom: 8px;
+    display: none;
+  }
+  .photo-thumb.show { display: block; }
+  .photo-thumb img {
+    width: 100%;
+    height: auto;
+    display: block;
+    max-height: 240px;
+    object-fit: cover;
+  }
+  .photo-thumb .retake {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.6);
+    color: #fff;
+    border: 0;
+    padding: 6px 12px;
+    border-radius: 16px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .status {
+    padding: 12px 14px;
+    border-radius: 10px;
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    display: none;
+  }
+  .status.info { background: #eff6ff; color: #1e40af; display: block; }
+  .status.success { background: #ecfdf5; color: #065f46; display: block; }
+  .status.warn { background: #fffbeb; color: #92400e; display: block; }
+  .status.error { background: #fef2f2; color: #991b1b; display: block; }
+  .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    vertical-align: -2px;
+    margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .footer-note {
+    font-size: 12px;
+    color: var(--muted);
+    text-align: center;
+    margin-top: 12px;
+  }
+  input[type=file] { display: none; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <h1>ยืนยันถึงที่หมาย</h1>
+
+    <div id="bookingCard" class="card" style="display:none">
+      <div class="row"><span class="label">เลขที่งาน</span><span class="value" id="vBookingId">-</span></div>
+      <div class="row" id="rDestName" style="display:none"><span class="label">ปลายทาง</span><span class="value" id="vDestName">-</span></div>
+      <div class="row" id="rDestCoord" style="display:none"><span class="label">พิกัดปลายทาง</span><span class="value" id="vDestCoord">-</span></div>
+      <div class="row" id="rDriver" style="display:none"><span class="label">คนขับ</span><span class="value" id="vDriver">-</span></div>
+    </div>
+
+    <div class="photo-section" id="photoSection" style="display:none">
+      <div class="photo-thumb" id="photoThumb">
+        <img id="photoPreview" alt="" />
+        <button type="button" class="retake" id="btnRetake">📷 ถ่ายใหม่</button>
+      </div>
+      <button type="button" class="btn secondary" id="btnTakePhoto">📷 ถ่ายรูปยืนยัน</button>
+      <input type="file" id="photoInput" accept="image/*" capture="environment" />
+    </div>
+
+    <button id="btnConfirm" class="btn" disabled>กำลังโหลด...</button>
+    <div id="status" class="status"></div>
+    <div class="footer-note">ระบบจะขอสิทธิ์เข้าถึงตำแหน่ง GPS เพื่อยืนยันการถึงที่หมาย</div>
+  </div>
+
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="config.js"></script>
+  <script>
+    (function () {
+      const cfg = window.LIFF_CONFIG;
+      const $ = (id) => document.getElementById(id);
+      const btn = $('btnConfirm');
+      const btnTakePhoto = $('btnTakePhoto');
+      const btnRetake = $('btnRetake');
+      const photoInput = $('photoInput');
+      const photoThumb = $('photoThumb');
+      const photoPreview = $('photoPreview');
+      const statusBox = $('status');
+
+      // อ่าน query params — รวม liff.state ที่ LIFF redirect แนบมา
+      function getParams() {
+        const direct = new URLSearchParams(location.search);
+        // LIFF บางครั้งใส่ original query ใน liff.state
+        const state = direct.get('liff.state');
+        if (state) {
+          const s = state.startsWith('?') ? state.slice(1) : state;
+          const fromState = new URLSearchParams(s);
+          fromState.forEach((v, k) => {
+            if (!direct.has(k)) direct.set(k, v);
+          });
+        }
+        return direct;
+      }
+      let params = getParams();
+      let bookingId = params.get('bookingId') || '';
+      let destLat = parseFloat(params.get('destLat'));
+      let destLng = parseFloat(params.get('destLng'));
+      let destName = params.get('destName') || '';
+
+      let profile = null;
+      let submitting = false;
+      let photoBlob = null;       // ภาพที่ compress แล้ว (Blob)
+
+      function setStatus(msg, type) {
+        statusBox.className = 'status ' + (type || 'info');
+        statusBox.innerHTML = msg;
+      }
+      function clearStatus() {
+        statusBox.className = 'status';
+        statusBox.innerHTML = '';
+      }
+      function updateConfirmEnabled() {
+        if (submitting) return;
+        const needsPhoto = !!cfg.requirePhoto;
+        const ok = bookingId && (!needsPhoto || photoBlob);
+        btn.disabled = !ok;
+        btn.textContent = ok ? '✅ ยืนยันถึงที่หมาย'
+                             : (needsPhoto && !photoBlob ? 'ถ่ายรูปก่อนยืนยัน' : 'รอข้อมูล...');
+      }
+
+      function renderBooking() {
+        if (!bookingId) return;
+        $('bookingCard').style.display = 'block';
+        $('vBookingId').textContent = bookingId;
+        if (destName) {
+          $('rDestName').style.display = 'flex';
+          $('vDestName').textContent = destName;
+        }
+        if (!isNaN(destLat) && !isNaN(destLng)) {
+          $('rDestCoord').style.display = 'flex';
+          $('vDestCoord').textContent = destLat.toFixed(5) + ', ' + destLng.toFixed(5);
+        }
+      }
+
+      // ---------- camera ----------
+      function compressImage(file) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          const url = URL.createObjectURL(file);
+          img.onload = () => {
+            try {
+              const MAX = cfg.photoMaxWidthPx || 1280;
+              const scale = Math.min(1, MAX / Math.max(img.width, img.height));
+              const w = Math.max(1, Math.round(img.width * scale));
+              const h = Math.max(1, Math.round(img.height * scale));
+              const canvas = document.createElement('canvas');
+              canvas.width = w; canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, w, h);
+              canvas.toBlob(
+                (b) => b ? resolve(b) : reject(new Error('compress failed')),
+                'image/jpeg',
+                cfg.photoJpegQuality || 0.85
+              );
+            } catch (e) { reject(e); }
+            finally { URL.revokeObjectURL(url); }
+          };
+          img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image load failed')); };
+          img.src = url;
+        });
+      }
+
+      async function handlePhotoPick(e) {
+        const file = (e.target.files || [])[0];
+        if (!file) return;
+        try {
+          setStatus('<span class="spinner"></span> กำลังย่อรูป...', 'info');
+          const blob = await compressImage(file);
+          photoBlob = blob;
+          photoPreview.src = URL.createObjectURL(blob);
+          photoThumb.classList.add('show');
+          btnTakePhoto.style.display = 'none';
+          clearStatus();
+          updateConfirmEnabled();
+        } catch (err) {
+          console.error(err);
+          setStatus('❌ เปิดไฟล์รูปไม่สำเร็จ: ' + (err.message || err), 'error');
+        }
+        photoInput.value = '';  // reset เพื่อให้เลือกไฟล์เดิมซ้ำได้
+      }
+
+      function handleRetake() {
+        photoBlob = null;
+        photoThumb.classList.remove('show');
+        btnTakePhoto.style.display = '';
+        updateConfirmEnabled();
+      }
+
+      async function uploadToCloudinary(blob) {
+        const c = cfg.cloudinary || {};
+        if (!c.cloudName || c.cloudName === 'YOUR_CLOUD_NAME') {
+          throw new Error('cloudinary not configured');
+        }
+        const fd = new FormData();
+        fd.append('file', blob, 'arrival.jpg');
+        fd.append('upload_preset', c.uploadPreset);
+        if (c.folder) fd.append('folder', c.folder);
+        const url = 'https://api.cloudinary.com/v1_1/' + c.cloudName + '/image/upload';
+        const res = await fetch(url, { method: 'POST', body: fd });
+        if (!res.ok) {
+          const t = await res.text().catch(() => '');
+          throw new Error('cloudinary ' + res.status + ': ' + (t || ''));
+        }
+        const j = await res.json();
+        if (!j.secure_url) throw new Error('cloudinary: no secure_url');
+        return j.secure_url;
+      }
+
+      // ---------- GPS ----------
+      function getPositionAsync() {
+        return new Promise((resolve, reject) => {
+          if (!navigator.geolocation) {
+            return reject(new Error('อุปกรณ์นี้ไม่รองรับการอ่านตำแหน่ง GPS'));
+          }
+          navigator.geolocation.getCurrentPosition(
+            (pos) => resolve(pos),
+            (err) => {
+              const map = {
+                1: 'กรุณาอนุญาตการเข้าถึงตำแหน่งใน LINE → ตั้งค่า → สิทธิ์',
+                2: 'ไม่สามารถระบุตำแหน่งได้ ลองออกไปที่โล่งแล้วลองใหม่',
+                3: 'หาตำแหน่งไม่สำเร็จในเวลาที่กำหนด ลองใหม่อีกครั้ง',
+              };
+              reject(new Error(map[err.code] || err.message || 'อ่านตำแหน่งล้มเหลว'));
+            },
+            { enableHighAccuracy: true, timeout: cfg.gpsTimeoutMs, maximumAge: 0 }
+          );
+        });
+      }
+
+      async function postConfirm(payload) {
+        const res = await fetch(cfg.apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const err = new Error(j.error_description || j.error || ('HTTP ' + res.status));
+          err.status = res.status;
+          err.payload = j;
+          throw err;
+        }
+        return j;
+      }
+
+      async function handleConfirm() {
+        if (submitting) return;
+        if (cfg.requirePhoto && !photoBlob) {
+          setStatus('กรุณาถ่ายรูปก่อนยืนยัน', 'warn');
+          return;
+        }
+        submitting = true;
+        btn.disabled = true;
+        btn.textContent = 'กำลังยืนยัน...';
+        try {
+          let photoUrl = null;
+          if (photoBlob) {
+            setStatus('<span class="spinner"></span> กำลังอัปโหลดรูป...', 'info');
+            photoUrl = await uploadToCloudinary(photoBlob);
+          }
+
+          setStatus('<span class="spinner"></span> กำลังอ่านตำแหน่ง GPS...', 'info');
+          const pos = await getPositionAsync();
+          const { latitude, longitude, accuracy } = pos.coords;
+
+          if (accuracy > cfg.gpsMaxAccuracyM) {
+            setStatus(
+              'ความแม่นยำของ GPS ต่ำเกินไป (±' + Math.round(accuracy) + ' ม.) ' +
+              'ลองออกไปที่โล่งแล้วกดปุ่มอีกครั้ง',
+              'warn'
+            );
+            submitting = false;
+            updateConfirmEnabled();
+            return;
+          }
+
+          setStatus('<span class="spinner"></span> กำลังส่งข้อมูล...', 'info');
+
+          let idToken = null;
+          try { idToken = liff.getIDToken(); } catch (_) {}
+
+          const payload = {
+            action: 'confirm_arrival',
+            bookingId: bookingId,
+            userId: profile ? profile.userId : null,
+            displayName: profile ? profile.displayName : null,
+            lat: latitude,
+            lng: longitude,
+            accuracy: accuracy,
+            destLat: isNaN(destLat) ? null : destLat,
+            destLng: isNaN(destLng) ? null : destLng,
+            photoUrl: photoUrl,
+            timestamp: new Date().toISOString(),
+            idToken: idToken,
+          };
+
+          const result = await postConfirm(payload);
+
+          const dist = result && typeof result.distance_from_dest === 'number'
+            ? Math.round(result.distance_from_dest)
+            : null;
+
+          if (result && result.is_within_range === false) {
+            setStatus(
+              '⚠️ บันทึกแล้ว แต่อยู่ห่างจากปลายทาง' +
+              (dist !== null ? ' ' + dist + ' ม.' : '') +
+              ' (เกินรัศมี ' + cfg.arrivalRadiusM + ' ม.)',
+              'warn'
+            );
+          } else {
+            setStatus(
+              '✅ ยืนยันสำเร็จ' +
+              (dist !== null ? ' (ห่างจุดหมาย ' + dist + ' ม.)' : ''),
+              'success'
+            );
+          }
+
+          btn.textContent = 'เสร็จสิ้น';
+          setTimeout(() => {
+            try { if (liff.isInClient()) liff.closeWindow(); } catch (_) {}
+          }, 1500);
+        } catch (e) {
+          console.error(e);
+          let msg = e.message || 'เกิดข้อผิดพลาด';
+          if (e.status === 401) msg = '❌ ยืนยันตัวตน LINE ล้มเหลว — เปิดลิงก์ใหม่ใน LINE app';
+          else if (e.status === 429) msg = '⏱ ยืนยันซ้ำเร็วเกินไป รอสักครู่แล้วลองใหม่';
+          else msg = '❌ ' + msg;
+          setStatus(msg, 'error');
+          submitting = false;
+          updateConfirmEnabled();
+        }
+      }
+
+      async function bootstrap() {
+        // เริ่ม LIFF init ก่อน — เพื่อให้ SDK restore query จาก liff.state หลัง redirect
+        try {
+          await liff.init({ liffId: cfg.liffId });
+          // หลัง init แล้ว ลองอ่าน params อีกรอบ (เผื่อ liff redirect คืน query)
+          params = getParams();
+          bookingId = params.get('bookingId') || bookingId;
+          destLat = parseFloat(params.get('destLat')) || destLat;
+          destLng = parseFloat(params.get('destLng')) || destLng;
+          destName = params.get('destName') || destName;
+        } catch (e) {
+          setStatus('❌ LIFF init ล้มเหลว: ' + (e.message || e), 'error');
+          return;
+        }
+        renderBooking();
+        if (!bookingId) {
+          setStatus('ไม่พบเลขที่งานใน URL — กรุณาเปิดลิงก์จากข้อความใน LINE', 'error');
+          return;
+        }
+
+        // ปุ่มถ่ายรูป + เลือกไฟล์ — แสดงเฉพาะถ้าเปิดในคอนฟิก
+        if (cfg.showPhoto) {
+          $('photoSection').style.display = '';
+          btnTakePhoto.addEventListener('click', () => photoInput.click());
+          btnRetake.addEventListener('click', handleRetake);
+          photoInput.addEventListener('change', handlePhotoPick);
+        }
+
+        if (!liff.isLoggedIn()) {
+          liff.login({ redirectUri: location.href });
+          return;
+        }
+        try {
+          profile = await liff.getProfile();
+          $('rDriver').style.display = 'flex';
+          $('vDriver').textContent = profile.displayName;
+        } catch (e) {
+          console.warn('getProfile failed:', e);
+        }
+        clearStatus();
+        updateConfirmEnabled();
+        btn.addEventListener('click', handleConfirm);
+      }
+
+      bootstrap();
+    })();
+  </script>
+</body>
+</html>
