@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "Bash(claude mcp:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(python change_more_uploads_to_file.py)",
+      "Bash(python -c ' *)"
     ]
   }
 }

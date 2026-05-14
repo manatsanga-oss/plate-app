@@ -23,7 +23,14 @@ before = len(wf['nodes'])
 wf['nodes'] = [n for n in wf['nodes'] if n['name'] not in REMOVE_NODES]
 removed = before - len(wf['nodes'])
 
-# 2) แก้ Extract DCS Orders ให้รับ binary จาก field 'file' (FormData key จาก frontend)
+# 2) แก้ Webhook ให้รับ POST (default คือ GET)
+webhook = next((n for n in wf['nodes'] if n['name'] == 'Webhook Upload DCS Orders'), None)
+if not webhook:
+    print('ERROR: Webhook Upload DCS Orders ไม่พบ')
+    sys.exit(1)
+webhook['parameters']['httpMethod'] = 'POST'
+
+# 3) แก้ Extract DCS Orders ให้รับ binary จาก field 'file' (FormData key จาก frontend)
 extract = next((n for n in wf['nodes'] if n['name'] == 'Extract DCS Orders'), None)
 if not extract:
     print('ERROR: Extract DCS Orders ไม่พบ')

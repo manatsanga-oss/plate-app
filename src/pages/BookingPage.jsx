@@ -233,7 +233,6 @@ export default function BookingPage({ currentUser }) {
       });
       const data = await res.json();
       if (data?.success || data?.booking_id) {
-        // ส่ง LINE notification
         const thaiDate = form.booking_date
           ? (() => {
               const [y, m, d] = form.booking_date.split("-");
@@ -241,27 +240,7 @@ export default function BookingPage({ currentUser }) {
             })()
           : "-";
         const driverName = drivers.find(d => String(d.driver_id) === String(form.driver_id))?.name || "-";
-        const lineMsg = [
-          "🚗 รายการจองคนขับรถ",
-          "----------------------------",
-          `🏪 ร้านที่จอง: ${currentUser?.branch || "-"}`,
-          `📅 วันที่จอง: ${thaiDate}`,
-          `⏰ เวลา: ${form.booking_time} น.`,
-          `👤 คนขับรถ: ${driverName}`,
-          form.car_model ? `💎 รุ่น: ${form.car_model}` : "",
-          form.finance_company ? `🏢 ไฟแนนท์: ${form.finance_company}` : "",
-          form.delivery_type === "อื่น ๆ" && form.purpose ? `📝 วัตถุประสงค์: ${form.purpose}` : "",
-          distanceInfo?.destination_name ? `📍 สถานที่ส่ง: ${form.destination}` : `📍 สถานที่ส่ง: ${form.destination}`,
-          distanceInfo?.destination_name ? `📌 ที่อยู่: ${distanceInfo.destination_name}` : "",
-          distanceInfo?.distance_text ? `📏 ระยะทาง: ${distanceInfo.distance_text}` : "",
-          distanceInfo?.duration_text ? `⏱ เวลาเดินทาง: ${distanceInfo.duration_text}` : "",
-        ].filter(Boolean).join("\n");
-        fetch(API_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "notify_line", message: lineMsg }),
-        }).catch(() => {});
-        // Flex Message พร้อมปุ่ม "ยืนยันถึงที่หมาย" → เปิด LIFF
+        // ส่ง Flex Message พร้อมปุ่ม "ยืนยันถึงที่หมาย" → เปิด LIFF
         fetch(API_URL, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -271,11 +250,14 @@ export default function BookingPage({ currentUser }) {
             booker_name: currentUser?.name,
             branch: currentUser?.branch,
             booking_date: thaiDate,
-            booking_time: form.booking_time,
+            booking_time: form.booking_time + " น.",
             car_model: form.car_model,
+            finance_company: form.finance_company,
             driver_name: driverName,
             destination: form.destination,
             destination_formatted: distanceInfo?.destination_name || form.destination,
+            distance_text: distanceInfo?.distance_text || "",
+            duration_text: distanceInfo?.duration_text || "",
             purpose: form.delivery_type === "อื่น ๆ" ? form.purpose : "",
           }),
         }).catch(() => {});

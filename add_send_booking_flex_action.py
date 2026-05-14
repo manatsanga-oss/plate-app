@@ -33,13 +33,18 @@ const LIFF = 'https://liff.line.me/2010078995-AXJ1tdUa';
 const bookingId = String(b.bookingId || b.booking_id || '');
 const destLat = b.destLat ?? b.dest_lat ?? '';
 const destLng = b.destLng ?? b.dest_lng ?? '';
-const destName = b.destination_formatted || b.destination || '-';
+const destShort = b.destination || '';
+const destFull = b.destination_formatted || destShort || '-';
 const bookerName = b.booker_name || b.bookerName || '-';
+const branch = b.branch || '';
 const bookingDate = b.booking_date || b.bookingDate || '-';
 const bookingTime = b.booking_time || b.bookingTime || '-';
-const carModel = b.car_model || b.carModel || '-';
+const carModel = b.car_model || b.carModel || '';
+const finance = b.finance_company || b.financeCompany || '';
 const driver = b.driver_name || b.driverName || '-';
 const purpose = b.purpose || '';
+const distance = b.distance_text || b.distanceText || '';
+const duration = b.duration_text || b.durationText || '';
 const groupId = b.groupId || b.group_id || null;
 
 if (!bookingId) throw new Error('missing bookingId');
@@ -48,15 +53,29 @@ const uri = LIFF + '?bookingId=' + encodeURIComponent(bookingId)
   + (destLat !== '' && destLng !== ''
        ? '&destLat=' + encodeURIComponent(destLat) + '&destLng=' + encodeURIComponent(destLng)
        : '')
-  + (destName && destName !== '-' ? '&destName=' + encodeURIComponent(destName) : '');
+  + (destFull && destFull !== '-' ? '&destName=' + encodeURIComponent(destFull) : '');
 
 const row = (label, value) => ({
   type: 'box', layout: 'baseline', spacing: 'sm',
   contents: [
-    { type: 'text', text: label, color: '#888888', size: 'sm', flex: 2 },
-    { type: 'text', text: String(value || '-'), wrap: true, color: '#333333', size: 'sm', flex: 5 },
+    { type: 'text', text: label, color: '#888888', size: 'sm', flex: 3 },
+    { type: 'text', text: String(value || '-'), wrap: true, color: '#333333', size: 'sm', flex: 7 },
   ],
 });
+
+const bodyRows = [];
+bodyRows.push(row('ผู้จอง', bookerName));
+if (branch) bodyRows.push(row('ร้านที่จอง', branch));
+bodyRows.push(row('วันที่', bookingDate));
+bodyRows.push(row('เวลา', bookingTime));
+if (carModel) bodyRows.push(row('รุ่น', carModel));
+if (finance) bodyRows.push(row('ไฟแนนซ์', finance));
+bodyRows.push(row('คนขับ', driver));
+if (purpose) bodyRows.push(row('วัตถุประสงค์', purpose));
+if (destShort && destShort !== destFull) bodyRows.push(row('สถานที่ส่ง', destShort));
+bodyRows.push(row('ที่อยู่', destFull));
+if (distance) bodyRows.push(row('ระยะทาง', distance));
+if (duration) bodyRows.push(row('เวลาเดินทาง', duration));
 
 const flex = {
   type: 'bubble',
@@ -70,15 +89,7 @@ const flex = {
   },
   body: {
     type: 'box', layout: 'vertical', spacing: 'md', paddingAll: '16px',
-    contents: [
-      row('ผู้จอง', bookerName),
-      row('วันที่', bookingDate),
-      row('เวลา', bookingTime),
-      row('รุ่น', carModel),
-      row('คนขับ', driver),
-      row('ปลายทาง', destName),
-      ...(purpose ? [row('หมายเหตุ', purpose)] : []),
-    ],
+    contents: bodyRows,
   },
   footer: {
     type: 'box', layout: 'vertical', spacing: 'sm', paddingAll: '12px',
@@ -93,7 +104,7 @@ const flex = {
 
 return [{ json: {
   to: groupId || '__DEFAULT_GROUP__',
-  altText: '🚗 งานส่งรถ #' + bookingId + ' • ' + destName,
+  altText: '🚗 งานส่งรถ #' + bookingId + ' • ' + destFull,
   flex: flex,
 } }];
 """
