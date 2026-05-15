@@ -185,6 +185,7 @@ export default function SalesByPaymentReportPage() {
         <tr>
           <td>${i + 1}</td>
           <td>${r.branch || "-"}</td>
+          <td>${((r.branch_code || (r.sale_invoice_no || "").slice(0, 5) || "-")).toUpperCase()}</td>
           <td>${r.tax_invoice_no || "-"}</td>
           <td>${fmtDate(r.invoice_date || r.tax_invoice_date)}</td>
           <td>${r.customer_name || r.sale_customer_name || "-"}</td>
@@ -240,7 +241,7 @@ export default function SalesByPaymentReportPage() {
       </div>
       <table>
         <thead><tr>
-          <th>#</th><th>สาขา</th><th>เลขใบกำกับ</th><th>วันที่ใบกำกับ</th><th>ลูกค้า</th><th>รุ่น</th>
+          <th>#</th><th>สังกัด</th><th>รหัสสาขา</th><th>เลขใบกำกับ</th><th>วันที่ใบกำกับ</th><th>ลูกค้า</th><th>รุ่น</th>
           <th>ประเภท</th><th>ไฟแนนท์</th><th class="r">ยอดขาย</th><th>วันประกาศราคา</th><th class="r">ราคาประกาศ</th>
           <th class="r">ค่านำพา</th>
           <th class="r">เงินสด</th><th class="r">เงินโอน</th><th class="r">มัดจำ</th><th class="r">เช็ค</th>
@@ -250,7 +251,7 @@ export default function SalesByPaymentReportPage() {
         </tr></thead>
         <tbody>${rows_html}</tbody>
         <tfoot><tr>
-          <td colspan="8" style="text-align:right">รวม ${filtered.length} ใบ</td>
+          <td colspan="9" style="text-align:right">รวม ${filtered.length} ใบ</td>
           <td class="r">${fmt(totals.sale_total)}</td>
           <td></td><td></td>
           <td class="r" style="color:#ea580c">${fmt(totals.delivery_fee)}</td>
@@ -272,10 +273,11 @@ export default function SalesByPaymentReportPage() {
   }
 
   function exportCSV() {
-    const headers = ["#", "สาขา", "เลขใบกำกับ", "วันที่ตามใบกำกับ", "ลูกค้า", "เลขถัง", "รุ่น", "ประเภทการขาย", "ชื่อไฟแนนท์", "ยอดขาย", "ราคาขายประกาศ", "ค่านำพา", "เงินสด", "เงินโอน", "มัดจำ", "เช็ค", "ประกันรถหายออกแทน", "เงินดาวน์/ค่างวดออกแทน", "ตัดรับ FT", "รวมรับชำระ"];
+    const headers = ["#", "สังกัด", "รหัสสาขา", "เลขใบกำกับ", "วันที่ตามใบกำกับ", "ลูกค้า", "เลขถัง", "รุ่น", "ประเภทการขาย", "ชื่อไฟแนนท์", "ยอดขาย", "ราคาขายประกาศ", "ค่านำพา", "เงินสด", "เงินโอน", "มัดจำ", "เช็ค", "ประกันรถหายออกแทน", "เงินดาวน์/ค่างวดออกแทน", "ตัดรับ FT", "รวมรับชำระ"];
     const lines = filtered.map((r, i) => {
       const s = sumByMethod(r);
-      return [i + 1, r.branch || "", r.tax_invoice_no || "", r.invoice_date || r.tax_invoice_date || "", r.customer_name || "", r.chassis_no || "", r.model_name || "", r.sale_invoice_type || "", r.sale_finance_company || "", r.total_amount || 0, r.sale_price || 0, s.delivery_fee, s.cash, s.transfer, s.deposit, s.cheque, s.credit_note, s.coupon, s.ft, s.total];
+      const branchCode = (r.branch_code || (r.sale_invoice_no || "").slice(0, 5) || "").toUpperCase();
+      return [i + 1, r.branch || "", branchCode, r.tax_invoice_no || "", r.invoice_date || r.tax_invoice_date || "", r.customer_name || "", r.chassis_no || "", r.model_name || "", r.sale_invoice_type || "", r.sale_finance_company || "", r.total_amount || 0, r.sale_price || 0, s.delivery_fee, s.cash, s.transfer, s.deposit, s.cheque, s.credit_note, s.coupon, s.ft, s.total];
     });
     const csv = "﻿" + [headers.map(h => `"${h}"`).join(","), ...lines.map(row => row.map(c => typeof c === "number" ? c : `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -350,7 +352,8 @@ export default function SalesByPaymentReportPage() {
           <thead style={{ background: "#072d6b", color: "#fff" }}>
             <tr>
               <th style={th}>#</th>
-              <th style={th}>สาขา</th>
+              <th style={th}>สังกัด</th>
+              <th style={th}>รหัสสาขา</th>
               <th style={th}>เลขใบกำกับ</th>
               <th style={th}>วันที่</th>
               <th style={th}>ลูกค้า</th>
@@ -379,6 +382,7 @@ export default function SalesByPaymentReportPage() {
                 <tr key={r.tax_invoice_no || i} style={{ borderTop: "1px solid #e5e7eb" }}>
                   <td style={td}>{i + 1}</td>
                   <td style={td}>{r.branch || "-"}</td>
+                  <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#3730a3" }}>{(r.branch_code || (r.sale_invoice_no || "").slice(0, 5) || "-").toUpperCase()}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.tax_invoice_no || "-"}</td>
                   <td style={td}>{fmtDate(r.invoice_date || r.tax_invoice_date)}</td>
                   <td style={td}>{r.customer_name || r.sale_customer_name || "-"}</td>
@@ -443,7 +447,7 @@ export default function SalesByPaymentReportPage() {
             })}
             {filtered.length > 0 && (
               <tr style={{ background: "#fde68a", fontWeight: 700 }}>
-                <td colSpan={9} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} ใบ</td>
+                <td colSpan={10} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} ใบ</td>
                 <td style={tdNum}>{fmt(totals.sale_total)}</td>
                 <td></td>
                 <td></td>

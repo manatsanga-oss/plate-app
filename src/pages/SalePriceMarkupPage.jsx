@@ -363,6 +363,7 @@ export default function SalePriceMarkupPage({ currentUser }) {
 }
 
 function RuleTable({ title, rows, tab, onEdit, onCancel, onRestore, onDelete, isHistory }) {
+  const showBranch = tab?.key === "finance_cc";
   if (rows.length === 0) {
     return (
       <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: 24, textAlign: "center", color: "#9ca3af" }}>
@@ -380,7 +381,7 @@ function RuleTable({ title, rows, tab, onEdit, onCancel, onRestore, onDelete, is
           <tr>
             <th style={th}>#</th>
             <th style={th}>เงื่อนไข</th>
-            <th style={th}>สาขา</th>
+            {showBranch && <th style={th}>สาขา</th>}
             <th style={{ ...th, textAlign: "right" }}>ยอด</th>
             <th style={th}>วันที่มีผล</th>
             <th style={th}>{isHistory ? "ยกเลิกเมื่อ" : "บันทึกล่าสุด"}</th>
@@ -414,11 +415,13 @@ function RuleTable({ title, rows, tab, onEdit, onCancel, onRestore, onDelete, is
                   </>
                 )}
               </td>
-              <td style={{ ...td, fontSize: 11 }}>
-                {r.branch_group ? (
-                  <span style={{ padding: "2px 8px", background: "#e0e7ff", color: "#3730a3", borderRadius: 8, fontFamily: "monospace", fontWeight: 600 }}>{r.branch_group}</span>
-                ) : <span style={{ color: "#9ca3af" }}>-</span>}
-              </td>
+              {showBranch && (
+                <td style={{ ...td, fontSize: 11 }}>
+                  {r.branch_group ? (
+                    <span style={{ padding: "2px 8px", background: "#e0e7ff", color: "#3730a3", borderRadius: 8, fontFamily: "monospace", fontWeight: 600 }}>{r.branch_group}</span>
+                  ) : <span style={{ color: "#9ca3af" }}>-</span>}
+                </td>
+              )}
               <td style={{ ...td, textAlign: "right", fontWeight: 700, color: tab?.color, fontFamily: "monospace" }}>+{fmt(r.markup_amount)}</td>
               <td style={{ ...td, fontSize: 11 }}>
                 {fmtDate(r.effective_date)}
