@@ -49,11 +49,14 @@ const groupId = b.groupId || b.group_id || null;
 
 if (!bookingId) throw new Error('missing bookingId');
 
+// destName ใน URL ใช้ตัวสั้น (form.destination) ไม่ใช่ที่อยู่เต็ม
+// เพราะ LINE LIFF URL ยอมรับ query string ได้จำกัด ถ้ายาวเกินอาจ 400 Bad Request
+const destForUrl = (destShort || destFull || '').replace(/[\r\n]/g, ' ').trim().slice(0, 80);
 const uri = LIFF + '?bookingId=' + encodeURIComponent(bookingId)
   + (destLat !== '' && destLng !== ''
        ? '&destLat=' + encodeURIComponent(destLat) + '&destLng=' + encodeURIComponent(destLng)
        : '')
-  + (destFull && destFull !== '-' ? '&destName=' + encodeURIComponent(destFull) : '');
+  + (destForUrl ? '&destName=' + encodeURIComponent(destForUrl) : '');
 
 const row = (label, value) => ({
   type: 'box', layout: 'baseline', spacing: 'sm',
