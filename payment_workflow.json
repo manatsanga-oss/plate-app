@@ -1,0 +1,199 @@
+{
+  "name": "payment-api",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "payment-api",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-1",
+      "name": "Webhook (UI)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "webhookId": "payment-api"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action }}",
+        "rules": {
+          "rules": [
+            { "operation": "equal", "value2": "create_promptpay_qr", "output": 0 },
+            { "operation": "equal", "value2": "get_payment_status", "output": 1 },
+            { "operation": "equal", "value2": "cancel_payment", "output": 2 },
+            { "operation": "equal", "value2": "list_payments", "output": 3 }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "id": "sw-1",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [320, 300]
+    },
+
+    {
+      "parameters": {
+        "functionCode": "// validate + แปลงจำนวนเงิน → satang (Omise ใช้หน่วย satang = บาท*100)\nconst b = $json.body || {};\nconst amount = Number(b.amount);\nif (!amount || amount <= 0) {\n  throw new Error('amount required');\n}\nreturn [{\n  json: {\n    amount_satang: Math.round(amount * 100),\n    amount: amount,\n    payment_type: b.payment_type || 'general',\n    ref_no: b.ref_no || '',\n    customer_name: b.customer_name || '',\n    customer_phone: b.customer_phone || '',\n    description: b.description || '',\n    created_by: b.created_by || 'system',\n    branch_code: b.branch_code || '',\n    branch_name: b.branch_name || ''\n  }\n}];"
+      },
+      "id": "fn-prep",
+      "name": "Prepare Charge",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [540, 100]
+    },
+    {
+      "parameters": {
+        "url": "https://api.omise.co/sources",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "promptpay" },
+            { "name": "amount", "value": "={{ $json.amount_satang }}" },
+            { "name": "currency", "value": "THB" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-source",
+      "name": "Omise: Create Source",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [760, 100],
+      "credentials": {
+        "httpBasicAuth": { "id": "REPLACE_OMISE_PUBLIC_KEY_CRED_ID", "name": "Omise Public Key" }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://api.omise.co/charges",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBasicAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "amount", "value": "={{ $('Prepare Charge').item.json.amount_satang }}" },
+            { "name": "currency", "value": "THB" },
+            { "name": "source", "value": "={{ $json.id }}" },
+            { "name": "description", "value": "={{ $('Prepare Charge').item.json.description || ($('Prepare Charge').item.json.payment_type + ' - ' + $('Prepare Charge').item.json.customer_name) }}" },
+            { "name": "metadata[ref_no]", "value": "={{ $('Prepare Charge').item.json.ref_no }}" },
+            { "name": "metadata[customer_name]", "value": "={{ $('Prepare Charge').item.json.customer_name }}" },
+            { "name": "metadata[branch_code]", "value": "={{ $('Prepare Charge').item.json.branch_code }}" },
+            { "name": "metadata[payment_type]", "value": "={{ $('Prepare Charge').item.json.payment_type }}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "http-charge",
+      "name": "Omise: Create Charge",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [980, 100],
+      "credentials": {
+        "httpBasicAuth": { "id": "REPLACE_OMISE_SECRET_KEY_CRED_ID", "name": "Omise Secret Key" }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// บันทึก charge ลง DB + map response กลับให้ UI\nconst charge = $json;\nconst src = charge.source || {};\nconst scan = src.scannable_code || {};\nconst img = (scan.image && (scan.image.download_uri || scan.image)) || '';\nconst prep = $('Prepare Charge').item.json;\nreturn [{\n  json: {\n    charge_id: charge.id,\n    source_id: src.id || '',\n    qr_image: img,\n    amount: prep.amount,\n    status: charge.status === 'successful' ? 'paid' : (charge.status || 'pending'),\n    expires_at: charge.expires_at || null,\n    created_at: charge.created_at || new Date().toISOString(),\n    ref_no: prep.ref_no,\n    customer_name: prep.customer_name,\n    customer_phone: prep.customer_phone,\n    description: prep.description,\n    payment_type: prep.payment_type,\n    created_by: prep.created_by,\n    branch_code: prep.branch_code,\n    branch_name: prep.branch_name,\n    raw_omise: JSON.stringify(charge)\n  }\n}];"
+      },
+      "id": "fn-map",
+      "name": "Map Charge Response",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1200, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO payments (charge_id, source_id, payment_type, ref_no, customer_name, customer_phone, description, amount, status, qr_image, expires_at, created_by, branch_code, branch_name, raw_omise) VALUES ('{{ $json.charge_id }}','{{ $json.source_id }}','{{ $json.payment_type }}','{{ ($json.ref_no || '').replace(/'/g, \"''\") }}','{{ ($json.customer_name || '').replace(/'/g, \"''\") }}','{{ $json.customer_phone }}','{{ ($json.description || '').replace(/'/g, \"''\") }}', {{ $json.amount }}, '{{ $json.status }}', '{{ $json.qr_image }}', {{ $json.expires_at ? \"'\" + $json.expires_at + \"'\" : 'NULL' }}, '{{ $json.created_by }}', '{{ $json.branch_code }}', '{{ ($json.branch_name || '').replace(/'/g, \"''\") }}', '{{ $json.raw_omise.replace(/'/g, \"''\") }}'::jsonb) ON CONFLICT (charge_id) DO NOTHING RETURNING payment_id, charge_id, qr_image, status, expires_at, amount, created_at, ref_no, customer_name;"
+      },
+      "id": "pg-insert",
+      "name": "PG: Insert Payment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [1420, 100],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT charge_id, status, amount, paid_at, expires_at, ref_no, customer_name FROM payments WHERE charge_id = '{{ $json.body.charge_id }}';"
+      },
+      "id": "pg-status",
+      "name": "PG: Get Status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [540, 260],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE payments SET status = 'cancelled' WHERE charge_id = '{{ $json.body.charge_id }}' AND status = 'pending' RETURNING charge_id, status;"
+      },
+      "id": "pg-cancel",
+      "name": "PG: Cancel",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [540, 420],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT charge_id, payment_type, ref_no, customer_name, customer_phone, description, amount, status, qr_image, expires_at, paid_at, created_at, branch_code, branch_name FROM payments WHERE created_at::date BETWEEN '{{ $json.body.date_from }}' AND '{{ $json.body.date_to }}' {{ $json.body.branch_code ? \"AND branch_code = '\" + $json.body.branch_code + \"'\" : '' }} ORDER BY created_at DESC LIMIT 500;"
+      },
+      "id": "pg-list",
+      "name": "PG: List Payments",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [540, 580],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond to UI",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1700, 300]
+    }
+  ],
+  "connections": {
+    "Webhook (UI)": { "main": [[ { "node": "Switch Action", "type": "main", "index": 0 } ]] },
+    "Switch Action": {
+      "main": [
+        [ { "node": "Prepare Charge", "type": "main", "index": 0 } ],
+        [ { "node": "PG: Get Status", "type": "main", "index": 0 } ],
+        [ { "node": "PG: Cancel", "type": "main", "index": 0 } ],
+        [ { "node": "PG: List Payments", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Prepare Charge": { "main": [[ { "node": "Omise: Create Source", "type": "main", "index": 0 } ]] },
+    "Omise: Create Source": { "main": [[ { "node": "Omise: Create Charge", "type": "main", "index": 0 } ]] },
+    "Omise: Create Charge": { "main": [[ { "node": "Map Charge Response", "type": "main", "index": 0 } ]] },
+    "Map Charge Response": { "main": [[ { "node": "PG: Insert Payment", "type": "main", "index": 0 } ]] },
+    "PG: Insert Payment": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
+    "PG: Get Status": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
+    "PG: Cancel": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
+    "PG: List Payments": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] }
+  },
+  "settings": {},
+  "active": false,
+  "tags": ["payment", "omise", "promptpay"]
+}

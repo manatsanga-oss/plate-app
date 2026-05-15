@@ -1,0 +1,61 @@
+{
+  "name": "payment-omise-callback",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "payment-omise-callback",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-omise",
+      "name": "Webhook (Omise)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "webhookId": "payment-omise-callback"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Omise webhook payload: { key: 'charge.complete', data: { id, status, paid_at, ... } }\nconst body = $json.body || {};\nconst data = body.data || {};\nlet status = 'pending';\nif (data.status === 'successful' || data.paid === true) status = 'paid';\nelse if (data.status === 'failed') status = 'failed';\nelse if (data.status === 'expired') status = 'expired';\nreturn [{\n  json: {\n    charge_id: data.id || '',\n    status,\n    paid_at: data.paid_at || (status === 'paid' ? new Date().toISOString() : null),\n    raw: JSON.stringify(body)\n  }\n}];"
+      },
+      "id": "fn-parse",
+      "name": "Parse Omise Event",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [320, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE payments SET status = '{{ $json.status }}', paid_at = {{ $json.paid_at ? \"'\" + $json.paid_at + \"'\" : 'paid_at' }}, raw_omise = '{{ $json.raw.replace(/'/g, \"''\") }}'::jsonb WHERE charge_id = '{{ $json.charge_id }}' RETURNING charge_id, status, paid_at;"
+      },
+      "id": "pg-update",
+      "name": "PG: Update Payment",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [540, 300],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { ok: true } }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Ack to Omise",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [760, 300]
+    }
+  ],
+  "connections": {
+    "Webhook (Omise)": { "main": [[ { "node": "Parse Omise Event", "type": "main", "index": 0 } ]] },
+    "Parse Omise Event": { "main": [[ { "node": "PG: Update Payment", "type": "main", "index": 0 } ]] },
+    "PG: Update Payment": { "main": [[ { "node": "Ack to Omise", "type": "main", "index": 0 } ]] }
+  },
+  "settings": {},
+  "active": false,
+  "tags": ["payment", "omise", "promptpay", "callback"]
+}
