@@ -310,7 +310,7 @@ export default function SalesByPaymentReportPage() {
     const lines = filtered.map((r, i) => {
       const s = sumByMethod(r);
       const branchCode = (r.branch_code || (r.sale_invoice_no || "").slice(0, 5) || "").toUpperCase();
-      return [i + 1, r.branch || "", branchCode, r.tax_invoice_no || "", r.invoice_date || r.tax_invoice_date || "", r.customer_name || "", r.chassis_no || "", r.model_name || "", r.sale_invoice_type || "", r.sale_finance_company || "", r.total_amount || 0, r.sale_price || 0, s.delivery_fee, deliveryFeeBonus(r), s.cash, s.transfer, s.deposit, s.cheque, s.credit_note, s.coupon, s.ft, s.total];
+      return [i + 1, r.branch || "", branchCode, r.tax_invoice_no || "", r.invoice_date || r.tax_invoice_date || "", r.customer_name || r.sale_customer_name || "", r.chassis_no || "", r.model_name || "", r.sale_invoice_type || "", r.sale_finance_company || "", r.total_amount || 0, r.sale_price || 0, s.delivery_fee, deliveryFeeBonus(r), s.cash, s.transfer, s.deposit, s.cheque, s.credit_note, s.coupon, s.ft, s.total];
     });
     const csv = "﻿" + [headers.map(h => `"${h}"`).join(","), ...lines.map(row => row.map(c => typeof c === "number" ? c : `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -393,7 +393,6 @@ export default function SalesByPaymentReportPage() {
               <th style={th}>เลขถัง</th>
               <th style={th}>รุ่น</th>
               <th style={{ ...th, textAlign: "center" }}>ประเภทการขาย</th>
-              <th style={th}>ชื่อไฟแนนท์</th>
               <th style={{ ...th, textAlign: "right" }}>ยอดขาย</th>
               <th style={{ ...th, background: "#0d9488" }}>วันที่ประกาศราคา</th>
               <th style={{ ...th, textAlign: "right", background: "#0d9488" }}>ราคาขาย</th>
@@ -431,7 +430,6 @@ export default function SalesByPaymentReportPage() {
                       return <span style={{ color: "#9ca3af", fontSize: 11 }}>{t || "-"}</span>;
                     })()}
                   </td>
-                  <td style={{ ...td, fontSize: 11, color: r.sale_finance_company ? "#0369a1" : "#9ca3af" }}>{r.sale_finance_company || "-"}</td>
                   {(() => {
                     const sa = Number(r.total_amount || 0);
                     const sp = Number(r.sale_price || 0);
