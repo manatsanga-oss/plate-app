@@ -123,11 +123,10 @@ export default function SalePriceMarkupPage({ currentUser }) {
   async function searchSales() {
     const kw = saleSearch.trim();
     if (!kw) { setSaleResults([]); return; }
-    const action = edit?.markup_type === "cosmos_insurance" ? "search_cosmos_theft" : "search_moto_sales_for_link";
     try {
       const res = await fetch(ACCOUNTING_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, search: kw }),
+        body: JSON.stringify({ action: "search_moto_sales_for_link", search: kw }),
       });
       const data = await res.json();
       setSaleResults(Array.isArray(data) ? data : []);
@@ -297,30 +296,28 @@ export default function SalePriceMarkupPage({ currentUser }) {
 
             {edit.markup_type === "cosmos_insurance" && (
               <>
-                <Field label="รายการประกัน COSMOS *">
+                <Field label="ใบขาย *">
                   {edit.sale_invoice_no ? (
                     <div style={{ padding: 8, background: "#fef3c7", border: "1px solid #92400e", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                       <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#92400e" }}>{edit.sale_invoice_no}</span>
-                      <button onClick={() => setEdit({ ...edit, sale_invoice_no: "", sale_id: null, policy_no: "" })} style={{ ...btnMini, background: "#dc2626" }}>✕</button>
+                      <button onClick={() => setEdit({ ...edit, sale_invoice_no: "", sale_id: null })} style={{ ...btnMini, background: "#dc2626" }}>✕</button>
                     </div>
                   ) : (
                     <div>
                       <div style={{ display: "flex", gap: 6 }}>
-                        <input value={saleSearch} onChange={e => setSaleSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchSales()} placeholder="🔍 App No / ลูกค้า / เลขถัง / เลขใบขาย / เลขกรมธรรม์" style={inp} />
+                        <input value={saleSearch} onChange={e => setSaleSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchSales()} placeholder="🔍 เลขใบขาย / ลูกค้า / เลขเครื่อง / เลขถัง" style={inp} />
                         <button onClick={searchSales} style={btnBlue}>ค้นหา</button>
                       </div>
                       {saleResults.length > 0 && (
                         <div style={{ marginTop: 6, maxHeight: 220, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6 }}>
                           {saleResults.map(s => (
-                            <div key={s.id} onClick={() => { setEdit({ ...edit, sale_invoice_no: s.sale_invoice_no || "", policy_no: s.policy_no || edit.policy_no || "", sale_id: null }); setSaleResults([]); setSaleSearch(""); }}
+                            <div key={s.id} onClick={() => { setEdit({ ...edit, sale_invoice_no: s.invoice_no, sale_id: s.id }); setSaleResults([]); setSaleSearch(""); }}
                               style={{ padding: 8, borderBottom: "1px solid #f3f4f6", cursor: "pointer", fontSize: 12 }}
                               onMouseEnter={e => e.currentTarget.style.background = "#fffbeb"}
                               onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
-                              <div style={{ fontWeight: 600, color: "#92400e", fontFamily: "monospace" }}>{s.app_no || "-"}</div>
-                              <div style={{ color: "#374151" }}>{s.customer_name || "-"}</div>
-                              <div style={{ color: "#6b7280", fontSize: 11 }}>
-                                ขาย: {s.sale_invoice_no || "-"} · ถัง: {s.chassis_no || "-"}{s.policy_no ? ` · กรมธรรม์: ${s.policy_no}` : ""}
-                              </div>
+                              <div style={{ fontWeight: 600, color: "#92400e", fontFamily: "monospace" }}>{s.invoice_no}</div>
+                              <div style={{ color: "#374151" }}>{s.customer_name} · {s.brand} {s.model_series}</div>
+                              <div style={{ color: "#6b7280", fontSize: 11 }}>เครื่อง: {s.engine_no || "-"} · {fmtDate(s.sale_date)}</div>
                             </div>
                           ))}
                         </div>
@@ -335,7 +332,7 @@ export default function SalePriceMarkupPage({ currentUser }) {
             )}
 
             <Field label="ยอดบวกเพิ่ม (บาท) *">
-              <input type="number" value={edit.markup_amount || ""} onChange={e => setEdit({ ...edit, markup_amount: e.target.value })} style={{ ...inp, fontWeight: 700, fontSize: 16 }} placeholder="1000" />
+              <input type="number" value={edit.markup_amount || ""} onChange={e => setEdit({ ...edit, markup_amount: e.target.value })} style={{ ...inp, fontWeight: 700, fontSize: 16 }} />
             </Field>
 
             <div style={{ display: "flex", gap: 8 }}>

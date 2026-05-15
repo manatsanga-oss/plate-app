@@ -48,6 +48,36 @@ export default function SalesByPaymentReportPage() {
   }
   useEffect(() => { fetchData(); fetchMarkups(); /* eslint-disable-next-line */ }, []);
 
+  // จำแนกยี่ห้อจาก sale_brand (จาก moto_sales) → matched_brand → chassis prefix → model_code
+  function detectBrand(r) {
+    const brand = (r.sale_brand || r.matched_brand || r.brand || "").toLowerCase();
+    if (brand.includes("honda") || brand.includes("ฮอนด้า")) return "honda";
+    if (brand.includes("yamaha") || brand.includes("ยามาฮ่า")) return "yamaha";
+    // chassis prefix (MLHJ=Honda Thailand, MLE=Yamaha Thailand)
+    const chassis = String(r.chassis_no || r.matched_chassis_no || "").toUpperCase();
+    if (chassis.startsWith("MLHJ") || chassis.startsWith("LALHJ")) return "honda";
+    if (chassis.startsWith("MLE") || chassis.startsWith("MH3")) return "yamaha";
+    // model_code prefix
+    const mc = String(r.sale_model_code || r.model_code || r.matched_model_code || "").toUpperCase();
+    if (/^(AC|AF|AN|JC|JF|KF|KC)/.test(mc)) return "honda";
+    if (/^(BK|BJ|BG|BD|BF|DT|GW)/.test(mc)) return "yamaha";
+    // model name
+    const mn = String(r.model_name || r.matched_model_series || "").toLowerCase();
+    if (/(wave|click|scoopy|pcx|cbr|crf|adv|forza|cb150|nice|monkey|msx|grom)/i.test(mn)) return "honda";
+    if (/(fino|fazzio|aerox|finn|grand filano|exciter|nmax|m-slaz|tricity|jupiter|yzf|wr)/i.test(mn)) return "yamaha";
+    return null;
+  }
+
+  // คำนวณบวกเพิ่มค่านำพา ตามยี่ห้อ
+  // Honda: ทุก 500 บาท → +2,000 | Yamaha: ทุก 500 บาท → +1,000
+  function deliveryFeeBonus(r) {
+    const fee = Number(r.delivery_fee_amount || 0);
+    if (fee <= 0) return 0;
+    const brand = detectBrand(r);
+    const multiplier = brand === "honda" ? 2000 : brand === "yamaha" ? 1000 : 0;
+    return Math.floor(fee / 500) * multiplier;
+  }
+
   // หา markup ที่เข้าเงื่อนไขกับแถวขายนี้
   function getMarkups(r) {
     // normalize ชื่อบริษัท: lowercase + ตัด whitespace + ตัด punctuation ทั่วไป
@@ -68,7 +98,7 @@ export default function SalesByPaymentReportPage() {
       return mN === finN || mN.includes(finN) || finN.includes(mN);
     };
     const branchCode = (r.branch_code || (r.sale_invoice_no || "").slice(0, 5) || "").toUpperCase();
-    // ดึง CC จาก model_code / model_name (3-4 หลักในรุ่นรถ เช่น AFS110, CLICK160, PCX160)
+    // CC: ใช้ engine_cc จาก master data (moto_series.engine_cc) ก่อน → fallback extract
     const extractCC = (txt) => {
       if (!txt) return null;
       const matches = String(txt).match(/\d{3,4}/g) || [];
@@ -78,7 +108,7 @@ export default function SalesByPaymentReportPage() {
       }
       return null;
     };
-    const saleCC = extractCC(r.model_code) ?? extractCC(r.model_name) ?? extractCC(r.matched_model_code) ?? extractCC(r.matched_model_series);
+    const saleCC = Number(r.sale_engine_cc) || extractCC(r.sale_model_code) || extractCC(r.model_code) || extractCC(r.model_name) || extractCC(r.matched_model_code) || extractCC(r.matched_model_series) || null;
     return markups.filter(m => {
       if (m.markup_type === "finance") return finMatch(m);
       if (m.markup_type === "finance_cc") {
@@ -138,9 +168,9 @@ export default function SalesByPaymentReportPage() {
     return hay.includes(kw);
   });
 
-  // mismatch helper — เทียบ ยอดขาย vs (ราคาขายประกาศ + รายการบวกเพิ่ม)
+  // mismatch helper — เทียบ ยอดขาย vs (ราคาขายประกาศ + รายการบวกเพิ่ม + บวกเพิ่มค่านำพา)
   function markupTotal(r) {
-    return getMarkups(r).reduce((s, m) => s + Number(m.markup_amount || 0), 0);
+    return getMarkups(r).reduce((s, m) => s + Number(m.markup_amount || 0), 0) + deliveryFeeBonus(r);
   }
   function isMismatch(r) {
     const sa = Number(r.total_amount || 0);
@@ -196,6 +226,7 @@ export default function SalesByPaymentReportPage() {
           <td>${r.is_booking ? "📌 " : ""}${r.price_date ? fmtDate(r.price_date) : "-"}</td>
           <td class="r${mismatch ? " mismatch" : ""}">${r.is_booking ? "📌 " : ""}${sp > 0 ? fmt(sp) : "-"}</td>
           <td class="r" style="color:#ea580c">${s.delivery_fee > 0 ? fmt(s.delivery_fee) : "-"}</td>
+          <td class="r" style="color:#c2410c;font-weight:700">${(() => { const b = deliveryFeeBonus(r); return b > 0 ? "+" + fmt(b) : "-"; })()}</td>
           <td class="r">${s.cash > 0 ? fmt(s.cash) : "-"}</td>
           <td class="r">${s.transfer > 0 ? fmt(s.transfer) : "-"}</td>
           <td class="r">${s.deposit > 0 ? fmt(s.deposit) : "-"}</td>
@@ -244,6 +275,7 @@ export default function SalesByPaymentReportPage() {
           <th>#</th><th>สังกัด</th><th>รหัสสาขา</th><th>เลขใบกำกับ</th><th>วันที่ใบกำกับ</th><th>ลูกค้า</th><th>รุ่น</th>
           <th>ประเภท</th><th>ไฟแนนท์</th><th class="r">ยอดขาย</th><th>วันประกาศราคา</th><th class="r">ราคาประกาศ</th>
           <th class="r">ค่านำพา</th>
+          <th class="r">บวกเพิ่มค่านำพา</th>
           <th class="r">เงินสด</th><th class="r">เงินโอน</th><th class="r">มัดจำ</th><th class="r">เช็ค</th>
           <th class="r">ประกันออกแทน</th><th class="r">ดาวน์/งวดออกแทน</th>
           <th>วันประกาศดาวน์</th><th class="r">ยอดประกาศดาวน์</th>
@@ -255,6 +287,7 @@ export default function SalesByPaymentReportPage() {
           <td class="r">${fmt(totals.sale_total)}</td>
           <td></td><td></td>
           <td class="r" style="color:#ea580c">${fmt(totals.delivery_fee)}</td>
+          <td class="r" style="color:#c2410c;font-weight:700">${(() => { const tb = filtered.reduce((s, r) => s + deliveryFeeBonus(r), 0); return tb > 0 ? "+" + fmt(tb) : "-"; })()}</td>
           <td class="r">${fmt(totals.cash)}</td>
           <td class="r">${fmt(totals.transfer)}</td>
           <td class="r">${fmt(totals.deposit)}</td>
@@ -273,11 +306,11 @@ export default function SalesByPaymentReportPage() {
   }
 
   function exportCSV() {
-    const headers = ["#", "สังกัด", "รหัสสาขา", "เลขใบกำกับ", "วันที่ตามใบกำกับ", "ลูกค้า", "เลขถัง", "รุ่น", "ประเภทการขาย", "ชื่อไฟแนนท์", "ยอดขาย", "ราคาขายประกาศ", "ค่านำพา", "เงินสด", "เงินโอน", "มัดจำ", "เช็ค", "ประกันรถหายออกแทน", "เงินดาวน์/ค่างวดออกแทน", "ตัดรับ FT", "รวมรับชำระ"];
+    const headers = ["#", "สังกัด", "รหัสสาขา", "เลขใบกำกับ", "วันที่ตามใบกำกับ", "ลูกค้า", "เลขถัง", "รุ่น", "ประเภทการขาย", "ชื่อไฟแนนท์", "ยอดขาย", "ราคาขายประกาศ", "ค่านำพา", "บวกเพิ่มค่านำพา", "เงินสด", "เงินโอน", "มัดจำ", "เช็ค", "ประกันรถหายออกแทน", "เงินดาวน์/ค่างวดออกแทน", "ตัดรับ FT", "รวมรับชำระ"];
     const lines = filtered.map((r, i) => {
       const s = sumByMethod(r);
       const branchCode = (r.branch_code || (r.sale_invoice_no || "").slice(0, 5) || "").toUpperCase();
-      return [i + 1, r.branch || "", branchCode, r.tax_invoice_no || "", r.invoice_date || r.tax_invoice_date || "", r.customer_name || "", r.chassis_no || "", r.model_name || "", r.sale_invoice_type || "", r.sale_finance_company || "", r.total_amount || 0, r.sale_price || 0, s.delivery_fee, s.cash, s.transfer, s.deposit, s.cheque, s.credit_note, s.coupon, s.ft, s.total];
+      return [i + 1, r.branch || "", branchCode, r.tax_invoice_no || "", r.invoice_date || r.tax_invoice_date || "", r.customer_name || "", r.chassis_no || "", r.model_name || "", r.sale_invoice_type || "", r.sale_finance_company || "", r.total_amount || 0, r.sale_price || 0, s.delivery_fee, deliveryFeeBonus(r), s.cash, s.transfer, s.deposit, s.cheque, s.credit_note, s.coupon, s.ft, s.total];
     });
     const csv = "﻿" + [headers.map(h => `"${h}"`).join(","), ...lines.map(row => row.map(c => typeof c === "number" ? c : `"${String(c).replace(/"/g, '""')}"`).join(","))].join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -365,6 +398,7 @@ export default function SalesByPaymentReportPage() {
               <th style={{ ...th, background: "#0d9488" }}>วันที่ประกาศราคา</th>
               <th style={{ ...th, textAlign: "right", background: "#0d9488" }}>ราคาขาย</th>
               {show.delivery_fee && <th style={{ ...th, textAlign: "right", background: "#ea580c" }}>ค่านำพา</th>}
+              <th style={{ ...th, textAlign: "right", background: "#f97316" }}>บวกเพิ่มค่านำพา</th>
               <th style={{ ...th, textAlign: "right", background: "#10b981" }}>รายการบวกเพิ่ม</th>
               {show.credit_note && <th style={{ ...th, textAlign: "right", background: "#a16207" }}>ประกันออกแทน</th>}
               {show.coupon && <th style={{ ...th, textAlign: "right", background: "#be185d" }}>ดาวน์/งวดออกแทน</th>}
@@ -421,6 +455,18 @@ export default function SalesByPaymentReportPage() {
                   })()}
                   {show.delivery_fee && <td style={{ ...tdNum, color: "#ea580c", fontWeight: s.delivery_fee > 0 ? 600 : "inherit" }}>{s.delivery_fee > 0 ? fmt(s.delivery_fee) : "-"}</td>}
                   {(() => {
+                    const bonus = deliveryFeeBonus(r);
+                    const brand = detectBrand(r);
+                    const tip = bonus > 0
+                      ? `${brand === "honda" ? "Honda" : (brand === "yamaha" ? "Yamaha" : "อื่นๆ")}: ค่านำพา ${fmt(s.delivery_fee)} × ${brand === "honda" ? "2,000/500" : "1,000/500"} = +${fmt(bonus)}`
+                      : "";
+                    return (
+                      <td style={{ ...tdNum, color: "#c2410c", fontWeight: bonus > 0 ? 700 : "inherit" }} title={tip}>
+                        {bonus > 0 ? `+${fmt(bonus)}` : "-"}
+                      </td>
+                    );
+                  })()}
+                  {(() => {
                     const ms = getMarkups(r);
                     const total = ms.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
                     const tipText = ms.map(m =>
@@ -452,6 +498,12 @@ export default function SalesByPaymentReportPage() {
                 <td></td>
                 <td></td>
                 {show.delivery_fee && <td style={{ ...tdNum, color: "#ea580c" }}>{fmt(totals.delivery_fee)}</td>}
+                <td style={{ ...tdNum, color: "#c2410c", fontWeight: 700 }}>
+                  {(() => {
+                    const totalBonus = filtered.reduce((sum, r) => sum + deliveryFeeBonus(r), 0);
+                    return totalBonus > 0 ? `+${fmt(totalBonus)}` : "-";
+                  })()}
+                </td>
                 <td style={{ ...tdNum, color: "#065f46", fontWeight: 700 }}>
                   {(() => {
                     const totalMarkup = filtered.reduce((sum, r) => sum + getMarkups(r).reduce((s, m) => s + Number(m.markup_amount || 0), 0), 0);
