@@ -9,17 +9,23 @@ function fmtDate(v) {
   const d = new Date(v); if (isNaN(d)) return String(v).slice(0, 10);
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`;
 }
+function fmtDateTime(v) {
+  if (!v) return "-";
+  const d = new Date(v); if (isNaN(d)) return String(v);
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
 
-const TYPES = [
-  { key: "finance",     label: "ตามไฟแนนท์",        emoji: "💳", color: "#1e40af", desc: "บวกเพิ่มตามชื่อบริษัทไฟแนนท์" },
-  { key: "finance_cc",  label: "ตามไฟแนนท์ + CC",   emoji: "🏍️", color: "#7c3aed", desc: "บวกเพิ่มตามไฟแนนท์ + ช่วง CC ของรถ" },
-  { key: "custom",      label: "กำหนดเอง",          emoji: "✏️", color: "#ea580c", desc: "บวกเพิ่มเฉพาะรุ่น/ยี่ห้อ/สาขา" },
+const TABS = [
+  { key: "finance",            label: "ตามไฟแนนท์",                          emoji: "💳", color: "#1e40af" },
+  { key: "finance_cc",         label: "ตามไฟแนนท์ + CC",                     emoji: "🏍️", color: "#7c3aed" },
+  { key: "custom",             label: "กำหนดเอง",                            emoji: "✏️", color: "#ea580c" },
+  { key: "installment_bonus",  label: "บวกเพิ่มจากค่างวดออกแทน",            emoji: "🧮", color: "#0891b2" },
 ];
 
 const EMPTY_ROW = {
   id: null, markup_type: "finance", finance_company: "", cc_min: "", cc_max: "",
-  model_code: "", brand: "", branch_group: "all", markup_amount: "",
-  effective_date: "", end_date: "", status: "active", notes: "",
+  model_code: "", brand: "", branch_group: "all", sale_invoice_no: "", sale_id: null,
+  markup_amount: "", effective_date: "", end_date: "", status: "active", notes: "",
 };
 
 export default function SalePriceMarkupPage({ currentUser }) {
@@ -27,7 +33,11 @@ export default function SalePriceMarkupPage({ currentUser }) {
   const [financeCos, setFinanceCos] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [edit, setEdit] = useState(null);  // editing row or null
+  const [edit, setEdit] = useState(null);
+  const [activeTab, setActiveTab] = useState("finance");
+  const [showHistory, setShowHistory] = useState(false);
+  const [saleSearch, setSaleSearch] = useState("");
+  const [saleResults, setSaleResults] = useState([]);
 
   async function fetchFinance() {
     try {
@@ -39,8 +49,6 @@ export default function SalePriceMarkupPage({ currentUser }) {
       setFinanceCos(Array.isArray(data) ? data.filter(c => c.status !== "inactive") : []);
     } catch (e) { /* ignore */ }
   }
-  useEffect(() => { fetchFinance(); }, []);
-
   async function fetchData() {
     setLoading(true); setMessage("");
     try {
@@ -55,13 +63,14 @@ export default function SalePriceMarkupPage({ currentUser }) {
     }
     setLoading(false);
   }
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fetchFinance(); fetchData(); /* eslint-disable-next-line */ }, []);
 
   async function save() {
     if (!edit) return;
     if (!edit.markup_amount || Number(edit.markup_amount) === 0) { alert("กรอกยอดบวกเพิ่ม"); return; }
-    if (edit.markup_type === "finance" && !edit.finance_company) { alert("เลือก/กรอกบริษัทไฟแนนท์"); return; }
+    if (edit.markup_type === "finance" && !edit.finance_company) { alert("เลือกบริษัทไฟแนนท์"); return; }
     if (edit.markup_type === "finance_cc" && (!edit.finance_company || !edit.cc_min)) { alert("กรอกไฟแนนท์ + CC"); return; }
+    if (edit.markup_type === "installment_bonus" && !edit.sale_invoice_no) { alert("เลือกใบขาย"); return; }
 
     setMessage("⏳ กำลังบันทึก...");
     try {
@@ -78,8 +87,28 @@ export default function SalePriceMarkupPage({ currentUser }) {
     }
   }
 
-  async function del(id) {
-    if (!confirm("ลบเงื่อนไขนี้?")) return;
+  async function cancelRow(r) {
+    if (!confirm("ยกเลิกเงื่อนไขนี้? (จะย้ายไปอยู่ในประวัติ)")) return;
+    try {
+      await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_price_markup", ...r, status: "inactive", end_date: r.end_date || new Date().toISOString().slice(0, 10) }),
+      });
+      fetchData();
+    } catch (e) { alert("ยกเลิกไม่สำเร็จ"); }
+  }
+  async function restoreRow(r) {
+    if (!confirm("เปิดใช้งานเงื่อนไขนี้อีกครั้ง?")) return;
+    try {
+      await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_price_markup", ...r, status: "active" }),
+      });
+      fetchData();
+    } catch (e) { alert("เปิดใช้งานไม่สำเร็จ"); }
+  }
+  async function hardDelete(id) {
+    if (!confirm("ลบถาวร? จะไม่สามารถกู้คืนได้")) return;
     try {
       await fetch(ACCOUNTING_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -89,7 +118,23 @@ export default function SalePriceMarkupPage({ currentUser }) {
     } catch (e) { alert("ลบไม่สำเร็จ"); }
   }
 
-  const byType = TYPES.map(t => ({ ...t, items: rows.filter(r => r.markup_type === t.key) }));
+  async function searchSales() {
+    const kw = saleSearch.trim();
+    if (!kw) { setSaleResults([]); return; }
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search_moto_sales_for_link", search: kw }),
+      });
+      const data = await res.json();
+      setSaleResults(Array.isArray(data) ? data : []);
+    } catch (e) { setSaleResults([]); }
+  }
+
+  const currentTab = TABS.find(t => t.key === activeTab);
+  const tabRows = rows.filter(r => r.markup_type === activeTab);
+  const activeRows = tabRows.filter(r => r.status === "active");
+  const inactiveRows = tabRows.filter(r => r.status !== "active");
 
   return (
     <div className="page-container">
@@ -97,99 +142,98 @@ export default function SalePriceMarkupPage({ currentUser }) {
         <h2 className="page-title">💵 เงื่อนไขราคาขายบวกเพิ่ม</h2>
       </div>
 
-      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12 }}>
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 2, borderBottom: "2px solid #e5e7eb", marginBottom: 14, flexWrap: "wrap" }}>
+        {TABS.map(t => {
+          const cnt = rows.filter(r => r.markup_type === t.key && r.status === "active").length;
+          const isActive = t.key === activeTab;
+          return (
+            <button key={t.key} onClick={() => { setActiveTab(t.key); setShowHistory(false); }}
+              style={{
+                padding: "10px 16px", border: "none",
+                background: isActive ? t.color : "#f3f4f6",
+                color: isActive ? "#fff" : "#374151",
+                fontWeight: 600, cursor: "pointer", borderRadius: "8px 8px 0 0",
+                borderBottom: isActive ? `3px solid ${t.color}` : "none",
+                fontSize: 14,
+              }}>
+              {t.emoji} {t.label} {cnt > 0 && <span style={{ marginLeft: 6, padding: "1px 8px", background: isActive ? "#ffffff33" : "#e5e7eb", borderRadius: 10, fontSize: 11 }}>{cnt}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Toolbar */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+        <button onClick={() => setEdit({ ...EMPTY_ROW, markup_type: activeTab })} style={{ ...btnBlue, background: currentTab?.color }}>+ เพิ่มเงื่อนไข</button>
         <button onClick={fetchData} disabled={loading} style={btnBlue}>{loading ? "..." : "🔄 รีเฟรช"}</button>
+        <button onClick={() => setShowHistory(s => !s)} style={{ ...btnBlue, background: showHistory ? "#6b7280" : "#9ca3af" }}>
+          📋 ประวัติ ({inactiveRows.length}) {showHistory ? "▼" : "▶"}
+        </button>
+        <span style={{ color: currentTab?.color, fontSize: 13, marginLeft: "auto" }}>
+          {currentTab?.emoji} ใช้งานอยู่: <strong>{activeRows.length}</strong> · ยกเลิก: <strong>{inactiveRows.length}</strong>
+        </span>
       </div>
 
       {message && <div style={{ padding: 10, marginBottom: 10, color: message.startsWith("❌") ? "#b91c1c" : "#065f46" }}>{message}</div>}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px,1fr))", gap: 16 }}>
-        {byType.map(t => (
-          <div key={t.key} style={{ background: "#fff", borderRadius: 10, border: `2px solid ${t.color}`, overflow: "hidden" }}>
-            <div style={{ background: t.color, color: "#fff", padding: "10px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 16 }}>{t.emoji} {t.label}</div>
-                <div style={{ fontSize: 11, opacity: 0.9 }}>{t.desc}</div>
-              </div>
-              <button onClick={() => setEdit({ ...EMPTY_ROW, markup_type: t.key })}
-                style={{ padding: "6px 12px", background: "#fff", color: t.color, border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700 }}>+ เพิ่ม</button>
-            </div>
-            <div style={{ padding: 8, maxHeight: 500, overflowY: "auto" }}>
-              {t.items.length === 0 && <div style={{ padding: 20, textAlign: "center", color: "#9ca3af", fontSize: 12 }}>ยังไม่มีข้อมูล</div>}
-              {t.items.map(r => (
-                <div key={r.id} style={{ borderBottom: "1px solid #e5e7eb", padding: "8px 6px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                  <div style={{ flex: 1, fontSize: 12 }}>
-                    {t.key === "finance" && <div style={{ fontWeight: 600 }}>{r.finance_company || "-"}</div>}
-                    {t.key === "finance_cc" && (
-                      <>
-                        <div style={{ fontWeight: 600 }}>{r.finance_company || "-"}</div>
-                        <div style={{ color: "#6b7280" }}>CC: {r.cc_min || 0} – {r.cc_max || "∞"}</div>
-                      </>
-                    )}
-                    {t.key === "custom" && (
-                      <>
-                        <div style={{ fontWeight: 600 }}>{r.brand || ""} {r.model_code || "ทุกรุ่น"}</div>
-                        <div style={{ color: "#6b7280" }}>สาขา: {r.branch_group || "all"}</div>
-                      </>
-                    )}
-                    {r.effective_date && <div style={{ color: "#6b7280", fontSize: 10 }}>มีผล: {fmtDate(r.effective_date)}{r.end_date ? ` ถึง ${fmtDate(r.end_date)}` : ""}</div>}
-                    {r.notes && <div style={{ color: "#9ca3af", fontSize: 10, fontStyle: "italic" }}>{r.notes}</div>}
-                  </div>
-                  <div style={{ textAlign: "right", minWidth: 90 }}>
-                    <div style={{ fontWeight: 700, color: t.color, fontSize: 15 }}>+{fmt(r.markup_amount)}</div>
-                    <div style={{ display: "flex", gap: 4, marginTop: 4, justifyContent: "flex-end" }}>
-                      <button onClick={() => setEdit(r)} style={{ ...btnMini, background: "#f59e0b" }}>✏️</button>
-                      <button onClick={() => del(r.id)} style={{ ...btnMini, background: "#dc2626" }}>🗑️</button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+      {/* Active rules */}
+      <RuleTable
+        title="✅ ใช้งานอยู่"
+        rows={activeRows} tab={currentTab}
+        onEdit={r => setEdit(r)}
+        onCancel={cancelRow}
+      />
+
+      {/* History */}
+      {showHistory && (
+        <div style={{ marginTop: 16 }}>
+          <RuleTable
+            title="📋 ประวัติ (ยกเลิกแล้ว)"
+            rows={inactiveRows} tab={currentTab}
+            onRestore={restoreRow}
+            onDelete={hardDelete}
+            isHistory
+          />
+        </div>
+      )}
 
       {/* Edit Modal */}
       {edit && (
         <div onClick={() => setEdit(null)} style={modalOv}>
-          <div onClick={e => e.stopPropagation()} style={{ ...modalBox, maxWidth: 560 }}>
+          <div onClick={e => e.stopPropagation()} style={{ ...modalBox, maxWidth: 600 }}>
             <h3 style={{ margin: "0 0 12px" }}>
-              {edit.id ? "✏️ แก้ไข" : "+ เพิ่ม"} เงื่อนไขราคา · {TYPES.find(t => t.key === edit.markup_type)?.label}
+              {edit.id ? "✏️ แก้ไข" : "+ เพิ่ม"} เงื่อนไข · {TABS.find(t => t.key === edit.markup_type)?.label}
             </h3>
 
-            {/* Finance company (for finance + finance_cc) */}
             {(edit.markup_type === "finance" || edit.markup_type === "finance_cc") && (
               <Field label="บริษัทไฟแนนท์ *">
                 <select value={edit.finance_company || ""} onChange={e => setEdit({ ...edit, finance_company: e.target.value })} style={inp}>
-                  <option value="">-- เลือกบริษัทไฟแนนท์ --</option>
-                  {financeCos.map(c => (
-                    <option key={c.id || c.company_name} value={c.company_name}>{c.company_name}</option>
-                  ))}
+                  <option value="">-- เลือก --</option>
+                  {financeCos.map(c => <option key={c.id || c.company_name} value={c.company_name}>{c.company_name}</option>)}
                 </select>
               </Field>
             )}
 
-            {/* CC range (for finance_cc) */}
             {edit.markup_type === "finance_cc" && (
               <div style={{ display: "flex", gap: 8 }}>
-                <Field label="CC ต่ำสุด">
-                  <input type="number" value={edit.cc_min || ""} onChange={e => setEdit({ ...edit, cc_min: e.target.value })} style={inp} placeholder="เช่น 110" />
+                <Field label="CC ต่ำสุด *">
+                  <input type="number" value={edit.cc_min || ""} onChange={e => setEdit({ ...edit, cc_min: e.target.value })} style={inp} placeholder="110" />
                 </Field>
                 <Field label="CC สูงสุด">
-                  <input type="number" value={edit.cc_max || ""} onChange={e => setEdit({ ...edit, cc_max: e.target.value })} style={inp} placeholder="เช่น 125 (ว่าง = ไม่จำกัด)" />
+                  <input type="number" value={edit.cc_max || ""} onChange={e => setEdit({ ...edit, cc_max: e.target.value })} style={inp} placeholder="125 (ว่าง=ไม่จำกัด)" />
                 </Field>
               </div>
             )}
 
-            {/* Custom: brand + model + branch */}
             {edit.markup_type === "custom" && (
               <>
                 <div style={{ display: "flex", gap: 8 }}>
                   <Field label="ยี่ห้อ">
-                    <input value={edit.brand || ""} onChange={e => setEdit({ ...edit, brand: e.target.value })} style={inp} placeholder="เช่น Honda / Yamaha" />
+                    <input value={edit.brand || ""} onChange={e => setEdit({ ...edit, brand: e.target.value })} style={inp} placeholder="Honda / Yamaha" />
                   </Field>
                   <Field label="รหัสรุ่น">
-                    <input value={edit.model_code || ""} onChange={e => setEdit({ ...edit, model_code: e.target.value })} style={inp} placeholder="เช่น ACF125CAT (ว่าง = ทุกรุ่น)" />
+                    <input value={edit.model_code || ""} onChange={e => setEdit({ ...edit, model_code: e.target.value })} style={inp} placeholder="ACF125CAT (ว่าง=ทุกรุ่น)" />
                   </Field>
                 </div>
                 <Field label="กลุ่มสาขา">
@@ -202,8 +246,42 @@ export default function SalePriceMarkupPage({ currentUser }) {
               </>
             )}
 
+            {edit.markup_type === "installment_bonus" && (
+              <>
+                <Field label="ใบขาย *">
+                  {edit.sale_invoice_no ? (
+                    <div style={{ padding: 8, background: "#ecfdf5", border: "1px solid #10b981", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#065f46" }}>{edit.sale_invoice_no}</span>
+                      <button onClick={() => setEdit({ ...edit, sale_invoice_no: "", sale_id: null })} style={{ ...btnMini, background: "#dc2626" }}>✕</button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input value={saleSearch} onChange={e => setSaleSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchSales()} placeholder="🔍 เลขใบขาย / ลูกค้า / เลขเครื่อง" style={inp} />
+                        <button onClick={searchSales} style={btnBlue}>ค้นหา</button>
+                      </div>
+                      {saleResults.length > 0 && (
+                        <div style={{ marginTop: 6, maxHeight: 200, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+                          {saleResults.map(s => (
+                            <div key={s.id} onClick={() => { setEdit({ ...edit, sale_invoice_no: s.invoice_no, sale_id: s.id }); setSaleResults([]); setSaleSearch(""); }}
+                              style={{ padding: 8, borderBottom: "1px solid #f3f4f6", cursor: "pointer", fontSize: 12 }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#f3f4f6"}
+                              onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                              <div style={{ fontWeight: 600, color: "#0369a1" }}>{s.invoice_no}</div>
+                              <div style={{ color: "#374151" }}>{s.customer_name} · {s.brand} {s.model_series}</div>
+                              <div style={{ color: "#6b7280", fontSize: 11 }}>เครื่อง: {s.engine_no || "-"} · {fmtDate(s.sale_date)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Field>
+              </>
+            )}
+
             <Field label="ยอดบวกเพิ่ม (บาท) *">
-              <input type="number" value={edit.markup_amount || ""} onChange={e => setEdit({ ...edit, markup_amount: e.target.value })} style={{ ...inp, fontWeight: 700, fontSize: 16 }} placeholder="เช่น 1000" />
+              <input type="number" value={edit.markup_amount || ""} onChange={e => setEdit({ ...edit, markup_amount: e.target.value })} style={{ ...inp, fontWeight: 700, fontSize: 16 }} placeholder="1000" />
             </Field>
 
             <div style={{ display: "flex", gap: 8 }}>
@@ -214,13 +292,6 @@ export default function SalePriceMarkupPage({ currentUser }) {
                 <input type="date" value={edit.end_date || ""} onChange={e => setEdit({ ...edit, end_date: e.target.value })} style={inp} />
               </Field>
             </div>
-
-            <Field label="สถานะ">
-              <select value={edit.status || "active"} onChange={e => setEdit({ ...edit, status: e.target.value })} style={inp}>
-                <option value="active">ใช้งาน</option>
-                <option value="inactive">ไม่ใช้งาน</option>
-              </select>
-            </Field>
 
             <Field label="หมายเหตุ">
               <textarea value={edit.notes || ""} onChange={e => setEdit({ ...edit, notes: e.target.value })} style={{ ...inp, minHeight: 60 }} />
@@ -237,6 +308,84 @@ export default function SalePriceMarkupPage({ currentUser }) {
   );
 }
 
+function RuleTable({ title, rows, tab, onEdit, onCancel, onRestore, onDelete, isHistory }) {
+  if (rows.length === 0) {
+    return (
+      <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: 24, textAlign: "center", color: "#9ca3af" }}>
+        {isHistory ? "ไม่มีประวัติ" : "ยังไม่มีข้อมูล กดปุ่ม + เพิ่มเงื่อนไข"}
+      </div>
+    );
+  }
+  return (
+    <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
+      <div style={{ padding: "8px 14px", background: isHistory ? "#f3f4f6" : tab?.color, color: isHistory ? "#374151" : "#fff", fontWeight: 700, fontSize: 13 }}>
+        {title}
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+        <thead style={{ background: "#f9fafb" }}>
+          <tr>
+            <th style={th}>#</th>
+            <th style={th}>เงื่อนไข</th>
+            <th style={{ ...th, textAlign: "right" }}>ยอด</th>
+            <th style={th}>วันที่มีผล</th>
+            <th style={th}>{isHistory ? "ยกเลิกเมื่อ" : "บันทึกล่าสุด"}</th>
+            <th style={th}>โดย</th>
+            <th style={th}>หมายเหตุ</th>
+            <th style={{ ...th, textAlign: "center" }}>จัดการ</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.id} style={{ borderTop: "1px solid #e5e7eb", opacity: isHistory ? 0.7 : 1 }}>
+              <td style={td}>{i + 1}</td>
+              <td style={td}>
+                {r.markup_type === "finance" && <span style={{ fontWeight: 600 }}>{r.finance_company || "-"}</span>}
+                {r.markup_type === "finance_cc" && (
+                  <>
+                    <div style={{ fontWeight: 600 }}>{r.finance_company || "-"}</div>
+                    <div style={{ color: "#6b7280", fontSize: 11 }}>CC: {r.cc_min || 0} – {r.cc_max || "∞"}</div>
+                  </>
+                )}
+                {r.markup_type === "custom" && (
+                  <>
+                    <div style={{ fontWeight: 600 }}>{r.brand || ""} {r.model_code || "ทุกรุ่น"}</div>
+                    <div style={{ color: "#6b7280", fontSize: 11 }}>สาขา: {r.branch_group || "all"}</div>
+                  </>
+                )}
+                {r.markup_type === "installment_bonus" && (
+                  <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.sale_invoice_no || "-"}</span>
+                )}
+              </td>
+              <td style={{ ...td, textAlign: "right", fontWeight: 700, color: tab?.color, fontFamily: "monospace" }}>+{fmt(r.markup_amount)}</td>
+              <td style={{ ...td, fontSize: 11 }}>
+                {fmtDate(r.effective_date)}
+                {r.end_date && <div style={{ color: "#9ca3af" }}>ถึง {fmtDate(r.end_date)}</div>}
+              </td>
+              <td style={{ ...td, fontSize: 11, color: "#6b7280" }}>{fmtDateTime(r.updated_at)}</td>
+              <td style={{ ...td, fontSize: 11 }}>{r.created_by || "-"}</td>
+              <td style={{ ...td, fontSize: 11, color: "#9ca3af" }}>{r.notes || "-"}</td>
+              <td style={{ ...td, textAlign: "center" }}>
+                {!isHistory && (
+                  <>
+                    <button onClick={() => onEdit(r)} style={{ ...btnMini, background: "#f59e0b", marginRight: 4 }}>✏️</button>
+                    <button onClick={() => onCancel(r)} style={{ ...btnMini, background: "#dc2626" }}>ยกเลิก</button>
+                  </>
+                )}
+                {isHistory && (
+                  <>
+                    <button onClick={() => onRestore(r)} style={{ ...btnMini, background: "#10b981", marginRight: 4 }}>↻ เปิดใช้</button>
+                    <button onClick={() => onDelete(r.id)} style={{ ...btnMini, background: "#7c2d12" }}>🗑️</button>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 10, flex: 1 }}>
@@ -246,8 +395,10 @@ function Field({ label, children }) {
   );
 }
 
+const th = { padding: "6px 10px", textAlign: "left", fontWeight: 700, fontSize: 11, color: "#374151", borderBottom: "1px solid #e5e7eb" };
+const td = { padding: "8px 10px", fontSize: 12 };
 const inp = { padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, width: "100%", boxSizing: "border-box" };
 const btnBlue = { padding: "6px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 };
-const btnMini = { padding: "2px 6px", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 };
+const btnMini = { padding: "3px 8px", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 };
 const modalOv = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
 const modalBox = { background: "#fff", padding: 20, borderRadius: 10, width: "92%", maxHeight: "90vh", overflowY: "auto" };
