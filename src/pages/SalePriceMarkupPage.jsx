@@ -20,12 +20,13 @@ const TABS = [
   { key: "finance_cc",         label: "ตามไฟแนนท์ + CC",                     emoji: "🏍️", color: "#7c3aed" },
   { key: "custom",             label: "กำหนดเอง",                            emoji: "✏️", color: "#ea580c" },
   { key: "installment_bonus",  label: "บวกเพิ่มจากค่างวดออกแทน",            emoji: "🧮", color: "#0891b2" },
+  { key: "cosmos_insurance",   label: "ประกัน COSMOS ซื้อเพิ่ม",             emoji: "🛡️", color: "#92400e" },
 ];
 
 const EMPTY_ROW = {
   id: null, markup_type: "finance", finance_company: "", cc_min: "", cc_max: "",
   model_code: "", brand: "", branch_group: "all", sale_invoice_no: "", sale_id: null,
-  markup_amount: "", effective_date: "", end_date: "", status: "active", notes: "",
+  policy_no: "", markup_amount: "", effective_date: "", end_date: "", status: "active", notes: "",
 };
 
 export default function SalePriceMarkupPage({ currentUser }) {
@@ -69,8 +70,9 @@ export default function SalePriceMarkupPage({ currentUser }) {
     if (!edit) return;
     if (!edit.markup_amount || Number(edit.markup_amount) === 0) { alert("กรอกยอดบวกเพิ่ม"); return; }
     if (edit.markup_type === "finance" && !edit.finance_company) { alert("เลือกบริษัทไฟแนนท์"); return; }
-    if (edit.markup_type === "finance_cc" && (!edit.finance_company || !edit.cc_min)) { alert("กรอกไฟแนนท์ + CC"); return; }
+    if (edit.markup_type === "finance_cc" && (!edit.finance_company || !edit.cc_min || !edit.branch_group)) { alert("กรอกไฟแนนท์ + CC + ร้านที่ขาย"); return; }
     if (edit.markup_type === "installment_bonus" && !edit.sale_invoice_no) { alert("เลือกใบขาย"); return; }
+    if (edit.markup_type === "cosmos_insurance" && !edit.sale_invoice_no) { alert("เลือกรายการประกัน COSMOS"); return; }
 
     setMessage("⏳ กำลังบันทึก...");
     try {
@@ -121,10 +123,11 @@ export default function SalePriceMarkupPage({ currentUser }) {
   async function searchSales() {
     const kw = saleSearch.trim();
     if (!kw) { setSaleResults([]); return; }
+    const action = edit?.markup_type === "cosmos_insurance" ? "search_cosmos_theft" : "search_moto_sales_for_link";
     try {
       const res = await fetch(ACCOUNTING_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "search_moto_sales_for_link", search: kw }),
+        body: JSON.stringify({ action, search: kw }),
       });
       const data = await res.json();
       setSaleResults(Array.isArray(data) ? data : []);
@@ -216,14 +219,26 @@ export default function SalePriceMarkupPage({ currentUser }) {
             )}
 
             {edit.markup_type === "finance_cc" && (
-              <div style={{ display: "flex", gap: 8 }}>
-                <Field label="CC ต่ำสุด *">
-                  <input type="number" value={edit.cc_min || ""} onChange={e => setEdit({ ...edit, cc_min: e.target.value })} style={inp} placeholder="110" />
+              <>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <Field label="CC ต่ำสุด *">
+                    <input type="number" value={edit.cc_min || ""} onChange={e => setEdit({ ...edit, cc_min: e.target.value })} style={inp} placeholder="110" />
+                  </Field>
+                  <Field label="CC สูงสุด">
+                    <input type="number" value={edit.cc_max || ""} onChange={e => setEdit({ ...edit, cc_max: e.target.value })} style={inp} placeholder="125 (ว่าง=ไม่จำกัด)" />
+                  </Field>
+                </div>
+                <Field label="ร้านที่ขาย *">
+                  <select value={edit.branch_group || ""} onChange={e => setEdit({ ...edit, branch_group: e.target.value })} style={inp}>
+                    <option value="">-- เลือกสาขา --</option>
+                    <option value="SCY01">SCY01</option>
+                    <option value="SCY04">SCY04</option>
+                    <option value="SCY05">SCY05</option>
+                    <option value="SCY06">SCY06</option>
+                    <option value="SCY07">SCY07</option>
+                  </select>
                 </Field>
-                <Field label="CC สูงสุด">
-                  <input type="number" value={edit.cc_max || ""} onChange={e => setEdit({ ...edit, cc_max: e.target.value })} style={inp} placeholder="125 (ว่าง=ไม่จำกัด)" />
-                </Field>
-              </div>
+              </>
             )}
 
             {edit.markup_type === "custom" && (
@@ -280,6 +295,45 @@ export default function SalePriceMarkupPage({ currentUser }) {
               </>
             )}
 
+            {edit.markup_type === "cosmos_insurance" && (
+              <>
+                <Field label="รายการประกัน COSMOS *">
+                  {edit.sale_invoice_no ? (
+                    <div style={{ padding: 8, background: "#fef3c7", border: "1px solid #92400e", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#92400e" }}>{edit.sale_invoice_no}</span>
+                      <button onClick={() => setEdit({ ...edit, sale_invoice_no: "", sale_id: null, policy_no: "" })} style={{ ...btnMini, background: "#dc2626" }}>✕</button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input value={saleSearch} onChange={e => setSaleSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchSales()} placeholder="🔍 App No / ลูกค้า / เลขถัง / เลขใบขาย / เลขกรมธรรม์" style={inp} />
+                        <button onClick={searchSales} style={btnBlue}>ค้นหา</button>
+                      </div>
+                      {saleResults.length > 0 && (
+                        <div style={{ marginTop: 6, maxHeight: 220, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+                          {saleResults.map(s => (
+                            <div key={s.id} onClick={() => { setEdit({ ...edit, sale_invoice_no: s.sale_invoice_no || "", policy_no: s.policy_no || edit.policy_no || "", sale_id: null }); setSaleResults([]); setSaleSearch(""); }}
+                              style={{ padding: 8, borderBottom: "1px solid #f3f4f6", cursor: "pointer", fontSize: 12 }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#fffbeb"}
+                              onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                              <div style={{ fontWeight: 600, color: "#92400e", fontFamily: "monospace" }}>{s.app_no || "-"}</div>
+                              <div style={{ color: "#374151" }}>{s.customer_name || "-"}</div>
+                              <div style={{ color: "#6b7280", fontSize: 11 }}>
+                                ขาย: {s.sale_invoice_no || "-"} · ถัง: {s.chassis_no || "-"}{s.policy_no ? ` · กรมธรรม์: ${s.policy_no}` : ""}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Field>
+                <Field label="เลขที่กรมธรรม์">
+                  <input value={edit.policy_no || ""} onChange={e => setEdit({ ...edit, policy_no: e.target.value })} style={inp} placeholder="เช่น POL-2025-001234" />
+                </Field>
+              </>
+            )}
+
             <Field label="ยอดบวกเพิ่ม (บาท) *">
               <input type="number" value={edit.markup_amount || ""} onChange={e => setEdit({ ...edit, markup_amount: e.target.value })} style={{ ...inp, fontWeight: 700, fontSize: 16 }} placeholder="1000" />
             </Field>
@@ -326,6 +380,7 @@ function RuleTable({ title, rows, tab, onEdit, onCancel, onRestore, onDelete, is
           <tr>
             <th style={th}>#</th>
             <th style={th}>เงื่อนไข</th>
+            <th style={th}>สาขา</th>
             <th style={{ ...th, textAlign: "right" }}>ยอด</th>
             <th style={th}>วันที่มีผล</th>
             <th style={th}>{isHistory ? "ยกเลิกเมื่อ" : "บันทึกล่าสุด"}</th>
@@ -347,14 +402,22 @@ function RuleTable({ title, rows, tab, onEdit, onCancel, onRestore, onDelete, is
                   </>
                 )}
                 {r.markup_type === "custom" && (
-                  <>
-                    <div style={{ fontWeight: 600 }}>{r.brand || ""} {r.model_code || "ทุกรุ่น"}</div>
-                    <div style={{ color: "#6b7280", fontSize: 11 }}>สาขา: {r.branch_group || "all"}</div>
-                  </>
+                  <div style={{ fontWeight: 600 }}>{r.brand || ""} {r.model_code || "ทุกรุ่น"}</div>
                 )}
                 {r.markup_type === "installment_bonus" && (
                   <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.sale_invoice_no || "-"}</span>
                 )}
+                {r.markup_type === "cosmos_insurance" && (
+                  <>
+                    <div style={{ fontFamily: "monospace", fontWeight: 600, color: "#92400e" }}>{r.sale_invoice_no || "-"}</div>
+                    {r.policy_no && <div style={{ color: "#6b7280", fontSize: 11 }}>กรมธรรม์: {r.policy_no}</div>}
+                  </>
+                )}
+              </td>
+              <td style={{ ...td, fontSize: 11 }}>
+                {r.branch_group ? (
+                  <span style={{ padding: "2px 8px", background: "#e0e7ff", color: "#3730a3", borderRadius: 8, fontFamily: "monospace", fontWeight: 600 }}>{r.branch_group}</span>
+                ) : <span style={{ color: "#9ca3af" }}>-</span>}
               </td>
               <td style={{ ...td, textAlign: "right", fontWeight: 700, color: tab?.color, fontFamily: "monospace" }}>+{fmt(r.markup_amount)}</td>
               <td style={{ ...td, fontSize: 11 }}>

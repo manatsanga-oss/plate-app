@@ -13,6 +13,7 @@ function firstOfMonth() { const d = new Date(); d.setDate(1); return d.toISOStri
 
 export default function SalesByPaymentReportPage() {
   const [rows, setRows] = useState([]);
+  const [markups, setMarkups] = useState([]);
   const [loading, setLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState(firstOfMonth());
   const [dateTo, setDateTo] = useState(todayISO());
@@ -35,7 +36,72 @@ export default function SalesByPaymentReportPage() {
     }
     setLoading(false);
   }
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
+  async function fetchMarkups() {
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_price_markups" }),
+      });
+      const data = await res.json();
+      setMarkups((Array.isArray(data) ? data : []).filter(m => m.status === "active"));
+    } catch { setMarkups([]); }
+  }
+  useEffect(() => { fetchData(); fetchMarkups(); /* eslint-disable-next-line */ }, []);
+
+  // หา markup ที่เข้าเงื่อนไขกับแถวขายนี้
+  function getMarkups(r) {
+    // normalize ชื่อบริษัท: lowercase + ตัด whitespace + ตัด punctuation ทั่วไป
+    const norm = (s) => String(s || "").toLowerCase().replace(/[\s\(\)\[\]\.\-_]/g, "").trim();
+    const finN = norm(r.sale_finance_company);
+    const inv = r.sale_invoice_no || r.tax_invoice_no || "";
+    const brand = (r.matched_brand || r.brand || "").toLowerCase();
+    const modelCode = (r.model_code || "").toLowerCase();
+    const branchGroup = (() => {
+      const bc = (r.branch_code || (r.sale_invoice_no || "").slice(0, 5) || "").toUpperCase();
+      if (["SCY05","SCY06"].includes(bc)) return "papao";
+      if (["SCY01","SCY04","SCY07"].includes(bc)) return "singchai";
+      return "all";
+    })();
+    const finMatch = (m) => {
+      if (!finN || !m.finance_company) return false;
+      const mN = norm(m.finance_company);
+      return mN === finN || mN.includes(finN) || finN.includes(mN);
+    };
+    const branchCode = (r.branch_code || (r.sale_invoice_no || "").slice(0, 5) || "").toUpperCase();
+    // ดึง CC จาก model_code / model_name (3-4 หลักในรุ่นรถ เช่น AFS110, CLICK160, PCX160)
+    const extractCC = (txt) => {
+      if (!txt) return null;
+      const matches = String(txt).match(/\d{3,4}/g) || [];
+      for (const m of matches) {
+        const v = parseInt(m, 10);
+        if (v >= 75 && v <= 2500) return v;
+      }
+      return null;
+    };
+    const saleCC = extractCC(r.model_code) ?? extractCC(r.model_name) ?? extractCC(r.matched_model_code) ?? extractCC(r.matched_model_series);
+    return markups.filter(m => {
+      if (m.markup_type === "finance") return finMatch(m);
+      if (m.markup_type === "finance_cc") {
+        if (!finMatch(m)) return false;
+        if (m.branch_group && m.branch_group !== branchCode) return false;
+        // CC range
+        if (saleCC !== null) {
+          if (m.cc_min && saleCC < Number(m.cc_min)) return false;
+          if (m.cc_max && saleCC > Number(m.cc_max)) return false;
+        }
+        return true;
+      }
+      if (m.markup_type === "installment_bonus") return inv && m.sale_invoice_no === inv;
+      if (m.markup_type === "cosmos_insurance") return inv && m.sale_invoice_no === inv;
+      if (m.markup_type === "custom") {
+        if (m.brand && m.brand.toLowerCase() !== brand) return false;
+        if (m.model_code && m.model_code.toLowerCase() !== modelCode) return false;
+        if (m.branch_group && m.branch_group !== "all" && m.branch_group !== branchGroup) return false;
+        return true;
+      }
+      return false;
+    });
+  }
 
   // For each sale, sum payment methods from its receipts[]
   function sumByMethod(r) {
@@ -72,12 +138,17 @@ export default function SalesByPaymentReportPage() {
     return hay.includes(kw);
   });
 
-  // mismatch helper
-  const mismatchCount = filtered.filter(r => {
+  // mismatch helper — เทียบ ยอดขาย vs (ราคาขายประกาศ + รายการบวกเพิ่ม)
+  function markupTotal(r) {
+    return getMarkups(r).reduce((s, m) => s + Number(m.markup_amount || 0), 0);
+  }
+  function isMismatch(r) {
     const sa = Number(r.total_amount || 0);
     const sp = Number(r.sale_price || 0);
-    return sp > 0 && Math.abs(sa - sp) > 0.01;
-  }).length;
+    const mk = markupTotal(r);
+    return sp > 0 && Math.abs(sa - (sp + mk)) > 0.01;
+  }
+  const mismatchCount = filtered.filter(isMismatch).length;
 
   // Totals
   const totals = filtered.reduce((acc, r) => {
@@ -101,7 +172,8 @@ export default function SalesByPaymentReportPage() {
       const s = sumByMethod(r);
       const sa = Number(r.total_amount || 0);
       const sp = Number(r.sale_price || 0);
-      const mismatch = sp > 0 && Math.abs(sa - sp) > 0.01;
+      const mk = markupTotal(r);
+      const mismatch = sp > 0 && Math.abs(sa - (sp + mk)) > 0.01;
       const typeTxt = (() => {
         const t = r.sale_invoice_type || "";
         if (t.includes("ไฟแนนซ์") || t.includes("ไฟแนนท์")) return "ไฟแนนท์";
@@ -290,15 +362,11 @@ export default function SalesByPaymentReportPage() {
               <th style={{ ...th, background: "#0d9488" }}>วันที่ประกาศราคา</th>
               <th style={{ ...th, textAlign: "right", background: "#0d9488" }}>ราคาขาย</th>
               {show.delivery_fee && <th style={{ ...th, textAlign: "right", background: "#ea580c" }}>ค่านำพา</th>}
-              {show.cash && <th style={{ ...th, textAlign: "right", background: "#16a34a" }}>เงินสด</th>}
-              {show.transfer && <th style={{ ...th, textAlign: "right", background: "#0284c7" }}>เงินโอน</th>}
-              {show.deposit && <th style={{ ...th, textAlign: "right", background: "#7c3aed" }}>มัดจำ</th>}
-              {show.cheque && <th style={{ ...th, textAlign: "right", background: "#dc2626" }}>เช็ค</th>}
+              <th style={{ ...th, textAlign: "right", background: "#10b981" }}>รายการบวกเพิ่ม</th>
               {show.credit_note && <th style={{ ...th, textAlign: "right", background: "#a16207" }}>ประกันออกแทน</th>}
               {show.coupon && <th style={{ ...th, textAlign: "right", background: "#be185d" }}>ดาวน์/งวดออกแทน</th>}
               {show.announced && <th style={{ ...th, background: "#f59e0b" }}>วันที่ประกาศ</th>}
               {show.announced && <th style={{ ...th, textAlign: "right", background: "#f59e0b" }}>ยอดเงินประกาศ</th>}
-              {show.ft && <th style={{ ...th, textAlign: "right", background: "#0891b2" }}>ตัดรับ FT</th>}
               <th style={{ ...th, textAlign: "right", background: "#fef9c3", color: "#072d6b" }}>รวม</th>
             </tr>
           </thead>
@@ -329,10 +397,11 @@ export default function SalesByPaymentReportPage() {
                   {(() => {
                     const sa = Number(r.total_amount || 0);
                     const sp = Number(r.sale_price || 0);
-                    const mismatch = sp > 0 && Math.abs(sa - sp) > 0.01;
+                    const mk = markupTotal(r);
+                    const mismatch = sp > 0 && Math.abs(sa - (sp + mk)) > 0.01;
                     return (
                       <>
-                        <td style={{ ...tdNum, background: mismatch ? "#fee2e2" : undefined, color: mismatch ? "#b91c1c" : "inherit", fontWeight: mismatch ? 700 : "inherit" }} title={mismatch ? `ยอดขายไม่ตรงกับราคาประกาศ (ต่าง ${fmt(sa - sp)})` : ""}>
+                        <td style={{ ...tdNum, background: mismatch ? "#fee2e2" : undefined, color: mismatch ? "#b91c1c" : "inherit", fontWeight: mismatch ? 700 : "inherit" }} title={mismatch ? `ยอดขายไม่ตรง (ราคา ${fmt(sp)} + บวกเพิ่ม ${fmt(mk)} = ${fmt(sp + mk)} ต่างกับยอด ${fmt(sa)} = ${fmt(sa - sp - mk)})` : ""}>
                           {fmt(r.total_amount)}{mismatch && " ⚠️"}
                         </td>
                         <td style={{ ...td, fontSize: 11, color: "#0d9488" }} title={r.is_booking ? `รถจอง (จองวันที่ ${fmtDate(r.booking_date)})` : ""}>
@@ -347,15 +416,27 @@ export default function SalesByPaymentReportPage() {
                     );
                   })()}
                   {show.delivery_fee && <td style={{ ...tdNum, color: "#ea580c", fontWeight: s.delivery_fee > 0 ? 600 : "inherit" }}>{s.delivery_fee > 0 ? fmt(s.delivery_fee) : "-"}</td>}
-                  {show.cash && <td style={tdNum}>{s.cash > 0 ? fmt(s.cash) : "-"}</td>}
-                  {show.transfer && <td style={tdNum}>{s.transfer > 0 ? fmt(s.transfer) : "-"}</td>}
-                  {show.deposit && <td style={tdNum}>{s.deposit > 0 ? fmt(s.deposit) : "-"}</td>}
-                  {show.cheque && <td style={tdNum}>{s.cheque > 0 ? fmt(s.cheque) : "-"}</td>}
+                  {(() => {
+                    const ms = getMarkups(r);
+                    const total = ms.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
+                    const tipText = ms.map(m =>
+                      `${m.markup_type === "finance" ? m.finance_company
+                        : m.markup_type === "finance_cc" ? `${m.finance_company} (${m.cc_min}-${m.cc_max || "∞"}cc)`
+                        : m.markup_type === "custom" ? `${m.brand || ""} ${m.model_code || "ทุกรุ่น"}`.trim()
+                        : m.markup_type === "installment_bonus" ? `ค่างวด ${m.sale_invoice_no}`
+                        : m.markup_type === "cosmos_insurance" ? `COSMOS ${m.sale_invoice_no}${m.policy_no ? ` (${m.policy_no})` : ""}`
+                        : "-"}: +${fmt(m.markup_amount)}`
+                    ).join("\n");
+                    return (
+                      <td style={{ ...tdNum, color: "#065f46", fontWeight: total > 0 ? 700 : "inherit" }} title={tipText || ""}>
+                        {total > 0 ? `+${fmt(total)}` : "-"}
+                      </td>
+                    );
+                  })()}
                   {show.credit_note && <td style={tdNum}>{s.credit_note > 0 ? fmt(s.credit_note) : "-"}</td>}
                   {show.coupon && <td style={tdNum}>{s.coupon > 0 ? fmt(s.coupon) : "-"}</td>}
                   {show.announced && <td style={{ ...td, fontSize: 11, color: "#92400e" }}>{r.announced_date ? fmtDate(r.announced_date) : "-"}</td>}
                   {show.announced && <td style={{ ...tdNum, color: "#92400e", fontWeight: 600 }}>{r.announced_amount ? fmt(r.announced_amount) : "-"}</td>}
-                  {show.ft && <td style={{ ...tdNum, color: "#0891b2", fontWeight: 600 }}>{s.ft > 0 ? fmt(s.ft) : "-"}</td>}
                   <td style={{ ...tdNum, fontWeight: 700, background: "#fef9c3" }}>{fmt(s.total)}</td>
                 </tr>
               );
@@ -367,15 +448,16 @@ export default function SalesByPaymentReportPage() {
                 <td></td>
                 <td></td>
                 {show.delivery_fee && <td style={{ ...tdNum, color: "#ea580c" }}>{fmt(totals.delivery_fee)}</td>}
-                {show.cash && <td style={tdNum}>{fmt(totals.cash)}</td>}
-                {show.transfer && <td style={tdNum}>{fmt(totals.transfer)}</td>}
-                {show.deposit && <td style={tdNum}>{fmt(totals.deposit)}</td>}
-                {show.cheque && <td style={tdNum}>{fmt(totals.cheque)}</td>}
+                <td style={{ ...tdNum, color: "#065f46", fontWeight: 700 }}>
+                  {(() => {
+                    const totalMarkup = filtered.reduce((sum, r) => sum + getMarkups(r).reduce((s, m) => s + Number(m.markup_amount || 0), 0), 0);
+                    return totalMarkup > 0 ? `+${fmt(totalMarkup)}` : "-";
+                  })()}
+                </td>
                 {show.credit_note && <td style={tdNum}>{fmt(totals.credit_note)}</td>}
                 {show.coupon && <td style={tdNum}>{fmt(totals.coupon)}</td>}
                 {show.announced && <td></td>}
                 {show.announced && <td></td>}
-                {show.ft && <td style={{ ...tdNum, color: "#0891b2" }}>{fmt(totals.ft)}</td>}
                 <td style={tdNum}>{fmt(totals.total)}</td>
               </tr>
             )}
