@@ -36,6 +36,7 @@ const STATUS_LABEL = {
 };
 
 export default function PaymentPage({ currentUser }) {
+  const [activeTab, setActiveTab] = useState("charge"); // 'charge' | 'summary'
   const [form, setForm] = useState(emptyForm());
   const [creating, setCreating] = useState(false);
   const [charge, setCharge] = useState(null);   // { charge_id, qr_image, amount, status, expires_at, created_at }
@@ -216,6 +217,36 @@ export default function PaymentPage({ currentUser }) {
       <div className="page-topbar">
         <h2 className="page-title">💸 รับชำระเงิน (QR PromptPay)</h2>
       </div>
+
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #e5e7eb", marginBottom: 14 }}>
+        <button
+          onClick={() => setActiveTab("charge")}
+          style={{
+            padding: "10px 22px", border: "none", background: activeTab === "charge" ? "#0369a1" : "transparent",
+            color: activeTab === "charge" ? "#fff" : "#374151", fontWeight: 700, fontSize: 14, cursor: "pointer",
+            borderTopLeftRadius: 8, borderTopRightRadius: 8, marginBottom: -2,
+          }}
+        >
+          💸 รับชำระเงิน
+        </button>
+        <button
+          onClick={() => setActiveTab("summary")}
+          style={{
+            padding: "10px 22px", border: "none", background: activeTab === "summary" ? "#0369a1" : "transparent",
+            color: activeTab === "summary" ? "#fff" : "#374151", fontWeight: 700, fontSize: 14, cursor: "pointer",
+            borderTopLeftRadius: 8, borderTopRightRadius: 8, marginBottom: -2,
+          }}
+        >
+          📊 ประวัติสรุปยอด
+        </button>
+      </div>
+
+      {activeTab === "summary" && (
+        <SummaryTab currentUser={currentUser} />
+      )}
+
+      {activeTab === "charge" && (<>
 
       {message && (
         <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8, background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : "#991b1b" }}>
@@ -430,6 +461,309 @@ export default function PaymentPage({ currentUser }) {
                     </span>
                   </td>
                   <td style={{ ...td, fontFamily: "monospace", fontSize: 10, color: "#6b7280" }}>{r.charge_id}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      </>)}
+    </div>
+  );
+}
+
+// =====================================================
+// Tab: ประวัติสรุปยอด — filter + group by + checkbox + ปุ่มสรุป
+// =====================================================
+function SummaryTab({ currentUser }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [filterStatus, setFilterStatus] = useState("paid");
+  const [filterType, setFilterType] = useState("");
+  const [filterBranch, setFilterBranch] = useState("");
+  const [filterCreator, setFilterCreator] = useState("");
+  const [groupBy, setGroupBy] = useState("day"); // day | month | branch | creator | type
+  const [selected, setSelected] = useState({}); // {charge_id: true}
+  const [summary, setSummary] = useState(null); // { total, count, groups: [{key, label, total, count}] }
+
+  const isAdmin = currentUser?.role === "admin";
+  const userBranch = String(currentUser?.branch || "").trim();
+  const userBranchCode = userBranch.includes(" ") ? userBranch.split(" ")[0] : userBranch;
+
+  useEffect(() => {
+    const d = new Date();
+    setDateFrom(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+    setDateTo(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()).padStart(2, "0")}`);
+    if (!isAdmin && userBranchCode) setFilterBranch(userBranchCode);
+  }, []);
+
+  useEffect(() => {
+    if (dateFrom && dateTo) fetchData();
+    // eslint-disable-next-line
+  }, [dateFrom, dateTo]);
+
+  async function fetchData() {
+    setLoading(true);
+    setSummary(null);
+    setSelected({});
+    try {
+      const body = {
+        action: "list_payments",
+        date_from: dateFrom,
+        date_to: dateTo,
+        branch_code: isAdmin ? (filterBranch || "") : (userBranchCode || ""),
+      };
+      const res = await fetch(PAY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      setRows(Array.isArray(data) ? data : []);
+    } catch { setRows([]); }
+    setLoading(false);
+  }
+
+  // applied filters (client-side)
+  const filtered = rows.filter(r => {
+    if (filterStatus && r.status !== filterStatus) return false;
+    if (filterType && r.payment_type !== filterType) return false;
+    if (isAdmin && filterBranch && r.branch_code !== filterBranch) return false;
+    if (filterCreator && !(r.created_by || "").toLowerCase().includes(filterCreator.toLowerCase())) return false;
+    return true;
+  });
+
+  // unique values for filter dropdowns
+  const allBranches = [...new Set(rows.map(r => r.branch_code).filter(Boolean))].sort();
+  const allCreators = [...new Set(rows.map(r => r.created_by).filter(Boolean))].sort();
+
+  function toggleAll() {
+    if (Object.keys(selected).length === filtered.length) {
+      setSelected({});
+    } else {
+      const next = {};
+      filtered.forEach(r => { next[r.charge_id] = true; });
+      setSelected(next);
+    }
+  }
+
+  function toggleOne(id) {
+    setSelected(prev => {
+      const next = { ...prev };
+      if (next[id]) delete next[id]; else next[id] = true;
+      return next;
+    });
+  }
+
+  function handleSummarize() {
+    const selectedRows = filtered.filter(r => selected[r.charge_id]);
+    if (selectedRows.length === 0) {
+      alert("กรุณาเลือกอย่างน้อย 1 รายการก่อน");
+      return;
+    }
+    const total = selectedRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+    const count = selectedRows.length;
+
+    // group
+    const groups = {};
+    selectedRows.forEach(r => {
+      let key, label;
+      if (groupBy === "day") {
+        const d = new Date(r.created_at);
+        key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        label = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`;
+      } else if (groupBy === "month") {
+        const d = new Date(r.created_at);
+        key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        const monthNames = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+        label = `${monthNames[d.getMonth()]} ${d.getFullYear() + 543}`;
+      } else if (groupBy === "branch") {
+        key = r.branch_code || "(ไม่ระบุ)";
+        label = r.branch_name ? `${r.branch_code} ${r.branch_name}` : (r.branch_code || "(ไม่ระบุ)");
+      } else if (groupBy === "creator") {
+        key = r.created_by || "(ไม่ระบุ)";
+        label = key;
+      } else if (groupBy === "type") {
+        key = r.payment_type || "(ไม่ระบุ)";
+        label = PAYMENT_TYPES.find(t => t.value === key)?.label || key;
+      }
+      if (!groups[key]) groups[key] = { key, label, total: 0, count: 0 };
+      groups[key].total += Number(r.amount || 0);
+      groups[key].count += 1;
+    });
+    const groupArr = Object.values(groups).sort((a, b) => b.total - a.total);
+    setSummary({ total, count, groups: groupArr });
+  }
+
+  const allChecked = filtered.length > 0 && Object.keys(selected).length === filtered.length;
+  const totalSelected = filtered.filter(r => selected[r.charge_id]).reduce((s, r) => s + Number(r.amount || 0), 0);
+  const countSelected = Object.values(selected).filter(Boolean).length;
+
+  return (
+    <div>
+      {/* Filters */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>วันที่:</span>
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inp} />
+        <span>ถึง</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
+
+        <span style={{ fontSize: 12, fontWeight: 600, marginLeft: 8 }}>สถานะ:</span>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={inp}>
+          <option value="">ทั้งหมด</option>
+          <option value="paid">ชำระแล้ว</option>
+          <option value="pending">รอชำระ</option>
+          <option value="expired">หมดอายุ</option>
+          <option value="cancelled">ยกเลิก</option>
+        </select>
+
+        <span style={{ fontSize: 12, fontWeight: 600 }}>ประเภท:</span>
+        <select value={filterType} onChange={e => setFilterType(e.target.value)} style={inp}>
+          <option value="">ทั้งหมด</option>
+          {PAYMENT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+        </select>
+
+        {isAdmin && (
+          <>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>สาขา:</span>
+            <select value={filterBranch} onChange={e => setFilterBranch(e.target.value)} style={inp}>
+              <option value="">ทุกสาขา</option>
+              {allBranches.map(b => <option key={b} value={b}>{b}</option>)}
+            </select>
+          </>
+        )}
+
+        <span style={{ fontSize: 12, fontWeight: 600 }}>ผู้บันทึก:</span>
+        <select value={filterCreator} onChange={e => setFilterCreator(e.target.value)} style={inp}>
+          <option value="">ทุกคน</option>
+          {allCreators.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+
+        <button onClick={fetchData} disabled={loading} style={{ padding: "7px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+          {loading ? "..." : "🔄 รีเฟรช"}
+        </button>
+      </div>
+
+      {/* Group by + summarize button */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10, padding: "12px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>📊 สรุปยอดแยกตาม:</span>
+        <select value={groupBy} onChange={e => setGroupBy(e.target.value)} style={inp}>
+          <option value="day">รายวัน</option>
+          <option value="month">รายเดือน</option>
+          <option value="branch">สาขา</option>
+          <option value="creator">ผู้บันทึก</option>
+          <option value="type">ประเภท</option>
+        </select>
+        <button onClick={handleSummarize} style={{ padding: "8px 22px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+          📊 สรุปยอดที่เลือก ({countSelected} รายการ · {fmt(totalSelected)} บาท)
+        </button>
+        {summary && (
+          <button onClick={() => setSummary(null)} style={{ padding: "8px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+            ✕ ปิดสรุป
+          </button>
+        )}
+      </div>
+
+      {/* Summary box */}
+      {summary && (
+        <div style={{ marginBottom: 10, padding: "14px 18px", background: "linear-gradient(135deg, #f0fdf4, #ecfdf5)", borderRadius: 10, border: "2px solid #059669" }}>
+          <div style={{ display: "flex", gap: 24, marginBottom: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 11, color: "#6b7280" }}>รายการที่เลือก</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#059669" }}>{summary.count}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: "#6b7280" }}>ยอดรวม</div>
+              <div style={{ fontSize: 22, fontWeight: 800, color: "#059669" }}>{fmt(summary.total)} บาท</div>
+            </div>
+          </div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, background: "#fff", borderRadius: 6, overflow: "hidden" }}>
+            <thead style={{ background: "#065f46", color: "#fff" }}>
+              <tr>
+                <th style={th}>{groupBy === "day" ? "วันที่" : groupBy === "month" ? "เดือน" : groupBy === "branch" ? "สาขา" : groupBy === "creator" ? "ผู้บันทึก" : "ประเภท"}</th>
+                <th style={{ ...th, textAlign: "right" }}>รายการ</th>
+                <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
+                <th style={{ ...th, textAlign: "right" }}>%</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.groups.map(g => (
+                <tr key={g.key} style={{ borderTop: "1px solid #e5e7eb" }}>
+                  <td style={td}>{g.label}</td>
+                  <td style={{ ...td, textAlign: "right" }}>{g.count}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#059669" }}>{fmt(g.total)}</td>
+                  <td style={{ ...td, textAlign: "right", color: "#6b7280" }}>{summary.total > 0 ? ((g.total / summary.total) * 100).toFixed(1) : "0.0"}%</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Selected info */}
+      <div style={{ display: "flex", gap: 18, marginBottom: 10, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 13 }}>
+        <span>📋 ทั้งหมด: <strong>{filtered.length}</strong> รายการ</span>
+        <span>☑️ เลือก: <strong style={{ color: "#0369a1" }}>{countSelected}</strong> รายการ</span>
+        <span>💰 ยอดที่เลือก: <strong style={{ color: "#059669" }}>{fmt(totalSelected)}</strong> บาท</span>
+      </div>
+
+      {/* Table */}
+      <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>ไม่มีรายการ</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead style={{ background: "#072d6b", color: "#fff" }}>
+              <tr>
+                <th style={{ ...th, width: 40 }}>
+                  <input type="checkbox" checked={allChecked} onChange={toggleAll} style={{ cursor: "pointer", transform: "scale(1.2)" }} />
+                </th>
+                <th style={th}>วันที่/เวลา</th>
+                <th style={th}>ประเภท</th>
+                <th style={th}>อ้างอิง</th>
+                <th style={th}>ลูกค้า</th>
+                <th style={th}>สาขา</th>
+                <th style={th}>ผู้บันทึก</th>
+                <th style={{ ...th, textAlign: "right" }}>จำนวนเงิน</th>
+                <th style={th}>สถานะ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr
+                  key={r.charge_id}
+                  style={{ borderTop: "1px solid #e5e7eb", background: selected[r.charge_id] ? "#eff6ff" : "transparent", cursor: "pointer" }}
+                  onClick={() => toggleOne(r.charge_id)}
+                >
+                  <td style={td}>
+                    <input
+                      type="checkbox"
+                      checked={!!selected[r.charge_id]}
+                      onChange={() => toggleOne(r.charge_id)}
+                      onClick={e => e.stopPropagation()}
+                      style={{ cursor: "pointer", transform: "scale(1.2)" }}
+                    />
+                  </td>
+                  <td style={td}>{fmtDateTime(r.created_at)}</td>
+                  <td style={td}>{PAYMENT_TYPES.find(t => t.value === r.payment_type)?.label || r.payment_type || "-"}</td>
+                  <td style={{ ...td, fontFamily: "monospace" }}>{r.ref_no || "-"}</td>
+                  <td style={td}>{r.customer_name || "-"}</td>
+                  <td style={{ ...td, fontSize: 11 }}>
+                    {r.branch_code && <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.branch_code}</span>}
+                    {r.branch_code && r.branch_name && " "}
+                    {r.branch_name && <span>{r.branch_name}</span>}
+                  </td>
+                  <td style={{ ...td, fontSize: 11 }}>{r.created_by || "-"}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: r.status === "paid" ? "#059669" : "#6b7280" }}>{fmt(r.amount)}</td>
+                  <td style={td}>
+                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, color: STATUS_LABEL[r.status]?.color, background: STATUS_LABEL[r.status]?.bg }}>
+                      {STATUS_LABEL[r.status]?.text || r.status}
+                    </span>
+                  </td>
                 </tr>
               ))}
             </tbody>
