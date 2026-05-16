@@ -305,30 +305,30 @@ export default function PaymentPage({ currentUser }) {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #e5e7eb", marginBottom: 14 }}>
-        <button
-          onClick={() => setActiveTab("charge")}
-          style={{
-            padding: "10px 22px", border: "none", background: activeTab === "charge" ? "#0369a1" : "transparent",
-            color: activeTab === "charge" ? "#fff" : "#374151", fontWeight: 700, fontSize: 14, cursor: "pointer",
-            borderTopLeftRadius: 8, borderTopRightRadius: 8, marginBottom: -2,
-          }}
-        >
-          💸 รับชำระเงิน
-        </button>
-        <button
-          onClick={() => setActiveTab("summary")}
-          style={{
-            padding: "10px 22px", border: "none", background: activeTab === "summary" ? "#0369a1" : "transparent",
-            color: activeTab === "summary" ? "#fff" : "#374151", fontWeight: 700, fontSize: 14, cursor: "pointer",
-            borderTopLeftRadius: 8, borderTopRightRadius: 8, marginBottom: -2,
-          }}
-        >
-          📊 สรุปยอดรับเงิน
-        </button>
+        {[
+          { key: "charge", label: "💸 รับชำระเงิน" },
+          { key: "create_summary", label: "💾 สร้างใบสรุปยอด" },
+          { key: "summary_report", label: "📊 สรุปยอดรับเงิน" },
+        ].map(t => (
+          <button
+            key={t.key}
+            onClick={() => setActiveTab(t.key)}
+            style={{
+              padding: "10px 22px", border: "none", background: activeTab === t.key ? "#0369a1" : "transparent",
+              color: activeTab === t.key ? "#fff" : "#374151", fontWeight: 700, fontSize: 14, cursor: "pointer",
+              borderTopLeftRadius: 8, borderTopRightRadius: 8, marginBottom: -2,
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {activeTab === "summary" && (
+      {activeTab === "create_summary" && (
         <SummaryTab currentUser={currentUser} />
+      )}
+      {activeTab === "summary_report" && (
+        <SummaryReportTab currentUser={currentUser} />
       )}
 
       {activeTab === "charge" && (<>
@@ -984,63 +984,6 @@ function SummaryTab({ currentUser }) {
         )}
       </div>
 
-      {/* ประวัติใบสรุปยอด */}
-      <div style={{ marginTop: 18, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        <div style={{ fontWeight: 700, fontSize: 13, color: "#072d6b", marginBottom: 10 }}>
-          📑 ประวัติใบสรุปยอดที่บันทึกแล้ว ({savedSummaries.length})
-        </div>
-        {savedSummaries.length === 0 ? (
-          <div style={{ padding: 16, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>ยังไม่มีใบสรุปในช่วงนี้</div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, background: "#fff", borderRadius: 6, overflow: "hidden" }}>
-            <thead style={{ background: "#072d6b", color: "#fff" }}>
-              <tr>
-                <th style={th}>เลขที่</th>
-                <th style={th}>วันที่บันทึก</th>
-                <th style={th}>ช่วง</th>
-                <th style={th}>สาขา</th>
-                <th style={th}>ผู้บันทึก</th>
-                <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
-                <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
-                <th style={th}>หมายเหตุ</th>
-                <th style={th}>จัดการ</th>
-              </tr>
-            </thead>
-            <tbody>
-              {savedSummaries.map(s => (
-                <tr key={s.summary_id} style={{ borderTop: "1px solid #e5e7eb" }}>
-                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#0369a1" }}>{s.summary_no}</td>
-                  <td style={td}>{fmtDateTime(s.created_at)}</td>
-                  <td style={{ ...td, fontSize: 11 }}>{s.date_from ? `${String(s.date_from).slice(0, 10)} → ${String(s.date_to).slice(0, 10)}` : "-"}</td>
-                  <td style={{ ...td, fontSize: 11 }}>
-                    {s.branch_code && <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{s.branch_code}</span>}
-                    {s.branch_name && <> {s.branch_name}</>}
-                  </td>
-                  <td style={{ ...td, fontSize: 11 }}>{s.created_by || "-"}</td>
-                  <td style={{ ...td, textAlign: "right" }}>{s.total_count}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(s.total_amount)}</td>
-                  <td style={{ ...td, fontSize: 11, maxWidth: 200 }}>{s.note || "-"}</td>
-                  <td style={td}>
-                    <button onClick={() => handleOpenDetail(s)} style={{ padding: "3px 8px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🔍 ดู</button>
-                    <button onClick={async () => { await handleOpenDetail(s); }} style={{ display: "none" }} />
-                    <button onClick={async () => {
-                      // fetch detail (with items) ก่อนพิมพ์ ถ้ายังไม่มี
-                      try {
-                        const res = await fetch(SUMMARY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_summary_detail", summary_id: s.summary_id }) });
-                        const data = await res.json();
-                        const row = Array.isArray(data) ? data[0] : data;
-                        printSummary(row || s);
-                      } catch { printSummary(s); }
-                    }} style={{ padding: "3px 8px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🖨️ พิมพ์</button>
-                    <button onClick={() => handleCancelSummary(s)} style={{ padding: "3px 8px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🗑️ ยกเลิก</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-
       {/* Save Dialog */}
       {showSaveDialog && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
@@ -1061,6 +1004,170 @@ function SummaryTab({ currentUser }) {
           </div>
         </div>
       )}
+
+    </div>
+  );
+}
+
+// =====================================================
+// Tab: สรุปยอดรับเงิน — แสดงประวัติใบสรุปยอด + ปุ่มดู/พิมพ์/ยกเลิก
+// =====================================================
+function SummaryReportTab({ currentUser }) {
+  const [summaries, setSummaries] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [search, setSearch] = useState("");
+  const [detailOpen, setDetailOpen] = useState(null);
+  const [message, setMessage] = useState("");
+
+  const isAdmin = currentUser?.role === "admin";
+  const userBranch = String(currentUser?.branch || "").trim();
+  const userBranchCode = userBranch.includes(" ") ? userBranch.split(" ")[0] : userBranch;
+
+  useEffect(() => {
+    const d = new Date();
+    setDateFrom(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`);
+    setDateTo(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()).padStart(2, "0")}`);
+  }, []);
+
+  useEffect(() => {
+    if (dateFrom && dateTo) fetchData();
+    // eslint-disable-next-line
+  }, [dateFrom, dateTo]);
+
+  async function fetchData() {
+    setLoading(true);
+    try {
+      const body = { action: "list_summaries", date_from: dateFrom, date_to: dateTo, branch_code: isAdmin ? "" : (userBranchCode || "") };
+      const res = await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      setSummaries(Array.isArray(data) ? data : []);
+    } catch { setSummaries([]); }
+    setLoading(false);
+  }
+
+  async function handleOpenDetail(s) {
+    try {
+      const res = await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_summary_detail", summary_id: s.summary_id }),
+      });
+      const data = await res.json();
+      const row = Array.isArray(data) ? data[0] : data;
+      setDetailOpen(row || s);
+    } catch { setDetailOpen(s); }
+  }
+
+  async function handlePrint(s) {
+    try {
+      const res = await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_summary_detail", summary_id: s.summary_id }),
+      });
+      const data = await res.json();
+      const row = Array.isArray(data) ? data[0] : data;
+      printSummary(row || s);
+    } catch { printSummary(s); }
+  }
+
+  async function handleCancelSummary(s) {
+    if (!window.confirm(`ยกเลิกใบสรุป ${s.summary_no}? รายการที่ผูกอยู่จะถูกปลดล็อค`)) return;
+    try {
+      await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel_summary", summary_id: s.summary_id }),
+      });
+      setMessage(`✅ ยกเลิกใบสรุป ${s.summary_no} แล้ว`);
+      fetchData();
+      setDetailOpen(null);
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
+  const filtered = summaries.filter(s => {
+    if (!search.trim()) return true;
+    const kw = search.trim().toLowerCase();
+    return [s.summary_no, s.note, s.created_by, s.branch_code, s.branch_name].filter(Boolean).join(" ").toLowerCase().includes(kw);
+  });
+
+  const grandTotal = filtered.reduce((sum, s) => sum + Number(s.total_amount || 0), 0);
+  const grandCount = filtered.reduce((sum, s) => sum + Number(s.total_count || 0), 0);
+
+  return (
+    <div>
+      {/* Filter */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <span style={{ fontSize: 12, fontWeight: 600 }}>วันที่บันทึก:</span>
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inp} />
+        <span>ถึง</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ค้นหา (เลขที่, ผู้บันทึก, หมายเหตุ)" style={{ ...inp, flex: 1, minWidth: 220 }} />
+        <button onClick={fetchData} disabled={loading} style={{ padding: "7px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+          {loading ? "..." : "🔄 รีเฟรช"}
+        </button>
+      </div>
+
+      {message && (
+        <div style={{ padding: "10px 14px", marginBottom: 10, borderRadius: 8, background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : "#991b1b", fontSize: 13 }}>
+          {message}
+        </div>
+      )}
+
+      {/* Summary */}
+      <div style={{ display: "flex", gap: 18, marginBottom: 10, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", fontSize: 13 }}>
+        <span>📑 ใบสรุป: <strong>{filtered.length}</strong> ใบ</span>
+        <span>📋 รายการรวม: <strong>{grandCount}</strong> รายการ</span>
+        <span>💰 ยอดรวม: <strong style={{ color: "#059669" }}>{fmt(grandTotal)}</strong> บาท</span>
+      </div>
+
+      {/* Table */}
+      <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
+        {loading ? (
+          <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>ยังไม่มีใบสรุปในช่วงนี้</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead style={{ background: "#072d6b", color: "#fff" }}>
+              <tr>
+                <th style={th}>เลขที่</th>
+                <th style={th}>วันที่บันทึก</th>
+                <th style={th}>ช่วงข้อมูล</th>
+                <th style={th}>สาขา</th>
+                <th style={th}>ผู้บันทึก</th>
+                <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
+                <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
+                <th style={th}>หมายเหตุ</th>
+                <th style={th}>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(s => (
+                <tr key={s.summary_id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#0369a1" }}>{s.summary_no}</td>
+                  <td style={td}>{fmtDateTime(s.created_at)}</td>
+                  <td style={{ ...td, fontSize: 11 }}>{s.date_from ? `${String(s.date_from).slice(0, 10)} → ${String(s.date_to).slice(0, 10)}` : "-"}</td>
+                  <td style={{ ...td, fontSize: 11 }}>
+                    {s.branch_code && <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{s.branch_code}</span>}
+                    {s.branch_name && <> {s.branch_name}</>}
+                  </td>
+                  <td style={{ ...td, fontSize: 11 }}>{s.created_by || "-"}</td>
+                  <td style={{ ...td, textAlign: "right" }}>{s.total_count}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(s.total_amount)}</td>
+                  <td style={{ ...td, fontSize: 11, maxWidth: 200 }}>{s.note || "-"}</td>
+                  <td style={td}>
+                    <button onClick={() => handleOpenDetail(s)} style={{ padding: "4px 10px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🔍 ดู</button>
+                    <button onClick={() => handlePrint(s)} style={{ padding: "4px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🖨️ พิมพ์</button>
+                    <button onClick={() => handleCancelSummary(s)} style={{ padding: "4px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🗑️ ยกเลิก</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
       {/* Detail Dialog */}
       {detailOpen && (
