@@ -24,8 +24,7 @@
             { "operation": "equal", "value2": "save_summary", "output": 0 },
             { "operation": "equal", "value2": "list_summaries", "output": 1 },
             { "operation": "equal", "value2": "get_summary_detail", "output": 2 },
-            { "operation": "equal", "value2": "cancel_summary", "output": 3 },
-            { "operation": "equal", "value2": "list_locked_charges", "output": 4 }
+            { "operation": "equal", "value2": "cancel_summary", "output": 3 }
           ]
         },
         "fallbackOutput": 0
@@ -105,20 +104,6 @@
 
     {
       "parameters": {
-        "operation": "executeQuery",
-        "query": "SELECT p.charge_id, p.summary_id, s.summary_no FROM payments p LEFT JOIN payment_summaries s ON s.summary_id = p.summary_id WHERE p.summary_id IS NOT NULL AND p.created_at::date BETWEEN '{{ $json.body.date_from }}' AND '{{ $json.body.date_to }}';",
-        "options": {}
-      },
-      "id": "pg-locked",
-      "name": "PG: List Locked",
-      "type": "n8n-nodes-base.postgres",
-      "typeVersion": 2,
-      "position": [540, 740],
-      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
-    },
-
-    {
-      "parameters": {
         "respondWith": "json",
         "responseBody": "={{ $input.all().map(i => i.json) }}",
         "options": {}
@@ -137,16 +122,14 @@
         [ { "node": "Prepare Summary", "type": "main", "index": 0 } ],
         [ { "node": "PG: List Summaries", "type": "main", "index": 0 } ],
         [ { "node": "PG: Summary Detail", "type": "main", "index": 0 } ],
-        [ { "node": "PG: Cancel Summary", "type": "main", "index": 0 } ],
-        [ { "node": "PG: List Locked", "type": "main", "index": 0 } ]
+        [ { "node": "PG: Cancel Summary", "type": "main", "index": 0 } ]
       ]
     },
     "Prepare Summary": { "main": [[ { "node": "PG: Save Summary", "type": "main", "index": 0 } ]] },
     "PG: Save Summary": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
     "PG: List Summaries": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
     "PG: Summary Detail": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
-    "PG: Cancel Summary": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
-    "PG: List Locked": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] }
+    "PG: Cancel Summary": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] }
   },
   "settings": {},
   "active": false,
