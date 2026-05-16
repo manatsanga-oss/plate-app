@@ -14,6 +14,90 @@ function fmtDateTime(v) {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+// พิมพ์ใบสรุปยอด — เปิด window ใหม่ พร้อม auto print
+function printSummary(s) {
+  if (!s) return;
+  const items = Array.isArray(s.items) ? s.items : [];
+  const itemRows = items.map((it, idx) => `
+    <tr>
+      <td style="text-align:center">${idx + 1}</td>
+      <td>${fmtDateTime(it.created_at)}</td>
+      <td>${(PAYMENT_TYPES.find(t => t.value === it.payment_type)?.label) || it.payment_type || "-"}</td>
+      <td style="font-family:monospace">${it.ref_no || "-"}</td>
+      <td>${escapeHtml(it.customer_name || "-")}</td>
+      <td style="font-family:monospace">${it.customer_phone || "-"}</td>
+      <td style="text-align:right;font-family:monospace">${fmt(it.amount)}</td>
+    </tr>
+  `).join("");
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>ใบสรุปยอด ${escapeHtml(s.summary_no || "")}</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  body { font-family: 'Tahoma','Sarabun',sans-serif; font-size: 12px; color: #1f2937; }
+  h1 { font-size: 18px; margin: 0 0 4px; color: #072d6b; }
+  .meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 10px 0; padding: 8px; background: #f0fdf4; border: 1px solid #059669; border-radius: 6px; }
+  .meta div { font-size: 11px; }
+  .meta .lbl { color: #6b7280; }
+  .meta .val { font-weight: 700; font-size: 13px; color: #065f46; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 8px; }
+  thead th { background: #072d6b; color: #fff; padding: 6px 8px; text-align: left; font-weight: 600; }
+  tbody td { padding: 5px 8px; border-bottom: 1px solid #e5e7eb; }
+  tfoot td { padding: 8px; border-top: 2px solid #072d6b; font-weight: 700; }
+  .note { margin-top: 10px; padding: 8px; background: #fef3c7; border-radius: 4px; }
+  .footer { margin-top: 30px; display: grid; grid-template-columns: 1fr 1fr; gap: 60px; }
+  .sig { border-top: 1px dashed #6b7280; padding-top: 4px; text-align: center; font-size: 11px; color: #6b7280; }
+</style></head><body>
+  <h1>📑 ใบสรุปยอดรับเงิน</h1>
+  <div style="font-family:monospace;font-size:14px;font-weight:700;color:#0369a1">เลขที่: ${escapeHtml(s.summary_no || "")}</div>
+
+  <div class="meta">
+    <div><div class="lbl">วันที่บันทึก</div><div class="val">${fmtDateTime(s.created_at)}</div></div>
+    <div><div class="lbl">ผู้บันทึก</div><div class="val">${escapeHtml(s.created_by || "-")}</div></div>
+    <div><div class="lbl">สาขา</div><div class="val">${escapeHtml((s.branch_code || "") + " " + (s.branch_name || ""))}</div></div>
+    <div><div class="lbl">ช่วงวันที่</div><div class="val">${s.date_from ? String(s.date_from).slice(0, 10) + " ถึง " + String(s.date_to || "").slice(0, 10) : "-"}</div></div>
+  </div>
+
+  ${s.note ? `<div class="note">📝 หมายเหตุ: ${escapeHtml(s.note)}</div>` : ""}
+
+  <table>
+    <thead>
+      <tr>
+        <th style="width:30px;text-align:center">#</th>
+        <th>วันที่/เวลา</th>
+        <th>ประเภท</th>
+        <th>เลขอ้างอิง</th>
+        <th>ลูกค้า</th>
+        <th>เบอร์</th>
+        <th style="text-align:right">จำนวนเงิน</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows || `<tr><td colspan="7" style="text-align:center;color:#9ca3af;padding:20px">ไม่มีรายการ</td></tr>`}</tbody>
+    <tfoot>
+      <tr>
+        <td colspan="6" style="text-align:right">ยอดรวมทั้งสิ้น (${s.total_count || items.length} รายการ)</td>
+        <td style="text-align:right;font-family:monospace;color:#059669;font-size:14px">${fmt(s.total_amount)} บาท</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="footer">
+    <div class="sig">ผู้จัดทำ<br/><br/><br/>(${escapeHtml(s.created_by || "")})</div>
+    <div class="sig">ผู้รับใบสรุป<br/><br/><br/>(.....................................)</div>
+  </div>
+</body></html>`;
+
+  const w = window.open("", "_blank", "width=900,height=700");
+  if (!w) { alert("กรุณาอนุญาต popup เพื่อพิมพ์"); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => { w.focus(); w.print(); }, 250);
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
 const PAYMENT_TYPES = [
   { value: "general", label: "รับชำระทั่วไป" },
   { value: "repair", label: "ค่าซ่อม" },
@@ -938,6 +1022,16 @@ function SummaryTab({ currentUser }) {
                   <td style={{ ...td, fontSize: 11, maxWidth: 200 }}>{s.note || "-"}</td>
                   <td style={td}>
                     <button onClick={() => handleOpenDetail(s)} style={{ padding: "3px 8px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🔍 ดู</button>
+                    <button onClick={async () => { await handleOpenDetail(s); }} style={{ display: "none" }} />
+                    <button onClick={async () => {
+                      // fetch detail (with items) ก่อนพิมพ์ ถ้ายังไม่มี
+                      try {
+                        const res = await fetch(SUMMARY_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_summary_detail", summary_id: s.summary_id }) });
+                        const data = await res.json();
+                        const row = Array.isArray(data) ? data[0] : data;
+                        printSummary(row || s);
+                      } catch { printSummary(s); }
+                    }} style={{ padding: "3px 8px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🖨️ พิมพ์</button>
                     <button onClick={() => handleCancelSummary(s)} style={{ padding: "3px 8px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🗑️ ยกเลิก</button>
                   </td>
                 </tr>
@@ -974,7 +1068,10 @@ function SummaryTab({ currentUser }) {
           <div style={{ background: "#fff", borderRadius: 10, padding: 22, width: "min(900px, 100%)", maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
               <h3 style={{ margin: 0, color: "#072d6b" }}>📑 ใบสรุปยอด {detailOpen.summary_no}</h3>
-              <button onClick={() => setDetailOpen(null)} style={{ padding: "6px 12px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => printSummary(detailOpen)} style={{ padding: "6px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700 }}>🖨️ พิมพ์</button>
+                <button onClick={() => setDetailOpen(null)} style={{ padding: "6px 12px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+              </div>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14, padding: 12, background: "#f0fdf4", borderRadius: 8 }}>
               <div><div style={{ fontSize: 10, color: "#6b7280" }}>วันที่บันทึก</div><div style={{ fontWeight: 700 }}>{fmtDateTime(detailOpen.created_at)}</div></div>
