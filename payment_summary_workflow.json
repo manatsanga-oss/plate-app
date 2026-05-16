@@ -1,0 +1,154 @@
+{
+  "name": "payment-summary-api",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "payment-summary-api",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "wh-1",
+      "name": "Webhook (UI)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "webhookId": "payment-summary-api"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action }}",
+        "rules": {
+          "rules": [
+            { "operation": "equal", "value2": "save_summary", "output": 0 },
+            { "operation": "equal", "value2": "list_summaries", "output": 1 },
+            { "operation": "equal", "value2": "get_summary_detail", "output": 2 },
+            { "operation": "equal", "value2": "cancel_summary", "output": 3 },
+            { "operation": "equal", "value2": "list_locked_charges", "output": 4 }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "id": "sw-1",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [320, 300]
+    },
+
+    {
+      "parameters": {
+        "functionCode": "// build INSERT payment_summaries + UPDATE payments\nconst b = $json.body || {};\nconst chargeIds = Array.isArray(b.charge_ids) ? b.charge_ids : [];\nif (chargeIds.length === 0) throw new Error('charge_ids required');\nconst now = new Date();\nconst yy = String((now.getFullYear() + 543) % 100).padStart(2, '0');\nconst mm = String(now.getMonth() + 1).padStart(2, '0');\nconst dd = String(now.getDate()).padStart(2, '0');\nconst seq = Math.floor(Math.random() * 900 + 100);\nconst summaryNo = b.summary_no || `SU${yy}${mm}${dd}${seq}`;\nconst escape = (s) => String(s || '').replace(/'/g, \"''\");\nconst breakdown = JSON.stringify(b.breakdown || []).replace(/'/g, \"''\");\nconst chargeList = chargeIds.map(c => `'${escape(c)}'`).join(',');\nreturn [{\n  json: {\n    summary_no: summaryNo,\n    date_from: b.date_from || null,\n    date_to: b.date_to || null,\n    group_by: b.group_by || '',\n    total_amount: Number(b.total_amount) || 0,\n    total_count: Number(b.total_count) || chargeIds.length,\n    breakdown: breakdown,\n    note: escape(b.note),\n    branch_code: escape(b.branch_code),\n    branch_name: escape(b.branch_name),\n    created_by: escape(b.created_by),\n    charge_list: chargeList,\n    charge_ids: chargeIds\n  }\n}];"
+      },
+      "id": "fn-prep-save",
+      "name": "Prepare Summary",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [540, 100]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH ins AS (INSERT INTO payment_summaries (summary_no, date_from, date_to, group_by, total_amount, total_count, breakdown, note, branch_code, branch_name, created_by) VALUES ('{{ $json.summary_no }}', {{ $json.date_from ? \"'\" + $json.date_from + \"'\" : 'NULL' }}, {{ $json.date_to ? \"'\" + $json.date_to + \"'\" : 'NULL' }}, '{{ $json.group_by }}', {{ $json.total_amount }}, {{ $json.total_count }}, '{{ $json.breakdown }}'::jsonb, '{{ $json.note }}', '{{ $json.branch_code }}', '{{ $json.branch_name }}', '{{ $json.created_by }}') RETURNING summary_id, summary_no, total_amount, total_count, created_at), upd AS (UPDATE payments SET summary_id = (SELECT summary_id FROM ins) WHERE charge_id IN ({{ $json.charge_list }}) AND summary_id IS NULL RETURNING charge_id) SELECT ins.*, (SELECT COUNT(*) FROM upd) AS updated_count FROM ins;",
+        "options": {}
+      },
+      "id": "pg-save",
+      "name": "PG: Save Summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [760, 100],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT summary_id, summary_no, date_from, date_to, group_by, total_amount, total_count, note, branch_code, branch_name, created_by, created_at FROM payment_summaries WHERE created_at::date BETWEEN '{{ $json.body.date_from }}' AND '{{ $json.body.date_to }}' AND ('{{ $json.body.branch_code }}' = '' OR branch_code = '{{ $json.body.branch_code }}') ORDER BY created_at DESC LIMIT 200;",
+        "options": {}
+      },
+      "id": "pg-list",
+      "name": "PG: List Summaries",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [540, 260],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT s.*, COALESCE(json_agg(json_build_object('charge_id', p.charge_id, 'payment_type', p.payment_type, 'ref_no', p.ref_no, 'customer_name', p.customer_name, 'customer_phone', p.customer_phone, 'amount', p.amount, 'status', p.status, 'created_at', p.created_at, 'branch_code', p.branch_code, 'branch_name', p.branch_name, 'created_by', p.created_by) ORDER BY p.created_at) FILTER (WHERE p.charge_id IS NOT NULL), '[]'::json) AS items FROM payment_summaries s LEFT JOIN payments p ON p.summary_id = s.summary_id WHERE s.summary_id = {{ Number($json.body.summary_id) }} GROUP BY s.summary_id;",
+        "options": {}
+      },
+      "id": "pg-detail",
+      "name": "PG: Summary Detail",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [540, 420],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH unlocked AS (UPDATE payments SET summary_id = NULL WHERE summary_id = {{ Number($json.body.summary_id) }} RETURNING charge_id), deleted AS (DELETE FROM payment_summaries WHERE summary_id = {{ Number($json.body.summary_id) }} RETURNING summary_id, summary_no) SELECT deleted.*, (SELECT COUNT(*) FROM unlocked) AS unlocked_count FROM deleted;",
+        "options": {}
+      },
+      "id": "pg-cancel",
+      "name": "PG: Cancel Summary",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [540, 580],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT p.charge_id, p.summary_id, s.summary_no FROM payments p LEFT JOIN payment_summaries s ON s.summary_id = p.summary_id WHERE p.summary_id IS NOT NULL AND p.created_at::date BETWEEN '{{ $json.body.date_from }}' AND '{{ $json.body.date_to }}';",
+        "options": {}
+      },
+      "id": "pg-locked",
+      "name": "PG: List Locked",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [540, 740],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $input.all().map(i => i.json) }}",
+        "options": {}
+      },
+      "id": "respond",
+      "name": "Respond to UI",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1040, 400]
+    }
+  ],
+  "connections": {
+    "Webhook (UI)": { "main": [[ { "node": "Switch Action", "type": "main", "index": 0 } ]] },
+    "Switch Action": {
+      "main": [
+        [ { "node": "Prepare Summary", "type": "main", "index": 0 } ],
+        [ { "node": "PG: List Summaries", "type": "main", "index": 0 } ],
+        [ { "node": "PG: Summary Detail", "type": "main", "index": 0 } ],
+        [ { "node": "PG: Cancel Summary", "type": "main", "index": 0 } ],
+        [ { "node": "PG: List Locked", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Prepare Summary": { "main": [[ { "node": "PG: Save Summary", "type": "main", "index": 0 } ]] },
+    "PG: Save Summary": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
+    "PG: List Summaries": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
+    "PG: Summary Detail": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
+    "PG: Cancel Summary": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] },
+    "PG: List Locked": { "main": [[ { "node": "Respond to UI", "type": "main", "index": 0 } ]] }
+  },
+  "settings": {},
+  "active": false,
+  "tags": ["payment", "summary"]
+}

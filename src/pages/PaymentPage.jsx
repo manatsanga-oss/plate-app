@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 
 // n8n endpoint — ใช้ action-based เหมือนหน้าอื่นในระบบ
 const PAY_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/payment-api";
+const SUMMARY_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/payment-summary-api";
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -238,7 +239,7 @@ export default function PaymentPage({ currentUser }) {
             borderTopLeftRadius: 8, borderTopRightRadius: 8, marginBottom: -2,
           }}
         >
-          📊 ประวัติสรุปยอด
+          📊 สรุปยอดรับเงิน
         </button>
       </div>
 
@@ -488,10 +489,18 @@ function SummaryTab({ currentUser }) {
   const [groupBy, setGroupBy] = useState("day"); // day | month | branch | creator | type
   const [selected, setSelected] = useState({}); // {charge_id: true}
   const [summary, setSummary] = useState(null); // { total, count, groups: [{key, label, total, count}] }
+  const [lockedMap, setLockedMap] = useState({}); // {charge_id: summary_no}
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [saveNote, setSaveNote] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [savedSummaries, setSavedSummaries] = useState([]);
+  const [detailOpen, setDetailOpen] = useState(null); // summary object เมื่อเปิดดู detail
+  const [message, setMessage] = useState("");
 
   const isAdmin = currentUser?.role === "admin";
   const userBranch = String(currentUser?.branch || "").trim();
   const userBranchCode = userBranch.includes(" ") ? userBranch.split(" ")[0] : userBranch;
+  const userBranchName = userBranch.includes(" ") ? userBranch.split(" ").slice(1).join(" ") : userBranch;
 
   useEffect(() => {
     const d = new Date();
@@ -501,9 +510,33 @@ function SummaryTab({ currentUser }) {
   }, []);
 
   useEffect(() => {
-    if (dateFrom && dateTo) fetchData();
+    if (dateFrom && dateTo) { fetchData(); fetchSummaries(); }
     // eslint-disable-next-line
   }, [dateFrom, dateTo]);
+
+  async function fetchSummaries() {
+    try {
+      const body = { action: "list_summaries", date_from: dateFrom, date_to: dateTo, branch_code: isAdmin ? (filterBranch || "") : (userBranchCode || "") };
+      const res = await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      setSavedSummaries(Array.isArray(data) ? data : []);
+    } catch { setSavedSummaries([]); }
+  }
+
+  async function fetchLocked() {
+    try {
+      const body = { action: "list_locked_charges", date_from: dateFrom, date_to: dateTo };
+      const res = await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      const map = {};
+      (Array.isArray(data) ? data : []).forEach(r => { if (r.charge_id) map[r.charge_id] = r.summary_no || `#${r.summary_id}`; });
+      setLockedMap(map);
+    } catch { setLockedMap({}); }
+  }
 
   async function fetchData() {
     setLoading(true);
@@ -522,8 +555,83 @@ function SummaryTab({ currentUser }) {
       });
       const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
+      fetchLocked();
     } catch { setRows([]); }
     setLoading(false);
+  }
+
+  async function handleSaveSummary() {
+    if (!summary || summary.count === 0) return;
+    const selectedIds = Object.keys(selected).filter(id => selected[id]);
+    // กรอง row ที่ locked ออก
+    const validIds = selectedIds.filter(id => !lockedMap[id]);
+    if (validIds.length === 0) {
+      setMessage("❌ ไม่มีรายการที่บันทึกได้ (ทุกรายการถูกสรุปแล้ว)");
+      return;
+    }
+    setSaving(true);
+    setMessage("");
+    try {
+      const body = {
+        action: "save_summary",
+        charge_ids: validIds,
+        date_from: dateFrom,
+        date_to: dateTo,
+        group_by: groupBy,
+        total_amount: summary.total,
+        total_count: validIds.length,
+        breakdown: summary.groups,
+        note: saveNote,
+        branch_code: userBranchCode,
+        branch_name: userBranchName,
+        created_by: currentUser?.username || currentUser?.name || "system",
+      };
+      const res = await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row?.summary_no) {
+        setMessage(`✅ บันทึกใบสรุป ${row.summary_no} สำเร็จ (${row.total_count} รายการ · ${fmt(row.total_amount)} บาท)`);
+        setShowSaveDialog(false);
+        setSaveNote("");
+        setSummary(null);
+        setSelected({});
+        fetchData();
+        fetchSummaries();
+      } else {
+        setMessage(`❌ บันทึกไม่สำเร็จ`);
+      }
+    } catch (e) {
+      setMessage(`❌ บันทึกไม่สำเร็จ: ${e.message || e}`);
+    }
+    setSaving(false);
+  }
+
+  async function handleCancelSummary(s) {
+    if (!window.confirm(`ยกเลิกใบสรุป ${s.summary_no}? รายการที่ผูกอยู่จะถูกปลดล็อค`)) return;
+    try {
+      await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel_summary", summary_id: s.summary_id }),
+      });
+      setMessage(`✅ ยกเลิกใบสรุป ${s.summary_no} แล้ว`);
+      fetchData();
+      fetchSummaries();
+      setDetailOpen(null);
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
+  async function handleOpenDetail(s) {
+    try {
+      const res = await fetch(SUMMARY_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_summary_detail", summary_id: s.summary_id }),
+      });
+      const data = await res.json();
+      const row = Array.isArray(data) ? data[0] : data;
+      setDetailOpen(row || s);
+    } catch { setDetailOpen(s); }
   }
 
   // applied filters (client-side)
@@ -544,12 +652,13 @@ function SummaryTab({ currentUser }) {
       setSelected({});
     } else {
       const next = {};
-      filtered.forEach(r => { next[r.charge_id] = true; });
+      filtered.forEach(r => { if (!lockedMap[r.charge_id]) next[r.charge_id] = true; });
       setSelected(next);
     }
   }
 
   function toggleOne(id) {
+    if (lockedMap[id]) return; // locked → ไม่ให้เลือก
     setSelected(prev => {
       const next = { ...prev };
       if (next[id]) delete next[id]; else next[id] = true;
@@ -660,11 +769,22 @@ function SummaryTab({ currentUser }) {
           📊 สรุปยอดที่เลือก ({countSelected} รายการ · {fmt(totalSelected)} บาท)
         </button>
         {summary && (
-          <button onClick={() => setSummary(null)} style={{ padding: "8px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
-            ✕ ปิดสรุป
-          </button>
+          <>
+            <button onClick={() => setShowSaveDialog(true)} style={{ padding: "8px 22px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+              💾 บันทึกใบสรุปยอด
+            </button>
+            <button onClick={() => setSummary(null)} style={{ padding: "8px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+              ✕ ปิดสรุป
+            </button>
+          </>
         )}
       </div>
+
+      {message && (
+        <div style={{ padding: "10px 14px", marginBottom: 10, borderRadius: 8, background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : "#991b1b", fontSize: 13 }}>
+          {message}
+        </div>
+      )}
 
       {/* Summary box */}
       {summary && (
@@ -733,25 +853,34 @@ function SummaryTab({ currentUser }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => (
+              {filtered.map(r => {
+                const isLocked = !!lockedMap[r.charge_id];
+                return (
                 <tr
                   key={r.charge_id}
-                  style={{ borderTop: "1px solid #e5e7eb", background: selected[r.charge_id] ? "#eff6ff" : "transparent", cursor: "pointer" }}
-                  onClick={() => toggleOne(r.charge_id)}
+                  style={{ borderTop: "1px solid #e5e7eb", background: isLocked ? "#f9fafb" : (selected[r.charge_id] ? "#eff6ff" : "transparent"), cursor: isLocked ? "default" : "pointer", opacity: isLocked ? 0.7 : 1 }}
+                  onClick={() => !isLocked && toggleOne(r.charge_id)}
                 >
                   <td style={td}>
-                    <input
-                      type="checkbox"
-                      checked={!!selected[r.charge_id]}
-                      onChange={() => toggleOne(r.charge_id)}
-                      onClick={e => e.stopPropagation()}
-                      style={{ cursor: "pointer", transform: "scale(1.2)" }}
-                    />
+                    {isLocked ? (
+                      <span title={`อยู่ในใบสรุป ${lockedMap[r.charge_id]}`} style={{ fontSize: 14 }}>🔒</span>
+                    ) : (
+                      <input
+                        type="checkbox"
+                        checked={!!selected[r.charge_id]}
+                        onChange={() => toggleOne(r.charge_id)}
+                        onClick={e => e.stopPropagation()}
+                        style={{ cursor: "pointer", transform: "scale(1.2)" }}
+                      />
+                    )}
                   </td>
                   <td style={td}>{fmtDateTime(r.created_at)}</td>
                   <td style={td}>{PAYMENT_TYPES.find(t => t.value === r.payment_type)?.label || r.payment_type || "-"}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.ref_no || "-"}</td>
-                  <td style={td}>{r.customer_name || "-"}</td>
+                  <td style={td}>
+                    {r.customer_name || "-"}
+                    {isLocked && <div style={{ fontSize: 10, color: "#0369a1", fontFamily: "monospace", marginTop: 2 }}>📄 {lockedMap[r.charge_id]}</div>}
+                  </td>
                   <td style={{ ...td, fontSize: 11 }}>
                     {r.branch_code && <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.branch_code}</span>}
                     {r.branch_code && r.branch_name && " "}
@@ -765,11 +894,122 @@ function SummaryTab({ currentUser }) {
                     </span>
                   </td>
                 </tr>
+                );})}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* ประวัติใบสรุปยอด */}
+      <div style={{ marginTop: 18, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <div style={{ fontWeight: 700, fontSize: 13, color: "#072d6b", marginBottom: 10 }}>
+          📑 ประวัติใบสรุปยอดที่บันทึกแล้ว ({savedSummaries.length})
+        </div>
+        {savedSummaries.length === 0 ? (
+          <div style={{ padding: 16, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>ยังไม่มีใบสรุปในช่วงนี้</div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, background: "#fff", borderRadius: 6, overflow: "hidden" }}>
+            <thead style={{ background: "#072d6b", color: "#fff" }}>
+              <tr>
+                <th style={th}>เลขที่</th>
+                <th style={th}>วันที่บันทึก</th>
+                <th style={th}>ช่วง</th>
+                <th style={th}>สาขา</th>
+                <th style={th}>ผู้บันทึก</th>
+                <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
+                <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
+                <th style={th}>หมายเหตุ</th>
+                <th style={th}>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody>
+              {savedSummaries.map(s => (
+                <tr key={s.summary_id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#0369a1" }}>{s.summary_no}</td>
+                  <td style={td}>{fmtDateTime(s.created_at)}</td>
+                  <td style={{ ...td, fontSize: 11 }}>{s.date_from ? `${String(s.date_from).slice(0, 10)} → ${String(s.date_to).slice(0, 10)}` : "-"}</td>
+                  <td style={{ ...td, fontSize: 11 }}>
+                    {s.branch_code && <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{s.branch_code}</span>}
+                    {s.branch_name && <> {s.branch_name}</>}
+                  </td>
+                  <td style={{ ...td, fontSize: 11 }}>{s.created_by || "-"}</td>
+                  <td style={{ ...td, textAlign: "right" }}>{s.total_count}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(s.total_amount)}</td>
+                  <td style={{ ...td, fontSize: 11, maxWidth: 200 }}>{s.note || "-"}</td>
+                  <td style={td}>
+                    <button onClick={() => handleOpenDetail(s)} style={{ padding: "3px 8px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🔍 ดู</button>
+                    <button onClick={() => handleCancelSummary(s)} style={{ padding: "3px 8px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🗑️ ยกเลิก</button>
+                  </td>
+                </tr>
               ))}
             </tbody>
           </table>
         )}
       </div>
+
+      {/* Save Dialog */}
+      {showSaveDialog && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}>
+          <div style={{ background: "#fff", borderRadius: 10, padding: 24, minWidth: 480, maxWidth: 560, boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
+            <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>💾 บันทึกใบสรุปยอด</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12, padding: 12, background: "#f8fafc", borderRadius: 8 }}>
+              <div><div style={{ fontSize: 11, color: "#6b7280" }}>รายการที่บันทึก</div><div style={{ fontSize: 18, fontWeight: 800, color: "#059669" }}>{Object.keys(selected).filter(id => selected[id] && !lockedMap[id]).length}</div></div>
+              <div><div style={{ fontSize: 11, color: "#6b7280" }}>ยอดรวม</div><div style={{ fontSize: 18, fontWeight: 800, color: "#059669" }}>{fmt(summary?.total || 0)} บาท</div></div>
+            </div>
+            <label style={lbl}>หมายเหตุ (ถ้ามี)</label>
+            <textarea value={saveNote} onChange={e => setSaveNote(e.target.value)} rows={3} style={{ ...inp2, resize: "vertical" }} placeholder="เช่น สรุปยอดส่งบัญชี รอบเช้า 15/05/2569" />
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+              <button onClick={() => { setShowSaveDialog(false); setSaveNote(""); }} disabled={saving} style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={handleSaveSummary} disabled={saving} style={{ padding: "8px 24px", background: saving ? "#9ca3af" : "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                {saving ? "กำลังบันทึก..." : "💾 ยืนยันบันทึก"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Detail Dialog */}
+      {detailOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100, padding: 20 }}>
+          <div style={{ background: "#fff", borderRadius: 10, padding: 22, width: "min(900px, 100%)", maxHeight: "90vh", overflow: "auto", boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>📑 ใบสรุปยอด {detailOpen.summary_no}</h3>
+              <button onClick={() => setDetailOpen(null)} style={{ padding: "6px 12px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14, padding: 12, background: "#f0fdf4", borderRadius: 8 }}>
+              <div><div style={{ fontSize: 10, color: "#6b7280" }}>วันที่บันทึก</div><div style={{ fontWeight: 700 }}>{fmtDateTime(detailOpen.created_at)}</div></div>
+              <div><div style={{ fontSize: 10, color: "#6b7280" }}>ผู้บันทึก</div><div style={{ fontWeight: 700 }}>{detailOpen.created_by || "-"}</div></div>
+              <div><div style={{ fontSize: 10, color: "#6b7280" }}>รายการ</div><div style={{ fontWeight: 700, color: "#059669" }}>{detailOpen.total_count}</div></div>
+              <div><div style={{ fontSize: 10, color: "#6b7280" }}>ยอดรวม</div><div style={{ fontWeight: 700, color: "#059669" }}>{fmt(detailOpen.total_amount)} บาท</div></div>
+            </div>
+            {detailOpen.note && <div style={{ marginBottom: 12, padding: 10, background: "#fef3c7", borderRadius: 6, fontSize: 13 }}>📝 {detailOpen.note}</div>}
+            {Array.isArray(detailOpen.items) && detailOpen.items.length > 0 && (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead style={{ background: "#072d6b", color: "#fff" }}>
+                  <tr>
+                    <th style={th}>วันที่</th>
+                    <th style={th}>ประเภท</th>
+                    <th style={th}>อ้างอิง</th>
+                    <th style={th}>ลูกค้า</th>
+                    <th style={{ ...th, textAlign: "right" }}>ยอด</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {detailOpen.items.map(item => (
+                    <tr key={item.charge_id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <td style={td}>{fmtDateTime(item.created_at)}</td>
+                      <td style={td}>{PAYMENT_TYPES.find(t => t.value === item.payment_type)?.label || item.payment_type}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{item.ref_no || "-"}</td>
+                      <td style={td}>{item.customer_name}</td>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(item.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

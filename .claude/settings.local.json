@@ -4,7 +4,8 @@
       "Bash(claude mcp:*)",
       "Bash(xargs grep:*)",
       "Bash(python change_more_uploads_to_file.py)",
-      "Bash(python -c ' *)"
+      "Bash(python -c ' *)",
+      "Bash(npm run *)"
     ]
   }
 }
