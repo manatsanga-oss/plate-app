@@ -17,7 +17,7 @@
     },
     {
       "parameters": {
-        "functionCode": "// Omise webhook payload: { key: 'charge.complete', data: { id, status, paid_at, ... } }\nconst body = $json.body || {};\nconst data = body.data || {};\nlet status = 'pending';\nif (data.status === 'successful' || data.paid === true) status = 'paid';\nelse if (data.status === 'failed') status = 'failed';\nelse if (data.status === 'expired') status = 'expired';\nreturn [{\n  json: {\n    charge_id: data.id || '',\n    status,\n    paid_at: data.paid_at || (status === 'paid' ? new Date().toISOString() : ''),\n    raw: JSON.stringify(body).replace(/'/g, \"''\")\n  }\n}];"
+        "functionCode": "// Omise webhook payload: { key: 'charge.complete'|'charge.create'|..., data: { id, status, paid_at, failure_code, ... } }\nconst body = $json.body || {};\nconst data = body.data || {};\nconst s = String(data.status || '').toLowerCase();\n\n// ไม่ default เป็น pending — เพื่อไม่ override DB เมื่อ event เป็น 'charge.create' ที่ยัง pending\nlet status = '';\nif (s === 'successful' || data.paid === true) status = 'paid';\nelse if (s === 'failed' || data.failure_code) status = 'failed';\nelse if (s === 'expired' || s === 'reversed') status = 'expired';\n// ถ้า status ไม่ใช่ final → ส่ง '' ไป SQL จะ keep ค่าเดิม\n\nreturn [{\n  json: {\n    charge_id: data.id || '',\n    status,\n    paid_at: data.paid_at || (status === 'paid' ? new Date().toISOString() : ''),\n    raw: JSON.stringify(body).replace(/'/g, \"''\")\n  }\n}];"
       },
       "id": "fn-parse",
       "name": "Parse Omise Event",
@@ -28,7 +28,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE payments SET status = '{{ $json.status }}', paid_at = CASE WHEN '{{ $json.paid_at }}' = '' THEN paid_at ELSE '{{ $json.paid_at }}'::timestamptz END, raw_omise = '{{ $json.raw }}'::jsonb WHERE charge_id = '{{ $json.charge_id }}' RETURNING charge_id, status, paid_at;"
+        "query": "UPDATE payments SET status = CASE WHEN '{{ $json.status }}' = '' THEN status ELSE '{{ $json.status }}' END, paid_at = CASE WHEN '{{ $json.paid_at }}' = '' THEN paid_at ELSE '{{ $json.paid_at }}'::timestamptz END, raw_omise = '{{ $json.raw }}'::jsonb WHERE charge_id = '{{ $json.charge_id }}' RETURNING charge_id, status, paid_at;"
       },
       "id": "pg-update",
       "name": "PG: Update Payment",
