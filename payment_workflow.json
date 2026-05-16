@@ -48,10 +48,12 @@
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "https://api.omise.co/sources",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendBody": true,
+        "contentType": "form-urlencoded",
         "bodyParameters": {
           "parameters": [
             { "name": "type", "value": "promptpay" },
@@ -72,10 +74,12 @@
     },
     {
       "parameters": {
+        "method": "POST",
         "url": "https://api.omise.co/charges",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpBasicAuth",
         "sendBody": true,
+        "contentType": "form-urlencoded",
         "bodyParameters": {
           "parameters": [
             { "name": "amount", "value": "={{ $('Prepare Charge').item.json.amount_satang }}" },
@@ -151,7 +155,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT charge_id, payment_type, ref_no, customer_name, customer_phone, description, amount, status, qr_image, expires_at, paid_at, created_at, branch_code, branch_name FROM payments WHERE created_at::date BETWEEN '{{ $json.body.date_from }}' AND '{{ $json.body.date_to }}' {{ $json.body.branch_code ? \"AND branch_code = '\" + $json.body.branch_code + \"'\" : '' }} ORDER BY created_at DESC LIMIT 500;"
+        "query": "SELECT charge_id, payment_type, ref_no, customer_name, customer_phone, description, amount, status, qr_image, expires_at, paid_at, created_at, branch_code, branch_name FROM payments WHERE created_at::date BETWEEN '{{ $json.body.date_from }}' AND '{{ $json.body.date_to }}' AND ('{{ $json.body.branch_code }}' = '' OR branch_code = '{{ $json.body.branch_code }}') ORDER BY created_at DESC LIMIT 500;"
       },
       "id": "pg-list",
       "name": "PG: List Payments",
@@ -164,7 +168,7 @@
     {
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ $json }}",
+        "responseBody": "={{ $input.all().map(i => i.json) }}",
         "options": {}
       },
       "id": "respond",
