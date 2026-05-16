@@ -98,6 +98,100 @@ function escapeHtml(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
+// พิมพ์ใบรับชำระ + QR code — สำหรับให้ลูกค้าสแกนจ่ายเงิน (หรือใบเสร็จเมื่อ paid แล้ว)
+function printChargeReceipt(charge) {
+  if (!charge) return;
+  const isPaid = charge.status === "paid";
+  const isPending = charge.status === "pending";
+  const typeLabel = (PAYMENT_TYPES.find(t => t.value === charge.payment_type)?.label) || charge.payment_type || "-";
+  const statusBadge = isPaid
+    ? `<div class="badge paid">✓ ชำระเงินแล้ว</div>`
+    : isPending
+      ? `<div class="badge pending">รอชำระเงิน</div>`
+      : `<div class="badge fail">${escapeHtml(charge.status || "")}</div>`;
+
+  const qrSection = (isPending && charge.qr_image) ? `
+    <div class="qr-wrap">
+      <div class="qr-title">สแกนเพื่อชำระเงิน</div>
+      <img src="${escapeHtml(charge.qr_image)}" alt="QR PromptPay" class="qr-img" />
+      <div class="qr-note">QR PromptPay · กรุณาสแกนภายในเวลาที่กำหนด</div>
+    </div>
+  ` : isPaid ? `
+    <div class="paid-mark">
+      <div class="paid-icon">✓</div>
+      <div class="paid-text">ชำระเงินแล้ว</div>
+      ${charge.paid_at ? `<div class="paid-date">${fmtDateTime(charge.paid_at)}</div>` : ""}
+    </div>
+  ` : "";
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>ใบรับชำระ ${escapeHtml(charge.charge_id || "")}</title>
+<style>
+  @page { size: A5; margin: 8mm; }
+  * { box-sizing: border-box; }
+  body { font-family: 'Tahoma','Sarabun',sans-serif; font-size: 12px; color: #1f2937; margin: 0; padding: 8px; }
+  .header { text-align: center; border-bottom: 2px solid #072d6b; padding-bottom: 8px; margin-bottom: 10px; }
+  .header h1 { font-size: 18px; margin: 0 0 2px; color: #072d6b; }
+  .header .sub { font-size: 11px; color: #6b7280; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 14px; margin: 8px 0; font-size: 11px; }
+  .meta .lbl { color: #6b7280; }
+  .meta strong { color: #1f2937; }
+  .amount-box { text-align: center; padding: 10px; background: #f0fdf4; border: 2px solid #059669; border-radius: 8px; margin: 10px 0; }
+  .amount-box .lbl { font-size: 11px; color: #065f46; }
+  .amount-box .val { font-size: 30px; font-weight: 800; color: #059669; }
+  .amount-box .type { font-size: 11px; color: #374151; margin-top: 2px; }
+  .qr-wrap { text-align: center; margin: 12px 0; padding: 10px; background: #fff; border: 2px dashed #0369a1; border-radius: 8px; }
+  .qr-title { font-size: 14px; font-weight: 700; color: #0369a1; margin-bottom: 6px; }
+  .qr-img { width: 220px; height: 220px; object-fit: contain; }
+  .qr-note { font-size: 10px; color: #6b7280; margin-top: 4px; }
+  .paid-mark { text-align: center; padding: 20px; margin: 12px 0; background: #d1fae5; border: 2px solid #059669; border-radius: 8px; }
+  .paid-icon { font-size: 60px; color: #059669; line-height: 1; }
+  .paid-text { font-size: 18px; font-weight: 800; color: #065f46; }
+  .paid-date { font-size: 11px; color: #065f46; margin-top: 4px; }
+  .badge { display: inline-block; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 11px; }
+  .badge.pending { background: #fef3c7; color: #b45309; }
+  .badge.paid { background: #d1fae5; color: #065f46; }
+  .badge.fail { background: #fee2e2; color: #991b1b; }
+  .footer { margin-top: 10px; padding-top: 6px; border-top: 1px dashed #6b7280; font-size: 9px; color: #6b7280; text-align: center; font-family: monospace; }
+</style></head><body>
+  <div class="header">
+    <h1>ใบรับชำระเงิน</h1>
+    <div class="sub">QR PromptPay · ${escapeHtml((charge.branch_code || "") + " " + (charge.branch_name || ""))}</div>
+    <div style="margin-top:4px">${statusBadge}</div>
+  </div>
+
+  <div class="meta">
+    <div><span class="lbl">วันที่:</span> <strong>${fmtDateTime(charge.created_at)}</strong></div>
+    <div><span class="lbl">เลขที่อ้างอิง:</span> <strong>${escapeHtml(charge.ref_no || "-")}</strong></div>
+    <div><span class="lbl">ลูกค้า:</span> <strong>${escapeHtml(charge.customer_name || "-")}</strong></div>
+    <div><span class="lbl">เบอร์:</span> <strong>${escapeHtml(charge.customer_phone || "-")}</strong></div>
+  </div>
+
+  <div class="amount-box">
+    <div class="lbl">จำนวนเงินที่ต้องชำระ</div>
+    <div class="val">฿ ${fmt(charge.amount)}</div>
+    <div class="type">${escapeHtml(typeLabel)}</div>
+  </div>
+
+  ${qrSection}
+
+  ${charge.description ? `<div style="padding:6px 8px;background:#fef3c7;border-radius:4px;font-size:10px">📝 ${escapeHtml(charge.description)}</div>` : ""}
+
+  <div class="footer">
+    Charge ID: ${escapeHtml(charge.charge_id || "")}
+    ${charge.expires_at && isPending ? `<br/>หมดอายุ: ${fmtDateTime(charge.expires_at)}` : ""}
+  </div>
+</body></html>`;
+
+  const w = window.open("", "_blank", "width=600,height=800");
+  if (!w) { alert("กรุณาอนุญาต popup เพื่อพิมพ์"); return; }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+  // รอ image โหลดก่อน print
+  setTimeout(() => { w.focus(); w.print(); }, 600);
+}
+
 const PAYMENT_TYPES = [
   { value: "general", label: "รับชำระทั่วไป" },
   { value: "repair", label: "ค่าซ่อม" },
@@ -489,6 +583,16 @@ export default function PaymentPage({ currentUser }) {
                   {charge.ref_no && <> · อ้างอิง <strong>{charge.ref_no}</strong></>}
                 </div>
               )}
+
+              {/* ปุ่มพิมพ์ใบรับชำระ */}
+              <div style={{ marginTop: 14, display: "flex", gap: 8, justifyContent: "center" }}>
+                <button
+                  onClick={() => printChargeReceipt({ ...charge, branch_code: userBranchCode, branch_name: userBranchName, payment_type: form.payment_type || charge.payment_type })}
+                  style={{ padding: "8px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}
+                >
+                  🖨️ พิมพ์ใบรับชำระ {charge.status === "pending" ? "(QR ให้ลูกค้า)" : ""}
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -529,6 +633,7 @@ export default function PaymentPage({ currentUser }) {
                 <th style={{ ...th, textAlign: "right" }}>จำนวนเงิน</th>
                 <th style={th}>สถานะ</th>
                 <th style={th}>Charge ID</th>
+                <th style={th}>พิมพ์</th>
               </tr>
             </thead>
             <tbody>
@@ -546,6 +651,9 @@ export default function PaymentPage({ currentUser }) {
                     </span>
                   </td>
                   <td style={{ ...td, fontFamily: "monospace", fontSize: 10, color: "#6b7280" }}>{r.charge_id}</td>
+                  <td style={td}>
+                    <button onClick={() => printChargeReceipt(r)} style={{ padding: "3px 8px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>🖨️</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
