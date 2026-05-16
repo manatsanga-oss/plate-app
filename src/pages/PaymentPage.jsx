@@ -573,7 +573,6 @@ function SummaryTab({ currentUser }) {
   const [groupBy, setGroupBy] = useState("day"); // day | month | branch | creator | type
   const [selected, setSelected] = useState({}); // {charge_id: true}
   const [summary, setSummary] = useState(null); // { total, count, groups: [{key, label, total, count}] }
-  const [lockedMap, setLockedMap] = useState({}); // {charge_id: summary_no}
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [saveNote, setSaveNote] = useState("");
   const [saving, setSaving] = useState(false);
@@ -609,19 +608,6 @@ function SummaryTab({ currentUser }) {
     } catch { setSavedSummaries([]); }
   }
 
-  async function fetchLocked() {
-    try {
-      const body = { action: "list_locked_charges", date_from: dateFrom, date_to: dateTo };
-      const res = await fetch(SUMMARY_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      const map = {};
-      (Array.isArray(data) ? data : []).forEach(r => { if (r.charge_id) map[r.charge_id] = r.summary_no || `#${r.summary_id}`; });
-      setLockedMap(map);
-    } catch { setLockedMap({}); }
-  }
-
   async function fetchData() {
     setLoading(true);
     setSummary(null);
@@ -639,7 +625,6 @@ function SummaryTab({ currentUser }) {
       });
       const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
-      fetchLocked();
     } catch { setRows([]); }
     setLoading(false);
   }
@@ -648,7 +633,7 @@ function SummaryTab({ currentUser }) {
     if (!summary || summary.count === 0) return;
     const selectedIds = Object.keys(selected).filter(id => selected[id]);
     // กรอง row ที่ locked ออก
-    const validIds = selectedIds.filter(id => !lockedMap[id]);
+    const validIds = selectedIds;
     if (validIds.length === 0) {
       setMessage("❌ ไม่มีรายการที่บันทึกได้ (ทุกรายการถูกสรุปแล้ว)");
       return;
@@ -721,7 +706,7 @@ function SummaryTab({ currentUser }) {
   // applied filters (client-side) — ไม่แสดง row ที่อยู่ในใบสรุปแล้ว
   const filtered = rows.filter(r => {
     // กรองรายการที่ถูกบันทึกในใบสรุปแล้ว — ไม่ต้องแสดงอีก
-    if (r.summary_id || lockedMap[r.charge_id]) return false;
+    if (r.summary_id) return false;
     if (filterStatus && r.status !== filterStatus) return false;
     if (filterType && r.payment_type !== filterType) return false;
     if (isAdmin && filterBranch && r.branch_code !== filterBranch) return false;
@@ -738,13 +723,12 @@ function SummaryTab({ currentUser }) {
       setSelected({});
     } else {
       const next = {};
-      filtered.forEach(r => { if (!lockedMap[r.charge_id]) next[r.charge_id] = true; });
+      filtered.forEach(r => { next[r.charge_id] = true; });
       setSelected(next);
     }
   }
 
   function toggleOne(id) {
-    if (lockedMap[id]) return; // locked → ไม่ให้เลือก
     setSelected(prev => {
       const next = { ...prev };
       if (next[id]) delete next[id]; else next[id] = true;
@@ -983,7 +967,7 @@ function SummaryTab({ currentUser }) {
           <div style={{ background: "#fff", borderRadius: 10, padding: 24, minWidth: 480, maxWidth: 560, boxShadow: "0 20px 40px rgba(0,0,0,0.2)" }}>
             <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>💾 บันทึกใบสรุปยอด</h3>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12, padding: 12, background: "#f8fafc", borderRadius: 8 }}>
-              <div><div style={{ fontSize: 11, color: "#6b7280" }}>รายการที่บันทึก</div><div style={{ fontSize: 18, fontWeight: 800, color: "#059669" }}>{Object.keys(selected).filter(id => selected[id] && !lockedMap[id]).length}</div></div>
+              <div><div style={{ fontSize: 11, color: "#6b7280" }}>รายการที่บันทึก</div><div style={{ fontSize: 18, fontWeight: 800, color: "#059669" }}>{Object.keys(selected).filter(id => selected[id]).length}</div></div>
               <div><div style={{ fontSize: 11, color: "#6b7280" }}>ยอดรวม</div><div style={{ fontSize: 18, fontWeight: 800, color: "#059669" }}>{fmt(summary?.total || 0)} บาท</div></div>
             </div>
             <label style={lbl}>หมายเหตุ (ถ้ามี)</label>
