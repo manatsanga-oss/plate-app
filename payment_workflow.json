@@ -155,7 +155,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "SELECT charge_id, payment_type, ref_no, customer_name, customer_phone, description, amount, status, qr_image, expires_at, paid_at, created_at, branch_code, branch_name FROM payments WHERE created_at::date BETWEEN '{{ $json.body.date_from }}' AND '{{ $json.body.date_to }}' AND ('{{ $json.body.branch_code }}' = '' OR branch_code = '{{ $json.body.branch_code }}') ORDER BY created_at DESC LIMIT 500;"
+        "query": "SELECT p.charge_id, p.payment_type, p.ref_no, p.customer_name, p.customer_phone, p.description, p.amount, p.status, p.qr_image, p.expires_at, p.paid_at, p.created_at, p.branch_code, p.branch_name, p.created_by, p.summary_id, s.summary_no FROM payments p LEFT JOIN payment_summaries s ON s.summary_id = p.summary_id WHERE p.created_at::date BETWEEN '{{ $json.body.date_from }}' AND '{{ $json.body.date_to }}' AND ('{{ $json.body.branch_code }}' = '' OR p.branch_code = '{{ $json.body.branch_code }}') ORDER BY p.created_at DESC LIMIT 500;"
       },
       "id": "pg-list",
       "name": "PG: List Payments",

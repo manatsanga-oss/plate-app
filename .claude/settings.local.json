@@ -5,7 +5,10 @@
       "Bash(xargs grep:*)",
       "Bash(python change_more_uploads_to_file.py)",
       "Bash(python -c ' *)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git -C \"C:/Users/manat/plate-app\" merge --ff-only claude/eager-hertz-ca6735)"
     ]
   }
 }

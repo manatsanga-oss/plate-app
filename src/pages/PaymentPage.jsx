@@ -718,8 +718,10 @@ function SummaryTab({ currentUser }) {
     } catch { setDetailOpen(s); }
   }
 
-  // applied filters (client-side)
+  // applied filters (client-side) — ไม่แสดง row ที่อยู่ในใบสรุปแล้ว
   const filtered = rows.filter(r => {
+    // กรองรายการที่ถูกบันทึกในใบสรุปแล้ว — ไม่ต้องแสดงอีก
+    if (r.summary_id || lockedMap[r.charge_id]) return false;
     if (filterStatus && r.status !== filterStatus) return false;
     if (filterType && r.payment_type !== filterType) return false;
     if (isAdmin && filterBranch && r.branch_code !== filterBranch) return false;
@@ -937,34 +939,25 @@ function SummaryTab({ currentUser }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(r => {
-                const isLocked = !!lockedMap[r.charge_id];
-                return (
+              {filtered.map(r => (
                 <tr
                   key={r.charge_id}
-                  style={{ borderTop: "1px solid #e5e7eb", background: isLocked ? "#f9fafb" : (selected[r.charge_id] ? "#eff6ff" : "transparent"), cursor: isLocked ? "default" : "pointer", opacity: isLocked ? 0.7 : 1 }}
-                  onClick={() => !isLocked && toggleOne(r.charge_id)}
+                  style={{ borderTop: "1px solid #e5e7eb", background: selected[r.charge_id] ? "#eff6ff" : "transparent", cursor: "pointer" }}
+                  onClick={() => toggleOne(r.charge_id)}
                 >
                   <td style={td}>
-                    {isLocked ? (
-                      <span title={`อยู่ในใบสรุป ${lockedMap[r.charge_id]}`} style={{ fontSize: 14 }}>🔒</span>
-                    ) : (
-                      <input
-                        type="checkbox"
-                        checked={!!selected[r.charge_id]}
-                        onChange={() => toggleOne(r.charge_id)}
-                        onClick={e => e.stopPropagation()}
-                        style={{ cursor: "pointer", transform: "scale(1.2)" }}
-                      />
-                    )}
+                    <input
+                      type="checkbox"
+                      checked={!!selected[r.charge_id]}
+                      onChange={() => toggleOne(r.charge_id)}
+                      onClick={e => e.stopPropagation()}
+                      style={{ cursor: "pointer", transform: "scale(1.2)" }}
+                    />
                   </td>
                   <td style={td}>{fmtDateTime(r.created_at)}</td>
                   <td style={td}>{PAYMENT_TYPES.find(t => t.value === r.payment_type)?.label || r.payment_type || "-"}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.ref_no || "-"}</td>
-                  <td style={td}>
-                    {r.customer_name || "-"}
-                    {isLocked && <div style={{ fontSize: 10, color: "#0369a1", fontFamily: "monospace", marginTop: 2 }}>📄 {lockedMap[r.charge_id]}</div>}
-                  </td>
+                  <td style={td}>{r.customer_name || "-"}</td>
                   <td style={{ ...td, fontSize: 11 }}>
                     {r.branch_code && <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.branch_code}</span>}
                     {r.branch_code && r.branch_name && " "}
@@ -978,7 +971,7 @@ function SummaryTab({ currentUser }) {
                     </span>
                   </td>
                 </tr>
-                );})}
+              ))}
             </tbody>
           </table>
         )}
