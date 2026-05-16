@@ -28,7 +28,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "UPDATE payments SET status = CASE WHEN '{{ $json.status }}' = '' THEN status ELSE '{{ $json.status }}' END, paid_at = CASE WHEN '{{ $json.paid_at }}' = '' THEN paid_at ELSE '{{ $json.paid_at }}'::timestamptz END, raw_omise = '{{ $json.raw }}'::jsonb WHERE charge_id = '{{ $json.charge_id }}' RETURNING charge_id, status, paid_at;"
+        "query": "UPDATE payments SET status = CASE WHEN '{{ $json.status }}' = '' THEN status ELSE '{{ $json.status }}' END, paid_at = COALESCE(NULLIF('{{ $json.paid_at }}', '')::timestamptz, paid_at), raw_omise = '{{ $json.raw }}'::jsonb WHERE charge_id = '{{ $json.charge_id }}' RETURNING charge_id, status, paid_at;"
       },
       "id": "pg-update",
       "name": "PG: Update Payment",
