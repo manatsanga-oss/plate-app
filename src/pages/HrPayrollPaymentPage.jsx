@@ -308,6 +308,11 @@ export default function HrPayrollPaymentPage({ currentUser }) {
     if (payMethod === "โอน" && !payAccountId) { alert("กรุณาเลือกบัญชีต้นทาง"); return; }
     setPaying(true);
     try {
+      // PF/SSO: override_total = ยอดรวม สมทบ + สะสม (2x ของ expense_document ปกติ)
+      // เพื่อให้ bank movement สะท้อนยอดโอนจริง (สมทบ+สะสมรวมกัน)
+      const overrideTotal = (payPopup.row?.key === "pf" || payPopup.row?.key === "sso")
+        ? Number(payPopup.row.amt || 0)  // amt = total × 2 อยู่แล้ว
+        : null;
       const res = await fetch(ACC_API, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -319,6 +324,7 @@ export default function HrPayrollPaymentPage({ currentUser }) {
           payment_note: payNote,
           paid_by: currentUser?.name || currentUser?.username || "system",
           from_bank_account_id: payMethod === "โอน" ? Number(payAccountId) : null,
+          override_total: overrideTotal,
         }),
       });
       const data = await res.json();
@@ -467,7 +473,7 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                   const items = [
                     { key: "salary", label: "เงินเดือนสุทธิ", amt: it.total_net_income, color: "#1e40af" },
                     { key: "tax", label: "ภงด.1 (ภาษี)", amt: it.total_tax, color: "#dc2626" },
-                    { key: "sso", label: "ประกันสังคม", amt: it.total_sso, color: "#dc2626" },
+                    { key: "sso", label: "ประกันสังคม", amt: Number(it.total_sso || 0) * 2, color: "#dc2626" },
                     { key: "pf", label: "กองทุนฯ", amt: Number(it.total_pf || 0) * 2, color: "#dc2626" },
                     { key: "loan", label: "กยศ.", amt: it.total_loan, color: "#dc2626" },
                     { key: "admin", label: "ผู้บริหาร", amt: it.total_admin, color: "#dc2626" },
@@ -543,7 +549,7 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                   const items = [
                     { key: "salary", label: "เงินเดือนสุทธิ", amt: it.total_net_income, color: "#1e40af" },
                     { key: "tax", label: "ภงด.1 (ภาษี)", amt: it.total_tax, color: "#dc2626" },
-                    { key: "sso", label: "ประกันสังคม", amt: it.total_sso, color: "#dc2626" },
+                    { key: "sso", label: "ประกันสังคม", amt: Number(it.total_sso || 0) * 2, color: "#dc2626" },
                     { key: "pf", label: "กองทุนฯ", amt: Number(it.total_pf || 0) * 2, color: "#dc2626" },
                     { key: "loan", label: "กยศ.", amt: it.total_loan, color: "#dc2626" },
                     { key: "admin", label: "ผู้บริหาร", amt: it.total_admin, color: "#dc2626" },
@@ -628,7 +634,7 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                     <th style={th}>พนักงาน</th>
                     <th style={th}>ตำแหน่ง</th>
                     <th style={{ ...th, textAlign: "right" }}>ยอดพนักงาน</th>
-                    {itemDetail.row.key === "pf" && <th style={{ ...th, textAlign: "right", background: "#065f46" }}>เงินสมทบบริษัท</th>}
+                    {(itemDetail.row.key === "pf" || itemDetail.row.key === "sso") && <th style={{ ...th, textAlign: "right", background: "#065f46" }}>เงินสมทบบริษัท</th>}
                     {!isPaid && <th style={{ ...th, textAlign: "center", width: 140 }}>จัดการ</th>}
                   </tr>
                 </thead>
@@ -652,7 +658,7 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                             <span style={{ fontWeight: 700, color: itemDetail.row.color }}>{fmtN(orig)}</span>
                           )}
                         </td>
-                        {itemDetail.row.key === "pf" && (
+                        {(itemDetail.row.key === "pf" || itemDetail.row.key === "sso") && (
                           <td style={{ ...td, textAlign: "right", background: "#ecfdf5" }}>
                             <span style={{ fontWeight: 700, color: "#065f46" }}>{fmtN(orig)}</span>
                           </td>
@@ -688,14 +694,14 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                     <td style={{ ...td, textAlign: "right", color: itemDetail.row.color }}>
                       {fmtN(itemDetail.employees.reduce((s, e) => s + Number(e[itemDetail.field] || 0), 0))}
                     </td>
-                    {itemDetail.row.key === "pf" && (
+                    {(itemDetail.row.key === "pf" || itemDetail.row.key === "sso") && (
                       <td style={{ ...td, textAlign: "right", background: "#d1fae5", color: "#065f46" }}>
                         {fmtN(itemDetail.employees.reduce((s, e) => s + Number(e[itemDetail.field] || 0), 0))}
                       </td>
                     )}
                     {!isPaid && <td></td>}
                   </tr>
-                  {itemDetail.row.key === "pf" && (
+                  {(itemDetail.row.key === "pf" || itemDetail.row.key === "sso") && (
                     <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                       <td colSpan={3} style={{ ...td, textAlign: "right", color: "#92400e" }}>💰 ยอดสมทบรวมทั้งบริษัท (พนักงาน + บริษัท)</td>
                       <td colSpan={2} style={{ ...td, textAlign: "right", color: "#92400e", fontSize: 15 }}>

@@ -140,6 +140,7 @@ export default function FastMovingStockPage() {
         <td class="r">${s.haahong}</td>
         <td class="r">${s.sachtalad}</td>
         <td class="r">${s.nakhonluang}</td>
+        <td class="r">${r.loan_qty || "-"}</td>
         <td>${fmtD(r.last_order_date)}</td>
         <td class="r">${Number(r.avg_order_qty_3m || 0) > 0 ? Number(r.avg_order_qty_3m).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : "-"}</td>
         <td class="r">${r.backorder_qty || "-"}</td>
@@ -163,7 +164,7 @@ export default function FastMovingStockPage() {
 <div class="info">ตัวกรอง: ${filterLabel} | จำนวน: ${filtered.length} รายการ | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
 <table>
   <thead><tr>
-    <th>#</th><th>กลุ่มสินค้า</th><th>รหัสสินค้า</th><th>ชื่อสินค้า</th><th>จำนวน</th><th>ป.เปา</th><th>ห้าห้อง</th><th>สช.ตลาด</th><th>นครหลวง</th><th>วันที่สั่งล่าสุด</th><th>เฉลี่ยสั่ง/เดือน</th><th>ค้างส่ง</th><th>คาดว่าได้รับ</th><th>ค้างปิด JOB</th>
+    <th>#</th><th>กลุ่มสินค้า</th><th>รหัสสินค้า</th><th>ชื่อสินค้า</th><th>จำนวน</th><th>ป.เปา</th><th>ห้าห้อง</th><th>สช.ตลาด</th><th>นครหลวง</th><th>ให้ยืม</th><th>วันที่สั่งล่าสุด</th><th>เฉลี่ยสั่ง/เดือน</th><th>ค้างส่ง</th><th>คาดว่าได้รับ</th><th>ค้างปิด JOB</th>
   </tr></thead>
   <tbody>${rows}</tbody>
 </table>
@@ -248,6 +249,7 @@ export default function FastMovingStockPage() {
               <th style={{ ...th, textAlign: "right" }}>ห้าห้อง</th>
               <th style={{ ...th, textAlign: "right" }}>สช.ตลาด</th>
               <th style={{ ...th, textAlign: "right" }}>นครหลวง</th>
+              <th style={{ ...th, textAlign: "right" }}>ให้ยืม</th>
               <th style={th}>วันที่สั่งล่าสุด</th>
               <th style={{ ...th, textAlign: "right" }}>เฉลี่ยสั่ง/เดือน (3ด.)</th>
               <th style={{ ...th, textAlign: "right" }}>ค้างส่ง</th>
@@ -257,9 +259,9 @@ export default function FastMovingStockPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={14} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={15} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
             ) : paged.length === 0 ? (
-              <tr><td colSpan={14} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={15} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
             ) : paged.map((r, i) => {
               const qty = Number(r.quantity || 0);
               const s = parseStores(r.stores);
@@ -274,6 +276,9 @@ export default function FastMovingStockPage() {
                   <td style={{ ...td, textAlign: "right" }}>{s.haahong}</td>
                   <td style={{ ...td, textAlign: "right" }}>{s.sachtalad}</td>
                   <td style={{ ...td, textAlign: "right" }}>{s.nakhonluang}</td>
+                  <td style={{ ...td, textAlign: "right", color: Number(r.loan_qty || 0) > 0 ? "#ea580c" : undefined, fontWeight: Number(r.loan_qty || 0) > 0 ? 700 : undefined }}>
+                    {Number(r.loan_qty || 0) > 0 ? fmtQty(r.loan_qty) : ""}
+                  </td>
                   <td style={td}>{r.last_order_date ? new Date(r.last_order_date).toLocaleDateString("th-TH") : ""}</td>
                   <td style={{ ...td, textAlign: "right" }}>{Number(r.avg_order_qty_3m || 0) > 0 ? Number(r.avg_order_qty_3m).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : ""}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.backorder_qty || 0) > 0 ? "#b91c1c" : undefined, fontWeight: Number(r.backorder_qty || 0) > 0 ? 700 : undefined }}>{Number(r.backorder_qty || 0) > 0 ? fmtQty(r.backorder_qty) : ""}</td>

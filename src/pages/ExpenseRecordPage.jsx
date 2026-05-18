@@ -14,7 +14,7 @@ function fmtDate(v) {
 }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
-const emptyItem = () => ({ expense_code: "", expense_name: "", description: "", qty: 1, unit_price: 0, amount: 0 });
+const emptyItem = () => ({ expense_code: "", expense_name: "", description: "", qty: 1, unit_price: 0, amount: 0, wht_pct: 0 });
 const emptyForm = () => ({
   expense_doc_no: "",  // generated on save
   doc_date: todayISO(),
@@ -153,13 +153,16 @@ export default function ExpenseRecordPage({ currentUser }) {
   function onVendorChange(vendorId) {
     const v = vendors.find(x => String(x.vendor_id) === String(vendorId));
     if (v) {
+      const defaultWht = Number(v.wht_rate) || 0;
       setForm(f => ({
         ...f,
         vendor_id: v.vendor_id,
         vendor_name: v.vendor_name,
         vendor_tax_id: v.tax_id || "",
         vendor_address: [v.address, v.sub_district, v.district, v.province, v.postal_code].filter(Boolean).join(" "),
-        wht_rate: Number(v.wht_rate) || 0,
+        wht_rate: defaultWht,
+        // ใส่ wht_pct default ให้แต่ละรายการที่ยังไม่มี
+        items: f.items.map(it => ({ ...it, wht_pct: it.wht_pct || defaultWht })),
       }));
     } else {
       setForm(f => ({ ...f, vendor_id: "", vendor_name: "", vendor_tax_id: "", vendor_address: "" }));
@@ -191,8 +194,13 @@ export default function ExpenseRecordPage({ currentUser }) {
   const afterDiscount = subtotal - discountAmount;
   const vatAmount = afterDiscount * (Number(form.vat_pct) || 0) / 100;
   const totalIncVat = afterDiscount + vatAmount;
-  const whtBase = afterDiscount; // WHT คำนวณจากยอดหลังส่วนลด ก่อน VAT
-  const whtAmount = whtBase * (Number(form.wht_rate) || 0) / 100;
+  // WHT แยกตามรายการ — คำนวณจากยอด item.amount (กระจายส่วนลดตามสัดส่วน)
+  const discountRatio = subtotal > 0 ? (subtotal - discountAmount) / subtotal : 1;
+  const whtAmount = form.items.reduce((s, it) => {
+    const itemAfterDisc = (Number(it.amount) || 0) * discountRatio;
+    return s + itemAfterDisc * (Number(it.wht_pct) || 0) / 100;
+  }, 0);
+  const whtBase = afterDiscount;
   const netToPay = totalIncVat - whtAmount;
 
   async function handleSave() {
@@ -755,6 +763,7 @@ function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAc
                 <th style={{ ...th, width: 80, textAlign: "right" }}>จำนวน</th>
                 <th style={{ ...th, width: 120, textAlign: "right" }}>ราคาต่อหน่วย</th>
                 <th style={{ ...th, width: 120, textAlign: "right" }}>รวม</th>
+                <th style={{ ...th, width: 80, textAlign: "right" }}>หัก ณ ที่จ่าย %</th>
                 <th style={{ ...th, width: 50 }}></th>
               </tr>
             </thead>
@@ -781,6 +790,9 @@ function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAc
                     <input type="number" step="0.01" value={it.unit_price} onChange={e => onItemChange(i, "unit_price", e.target.value)} style={{ ...inp, textAlign: "right" }} />
                   </td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmt(it.amount)}</td>
+                  <td style={td}>
+                    <input type="number" step="0.01" value={it.wht_pct} onChange={e => onItemChange(i, "wht_pct", e.target.value)} style={{ ...inp, textAlign: "right" }} />
+                  </td>
                   <td style={{ ...td, textAlign: "center" }}>
                     {form.items.length > 1 && <button onClick={() => removeItem(i)} style={{ ...btnSm, background: "#dc2626" }}>✕</button>}
                   </td>
@@ -807,7 +819,7 @@ function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAc
             <RowInput label="ภาษีมูลค่าเพิ่ม %" value={form.vat_pct} onChange={v => setForm(f => ({ ...f, vat_pct: v }))} suffix={`= ${fmt(vatAmount)}`} />
             <Row label="จำนวนเงินรวมทั้งสิ้น" value={fmt(totalIncVat)} bold />
             <div style={{ height: 1, background: "#e5e7eb", margin: "8px 0" }} />
-            <RowInput label="หัก ณ ที่จ่าย %" value={form.wht_rate} onChange={v => setForm(f => ({ ...f, wht_rate: v }))} suffix={`= ${fmt(whtAmount)}`} />
+            <Row label="หัก ณ ที่จ่าย (รวมจากรายการ)" value={fmt(whtAmount)} color="#dc2626" />
             <Row label="ยอดเงินสุทธิที่ต้องจ่าย" value={fmt(netToPay)} bold color="#059669" />
           </div>
         </div>
