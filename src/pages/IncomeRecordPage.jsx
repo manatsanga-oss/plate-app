@@ -42,6 +42,12 @@ const emptyForm = () => ({
 export default function IncomeRecordPage({ currentUser }) {
   const [docs, setDocs] = useState([]);
   const [customers, setCustomers] = useState([]);
+  // TF import (รายงานใบกำกับภาษีรายได้อื่นๆ → income_records)
+  const [tfImportOpen, setTfImportOpen] = useState(false);
+  const [tfList, setTfList] = useState([]);
+  const [tfSelected, setTfSelected] = useState({});
+  const [tfLoading, setTfLoading] = useState(false);
+  const [tfImporting, setTfImporting] = useState(false);
   const [incomeCategories, setIncomeCategories] = useState([]); // หมวดจาก master
   const [bankAccounts, setBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -77,6 +83,37 @@ export default function IncomeRecordPage({ currentUser }) {
   }, []);
 
   useEffect(() => { if (dateFrom && dateTo) fetchDocs(); /* eslint-disable-next-line */ }, [dateFrom, dateTo]);
+
+  async function openTfImport() {
+    setTfImportOpen(true);
+    setTfLoading(true); setTfSelected({});
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_tf_unimported" }),
+      });
+      const data = await res.json();
+      setTfList(Array.isArray(data) ? data.filter(x => x && x.tax_invoice_no) : []);
+    } catch { setTfList([]); }
+    setTfLoading(false);
+  }
+  async function submitTfImport() {
+    const invs = Object.keys(tfSelected).filter(k => tfSelected[k]);
+    if (invs.length === 0) { alert("เลือกอย่างน้อย 1 รายการ"); return; }
+    setTfImporting(true);
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "import_tf_to_income", invoice_nos: invs, created_by: currentUser?.user_id || currentUser?.name || "" }),
+      });
+      const data = await res.json();
+      const r = Array.isArray(data) ? data[0] : data;
+      setMessage(`✅ นำเข้า ${r?.imported ?? 0} รายการ (${invs.length} ที่เลือก)`);
+      setTfImportOpen(false); setTfList([]); setTfSelected({});
+      fetchDocs();
+    } catch (e) { alert("❌ Import ล้มเหลว: " + e.message); }
+    setTfImporting(false);
+  }
 
   async function fetchDocs() {
     setLoading(true);
@@ -474,6 +511,7 @@ export default function IncomeRecordPage({ currentUser }) {
           style={{ ...inp, flex: 1, minWidth: 200 }} />
         <button onClick={fetchDocs} style={btn("#0369a1")}>🔄 รีเฟรช</button>
         {tab === "draft" && <button onClick={openCreate} style={btn("#059669")}>+ เพิ่มรายได้</button>}
+        {tab === "draft" && <button onClick={openTfImport} style={btn("#92400e")}>📥 นำเข้าจากใบกำกับ TF</button>}
       </div>
 
       {/* TAB: รายการรายได้ (ทั้งหมด) */}
@@ -697,6 +735,82 @@ export default function IncomeRecordPage({ currentUser }) {
               </button>
                 );
               })()}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TF Import Modal */}
+      {tfImportOpen && (
+        <div onClick={() => !tfImporting && setTfImportOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 20, width: "90%", maxWidth: 900, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ margin: 0, color: "#92400e" }}>📥 นำเข้าใบกำกับภาษีรายได้อื่นๆ (TF) → income_records</h3>
+              <button onClick={() => setTfImportOpen(false)} disabled={tfImporting} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+
+            {tfLoading ? (
+              <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+            ) : tfList.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>ไม่มีใบกำกับที่ยังไม่ถูกนำเข้า</div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 8, fontSize: 13 }}>
+                  <label style={{ cursor: "pointer", fontWeight: 600 }}>
+                    <input type="checkbox"
+                      checked={tfList.length > 0 && tfList.every(t => tfSelected[t.tax_invoice_no])}
+                      onChange={e => {
+                        const all = {};
+                        if (e.target.checked) tfList.forEach(t => { all[t.tax_invoice_no] = true; });
+                        setTfSelected(all);
+                      }} /> เลือกทั้งหมด ({tfList.length} รายการ)
+                  </label>
+                  <span style={{ marginLeft: 12, color: "#6b7280" }}>
+                    เลือกแล้ว: <strong>{Object.values(tfSelected).filter(Boolean).length}</strong>
+                  </span>
+                </div>
+                <div style={{ overflowX: "auto", maxHeight: 500, overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead style={{ background: "#fef3c7", position: "sticky", top: 0 }}>
+                      <tr>
+                        <th style={{ ...th, width: 30 }}></th>
+                        <th style={th}>สาขา</th>
+                        <th style={th}>เลขใบกำกับ</th>
+                        <th style={th}>วันที่</th>
+                        <th style={th}>ลูกค้า</th>
+                        <th style={th}>Tax ID</th>
+                        <th style={{ ...th, textAlign: "right" }}>ก่อน VAT</th>
+                        <th style={{ ...th, textAlign: "right" }}>VAT</th>
+                        <th style={{ ...th, textAlign: "right" }}>รวม</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tfList.map((t, i) => (
+                        <tr key={t.tax_invoice_no} style={{ borderTop: "1px solid #f3f4f6", background: tfSelected[t.tax_invoice_no] ? "#fffbeb" : (i % 2 === 0 ? "#fff" : "#f9fafb") }}>
+                          <td style={{ ...td, textAlign: "center" }}>
+                            <input type="checkbox" checked={!!tfSelected[t.tax_invoice_no]} onChange={e => setTfSelected(prev => ({ ...prev, [t.tax_invoice_no]: e.target.checked }))} />
+                          </td>
+                          <td style={td}>{t.branch}</td>
+                          <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#92400e" }}>{t.tax_invoice_no}</td>
+                          <td style={td}>{fmtDate(t.invoice_date)}</td>
+                          <td style={td}>{t.customer_name || "-"}</td>
+                          <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{t.customer_tax_id || "-"}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(t.amount_before_vat)}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(t.vat_amount)}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmt(t.total_amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
+              <button onClick={() => setTfImportOpen(false)} disabled={tfImporting} style={btn("#6b7280")}>ยกเลิก</button>
+              <button onClick={submitTfImport} disabled={tfImporting || Object.values(tfSelected).filter(Boolean).length === 0} style={btn("#92400e")}>
+                {tfImporting ? "⏳ กำลังนำเข้า..." : `📥 นำเข้า ${Object.values(tfSelected).filter(Boolean).length} รายการ`}
+              </button>
             </div>
           </div>
         </div>

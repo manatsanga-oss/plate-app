@@ -11,6 +11,20 @@ function fmtDate(v) {
 }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function firstOfMonth() { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); }
+function lastDayOfMonth(ym) {
+  // ym = "YYYY-MM" → last day of that month "YYYY-MM-DD"
+  if (!ym) return "";
+  const [y, m] = ym.split("-").map(Number);
+  const d = new Date(y, m, 0); // day 0 of next month = last day of this month
+  return `${y}-${String(m).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+function fmtMonthLabel(ym) {
+  // "2026-05" → "พ.ค. 2569"
+  if (!ym) return "";
+  const [y, m] = ym.split("-").map(Number);
+  const names = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+  return `${names[m-1]} ${y+543}`;
+}
 
 const BRANCH_LABEL = {
   PAPAO: { label: "ป.เปา", bg: "#dbeafe", color: "#1e40af" },
@@ -21,8 +35,7 @@ const BRANCH_LABEL = {
 export default function RegistrationSummaryReportPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [dateFrom, setDateFrom] = useState(firstOfMonth());
-  const [dateTo, setDateTo] = useState(todayISO());
+  const [invoiceMonth, setInvoiceMonth] = useState(() => new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [branchFilter, setBranchFilter] = useState("all");
   const [regPaidMonth, setRegPaidMonth] = useState("");  // YYYY-MM
   const [insPaidMonth, setInsPaidMonth] = useState("");  // YYYY-MM
@@ -38,8 +51,8 @@ export default function RegistrationSummaryReportPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "list_registration_summary",
-          date_from: dateFrom,
-          date_to: dateTo,
+          date_from: invoiceMonth ? `${invoiceMonth}-01` : "",
+          date_to:   invoiceMonth ? lastDayOfMonth(invoiceMonth) : "",
         }),
       });
       const data = await res.json();
@@ -52,7 +65,7 @@ export default function RegistrationSummaryReportPage() {
     setLoading(false);
   }
 
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [invoiceMonth]);
 
   const kw = search.trim().toLowerCase();
   const monthOf = (v) => v ? String(v).slice(0, 7) : "";  // YYYY-MM
@@ -120,7 +133,7 @@ export default function RegistrationSummaryReportPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `รายงานสรุปงานทะเบียน_${dateFrom}_${dateTo}.csv`;
+    a.download = `รายงานสรุปใบปะหน้า คชจ. ขายรถ_${invoiceMonth || "all"}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -131,17 +144,15 @@ export default function RegistrationSummaryReportPage() {
   return (
     <div className="page-container">
       <div className="page-topbar">
-        <h2 className="page-title">📋 รายงานสรุปงานทะเบียน</h2>
+        <h2 className="page-title">📋 รายงานสรุปใบปะหน้า คชจ. ขายรถ</h2>
       </div>
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        <label style={{ fontSize: 13, fontWeight: 600 }}>ตั้งแต่:</label>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}
-          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
-        <label style={{ fontSize: 13, fontWeight: 600 }}>ถึง:</label>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
-          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+        <label style={{ fontSize: 13, fontWeight: 600 }}>📅 เดือนใบกำกับ:</label>
+        <input type="month" value={invoiceMonth} onChange={e => setInvoiceMonth(e.target.value)}
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13, minWidth: 140 }} />
+        <span style={{ fontSize: 11, color: "#6b7280" }}>{invoiceMonth ? fmtMonthLabel(invoiceMonth) : ""}</span>
         <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
           style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}>
           <option value="all">ทุกสาขา</option>
@@ -227,6 +238,8 @@ export default function RegistrationSummaryReportPage() {
                 <th style={th}>วันที่ขาย</th>
                 <th style={{ ...th, textAlign: "right" }}>ยอดจดทะเบียน</th>
                 <th style={{ ...th, textAlign: "right" }}>ค่า พรบ.</th>
+                <th style={{ ...th, textAlign: "right", background: "#a16207", color: "#fff" }}>ประกันรถหายออกแทน</th>
+                <th style={{ ...th, textAlign: "right", background: "#be185d", color: "#fff" }}>ดาวน์/งวดออกแทน</th>
               </tr>
             </thead>
             <tbody>
@@ -269,6 +282,12 @@ export default function RegistrationSummaryReportPage() {
                         </div>
                       )}
                     </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.credit_note_total) > 0 ? "#a16207" : "#9ca3af" }}>
+                      {Number(r.credit_note_total) > 0 ? fmt(r.credit_note_total) : "-"}
+                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.coupon_total) > 0 ? "#be185d" : "#9ca3af" }}>
+                      {Number(r.coupon_total) > 0 ? fmt(r.coupon_total) : "-"}
+                    </td>
                   </tr>
                 );
               })}
@@ -278,6 +297,12 @@ export default function RegistrationSummaryReportPage() {
                 <td colSpan={10} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} ใบ</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#92400e", fontSize: 14 }}>{fmt(totalRegFee)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#065f46", fontSize: 14 }}>{fmt(totalInsPremium)}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#a16207", fontSize: 14 }}>
+                  {fmt(filtered.reduce((s, r) => s + Number(r.credit_note_total || 0), 0))}
+                </td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#be185d", fontSize: 14 }}>
+                  {fmt(filtered.reduce((s, r) => s + Number(r.coupon_total || 0), 0))}
+                </td>
               </tr>
             </tfoot>
           </table>

@@ -21,12 +21,14 @@ const TABS = [
   { key: "custom",             label: "กำหนดเอง",                            emoji: "✏️", color: "#ea580c" },
   { key: "installment_bonus",  label: "บวกเพิ่มจากค่างวดออกแทน",            emoji: "🧮", color: "#0891b2" },
   { key: "cosmos_insurance",   label: "ประกัน COSMOS ซื้อเพิ่ม",             emoji: "🛡️", color: "#92400e" },
+  { key: "other_income",       label: "หักจากบันทึกรายได้",                  emoji: "💰", color: "#dc2626" },
 ];
 
 const EMPTY_ROW = {
   id: null, markup_type: "finance", finance_company: "", cc_min: "", cc_max: "",
   model_code: "", brand: "", branch_group: "all", sale_invoice_no: "", sale_id: null,
-  policy_no: "", markup_amount: "", effective_date: "", end_date: "", status: "active", notes: "",
+  policy_no: "", other_income_tax_invoice_no: "",
+  markup_amount: "", effective_date: "", end_date: "", status: "active", notes: "",
 };
 
 export default function SalePriceMarkupPage({ currentUser }) {
@@ -39,6 +41,8 @@ export default function SalePriceMarkupPage({ currentUser }) {
   const [showHistory, setShowHistory] = useState(false);
   const [saleSearch, setSaleSearch] = useState("");
   const [saleResults, setSaleResults] = useState([]);
+  const [otherSearch, setOtherSearch] = useState("");
+  const [otherResults, setOtherResults] = useState([]);
 
   async function fetchFinance() {
     try {
@@ -73,6 +77,7 @@ export default function SalePriceMarkupPage({ currentUser }) {
     if (edit.markup_type === "finance_cc" && (!edit.finance_company || !edit.cc_min || !edit.branch_group)) { alert("กรอกไฟแนนท์ + CC + ร้านที่ขาย"); return; }
     if (edit.markup_type === "installment_bonus" && !edit.sale_invoice_no) { alert("เลือกใบขาย"); return; }
     if (edit.markup_type === "cosmos_insurance" && !edit.sale_invoice_no) { alert("เลือกรายการประกัน COSMOS"); return; }
+    if (edit.markup_type === "other_income" && !edit.sale_invoice_no && !edit.other_income_tax_invoice_no) { alert("เลือกใบขาย หรือ บันทึกรายได้อื่น"); return; }
 
     setMessage("⏳ กำลังบันทึก...");
     try {
@@ -131,6 +136,19 @@ export default function SalePriceMarkupPage({ currentUser }) {
       const data = await res.json();
       setSaleResults(Array.isArray(data) ? data : []);
     } catch (e) { setSaleResults([]); }
+  }
+
+  async function searchOtherIncome() {
+    const kw = otherSearch.trim();
+    if (!kw) { setOtherResults([]); return; }
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search_other_income_invoices", search: kw }),
+      });
+      const data = await res.json();
+      setOtherResults(Array.isArray(data) ? data : []);
+    } catch (e) { setOtherResults([]); }
   }
 
   const currentTab = TABS.find(t => t.key === activeTab);
@@ -294,6 +312,75 @@ export default function SalePriceMarkupPage({ currentUser }) {
               </>
             )}
 
+            {edit.markup_type === "other_income" && (
+              <>
+                {/* Search 1: moto_sales by invoice */}
+                <Field label="ใบขาย (จาก moto_sales)">
+                  {edit.sale_invoice_no ? (
+                    <div style={{ padding: 8, background: "#ecfdf5", border: "1px solid #10b981", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#065f46" }}>{edit.sale_invoice_no}</span>
+                      <button onClick={() => setEdit({ ...edit, sale_invoice_no: "", sale_id: null })} style={{ ...btnMini, background: "#dc2626" }}>✕</button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input value={saleSearch} onChange={e => setSaleSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchSales()} placeholder="🔍 เลขใบขาย / ลูกค้า / เลขเครื่อง / เลขถัง" style={inp} />
+                        <button onClick={searchSales} style={btnBlue}>ค้นหา</button>
+                      </div>
+                      {saleResults.length > 0 && (
+                        <div style={{ marginTop: 6, maxHeight: 180, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+                          {saleResults.map(s => (
+                            <div key={"s" + s.id} onClick={() => { setEdit({ ...edit, sale_invoice_no: s.invoice_no, sale_id: s.id }); setSaleResults([]); setSaleSearch(""); }}
+                              style={{ padding: 8, borderBottom: "1px solid #f3f4f6", cursor: "pointer", fontSize: 12 }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#ecfdf5"}
+                              onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                              <div style={{ fontWeight: 600, color: "#065f46", fontFamily: "monospace" }}>{s.invoice_no}</div>
+                              <div style={{ color: "#374151" }}>{s.customer_name} · {s.brand} {s.model_series}</div>
+                              <div style={{ color: "#6b7280", fontSize: 11 }}>เครื่อง: {s.engine_no || "-"} · {fmtDate(s.sale_date)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Field>
+
+                {/* Search 2: other_income_tax_invoices */}
+                <Field label="บันทึกรายได้อื่นๆ (TF invoice)">
+                  {edit.other_income_tax_invoice_no ? (
+                    <div style={{ padding: 8, background: "#fffbeb", border: "1px solid #f59e0b", borderRadius: 6, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#92400e" }}>{edit.other_income_tax_invoice_no}</span>
+                      <button onClick={() => setEdit({ ...edit, other_income_tax_invoice_no: "" })} style={{ ...btnMini, background: "#dc2626" }}>✕</button>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <input value={otherSearch} onChange={e => setOtherSearch(e.target.value)} onKeyDown={e => e.key === "Enter" && searchOtherIncome()} placeholder="🔍 เลขใบกำกับ TF / ลูกค้า / Tax ID" style={inp} />
+                        <button onClick={searchOtherIncome} style={btnBlue}>ค้นหา</button>
+                      </div>
+                      {otherResults.length > 0 && (
+                        <div style={{ marginTop: 6, maxHeight: 180, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+                          {otherResults.map(s => (
+                            <div key={"o" + s.branch + s.id} onClick={() => {
+                                setEdit({ ...edit, other_income_tax_invoice_no: s.tax_invoice_no, markup_amount: edit.markup_amount || s.total_amount });
+                                setOtherResults([]); setOtherSearch("");
+                              }}
+                              style={{ padding: 8, borderBottom: "1px solid #f3f4f6", cursor: "pointer", fontSize: 12 }}
+                              onMouseEnter={e => e.currentTarget.style.background = "#fffbeb"}
+                              onMouseLeave={e => e.currentTarget.style.background = "#fff"}>
+                              <div style={{ fontWeight: 600, color: "#92400e", fontFamily: "monospace" }}>{s.tax_invoice_no} <span style={{ fontSize: 10, color: "#9ca3af" }}>· {s.branch}</span></div>
+                              <div style={{ color: "#374151" }}>{s.customer_name || "-"}</div>
+                              <div style={{ color: "#6b7280", fontSize: 11 }}>{fmtDate(s.invoice_date)} · รวม {fmt(s.total_amount)}</div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Field>
+              </>
+            )}
+
             {edit.markup_type === "cosmos_insurance" && (
               <>
                 <Field label="ใบขาย *">
@@ -331,8 +418,10 @@ export default function SalePriceMarkupPage({ currentUser }) {
               </>
             )}
 
-            <Field label="ยอดบวกเพิ่ม (บาท) *">
-              <input type="number" value={edit.markup_amount || ""} onChange={e => setEdit({ ...edit, markup_amount: e.target.value })} style={{ ...inp, fontWeight: 700, fontSize: 16 }} />
+            <Field label={`ยอดบวกเพิ่ม (บาท) *${edit.markup_type === "other_income" && edit.other_income_tax_invoice_no ? " — ตามใบกำกับ TF (แก้ไขไม่ได้)" : ""}`}>
+              <input type="number" value={edit.markup_amount || ""} onChange={e => setEdit({ ...edit, markup_amount: e.target.value })}
+                readOnly={edit.markup_type === "other_income" && !!edit.other_income_tax_invoice_no}
+                style={{ ...inp, fontWeight: 700, fontSize: 16, background: (edit.markup_type === "other_income" && edit.other_income_tax_invoice_no) ? "#f3f4f6" : "#fff", cursor: (edit.markup_type === "other_income" && edit.other_income_tax_invoice_no) ? "not-allowed" : "text" }} />
             </Field>
 
             <div style={{ display: "flex", gap: 8 }}>
@@ -411,6 +500,12 @@ function RuleTable({ title, rows, tab, onEdit, onCancel, onRestore, onDelete, is
                     {r.policy_no && <div style={{ color: "#6b7280", fontSize: 11 }}>กรมธรรม์: {r.policy_no}</div>}
                   </>
                 )}
+                {r.markup_type === "other_income" && (
+                  <>
+                    {r.sale_invoice_no && <div style={{ fontFamily: "monospace", fontWeight: 600, color: "#065f46" }}>📋 {r.sale_invoice_no}</div>}
+                    {r.other_income_tax_invoice_no && <div style={{ fontFamily: "monospace", fontWeight: 600, color: "#92400e", fontSize: 11 }}>💰 {r.other_income_tax_invoice_no}</div>}
+                  </>
+                )}
               </td>
               {showBranch && (
                 <td style={{ ...td, fontSize: 11 }}>
@@ -419,7 +514,7 @@ function RuleTable({ title, rows, tab, onEdit, onCancel, onRestore, onDelete, is
                   ) : <span style={{ color: "#9ca3af" }}>-</span>}
                 </td>
               )}
-              <td style={{ ...td, textAlign: "right", fontWeight: 700, color: tab?.color, fontFamily: "monospace" }}>+{fmt(r.markup_amount)}</td>
+              <td style={{ ...td, textAlign: "right", fontWeight: 700, color: tab?.color, fontFamily: "monospace" }}>{r.markup_type === "other_income" ? "−" : "+"}{fmt(r.markup_amount)}</td>
               <td style={{ ...td, fontSize: 11 }}>
                 {fmtDate(r.effective_date)}
                 {r.end_date && <div style={{ color: "#9ca3af" }}>ถึง {fmtDate(r.end_date)}</div>}

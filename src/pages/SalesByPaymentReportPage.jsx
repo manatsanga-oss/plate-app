@@ -123,6 +123,7 @@ export default function SalesByPaymentReportPage() {
       }
       if (m.markup_type === "installment_bonus") return inv && m.sale_invoice_no === inv;
       if (m.markup_type === "cosmos_insurance") return inv && m.sale_invoice_no === inv;
+      if (m.markup_type === "other_income") return inv && m.sale_invoice_no === inv;
       if (m.markup_type === "custom") {
         if (m.brand && m.brand.toLowerCase() !== brand) return false;
         if (m.model_code && m.model_code.toLowerCase() !== modelCode) return false;
@@ -168,9 +169,12 @@ export default function SalesByPaymentReportPage() {
     return hay.includes(kw);
   });
 
-  // mismatch helper — เทียบ ยอดขาย vs (ราคาขายประกาศ + รายการบวกเพิ่ม + บวกเพิ่มค่านำพา)
+  // mismatch helper — เทียบ ยอดขาย vs (ราคาขายประกาศ + รายการบวกเพิ่ม + บวกเพิ่มค่านำพา - หักจากบันทึกรายได้)
   function markupTotal(r) {
-    return getMarkups(r).reduce((s, m) => s + Number(m.markup_amount || 0), 0) + deliveryFeeBonus(r);
+    return getMarkups(r).reduce((s, m) => {
+      const amt = Number(m.markup_amount || 0);
+      return m.markup_type === "other_income" ? s - amt : s + amt;
+    }, 0) + deliveryFeeBonus(r);
   }
   function isMismatch(r) {
     const sa = Number(r.total_amount || 0);
@@ -466,18 +470,24 @@ export default function SalesByPaymentReportPage() {
                   })()}
                   {(() => {
                     const ms = getMarkups(r);
-                    const total = ms.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
-                    const tipText = ms.map(m =>
-                      `${m.markup_type === "finance" ? m.finance_company
+                    const total = ms.reduce((s, m) => {
+                      const a = Number(m.markup_amount || 0);
+                      return m.markup_type === "other_income" ? s - a : s + a;
+                    }, 0);
+                    const tipText = ms.map(m => {
+                      const sign = m.markup_type === "other_income" ? "−" : "+";
+                      const label = m.markup_type === "finance" ? m.finance_company
                         : m.markup_type === "finance_cc" ? `${m.finance_company} (${m.cc_min}-${m.cc_max || "∞"}cc)`
                         : m.markup_type === "custom" ? `${m.brand || ""} ${m.model_code || "ทุกรุ่น"}`.trim()
                         : m.markup_type === "installment_bonus" ? `ค่างวด ${m.sale_invoice_no}`
                         : m.markup_type === "cosmos_insurance" ? `COSMOS ${m.sale_invoice_no}${m.policy_no ? ` (${m.policy_no})` : ""}`
-                        : "-"}: +${fmt(m.markup_amount)}`
-                    ).join("\n");
+                        : m.markup_type === "other_income" ? `หักรายได้อื่น ${m.sale_invoice_no || m.other_income_tax_invoice_no || ""}`
+                        : "-";
+                      return `${label}: ${sign}${fmt(m.markup_amount)}`;
+                    }).join("\n");
                     return (
-                      <td style={{ ...tdNum, color: "#065f46", fontWeight: total > 0 ? 700 : "inherit" }} title={tipText || ""}>
-                        {total > 0 ? `+${fmt(total)}` : "-"}
+                      <td style={{ ...tdNum, color: total < 0 ? "#b91c1c" : "#065f46", fontWeight: total !== 0 ? 700 : "inherit" }} title={tipText || ""}>
+                        {total > 0 ? `+${fmt(total)}` : total < 0 ? `−${fmt(Math.abs(total))}` : "-"}
                       </td>
                     );
                   })()}
@@ -502,10 +512,15 @@ export default function SalesByPaymentReportPage() {
                     return totalBonus > 0 ? `+${fmt(totalBonus)}` : "-";
                   })()}
                 </td>
-                <td style={{ ...tdNum, color: "#065f46", fontWeight: 700 }}>
+                <td style={{ ...tdNum, fontWeight: 700 }}>
                   {(() => {
-                    const totalMarkup = filtered.reduce((sum, r) => sum + getMarkups(r).reduce((s, m) => s + Number(m.markup_amount || 0), 0), 0);
-                    return totalMarkup > 0 ? `+${fmt(totalMarkup)}` : "-";
+                    const totalMarkup = filtered.reduce((sum, r) => sum + getMarkups(r).reduce((s, m) => {
+                      const a = Number(m.markup_amount || 0);
+                      return m.markup_type === "other_income" ? s - a : s + a;
+                    }, 0), 0);
+                    if (totalMarkup > 0) return <span style={{ color: "#065f46" }}>+{fmt(totalMarkup)}</span>;
+                    if (totalMarkup < 0) return <span style={{ color: "#b91c1c" }}>−{fmt(Math.abs(totalMarkup))}</span>;
+                    return "-";
                   })()}
                 </td>
                 {show.credit_note && <td style={tdNum}>{fmt(totals.credit_note)}</td>}

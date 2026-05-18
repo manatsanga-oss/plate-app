@@ -73,8 +73,13 @@ export default function FastMovingStockPage() {
     if (filterGroup !== "all" && r.product_group !== filterGroup) return false;
     if (filterBrand !== "all" && r.brand !== filterBrand) return false;
     const qty = Number(r.quantity || 0);
-    if (filterStock === "in" && qty <= 0) return false;
-    if (filterStock === "out" && qty > 0) return false;
+    // "สินค้าหมด" / "มีสต๊อก" เช็คจากร้านหลักตามยี่ห้อ: HONDA = ป.เปา, YAMAHA = ห้าห้อง
+    const _s = parseStores(r.stores);
+    const _brand = String(r.brand || "").toUpperCase();
+    const _mainRaw = _brand.includes("YAMAHA") ? _s.haahong : _s.ppao;
+    const mainQty = _mainRaw === "-" ? 0 : Number(_mainRaw) || 0;
+    if (filterStock === "in" && mainQty <= 0) return false;
+    if (filterStock === "out" && mainQty > 0) return false;
     const st = r.stock_type || "สต๊อก";
     if (filterStockType === "stock" && st !== "สต๊อก") return false;
     if (filterStockType === "nostock" && st !== "ไม่สต๊อก") return false;

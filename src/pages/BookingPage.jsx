@@ -303,6 +303,35 @@ export default function BookingPage({ currentUser }) {
       });
       const data = await res.json();
       if (data?.success || data?.booking_id) {
+        // ส่ง Flex Message แจ้งยกเลิกเข้า LINE
+        const thaiDate = cancelTarget.booking_date
+          ? new Date(cancelTarget.booking_date).toLocaleDateString("th-TH")
+          : "-";
+        const driverName = cancelTarget.driver_id
+          ? (drivers.find(d => String(d.driver_id) === String(cancelTarget.driver_id))?.name || "-")
+          : (cancelTarget.driver_name || "-");
+        fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "send_cancel_flex",
+            bookingId: cancelTarget.booking_id,
+            booker_name: cancelTarget.booker_name,
+            branch: cancelTarget.branch,
+            booking_date: thaiDate,
+            booking_time: cancelTarget.booking_time,
+            car_model: cancelTarget.car_model,
+            finance_company: cancelTarget.finance_company,
+            driver_name: driverName,
+            destination: cancelTarget.destination,
+            destination_formatted: cancelTarget.destination_formatted || cancelTarget.destination,
+            distance_text: cancelTarget.distance_text || "",
+            duration_text: cancelTarget.duration_text || "",
+            purpose: cancelTarget.purpose || "",
+            cancel_reason: cancelReason,
+            cancelled_by: currentUser?.name || currentUser?.username || "",
+          }),
+        }).catch(() => {});
         setCancelTarget(null);
         setCancelReason("");
         fetchBookings();

@@ -117,14 +117,21 @@ export default function FastMovingPage() {
   }
 
   async function addModel(id, sel_brand, sel_run, sel_code, sel_type, sel_vehicle_type, sel_engine_cc) {
+    if (!id) { alert("⚠️ ไม่มี part_id"); return false; }
     try {
-      await fetch(API_URL, {
+      const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "update_model", id, sel_brand, sel_run, sel_code, sel_type, sel_vehicle_type, sel_engine_cc }),
       });
+      const txt = await res.text();
+      console.log("addModel response:", res.status, txt);
+      if (!res.ok || !txt) { alert("❌ บันทึกล้มเหลว: status=" + res.status + " body=" + (txt || "EMPTY")); return false; }
+      let data; try { data = JSON.parse(txt); } catch { data = null; }
+      if (Array.isArray(data) && data.length === 0) { alert("⚠️ ไม่มีการบันทึก (response = [])\nอาจ id ผิด หรือ duplicate"); return false; }
       fetchData();
-    } catch {}
+      return true;
+    } catch (e) { alert("❌ Error: " + e.message); return false; }
   }
 
   async function deleteModel(pm_id) {
@@ -156,12 +163,13 @@ export default function FastMovingPage() {
 
   async function confirmAdd() {
     if (!editPopup) return;
-    await addModel(editPopup.id, eBrand, eRun, eCode, eType, eVehicleType, buildCcValue());
-    // refresh popup state with new list
-    const fresh = (await (await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_fast_moving_report" }) })).json());
-    const updated = fresh.find(r => r.id === editPopup.id);
-    if (updated) setEditPopup({ ...editPopup, models: updated.models || [] });
+    const ok = await addModel(editPopup.id, eBrand, eRun, eCode, eType, eVehicleType, buildCcValue());
+    if (!ok) return;
+    // refresh main list (so chip shows in table)
+    fetchData();
+    // clear form + close popup
     setEBrand(""); setEVehicleType(""); setERun(""); setECode(""); setEType(""); setEEngineCc(""); setECcOp("=");
+    setEditPopup(null);
   }
 
   async function removeModel(pm_id) {
@@ -381,8 +389,8 @@ export default function FastMovingPage() {
                   <td onClick={() => openInfoEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer", color: "#1e40af" }}>
                     {r.product_name || <span style={{ color: "#9ca3af" }}>ไม่พบในสต๊อก</span>}
                     {r.is_discontinued && (
-                      <span style={{ marginLeft: 6, padding: "1px 6px", background: "#fee2e2", color: "#b91c1c", fontSize: 10, borderRadius: 8, fontWeight: 700, whiteSpace: "nowrap" }}>
-                        🚫 เลิกผลิต
+                      <span style={{ marginLeft: 6, color: "#dc2626", fontWeight: 700 }}>
+                        (ยกเลิกผลิต)
                       </span>
                     )}
                   </td>
@@ -645,25 +653,21 @@ export default function FastMovingPage() {
               </select>
             </div>
 
-            {eRun && (
-              <>
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>แบบ</label>
-                <select value={eCode} onChange={e => { setECode(e.target.value); setEType(""); }} style={selectStyle}>
-                  <option value="">-- ทุกแบบ --</option>
-                  {eCodeOpts.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>แบบ <span style={{ color: "#9ca3af", fontWeight: 400 }}>(ไม่บังคับ)</span></label>
+              <select value={eCode} onChange={e => { setECode(e.target.value); setEType(""); }} style={selectStyle} disabled={!eRun}>
+                <option value="">-- ทุกแบบ --</option>
+                {eCodeOpts.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
 
-              <div style={{ marginBottom: 10 }}>
-                <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>type</label>
-                <input value={eType} onChange={e => setEType(e.target.value)} list="type-list" placeholder="-- ทุก type --" style={selectStyle} />
-                <datalist id="type-list">
-                  {eTypeOpts.map(t => <option key={t} value={t}>{t}</option>)}
-                </datalist>
-              </div>
-              </>
-            )}
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>type <span style={{ color: "#9ca3af", fontWeight: 400 }}>(ไม่บังคับ)</span></label>
+              <input value={eType} onChange={e => setEType(e.target.value)} list="type-list" placeholder="-- ทุก type --" style={selectStyle} disabled={!eRun} />
+              <datalist id="type-list">
+                {eTypeOpts.map(t => <option key={t} value={t}>{t}</option>)}
+              </datalist>
+            </div>
 
             <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12, padding: "6px 10px", background: "#f9fafb", borderRadius: 6 }}>
               จะบันทึก: <b style={{ color: "#072d6b" }}>{[eBrand, eVehicleType, buildCcValue() && `CC${buildCcValue()}`, eRun, eCode, eType].filter(Boolean).join(" / ") || "ทั้งหมด"}</b>
