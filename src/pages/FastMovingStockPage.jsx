@@ -70,6 +70,8 @@ export default function FastMovingStockPage() {
   const brands = [...new Set(rows.map(r => r.brand).filter(Boolean))].sort();
 
   const filtered = rows.filter(r => {
+    // ซ่อนอะไหล่ที่ยกเลิกผลิต (is_discontinued)
+    if (r.is_discontinued) return false;
     if (filterGroup !== "all" && r.product_group !== filterGroup) return false;
     if (filterBrand !== "all" && r.brand !== filterBrand) return false;
     const qty = Number(r.quantity || 0);
@@ -98,8 +100,8 @@ export default function FastMovingStockPage() {
       if (mode === "has" && qty <= 0) return false;
       if (mode === "none" && qty > 0) return false;
     }
-    // ซ่อนรายการที่หมดสต๊อก + สั่งซื้อภายใน 7 วันที่ผ่านมา
-    if (hideRecentOrdered && Number(r.quantity || 0) <= 0 && r.last_order_date) {
+    // ซ่อนรายการที่สั่งซื้อภายใน 7 วันที่ผ่านมา (นับจากวันที่ปัจจุบันย้อนไป 7 วัน)
+    if (hideRecentOrdered && r.last_order_date) {
       const orderDate = new Date(r.last_order_date);
       if (!isNaN(orderDate)) {
         const diffDays = (Date.now() - orderDate.getTime()) / 86400000;
@@ -219,7 +221,7 @@ export default function FastMovingStockPage() {
         </label>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#dc2626", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: hideRecentOrdered ? "#fef2f2" : "#fff" }}>
           <input type="checkbox" checked={hideRecentOrdered} onChange={e => { setHideRecentOrdered(e.target.checked); setCurrentPage(1); }} />
-          สั่งซื้อ 7 วัน
+          ไม่สั่งซื้อ 7 วัน
         </label>
         <select value={filterStoreStock} onChange={e => { setFilterStoreStock(e.target.value); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #0ea5e9", borderRadius: 8, color: "#0369a1", fontWeight: 600 }}>

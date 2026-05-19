@@ -48,6 +48,12 @@ export default function IncomeRecordPage({ currentUser }) {
   const [tfSelected, setTfSelected] = useState({});
   const [tfLoading, setTfLoading] = useState(false);
   const [tfImporting, setTfImporting] = useState(false);
+  // Finance transfer import (เงินโอนจากไฟแนนท์ที่ยัง pending → ตัดชำระ income_records)
+  const [ftImportOpen, setFtImportOpen] = useState(false);
+  const [ftList, setFtList] = useState([]);
+  const [ftSelected, setFtSelected] = useState({});
+  const [ftLoading, setFtLoading] = useState(false);
+  const [ftImporting, setFtImporting] = useState(false);
   const [incomeCategories, setIncomeCategories] = useState([]); // หมวดจาก master
   const [bankAccounts, setBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -71,6 +77,23 @@ export default function IncomeRecordPage({ currentUser }) {
   // ใบลดหนี้ที่ยังไม่ถูกใช้ — โหลดจาก accounting-api เมื่อเปิด popup
   const [availableCreditNotes, setAvailableCreditNotes] = useState([]);
   const [loadingCreditNotes, setLoadingCreditNotes] = useState(false);
+
+  // Backfill wht_rate ของ items เมื่อ incomeCategories โหลดเสร็จ (กันกรณีเปิด form ก่อน categories โหลดเสร็จ)
+  useEffect(() => {
+    if (!showForm || !incomeCategories.length) return;
+    setForm(f => {
+      const items = f.items.map(it => {
+        const wht = Number(it.wht_rate) || 0;
+        if (!wht && it.income_code) {
+          const ge = incomeCategories.find(g => g.income_code === it.income_code);
+          if (ge && Number(ge.wht_rate) > 0) return { ...it, wht_rate: Number(ge.wht_rate) };
+        }
+        return it;
+      });
+      return { ...f, items };
+    });
+    /* eslint-disable-next-line */
+  }, [incomeCategories, showForm]);
 
   useEffect(() => {
     const now = new Date();
@@ -113,6 +136,46 @@ export default function IncomeRecordPage({ currentUser }) {
       fetchDocs();
     } catch (e) { alert("❌ Import ล้มเหลว: " + e.message); }
     setTfImporting(false);
+  }
+
+  async function openFtImport() {
+    setFtImportOpen(true);
+    setFtLoading(true); setFtSelected({});
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_finance_transfers", date_from: dateFrom || null, date_to: dateTo || null }),
+      });
+      const data = await res.json();
+      // กรองเฉพาะรายการที่ match_status เป็น pending (รอตัดชำระ)
+      const arr = Array.isArray(data) ? data.filter(r => r && (r.match_status || "pending") === "pending") : [];
+      setFtList(arr);
+    } catch { setFtList([]); }
+    setFtLoading(false);
+  }
+
+  async function submitFtImport() {
+    const ftIds = Object.keys(ftSelected).filter(k => ftSelected[k]);
+    if (ftIds.length === 0) { alert("เลือกอย่างน้อย 1 รายการ"); return; }
+    if (selectedIds.length === 0) { alert("กรุณาเลือกรายการรายได้ที่ต้องการตัดชำระจากตารางหลักก่อน"); return; }
+    setFtImporting(true);
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "match_finance_transfers_to_income",
+          ft_ids: ftIds.map(Number),
+          income_doc_ids: selectedIds.map(Number),
+          paid_by: currentUser?.user_id || currentUser?.name || "",
+        }),
+      });
+      const data = await res.json();
+      const r = Array.isArray(data) ? data[0] : data;
+      setMessage(`✅ ตัดชำระจากไฟแนนท์ ${r?.matched ?? ftIds.length} รายการ`);
+      setFtImportOpen(false); setFtList([]); setFtSelected({}); setSelected({});
+      fetchDocs();
+    } catch (e) { alert("❌ ตัดชำระล้มเหลว: " + e.message); }
+    setFtImporting(false);
   }
 
   async function fetchDocs() {
@@ -188,7 +251,17 @@ export default function IncomeRecordPage({ currentUser }) {
       paid_doc_no: d.paid_doc_no || "",
       from_bank_account_id: d.from_bank_account_id || "",
       status: d.status || "draft",
-      items: Array.isArray(d.items) && d.items.length ? d.items : [emptyItem()],
+      // เติม wht_rate อัตโนมัติจากหมวดรายได้ ถ้า item มี income_code แต่ยังไม่มี wht_rate
+      items: Array.isArray(d.items) && d.items.length
+        ? d.items.map(it => {
+            const wht = Number(it.wht_rate) || 0;
+            if (!wht && it.income_code) {
+              const ge = incomeCategories.find(g => g.income_code === it.income_code);
+              if (ge) return { ...it, wht_rate: Number(ge.wht_rate) || 0 };
+            }
+            return it;
+          })
+        : [emptyItem()],
     });
     setShowForm(true);
   }
@@ -532,6 +605,9 @@ export default function IncomeRecordPage({ currentUser }) {
             <span>เลือก: <strong>{selectedIds.length}</strong> / {draftDocs.length} เอกสาร</span>
             <span style={{ color: "#dc2626" }}>ยอดรวม: <strong>{fmt(selectedNet)}</strong> บาท</span>
             <div style={{ flex: 1 }} />
+            <button onClick={openFtImport} style={btn("#7c3aed")}>
+              💰 บันทึกรับชำระจากไฟแนนท์
+            </button>
             <button onClick={openPayDialog} disabled={selectedIds.length === 0}
               style={{ ...btn(selectedIds.length === 0 ? "#9ca3af" : "#059669"), cursor: selectedIds.length === 0 ? "not-allowed" : "pointer" }}>
               💵 บันทึกรับเงิน
@@ -815,6 +891,91 @@ export default function IncomeRecordPage({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* Finance Transfer Import — รับชำระจากไฟแนนท์ (status = pending) */}
+      {ftImportOpen && (
+        <div onClick={() => !ftImporting && setFtImportOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 20, width: "90%", maxWidth: 900, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ margin: 0, color: "#7c3aed" }}>💰 บันทึกรับชำระจากไฟแนนท์ (รอตัดชำระ)</h3>
+              <button onClick={() => setFtImportOpen(false)} disabled={ftImporting} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+
+            <div style={{ padding: 10, background: "#f3e8ff", border: "1px solid #c4b5fd", borderRadius: 8, marginBottom: 10, fontSize: 12, color: "#5b21b6" }}>
+              💡 เลือกรายการรายได้ในตารางหลักไว้ก่อน → เปิด popup นี้ → เลือกเงินโอนที่จะใช้ตัดชำระ → กดยืนยัน
+            </div>
+
+            {ftLoading ? (
+              <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
+            ) : ftList.length === 0 ? (
+              <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>ไม่มีเงินโอนที่รอตัดชำระ</div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 8, fontSize: 13 }}>
+                  <label style={{ cursor: "pointer", fontWeight: 600 }}>
+                    <input type="checkbox"
+                      checked={ftList.length > 0 && ftList.every(r => ftSelected[r.ft_id || r.id])}
+                      onChange={e => {
+                        const all = {};
+                        if (e.target.checked) ftList.forEach(r => { all[r.ft_id || r.id] = true; });
+                        setFtSelected(all);
+                      }} /> เลือกทั้งหมด ({ftList.length} รายการ)
+                  </label>
+                  <span style={{ marginLeft: 12, color: "#6b7280" }}>
+                    เลือกแล้ว: <strong>{Object.values(ftSelected).filter(Boolean).length}</strong>
+                    {" · ยอดรวม: "}
+                    <strong style={{ color: "#15803d" }}>
+                      {fmt(ftList.filter(r => ftSelected[r.ft_id || r.id]).reduce((s, r) => s + Number(r.amount || 0), 0))}
+                    </strong>
+                  </span>
+                </div>
+                <div style={{ overflowX: "auto", maxHeight: 500, overflowY: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead style={{ background: "#f3e8ff", position: "sticky", top: 0 }}>
+                      <tr>
+                        <th style={{ ...th, width: 30 }}></th>
+                        <th style={th}>วันที่โอน</th>
+                        <th style={th}>ไฟแนนท์</th>
+                        <th style={th}>ธนาคารที่รับโอน</th>
+                        <th style={{ ...th, textAlign: "right" }}>จำนวนเงิน</th>
+                        <th style={th}>หมายเหตุ</th>
+                        <th style={th}>ผู้บันทึก</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ftList.map((r, i) => {
+                        const id = r.ft_id || r.id;
+                        return (
+                        <tr key={id} style={{ borderTop: "1px solid #f3f4f6", background: ftSelected[id] ? "#faf5ff" : (i % 2 === 0 ? "#fff" : "#f9fafb") }}>
+                          <td style={{ ...td, textAlign: "center" }}>
+                            <input type="checkbox" checked={!!ftSelected[id]} onChange={e => setFtSelected(prev => ({ ...prev, [id]: e.target.checked }))} />
+                          </td>
+                          <td style={td}>{fmtDate(r.transfer_date)}</td>
+                          <td style={{ ...td, fontWeight: 600 }}>{r.finance_company || "-"}</td>
+                          <td style={td}>
+                            {r.bank_name && <strong>{r.bank_name}</strong>}
+                            {r.account_no && <div style={{ fontFamily: "monospace", fontSize: 11, color: "#6b7280" }}>{r.account_no}</div>}
+                          </td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d", fontWeight: 700 }}>{fmt(r.amount)}</td>
+                          <td style={{ ...td, fontSize: 11, color: "#6b7280" }}>{r.note || "-"}</td>
+                          <td style={{ ...td, fontSize: 11 }}>{r.created_by || "-"}</td>
+                        </tr>
+                      );})}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
+              <button onClick={() => setFtImportOpen(false)} disabled={ftImporting} style={btn("#6b7280")}>ยกเลิก</button>
+              <button onClick={submitFtImport} disabled={ftImporting || Object.values(ftSelected).filter(Boolean).length === 0} style={btn("#7c3aed")}>
+                {ftImporting ? "⏳ กำลังบันทึก..." : `💰 ตัดชำระ ${Object.values(ftSelected).filter(Boolean).length} รายการ`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -932,6 +1093,7 @@ function FormModal({ form, setForm, editTarget, customers, incomeCategories, ban
                 <th style={{ ...th, width: 80, textAlign: "right" }}>จำนวน</th>
                 <th style={{ ...th, width: 120, textAlign: "right" }}>ราคาต่อหน่วย</th>
                 <th style={{ ...th, width: 120, textAlign: "right" }}>รวม</th>
+                <th style={{ ...th, width: 80, textAlign: "right" }}>หัก ณ ที่จ่าย %</th>
                 <th style={{ ...th, width: 50 }}></th>
               </tr>
             </thead>
@@ -958,6 +1120,9 @@ function FormModal({ form, setForm, editTarget, customers, incomeCategories, ban
                     <input type="number" step="0.01" value={it.unit_price} onChange={e => onItemChange(i, "unit_price", e.target.value)} style={{ ...inp, textAlign: "right" }} />
                   </td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmt(it.amount)}</td>
+                  <td style={td}>
+                    <input type="number" step="0.01" value={it.wht_rate} onChange={e => onItemChange(i, "wht_rate", e.target.value)} style={{ ...inp, textAlign: "right" }} />
+                  </td>
                   <td style={{ ...td, textAlign: "center" }}>
                     {form.items.length > 1 && <button onClick={() => removeItem(i)} style={{ ...btnSm, background: "#dc2626" }}>✕</button>}
                   </td>
@@ -984,7 +1149,7 @@ function FormModal({ form, setForm, editTarget, customers, incomeCategories, ban
             <RowInput label="ภาษีมูลค่าเพิ่ม %" value={form.vat_pct} onChange={v => setForm(f => ({ ...f, vat_pct: v }))} suffix={`= ${fmt(vatAmount)}`} />
             <Row label="จำนวนเงินรวมทั้งสิ้น" value={fmt(totalIncVat)} bold />
             <div style={{ height: 1, background: "#e5e7eb", margin: "8px 0" }} />
-            <Row label="หัก ณ ที่จ่าย" value={`= ${fmt(whtAmount)}`} title="คำนวณอัตโนมัติจากอัตรา WHT ของหมวดรายได้แต่ละรายการ" />
+            <Row label="หัก ณ ที่จ่าย (รวมจากรายการ)" value={fmt(whtAmount)} color="#dc2626" title="คำนวณจากอัตรา WHT % ที่ระบุในแต่ละรายการ" />
             <Row label="ยอดเงินสุทธิที่ได้รับ" value={fmt(netToPay)} bold color="#059669" />
           </div>
         </div>
