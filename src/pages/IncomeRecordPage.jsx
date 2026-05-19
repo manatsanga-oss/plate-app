@@ -4,6 +4,7 @@ const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const CUSTOMER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-sales-get-customers";
 const ACCOUNTING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const MOTO_SALES_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-sales-api";
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -54,6 +55,9 @@ export default function IncomeRecordPage({ currentUser }) {
   const [ftSelected, setFtSelected] = useState({});
   const [ftLoading, setFtLoading] = useState(false);
   const [ftImporting, setFtImporting] = useState(false);
+  // Confirm step — เปิดหลัง user เลือกเงินโอนจาก ftImport popup
+  const [ftConfirmOpen, setFtConfirmOpen] = useState(false);
+  const [ftConfirmTransfers, setFtConfirmTransfers] = useState([]);
   const [incomeCategories, setIncomeCategories] = useState([]); // หมวดจาก master
   const [bankAccounts, setBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -65,7 +69,17 @@ export default function IncomeRecordPage({ currentUser }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [message, setMessage] = useState("");
-  const [tab, setTab] = useState("draft"); // draft | pay | history
+  const [tab, setTab] = useState("draft"); // draft | pay | history | allocation
+  // Allocation popup (บันทึกรายละเอียดการรับชำระรายได้อื่น ๆ — แตกย่อยตาม moto_sales)
+  const [allocOpen, setAllocOpen] = useState(false);
+  const [allocDoc, setAllocDoc] = useState(null);
+  const [allocCategory, setAllocCategory] = useState("");
+  const [allocSales, setAllocSales] = useState([]);
+  const [allocSalesLoading, setAllocSalesLoading] = useState(false);
+  const [allocSearch, setAllocSearch] = useState("");
+  const [allocLines, setAllocLines] = useState([]); // [{ sale_id, invoice_no, amount, note }]
+  const [allocSaving, setAllocSaving] = useState(false);
+  const [allocShowSelectedOnly, setAllocShowSelectedOnly] = useState(false);
   const [selected, setSelected] = useState({}); // { income_doc_id: true }
   const [payDialog, setPayDialog] = useState(false);
   const [payForm, setPayForm] = useState({ paid_date: todayISO(), payment_note: "" });
@@ -154,10 +168,28 @@ export default function IncomeRecordPage({ currentUser }) {
     setFtLoading(false);
   }
 
-  async function submitFtImport() {
+  // Step 1: หลังเลือกเงินโอน → ปิด popup เลือก → เปิด popup ยืนยัน
+  function proceedFtConfirm() {
     const ftIds = Object.keys(ftSelected).filter(k => ftSelected[k]);
     if (ftIds.length === 0) { alert("เลือกอย่างน้อย 1 รายการ"); return; }
     if (selectedIds.length === 0) { alert("กรุณาเลือกรายการรายได้ที่ต้องการตัดชำระจากตารางหลักก่อน"); return; }
+    const selectedTransfers = ftList.filter(r => ftSelected[r.ft_id || r.id]);
+    setFtConfirmTransfers(selectedTransfers);
+    setFtImportOpen(false);
+    setFtConfirmOpen(true);
+  }
+
+  // Step 2: ยืนยันแล้ว → ส่งจริง (ตรวจยอดตรงก่อน)
+  async function submitFtImport() {
+    const ftIds = ftConfirmTransfers.map(r => r.ft_id || r.id);
+    if (ftIds.length === 0 || selectedIds.length === 0) return;
+    const incomeTotal = filtered.filter(d => selected[d.income_doc_id])
+      .reduce((s, d) => s + Number(d.net_to_pay || d.total || 0), 0);
+    const ftTotal = ftConfirmTransfers.reduce((s, r) => s + Number(r.amount || 0), 0);
+    if (Math.abs(incomeTotal - ftTotal) > 0.01) {
+      alert(`❌ ยอดไม่ตรงกัน — รายได้ ${incomeTotal.toFixed(2)} ≠ เงินโอน ${ftTotal.toFixed(2)} (ส่วนต่าง ${(incomeTotal - ftTotal).toFixed(2)})`);
+      return;
+    }
     setFtImporting(true);
     try {
       const res = await fetch(ACCOUNTING_URL, {
@@ -172,10 +204,116 @@ export default function IncomeRecordPage({ currentUser }) {
       const data = await res.json();
       const r = Array.isArray(data) ? data[0] : data;
       setMessage(`✅ ตัดชำระจากไฟแนนท์ ${r?.matched ?? ftIds.length} รายการ`);
-      setFtImportOpen(false); setFtList([]); setFtSelected({}); setSelected({});
+      setFtConfirmOpen(false); setFtConfirmTransfers([]);
+      setFtList([]); setFtSelected({}); setSelected({});
       fetchDocs();
     } catch (e) { alert("❌ ตัดชำระล้มเหลว: " + e.message); }
     setFtImporting(false);
+  }
+
+  // === Allocation (บันทึกรายละเอียดการรับชำระรายได้อื่น ๆ) ===
+  function openAllocation(doc) {
+    setAllocDoc(doc);
+    setAllocCategory("");
+    setAllocLines([]);
+    setAllocSales([]);
+    setAllocSearch("");
+    setAllocShowSelectedOnly(false);
+    setAllocOpen(true);
+    // load existing allocations if any
+    fetch(ACCOUNTING_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_income_allocations", income_doc_id: doc.income_doc_id }),
+    }).then(r => r.json()).then(data => {
+      const arr = Array.isArray(data) ? data.filter(x => x && (x.sale_id || x.invoice_no)) : [];
+      if (arr.length) {
+        setAllocCategory(arr[0].category || "");
+        setAllocLines(arr.map(a => ({ sale_id: a.sale_id, invoice_no: a.invoice_no, customer_name: a.customer_name, model: a.model, amount: Number(a.amount || 0), note: a.note || "" })));
+        setAllocShowSelectedOnly(true);
+        loadMotoSales();
+      }
+    }).catch(() => {});
+  }
+  async function loadMotoSales() {
+    setAllocSalesLoading(true);
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        // ส่ง empty string ให้ workflow template ทำงาน (COALESCE จะใช้ default 1900-9999)
+        body: JSON.stringify({ action: "list_car_payment_receipts", date_from: "", date_to: "" }),
+      });
+      const data = await res.json();
+      const arr = Array.isArray(data) ? data : (data?.rows || []);
+      const getFc = s => s?.sale_finance_company || s?.finance_company || s?.finance || "";
+      // แสดงทั้งหมด — ผู้ใช้ใช้ search box ค้นเอง
+      const normalized = arr
+        .filter(s => s && (s.invoice_no || s.tax_invoice_no || s.sale_doc_no || s.doc_no || s.id || s.sale_id || s.sale_invoice_no))
+        .map(s => ({
+          id: s.id || s.sale_id,
+          // ใช้เลขใบกำกับภาษีเป็นหลัก (ไม่ใช่เลขใบขาย)
+          invoice_no: s.tax_invoice_no || s.sale_invoice_no || s.invoice_no || s.sale_doc_no || s.doc_no || "",
+          sale_date: s.invoice_date || s.sale_date || s.doc_date,
+          customer_name: s.customer_name || s.sale_customer_name || s.customer || "",
+          model_series: s.model_name || s.sale_model_code || s.model_series || s.model || "",
+          engine_no: s.engine_no || "",
+          chassis_no: s.chassis_no || s.frame_no || "",
+          total_amount: s.total_amount || s.sale_price || s.net_amount || s.total || 0,
+          finance_company: getFc(s),
+          sale_customer_name: s.sale_customer_name || "",
+        }));
+      console.log("loadMotoSales: loaded", normalized.length, "rows");
+      setAllocSales(normalized);
+    } catch { setAllocSales([]); }
+    setAllocSalesLoading(false);
+  }
+  function addAllocLine(s) {
+    // เทียบโดยใช้ invoice_no เป็นหลัก (id อาจ undefined สำหรับใบกำกับ)
+    if (allocLines.some(l => l.invoice_no === s.invoice_no || (s.id && l.sale_id === s.id))) return;
+    setAllocLines(arr => [...arr, {
+      sale_id: s.id, invoice_no: s.invoice_no,
+      customer_name: s.customer_name, model: s.model_series || s.model,
+      amount: 0, note: ""
+    }]);
+  }
+  function updateAllocLine(idx, field, val) {
+    setAllocLines(arr => arr.map((l, i) => i === idx ? { ...l, [field]: val } : l));
+  }
+  function removeAllocLine(idx) {
+    setAllocLines(arr => arr.filter((_, i) => i !== idx));
+  }
+  async function saveAllocation() {
+    if (!allocDoc) return;
+    if (!allocCategory) { alert("กรุณาเลือกประเภทรายรับ"); return; }
+    if (allocLines.length === 0) { alert("เพิ่มอย่างน้อย 1 รายการ"); return; }
+    const sum = allocLines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    const target = Number(allocDoc.total || allocDoc.net_to_pay || 0);
+    if (Math.abs(sum - target) > 0.01) {
+      if (!window.confirm(`ยอดรวมที่กระจาย ${sum.toFixed(2)} ไม่ตรงกับยอดรวม VAT ${target.toFixed(2)} (ส่วนต่าง ${(sum - target).toFixed(2)}) — บันทึกต่อหรือไม่?`)) return;
+    }
+    setAllocSaving(true);
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_income_allocations",
+          income_doc_id: allocDoc.income_doc_id,
+          income_doc_no: allocDoc.income_doc_no,
+          category: allocCategory,
+          allocations: allocLines.map(l => ({
+            sale_id: l.sale_id || null, invoice_no: l.invoice_no,
+            customer_name: l.customer_name, model: l.model,
+            amount: Number(l.amount || 0), note: l.note || ""
+          })),
+          created_by: currentUser?.user_id || currentUser?.name || "system",
+        }),
+      });
+      const data = await res.json();
+      const r = Array.isArray(data) ? data[0] : data;
+      if (r?.error_msg) throw new Error(r.error_msg);
+      setMessage(`✅ บันทึกรายละเอียด ${allocLines.length} รายการสำเร็จ`);
+      setAllocOpen(false); setAllocDoc(null); setAllocLines([]);
+    } catch (e) { alert("❌ บันทึกล้มเหลว: " + e.message); }
+    setAllocSaving(false);
   }
 
   async function fetchDocs() {
@@ -562,6 +700,7 @@ export default function IncomeRecordPage({ currentUser }) {
         {[
           ["draft", "📑 รายการรายได้"],
           ["pay", "💵 บันทึกรับเงิน"],
+          ["allocation", "📝 รายละเอียดการรับชำระ"],
           ["history", "📋 ประวัติการรับเงิน"],
         ].map(([k, label]) => (
           <button key={k} onClick={() => { setTab(k); setSelected({}); }}
@@ -614,6 +753,49 @@ export default function IncomeRecordPage({ currentUser }) {
             </button>
           </div>
           <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} />
+        </>
+      )}
+
+      {/* TAB: รายละเอียดการรับชำระ — เลือกรายการ paid → แตกย่อยตาม moto_sales */}
+      {tab === "allocation" && (
+        <>
+          <div style={{ padding: "10px 14px", background: "#ede9fe", border: "1px solid #c4b5fd", borderRadius: 10, marginBottom: 12, fontSize: 13, color: "#5b21b6" }}>
+            💡 รายการที่ <strong>ชำระเงินแล้ว</strong> (status = paid) — คลิก "📝 บันทึกรายละเอียด" เพื่อแตกยอดตามรถที่ขายแต่ละคัน
+          </div>
+          <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
+            {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
+             paidDocs.length === 0 ? <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีรายการที่ชำระแล้ว</div> :
+             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead style={{ background: "#072d6b", color: "#fff" }}>
+                <tr>
+                  <th style={th}>เลขเอกสาร</th>
+                  <th style={th}>วันที่</th>
+                  <th style={th}>Customer</th>
+                  <th style={th}>เลขที่อ้างอิง</th>
+                  <th style={th}>รายละเอียด</th>
+                  <th style={{ ...th, textAlign: "right" }}>ยอดสุทธิ</th>
+                  <th style={th}>เลขจ่าย</th>
+                  <th style={{ ...th, textAlign: "center" }}>จัดการ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paidDocs.map(d => (
+                  <tr key={d.income_doc_id} style={{ borderTop: "1px solid #e5e7eb", background: "#f0fdf4" }}>
+                    <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#072d6b" }}>{d.income_doc_no}</td>
+                    <td style={td}>{fmtDate(d.doc_date)}</td>
+                    <td style={td}>{d.customer_name || "-"}</td>
+                    <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{d.reference_no || "-"}</td>
+                    <td style={{ ...td, fontSize: 12 }}>{d.description || "-"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#065f46" }}>{fmt(d.net_to_pay || d.total)}</td>
+                    <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{d.paid_doc_no || "-"}</td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      <button onClick={() => openAllocation(d)} style={btn("#7c3aed")}>📝 รายละเอียด</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+             </table>}
+          </div>
         </>
       )}
 
@@ -969,9 +1151,219 @@ export default function IncomeRecordPage({ currentUser }) {
 
             <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
               <button onClick={() => setFtImportOpen(false)} disabled={ftImporting} style={btn("#6b7280")}>ยกเลิก</button>
-              <button onClick={submitFtImport} disabled={ftImporting || Object.values(ftSelected).filter(Boolean).length === 0} style={btn("#7c3aed")}>
-                {ftImporting ? "⏳ กำลังบันทึก..." : `💰 ตัดชำระ ${Object.values(ftSelected).filter(Boolean).length} รายการ`}
+              <button onClick={proceedFtConfirm} disabled={ftImporting || Object.values(ftSelected).filter(Boolean).length === 0} style={btn("#7c3aed")}>
+                {`➡️ ถัดไป (${Object.values(ftSelected).filter(Boolean).length} รายการ)`}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm popup — ยืนยันก่อนตัดชำระ (ยอดต้องตรง) */}
+      {ftConfirmOpen && (() => {
+        const incomeSelected = filtered.filter(d => selected[d.income_doc_id]);
+        const incomeTotal = incomeSelected.reduce((s, d) => s + Number(d.net_to_pay || d.total || 0), 0);
+        const ftTotal = ftConfirmTransfers.reduce((s, r) => s + Number(r.amount || 0), 0);
+        const diff = incomeTotal - ftTotal;
+        const matched = Math.abs(diff) <= 0.01;
+        return (
+        <div onClick={() => !ftImporting && setFtConfirmOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 20, width: "92%", maxWidth: 1000, maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ margin: 0, color: "#7c3aed" }}>✅ ยืนยันการตัดชำระจากไฟแนนท์</h3>
+              <button onClick={() => setFtConfirmOpen(false)} disabled={ftImporting} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <div style={{ padding: 10, background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8 }}>
+                <div style={{ fontWeight: 700, color: "#065f46", marginBottom: 6 }}>📥 รายได้ที่ตัด ({incomeSelected.length})</div>
+                <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                  {incomeSelected.map(d => (
+                    <div key={d.income_doc_id} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid #d1fae5", display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontFamily: "monospace" }}>{d.income_doc_no}</span>
+                      <span style={{ fontWeight: 600, color: "#065f46" }}>{fmt(d.net_to_pay || d.total)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 8, paddingTop: 6, borderTop: "2px solid #065f46", display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#065f46" }}>
+                  <span>รวม</span><span>{fmt(incomeTotal)}</span>
+                </div>
+              </div>
+              <div style={{ padding: 10, background: "#f3e8ff", border: "1px solid #c4b5fd", borderRadius: 8 }}>
+                <div style={{ fontWeight: 700, color: "#5b21b6", marginBottom: 6 }}>💰 เงินโอนที่ใช้ตัด ({ftConfirmTransfers.length})</div>
+                <div style={{ maxHeight: 200, overflowY: "auto" }}>
+                  {ftConfirmTransfers.map(r => (
+                    <div key={r.ft_id || r.id} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid #ddd6fe", display: "flex", justifyContent: "space-between" }}>
+                      <span>{fmtDate(r.transfer_date)} · {r.finance_company}</span>
+                      <span style={{ fontWeight: 600, color: "#5b21b6" }}>{fmt(r.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 8, paddingTop: 6, borderTop: "2px solid #5b21b6", display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#5b21b6" }}>
+                  <span>รวม</span><span>{fmt(ftTotal)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: 14, background: matched ? "#dcfce7" : "#fee2e2", border: `2px solid ${matched ? "#10b981" : "#dc2626"}`, borderRadius: 8, marginBottom: 14, textAlign: "center", fontSize: 16, fontWeight: 700, color: matched ? "#065f46" : "#991b1b" }}>
+              {matched ? (
+                <>✅ ยอดตรงกัน {fmt(incomeTotal)}</>
+              ) : (
+                <>⚠ ยอดไม่ตรงกัน — ส่วนต่าง <strong>{fmt(diff)}</strong> บาท (ไม่สามารถบันทึกได้)</>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => { setFtConfirmOpen(false); setFtImportOpen(true); }} disabled={ftImporting} style={btn("#6b7280")}>← ย้อนกลับ</button>
+              <button onClick={submitFtImport} disabled={ftImporting || !matched}
+                style={{ ...btn(matched ? "#7c3aed" : "#9ca3af"), cursor: (ftImporting || !matched) ? "not-allowed" : "pointer" }}>
+                {ftImporting ? "⏳ กำลังบันทึก..." : "💾 บันทึกตัดชำระ"}
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+
+      {/* Allocation popup — แตกย่อยรายได้ตาม moto_sales */}
+      {allocOpen && allocDoc && (
+        <div onClick={() => !allocSaving && setAllocOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 20, width: "92%", maxWidth: 1100, maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ margin: 0, color: "#7c3aed" }}>📝 บันทึกรายละเอียดการรับชำระ — {allocDoc.income_doc_no}</h3>
+              <button onClick={() => setAllocOpen(false)} disabled={allocSaving} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+
+            <div style={{ padding: 10, background: "#f8fafc", borderRadius: 8, marginBottom: 12, fontSize: 13, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
+              <div><span style={{ color: "#6b7280" }}>Customer:</span> <strong>{allocDoc.customer_name || "-"}</strong></div>
+              <div><span style={{ color: "#6b7280" }}>เลขที่อ้างอิง:</span> <strong style={{ fontFamily: "monospace" }}>{allocDoc.reference_no || "-"}</strong></div>
+              <div><span style={{ color: "#6b7280" }}>ยอดรวม VAT:</span> <strong style={{ color: "#0369a1", fontSize: 15 }}>{fmt(allocDoc.total)}</strong></div>
+              <div><span style={{ color: "#6b7280" }}>ยอดสุทธิ:</span> <strong style={{ color: "#065f46", fontSize: 15 }}>{fmt(allocDoc.net_to_pay || allocDoc.total)}</strong></div>
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <label style={{ fontSize: 13, fontWeight: 600 }}>ประเภทการรับชำระ *</label>
+              <select value={allocCategory} onChange={e => {
+                  setAllocCategory(e.target.value);
+                  if (e.target.value && allocSales.length === 0) loadMotoSales();
+                }}
+                style={{ ...inp, marginTop: 4 }}>
+                <option value="">-- เลือกประเภทการรับชำระ --</option>
+                {incomeCategories.map(g => (
+                  <option key={g.income_code} value={g.income_code}>{g.income_code} — {g.income_name}</option>
+                ))}
+              </select>
+            </div>
+
+            {allocCategory && (
+              <>
+                <div style={{ marginBottom: 8, display: "flex", gap: 10, alignItems: "center" }}>
+                  <input type="text" value={allocSearch} onChange={e => setAllocSearch(e.target.value)}
+                    placeholder="🔎 ค้นหา (เลขที่ใบขาย / ลูกค้า / รุ่น)"
+                    style={{ ...inp, flex: 1 }} />
+                  <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "6px 10px", border: "1px solid #c4b5fd", borderRadius: 6, background: allocShowSelectedOnly ? "#ede9fe" : "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    <input type="checkbox" checked={allocShowSelectedOnly} onChange={e => setAllocShowSelectedOnly(e.target.checked)} />
+                    แสดงเฉพาะที่เลือก ({allocLines.length})
+                  </label>
+                  <button onClick={loadMotoSales} disabled={allocSalesLoading} style={btn("#0369a1")}>🔄 โหลดข้อมูลรถ</button>
+                </div>
+                {allocSalesLoading ? (
+                  <div style={{ padding: 20, textAlign: "center", color: "#6b7280" }}>กำลังโหลดข้อมูลรถ...</div>
+                ) : (
+                  <div style={{ maxHeight: 250, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8, marginBottom: 12 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead style={{ background: "#f3f4f6", position: "sticky", top: 0 }}>
+                        <tr>
+                          <th style={{ ...th, width: 30 }}></th>
+                          <th style={th}>เลขที่ใบขาย</th>
+                          <th style={th}>วันที่</th>
+                          <th style={th}>ลูกค้า</th>
+                          <th style={th}>รุ่น</th>
+                          <th style={{ ...th, fontSize: 11 }}>เลขเครื่อง</th>
+                          <th style={{ ...th, fontSize: 11 }}>เลขตัวถัง</th>
+                          <th style={th}>ชื่อลูกค้า (ใบขาย)</th>
+                          <th style={{ ...th, width: 130, textAlign: "right" }}>จำนวนรับ</th>
+                          <th style={th}>หมายเหตุ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {allocSales.filter(s => {
+                          // filter เฉพาะที่เลือก ถ้าติ๊ก toggle
+                          if (allocShowSelectedOnly) {
+                            const sel = allocLines.some(l => l.invoice_no === s.invoice_no || (s.id && l.sale_id === s.id));
+                            if (!sel) return false;
+                          }
+                          if (!allocSearch.trim()) return true;
+                          const q = allocSearch.toLowerCase();
+                          return [s.invoice_no, s.customer_name, s.sale_customer_name, s.model_series, s.model, s.engine_no, s.chassis_no, s.frame_no]
+                            .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+                        }).slice(0, 500).map((s, idx) => {
+                          const lineIdx = allocLines.findIndex(l => (l.sale_id && l.sale_id === s.id) || l.invoice_no === s.invoice_no);
+                          const selected = lineIdx >= 0;
+                          const line = selected ? allocLines[lineIdx] : null;
+                          return (
+                          <tr key={s.id || s.invoice_no || s.chassis_no || idx} style={{ borderTop: "1px solid #f3f4f6", background: selected ? "#fef9c3" : undefined }}>
+                            <td style={{ ...td, textAlign: "center" }}>
+                              <input type="checkbox" checked={selected} onChange={e => {
+                                if (e.target.checked) addAllocLine(s);
+                                else removeAllocLine(lineIdx);
+                              }} />
+                            </td>
+                            <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{s.invoice_no}</td>
+                            <td style={td}>{fmtDate(s.sale_date)}</td>
+                            <td style={td}>{s.customer_name || "-"}</td>
+                            <td style={td}>{s.model_series || s.model || "-"}</td>
+                            <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.engine_no || "-"}</td>
+                            <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.chassis_no || s.frame_no || "-"}</td>
+                            <td style={td}>{s.sale_customer_name || "-"}</td>
+                            <td style={td}>
+                              {selected ? (
+                                <input type="number" step="0.01" value={line.amount}
+                                  onChange={e => updateAllocLine(lineIdx, "amount", e.target.value)}
+                                  style={{ ...inp, textAlign: "right", fontFamily: "monospace", padding: "2px 6px" }} />
+                              ) : <span style={{ color: "#d1d5db" }}>—</span>}
+                            </td>
+                            <td style={td}>
+                              {selected ? (
+                                <input type="text" value={line.note}
+                                  onChange={e => updateAllocLine(lineIdx, "note", e.target.value)}
+                                  style={{ ...inp, padding: "2px 6px" }} />
+                              ) : <span style={{ color: "#d1d5db" }}>—</span>}
+                            </td>
+                          </tr>
+                        );})}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Summary footer */}
+            <div style={{ marginTop: 10, padding: 12, background: "#f3f4f6", borderRadius: 8, display: "flex", justifyContent: "space-between", alignItems: "center", fontWeight: 700 }}>
+              <span style={{ color: "#7c3aed" }}>เลือกแล้ว: {allocLines.length} รายการ</span>
+              <span>รวมที่กระจาย: <span style={{ fontFamily: "monospace", color: "#7c3aed" }}>{fmt(allocLines.reduce((s, l) => s + Number(l.amount || 0), 0))}</span></span>
+              <span style={{ fontSize: 13 }}>เป้าหมาย (ยอดรวม VAT): <span style={{ fontFamily: "monospace" }}>{fmt(allocDoc.total || allocDoc.net_to_pay)}</span></span>
+              {Math.abs(allocLines.reduce((s, l) => s + Number(l.amount || 0), 0) - Number(allocDoc.total || allocDoc.net_to_pay || 0)) <= 0.01 ?
+                <span style={{ color: "#10b981" }}>✓ ตรงกัน</span> :
+                <span style={{ color: "#dc2626" }}>⚠ ไม่ตรง ({fmt(allocLines.reduce((s, l) => s + Number(l.amount || 0), 0) - Number(allocDoc.total || allocDoc.net_to_pay || 0))})</span>}
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+              <button onClick={() => setAllocOpen(false)} disabled={allocSaving} style={btn("#6b7280")}>ยกเลิก</button>
+              {(() => {
+                const sum = allocLines.reduce((s, l) => s + Number(l.amount || 0), 0);
+                const target = Number(allocDoc.total || allocDoc.net_to_pay || 0);
+                const exceeded = sum - target > 0.01;
+                const disabled = allocSaving || allocLines.length === 0 || exceeded;
+                return (
+                  <button onClick={saveAllocation} disabled={disabled}
+                    style={{ ...btn(disabled ? "#9ca3af" : "#7c3aed"), cursor: disabled ? "not-allowed" : "pointer" }}
+                    title={exceeded ? "ยอดที่กระจายเกินเป้าหมาย — แก้ก่อนบันทึก" : ""}>
+                    {allocSaving ? "⏳ กำลังบันทึก..." : "💾 บันทึกรายละเอียด"}
+                  </button>
+                );
+              })()}
             </div>
           </div>
         </div>
