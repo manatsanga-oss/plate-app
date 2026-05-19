@@ -25,6 +25,7 @@ const emptyForm = () => ({
 export default function YamahaOrderPage({ currentUser }) {
   const [orders, setOrders] = useState([]);
   const [deposits, setDeposits] = useState([]);
+  const [seizedDocs, setSeizedDocs] = useState(new Set());
   const [models, setModels] = useState([]);
   const [techs, setTechs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -145,6 +146,12 @@ export default function YamahaOrderPage({ currentUser }) {
       const res = await fetch(YAMAHA_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const data = await res.json();
       setDeposits(Array.isArray(data) ? data : []);
+    } catch {}
+    try {
+      const sRes = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposit_seizures", brand: "YAMAHA" }) });
+      const sData = await sRes.json();
+      const seized = (Array.isArray(sData) ? sData : []).filter(s => s?.deposit_doc_no);
+      setSeizedDocs(new Set(seized.map(s => s.deposit_doc_no)));
     } catch {}
     try {
       const r = await fetch(USER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_users" }) }).then(res => res.json());
@@ -448,6 +455,11 @@ export default function YamahaOrderPage({ currentUser }) {
   }
 
   const filtered = orders.filter(o => {
+    // ตัดรายการที่ถูกยึดเงินมัดจำแล้ว
+    if (seizedDocs.has(o.deposit_doc_no)) return false;
+    // ตัดรายการที่จับคู่กับเงินมัดจำไม่ได้ (สถานะ "ปิดซ่อม") ออก
+    const hasDeposit = deposits.some(d => d.receipt_no === o.deposit_doc_no);
+    if (!hasDeposit) return false;
     if (filterStatus !== "all" && o.status !== filterStatus) return false;
     if (filterParking !== "all" && (o.parking_status || "") !== filterParking) return false;
     if (!search.trim()) return true;

@@ -33,6 +33,7 @@ const emptyForm = () => ({
 export default function SparePartsOrderPage({ currentUser }) {
   const [orders, setOrders] = useState([]);
   const [deposits, setDeposits] = useState([]);
+  const [seizedDocs, setSeizedDocs] = useState(new Set());
   const [models, setModels] = useState([]);
   const [techs, setTechs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -119,6 +120,11 @@ export default function SparePartsOrderPage({ currentUser }) {
     } catch {}
     try { const r = await api("get_honda_deposits"); setDeposits(norm(r)); } catch {}
     try { const r = await api("get_repair_deposits"); setRepairDeposits(norm(r)); } catch {}
+    try {
+      const r = await api("list_deposit_seizures", { brand: "HONDA" });
+      const seized = norm(r).filter(s => s?.deposit_doc_no);
+      setSeizedDocs(new Set(seized.map(s => s.deposit_doc_no)));
+    } catch {}
     try { const r = await api("get_part_substitutes"); setPartSubstitutes(norm(r)); } catch {}
     try { const r = await api("get_car_model_names"); console.log("models:", r); setModels(norm(r)); } catch (e) { console.error("models err:", e); }
     try {
@@ -497,6 +503,8 @@ export default function SparePartsOrderPage({ currentUser }) {
   }
 
   const filtered = orders.filter(o => {
+    // ซ่อน order ที่เงินมัดจำถูกยึดแล้ว
+    if (seizedDocs.has(o.deposit_doc_no)) return false;
     // ซ่อน order ที่จับคู่กับตารางเงินมัดจำไม่ได้ (ปิด Job/ปิดซ่อม) — แสดงเฉพาะที่มีเงินมัดจำคงเหลือ
     if (deposits.length > 0 || repairDeposits.length > 0) {
       const hasDeposit = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no)

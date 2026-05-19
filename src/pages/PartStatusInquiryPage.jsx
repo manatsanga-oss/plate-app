@@ -13,12 +13,14 @@ function fmtDate(v) {
 const STATUS_COLOR = {
   "มาครบ": "#10b981", "มาไม่ครบ": "#f59e0b", "อะไหล่ค้างส่ง": "#ef4444",
   "เปิดงาน": "#ec4899", "สั่งซื้อแล้ว": "#3b82f6", "ปิดงานซ่อม": "#dc2626",
+  "ยึดเงินมัดจำ": "#7c3aed",
 };
 
 export default function PartStatusInquiryPage() {
   const [partCode, setPartCode] = useState("");
   const [hondaRows, setHondaRows] = useState([]);
   const [yamahaRows, setYamahaRows] = useState([]);
+  const [seizedDocs, setSeizedDocs] = useState(new Set());
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [message, setMessage] = useState("");
@@ -28,12 +30,15 @@ export default function PartStatusInquiryPage() {
     if (!code) { setMessage("⚠️ กรอกรหัสอะไหล่"); return; }
     setLoading(true); setMessage(""); setSearched(true);
     try {
-      const [h, y] = await Promise.all([
+      const [h, y, s] = await Promise.all([
         fetch(HONDA_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "inquire_part_status", part_code: code }) }).then(r => r.json()).catch(() => []),
         fetch(YAMAHA_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "inquire_part_status", part_code: code }) }).then(r => r.json()).catch(() => []),
+        fetch(HONDA_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposit_seizures" }) }).then(r => r.json()).catch(() => []),
       ]);
       setHondaRows(Array.isArray(h) ? h.filter(r => r && r.order_no) : []);
       setYamahaRows(Array.isArray(y) ? y.filter(r => r && r.order_no) : []);
+      const seized = Array.isArray(s) ? s.filter(x => x?.deposit_doc_no) : [];
+      setSeizedDocs(new Set(seized.map(x => x.deposit_doc_no)));
     } catch (e) { setMessage("❌ ค้นหาล้มเหลว: " + e.message); }
     setLoading(false);
   }
@@ -67,8 +72,11 @@ export default function PartStatusInquiryPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
-                  <tr key={r.order_id + "_" + i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                {rows.map((r, i) => {
+                  const isSeized = r.deposit_doc_no && seizedDocs.has(r.deposit_doc_no);
+                  const displayStatus = isSeized ? "ยึดเงินมัดจำ" : (r.status || "-");
+                  return (
+                  <tr key={r.order_id + "_" + i} style={{ borderTop: "1px solid #e5e7eb", background: isSeized ? "#faf5ff" : undefined }}>
                     <td style={td}>{i + 1}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.deposit_doc_no || "-"}</td>
                     <td style={td}>{r.customer_name || "-"}</td>
@@ -77,8 +85,8 @@ export default function PartStatusInquiryPage() {
                     <td style={{ ...td, fontFamily: "monospace" }}>{r.license_plate || "-"}</td>
                     <td style={td}>{r.parking_status || "-"}</td>
                     <td style={td}>
-                      <span style={{ padding: "2px 8px", borderRadius: 10, background: (STATUS_COLOR[r.status] || "#6b7280") + "33", color: STATUS_COLOR[r.status] || "#374151", fontSize: 11, fontWeight: 600 }}>
-                        {r.status || "-"}
+                      <span style={{ padding: "2px 8px", borderRadius: 10, background: (STATUS_COLOR[displayStatus] || "#6b7280") + "33", color: STATUS_COLOR[displayStatus] || "#374151", fontSize: 11, fontWeight: 600 }}>
+                        {displayStatus}
                       </span>
                     </td>
                     <td style={{ ...td, fontFamily: "monospace" }}>
@@ -93,7 +101,7 @@ export default function PartStatusInquiryPage() {
                     <td style={{ ...td, fontSize: 11, color: "#374151" }}>{r.part_name || "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{fmt(r.quantity)}</td>
                   </tr>
-                ))}
+                );})}
               </tbody>
             </table>
           </div>

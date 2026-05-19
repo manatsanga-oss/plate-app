@@ -80,6 +80,7 @@ export default function IncomeRecordPage({ currentUser }) {
   const [allocLines, setAllocLines] = useState([]); // [{ sale_id, invoice_no, amount, note }]
   const [allocSaving, setAllocSaving] = useState(false);
   const [allocShowSelectedOnly, setAllocShowSelectedOnly] = useState(false);
+  const [allocUsedInvoices, setAllocUsedInvoices] = useState(new Set());
   const [selected, setSelected] = useState({}); // { income_doc_id: true }
   const [payDialog, setPayDialog] = useState(false);
   const [payForm, setPayForm] = useState({ paid_date: todayISO(), payment_note: "" });
@@ -91,6 +92,22 @@ export default function IncomeRecordPage({ currentUser }) {
   // ใบลดหนี้ที่ยังไม่ถูกใช้ — โหลดจาก accounting-api เมื่อเปิด popup
   const [availableCreditNotes, setAvailableCreditNotes] = useState([]);
   const [loadingCreditNotes, setLoadingCreditNotes] = useState(false);
+
+  // ดึงรายการ invoice_no ที่ถูกใช้แล้วในหมวดนี้ (จาก income_allocations อื่น)
+  useEffect(() => {
+    if (!allocOpen || !allocCategory || !allocDoc) { setAllocUsedInvoices(new Set()); return; }
+    fetch(ACCOUNTING_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "list_used_alloc_invoices",
+        category: allocCategory,
+        exclude_doc_id: allocDoc.income_doc_id,
+      }),
+    }).then(r => r.json()).then(data => {
+      const arr = Array.isArray(data) ? data : [];
+      setAllocUsedInvoices(new Set(arr.map(x => String(x?.invoice_no || "")).filter(Boolean)));
+    }).catch(() => setAllocUsedInvoices(new Set()));
+  }, [allocOpen, allocCategory, allocDoc]);
 
   // Backfill wht_rate ของ items เมื่อ incomeCategories โหลดเสร็จ (กันกรณีเปิด form ก่อน categories โหลดเสร็จ)
   useEffect(() => {
@@ -1288,6 +1305,8 @@ export default function IncomeRecordPage({ currentUser }) {
                       </thead>
                       <tbody>
                         {allocSales.filter(s => {
+                          // ตัดรายการที่ถูกใช้ในใบอื่นแล้ว (หมวดเดียวกัน) — ยกเว้นที่ตัวเองเลือกอยู่
+                          if (allocUsedInvoices.has(s.invoice_no) && !allocLines.some(l => l.invoice_no === s.invoice_no)) return false;
                           // filter เฉพาะที่เลือก ถ้าติ๊ก toggle
                           if (allocShowSelectedOnly) {
                             const sel = allocLines.some(l => l.invoice_no === s.invoice_no || (s.id && l.sale_id === s.id));
