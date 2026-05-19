@@ -23,7 +23,13 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const [filterModel, setFilterModel] = useState("");
   const [filterType, setFilterType] = useState("");
   const [saleType, setSaleType] = useState("เงินสด"); // เงินสด | ขายไฟแนนซ์
-  const [branch, setBranch] = useState("ป.เปา"); // ป.เปา | สิงห์ชัย
+  // ดึง branch_code จาก currentUser (เช่น "SCY01 สำนักงานใหญ่" → "SCY01")
+  const userBranchCode = (() => {
+    const b = String(currentUser?.branch || "").trim();
+    const m = b.match(/SCY\d{2}/i);
+    return m ? m[0].toUpperCase() : "SCY05";
+  })();
+  const [branch] = useState(userBranchCode);
   const [financeId, setFinanceId] = useState("");
 
   // Adjustable checkboxes
@@ -33,8 +39,7 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const [downPayout, setDownPayout] = useState(0);
   const [useInsurancePayout, setUseInsurancePayout] = useState(false);
   const [insurancePayout, setInsurancePayout] = useState(0);
-  const [useMarkup, setUseMarkup] = useState(false);
-  const [markup, setMarkup] = useState(0);
+  const [targetPrice, setTargetPrice] = useState("");
 
   useEffect(() => {
     fetchAll();
@@ -91,12 +96,14 @@ export default function MotoPriceQuotePage({ currentUser }) {
   );
 
   // หาราคาประกาศจาก moto_type_prices
+  // branch (state) เก็บเป็น branch_code (SCY01-07) → map เป็นกลุ่ม ป.เปา/สิงห์ชัย เพื่อหา price_type
+  const branchName = ["SCY05", "SCY06"].includes(branch) ? "ป.เปา" : "สิงห์ชัย";
   function findPrice() {
     if (!selectedRow) return null;
     const matchingPriceType = priceTypes.find(pt => {
       const name = String(pt.type_name || "").toLowerCase();
       const isFinance = saleType === "ขายไฟแนนซ์";
-      const branchMatch = name.includes(branch.toLowerCase());
+      const branchMatch = name.includes(branchName.toLowerCase());
       if (isFinance) return (name.includes("ไฟแนนท์") || name.includes("ไฟแนนซ์")) && branchMatch;
       return name.includes("เงินสด") && branchMatch;
     });
@@ -137,7 +144,9 @@ export default function MotoPriceQuotePage({ currentUser }) {
     const brand = (selectedRow.brand_name || "").toLowerCase();
     const modelCode = (selectedRow.model_code || "").toLowerCase();
     const rowCC = getRowCC();
-    const branchGroup = branch === "ป.เปา" ? "papao" : "singchai";
+    // branch ใน state เก็บเป็น branch_code (SCY01, SCY04, SCY05, SCY06, SCY07)
+    const branchCode = branch;
+    const branchGroup = ["SCY05", "SCY06"].includes(branch) ? "papao" : "singchai";
     const finMatch = (m) => {
       if (!finN || !m.finance_company) return false;
       const mN = norm(m.finance_company);
@@ -151,7 +160,10 @@ export default function MotoPriceQuotePage({ currentUser }) {
       if (m.markup_type === "finance_cc") {
         if (saleType !== "ขายไฟแนนซ์") return false;
         if (!finMatch(m)) return false;
-        if (m.branch_group && m.branch_group !== "all" && m.branch_group !== branchGroup) return false;
+        // branch_group อาจเก็บเป็น branch_code (SCY05) หรือ group (papao/singchai/all)
+        if (m.branch_group && m.branch_group !== "all"
+            && m.branch_group !== branchCode
+            && m.branch_group !== branchGroup) return false;
         if (rowCC !== null) {
           if (m.cc_min && rowCC < Number(m.cc_min)) return false;
           if (m.cc_max && rowCC > Number(m.cc_max)) return false;
@@ -161,7 +173,9 @@ export default function MotoPriceQuotePage({ currentUser }) {
       if (m.markup_type === "custom") {
         if (m.brand && m.brand.toLowerCase() !== brand) return false;
         if (m.model_code && m.model_code.toLowerCase() !== modelCode) return false;
-        if (m.branch_group && m.branch_group !== "all" && m.branch_group !== branchGroup) return false;
+        if (m.branch_group && m.branch_group !== "all"
+            && m.branch_group !== branchCode
+            && m.branch_group !== branchGroup) return false;
         return true;
       }
       // installment_bonus, cosmos_insurance, other_income — ใช้กับ sale_invoice_no ไม่เกี่ยวกับ quote
@@ -181,22 +195,36 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const deliveryBonus = deliveryFeeBonusAmount();
   const markupsTotal = applicableMarkups.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
 
+  // เงินดาวน์ออกแทน: input × 107/100 ปัดขึ้นหลักร้อย → บวกเข้าราคา
+  const downPayoutCalc = useDownPayout
+    ? Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100
+    : 0;
+  const insurancePayoutCalc = useInsurancePayout
+    ? Math.ceil((Number(insurancePayout || 0) * 1.07) / 100) * 100
+    : 0;
+
   // คำนวณยอด
   const totalPrice = (announcedPrice || 0)
     + markupsTotal
     + deliveryBonus
     + (useDeliveryFee ? Number(deliveryFee || 0) : 0)
-    + (useMarkup ? Number(markup || 0) : 0)
-    - (useDownPayout ? Number(downPayout || 0) : 0)
-    - (useInsurancePayout ? Number(insurancePayout || 0) : 0);
+    + downPayoutCalc
+    + insurancePayoutCalc;
+
+  // Reverse calc: ถ้า user ตั้ง targetPrice → หา input ของ "เงินดาวน์ออกแทน" ที่ทำให้ได้ target
+  const baseExcludingDown = totalPrice - downPayoutCalc; // ยอดไม่รวมส่วนเงินดาวน์
+  const tgt = Number(targetPrice || 0);
+  const targetDownCalc = tgt > 0 ? (tgt - baseExcludingDown) : 0;
+  const reversedDownRaw = targetDownCalc > 0 ? Math.round(targetDownCalc / 1.07) : 0;
+  const additionalDown = tgt > 0 && targetDownCalc < 0 ? Math.abs(targetDownCalc) : 0;
 
   function reset() {
     setFilterBrand(""); setFilterMarketing(""); setFilterModel(""); setFilterType("");
-    setSaleType("เงินสด"); setBranch("ป.เปา"); setFinanceId("");
+    setSaleType("เงินสด"); setFinanceId("");
     setUseDeliveryFee(false); setDeliveryFee(0);
     setUseDownPayout(false); setDownPayout(0);
     setUseInsurancePayout(false); setInsurancePayout(0);
-    setUseMarkup(false); setMarkup(0);
+    setTargetPrice("");
   }
 
   return (
@@ -208,7 +236,7 @@ export default function MotoPriceQuotePage({ currentUser }) {
       {loading ? (
         <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
           {/* LEFT: Inputs */}
           <div style={{ background: "#fff", padding: 16, borderRadius: 10, border: "1px solid #e5e7eb" }}>
             <h3 style={{ margin: "0 0 12px", color: "#072d6b", fontSize: 15 }}>📋 เลือกข้อมูลรถ</h3>
@@ -240,11 +268,9 @@ export default function MotoPriceQuotePage({ currentUser }) {
 
             <div style={{ height: 1, background: "#e5e7eb", margin: "14px 0" }} />
 
-            <Field label="สาขา">
-              <div style={{ display: "flex", gap: 8 }}>
-                {["ป.เปา", "สิงห์ชัย"].map(b => (
-                  <button key={b} onClick={() => setBranch(b)} style={pill(branch === b, "#0369a1")}>{b}</button>
-                ))}
+            <Field label="สาขา (จาก user ที่ login)">
+              <div style={{ padding: "8px 12px", background: "#f8fafc", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, color: "#374151" }}>
+                <strong style={{ color: "#0369a1" }}>{branch}</strong> ({["SCY05", "SCY06"].includes(branch) ? "ป.เปา" : "สิงห์ชัย"})
               </div>
             </Field>
 
@@ -270,12 +296,41 @@ export default function MotoPriceQuotePage({ currentUser }) {
 
             <CheckRow checked={useDeliveryFee} onChange={setUseDeliveryFee} label="ค่านำพา"
               amount={deliveryFee} onAmount={setDeliveryFee} />
-            <CheckRow checked={useMarkup} onChange={setUseMarkup} label="บวกเพิ่ม"
-              amount={markup} onAmount={setMarkup} />
-            <CheckRow checked={useDownPayout} onChange={setUseDownPayout} label="เงินดาวน์/ค่างวดออกแทน (หัก)"
-              amount={downPayout} onAmount={setDownPayout} negative />
-            <CheckRow checked={useInsurancePayout} onChange={setUseInsurancePayout} label="ประกันออกแทน (หัก)"
-              amount={insurancePayout} onAmount={setInsurancePayout} negative />
+            <CheckRow checked={useDownPayout} onChange={setUseDownPayout} label="เงินดาวน์/ค่างวดออกแทน"
+              amount={downPayout} onAmount={setDownPayout}
+              suffix={useDownPayout && Number(downPayout) > 0 ? `× 1.07 ปัดร้อย = +${fmt(downPayoutCalc)}` : ""} />
+            <CheckRow checked={useInsurancePayout} onChange={setUseInsurancePayout} label="ประกันออกแทน"
+              amount={insurancePayout} onAmount={setInsurancePayout}
+              suffix={useInsurancePayout && Number(insurancePayout) > 0 ? `× 1.07 ปัดร้อย = +${fmt(insurancePayoutCalc)}` : ""} />
+
+            <div style={{ height: 1, background: "#e5e7eb", margin: "14px 0" }} />
+            <div style={{ fontWeight: 700, marginBottom: 8, color: "#0369a1" }}>🎯 กำหนดราคาขายสุทธิที่ต้องการ</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+              <input type="number" step="0.01" value={targetPrice}
+                onChange={e => setTargetPrice(e.target.value)}
+                placeholder="เช่น 130000"
+                style={{ ...inp, flex: 1, textAlign: "right", fontFamily: "monospace", fontSize: 15, fontWeight: 700 }} />
+              <button onClick={() => setTargetPrice("")} style={{ ...btn("#6b7280"), padding: "6px 12px" }}>✕</button>
+            </div>
+            {tgt > 0 && (
+              <div style={{ padding: 10, background: targetDownCalc >= 0 ? "#ecfdf5" : "#fef2f2", borderRadius: 6, fontSize: 12, marginBottom: 8, border: `1px solid ${targetDownCalc >= 0 ? "#a7f3d0" : "#fca5a5"}` }}>
+                {targetDownCalc >= 0 ? (
+                  <>
+                    <div>💡 เงินดาวน์ออกแทนที่ลูกค้าได้รับ ≈ <strong style={{ color: "#15803d", fontSize: 14 }}>{fmt(reversedDownRaw)}</strong> บาท</div>
+                    <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>({fmt(reversedDownRaw)} × 1.07 ปัดร้อย = +{fmt(targetDownCalc)})</div>
+                    <button onClick={() => { setUseDownPayout(true); setDownPayout(reversedDownRaw); }}
+                      style={{ ...btn("#10b981"), padding: "4px 12px", fontSize: 11, marginTop: 6 }}>
+                      ✓ ใช้ค่านี้
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <div>⚠ ราคาเป้าหมายต่ำกว่ายอดพื้นฐาน — ต้องเก็บ <strong style={{ color: "#dc2626", fontSize: 14 }}>เงินดาวน์เพิ่ม {fmt(additionalDown)}</strong> บาท</div>
+                    <div style={{ color: "#6b7280", fontSize: 11, marginTop: 2 }}>ยอดพื้นฐาน (ไม่รวมเงินดาวน์ออกแทน): {fmt(baseExcludingDown)}</div>
+                  </>
+                )}
+              </div>
+            )}
 
             <button onClick={reset} style={{ ...btn("#6b7280"), marginTop: 12, width: "100%" }}>🔄 ล้างค่า</button>
           </div>
@@ -288,10 +343,10 @@ export default function MotoPriceQuotePage({ currentUser }) {
               <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กรุณาเลือก ยี่ห้อ / รุ่น / แบบ / Type</div>
             ) : (
               <>
-                <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+                <div style={{ padding: 12, background: "#f8fafc", borderRadius: 8, marginBottom: 12, fontSize: 13, lineHeight: 1.6 }}>
                   <div><b>ยี่ห้อ:</b> {selectedRow.brand_name}</div>
                   <div><b>รุ่น:</b> {selectedRow.marketing_name || selectedRow.series_name} · <b>แบบ:</b> {selectedRow.model_code} · <b>Type:</b> {selectedRow.type_name}</div>
-                  <div><b>ประเภท:</b> {saleType} ({branch}) {saleType === "ขายไฟแนนซ์" && financeId && `· ${financeCompanies.find(f => String(f.company_id) === String(financeId))?.company_name || ""}`}</div>
+                  <div><b>ประเภท:</b> {saleType} · สาขา {branch} ({branchName}) {saleType === "ขายไฟแนนซ์" && financeId && `· ${financeCompanies.find(f => String(f.company_id) === String(financeId))?.company_name || ""}`}</div>
                 </div>
 
                 <Row label="ราคาประกาศ" value={fmt(announcedPrice || 0)} color="#072d6b" warn={!announcedPrice} />
@@ -315,9 +370,8 @@ export default function MotoPriceQuotePage({ currentUser }) {
 
                 {useDeliveryFee && <Row label="+ ค่านำพา" value={fmt(deliveryFee)} color="#0369a1" />}
                 {deliveryBonus > 0 && <Row label={`+ บวกเพิ่มค่านำพา (${(selectedRow?.brand_name || "").toLowerCase().includes("honda") || (selectedRow?.brand_name || "").toLowerCase().includes("ฮอนด้า") ? "฿500→฿2,000" : "฿500→฿1,000"})`} value={`+${fmt(deliveryBonus)}`} color="#f97316" />}
-                {useMarkup && <Row label="+ บวกเพิ่ม" value={fmt(markup)} color="#0369a1" />}
-                {useDownPayout && <Row label="− เงินดาวน์/ค่างวดออกแทน" value={fmt(downPayout)} color="#dc2626" />}
-                {useInsurancePayout && <Row label="− ประกันออกแทน" value={fmt(insurancePayout)} color="#dc2626" />}
+                {useDownPayout && downPayoutCalc > 0 && <Row label={`+ เงินดาวน์/ค่างวดออกแทน (${fmt(downPayout)} × 1.07 ปัดร้อย)`} value={`+${fmt(downPayoutCalc)}`} color="#0369a1" />}
+                {useInsurancePayout && insurancePayoutCalc > 0 && <Row label={`+ ประกันออกแทน (${fmt(insurancePayout)} × 1.07 ปัดร้อย)`} value={`+${fmt(insurancePayoutCalc)}`} color="#0369a1" />}
 
                 <div style={{ height: 2, background: "#072d6b", margin: "12px 0 6px" }} />
                 <div style={{ display: "flex", justifyContent: "space-between", padding: 10, background: "#f0fdf4", borderRadius: 8, fontWeight: 700, fontSize: 18 }}>
@@ -342,16 +396,19 @@ function Field({ label, children }) {
   );
 }
 
-function CheckRow({ checked, onChange, label, amount, onAmount, negative }) {
+function CheckRow({ checked, onChange, label, amount, onAmount, negative, suffix }) {
   return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 6, padding: "6px 10px", background: checked ? "#fef3c7" : "#f9fafb", borderRadius: 6 }}>
-      <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, fontSize: 13 }}>
-        <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
-        <span style={{ color: negative ? "#dc2626" : "#374151" }}>{label}</span>
-      </label>
-      <input type="number" step="0.01" value={amount} onChange={e => onAmount(e.target.value)}
-        disabled={!checked}
-        style={{ ...inp, width: 120, textAlign: "right", fontFamily: "monospace" }} />
+    <div style={{ marginBottom: 6, padding: "6px 10px", background: checked ? "#fef3c7" : "#f9fafb", borderRadius: 6 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <label style={{ display: "flex", gap: 6, alignItems: "center", cursor: "pointer", flex: 1, fontSize: 13 }}>
+          <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} />
+          <span style={{ color: negative ? "#dc2626" : "#374151" }}>{label}</span>
+        </label>
+        <input type="number" step="0.01" value={amount} onChange={e => onAmount(e.target.value)}
+          disabled={!checked}
+          style={{ ...inp, width: 120, textAlign: "right", fontFamily: "monospace" }} />
+      </div>
+      {suffix && <div style={{ fontSize: 11, color: "#0369a1", marginTop: 4, paddingLeft: 22 }}>{suffix}</div>}
     </div>
   );
 }
