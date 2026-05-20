@@ -78,6 +78,7 @@ export default function IncomeRecordPage({ currentUser }) {
   const [allocSalesLoading, setAllocSalesLoading] = useState(false);
   const [allocSearch, setAllocSearch] = useState("");
   const [allocLines, setAllocLines] = useState([]); // [{ sale_id, invoice_no, amount, note }]
+  const [lineEdit, setLineEdit] = useState(null); // { sale, lineIdx, amount, note }
   const [allocSaving, setAllocSaving] = useState(false);
   const [allocShowSelectedOnly, setAllocShowSelectedOnly] = useState(false);
   const [allocUsedInvoices, setAllocUsedInvoices] = useState(new Set());
@@ -1291,7 +1292,6 @@ export default function IncomeRecordPage({ currentUser }) {
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                       <thead style={{ background: "#f3f4f6", position: "sticky", top: 0 }}>
                         <tr>
-                          <th style={{ ...th, width: 30 }}></th>
                           <th style={th}>เลขที่ใบขาย</th>
                           <th style={th}>วันที่</th>
                           <th style={th}>ลูกค้า</th>
@@ -1305,9 +1305,7 @@ export default function IncomeRecordPage({ currentUser }) {
                       </thead>
                       <tbody>
                         {allocSales.filter(s => {
-                          // ตัดรายการที่ถูกใช้ในใบอื่นแล้ว (หมวดเดียวกัน) — ยกเว้นที่ตัวเองเลือกอยู่
                           if (allocUsedInvoices.has(s.invoice_no) && !allocLines.some(l => l.invoice_no === s.invoice_no)) return false;
-                          // filter เฉพาะที่เลือก ถ้าติ๊ก toggle
                           if (allocShowSelectedOnly) {
                             const sel = allocLines.some(l => l.invoice_no === s.invoice_no || (s.id && l.sale_id === s.id));
                             if (!sel) return false;
@@ -1320,14 +1318,23 @@ export default function IncomeRecordPage({ currentUser }) {
                           const lineIdx = allocLines.findIndex(l => (l.sale_id && l.sale_id === s.id) || l.invoice_no === s.invoice_no);
                           const selected = lineIdx >= 0;
                           const line = selected ? allocLines[lineIdx] : null;
+                          const onRowClick = () => {
+                            setLineEdit({
+                              sale: s,
+                              lineIdx: selected ? lineIdx : -1,
+                              amount: selected ? line.amount : "",
+                              note: selected ? line.note : "",
+                            });
+                          };
                           return (
-                          <tr key={s.id || s.invoice_no || s.chassis_no || idx} style={{ borderTop: "1px solid #f3f4f6", background: selected ? "#fef9c3" : undefined }}>
-                            <td style={{ ...td, textAlign: "center" }}>
-                              <input type="checkbox" checked={selected} onChange={e => {
-                                if (e.target.checked) addAllocLine(s);
-                                else removeAllocLine(lineIdx);
-                              }} />
-                            </td>
+                          <tr key={s.id || s.invoice_no || s.chassis_no || idx}
+                              onClick={onRowClick}
+                              style={{
+                                borderTop: "1px solid #f3f4f6",
+                                background: selected ? "#fef9c3" : undefined,
+                                cursor: "pointer"
+                              }}
+                              title="คลิกเพื่อใส่จำนวนเงิน">
                             <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{s.invoice_no}</td>
                             <td style={td}>{fmtDate(s.sale_date)}</td>
                             <td style={td}>{s.customer_name || "-"}</td>
@@ -1335,19 +1342,11 @@ export default function IncomeRecordPage({ currentUser }) {
                             <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.engine_no || "-"}</td>
                             <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.chassis_no || s.frame_no || "-"}</td>
                             <td style={td}>{s.sale_customer_name || "-"}</td>
-                            <td style={td}>
-                              {selected ? (
-                                <input type="number" step="0.01" value={line.amount}
-                                  onChange={e => updateAllocLine(lineIdx, "amount", e.target.value)}
-                                  style={{ ...inp, textAlign: "right", fontFamily: "monospace", padding: "2px 6px" }} />
-                              ) : <span style={{ color: "#d1d5db" }}>—</span>}
+                            <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: selected ? 700 : 400, color: selected ? "#7c3aed" : "#d1d5db" }}>
+                              {selected ? fmt(line.amount) : "—"}
                             </td>
                             <td style={td}>
-                              {selected ? (
-                                <input type="text" value={line.note}
-                                  onChange={e => updateAllocLine(lineIdx, "note", e.target.value)}
-                                  style={{ ...inp, padding: "2px 6px" }} />
-                              ) : <span style={{ color: "#d1d5db" }}>—</span>}
+                              {selected ? <span>{line.note || "—"}</span> : <span style={{ color: "#d1d5db" }}>—</span>}
                             </td>
                           </tr>
                         );})}
@@ -1367,6 +1366,80 @@ export default function IncomeRecordPage({ currentUser }) {
                 <span style={{ color: "#10b981" }}>✓ ตรงกัน</span> :
                 <span style={{ color: "#dc2626" }}>⚠ ไม่ตรง ({fmt(allocLines.reduce((s, l) => s + Number(l.amount || 0), 0) - Number(allocDoc.total || allocDoc.net_to_pay || 0))})</span>}
             </div>
+
+            {/* Inline amount popup */}
+            {lineEdit && (
+              <div onClick={() => setLineEdit(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
+                <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 22, width: 460, maxWidth: "92%", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+                    <h4 style={{ margin: 0, color: "#7c3aed" }}>💵 ใส่จำนวนเงินที่กระจาย</h4>
+                    <button onClick={() => setLineEdit(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+                  </div>
+
+                  <div style={{ background: "#f8fafc", borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 13 }}>
+                    <div><span style={{ color: "#6b7280" }}>เลขที่ใบขาย:</span> <strong style={{ fontFamily: "monospace", color: "#0369a1" }}>{lineEdit.sale.invoice_no}</strong></div>
+                    <div><span style={{ color: "#6b7280" }}>ลูกค้า:</span> <strong>{lineEdit.sale.customer_name || "-"}</strong></div>
+                    <div><span style={{ color: "#6b7280" }}>รุ่น:</span> {lineEdit.sale.model_series || lineEdit.sale.model || "-"}</div>
+                    <div><span style={{ color: "#6b7280" }}>เลขตัวถัง:</span> <span style={{ fontFamily: "monospace" }}>{lineEdit.sale.chassis_no || lineEdit.sale.frame_no || "-"}</span></div>
+                  </div>
+
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>จำนวนรับ *</label>
+                    <input type="number" step="0.01" autoFocus value={lineEdit.amount}
+                      onChange={e => setLineEdit(le => ({ ...le, amount: e.target.value }))}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") {
+                          const amt = Number(lineEdit.amount) || 0;
+                          if (lineEdit.lineIdx >= 0) {
+                            if (amt <= 0) removeAllocLine(lineEdit.lineIdx);
+                            else {
+                              updateAllocLine(lineEdit.lineIdx, "amount", amt);
+                              updateAllocLine(lineEdit.lineIdx, "note", lineEdit.note);
+                            }
+                          } else if (amt > 0) {
+                            const s = lineEdit.sale;
+                            setAllocLines(arr => [...arr, { sale_id: s.id, invoice_no: s.invoice_no, customer_name: s.customer_name, model: s.model_series || s.model, amount: amt, note: lineEdit.note }]);
+                          }
+                          setLineEdit(null);
+                        }
+                      }}
+                      style={{ ...inp, fontSize: 18, fontWeight: 700, textAlign: "right", fontFamily: "monospace" }} />
+                  </div>
+
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>หมายเหตุ</label>
+                    <input type="text" value={lineEdit.note}
+                      onChange={e => setLineEdit(le => ({ ...le, note: e.target.value }))}
+                      style={inp} />
+                  </div>
+
+                  <div style={{ display: "flex", gap: 8, justifyContent: "space-between" }}>
+                    {lineEdit.lineIdx >= 0 ? (
+                      <button onClick={() => { removeAllocLine(lineEdit.lineIdx); setLineEdit(null); }}
+                        style={btn("#dc2626")}>🗑 ลบ</button>
+                    ) : <span />}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => setLineEdit(null)} style={btn("#6b7280")}>ยกเลิก</button>
+                      <button onClick={() => {
+                        const amt = Number(lineEdit.amount) || 0;
+                        if (lineEdit.lineIdx >= 0) {
+                          if (amt <= 0) {
+                            removeAllocLine(lineEdit.lineIdx);
+                          } else {
+                            updateAllocLine(lineEdit.lineIdx, "amount", amt);
+                            updateAllocLine(lineEdit.lineIdx, "note", lineEdit.note);
+                          }
+                        } else if (amt > 0) {
+                          const s = lineEdit.sale;
+                          setAllocLines(arr => [...arr, { sale_id: s.id, invoice_no: s.invoice_no, customer_name: s.customer_name, model: s.model_series || s.model, amount: amt, note: lineEdit.note }]);
+                        }
+                        setLineEdit(null);
+                      }} style={btn("#7c3aed")}>💾 บันทึก</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
               <button onClick={() => setAllocOpen(false)} disabled={allocSaving} style={btn("#6b7280")}>ยกเลิก</button>
