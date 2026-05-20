@@ -46,8 +46,12 @@ export default function MotoInsuranceExtraExpensePage({ currentUser }) {
   }
 
   async function save() {
-    if (!form.payment_receipt_no) { setMessage("❌ เลือกเลขที่ใบรับชำระ"); return; }
-    if (!form.expense_amount || Number(form.expense_amount) <= 0) { setMessage("❌ กรอกยอด"); return; }
+    const isCancel = form.expense_type === "ยกเลิก พรบ.";
+    // ยกเลิก พรบ. — ไม่บังคับ payment_receipt_no
+    if (!isCancel && !form.payment_receipt_no) { setMessage("❌ เลือกเลขที่ใบรับชำระ"); return; }
+    if (!form.expense_amount || Number(form.expense_amount) === 0) { setMessage("❌ กรอกยอด"); return; }
+    // ยกเลิก พรบ. — บังคับยอดติดลบ (เป็นเงินคืน)
+    const amt = isCancel ? -Math.abs(Number(form.expense_amount)) : Math.abs(Number(form.expense_amount));
     setSaving(true); setMessage("");
     try {
       await postAPI({
@@ -55,8 +59,8 @@ export default function MotoInsuranceExtraExpensePage({ currentUser }) {
         id: form.id || "",
         expense_type: form.expense_type || "แก้ไข พรบ.",
         original_policy_no: form.original_policy_no || "",
-        expense_amount: Number(form.expense_amount),
-        payment_receipt_no: form.payment_receipt_no,
+        expense_amount: amt,
+        payment_receipt_no: form.payment_receipt_no || "",
         note: form.note,
         created_by: currentUser?.username || currentUser?.name || "system",
       });
@@ -90,7 +94,7 @@ export default function MotoInsuranceExtraExpensePage({ currentUser }) {
   async function openPicker() {
     setPickerOpen(true);
     // default search = "พรบ" เพื่อกรองงานพรบ เป็นหลัก
-    const q = pickerSearch || "พรบ";
+    const q = pickerSearch || "พรบ|พนักงาน";
     setPickerSearch(q);
     setPickerLoading(true);
     try {
@@ -175,13 +179,17 @@ export default function MotoInsuranceExtraExpensePage({ currentUser }) {
 
             {/* Section 2: ใบรับชำระ */}
             <div style={{ marginBottom: 18 }}>
-              <div style={sectionHd}>② เลขที่ใบรับชำระ (จากรายได้อื่น ๆ) <span style={req}>*</span></div>
+              <div style={sectionHd}>② เลขที่ใบรับชำระ (จากรายได้อื่น ๆ) {form.expense_type !== "ยกเลิก พรบ." && <span style={req}>*</span>}</div>
               <div style={{ display: "flex", gap: 8 }}>
                 <input value={form.payment_receipt_no} onChange={e => setForm({ ...form, payment_receipt_no: e.target.value })}
                        style={{ ...inp, fontFamily: "monospace", fontSize: 14 }} placeholder="REC..." />
                 <button onClick={openPicker} style={{ ...btnBlue, whiteSpace: "nowrap" }}>🔍 เลือกจากใบรับ</button>
               </div>
-              <div style={hint}>คลิก "เลือกจากใบรับ" เพื่อค้นหาใบรับจากรายได้อื่น ๆ (กรอง "พรบ" อัตโนมัติ)</div>
+              <div style={hint}>
+                {form.expense_type === "ยกเลิก พรบ."
+                  ? "💡 ยกเลิก พรบ. — ไม่บังคับใส่ใบรับชำระ (ยอดจะถูกบันทึกเป็นค่าติดลบอัตโนมัติ)"
+                  : "คลิก \"เลือกจากใบรับ\" เพื่อค้นหาใบรับจากรายได้อื่น ๆ (กรอง \"พรบ\" หรือ \"พนักงาน\" อัตโนมัติ)"}
+              </div>
             </div>
 
             {/* Section 3: รายละเอียด */}
@@ -192,9 +200,9 @@ export default function MotoInsuranceExtraExpensePage({ currentUser }) {
                   <input value={form.original_policy_no} onChange={e => setForm({ ...form, original_policy_no: e.target.value })}
                          style={{ ...inp, fontFamily: "monospace" }} placeholder="เช่น 01250008175" />
                 </Field>
-                <Field label={<span>ค่าใช้จ่าย (บาท) <span style={req}>*</span></span>}>
+                <Field label={<span>ค่าใช้จ่าย (บาท) {form.expense_type === "ยกเลิก พรบ." && <span style={{ color: "#059669", fontSize: 11, fontWeight: 600 }}>(ติดลบอัตโนมัติ — เงินคืน)</span>} <span style={req}>*</span></span>}>
                   <input type="number" step="0.01" value={form.expense_amount} onChange={e => setForm({ ...form, expense_amount: e.target.value })}
-                         style={{ ...inp, textAlign: "right", fontSize: 18, fontWeight: 700, color: "#dc2626" }} />
+                         style={{ ...inp, textAlign: "right", fontSize: 18, fontWeight: 700, color: form.expense_type === "ยกเลิก พรบ." ? "#059669" : "#dc2626" }} />
                 </Field>
               </div>
               <Field label="หมายเหตุ">
