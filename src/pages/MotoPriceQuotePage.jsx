@@ -199,8 +199,9 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const downPayoutCalc = useDownPayout
     ? Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100
     : 0;
+  // ประกันออกแทน: ใช้ยอดตามที่ใส่ตรงๆ (ไม่มีสูตร)
   const insurancePayoutCalc = useInsurancePayout
-    ? Math.ceil((Number(insurancePayout || 0) * 1.07) / 100) * 100
+    ? Number(insurancePayout || 0)
     : 0;
 
   // คำนวณยอด
@@ -218,6 +219,65 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const reversedDownRaw = targetDownCalc > 0 ? Math.round(targetDownCalc / 1.07) : 0;
   const additionalDown = tgt > 0 && targetDownCalc < 0 ? Math.abs(targetDownCalc) : 0;
 
+  function printQuote() {
+    if (!selectedRow) { alert("กรุณาเลือกข้อมูลรถก่อน"); return; }
+    const finName = financeCompanies.find(f => String(f.company_id) === String(financeId))?.company_name || "";
+    const lines = [];
+    lines.push({ label: "ราคาประกาศ", value: fmt(announcedPrice || 0), bold: true });
+    if (applicableMarkups.length > 0) {
+      lines.push({ section: "+ บวกเพิ่ม (จากเงื่อนไขราคาขาย)" });
+      applicableMarkups.forEach(m => {
+        const label = m.markup_type === "finance" ? `ตามไฟแนนท์: ${m.finance_company || "-"}`
+          : m.markup_type === "finance_cc" ? `ตามไฟแนนท์+CC: ${m.finance_company || "-"} (${m.cc_min || "0"}-${m.cc_max || "∞"} cc)`
+          : m.markup_type === "custom" ? `กำหนดเอง: ${m.brand || ""} ${m.model_code || ""}` : m.markup_type;
+        lines.push({ label: `  ${label}`, value: `+${fmt(m.markup_amount)}`, sub: true });
+      });
+      lines.push({ label: "รวมบวกเพิ่ม", value: `+${fmt(markupsTotal)}`, color: "#7c3aed" });
+    }
+    if (useDeliveryFee) lines.push({ label: "+ ค่านำพา", value: fmt(deliveryFee) });
+    if (deliveryBonus > 0) lines.push({ label: "+ บวกเพิ่มค่านำพา", value: `+${fmt(deliveryBonus)}` });
+    if (useDownPayout && downPayoutCalc > 0) lines.push({ label: `+ เงินดาวน์/ค่างวดออกแทน (${fmt(downPayout)} × 1.07 ปัดร้อย)`, value: `+${fmt(downPayoutCalc)}` });
+    if (useInsurancePayout && insurancePayoutCalc > 0) lines.push({ label: "+ ประกันออกแทน", value: `+${fmt(insurancePayoutCalc)}` });
+
+    const w = window.open("", "_blank");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบเสนอราคา - ${selectedRow.brand_name} ${selectedRow.model_code}</title>
+<style>
+  body { font-family: 'Tahoma', sans-serif; padding: 16px; font-size: 13px; max-width: 480px; margin: 0 auto; }
+  h2 { margin: 0 0 8px; font-size: 17px; text-align: center; color: #072d6b; }
+  .date { text-align: center; color: #6b7280; font-size: 11px; margin-bottom: 12px; }
+  .info { background: #f8fafc; padding: 10px; border-radius: 6px; margin-bottom: 12px; line-height: 1.7; }
+  .info b { color: #072d6b; }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px dashed #e5e7eb; }
+  .row.sub { font-size: 11px; color: #6b7280; padding: 2px 0; border-bottom: none; }
+  .row.bold { font-weight: 700; }
+  .row.section { background: #f3e8ff; color: #7c3aed; font-weight: 600; padding: 4px 8px; border-radius: 4px; font-size: 12px; margin-top: 6px; }
+  .total { display: flex; justify-content: space-between; padding: 12px; background: #f0fdf4; border-radius: 8px; font-weight: 700; font-size: 17px; color: #15803d; margin-top: 12px; }
+  .footer { text-align: center; margin-top: 16px; font-size: 10px; color: #9ca3af; }
+  @media print { @page { size: A6 portrait; margin: 8mm; } body { padding: 4px; } }
+</style></head><body>
+<h2>💰 ใบเสนอราคารถจักรยานยนต์</h2>
+<div class="date">วันที่: ${new Date().toLocaleString("th-TH")}</div>
+<div class="info">
+  <div><b>ยี่ห้อ:</b> ${selectedRow.brand_name}</div>
+  <div><b>รุ่น:</b> ${selectedRow.marketing_name || selectedRow.series_name} · <b>แบบ:</b> ${selectedRow.model_code} · <b>Type:</b> ${selectedRow.type_name}</div>
+  <div><b>ประเภท:</b> ${saleType}${finName ? " · " + finName : ""}</div>
+  <div><b>สาขา:</b> ${branch} (${branchName})</div>
+</div>
+${lines.map(l => l.section
+  ? `<div class="row section">${l.section}</div>`
+  : `<div class="row ${l.bold ? "bold" : ""} ${l.sub ? "sub" : ""}" style="${l.color ? `color: ${l.color};` : ""}"><span>${l.label}</span><span style="font-family: monospace;">${l.value}</span></div>`
+).join("")}
+<div class="total">
+  <span>💰 ยอดสุทธิ</span>
+  <span>${fmt(totalPrice)} บาท</span>
+</div>
+${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#fef9c3;border-radius:6px;font-size:11px">🎯 ราคาเป้าหมาย: ${fmt(tgt)} บาท</div>` : ""}
+<div class="footer">${currentUser?.name || ""} · ${currentUser?.branch || ""}</div>
+<script>window.onload = () => window.print();</script>
+</body></html>`);
+    w.document.close();
+  }
+
   function reset() {
     setFilterBrand(""); setFilterMarketing(""); setFilterModel(""); setFilterType("");
     setSaleType("เงินสด"); setFinanceId("");
@@ -230,7 +290,7 @@ export default function MotoPriceQuotePage({ currentUser }) {
   return (
     <div className="page-container">
       <div className="page-topbar">
-        <h2 className="page-title">💰 สอบถามราคารถจักรยานยนต์</h2>
+        <h2 className="page-title">💰 คำนวณราคาขายรถ</h2>
       </div>
 
       {loading ? (
@@ -300,15 +360,13 @@ export default function MotoPriceQuotePage({ currentUser }) {
               amount={downPayout} onAmount={setDownPayout}
               suffix={useDownPayout && Number(downPayout) > 0 ? `× 1.07 ปัดร้อย = +${fmt(downPayoutCalc)}` : ""} />
             <CheckRow checked={useInsurancePayout} onChange={setUseInsurancePayout} label="ประกันออกแทน"
-              amount={insurancePayout} onAmount={setInsurancePayout}
-              suffix={useInsurancePayout && Number(insurancePayout) > 0 ? `× 1.07 ปัดร้อย = +${fmt(insurancePayoutCalc)}` : ""} />
+              amount={insurancePayout} onAmount={setInsurancePayout} />
 
             <div style={{ height: 1, background: "#e5e7eb", margin: "14px 0" }} />
             <div style={{ fontWeight: 700, marginBottom: 8, color: "#0369a1" }}>🎯 กำหนดราคาขายสุทธิที่ต้องการ</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
               <input type="number" step="0.01" value={targetPrice}
                 onChange={e => setTargetPrice(e.target.value)}
-                placeholder="เช่น 130000"
                 style={{ ...inp, flex: 1, textAlign: "right", fontFamily: "monospace", fontSize: 15, fontWeight: 700 }} />
               <button onClick={() => setTargetPrice("")} style={{ ...btn("#6b7280"), padding: "6px 12px" }}>✕</button>
             </div>
@@ -337,7 +395,13 @@ export default function MotoPriceQuotePage({ currentUser }) {
 
           {/* RIGHT: Result */}
           <div style={{ background: "#fff", padding: 16, borderRadius: 10, border: "1px solid #e5e7eb" }}>
-            <h3 style={{ margin: "0 0 12px", color: "#072d6b", fontSize: 15 }}>💵 ผลการคำนวณ</h3>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b", fontSize: 15 }}>💵 ผลการคำนวณ</h3>
+              <button onClick={printQuote} disabled={!selectedRow}
+                style={{ ...btn(selectedRow ? "#0369a1" : "#9ca3af"), padding: "6px 12px", fontSize: 12, cursor: selectedRow ? "pointer" : "not-allowed" }}>
+                🖨️ พิมพ์
+              </button>
+            </div>
 
             {!selectedRow ? (
               <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กรุณาเลือก ยี่ห้อ / รุ่น / แบบ / Type</div>
@@ -371,7 +435,7 @@ export default function MotoPriceQuotePage({ currentUser }) {
                 {useDeliveryFee && <Row label="+ ค่านำพา" value={fmt(deliveryFee)} color="#0369a1" />}
                 {deliveryBonus > 0 && <Row label={`+ บวกเพิ่มค่านำพา (${(selectedRow?.brand_name || "").toLowerCase().includes("honda") || (selectedRow?.brand_name || "").toLowerCase().includes("ฮอนด้า") ? "฿500→฿2,000" : "฿500→฿1,000"})`} value={`+${fmt(deliveryBonus)}`} color="#f97316" />}
                 {useDownPayout && downPayoutCalc > 0 && <Row label={`+ เงินดาวน์/ค่างวดออกแทน (${fmt(downPayout)} × 1.07 ปัดร้อย)`} value={`+${fmt(downPayoutCalc)}`} color="#0369a1" />}
-                {useInsurancePayout && insurancePayoutCalc > 0 && <Row label={`+ ประกันออกแทน (${fmt(insurancePayout)} × 1.07 ปัดร้อย)`} value={`+${fmt(insurancePayoutCalc)}`} color="#0369a1" />}
+                {useInsurancePayout && insurancePayoutCalc > 0 && <Row label="+ ประกันออกแทน" value={`+${fmt(insurancePayoutCalc)}`} color="#0369a1" />}
 
                 <div style={{ height: 2, background: "#072d6b", margin: "12px 0 6px" }} />
                 <div style={{ display: "flex", justifyContent: "space-between", padding: 10, background: "#f0fdf4", borderRadius: 8, fontWeight: 700, fontSize: 18 }}>

@@ -78,8 +78,13 @@ export default function FastMovingStockPage() {
     // "สินค้าหมด" / "มีสต๊อก" เช็คจากร้านหลักตามยี่ห้อ: HONDA = ป.เปา, YAMAHA = ห้าห้อง
     const _s = parseStores(r.stores);
     const _brand = String(r.brand || "").toUpperCase();
-    const _mainRaw = _brand.includes("YAMAHA") ? _s.haahong : _s.ppao;
-    const mainQty = _mainRaw === "-" ? 0 : Number(_mainRaw) || 0;
+    // "สินค้าหมด" / "มีสต๊อก" เช็คตามยี่ห้อ:
+    // HONDA  = ป.เปา + สช.ตลาด (รวมกัน) เป็น 0 = หมด
+    // YAMAHA = ห้าห้อง เป็น 0 = หมด
+    const _toNum = v => (v === "-" || v == null) ? 0 : Number(v) || 0;
+    const mainQty = _brand.includes("YAMAHA")
+      ? _toNum(_s.haahong)
+      : _toNum(_s.ppao) + _toNum(_s.sachtalad);
     if (filterStock === "in" && mainQty <= 0) return false;
     if (filterStock === "out" && mainQty > 0) return false;
     const st = r.stock_type || "สต๊อก";
