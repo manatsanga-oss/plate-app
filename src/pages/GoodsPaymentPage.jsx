@@ -335,7 +335,10 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                         <td style={td}>{fmtDate(p.payment_date)}</td>
                         <td style={td}>{p.brand}</td>
                         <td style={td}>{p.vendor_name}</td>
-                        <td style={td}>{p.bank_name ? `${p.bank_name} ${p.account_no}` : "-"}</td>
+                        <td style={td}>{(() => {
+                          const b = bankAccounts.find(x => Number(x.account_id || x.id) === Number(p.bank_account_id));
+                          return b ? `${b.bank_name} ${b.account_no}` : "-";
+                        })()}</td>
                         <td style={{ ...td, textAlign: "center" }}>{(p.items || []).length}</td>
                         <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{fmtMoney(p.net_amount)}</td>
                         <td style={td}>
@@ -413,7 +416,7 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                     <select value={m.bank_account_id} onChange={e => updateMethod(i, "bank_account_id", e.target.value)} style={inp} disabled={m.method === "cash"}>
                       <option value="">{m.method === "cash" ? "-- เงินสด --" : "-- เลือกบัญชีโอนจาก --"}</option>
                       {bankAccounts.map(b => (
-                        <option key={b.id} value={b.id}>{b.bank_name} {b.account_no} ({b.account_name})</option>
+                        <option key={b.account_id || b.id} value={b.account_id || b.id}>{b.bank_name} {b.account_no} ({b.account_name})</option>
                       ))}
                     </select>
                   )}

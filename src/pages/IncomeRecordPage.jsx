@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
@@ -77,6 +77,7 @@ export default function IncomeRecordPage({ currentUser }) {
   const [allocSales, setAllocSales] = useState([]);
   const [allocSalesLoading, setAllocSalesLoading] = useState(false);
   const [allocSearch, setAllocSearch] = useState("");
+  const allocSearchRef = useRef(null);
   const [allocLines, setAllocLines] = useState([]); // [{ sale_id, invoice_no, amount, note }]
   const [lineEdit, setLineEdit] = useState(null); // { sale, lineIdx, amount, note }
   const [allocSaving, setAllocSaving] = useState(false);
@@ -1276,7 +1277,7 @@ export default function IncomeRecordPage({ currentUser }) {
             {allocCategory && (
               <>
                 <div style={{ marginBottom: 8, display: "flex", gap: 10, alignItems: "center" }}>
-                  <input type="text" value={allocSearch} onChange={e => setAllocSearch(e.target.value)}
+                  <input ref={allocSearchRef} type="text" value={allocSearch} onChange={e => setAllocSearch(e.target.value)}
                     placeholder="🔎 ค้นหา (เลขที่ใบขาย / ลูกค้า / รุ่น)"
                     style={{ ...inp, flex: 1 }} />
                   <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, padding: "6px 10px", border: "1px solid #c4b5fd", borderRadius: 6, background: allocShowSelectedOnly ? "#ede9fe" : "#fff", cursor: "pointer", whiteSpace: "nowrap" }}>
@@ -1401,6 +1402,8 @@ export default function IncomeRecordPage({ currentUser }) {
                             setAllocLines(arr => [...arr, { sale_id: s.id, invoice_no: s.invoice_no, customer_name: s.customer_name, model: s.model_series || s.model, amount: amt, note: lineEdit.note }]);
                           }
                           setLineEdit(null);
+                          setAllocSearch("");
+                          setTimeout(() => allocSearchRef.current?.focus(), 50);
                         }
                       }}
                       style={{ ...inp, fontSize: 18, fontWeight: 700, textAlign: "right", fontFamily: "monospace" }} />
@@ -1434,6 +1437,8 @@ export default function IncomeRecordPage({ currentUser }) {
                           setAllocLines(arr => [...arr, { sale_id: s.id, invoice_no: s.invoice_no, customer_name: s.customer_name, model: s.model_series || s.model, amount: amt, note: lineEdit.note }]);
                         }
                         setLineEdit(null);
+                        setAllocSearch("");
+                        setTimeout(() => allocSearchRef.current?.focus(), 50);
                       }} style={btn("#7c3aed")}>💾 บันทึก</button>
                     </div>
                   </div>
