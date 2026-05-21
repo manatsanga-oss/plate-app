@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/goods-payment-api";
 const ACCOUNTING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const FINANCE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
 
 function fmtMoney(v) {
   const n = Number(v) || 0;
@@ -30,6 +31,7 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bankAccounts, setBankAccounts] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [unpaidIncomes, setUnpaidIncomes] = useState([]);  // รายการบันทึกรับเงินที่ยังไม่ชำระ (สำหรับ ใบลดหนี้)
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [editPayment, setEditPayment] = useState(null);
@@ -66,7 +68,34 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
     setBankAccounts(Array.isArray(data) ? data : (data?.data || []));
   }
 
-  useEffect(() => { loadBanks(); }, []);
+  // โหลดรายการบันทึกรับเงินที่ยังไม่ชำระ (status != paid/cancelled)
+  async function loadUnpaidIncomes() {
+    try {
+      const today = new Date();
+      const fromY = today.getFullYear() - 2;
+      const dateFrom = `${fromY}-01-01`;
+      const dateTo = `${today.getFullYear() + 1}-12-31`;
+      const res = await fetch(FINANCE_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "income_record", op: "list", date_from: dateFrom, date_to: dateTo }),
+      });
+      const data = await res.json().catch(() => []);
+      const arr = Array.isArray(data) ? data : (data?.data || data?.rows || []);
+      console.log("[GoodsPayment] income_record op=list raw:", arr.length, "rows", arr.slice(0,3));
+      const unpaid = arr.filter(r => {
+        if (!r || !r.income_doc_no) return false;
+        const st = String(r.status || "").toLowerCase().trim();
+        return !["paid", "ชำระแล้ว", "cancelled", "ยกเลิก"].includes(st);
+      });
+      console.log("[GoodsPayment] unpaid count:", unpaid.length);
+      setUnpaidIncomes(unpaid);
+    } catch (e) {
+      console.error("[GoodsPayment] loadUnpaidIncomes error:", e);
+      setUnpaidIncomes([]);
+    }
+  }
+
+  useEffect(() => { loadBanks(); loadUnpaidIncomes(); }, []);
   useEffect(() => { if (view === "invoices") loadInvoices(); else loadPayments(); /* eslint-disable-next-line */ }, [brandTab, mainTab, view]);
 
   const unpaidInvoices = useMemo(() => invoices.filter(r => r.payment_status !== "paid"), [invoices]);
@@ -409,10 +438,34 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                     <option value="cheque">เช็ค</option>
                     <option value="credit_note">ใบลดหนี้</option>
                   </select>
-                  <input type="number" value={m.amount} onChange={e => updateMethod(i, "amount", e.target.value)} placeholder="จำนวนเงิน" style={{ ...inp, textAlign: "right" }} />
-                  {m.method === "credit_note" ? (
-                    <input value={m.reference_no || ""} onChange={e => updateMethod(i, "reference_no", e.target.value)} placeholder="เลขที่ใบลดหนี้" style={inp} />
-                  ) : (
+                  <input type="number" value={m.amount} onChange={e => updateMethod(i, "amount", e.target.value)} placeholder="จำนวนเงิน" style={{ ...inp, textAlign: "right" }} readOnly={m.method === "credit_note"} title={m.method === "credit_note" ? "ยอดจะถูกเซ็ตอัตโนมัติเมื่อเลือกใบรับเงิน" : ""} />
+                  {m.method === "credit_note" ? (() => {
+                    // กรอง: customer_name ใน income ต้องมี brand keyword (ยามาฮ่า/ฮอนด้า) ตรงกับ brandTab
+                    const keywords = brandTab === "HONDA"
+                      ? ["ฮอนด้า", "honda", "HONDA"]
+                      : ["ยามาฮ่า", "yamaha", "YAMAHA"];
+                    const matching = unpaidIncomes.filter(r => {
+                      const c = String(r.customer_name || "");
+                      const cU = c.toUpperCase();
+                      return keywords.some(k => c.includes(k) || cU.includes(k.toUpperCase()));
+                    });
+                    return (
+                      <select value={m.reference_no || ""} onChange={e => {
+                        const docNo = e.target.value;
+                        const picked = unpaidIncomes.find(r => r.income_doc_no === docNo);
+                        const amt = picked ? Number(picked.net_to_pay || picked.total || 0) : 0;
+                        updateMethod(i, "reference_no", docNo);
+                        if (picked) updateMethod(i, "amount", amt);
+                      }} style={inp}>
+                        <option value="">-- เลือกใบรับเงิน ({matching.length}/{unpaidIncomes.length} ใบ) --</option>
+                        {matching.map(r => (
+                          <option key={r.income_doc_no} value={r.income_doc_no}>
+                            {r.income_doc_no} · {fmtMoney(r.net_to_pay || r.total)} บ. · {(r.customer_name || "").slice(0, 25)}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })() : (
                     <select value={m.bank_account_id} onChange={e => updateMethod(i, "bank_account_id", e.target.value)} style={inp} disabled={m.method === "cash"}>
                       <option value="">{m.method === "cash" ? "-- เงินสด --" : "-- เลือกบัญชีโอนจาก --"}</option>
                       {bankAccounts.map(b => (

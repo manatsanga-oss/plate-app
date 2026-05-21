@@ -622,6 +622,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         <td>${o.customer_name}</td>
         <td>${(o.technician || "").split(" ")[0]}</td>
         <td>${o.model_name || "-"}</td>
+        <td>${o.license_plate || "-"}</td>
         <td>${o.parking_status}</td>
         <td>${o.status}</td>
         <td>${o.vendor_po_no || "-"}</td>
@@ -630,6 +631,7 @@ export default function SparePartsOrderPage({ currentUser }) {
     }).join("");
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>รายการสั่งซื้ออะไหล่</title>
 <style>
+  @page { size: A4 landscape; margin: 10mm; }
   body { font-family: 'Tahoma', 'Sarabun', sans-serif; padding: 16px; font-size: 11px; }
   h2 { margin: 0 0 4px; font-size: 16px; }
   .info { font-size: 12px; color: #555; margin-bottom: 12px; }
@@ -642,7 +644,7 @@ export default function SparePartsOrderPage({ currentUser }) {
 <div class="info">ตัวกรอง: ${filterLabel} | จำนวน: ${filtered.length} รายการ | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
 <table>
   <thead><tr>
-    <th>#</th><th>ประเภท</th><th>วันที่มัดจำ</th><th>เลขที่มัดจำ</th><th>ลูกค้า</th><th>ช่าง</th><th>รุ่นรถ</th><th>สถานะจอด</th><th>สถานะ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>วันที่นัดหมาย</th>
+    <th>#</th><th>ประเภท</th><th>วันที่มัดจำ</th><th>เลขที่มัดจำ</th><th>ลูกค้า</th><th>ช่าง</th><th>รุ่นรถ</th><th>ทะเบียนรถ</th><th>สถานะจอด</th><th>สถานะ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>วันที่นัดหมาย</th>
   </tr></thead>
   <tbody>${rows}</tbody>
 </table>

@@ -15,6 +15,7 @@ const emptyForm = () => ({
   engine_chassis_no: "",
   mileage: "",
   technician: "",
+  parking_status: "ไม่จอดร้าน",
   customer_complaint: "",
   mechanic_finding: "",
   note: "",
@@ -136,6 +137,7 @@ export default function ClaimPage({ currentUser }) {
       engine_chassis_no: claim.engine_chassis_no || "",
       mileage: claim.mileage || "",
       technician: claim.technician || "",
+      parking_status: claim.parking_status || "ไม่จอดร้าน",
       customer_complaint: claim.customer_complaint || "",
       mechanic_finding: claim.mechanic_finding || "",
       note: claim.note || "",
@@ -381,6 +383,12 @@ export default function ClaimPage({ currentUser }) {
                 })}
               </select>
             </div>
+            <div><label style={S.label}>สถานะจอด</label>
+              <select value={form.parking_status} onChange={e => setForm({ ...form, parking_status: e.target.value })} style={inputStyle}>
+                <option value="ไม่จอดร้าน">ไม่จอดร้าน</option>
+                <option value="จอดร้าน">จอดร้าน</option>
+              </select>
+            </div>
             <div style={{ gridColumn: "1 / -1" }}><label style={S.label}>อาการที่ลูกค้าแจ้ง</label>
               <textarea value={form.customer_complaint} onChange={e => setForm({ ...form, customer_complaint: e.target.value })} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
             </div>
@@ -547,12 +555,13 @@ export default function ClaimPage({ currentUser }) {
           <thead><tr>
             <th>#</th><th>เลขที่เคลม</th><th>วันที่</th><th>ผู้ติดต่อ</th>
             <th>รุ่นรถ</th><th>เลขเครื่อง/ตัวถัง</th><th>ช่าง</th>
+            <th>สถานะจอด</th>
             <th>เลขที่ใบเคลม (ศูนย์)</th>
             <th style={{ width: 180 }}>ขั้นตอน</th><th>จัดการ</th>
           </tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={10} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
-              : filtered.length === 0 ? <tr><td colSpan={10} style={{ textAlign: "center", padding: 20 }}>ไม่มีรายการ</td></tr>
+            {loading ? <tr><td colSpan={11} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
+              : filtered.length === 0 ? <tr><td colSpan={11} style={{ textAlign: "center", padding: 20 }}>ไม่มีรายการ</td></tr>
               : filtered.map((c, i) => {
                 const doneSteps = TRACKING_STEPS.filter(s => c[s.key]).length;
                 const pct = (doneSteps / TRACKING_STEPS.length) * 100;
@@ -568,6 +577,15 @@ export default function ClaimPage({ currentUser }) {
                   <td>{c.car_model}</td>
                   <td style={{ fontSize: 11 }}>{c.engine_chassis_no}</td>
                   <td>{c.technician || "-"}</td>
+                  <td>
+                    <span style={{
+                      padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600,
+                      background: c.parking_status === "จอดร้าน" ? "#fef3c7" : "#dcfce7",
+                      color: c.parking_status === "จอดร้าน" ? "#b45309" : "#166534",
+                    }}>
+                      {c.parking_status || "ไม่จอดร้าน"}
+                    </span>
+                  </td>
                   <td style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{c.submit_claim_no || "-"}</td>
                   <td>
                     <div style={{ display: "flex", gap: 2, marginBottom: 4 }}>

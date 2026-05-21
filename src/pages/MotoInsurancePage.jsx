@@ -480,20 +480,27 @@ function OcrPanel({ setMessage }) {
     if (!toSave.length) { setMessage("เลือกรายการก่อน"); return; }
     setSaving(true);
     try {
-      // ตรวจซ้ำก่อน
-      const policy_nos = toSave.map(it => it.policy_no).filter(Boolean);
+      // ตรวจซ้ำ composite: chassis_no + policy_no + total_premium
+      const checks = toSave
+        .map(it => ({
+          policy_no: it.policy_no,
+          chassis_no: it.chassis_no,
+          total_premium: Number(it.total_premium || it.premium || 0),
+        }))
+        .filter(c => c.policy_no && c.chassis_no);
       const checkRes = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "check_duplicate_policies", policy_nos }),
+        body: JSON.stringify({ action: "check_duplicate_policies", checks }),
       });
       const dupRows = await checkRes.json();
       const dups = Array.isArray(dupRows) ? dupRows.filter(r => r && r.policy_no) : [];
       if (dups.length > 0) {
-        setDupCheckResult({ dups, toSave });
+        // ❌ บล็อก ไม่ยอมให้ทับ — ซ้ำทั้ง 3 fields = record เดียวกันแล้ว
+        setDupCheckResult({ dups, toSave, mode: 'block' });
         setSaving(false);
         return;
       }
-      // ไม่ซ้ำ → save เลย
+      // ไม่ซ้ำ → save เป็นรายการใหม่ (batch ใหม่)
       await doSave(toSave);
     } catch {
       setMessage("❌ บันทึกไม่สำเร็จ");
@@ -835,22 +842,18 @@ function OcrPanel({ setMessage }) {
               </table>
             </div>
 
-            <div style={{ padding: "12px 18px", borderTop: "1px solid #e5e7eb", background: "#f9fafb", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-              <div style={{ fontSize: 12, color: "#6b7280" }}>
-                จะบันทึกทั้งหมด <strong>{dupCheckResult.toSave.length}</strong> รายการ —
-                ใหม่ <strong style={{ color: "#059669" }}>{dupCheckResult.toSave.length - dupCheckResult.dups.length}</strong> รายการ ·
-                ซ้ำ <strong style={{ color: "#d97706" }}>{dupCheckResult.dups.length}</strong> รายการ (จะ overwrite)
+            <div style={{ padding: "12px 18px", borderTop: "1px solid #e5e7eb", background: "#fef2f2", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+              <div style={{ fontSize: 13, color: "#991b1b", fontWeight: 600 }}>
+                ❌ ไม่สามารถบันทึกได้ — มี <strong>{dupCheckResult.dups.length}</strong> รายการ
+                ที่ <strong>เลขถัง + เลขกรมธรรม์ + เบี้ยรวม</strong> ตรงกับ DB ทั้งหมด (record เดียวกัน)
+                <div style={{ fontSize: 11, fontWeight: 400, color: "#7f1d1d", marginTop: 4 }}>
+                  💡 ถ้าต้องการบันทึกเป็นรายการใหม่ ให้ปรับข้อมูล 1 ใน 3 fields (เช่น เบี้ยรวม) หรือ uncheck รายการที่ซ้ำ
+                </div>
               </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setDupCheckResult(null)}
-                  style={{ padding: "8px 18px", background: "#fff", color: "#374151", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-                  ❌ ยกเลิก
-                </button>
-                <button onClick={() => doSave(dupCheckResult.toSave)} disabled={saving}
-                  style={{ padding: "8px 22px", background: "#d97706", color: "#fff", border: "none", borderRadius: 6, cursor: saving ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 700, opacity: saving ? 0.6 : 1 }}>
-                  {saving ? "กำลังบันทึก..." : "✅ ยืนยันบันทึกต่อ (overwrite)"}
-                </button>
-              </div>
+              <button onClick={() => setDupCheckResult(null)}
+                style={{ padding: "8px 22px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+                ปิด
+              </button>
             </div>
           </div>
         </div>
