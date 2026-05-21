@@ -18,12 +18,12 @@ const UPLOAD_GROUPS = [
     title: "UPLOAD ข้อมูลบริการและอะไหล่",
     items: [
       { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด (ป.เปา + ห้าห้อง + สช.ตลาด + นครหลวง)", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
-      { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_orders", url: `${BASE}/upload-dcs-orders` },
-      { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
-      { key: "honda-loan-parts", label: "รายงานอะไหล่ให้ยืมยังไม่ได้รับคืน", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด (HONDA)", db: "honda_loan_parts", url: `${BASE}/upload-honda-loan-parts` },
+      { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (apc_order_no + line_no + part_number)", db: "dcs_spare_orders", url: `${BASE}/upload-dcs-orders` },
+      { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
+      { key: "honda-loan-parts", label: "รายงานอะไหล่ให้ยืมยังไม่ได้รับคืน", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (HONDA snapshot)", db: "honda_loan_parts", url: `${BASE}/upload-honda-loan-parts` },
       { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
-      { key: "yamaha-b2b-backorders", label: "รายงานอะไหล่ค้างส่ง YAMAHA B2B", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "yamaha_b2b_backorders", url: `${BASE}/upload-yamaha-b2b-backorders` },
-      { key: "pending-job", label: "รายการอะไหล่เบิกค้างปิด JOB", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "pending_job_parts", url: `${BASE}/upload-pending-job` },
+      { key: "yamaha-b2b-backorders", label: "รายงานอะไหล่ค้างส่ง YAMAHA B2B", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "yamaha_b2b_backorders", url: `${BASE}/upload-yamaha-b2b-backorders` },
+      { key: "pending-job", label: "รายการอะไหล่เบิกค้างปิด JOB", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "pending_job_parts", url: `${BASE}/upload-pending-job` },
       { key: "yamaha-repair", label: "Upload ใบแจ้งซ่อม Yamaha", desc: "39 คอลัมน์ · UPSERT (job_no + item_type + repair_type_code + mechanic_code)", db: "yamaha_repair_invoices", url: `${BASE}/upload-yamaha-repair` },
       { key: "honda-repair", label: "Upload ใบแจ้งซ่อม HONDA", desc: "XLS DMS รายงานช่างที่ซ่อม · UPSERT (job_no)", db: "honda_repair_jobs", url: `${BASE}/upload-honda-repair` },
     ],
@@ -62,12 +62,9 @@ function fmtDateTime(iso) {
 const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
 const FILE_UPLOAD_KEYS = new Set([
   "time-tracking", "yamaha-repair", "honda-repair",
-  "dcs-orders", "dcs-backorders",
-  "yamaha-b2b-orders", "yamaha-b2b-backorders",
-  "pending-job",
-  "honda-loan-parts",
+  "yamaha-b2b-orders",
   "honda-warranty",
-]); // รายการที่ต้องเลือกไฟล์เอง
+]); // รายการที่ต้องเลือกไฟล์เอง — dcs-orders, dcs-backorders, honda-loan-parts, pending-job, yamaha-b2b-backorders ย้ายไป OneDrive
 
 export default function UploadPage({ currentUser } = {}) {
   const [statuses, setStatuses] = useState({});
