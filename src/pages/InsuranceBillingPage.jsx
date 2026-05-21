@@ -1011,13 +1011,14 @@ export default function InsuranceBillingPage({ currentUser }) {
         const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
         // คำนวณจาก rows ทุก record ที่มี billing_doc_no ตรง (รวมทั้ง insurance + extras)
         const selRows = rows.filter(r => r.billing_doc_no && selectedBills[r.billing_doc_no]);
-        const selRemit = selRows.reduce((s, r) => s + Number(r.premium_remit || 0), 0);
+        // ยอดรวม = เบี้ยรวม (total_premium) ไม่ใช่ premium_remit (เบี้ยนำส่ง)
+        const selRemit = selRows.reduce((s, r) => s + Number(r.total_premium || 0), 0);
         const selGroups = selectedDocNos.map(docNo => {
           const drows = selRows.filter(r => r.billing_doc_no === docNo);
           return {
             billing_doc_no: docNo,
             count: drows.length,
-            premium_remit: drows.reduce((s, r) => s + Number(r.premium_remit || 0), 0),
+            premium_remit: drows.reduce((s, r) => s + Number(r.total_premium || 0), 0),
             commission: drows.reduce((s, r) => s + Number(r.commission || 0), 0),
           };
         });
