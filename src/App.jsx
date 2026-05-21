@@ -10,6 +10,7 @@ import MotoBookingPage from "./pages/MotoBookingPage";
 import CustomerPage from "./pages/CustomerPage";
 import UploadPage from "./pages/UploadPage";
 import UploadAccountingPage from "./pages/UploadAccountingPage";
+import PartWithdrawalPage from "./pages/PartWithdrawalPage";
 import VehiclePurchaseReportPage from "./pages/VehiclePurchaseReportPage";
 import TaxInvoiceReportPage from "./pages/TaxInvoiceReportPage";
 import StockCheckPage from "./pages/StockCheckPage";
@@ -155,6 +156,7 @@ export default function App() {
     if (page === "yamaharepairreport") return true;           // ทุก user เห็นรายงานใบแจ้งซ่อม
     if (page === "hondarepairreport") return true;
     if (page === "partstatusinquiry") return true;            // สอบถามสถานะอะไหล่ — เปิดให้ทุก user
+    if (page === "partwithdrawal") return true;               // บันทึกการเบิกอะไหล่ — เปิดให้ทุก user
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
@@ -249,6 +251,9 @@ export default function App() {
         )}
         {activeMenu === "partstatusinquiry" && canAccess("partstatusinquiry") && (
           <PartStatusInquiryPage currentUser={currentUser} />
+        )}
+        {activeMenu === "partwithdrawal" && canAccess("partwithdrawal") && (
+          <PartWithdrawalPage currentUser={currentUser} />
         )}
         {activeMenu === "motoinsuranceextra" && canAccess("motoinsuranceextra") && (
           <MotoInsuranceExtraExpensePage currentUser={currentUser} />
@@ -616,10 +621,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="accfinancetransfer" label="บันทึกรับเงินโอนไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partstatusinquiry"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partstatusinquiry","partwithdrawal"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="yamaharepairreport" label="รายงานใบแจ้งซ่อม YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hondarepairreport" label="รายงานใบแจ้งซ่อม HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partstatusinquiry" label="สอบถามสถานะอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="partwithdrawal" label="บันทึกการเบิกอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrspecialcommission","hrnormalcommission","hrsalesrecord","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
