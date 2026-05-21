@@ -454,8 +454,12 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                         const docNo = e.target.value;
                         const picked = unpaidIncomes.find(r => r.income_doc_no === docNo);
                         const amt = picked ? Number(picked.net_to_pay || picked.total || 0) : 0;
-                        updateMethod(i, "reference_no", docNo);
-                        if (picked) updateMethod(i, "amount", amt);
+                        // ใช้ setForm รวมการอัปเดต ป้องกัน state ซ้อนกัน
+                        setForm(prev => {
+                          const methods = [...prev.methods];
+                          methods[i] = { ...methods[i], reference_no: docNo, amount: amt };
+                          return { ...prev, methods };
+                        });
                       }} style={inp}>
                         <option value="">-- เลือกใบรับเงิน ({matching.length}/{unpaidIncomes.length} ใบ) --</option>
                         {matching.map(r => (
