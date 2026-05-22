@@ -300,13 +300,13 @@ export default function IncomeRecordPage({ currentUser }) {
   function removeAllocLine(idx) {
     setAllocLines(arr => arr.filter((_, i) => i !== idx));
   }
-  async function saveAllocation() {
+  async function saveAllocation(asDraft = false) {
     if (!allocDoc) return;
     if (!allocCategory) { alert("กรุณาเลือกประเภทรายรับ"); return; }
     if (allocLines.length === 0) { alert("เพิ่มอย่างน้อย 1 รายการ"); return; }
     const sum = allocLines.reduce((s, l) => s + Number(l.amount || 0), 0);
     const target = Number(allocDoc.total || allocDoc.net_to_pay || 0);
-    if (Math.abs(sum - target) > 0.01) {
+    if (!asDraft && Math.abs(sum - target) > 0.01) {
       if (!window.confirm(`ยอดรวมที่กระจาย ${sum.toFixed(2)} ไม่ตรงกับยอดรวม VAT ${target.toFixed(2)} (ส่วนต่าง ${(sum - target).toFixed(2)}) — บันทึกต่อหรือไม่?`)) return;
     }
     setAllocSaving(true);
@@ -329,7 +329,7 @@ export default function IncomeRecordPage({ currentUser }) {
       const data = await res.json();
       const r = Array.isArray(data) ? data[0] : data;
       if (r?.error_msg) throw new Error(r.error_msg);
-      setMessage(`✅ บันทึกรายละเอียด ${allocLines.length} รายการสำเร็จ`);
+      setMessage(`✅ บันทึก${asDraft ? "ค้างไว้" : "รายละเอียด"} ${allocLines.length} รายการสำเร็จ${asDraft ? " (แก้ไขต่อได้ภายหลัง)" : ""}`);
       setAllocOpen(false); setAllocDoc(null); setAllocLines([]);
     } catch (e) { alert("❌ บันทึกล้มเหลว: " + e.message); }
     setAllocSaving(false);
@@ -1448,13 +1448,18 @@ export default function IncomeRecordPage({ currentUser }) {
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
               <button onClick={() => setAllocOpen(false)} disabled={allocSaving} style={btn("#6b7280")}>ยกเลิก</button>
+              <button onClick={() => saveAllocation(true)} disabled={allocSaving || allocLines.length === 0}
+                style={{ ...btn(allocSaving || allocLines.length === 0 ? "#9ca3af" : "#0891b2"), cursor: (allocSaving || allocLines.length === 0) ? "not-allowed" : "pointer" }}
+                title="บันทึกค้างไว้แม้ยอดไม่ครบ — กด 📝 รายละเอียด ในตารางเพื่อมาแก้ไขต่อภายหลัง">
+                💾 บันทึกค้างไว้ (แก้ต่อภายหลัง)
+              </button>
               {(() => {
                 const sum = allocLines.reduce((s, l) => s + Number(l.amount || 0), 0);
                 const target = Number(allocDoc.total || allocDoc.net_to_pay || 0);
                 const exceeded = sum - target > 0.01;
                 const disabled = allocSaving || allocLines.length === 0 || exceeded;
                 return (
-                  <button onClick={saveAllocation} disabled={disabled}
+                  <button onClick={() => saveAllocation(false)} disabled={disabled}
                     style={{ ...btn(disabled ? "#9ca3af" : "#7c3aed"), cursor: disabled ? "not-allowed" : "pointer" }}
                     title={exceeded ? "ยอดที่กระจายเกินเป้าหมาย — แก้ก่อนบันทึก" : ""}>
                     {allocSaving ? "⏳ กำลังบันทึก..." : "💾 บันทึกรายละเอียด"}

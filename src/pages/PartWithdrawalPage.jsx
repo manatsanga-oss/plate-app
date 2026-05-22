@@ -190,7 +190,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") lookup(); }}
-            placeholder={loadingMaster ? "กำลังโหลดข้อมูล..." : "เช่น 17210-K26-900"}
+            placeholder={loadingMaster ? "กำลังโหลดข้อมูล..." : ""}
             disabled={loadingMaster}
             autoFocus
             style={{

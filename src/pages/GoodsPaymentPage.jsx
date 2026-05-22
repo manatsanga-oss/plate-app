@@ -46,16 +46,15 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
   });
 
   async function loadInvoices() {
-    if (mainTab !== "vehicle") return;
     setLoading(true);
-    const data = await callApi({ action: "list_invoices", brand: brandTab });
+    const data = await callApi({ action: "list_invoices", brand: brandTab, payment_type: mainTab });
     setInvoices(Array.isArray(data) ? data : []);
     setLoading(false);
     setSelectedIds(new Set());
   }
   async function loadPayments() {
     setLoading(true);
-    const data = await callApi({ action: "list_payments", payment_type: "vehicle" });
+    const data = await callApi({ action: "list_payments", payment_type: mainTab });
     setPayments(Array.isArray(data) ? data : []);
     setLoading(false);
   }
@@ -98,6 +97,14 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
   useEffect(() => { loadBanks(); loadUnpaidIncomes(); }, []);
   useEffect(() => { if (view === "invoices") loadInvoices(); else loadPayments(); /* eslint-disable-next-line */ }, [brandTab, mainTab, view]);
 
+  // determine source_table based on tab/brand
+  const sourceTableForCurrent = () => {
+    if (mainTab === "parts") {
+      return brandTab === "YAMAHA" ? "yamaha_part_tax_invoices" : "honda_part_receipts";
+    }
+    return brandTab === "YAMAHA" ? "vehicle_purchase_receipts_singchai" : "vehicle_purchase_receipts_papao";
+  };
+
   const unpaidInvoices = useMemo(() => invoices.filter(r => r.payment_status !== "paid"), [invoices]);
 
   function toggleSelect(id) {
@@ -113,7 +120,7 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
   function openPayForm() {
     const chosen = unpaidInvoices.filter(r => selectedIds.has(r.id));
     if (!chosen.length) return alert("เลือกใบกำกับอย่างน้อย 1 ใบ");
-    const sourceTable = brandTab === "YAMAHA" ? "vehicle_purchase_receipts_singchai" : "vehicle_purchase_receipts_papao";
+    const sourceTable = sourceTableForCurrent();
     setEditPayment(null);
     // each invoice_no is now a group of vehicles — expand to per-vehicle items
     const items = [];
@@ -211,7 +218,7 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
       action: "save_payment",
       payment_id: editPayment?.id || null,
       payment_date: form.payment_date,
-      payment_type: "vehicle",
+      payment_type: mainTab,
       brand: brandTab,
       vendor_name: brandTab === "HONDA" ? "บริษัท ไทยฮอนด้า จำกัด" : (form.items[0]?.vendor_name || ""),
       methods: form.methods.map(m => ({
@@ -248,20 +255,20 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
       <div style={{ display: "flex", gap: 4, borderBottom: "2px solid #e5e7eb", marginBottom: 16 }}>
         {[
           { k: "vehicle", l: "🚗 ชำระค่ารถ" },
-          { k: "parts", l: "🔧 ชำระค่าอะไหล่ (เร็วๆ นี้)" },
+          { k: "parts", l: "🔧 ชำระค่าอะไหล่" },
         ].map(t => (
-          <button key={t.k} onClick={() => t.k === "vehicle" && setMainTab(t.k)} disabled={t.k === "parts"}
+          <button key={t.k} onClick={() => setMainTab(t.k)}
             style={{
               padding: "10px 22px", border: "none", fontWeight: 700, fontSize: 14,
               background: mainTab === t.k ? "#072d6b" : "transparent",
-              color: mainTab === t.k ? "#fff" : (t.k === "parts" ? "#9ca3af" : "#374151"),
-              cursor: t.k === "parts" ? "not-allowed" : "pointer",
-              borderRadius: "8px 8px 0 0", opacity: t.k === "parts" ? 0.6 : 1,
+              color: mainTab === t.k ? "#fff" : "#374151",
+              cursor: "pointer",
+              borderRadius: "8px 8px 0 0",
             }}>{t.l}</button>
         ))}
       </div>
 
-      {mainTab === "vehicle" && (
+      {(mainTab === "vehicle" || mainTab === "parts") && (
         <>
           {/* view tabs */}
           <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
@@ -306,7 +313,7 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                         <th style={th}>#</th>
                         <th style={th}>เลขที่ใบกำกับ</th>
                         <th style={th}>วันที่</th>
-                        <th style={{ ...th, textAlign: "center" }}>จำนวนรถ</th>
+                        <th style={{ ...th, textAlign: "center" }}>{mainTab === "parts" ? "จำนวนรายการ" : "จำนวนรถ"}</th>
                         <th style={{ ...th, textAlign: "right" }}>จำนวนเงินรวม</th>
                         <th style={th}>ผู้ขาย</th>
                       </tr>
@@ -400,7 +407,7 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
         <div onClick={() => setShowForm(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: 24, overflowY: "auto" }}>
           <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 24, maxWidth: 720, width: "100%", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
             <h3 style={{ marginTop: 0, textAlign: "center", color: "#072d6b" }}>
-              💵 {editPayment ? `แก้ไขจ่ายเงิน — ${editPayment.payment_no}` : "บันทึกจ่ายเงิน"}
+              💵 {editPayment ? `แก้ไขจ่ายเงิน — ${editPayment.payment_no}` : `บันทึกจ่าย${mainTab === "parts" ? "ค่าอะไหล่" : "ค่ารถ"}`}
             </h3>
 
             {/* Header summary */}

@@ -21,6 +21,9 @@ const UPLOAD_GROUPS = [
       { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (apc_order_no + line_no + part_number)", db: "dcs_spare_orders", url: `${BASE}/upload-dcs-orders` },
       { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
       { key: "honda-loan-parts", label: "รายงานอะไหล่ให้ยืมยังไม่ได้รับคืน", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (HONDA snapshot)", db: "honda_loan_parts", url: `${BASE}/upload-honda-loan-parts` },
+      { key: "honda-part-receipt", label: "รายงานรับอะไหล่ HONDA (รายการรับสินค้า)", desc: "เลือกไฟล์ XLS · UPSERT (pd_no) · header + line items", db: "honda_part_receipts", url: `${BASE}/upload-honda-part-receipt` },
+      { key: "yamaha-part-receipt", label: "รายงานรับอะไหล่ YAMAHA (รายการ)", desc: "ไฟล์ XLSX รายงานการรับอะไหล่ · UPSERT (receipt_no+part+doc)", db: "yamaha_part_receipt_items", url: `${BASE}/upload-yamaha-part-receipt` },
+      { key: "yamaha-purchase-tax", label: "ใบกำกับภาษีซื้อ YAMAHA", desc: "ไฟล์ XLSX รายงานใบกำกับภาษีซื้อ · UPSERT (tax_invoice_no)", db: "yamaha_part_tax_invoices", url: `${BASE}/upload-yamaha-purchase-tax-invoice` },
       { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
       { key: "yamaha-b2b-backorders", label: "รายงานอะไหล่ค้างส่ง YAMAHA B2B", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "yamaha_b2b_backorders", url: `${BASE}/upload-yamaha-b2b-backorders` },
       { key: "pending-job", label: "รายการอะไหล่เบิกค้างปิด JOB", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "pending_job_parts", url: `${BASE}/upload-pending-job` },
@@ -64,6 +67,9 @@ const FILE_UPLOAD_KEYS = new Set([
   "time-tracking", "yamaha-repair", "honda-repair",
   "yamaha-b2b-orders",
   "honda-warranty",
+  "honda-part-receipt",   // รับอะไหล่ HONDA — เลือกไฟล์เอง
+  "yamaha-part-receipt",  // รับอะไหล่ YAMAHA — เลือกไฟล์เอง
+  "yamaha-purchase-tax",  // ใบกำกับภาษีซื้อ YAMAHA — เลือกไฟล์เอง
 ]); // รายการที่ต้องเลือกไฟล์เอง — dcs-orders, dcs-backorders, honda-loan-parts, pending-job, yamaha-b2b-backorders ย้ายไป OneDrive
 
 export default function UploadPage({ currentUser } = {}) {

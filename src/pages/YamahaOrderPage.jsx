@@ -63,6 +63,15 @@ export default function YamahaOrderPage({ currentUser }) {
   const [savingPO, setSavingPO] = useState(false);
 
   useEffect(() => { loadAll(); }, []);
+  useEffect(() => { reloadOrders(); /* eslint-disable-next-line */ }, [filterStatus, filterParking, search]);
+
+  async function reloadOrders() {
+    try {
+      const statusParam = (filterStatus === "all" || filterStatus === "ตีราคาซ่อม") ? "all" : filterStatus;
+      const r = await api("get_yamaha_orders", { status: statusParam, parking_status: filterParking, search });
+      setOrders(norm(r));
+    } catch {}
+  }
 
   async function api(action, extra = {}) {
     const res = await fetch(API_URL, {
@@ -93,7 +102,8 @@ export default function YamahaOrderPage({ currentUser }) {
       setAdjustDeposits(norm(r));
     } catch {}
     try {
-      const r = await api("get_yamaha_orders");
+      const statusParam = (filterStatus === "all" || filterStatus === "ตีราคาซ่อม") ? "all" : filterStatus;
+      const r = await api("get_yamaha_orders", { status: statusParam, parking_status: filterParking, search });
       const allOrders = norm(r);
       setOrders(allOrders);
       // เช็คสถานะอัตโนมัติ: จับคู่ yamaha_spare_items กับ yamaha_b2b_orders
@@ -454,26 +464,10 @@ export default function YamahaOrderPage({ currentUser }) {
     setSavingPO(false);
   }
 
-  const filtered = orders.filter(o => {
-    // ตัดรายการที่ถูกยึดเงินมัดจำแล้ว
-    if (seizedDocs.has(o.deposit_doc_no)) return false;
-    // ตัดรายการที่จับคู่กับเงินมัดจำไม่ได้ (สถานะ "ปิดซ่อม") ออก
-    const hasDeposit = deposits.some(d => d.receipt_no === o.deposit_doc_no);
-    if (!hasDeposit) return false;
-    if (filterStatus !== "all" && o.status !== filterStatus) return false;
-    if (filterParking !== "all" && (o.parking_status || "") !== filterParking) return false;
-    if (!search.trim()) return true;
-    const s = search.toLowerCase();
-    return (o.customer_name || "").toLowerCase().includes(s) || (o.deposit_doc_no || "").toLowerCase().includes(s) || (o.technician || "").toLowerCase().includes(s) || String(o.order_id).includes(s);
-  });
-
-  const sorted = [...filtered].sort((a, b) => {
-    const depA = deposits.find(d => d.receipt_no === a.deposit_doc_no);
-    const depB = deposits.find(d => d.receipt_no === b.deposit_doc_no);
-    const dateA = depA?.deposit_date ? new Date(depA.deposit_date).getTime() : 0;
-    const dateB = depB?.deposit_date ? new Date(depB.deposit_date).getTime() : 0;
-    return dateB - dateA;
-  });
+  // หมายเหตุ: การกรอง (status, parking, search, ยึดมัดจำ, ปิดซ่อม) ย้ายไปทำที่ n8n backend แล้ว
+  // backend ส่ง deposit_date มาด้วย (alias จาก moto_deposit) และจัดเรียงให้แล้ว
+  const filtered = orders;
+  const sorted = orders;
 
   const statusCounts = {
     all: orders.length,
@@ -481,6 +475,58 @@ export default function YamahaOrderPage({ currentUser }) {
   };
 
   const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
+
+  function printTable() {
+    const list = sorted;
+    const title = filterStatus === "all" ? "ทั้งหมด" : filterStatus;
+    const parkLabel = filterParking === "all" ? "ทั้งหมด" : filterParking;
+    const rows = list.map((o, i) => {
+      const dateStr = o.deposit_date ? fmtDate(o.deposit_date) : "-";
+      const statusStr = o.status || "-";
+      return `<tr>
+        <td class="center">${i + 1}</td>
+        <td>${o.order_type || ""}</td>
+        <td>${dateStr}</td>
+        <td>${o.deposit_doc_no || ""}</td>
+        <td>${o.customer_name || ""}</td>
+        <td>${(o.technician || "").split(" ")[0]}</td>
+        <td>${o.model_name || ""}</td>
+        <td>${o.license_plate || "-"}</td>
+        <td>${o.parking_status || "-"}</td>
+        <td>${statusStr}</td>
+        <td>${fmtDate(o.created_at)}</td>
+        <td>${o.vendor_po_no || "-"}</td>
+        <td>${o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
+      </tr>`;
+    }).join("");
+    const w = window.open("", "_blank", "width=1200,height=800");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>รายการสั่งซื้ออะไหล่ YAMAHA</title>
+<style>
+  @page { size: A4 landscape; margin: 10mm; }
+  body { font-family: 'Tahoma','Sarabun',sans-serif; padding: 12px; font-size: 11px; color: #222; }
+  h2 { text-align: center; margin: 0 0 4px; }
+  .sub { text-align: center; color: #666; margin-bottom: 10px; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { border: 1px solid #999; padding: 4px 6px; font-size: 10px; }
+  th { background: #072d6b; color: #fff; font-weight: 600; }
+  .center { text-align: center; }
+  tr:nth-child(even) td { background: #f9fafb; }
+</style></head><body>
+<h2>ระบบสั่งซื้ออะไหล่ YAMAHA</h2>
+<div class="sub">สถานะ: ${title} | สถานะจอด: ${parkLabel} | จำนวน: ${list.length} รายการ | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
+<table>
+  <thead><tr>
+    <th>#</th><th>ประเภท</th><th>วันที่มัดจำ</th><th>เลขที่มัดจำ</th><th>ลูกค้า</th>
+    <th>ช่าง</th><th>รุ่นรถ</th><th>ทะเบียนรถ</th><th>สถานะจอด</th><th>สถานะ</th>
+    <th>วันที่สั่งซื้อ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>วันที่นัดหมาย</th>
+  </tr></thead>
+  <tbody>${rows || '<tr><td colspan="13" class="center">ไม่พบข้อมูล</td></tr>'}</tbody>
+</table>
+</body></html>`);
+    w.document.close();
+    w.focus();
+    w.print();
+  }
 
   function printOrder(order) {
     const items = order.items || [];
@@ -554,6 +600,10 @@ export default function YamahaOrderPage({ currentUser }) {
           <button onClick={() => { setShowAdjustModal(true); setAdjustDocNo(""); setAdjustType("มัดจำค่ารถ"); setAdjustRemark(""); setMessage(""); }}
             style={{ padding: "8px 16px", fontSize: 13, background: "#ea580c", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
             บันทึกปรับปรุงเงินมัดจำ
+          </button>
+          <button onClick={printTable}
+            style={{ padding: "8px 16px", fontSize: 13, background: "#0891b2", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
+            🖨️ พิมพ์
           </button>
         </div>
       </div>
@@ -655,14 +705,14 @@ export default function YamahaOrderPage({ currentUser }) {
             ) : sorted.length === 0 ? (
               <tr><td colSpan={13} style={center}>ไม่พบข้อมูล</td></tr>
             ) : sorted.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((o, i) => {
-              const dep = deposits.find(d => d.receipt_no === o.deposit_doc_no);
-              const isClosed = !dep;
+              // backend การันตี deposit จับคู่ + เรียง deposit_date แล้ว
+              const isClosed = false;
               return (
               <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                 <td style={td}>
                   <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600, background: o.order_type === "ปกติ" ? "#dbeafe" : "#fef3c7", color: o.order_type === "ปกติ" ? "#1e40af" : "#92400e" }}>{o.order_type}</span>
                 </td>
-                <td style={td}>{dep ? fmtDate(dep.deposit_date) : <span style={{ color: "#ef4444", fontWeight: 600 }}>ปิด Job</span>}</td>
+                <td style={td}>{o.deposit_date ? fmtDate(o.deposit_date) : "-"}</td>
                 <td style={td}>{o.deposit_doc_no}</td>
                 <td style={td}>{o.customer_name}</td>
                 <td style={td}>{(o.technician || "").split(" ")[0]}</td>
