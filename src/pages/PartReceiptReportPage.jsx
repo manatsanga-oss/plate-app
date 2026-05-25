@@ -50,6 +50,7 @@ export default function PartReceiptReportPage() {
   }, [rows, search]);
 
   const summary = useMemo(() => {
+    const creditNotes = filtered.filter(r => r.doc_type === "credit_note");
     return {
       docs: filtered.length,
       items: filtered.reduce((s, r) => s + (Number(r.items_count) || 0), 0),
@@ -57,10 +58,13 @@ export default function PartReceiptReportPage() {
       cost: filtered.reduce((s, r) => s + (Number(r.total_cost) || 0), 0),
       vat: filtered.reduce((s, r) => s + (Number(r.vat_amount) || 0), 0),
       total: filtered.reduce((s, r) => s + (Number(r.total_incl_vat) || 0), 0),
+      credit_count: creditNotes.length,
+      credit_total: creditNotes.reduce((s, r) => s + (Number(r.total_incl_vat) || 0), 0),
     };
   }, [filtered]);
 
   const color = brand === "HONDA" ? "#dc2626" : "#1e40af";
+  const isHonda = brand === "HONDA";
 
   return (
     <div className="page-container">
@@ -99,30 +103,33 @@ export default function PartReceiptReportPage() {
 
       {/* Summary cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10, marginBottom: 12 }}>
-        <KPI label="📋 ใบรับ" value={fmtInt(summary.docs)} unit="ใบ" color="#0369a1" />
-        <KPI label="📦 รายการ" value={fmtInt(summary.items)} unit="รายการ" color="#7c3aed" />
-        <KPI label="🔢 จำนวน" value={fmt(summary.qty, 0)} unit="ชิ้น" color="#059669" />
+        <KPI label={isHonda ? "📋 ใบกำกับ" : "📋 ใบรับ"} value={fmtInt(summary.docs)} unit="ใบ" color="#0369a1" />
+        {!isHonda && <KPI label="📦 รายการ" value={fmtInt(summary.items)} unit="รายการ" color="#7c3aed" />}
+        {!isHonda && <KPI label="🔢 จำนวน" value={fmt(summary.qty, 0)} unit="ชิ้น" color="#059669" />}
         <KPI label="💰 มูลค่าก่อน VAT" value={fmt(summary.cost, 0)} unit="บาท" color="#374151" />
         <KPI label="📑 VAT" value={fmt(summary.vat, 0)} unit="บาท" color="#d97706" />
         <KPI label="✅ รวม" value={fmt(summary.total, 0)} unit="บาท" color={color} />
+        {isHonda && (
+          <KPI label="📄 ใบลดหนี้" value={fmtInt(summary.credit_count)} unit={`ใบ (${fmt(summary.credit_total, 0)} บาท)`} color="#dc2626" />
+        )}
       </div>
 
       {/* Table */}
       <div style={{ background: "#fff", borderRadius: 10, border: `2px solid ${color}`, overflow: "hidden" }}>
         <div style={{ padding: "10px 14px", background: color, color: "#fff", fontWeight: 700, fontSize: 14 }}>
-          {brand === "HONDA" ? "🔴 HONDA" : "🔵 YAMAHA"} — {filtered.length} ใบรับ
+          {isHonda ? "🔴 HONDA" : "🔵 YAMAHA"} — {filtered.length} {isHonda ? "ใบกำกับ" : "ใบรับ"}
         </div>
         <div style={{ overflowX: "auto", maxHeight: "65vh" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead style={{ background: "#f9fafb", position: "sticky", top: 0, zIndex: 1 }}>
               <tr>
                 <th style={th}>#</th>
-                <th style={th}>เลขที่ใบรับ</th>
+                <th style={th}>{isHonda ? "เลขที่ใบกำกับ" : "เลขที่ใบรับ"}</th>
                 <th style={th}>วันที่</th>
-                <th style={th}>{brand === "HONDA" ? "เลขที่ออเดอร์" : "เลขที่ใบกำกับ"}</th>
+                <th style={th}>{isHonda ? "เลขผู้เสียภาษี" : "เลขที่ใบกำกับ"}</th>
                 <th style={th}>ผู้ขาย</th>
-                <th style={{ ...th, textAlign: "right" }}>รายการ</th>
-                <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
+                {!isHonda && <th style={{ ...th, textAlign: "right" }}>รายการ</th>}
+                {!isHonda && <th style={{ ...th, textAlign: "right" }}>จำนวน</th>}
                 <th style={{ ...th, textAlign: "right" }}>มูลค่า</th>
                 <th style={{ ...th, textAlign: "right" }}>VAT</th>
                 <th style={{ ...th, textAlign: "right" }}>รวม</th>
@@ -130,23 +137,29 @@ export default function PartReceiptReportPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={10} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
+                <tr><td colSpan={isHonda ? 8 : 10} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={10} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
-              ) : filtered.map((r, i) => (
-                <tr key={r.doc_no + "_" + i} style={{ borderTop: "1px solid #f3f4f6" }}>
+                <tr><td colSpan={isHonda ? 8 : 10} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
+              ) : filtered.map((r, i) => {
+                const isCN = r.doc_type === "credit_note";
+                return (
+                <tr key={r.doc_no + "_" + i} style={{ borderTop: "1px solid #f3f4f6", background: isCN ? "#fef2f2" : "transparent" }}>
                   <td style={td}>{i + 1}</td>
-                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.doc_no}</td>
+                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: isCN ? "#dc2626" : "#0369a1" }}>
+                    {isCN && <span style={{ marginRight: 4, fontSize: 10, padding: "1px 5px", background: "#dc2626", color: "#fff", borderRadius: 4 }}>ลดหนี้</span>}
+                    {r.doc_no}
+                  </td>
                   <td style={td}>{fmtDate(r.doc_date)}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.tax_invoice_no || "-"}</td>
-                  <td style={td}>{(r.vendor_name || "-").slice(0, 35)}</td>
-                  <td style={{ ...td, textAlign: "right" }}>{fmtInt(r.items_count)}</td>
-                  <td style={{ ...td, textAlign: "right" }}>{fmt(r.total_qty, 0)}</td>
+                  <td style={td}>{(r.vendor_name || "-").slice(0, 50)}</td>
+                  {!isHonda && <td style={{ ...td, textAlign: "right" }}>{fmtInt(r.items_count)}</td>}
+                  {!isHonda && <td style={{ ...td, textAlign: "right" }}>{fmt(r.total_qty, 0)}</td>}
                   <td style={{ ...td, textAlign: "right" }}>{fmt(r.total_cost)}</td>
                   <td style={{ ...td, textAlign: "right", color: "#d97706" }}>{fmt(r.vat_amount)}</td>
-                  <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#059669" }}>{fmt(r.total_incl_vat)}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 700, color: isCN ? "#dc2626" : "#059669" }}>{fmt(r.total_incl_vat)}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>

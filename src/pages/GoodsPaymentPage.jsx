@@ -100,7 +100,7 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
   // determine source_table based on tab/brand
   const sourceTableForCurrent = () => {
     if (mainTab === "parts") {
-      return brandTab === "YAMAHA" ? "yamaha_part_tax_invoices" : "honda_part_receipts";
+      return brandTab === "YAMAHA" ? "yamaha_part_tax_invoices" : "honda_part_tax_invoices";
     }
     return brandTab === "YAMAHA" ? "vehicle_purchase_receipts_singchai" : "vehicle_purchase_receipts_papao";
   };

@@ -58,20 +58,27 @@ export default function YamahaRepairReportPage() {
   const statuses = [...new Set(rows.map(r => r.status).filter(Boolean))];
 
   // Pivot: rows=ช่างซ่อม, columns=item_type (เป็นยอดเงิน)
-  // รายการค่าแรง → labor_total | ใบแจ้งซ่อม → net_revenue | คูปอง → count×40
+  // รายการค่าแรง → labor_total | ใบแจ้งซ่อม → net_revenue | คูปอง → count×40 | parts_value → นับครั้งเดียวต่อ job_no
   const mechanicPivot = useMemo(() => {
     const map = new Map();
+    const partsCountedJobs = new Set();  // กัน parts_value ถูกบวกซ้ำหลายบรรทัดของ job เดียวกัน
     for (const r of rows) {
       const name = r.mechanic_name || "(ไม่ระบุ)";
       if (!map.has(name)) map.set(name, {
         mechanic_name: name,
-        labor_amount: 0, invoice_amount: 0, coupon_count: 0,
+        labor_amount: 0, invoice_amount: 0, coupon_count: 0, parts_value: 0,
       });
       const g = map.get(name);
       const it = r.item_type || "";
       if (it === "รายการค่าแรง") g.labor_amount += Number(r.labor_total || 0);
       else if (it === "ใบแจ้งซ่อม") g.invoice_amount += Number(r.net_revenue || 0);
       else if (it === "คูปอง") g.coupon_count += 1;
+      // parts_value ต่อ job — นับครั้งเดียว
+      const jobKey = `${name}|${r.job_no}`;
+      if (!partsCountedJobs.has(jobKey)) {
+        partsCountedJobs.add(jobKey);
+        g.parts_value += Number(r.parts_value || 0);
+      }
     }
     const list = [...map.values()].map(g => ({
       ...g,
@@ -79,6 +86,18 @@ export default function YamahaRepairReportPage() {
       total: g.labor_amount + g.invoice_amount + g.coupon_count * 40,
     }));
     return list.sort((a, b) => b.total - a.total);
+  }, [rows]);
+
+  // total parts value (unique per job_no)
+  const totalPartsValue = useMemo(() => {
+    const seen = new Set();
+    let sum = 0;
+    for (const r of rows) {
+      if (seen.has(r.job_no)) continue;
+      seen.add(r.job_no);
+      sum += Number(r.parts_value || 0);
+    }
+    return sum;
   }, [rows]);
 
   // สรุปต่อประเภทรายการ (item_type) — ใบแจ้งซ่อม / รายการค่าแรง / คูปอง
@@ -131,6 +150,7 @@ export default function YamahaRepairReportPage() {
         <Card label="📋 ใบแจ้งซ่อม" value={byJob.length} color="#1e40af" />
         <Card label="📌 รายการ (lines)" value={rows.length} color="#0369a1" />
         <Card label="💰 รายได้สุทธิรวม" value={fmt(totalRevenue)} color="#059669" highlight />
+        <Card label="📦 มูลค่าสินค้า (จาก yamaha_part_dispense)" value={fmt(totalPartsValue)} color="#0891b2" />
       </div>
 
       {/* Pivot: ช่างซ่อม × ประเภทรายการ (ยอดเงิน) */}
@@ -149,6 +169,7 @@ export default function YamahaRepairReportPage() {
                   <th style={{ ...th, textAlign: "right", background: "#dcfce7", color: "#15803d" }}>ค่าคอมมิชชั่น (65%)</th>
                   <th style={{ ...th, textAlign: "right" }}>ใบแจ้งซ่อม</th>
                   <th style={{ ...th, textAlign: "right", background: "#fef9c3", color: "#072d6b" }}>รวม</th>
+                  <th style={{ ...th, textAlign: "right", background: "#cffafe", color: "#0891b2" }}>มูลค่าสินค้า</th>
                 </tr>
               </thead>
               <tbody>
@@ -167,6 +188,7 @@ export default function YamahaRepairReportPage() {
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#dcfce7", color: "#15803d" }}>{laborTotal ? fmt(laborTotal * 0.65) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{g.invoice_amount ? fmt(g.invoice_amount) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3" }}>{fmt(g.total)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#cffafe", color: "#0891b2" }}>{g.parts_value ? fmt(g.parts_value) : "-"}</td>
                   </tr>
                 )})}
                 {(() => {
@@ -182,6 +204,7 @@ export default function YamahaRepairReportPage() {
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d" }}>{fmt(sumLaborTotal * 0.65)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.invoice_amount,0))}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.total,0))}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0891b2" }}>{fmt(mechanicPivot.reduce((s,g)=>s+(g.parts_value||0),0))}</td>
                   </tr>
                 )})()}
               </tbody>

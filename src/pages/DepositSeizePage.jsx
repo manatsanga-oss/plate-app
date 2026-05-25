@@ -34,7 +34,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
     try {
       const [hOrdRes, yOrdRes, hDepRes, yDepRes, seizeRes] = await Promise.all([
         fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_spare_orders" }) }),
-        fetch(YAMAHA_SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_yamaha_orders" }) }).catch(() => null),
+        fetch(YAMAHA_SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_yamaha_orders", include_seized: true }) }).catch(() => null),
         fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_honda_deposits" }) }),
         fetch(YAMAHA_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }),
         fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposit_seizures" }) }).catch(() => null),
@@ -54,7 +54,40 @@ export default function DepositSeizePage({ currentUser } = {}) {
         const key = d?.receipt_no || d?.deposit_doc_no;
         if (key) depMap[`YAMAHA:${key}`] = { ...d, receipt_no: d?.receipt_no || d?.deposit_doc_no };
       });
-      const allOrders = [...hOrders, ...yOrders]
+      // หา deposit ที่ "ยังไม่ได้สั่งซื้อ" (ไม่มี order อ้างอิงถึง) — สร้าง pseudo-order
+      const orderedDocSet = new Set([...hOrders, ...yOrders].map(o => `${o.brand}:${o.deposit_doc_no}`));
+      const isSparePartsDeposit = (d) => {
+        const t = String(d?.deposit_type || "");
+        const rn = String(d?.receipt_no || d?.deposit_doc_no || "");
+        // YAMAHA: type "เงินมัดจำอะไหล่" หรือ prefix SCY01
+        // HONDA: type มีคำว่า "อะไหล่" หรือ prefix DEPD
+        return t.includes("อะไหล่") || rn.startsWith("SCY01") || rn.startsWith("DEPD");
+      };
+      const pseudoOrders = [];
+      Object.entries(depMap).forEach(([key, dep]) => {
+        const [brand, docNo] = key.split(":");
+        if (orderedDocSet.has(key)) return;
+        if (!isSparePartsDeposit(dep)) return;
+        pseudoOrders.push({
+          brand,
+          order_id: `pseudo-${key}`,
+          order_no: null,
+          order_type: "ไม่มีใบสั่งซื้อ",
+          deposit_doc_no: docNo,
+          customer_name: dep.customer_name || "",
+          customer_code: dep.customer_code || "",
+          technician: "",
+          license_plate: "",
+          model_name: "",
+          parking_status: "",
+          status: "ไม่ได้สั่งซื้อ",
+          vendor_po_no: null,
+          created_at: dep.deposit_date,
+          __pseudo: true,
+        });
+      });
+
+      const allOrders = [...hOrders, ...yOrders, ...pseudoOrders]
         .filter(o => o && o.deposit_doc_no)
         .sort((a, b) => {
           const depA = depMap[`${a.brand}:${a.deposit_doc_no}`];
@@ -111,6 +144,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
     "เปิดงาน": baseOrders.filter(o => o.status === "เปิดงาน").length,
     "ปิดงานซ่อม": baseOrders.filter(o => o.status === "ปิดงานซ่อม").length,
     "ดีราคาซ่อม": baseOrders.filter(o => o.status === "ดีราคาซ่อม").length,
+    "ไม่ได้สั่งซื้อ": baseOrders.filter(o => o.status === "ไม่ได้สั่งซื้อ").length,
   };
   const brandCounts = {
     HONDA: baseOrders.filter(o => o.brand === "HONDA").length,
@@ -121,11 +155,13 @@ export default function DepositSeizePage({ currentUser } = {}) {
     const dep = deposits[`${o.brand}:${o.deposit_doc_no}`];
     const existing = seizureMap[`${o.brand}:${o.deposit_doc_no}`];
     setSeizePopup({
-      order: o, dep, items: existing?.items || [], loading: true,
+      order: o, dep, items: existing?.items || [], loading: !o.__pseudo,
       reason: existing?.reason || "", note: existing?.note || "",
       seizure_amount: existing?.seizure_amount || dep?.deposit_amount || dep?.amount || 0,
       saving: false, existing,
     });
+    // pseudo-order = ใบมัดจำที่ยังไม่ได้สั่งซื้อ → ไม่มี order_detail ให้โหลด
+    if (o.__pseudo) return;
     // โหลด items จาก order_detail
     try {
       const api = o.brand === "HONDA" ? SPARE_API : YAMAHA_SPARE_API;
@@ -288,6 +324,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
     "เปิดงาน": "#ec4899",
     "ปิดงานซ่อม": "#dc2626",
     "ดีราคาซ่อม": "#a78bfa",
+    "ไม่ได้สั่งซื้อ": "#64748b",
   };
 
   return (

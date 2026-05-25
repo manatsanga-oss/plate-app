@@ -290,14 +290,14 @@ export default function MotoExpensePage({ currentUser }) {
     return "-";
   };
 
-  // ดึงชื่อยี่ห้อ + รุ่น จากการ lookup motoTypes (ผูก type_id)
+  // ดึงชื่อยี่ห้อ + รุ่น + แบบ จากการ lookup motoTypes (ผูก type_id)
   const lookupTypeInfo = (e) => {
     const t = e.type_id ? motoTypes.find(x => String(x.type_id) === String(e.type_id)) : null;
     const brand = e.brand_name || t?.brand_name || (e.group_by === "brand" ? e.brand_name : "");
     const series = t?.marketing_name || t?.series_name || e.series_name || "";
-    const model = t?.model_name || e.model_name || "";
-    const modelLabel = [series, model].filter(Boolean).join(" ");
-    return { brand: brand || "-", model: modelLabel || "-" };
+    // "แบบ" ในระบบใช้ model_code (เช่น AFS125CSBT) ไม่ใช่ model_name
+    const model = t?.model_code || t?.model_name || e.model_code || e.model_name || "";
+    return { brand: brand || "-", series: series || "-", model: model || "-" };
   };
 
   return (
@@ -346,6 +346,7 @@ export default function MotoExpensePage({ currentUser }) {
                 <th>{tabLabel[tab]}</th>
                 <th>ยี่ห้อ</th>
                 <th>รุ่น</th>
+                <th>แบบ</th>
                 <th>จำนวนเงิน</th>
                 <th>วันที่ประกาศใช้</th>
                 <th>วันที่สิ้นสุด</th>
@@ -356,7 +357,7 @@ export default function MotoExpensePage({ currentUser }) {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={12} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลค่าใช้จ่าย</td></tr>
+                <tr><td colSpan={13} style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>ยังไม่มีข้อมูลค่าใช้จ่าย</td></tr>
               ) : filtered.map((e, i) => (
                 <tr key={e.expense_id || i}>
                   <td>{i + 1}</td>
@@ -377,7 +378,8 @@ export default function MotoExpensePage({ currentUser }) {
                     return (
                       <>
                         <td style={{ fontSize: 12 }}>{info.brand}</td>
-                        <td style={{ fontSize: 12 }}>{info.model}</td>
+                        <td style={{ fontSize: 12 }}>{info.series}</td>
+                        <td style={{ fontSize: 12, fontFamily: "monospace" }}>{info.model}</td>
                       </>
                     );
                   })()}

@@ -813,13 +813,14 @@ export default function YamahaOrderPage({ currentUser }) {
                 <select value={form.deposit_doc_no} onChange={e => handleDepositSelect(e.target.value)} style={{ ...inputStyle, flex: 1 }}>
                   <option value="">-- เลือกใบมัดจำ --</option>
                   {(() => {
-                    // filter ใบมัดจำที่ใช้ได้: เงินมัดจำอะไหล่ + SCY01 + ยังไม่ถูกใช้ + ลูกค้ายังไม่มีงานค้าง + ไม่ใช่ตีราคาซ่อม
+                    // filter ใบมัดจำที่ใช้ได้: เงินมัดจำอะไหล่ + SCY01 + ยังไม่ถูกใช้ + ไม่ใช่ตีราคาซ่อม + ไม่ใช่ปรับปรุง + ไม่ถูกยึด
                     const eligible = deposits.filter(d =>
                       d.deposit_type === "เงินมัดจำอะไหล่"
                       && (d.receipt_no || "").startsWith("SCY01")
                       && !orders.some(o => o.deposit_doc_no === d.receipt_no)
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
                       && !adjustDeposits.some(ad => ad.deposit_doc_no === d.receipt_no)
+                      && !seizedDocs.has(d.receipt_no)
                     );
                     return eligible;
                   })().map(d => (
@@ -847,6 +848,8 @@ export default function YamahaOrderPage({ currentUser }) {
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
                       // ไม่ใช่ปรับปรุงผิดประเภท
                       && !adjustDeposits.some(ad => ad.deposit_doc_no === d.receipt_no)
+                      // ไม่ถูกยึดเงินมัดจำ
+                      && !seizedDocs.has(d.receipt_no)
                       // มียอดคงเหลือ
                       && Number(d.remaining_amount || 0) > 0
                     )

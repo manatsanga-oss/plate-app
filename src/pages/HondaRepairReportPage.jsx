@@ -40,6 +40,7 @@ export default function HondaRepairReportPage() {
   const totalParts = rows.reduce((s, r) => s + Number(r.parts_amount || 0), 0);
   const totalLabor = rows.reduce((s, r) => s + Number(r.labor_amount || 0), 0);
   const totalNet = rows.reduce((s, r) => s + Number(r.net_sale || 0), 0);
+  const totalPartsValue = rows.reduce((s, r) => s + Number(r.parts_value || 0), 0);
 
   // pivot: mechanic × service_type (count + labor) — PDI ใช้ count × 50
   const mechanicPivot = useMemo(() => {
@@ -51,7 +52,7 @@ export default function HondaRepairReportPage() {
     for (const r of rows) {
       const name = r.mechanic_name || "(ไม่ระบุ)";
       if (!map.has(name)) {
-        const entry = { mechanic_code: r.mechanic_code, mechanic_name: name, total_jobs: 0, total_labor: 0, total_net: 0, is_pmotor: isPMotor(r.mechanic_code, name) };
+        const entry = { mechanic_code: r.mechanic_code, mechanic_name: name, total_jobs: 0, total_labor: 0, total_net: 0, total_parts_value: 0, is_pmotor: isPMotor(r.mechanic_code, name) };
         for (const t of types) entry[t] = { count: 0, labor: 0 };
         map.set(name, entry);
       }
@@ -65,6 +66,7 @@ export default function HondaRepairReportPage() {
       // total_labor: PDI ใช้ ×50 อื่น ๆ ใช้ labor_amount — ยกเว้น ป.เปา ไม่คิด PDI
       g.total_labor += (isPDIType(t) ? (g.is_pmotor ? 0 : 50) : Number(r.labor_amount || 0));
       g.total_net += Number(r.net_sale || 0);
+      g.total_parts_value += Number(r.parts_value || 0);
     }
     return { types, data: [...map.values()].sort((a, b) => b.total_labor - a.total_labor) };
   }, [rows]);
@@ -111,6 +113,7 @@ export default function HondaRepairReportPage() {
         <Card label="🛠️ ค่าบริการรวม (รวม PDI×50)" value={fmt(mechanicPivot.data.reduce((s, g) => s + g.total_labor, 0))} color="#0369a1" />
         <Card label="💰 ขายสุทธิรวม" value={fmt(totalNet)} color="#059669" />
         <Card label="💵 ค่าคอมมิชชั่นรวม (65%)" value={fmt(mechanicPivot.data.reduce((s, g) => s + g.total_labor, 0) * 0.65)} color="#15803d" highlight />
+        <Card label="📦 มูลค่าสินค้า (จาก honda_part_sales)" value={fmt(totalPartsValue)} color="#0891b2" />
       </div>
 
       {/* Pivot: ช่างซ่อม × ประเภทบริการ */}
@@ -127,6 +130,7 @@ export default function HondaRepairReportPage() {
                   <th style={{ ...th, textAlign: "right", background: "#fef9c3" }}>รวม Jobs</th>
                   <th style={{ ...th, textAlign: "right", background: "#fef9c3" }}>ค่าบริการรวม</th>
                   <th style={{ ...th, textAlign: "right", background: "#dcfce7" }}>ค่าคอมมิชชั่น (65%)</th>
+                  <th style={{ ...th, textAlign: "right", background: "#cffafe" }}>มูลค่าสินค้า</th>
                 </tr>
               </thead>
               <tbody>
@@ -154,6 +158,7 @@ export default function HondaRepairReportPage() {
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3" }}>{g.total_jobs}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3", color: "#059669" }}>{fmt(g.total_labor)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#dcfce7", color: "#15803d" }}>{fmt(g.total_labor * 0.65)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#cffafe", color: "#0891b2" }}>{fmt(g.total_parts_value)}</td>
                   </tr>
                 ))}
               </tbody>

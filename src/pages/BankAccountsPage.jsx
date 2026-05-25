@@ -8,7 +8,7 @@ const BANKS = [
   "เกียรตินาคิน", "แลนด์แอนด์เฮ้าส์",
 ];
 
-const ACCOUNT_TYPES = ["ออมทรัพย์", "กระแสรายวัน", "ฝากประจำ"];
+const ACCOUNT_TYPES = ["ออมทรัพย์", "กระแสรายวัน", "ฝากประจำ", "เงินสดย่อย"];
 
 const emptyForm = () => ({
   account_name: "",
