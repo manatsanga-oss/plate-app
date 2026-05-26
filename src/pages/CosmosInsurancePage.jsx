@@ -349,10 +349,10 @@ function HistoryPanel({ setMessage, currentUser }) {
   }
 
   async function saveSubmission() {
-    // เฉพาะ row ที่ติ๊กเลือก + จับคู่กับการขายแล้ว
-    const rowsToSave = filtered.filter(r => selected.has(r.app_no) && r.sale_id);
+    // เฉพาะ row ที่ติ๊กเลือก + จับคู่กับใบขาย หรือ ใบรับเรื่อง (อย่างใดอย่างหนึ่ง)
+    const rowsToSave = filtered.filter(r => selected.has(r.app_no) && (r.sale_id || r.receipt_no));
     if (!rowsToSave.length) {
-      setMessage("⚠️ กรุณาติ๊กเลือกรายการที่ต้องการบันทึก (เฉพาะที่จับคู่กับการขายแล้วเท่านั้น)");
+      setMessage("⚠️ กรุณาติ๊กเลือกรายการที่ต้องการบันทึก (ต้องจับคู่กับใบขายหรือใบรับเรื่อง)");
       return;
     }
     if (!window.confirm(`บันทึก ${rowsToSave.length} รายการ ${currentPlan.label} ลงฐานข้อมูล?`)) return;
@@ -366,7 +366,8 @@ function HistoryPanel({ setMessage, currentUser }) {
         submitted_by: currentUser?.username || currentUser?.name || "system",
         rows: rowsToSave.map(r => ({
           app_no: r.app_no,
-          invoice_no: r.invoice_no,
+          // fallback: ถ้าไม่มี invoice_no (sale) → ใช้ receipt_no (งานรับเรื่อง)
+          invoice_no: r.invoice_no || r.receipt_no || "",
           customer_name: r.sale_customer_name || r.customer_name || "",
           chassis_no: cleanChassis(r.chassis_no),
           plan_name: r.plan_name,
@@ -424,7 +425,7 @@ function HistoryPanel({ setMessage, currentUser }) {
 
   function toggleAll(rows) {
     setSelected(s => {
-      const eligible = rows.filter(r => r.sale_id).map(r => r.app_no);
+      const eligible = rows.filter(r => r.sale_id || r.receipt_no).map(r => r.app_no);
       const allSelected = eligible.every(a => s.has(a));
       if (allSelected) return new Set();
       return new Set(eligible);
@@ -513,7 +514,7 @@ function HistoryPanel({ setMessage, currentUser }) {
               <tr>
                 <th style={{ ...th, width: 36, textAlign: "center" }}>
                   <input type="checkbox"
-                    checked={filtered.filter(r => r.sale_id).length > 0 && filtered.filter(r => r.sale_id).every(r => selected.has(r.app_no))}
+                    checked={filtered.filter(r => r.sale_id || r.receipt_no).length > 0 && filtered.filter(r => r.sale_id || r.receipt_no).every(r => selected.has(r.app_no))}
                     onChange={() => toggleAll(filtered)}
                     style={{ cursor: "pointer", width: 16, height: 16 }} />
                 </th>
@@ -559,9 +560,9 @@ function HistoryPanel({ setMessage, currentUser }) {
                     <input type="checkbox"
                       checked={selected.has(r.app_no)}
                       onChange={() => toggleRow(r.app_no)}
-                      disabled={!r.sale_id}
-                      title={!r.sale_id ? "ต้องเลือกใบขายก่อน" : ""}
-                      style={{ cursor: r.sale_id ? "pointer" : "not-allowed", width: 16, height: 16 }} />
+                      disabled={!r.sale_id && !r.receipt_no}
+                      title={(!r.sale_id && !r.receipt_no) ? "ต้องเลือกใบขายหรือใบรับเรื่องก่อน" : ""}
+                      style={{ cursor: (r.sale_id || r.receipt_no) ? "pointer" : "not-allowed", width: 16, height: 16 }} />
                   </td>
                   <td style={td}>{i + 1}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: currentPlan.color }}>{r.app_no}</td>

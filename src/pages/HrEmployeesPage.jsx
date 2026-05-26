@@ -43,7 +43,7 @@ export default function HrEmployeesPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [ttNames, setTtNames] = useState([]); // ชื่อพนักงานจาก time_tracking_records
 
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [includeInactive]);
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { fetchTimeTrackingNames(); }, []);
 
   async function fetchTimeTrackingNames() {
@@ -64,7 +64,7 @@ export default function HrEmployeesPage({ currentUser }) {
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_hr_employees", include_inactive: String(includeInactive) }),
+        body: JSON.stringify({ action: "list_hr_employees", include_inactive: "true" }),
       });
       const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
@@ -145,6 +145,8 @@ export default function HrEmployeesPage({ currentUser }) {
 
   const kw = search.trim().toLowerCase();
   const filtered = rows.filter(r => {
+    // กรอง inactive ที่ frontend ถ้า checkbox ไม่ติ๊ก
+    if (!includeInactive && r.status === "inactive") return false;
     if (!kw) return true;
     const hay = [r.employee_name, r.team_name, r.position, r.affiliation, r.branch_code]
       .filter(Boolean).join(" ").toLowerCase();
