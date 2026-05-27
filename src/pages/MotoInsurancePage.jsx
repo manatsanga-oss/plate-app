@@ -1337,6 +1337,43 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
   async function handleSave() {
     setSaving(true); setError("");
     try {
+      // === Validation: chassis_no vs moto_sales ===
+      const chassisInput = String(form.chassis_no || "").trim().toUpperCase();
+      if (chassisInput) {
+        try {
+          const saleRes = await fetch(API_URL, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "search_moto_sales", chassis_no: chassisInput, keyword: chassisInput }),
+          });
+          const saleData = await saleRes.json();
+          const matched = Array.isArray(saleData) ? saleData[0] : saleData;
+          if (matched && matched.id) {
+            // chassis found in moto_sales — เช็ค insured_name vs sale.customer_name
+            const insName = String(form.insured_name || "").trim().toLowerCase();
+            const saleName = String(matched.customer_name || "").trim().toLowerCase();
+            const stripWords = s => s.replace(/(นาย|นาง|นางสาว|น\.ส\.|mr\.?|mrs\.?|miss\.?|บริษัท|จำกัด|มหาชน|\(|\))/gi, "").replace(/\s+/g, "").trim();
+            const insClean = stripWords(insName);
+            const saleClean = stripWords(saleName);
+            const overlap = insClean && saleClean && (insClean.includes(saleClean.slice(0, 6)) || saleClean.includes(insClean.slice(0, 6)));
+            if (!overlap) {
+              const proceed = window.confirm(
+                `⚠️ ชื่อผู้เอาประกันไม่ตรงกับเจ้าของรถในระบบ\n\n` +
+                `เลขถัง: ${chassisInput}\n` +
+                `ในใบขาย: ${matched.customer_name || "-"} (${matched.invoice_no || "-"})\n` +
+                `ในฟอร์ม: ${form.insured_name || "-"}\n\n` +
+                `ต้องการบันทึกต่อหรือไม่?`
+              );
+              if (!proceed) { setSaving(false); return; }
+            }
+          } else if (saleData && (Array.isArray(saleData) ? saleData.length === 0 : !saleData.id)) {
+            // chassis NOT found in moto_sales — เตือนแต่ให้บันทึกได้
+            const proceed = window.confirm(
+              `⚠️ ไม่พบเลขถัง ${chassisInput} ในระบบขายรถ\n\nต้องการบันทึกต่อหรือไม่?`
+            );
+            if (!proceed) { setSaving(false); return; }
+          }
+        } catch { /* silent — validation อย่าทำให้ save fail */ }
+      }
       const body = { action: "update_insurance", insurance_id: record.insurance_id, ...form };
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
