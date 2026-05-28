@@ -658,7 +658,6 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hrpayrollaccounts" label="ตั้งค่าบัญชีจ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrspecialcommission" label="รายงานค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrnormalcommission" label="รายงานค่าคอมปกติ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="hrsalesrecord" label="บันทึกรถคำนวณค่าคอม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Upload" pages={uploadPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

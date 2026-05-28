@@ -1,11 +1,16 @@
 import React, { useEffect, useState, useMemo } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/service-api";
+const HR_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 
 function fmt(v) { return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 
 async function postAPI(body) {
   const r = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  return r.json();
+}
+async function postHrAPI(body) {
+  const r = await fetch(HR_API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   return r.json();
 }
 
@@ -22,6 +27,11 @@ export default function YamahaRepairReportPage() {
   const [message, setMessage] = useState("");
   const [detail, setDetail] = useState(null);
   const [itemTypeDetail, setItemTypeDetail] = useState(null); // { item_type, rows }
+  const [employees, setEmployees] = useState([]);
+  const [checkFees, setCheckFees] = useState([]); // [{id, year, month, mechanic_name, amount, note}]
+  const [checkFeeModal, setCheckFeeModal] = useState(null); // { mechanic_name }
+  const [checkFeeForm, setCheckFeeForm] = useState({ amount: "", note: "" });
+  const [checkFeeSaving, setCheckFeeSaving] = useState(false);
 
   async function fetchData() {
     setLoading(true); setMessage("");
@@ -36,7 +46,59 @@ export default function YamahaRepairReportPage() {
     } catch { setRows([]); setMessage("❌ โหลดไม่สำเร็จ"); }
     setLoading(false);
   }
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
+  async function fetchEmployees() {
+    try {
+      const data = await postHrAPI({ action: "list_hr_employees", include_inactive: "true" });
+      setEmployees(Array.isArray(data) ? data : []);
+    } catch { setEmployees([]); }
+  }
+  async function fetchCheckFees() {
+    try {
+      const data = await postAPI({ action: "list_yamaha_check_fee", year: year || "", month: month || "" });
+      setCheckFees(Array.isArray(data) ? data : []);
+    } catch { setCheckFees([]); }
+  }
+  async function saveCheckFee() {
+    if (!checkFeeModal?.mechanic_name) return;
+    const amt = Number(checkFeeForm.amount);
+    if (!amt || amt <= 0) { setMessage("❌ กรุณาใส่จำนวนเงิน"); return; }
+    setCheckFeeSaving(true);
+    try {
+      await postAPI({
+        action: "save_yamaha_check_fee",
+        year: year || NOW.getFullYear(), month: month || (NOW.getMonth() + 1),
+        mechanic_name: checkFeeModal.mechanic_name,
+        amount: amt, note: checkFeeForm.note || "",
+        created_by: "system",
+      });
+      setCheckFeeForm({ amount: "", note: "" });
+      await fetchCheckFees();
+    } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+    setCheckFeeSaving(false);
+  }
+  async function deleteCheckFee(id) {
+    if (!confirm("ลบรายการนี้?")) return;
+    try {
+      await postAPI({ action: "delete_yamaha_check_fee", id });
+      await fetchCheckFees();
+    } catch { setMessage("❌ ลบไม่สำเร็จ"); }
+  }
+  useEffect(() => { fetchData(); fetchEmployees(); fetchCheckFees(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fetchCheckFees(); /* eslint-disable-next-line */ }, [year, month]);
+
+  // map ชื่อพนักงาน → ตำแหน่ง (สำหรับเช็คว่าใครไม่ใช่ช่าง)
+  const positionByName = useMemo(() => {
+    const m = new Map();
+    for (const e of employees) {
+      if (e.employee_name) m.set(String(e.employee_name).trim(), String(e.position || "").trim());
+    }
+    return m;
+  }, [employees]);
+  const isMechanic = (name) => {
+    const pos = positionByName.get(String(name || "").trim()) || "";
+    return pos.includes("ช่าง");
+  };
+  const TRANSFER_TO = "ชัยณรงค์ เกิดทรัพย์"; // ผู้รับยอด labor+coupon ของคนที่ไม่ใช่ช่าง
 
   // group by job_no for summary
   const byJob = useMemo(() => {
@@ -80,13 +142,48 @@ export default function YamahaRepairReportPage() {
         g.parts_value += Number(r.parts_value || 0);
       }
     }
+    // sum ค่าเช็ครถ ต่อช่าง (จาก checkFees ของปี/เดือนนี้)
+    const checkFeeByMechanic = new Map();
+    for (const f of checkFees) {
+      const n = String(f.mechanic_name || "").trim();
+      checkFeeByMechanic.set(n, (checkFeeByMechanic.get(n) || 0) + Number(f.amount || 0));
+    }
+
     const list = [...map.values()].map(g => ({
       ...g,
       coupon_amount: g.coupon_count * 40,
+      check_fee_amount: checkFeeByMechanic.get(String(g.mechanic_name).trim()) || 0,
       total: g.labor_amount + g.invoice_amount + g.coupon_count * 40,
     }));
-    return list.sort((a, b) => b.total - a.total);
-  }, [rows]);
+
+    // ย้ายทุกยอดของคนที่ตำแหน่งไม่ใช่ "ช่าง" (labor + coupon + ใบแจ้งซ่อม + มูลค่าสินค้า) ไปรวมที่ TRANSFER_TO
+    // แล้วลบแถวเดิมออก
+    let finalList = list;
+    if (positionByName.size > 0) {
+      let transferTo = list.find(g => g.mechanic_name === TRANSFER_TO);
+      if (!transferTo) {
+        transferTo = { mechanic_name: TRANSFER_TO, labor_amount: 0, invoice_amount: 0, coupon_count: 0, coupon_amount: 0, parts_value: 0, check_fee_amount: checkFeeByMechanic.get(TRANSFER_TO) || 0, total: 0 };
+        list.push(transferTo);
+      }
+      for (const g of list) {
+        if (g === transferTo) continue;
+        if (!isMechanic(g.mechanic_name)) {
+          transferTo.labor_amount += g.labor_amount;
+          transferTo.coupon_count += g.coupon_count;
+          transferTo.coupon_amount += g.coupon_amount;
+          transferTo.invoice_amount += g.invoice_amount;
+          transferTo.parts_value += g.parts_value;
+        }
+      }
+      // ลบแถวของคนไม่ใช่ช่างออก
+      finalList = list.filter(g => g === transferTo || isMechanic(g.mechanic_name));
+    }
+    // recompute total per row (รวม + check_fee)
+    for (const g of finalList) {
+      g.total = g.labor_amount + g.invoice_amount + g.coupon_amount + g.check_fee_amount;
+    }
+    return finalList.sort((a, b) => b.total - a.total);
+  }, [rows, positionByName, checkFees]);
 
   // total parts value (unique per job_no)
   const totalPartsValue = useMemo(() => {
@@ -165,6 +262,7 @@ export default function YamahaRepairReportPage() {
                   <th style={th}>ช่างซ่อม</th>
                   <th style={{ ...th, textAlign: "right" }}>รายการค่าแรง</th>
                   <th style={{ ...th, textAlign: "right" }}>คูปอง (×40)</th>
+                  <th style={{ ...th, textAlign: "right", background: "#fce7f3", color: "#9d174d" }}>ค่าเช็ครถ</th>
                   <th style={{ ...th, textAlign: "right", background: "#fef9c3", color: "#072d6b" }}>รวมค่าแรง</th>
                   <th style={{ ...th, textAlign: "right", background: "#dcfce7", color: "#15803d" }}>ค่าคอมมิชชั่น (65%)</th>
                   <th style={{ ...th, textAlign: "right" }}>ใบแจ้งซ่อม</th>
@@ -174,15 +272,24 @@ export default function YamahaRepairReportPage() {
               </thead>
               <tbody>
                 {mechanicPivot.map((g, i) => {
-                  const laborTotal = (g.labor_amount || 0) + (g.coupon_amount || 0);
+                  const laborTotal = (g.labor_amount || 0) + (g.coupon_amount || 0) + (g.check_fee_amount || 0);
                   return (
                   <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
-                    <td style={{ ...td, fontWeight: 600 }}>{g.mechanic_name}</td>
+                    <td style={{ ...td, fontWeight: 600 }}>
+                      {g.mechanic_name}
+                      <button onClick={() => { setCheckFeeModal({ mechanic_name: g.mechanic_name }); setCheckFeeForm({ amount: "", note: "" }); }}
+                              style={{ marginLeft: 8, padding: "2px 8px", fontSize: 11, background: "#9d174d", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer" }}>
+                        + เพิ่มรายการ
+                      </button>
+                    </td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.labor_amount ? fmt(g.labor_amount) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#f59e0b", fontWeight: 600 }}>
                       {g.coupon_amount ? fmt(g.coupon_amount) : "-"}
                       {g.coupon_count > 0 && <span style={{ fontSize: 10, color: "#6b7280", fontWeight: 400, marginLeft: 4 }}>({g.coupon_count})</span>}
+                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#9d174d", fontWeight: 600, background: "#fdf2f8" }}>
+                      {g.check_fee_amount ? fmt(g.check_fee_amount) : "-"}
                     </td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3" }}>{laborTotal ? fmt(laborTotal) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#dcfce7", color: "#15803d" }}>{laborTotal ? fmt(laborTotal * 0.65) : "-"}</td>
@@ -194,12 +301,14 @@ export default function YamahaRepairReportPage() {
                 {(() => {
                   const sumLabor = mechanicPivot.reduce((s,g)=>s+(g.labor_amount||0),0);
                   const sumCoupon = mechanicPivot.reduce((s,g)=>s+(g.coupon_amount||0),0);
-                  const sumLaborTotal = sumLabor + sumCoupon;
+                  const sumCheckFee = mechanicPivot.reduce((s,g)=>s+(g.check_fee_amount||0),0);
+                  const sumLaborTotal = sumLabor + sumCoupon + sumCheckFee;
                   return (
                   <tr style={{ background: "#fde68a", fontWeight: 700, borderTop: "2px solid #cbd5e1" }}>
                     <td colSpan={2} style={{ ...td, textAlign: "right" }}>รวม</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumLabor)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#f59e0b" }}>{fmt(sumCoupon)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#9d174d" }}>{fmt(sumCheckFee)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumLaborTotal)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d" }}>{fmt(sumLaborTotal * 0.65)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(mechanicPivot.reduce((s,g)=>s+g.invoice_amount,0))}</td>
@@ -377,6 +486,78 @@ export default function YamahaRepairReportPage() {
           </div>
         </div>
       )}
+
+      {/* Check Fee modal */}
+      {checkFeeModal && (() => {
+        const entries = checkFees.filter(f => String(f.mechanic_name || "").trim() === String(checkFeeModal.mechanic_name).trim());
+        const totalAmt = entries.reduce((s, f) => s + Number(f.amount || 0), 0);
+        return (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
+             onClick={() => setCheckFeeModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 700, width: "95%", maxHeight: "90vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#9d174d" }}>💰 ค่าเช็ครถ — {checkFeeModal.mechanic_name}
+                <span style={{ marginLeft: 10, fontSize: 13, color: "#6b7280" }}>({year}/{month})</span>
+              </h3>
+              <button onClick={() => setCheckFeeModal(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+
+            {/* Add form */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", padding: 10, background: "#fdf2f8", borderRadius: 8, marginBottom: 12 }}>
+              <input type="number" placeholder="จำนวนเงิน" value={checkFeeForm.amount}
+                     onChange={e => setCheckFeeForm(f => ({ ...f, amount: e.target.value }))}
+                     style={{ ...inp, width: 140 }} />
+              <input type="text" placeholder="หมายเหตุ (ถ้ามี)" value={checkFeeForm.note}
+                     onChange={e => setCheckFeeForm(f => ({ ...f, note: e.target.value }))}
+                     style={{ ...inp, flex: 1 }} />
+              <button onClick={saveCheckFee} disabled={checkFeeSaving}
+                      style={{ padding: "7px 14px", background: "#9d174d", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                {checkFeeSaving ? "..." : "💾 บันทึก"}
+              </button>
+            </div>
+
+            {/* Entries list */}
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead style={{ background: "#f0f4f9" }}>
+                <tr>
+                  <th style={th}>#</th>
+                  <th style={th}>วันที่บันทึก</th>
+                  <th style={{ ...th, textAlign: "right" }}>จำนวนเงิน</th>
+                  <th style={th}>หมายเหตุ</th>
+                  <th style={th}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.length === 0 && (
+                  <tr><td colSpan={5} style={{ ...td, textAlign: "center", color: "#6b7280" }}>ยังไม่มีรายการ</td></tr>
+                )}
+                {entries.map((f, i) => (
+                  <tr key={f.id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                    <td style={td}>{i + 1}</td>
+                    <td style={td}>{f.created_at ? String(f.created_at).slice(0, 16).replace("T", " ") : "-"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#9d174d", fontWeight: 600 }}>{fmt(f.amount)}</td>
+                    <td style={td}>{f.note || "-"}</td>
+                    <td style={td}>
+                      <button onClick={() => deleteCheckFee(f.id)}
+                              style={{ padding: "3px 8px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+                        ลบ
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {entries.length > 0 && (
+                  <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
+                    <td colSpan={2} style={{ ...td, textAlign: "right" }}>รวม</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#9d174d" }}>{fmt(totalAmt)}</td>
+                    <td colSpan={2} style={td}></td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        );
+      })()}
     </div>
   );
 }
