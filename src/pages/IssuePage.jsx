@@ -64,6 +64,11 @@ export default function IssuePage({ currentUser }) {
     }
   }, [currentUser]);
 
+  useEffect(() => {
+    if (branch) handleLoad();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [branch]);
+
   const getItemName = (item) =>
     text(item?.product_name) ||
     text(item?.["ชื่อสินค้า"]) ||
