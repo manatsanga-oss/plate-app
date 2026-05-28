@@ -42,9 +42,27 @@ export default function HrEmployeesPage({ currentUser }) {
   const [includeInactive, setIncludeInactive] = useState(false);
   const [message, setMessage] = useState("");
   const [ttNames, setTtNames] = useState([]); // ชื่อพนักงานจาก time_tracking_records
+  const [periods, setPeriods] = useState([]); // ช่วงวันหยุด {off_type, day_name, start_date, end_date}
 
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
   useEffect(() => { fetchTimeTrackingNames(); }, []);
+
+  async function loadPeriods(employee_id) {
+    if (!employee_id) { setPeriods([]); return; }
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_day_off_periods", employee_id }),
+      });
+      const data = await res.json();
+      setPeriods(Array.isArray(data) ? data.map(p => ({
+        off_type: p.off_type,
+        day_name: p.day_name,
+        start_date: p.start_date ? String(p.start_date).slice(0, 10) : "",
+        end_date: p.end_date ? String(p.end_date).slice(0, 10) : "",
+      })) : []);
+    } catch { setPeriods([]); }
+  }
 
   async function fetchTimeTrackingNames() {
     try {
@@ -74,9 +92,16 @@ export default function HrEmployeesPage({ currentUser }) {
 
   async function handleSave() {
     if (!form.employee_name.trim()) { setMessage("❌ กรุณากรอกชื่อพนักงาน"); return; }
+    // ตรวจสอบ periods: ต้องมี day_name และ start_date < end_date (ถ้ามีทั้งคู่)
+    for (const p of periods) {
+      if (!p.day_name) { setMessage("❌ กรุณาเลือกวันใน 'วันหยุด' ทุกแถว"); return; }
+      if (p.start_date && p.end_date && p.start_date > p.end_date) {
+        setMessage("❌ วันที่เริ่มใช้ต้องน้อยกว่าหรือเท่ากับวันที่สิ้นสุด"); return;
+      }
+    }
     setSaving(true); setMessage("");
     try {
-      await fetch(API_URL, {
+      const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: editTarget ? "update_hr_employee" : "save_hr_employee",
@@ -84,7 +109,27 @@ export default function HrEmployeesPage({ currentUser }) {
           ...form,
         }),
       });
-      setShowForm(false); setEditTarget(null); setForm(emptyForm());
+      const saved = await res.json();
+      // หา employee_id (edit ใช้ของเดิม, add อ่านจาก response)
+      const empId = editTarget?.employee_id
+        || (Array.isArray(saved) && saved[0]?.employee_id)
+        || saved?.employee_id;
+      if (empId) {
+        await fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "save_day_off_periods",
+            employee_id: empId,
+            periods: periods.map(p => ({
+              off_type: p.off_type,
+              day_name: p.day_name,
+              start_date: p.start_date || null,
+              end_date: p.end_date || null,
+            })),
+          }),
+        });
+      }
+      setShowForm(false); setEditTarget(null); setForm(emptyForm()); setPeriods([]);
       setMessage(`✅ ${editTarget ? "แก้ไข" : "เพิ่ม"}สำเร็จ`);
       fetchData();
     } catch { setMessage("❌ เกิดข้อผิดพลาด"); }
@@ -133,10 +178,11 @@ export default function HrEmployeesPage({ currentUser }) {
     });
     setEditTarget(r);
     setShowForm(true);
+    loadPeriods(r.employee_id);
   }
 
   function openAdd() {
-    setForm(emptyForm()); setEditTarget(null); setShowForm(true);
+    setForm(emptyForm()); setEditTarget(null); setPeriods([]); setShowForm(true);
   }
 
   function fmtNum(v) {
@@ -318,20 +364,20 @@ export default function HrEmployeesPage({ currentUser }) {
               </div>
             </Section>
 
-            <Section title="🗓️ วันหยุด">
-              <div style={grid2}>
-                <Field label="วันหยุดประจำสัปดาห์">
-                  <select value={form.weekly_day_off} onChange={e => setForm(f => ({ ...f, weekly_day_off: e.target.value }))} style={inp}>
-                    {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </Field>
-                <Field label="วันหยุดกลางเดือน (ชื่อวัน)">
-                  <select value={form.monthly_day_off} onChange={e => setForm(f => ({ ...f, monthly_day_off: e.target.value }))} style={inp}>
-                    <option value="">-- ไม่มี --</option>
-                    {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
-                  </select>
-                </Field>
-              </div>
+            <Section title="🗓️ วันหยุด (รองรับหลายช่วง — เว้นว่างหมายถึง 'ตลอดไป')">
+              <PeriodList
+                label="วันหยุดประจำสัปดาห์"
+                offType="weekly"
+                periods={periods}
+                setPeriods={setPeriods}
+              />
+              <div style={{ height: 10 }} />
+              <PeriodList
+                label="วันหยุดกลางเดือน"
+                offType="monthly"
+                periods={periods}
+                setPeriods={setPeriods}
+              />
             </Section>
 
             <Section title="💰 เงินเดือนและ Allowance">
@@ -416,6 +462,81 @@ export default function HrEmployeesPage({ currentUser }) {
             </div>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+function PeriodList({ label, offType, periods, setPeriods }) {
+  const items = periods
+    .map((p, idx) => ({ ...p, _idx: idx }))
+    .filter(p => p.off_type === offType);
+
+  function update(idx, key, val) {
+    setPeriods(prev => prev.map((p, i) => i === idx ? { ...p, [key]: val } : p));
+  }
+  function remove(idx) {
+    setPeriods(prev => prev.filter((_, i) => i !== idx));
+  }
+  function add() {
+    setPeriods(prev => [...prev, { off_type: offType, day_name: "Sunday", start_date: "", end_date: "" }]);
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#374151" }}>{label}</div>
+        <button type="button" onClick={add}
+          style={{ padding: "4px 10px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+          + เพิ่มช่วง
+        </button>
+      </div>
+      {items.length === 0 ? (
+        <div style={{ padding: "8px 10px", fontSize: 11, color: "#9ca3af", background: "#f9fafb", borderRadius: 5, textAlign: "center" }}>
+          — ไม่มี — (กด "เพิ่มช่วง" เพื่อกำหนดวันหยุด)
+        </div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: "#f1f5f9", color: "#374151" }}>
+              <th style={{ padding: 6, textAlign: "left", fontSize: 11, fontWeight: 600, width: "30%" }}>วัน</th>
+              <th style={{ padding: 6, textAlign: "left", fontSize: 11, fontWeight: 600, width: "30%" }}>เริ่มใช้ (เว้น = ตั้งแต่เริ่มงาน)</th>
+              <th style={{ padding: 6, textAlign: "left", fontSize: 11, fontWeight: 600, width: "30%" }}>สิ้นสุด (เว้น = ถึงปัจจุบัน)</th>
+              <th style={{ padding: 6, width: 50 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(it => (
+              <tr key={it._idx} style={{ borderTop: "1px solid #e5e7eb" }}>
+                <td style={{ padding: 4 }}>
+                  <select value={it.day_name}
+                    onChange={e => update(it._idx, "day_name", e.target.value)}
+                    style={{ ...inp, padding: "5px 8px", fontSize: 12 }}>
+                    {["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"].map(d =>
+                      <option key={d} value={d}>{d}</option>
+                    )}
+                  </select>
+                </td>
+                <td style={{ padding: 4 }}>
+                  <input type="date" value={it.start_date || ""}
+                    onChange={e => update(it._idx, "start_date", e.target.value)}
+                    style={{ ...inp, padding: "5px 8px", fontSize: 12 }} />
+                </td>
+                <td style={{ padding: 4 }}>
+                  <input type="date" value={it.end_date || ""}
+                    onChange={e => update(it._idx, "end_date", e.target.value)}
+                    style={{ ...inp, padding: "5px 8px", fontSize: 12 }} />
+                </td>
+                <td style={{ padding: 4, textAlign: "center" }}>
+                  <button type="button" onClick={() => remove(it._idx)}
+                    style={{ padding: "3px 8px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+                    ลบ
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </div>
   );
