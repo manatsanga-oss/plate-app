@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
+const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 
 function fmt(v) { return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(v) {
@@ -23,12 +24,52 @@ export default function NormalCommissionReportPage({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [detail, setDetail] = useState(null);
+  // ===== Snapshot =====
+  const [snapshotInfo, setSnapshotInfo] = useState(null);
+  const [savingSnap, setSavingSnap] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [snapDetail, setSnapDetail] = useState(null);
+  // ===== Payables =====
+  const [payOpen, setPayOpen] = useState(false);
+  const [payPreview, setPayPreview] = useState([]);
+  const [payDocs, setPayDocs] = useState([]);
+  const [payLoading, setPayLoading] = useState(false);
+  const [payCreating, setPayCreating] = useState(false);
+  const [selectedGroups, setSelectedGroups] = useState(new Set());
+  // ===== Pay popup =====
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [payPopup, setPayPopup] = useState(null);
+  const [payDate, setPayDate] = useState(todayISO());
+  const [payMethod, setPayMethod] = useState("โอน");
+  const [payAccountId, setPayAccountId] = useState("");
+  const [payNote, setPayNote] = useState("");
+  const [paying, setPaying] = useState(false);
+
+  useEffect(() => {
+    fetch(ACC_API, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_bank_accounts" }),
+    }).then(r => r.json()).then(d => {
+      setBankAccounts(Array.isArray(d) ? d.filter(a => a && (a.account_id || a.bank_account_id)) : []);
+    }).catch(() => setBankAccounts([]));
+  }, []);
+
+  async function checkSnapshot() {
+    try {
+      const data = await postAPI({ action: "commission_normal_snapshot", mode: "check", date_from: dateFrom, date_to: dateTo });
+      const arr = Array.isArray(data) ? data : [];
+      setSnapshotInfo(arr.length > 0 && arr[0]?.save_group ? arr[0] : null);
+    } catch { setSnapshotInfo(null); }
+  }
 
   async function fetchData() {
     setLoading(true); setMessage("");
     try {
       const data = await postAPI({ action: "commission_normal_summary", date_from: dateFrom, date_to: dateTo });
       setRows(Array.isArray(data) ? data.filter(r => r && r.employee_id) : []);
+      checkSnapshot();
     } catch { setRows([]); setMessage("❌ โหลดไม่สำเร็จ"); }
     setLoading(false);
   }
@@ -43,7 +84,176 @@ export default function NormalCommissionReportPage({ currentUser }) {
     } catch { setDetail({ emp, rows: [], loading: false }); }
   }
 
+  async function saveSnapshot() {
+    if (rows.length === 0) { setMessage("ไม่มีข้อมูลให้บันทึก"); return; }
+    let confirmMsg = `ยืนยันบันทึกค่าคอมปกติ?\n\nช่วง: ${dateFrom} ถึง ${dateTo}\nจำนวน ${rows.length} คน, ยอดรวม ${fmt(total)} บาท`;
+    if (snapshotInfo) confirmMsg += "\n\n⚠️ มี snapshot ของช่วงนี้อยู่แล้ว — บันทึกใหม่จะ overwrite ของเดิม";
+    if (!window.confirm(confirmMsg)) return;
+    setSavingSnap(true); setMessage("");
+    try {
+      // ดึง detail ของพนักงานทุกคน (ไม่ filter employee_id ส่งกลับมาทั้งหมด)
+      const detailData = await postAPI({
+        action: "commission_normal_detail",
+        date_from: dateFrom, date_to: dateTo, employee_id: null,
+      });
+      const detailRows = Array.isArray(detailData)
+        ? detailData.filter(r => r && r.sale_id).map(r => ({
+            sale_id: r.sale_id, sale_date: r.sale_date, invoice_no: r.invoice_no,
+            invoice_type: r.invoice_type, customer_name: r.customer_name,
+            brand: r.brand, model_series: r.model_series, model_code: r.model_code,
+            chassis_no: r.chassis_no, branch_code: r.branch_code,
+            idx: r.idx, target: r.target, headcount: r.headcount,
+            comm_main: r.comm_main, comm_finance: r.comm_finance, comm_total: r.comm_total,
+            employee_id: r.employee_id, employee_name: r.employee_name,
+            employee_branch_code: r.branch_code,
+          }))
+        : [];
+      await postAPI({
+        action: "commission_normal_snapshot", mode: "save",
+        date_from: dateFrom, date_to: dateTo,
+        saved_by: currentUser?.username || currentUser?.email || "",
+        rows: rows.map(r => ({
+          employee_id: r.employee_id, employee_name: r.employee_name,
+          branch_code: r.branch_code, sales_count: r.sales_count,
+          total_main: r.total_main, total_finance: r.total_finance,
+          total_commission: r.total_commission,
+        })),
+        detail_rows: detailRows,
+      });
+      setMessage(`✅ บันทึกสำเร็จ ${rows.length} คน, ${detailRows.length} รายการรถ`);
+      checkSnapshot();
+    } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+    setSavingSnap(false);
+  }
+
+  async function openHistory() {
+    setHistoryOpen(true); setHistoryLoading(true);
+    try {
+      const data = await postAPI({ action: "commission_normal_snapshot", mode: "history" });
+      setHistoryRows(Array.isArray(data) ? data.filter(r => r && r.save_group) : []);
+    } catch { setHistoryRows([]); }
+    setHistoryLoading(false);
+  }
+
+  async function viewSnapshotDetail(item) {
+    setSnapDetail({ save_group: item.save_group, item, rows: [], sales: [], loading: true });
+    try {
+      const [empData, salesData] = await Promise.all([
+        postAPI({ action: "commission_normal_snapshot", mode: "detail", save_group: item.save_group }),
+        postAPI({ action: "commission_normal_snapshot", mode: "detail_sales", save_group: item.save_group }),
+      ]);
+      setSnapDetail({
+        save_group: item.save_group, item,
+        rows: Array.isArray(empData) ? empData : [],
+        sales: Array.isArray(salesData) ? salesData : [],
+        loading: false,
+      });
+    } catch { setSnapDetail({ save_group: item.save_group, item, rows: [], sales: [], loading: false }); }
+  }
+
+  async function cancelSnapshot(item) {
+    if (!window.confirm(`ยืนยันยกเลิกการบันทึก?\n\nช่วง: ${item.period_from} ถึง ${item.period_to}\nจำนวน ${item.employee_count} คน\nยอดรวม ${fmt(item.total)} บาท`)) return;
+    try {
+      await postAPI({ action: "commission_normal_snapshot", mode: "cancel", save_group: item.save_group });
+      setMessage("✅ ยกเลิกการบันทึกเรียบร้อย");
+      await openHistory();
+      checkSnapshot();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
+  // ===== Payables =====
+  async function openPayables() {
+    if (!snapshotInfo?.save_group) { setMessage("ต้องบันทึก snapshot ก่อน"); return; }
+    setPayOpen(true); setPayLoading(true); setPayPreview([]); setPayDocs([]);
+    try {
+      const [preview, docs] = await Promise.all([
+        postAPI({ action: "commission_normal_payables", mode: "preview", save_group: snapshotInfo.save_group }),
+        postAPI({ action: "commission_normal_payables", mode: "list_docs", save_group: snapshotInfo.save_group }),
+      ]);
+      const previewArr = Array.isArray(preview) ? preview : [];
+      setPayPreview(previewArr);
+      setPayDocs(Array.isArray(docs) ? docs.filter(d => d && d.expense_doc_id) : []);
+      setSelectedGroups(new Set(previewArr.filter(p => Number(p.subtotal) > 0).map(p => Number(p.group_no))));
+    } catch { setMessage("❌ โหลดไม่สำเร็จ"); }
+    setPayLoading(false);
+  }
+
+  function toggleGroup(group_no) {
+    setSelectedGroups(prev => {
+      const next = new Set(prev);
+      const n = Number(group_no);
+      if (next.has(n)) next.delete(n); else next.add(n);
+      return next;
+    });
+  }
+
+  async function createPayables() {
+    if (!snapshotInfo?.save_group) return;
+    if (selectedGroups.size === 0) { setMessage("กรุณาเลือกอย่างน้อย 1 รายการ"); return; }
+    if (!window.confirm(`ยืนยันสร้างเอกสารจ่ายเงิน ${selectedGroups.size} ใบ?`)) return;
+    setPayCreating(true);
+    try {
+      await postAPI({
+        action: "commission_normal_payables", mode: "create",
+        save_group: snapshotInfo.save_group,
+        selected_groups: [...selectedGroups],
+        created_by: currentUser?.username || currentUser?.email || "",
+      });
+      setMessage("✅ สร้างเอกสารจ่ายเงินเรียบร้อย");
+      await openPayables();
+    } catch { setMessage("❌ สร้างไม่สำเร็จ"); }
+    setPayCreating(false);
+  }
+
+  async function cancelPayables() {
+    if (!snapshotInfo?.save_group) return;
+    if (!window.confirm("ยืนยันยกเลิกเอกสารจ่ายเงินทั้งหมด?\n\n⚠️ เอกสารที่จ่ายแล้วจะไม่ถูกลบ")) return;
+    try {
+      const data = await postAPI({ action: "commission_normal_payables", mode: "cancel", save_group: snapshotInfo.save_group });
+      const err = Array.isArray(data) && data[0]?.error;
+      if (err) { setMessage(`❌ ${err}`); return; }
+      setMessage("✅ ยกเลิกเอกสารแล้ว");
+      await openPayables();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
+  function openPayPopup(doc) {
+    setPayPopup({ doc });
+    setPayDate(todayISO());
+    setPayMethod("โอน");
+    setPayAccountId("");
+    setPayNote("");
+  }
+
+  async function doPay() {
+    if (!payPopup?.doc) return;
+    if (!payDate) { alert("กรุณากรอกวันที่จ่าย"); return; }
+    if (payMethod === "โอน" && !payAccountId) { alert("กรุณาเลือกบัญชีต้นทาง"); return; }
+    setPaying(true);
+    try {
+      const res = await fetch(ACC_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "expense_record", op: "save_payment",
+          expense_doc_ids: [payPopup.doc.expense_doc_id],
+          paid_date: payDate, payment_method: payMethod, payment_note: payNote,
+          paid_by: currentUser?.name || currentUser?.username || "system",
+          from_bank_account_id: payMethod === "โอน" ? Number(payAccountId) : null,
+        }),
+      });
+      const data = await res.json();
+      const result = Array.isArray(data) ? data[0] : data;
+      if (result?.error_msg) throw new Error(result.error_msg);
+      setMessage(`✅ บันทึกจ่ายสำเร็จ — เลขจ่าย: ${result?.paid_doc_no || "-"}`);
+      setPayPopup(null);
+      await openPayables();
+    } catch (e) { alert("❌ บันทึกจ่ายไม่สำเร็จ: " + e.message); }
+    setPaying(false);
+  }
+
   const total = rows.reduce((s, r) => s + Number(r.total_commission || 0), 0);
+  const totalMain = rows.reduce((s, r) => s + Number(r.total_main || 0), 0);
+  const totalFinance = rows.reduce((s, r) => s + Number(r.total_finance || 0), 0);
   const totalSales = rows.reduce((s, r) => s + Number(r.sales_count || 0), 0);
   const uniqueSales = Number(rows[0]?.total_unique_sales || 0);
 
@@ -59,9 +269,28 @@ export default function NormalCommissionReportPage({ currentUser }) {
         <span>ถึง:</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
         <button onClick={fetchData} disabled={loading} style={btnBlue}>{loading ? "..." : "🔄 รีเฟรช"}</button>
+        <button onClick={saveSnapshot} disabled={savingSnap || loading || rows.length === 0}
+          style={{ padding: "7px 14px", background: savingSnap ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: savingSnap || loading ? "not-allowed" : "pointer", fontWeight: 600 }}>
+          {savingSnap ? "..." : "💾 บันทึก"}
+        </button>
+        <button onClick={openHistory}
+          style={{ padding: "7px 14px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+          📋 ประวัติ
+        </button>
+        <button onClick={openPayables} disabled={!snapshotInfo}
+          style={{ padding: "7px 14px", background: snapshotInfo ? "#dc2626" : "#9ca3af", color: "#fff", border: "none", borderRadius: 6, cursor: snapshotInfo ? "pointer" : "not-allowed", fontWeight: 600 }}
+          title={snapshotInfo ? "" : "ต้องบันทึก snapshot ก่อน"}>
+          💵 บันทึกการจ่ายเงิน
+        </button>
       </div>
 
-      {message && <div style={{ padding: 10, marginBottom: 10, color: "#b91c1c" }}>{message}</div>}
+      {snapshotInfo && (
+        <div style={{ padding: "8px 12px", marginBottom: 10, background: "#d1fae5", borderRadius: 6, fontSize: 13, color: "#065f46" }}>
+          ℹ️ ช่วงนี้บันทึกแล้ว — เมื่อ {snapshotInfo.saved_at ? new Date(snapshotInfo.saved_at).toLocaleString("th-TH") : "-"} โดย {snapshotInfo.saved_by || "ผู้ดูแลระบบ"} ({snapshotInfo.row_count} คน, ยอดรวม {fmt(snapshotInfo.total)} บาท)
+        </div>
+      )}
+
+      {message && <div style={{ padding: 10, marginBottom: 10, color: message.startsWith("✅") ? "#065f46" : "#b91c1c", background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", borderRadius: 6 }}>{message}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 10, marginBottom: 12 }}>
         <Card label="👥 พนักงาน" value={rows.length} color="#1e40af" />
@@ -100,7 +329,8 @@ export default function NormalCommissionReportPage({ currentUser }) {
               <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                 <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม</td>
                 <td style={{ ...td, textAlign: "right" }}>{totalSales}</td>
-                <td colSpan={2}></td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(totalMain)}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(totalFinance)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(total)}</td>
                 <td></td>
               </tr>
@@ -109,6 +339,7 @@ export default function NormalCommissionReportPage({ currentUser }) {
         </table>
       </div>
 
+      {/* Detail modal */}
       {detail && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
              onClick={() => setDetail(null)}>
@@ -152,6 +383,319 @@ export default function NormalCommissionReportPage({ currentUser }) {
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* History modal */}
+      {historyOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
+             onClick={() => { setHistoryOpen(false); setSnapDetail(null); }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1100, width: "94%", maxHeight: "88vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>📋 ประวัติการบันทึกค่าคอมปกติ</h3>
+              <button onClick={() => { setHistoryOpen(false); setSnapDetail(null); }} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            {historyLoading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div> : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead style={{ background: "#f0f4f9" }}>
+                  <tr>
+                    <th style={th}>ช่วง</th><th style={th}>บันทึกเมื่อ</th><th style={th}>โดย</th>
+                    <th style={{ ...th, textAlign: "right" }}>คน</th>
+                    <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
+                    <th style={th}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyRows.length === 0 && <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีประวัติ</td></tr>}
+                  {historyRows.map((h, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <td style={td}>{fmtDate(h.period_from)} – {fmtDate(h.period_to)}</td>
+                      <td style={td}>{h.saved_at ? new Date(h.saved_at).toLocaleString("th-TH") : "-"}</td>
+                      <td style={td}>{h.saved_by || "-"}</td>
+                      <td style={{ ...td, textAlign: "right" }}>{h.employee_count}</td>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(h.total)}</td>
+                      <td style={td}>
+                        <button onClick={() => viewSnapshotDetail(h)} style={btnSmBlue}>👁️ ดู</button>
+                        <button onClick={() => cancelSnapshot(h)} style={{ marginLeft: 4, padding: "4px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12 }}>🗑 ยกเลิก</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Snapshot detail modal */}
+      {snapDetail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1100 }}
+             onClick={() => setSnapDetail(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1300, width: "94%", maxHeight: "88vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>📋 {fmtDate(snapDetail.item?.period_from)} – {fmtDate(snapDetail.item?.period_to)} · ยอดรวม {fmt(snapDetail.item?.total)}</h3>
+              <button onClick={() => setSnapDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            {snapDetail.loading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div> : (
+              <>
+                <h4 style={{ margin: "8px 0", color: "#374151" }}>👥 รายชื่อพนักงาน</h4>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 18 }}>
+                  <thead style={{ background: "#f0f4f9" }}>
+                    <tr>
+                      <th style={th}>#</th><th style={th}>พนักงาน</th><th style={th}>สาขา</th>
+                      <th style={{ ...th, textAlign: "right" }}>ใบขาย</th>
+                      <th style={{ ...th, textAlign: "right" }}>ค่าคอมหลัก</th>
+                      <th style={{ ...th, textAlign: "right" }}>ค่าคอมไฟแนนซ์</th>
+                      <th style={{ ...th, textAlign: "right" }}>รวม</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapDetail.rows.length === 0 && <tr><td colSpan={7} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+                    {snapDetail.rows.map((r, i) => (
+                      <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                        <td style={td}>{i + 1}</td>
+                        <td style={{ ...td, fontWeight: 600 }}>{r.employee_name}</td>
+                        <td style={{ ...td, fontFamily: "monospace" }}>{r.employee_branch_code || "-"}</td>
+                        <td style={{ ...td, textAlign: "right" }}>{r.sales_count}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.total_main)}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.total_finance)}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(r.total_commission)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+
+                <h4 style={{ margin: "8px 0", color: "#374151" }}>🚗 รายการรถที่ใช้คำนวณ ({snapDetail.sales?.length || 0})</h4>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ background: "#f0f4f9" }}>
+                    <tr>
+                      <th style={th}>#</th><th style={th}>วันที่</th><th style={th}>เลขใบขาย</th>
+                      <th style={th}>ประเภท</th><th style={th}>รุ่น</th><th style={th}>พนักงาน</th>
+                      <th style={{ ...th, textAlign: "center" }}>idx</th>
+                      <th style={{ ...th, textAlign: "center" }}>หาร</th>
+                      <th style={{ ...th, textAlign: "right" }}>ค่าคอมหลัก</th>
+                      <th style={{ ...th, textAlign: "right" }}>ไฟแนนซ์</th>
+                      <th style={{ ...th, textAlign: "right" }}>รวม</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(!snapDetail.sales || snapDetail.sales.length === 0) && <tr><td colSpan={11} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูลรถ (snapshot บันทึกก่อน feature นี้)</td></tr>}
+                    {(snapDetail.sales || []).map((r, i) => (
+                      <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                        <td style={td}>{i + 1}</td>
+                        <td style={td}>{fmtDate(r.sale_date)}</td>
+                        <td style={{ ...td, fontFamily: "monospace" }}>{r.invoice_no}</td>
+                        <td style={td}>{r.invoice_type}</td>
+                        <td style={td}>{r.brand} · {r.model_series}</td>
+                        <td style={td}>{r.employee_name}</td>
+                        <td style={{ ...td, textAlign: "center" }}>{r.idx}</td>
+                        <td style={{ ...td, textAlign: "center" }}>÷{r.headcount}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.comm_main)}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.comm_finance)}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(r.comm_total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Payables modal */}
+      {payOpen && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1050 }}
+             onClick={() => setPayOpen(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1100, width: "94%", maxHeight: "88vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>💵 บันทึกการจ่ายเงินค่าคอมปกติ</h3>
+              <button onClick={() => setPayOpen(false)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            {payLoading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div> : (
+              <>
+                <div style={{ padding: "8px 10px", marginBottom: 10, background: "#fef3c7", borderRadius: 6, fontSize: 12, color: "#78350f" }}>
+                  💡 ระบบจะสร้างเอกสาร 4 ใบ ตามสังกัด × แบรนด์ — ใบที่ "ค่านายหน้า" จะมีหัก ณ ที่จ่าย 3%
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginBottom: 14 }}>
+                  <thead style={{ background: "#f0f4f9" }}>
+                    <tr>
+                      {payDocs.length === 0 && <th style={{ ...th, textAlign: "center", width: 60 }}>เลือก</th>}
+                      <th style={th}>#</th><th style={th}>สังกัด</th><th style={th}>ขายแบรนด์</th>
+                      <th style={th}>ประเภท</th><th style={{ ...th, textAlign: "right" }}>คน</th>
+                      <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
+                      <th style={{ ...th, textAlign: "right" }}>หัก ณ ที่จ่าย</th>
+                      <th style={{ ...th, textAlign: "right" }}>สุทธิจ่าย</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {payPreview.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+                    {payPreview.map((p, i) => {
+                      const net = Number(p.subtotal || 0); // ยอดที่คำนวณ = ยอดที่ vendor ได้รับ
+                      const rate = Number(p.wht_pct || 0);
+                      const wht = rate > 0 ? Math.round((net * rate / (1 - rate)) * 100) / 100 : 0; // gross-up (ภาษีออกแทน)
+                      const subtotal = Math.round((net + wht) * 100) / 100;
+                      const gn = Number(p.group_no);
+                      const checked = selectedGroups.has(gn);
+                      return (
+                        <tr key={i} style={{ borderTop: "1px solid #e5e7eb", opacity: subtotal === 0 ? 0.5 : 1 }}>
+                          {payDocs.length === 0 && (
+                            <td style={{ ...td, textAlign: "center" }}>
+                              <input type="checkbox" checked={checked} disabled={subtotal === 0}
+                                onChange={() => toggleGroup(gn)}
+                                style={{ width: 18, height: 18, cursor: subtotal === 0 ? "not-allowed" : "pointer" }} />
+                            </td>
+                          )}
+                          <td style={td}>{p.group_no}</td>
+                          <td style={td}>{p.affiliation}</td>
+                          <td style={td}>{p.brand}</td>
+                          <td style={td}>{p.commission_type === "commission" ? "ค่าคอมมิชชั่น" : "ค่านายหน้า"}</td>
+                          <td style={{ ...td, textAlign: "right" }}>{p.employee_count}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(subtotal)}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{wht > 0 ? `-${fmt(wht)}` : "-"}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(net)}</td>
+                        </tr>
+                      );
+                    })}
+                    {payPreview.length > 0 && (() => {
+                      const selectedRows = payDocs.length === 0
+                        ? payPreview.filter(p => selectedGroups.has(Number(p.group_no)))
+                        : payPreview;
+                      const netSum = selectedRows.reduce((s, p) => s + Number(p.subtotal || 0), 0);
+                      const whtSum = selectedRows.reduce((s, p) => {
+                        const r = Number(p.wht_pct || 0);
+                        return s + (r > 0 ? Number(p.subtotal || 0) * r / (1 - r) : 0);
+                      }, 0);
+                      const grossSum = netSum + whtSum;
+                      return (
+                        <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
+                          <td colSpan={payDocs.length === 0 ? 6 : 5} style={{ ...td, textAlign: "right" }}>รวม{payDocs.length === 0 ? " (เฉพาะที่เลือก)" : ""}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(grossSum)}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{whtSum > 0 ? `-${fmt(whtSum)}` : "-"}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(netSum)}</td>
+                        </tr>
+                      );
+                    })()}
+                  </tbody>
+                </table>
+
+                {payDocs.length > 0 ? (
+                  <>
+                    <h4 style={{ margin: "8px 0", color: "#374151" }}>📄 เอกสารที่สร้างแล้ว ({payDocs.length})</h4>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 12 }}>
+                      <thead style={{ background: "#f0f4f9" }}>
+                        <tr>
+                          <th style={th}>เลขที่</th><th style={th}>วันที่</th><th style={th}>รายการ</th>
+                          <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
+                          <th style={{ ...th, textAlign: "right" }}>หัก</th>
+                          <th style={{ ...th, textAlign: "right" }}>สุทธิ</th>
+                          <th style={th}>สถานะ</th>
+                          <th style={th}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {payDocs.map(d => (
+                          <tr key={d.expense_doc_id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                            <td style={{ ...td, fontFamily: "monospace" }}>{d.expense_doc_no}</td>
+                            <td style={td}>{fmtDate(d.doc_date)}</td>
+                            <td style={td}>{d.vendor_name}</td>
+                            <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(d.subtotal)}</td>
+                            <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{Number(d.withholding_amount) > 0 ? `-${fmt(d.withholding_amount)}` : "-"}</td>
+                            <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(d.net_to_pay)}</td>
+                            <td style={td}>
+                              <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: d.status === "paid" ? "#d1fae5" : "#fef3c7", color: d.status === "paid" ? "#065f46" : "#92400e" }}>
+                                {d.status === "paid" ? "✓ จ่ายแล้ว" : "📝 ร่าง"}
+                              </span>
+                            </td>
+                            <td style={td}>
+                              {d.status === "paid" ? (
+                                <span style={{ fontSize: 11, color: "#065f46" }}>{d.paid_doc_no || ""}</span>
+                              ) : (
+                                <button onClick={() => openPayPopup(d)}
+                                  style={{ padding: "4px 10px", background: "#059669", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                                  💸 บันทึกจ่าย
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button onClick={cancelPayables}
+                        style={{ padding: "7px 14px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                        🗑 ยกเลิกเอกสาร (เฉพาะที่ยังไม่จ่าย)
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+                    <button onClick={createPayables} disabled={payCreating || selectedGroups.size === 0}
+                      style={{ padding: "8px 18px", background: payCreating || selectedGroups.size === 0 ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: payCreating || selectedGroups.size === 0 ? "not-allowed" : "pointer", fontWeight: 700, fontSize: 14 }}>
+                      {payCreating ? "กำลังสร้าง..." : `💾 ยืนยันสร้างเอกสาร ${selectedGroups.size} ใบ`}
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Pay popup */}
+      {payPopup && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1200 }}
+             onClick={() => !paying && setPayPopup(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 480, width: "92%", padding: 20 }}>
+            <h3 style={{ margin: "0 0 14px", color: "#072d6b", textAlign: "center" }}>💸 บันทึกจ่ายเงิน</h3>
+            <div style={{ padding: 12, marginBottom: 14, background: "#f0f9ff", borderRadius: 8, textAlign: "center" }}>
+              <div style={{ fontSize: 13, color: "#374151", marginBottom: 4 }}>{payPopup.doc.vendor_name}</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#059669", fontFamily: "monospace" }}>฿{fmt(payPopup.doc.net_to_pay)}</div>
+              <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>📄 เอกสาร: <strong>{payPopup.doc.expense_doc_no}</strong></div>
+              {Number(payPopup.doc.withholding_amount) > 0 && (
+                <div style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>หัก ณ ที่จ่าย: -{fmt(payPopup.doc.withholding_amount)} (ยอดก่อนหัก {fmt(payPopup.doc.subtotal)})</div>
+              )}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>วันที่จ่าย *</label>
+                <input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} style={{ ...inp, width: "100%" }} />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>วิธีจ่าย</label>
+                <select value={payMethod} onChange={e => setPayMethod(e.target.value)} style={{ ...inp, width: "100%" }}>
+                  <option value="โอน">โอน</option>
+                  <option value="เงินสด">เงินสด</option>
+                  <option value="เช็ค">เช็ค</option>
+                </select>
+              </div>
+            </div>
+            {payMethod === "โอน" && (
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>โอนจาก (บัญชีบริษัท) *</label>
+                <select value={payAccountId} onChange={e => setPayAccountId(e.target.value)} style={{ ...inp, width: "100%" }}>
+                  <option value="">-- เลือกบัญชี --</option>
+                  {bankAccounts.map(a => {
+                    const id = a.account_id || a.bank_account_id;
+                    const label = `${a.bank_name || ""} · ${a.account_no || ""}${a.account_name ? ` · ${a.account_name}` : ""}`;
+                    return <option key={id} value={id}>{label}</option>;
+                  })}
+                </select>
+              </div>
+            )}
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>หมายเหตุ</label>
+              <textarea value={payNote} onChange={e => setPayNote(e.target.value)} rows={2} style={{ ...inp, width: "100%", fontFamily: "Tahoma", resize: "vertical" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={() => setPayPopup(null)} disabled={paying}
+                style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={doPay} disabled={paying}
+                style={{ padding: "8px 18px", background: paying ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 6, cursor: paying ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                {paying ? "กำลังบันทึก..." : "💾 บันทึกจ่ายเงิน"}
+              </button>
+            </div>
           </div>
         </div>
       )}

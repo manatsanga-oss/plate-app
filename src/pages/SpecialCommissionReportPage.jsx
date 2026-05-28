@@ -609,9 +609,10 @@ tr.excluded td { text-decoration: line-through; }
                   <tbody>
                     {payPreview.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
                     {payPreview.map((p, i) => {
-                      const subtotal = Number(p.subtotal || 0);
-                      const wht = subtotal * Number(p.wht_pct || 0);
-                      const net = subtotal - wht;
+                      const net = Number(p.subtotal || 0); // ยอดที่คำนวณ = ยอดที่ vendor ได้รับ
+                      const rate = Number(p.wht_pct || 0);
+                      const wht = rate > 0 ? Math.round((net * rate / (1 - rate)) * 100) / 100 : 0; // gross-up (ภาษีออกแทน)
+                      const subtotal = Math.round((net + wht) * 100) / 100; // gross (ยอดรวมในใบจ่าย)
                       const gn = Number(p.group_no);
                       const checked = selectedGroups.has(gn);
                       return (
@@ -638,14 +639,18 @@ tr.excluded td { text-decoration: line-through; }
                       const selectedRows = payDocs.length === 0
                         ? payPreview.filter(p => selectedGroups.has(Number(p.group_no)))
                         : payPreview;
-                      const subSum = selectedRows.reduce((s, p) => s + Number(p.subtotal || 0), 0);
-                      const whtSum = selectedRows.reduce((s, p) => s + Number(p.subtotal || 0) * Number(p.wht_pct || 0), 0);
+                      const netSum = selectedRows.reduce((s, p) => s + Number(p.subtotal || 0), 0);
+                      const whtSum = selectedRows.reduce((s, p) => {
+                        const r = Number(p.wht_pct || 0);
+                        return s + (r > 0 ? Number(p.subtotal || 0) * r / (1 - r) : 0);
+                      }, 0);
+                      const grossSum = netSum + whtSum;
                       return (
                         <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                           <td colSpan={payDocs.length === 0 ? 6 : 5} style={{ ...td, textAlign: "right" }}>รวม{payDocs.length === 0 ? " (เฉพาะที่เลือก)" : ""}</td>
-                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(subSum)}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(grossSum)}</td>
                           <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{whtSum > 0 ? `-${fmt(whtSum)}` : "-"}</td>
-                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(subSum - whtSum)}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(netSum)}</td>
                         </tr>
                       );
                     })()}
