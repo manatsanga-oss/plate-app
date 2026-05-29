@@ -141,6 +141,9 @@ export default function App() {
       return ACC_USERS.includes(currentUser.username);
     }
     if (currentUser.role === "admin") return true;
+    // ถ้า user มี pages column เซ็ตชัดเจน → strict allowlist (เห็นเฉพาะที่ระบุเท่านั้น)
+    const explicitPages = getExplicitUserPages(currentUser.pages);
+    if (explicitPages) return explicitPages.includes(page);
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
     if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "mymotoreport" || page === "mymotoregister" || page === "expensedoccheck" || page === "deliveryfee" || page === "pricemarkup" || page === "payment") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
@@ -473,6 +476,16 @@ function parseUserPages(raw) {
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : DEFAULT_PAGES;
   } catch { return DEFAULT_PAGES; }
+}
+
+// คืนค่า pages เฉพาะเมื่อมีการเซ็ตชัดเจน (ไม่ fallback เป็น default)
+function getExplicitUserPages(raw) {
+  if (!raw) return null;
+  if (Array.isArray(raw)) return raw.length > 0 ? raw : null;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
+  } catch { return null; }
 }
 
 function MenuGroup({ title, pages, activeMenu, onChange, canAccess, children, defaultOpen }) {
