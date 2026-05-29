@@ -238,7 +238,8 @@ export default function PartGiveawayReportPage() {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                     <thead style={{ background: "#f9fafb" }}>
                       <tr>
-                        <th style={th}>วันที่</th>
+                        <th style={th}>วันที่แถม</th>
+                        <th style={th}>เลขใบขาย</th>
                         <th style={th}>รหัสอะไหล่</th>
                         <th style={th}>ชื่ออะไหล่</th>
                         <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
@@ -251,6 +252,7 @@ export default function PartGiveawayReportPage() {
                         return (
                           <tr key={r.id ?? j} style={{ borderTop: "1px solid #f3f4f6", background: isDup ? "#fee2e2" : "transparent" }}>
                             <td style={td}>{fmtDate(r.sale_date)}</td>
+                            <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.sale_doc_no || "-"}</td>
                             <td style={{ ...td, fontFamily: "monospace", fontWeight: isDup ? 700 : 400, color: isDup ? "#b91c1c" : "inherit" }}>
                               {isDup ? "⚠️ " : ""}{r.part_code}
                             </td>
