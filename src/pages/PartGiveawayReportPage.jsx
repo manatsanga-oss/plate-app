@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-giveaway-report";
+const STOCK_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api";
+const STOCK_CODES = ["P-0111-1", "P-003"]; // รหัสของแถมหลักที่ตามสต๊อกคงเหลือ
 
 function fmt(v, d = 2) { const n = Number(v) || 0; return n.toLocaleString("th-TH", { minimumFractionDigits: d, maximumFractionDigits: d }); }
 function fmtInt(v) { return (Number(v) || 0).toLocaleString("th-TH"); }
@@ -29,6 +31,24 @@ export default function PartGiveawayReportPage() {
   const [storeFilter, setStoreFilter] = useState("");
   const [showDup, setShowDup] = useState(false);
   const [showGap, setShowGap] = useState(false);
+  const [showWholesale, setShowWholesale] = useState(false);
+  const [stock, setStock] = useState([]);
+
+  // ดึงสต๊อกคงเหลือของแถม (จากระบบอะไหล่หมุนเร็ว) เฉพาะรหัสที่กำหนด
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(STOCK_API, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}),
+        });
+        const data = await res.json();
+        const map = new Map((Array.isArray(data) ? data : [])
+          .filter(r => STOCK_CODES.includes(String(r.part_code || "").trim()))
+          .map(r => [String(r.part_code).trim(), r]));
+        setStock(STOCK_CODES.map(c => map.get(c)).filter(Boolean));
+      } catch { setStock([]); }
+    })();
+  }, []);
 
   async function load() {
     setLoading(true);
@@ -103,6 +123,19 @@ export default function PartGiveawayReportPage() {
     return out.sort((x, y) => Math.abs(y._gap) - Math.abs(x._gap));
   }, [filtered]);
 
+  // รายการของแถมที่ใบขายอะไหล่เป็น "ขายส่ง" หรือผูกกับการขาย "รถมือสอง" (moto_sales.vehicle_type)
+  const wholesaleRows = useMemo(
+    () => filtered.filter(r =>
+      String(r.sale_type || "").includes("ส่ง") ||
+      String(r.sale_vehicle_type || "").includes("มือสอง")
+    ),
+    [filtered]
+  );
+  const wholesaleDocs = useMemo(
+    () => new Set(wholesaleRows.map(r => r.sale_doc_no).filter(Boolean)).size,
+    [wholesaleRows]
+  );
+
   const brandColor = "#7c3aed";
 
   return (
@@ -162,6 +195,12 @@ export default function PartGiveawayReportPage() {
           onClick={dupInvoices.length ? () => setShowDup(true) : undefined} />
         <KPI label={`📆 แถม-ขายต่างกัน >${GAP_DAYS} วัน`} value={fmtInt(gapRows.length)} unit="รายการ · กดดูรายละเอียด" color="#9333ea"
           onClick={gapRows.length ? () => setShowGap(true) : undefined} />
+        <KPI label="🏬 ขายส่ง+รถมือสอง" value={fmtInt(wholesaleDocs)} unit="ใบ · กดดูรายละเอียด" color="#d97706"
+          onClick={wholesaleRows.length ? () => setShowWholesale(true) : undefined} />
+        {stock.map(s => (
+          <KPI key={s.part_code} label={`📦 ${s.product_name || s.part_code}`}
+            value={fmtInt(s.quantity)} unit={`คงเหลือ · ${s.part_code}`} color="#0d9488" />
+        ))}
       </div>
 
       {/* Table */}
@@ -306,6 +345,53 @@ export default function PartGiveawayReportPage() {
                       </td>
                       <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.sale_invoice_no || "-"}</td>
                       <td style={td}>{(r.part_name || "-").slice(0, 40)}</td>
+                      <td style={{ ...td, fontSize: 11 }}>{r.sale_customer_name || r.gv_customer_name || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: ใบขายส่ง */}
+      {showWholesale && (
+        <div onClick={() => setShowWholesale(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 12, width: "min(960px, 96vw)", maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 10px 40px rgba(0,0,0,0.3)" }}>
+            <div style={{ padding: "12px 16px", background: "#d97706", color: "#fff", fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>🏬 ของแถมบนใบขายประเภทขายส่ง / รถมือสอง — {wholesaleDocs} ใบ / {wholesaleRows.length} รายการ</span>
+              <button onClick={() => setShowWholesale(false)}
+                style={{ background: "rgba(255,255,255,0.2)", color: "#fff", border: "none", borderRadius: 6, width: 28, height: 28, fontSize: 16, cursor: "pointer", fontWeight: 700 }}>✕</button>
+            </div>
+            <div style={{ overflow: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead style={{ background: "#f9fafb", position: "sticky", top: 0 }}>
+                  <tr>
+                    <th style={th}>#</th>
+                    <th style={th}>วันที่แถม</th>
+                    <th style={th}>เลขใบขาย</th>
+                    <th style={th}>ประเภทใบขาย</th>
+                    <th style={th}>ประเภทรถ</th>
+                    <th style={th}>รหัสอะไหล่</th>
+                    <th style={th}>ชื่ออะไหล่</th>
+                    <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
+                    <th style={th}>ลูกค้า</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {wholesaleRows.map((r, i) => (
+                    <tr key={r.id ?? i} style={{ borderTop: "1px solid #f3f4f6" }}>
+                      <td style={td}>{i + 1}</td>
+                      <td style={td}>{fmtDate(r.sale_date)}</td>
+                      <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.sale_doc_no || "-"}</td>
+                      <td style={{ ...td, fontWeight: 700, color: String(r.sale_type || "").includes("ส่ง") ? "#d97706" : undefined }}>{r.sale_type || "-"}</td>
+                      <td style={{ ...td, fontWeight: 700, color: String(r.sale_vehicle_type || "").includes("มือสอง") ? "#d97706" : undefined }}>{r.sale_vehicle_type || "-"}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{r.part_code}</td>
+                      <td style={td}>{(r.part_name || "-").slice(0, 40)}</td>
+                      <td style={{ ...td, textAlign: "right" }}>{fmt(r.qty, 0)}</td>
                       <td style={{ ...td, fontSize: 11 }}>{r.sale_customer_name || r.gv_customer_name || "-"}</td>
                     </tr>
                   ))}
