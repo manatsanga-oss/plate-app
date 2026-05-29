@@ -46,6 +46,7 @@ import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
 import DepositSeizePage from "./pages/DepositSeizePage";
 import LoginPage from "./pages/LoginPage";
 import SalesOverviewPage from "./pages/SalesOverviewPage";
+import PartGiveawayReportPage from "./pages/PartGiveawayReportPage";
 import VehicleRegistrationPage from "./pages/VehicleRegistrationPage";
 import RegistrationSubmitPage from "./pages/RegistrationSubmitPage";
 import ReceiveRegistrationPage from "./pages/ReceiveRegistrationPage";
@@ -194,6 +195,7 @@ export default function App() {
 
       <main className="main-content">
         {activeMenu === "salesoverview" && <SalesOverviewPage currentUser={currentUser} />}
+        {activeMenu === "partgiveawayreport" && <PartGiveawayReportPage currentUser={currentUser} />}
         {activeMenu === "mymotoreport" && <MyMotoReportPage currentUser={currentUser} />}
         {activeMenu === "mymotoregister" && <MyMotorRegisterPage currentUser={currentUser} />}
         {activeMenu === "reportadmin" && <ReportAdminPage currentUser={currentUser} />}
@@ -544,10 +546,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
     <aside className="sidebar">
       <div className="sidebar-header">Management</div>
 
-      <MenuGroup title="Report" pages={["salesoverview","mymotoreport","mymotoregister"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report" pages={["salesoverview","mymotoreport","mymotoregister","partgiveawayreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="salesoverview" label="สรุปภาพรวม" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="mymotoreport" label="รายงานลงทะเบียน MyMoto" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="mymotoregister" label="บันทึกลงทะเบียน MyMoto" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
+        <MenuItem page="partgiveawayreport" label="รายงานของแถม" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
       <MenuGroup title="Report Admin" pages={["reportadmin","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","stockturnover","partreceiptreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
