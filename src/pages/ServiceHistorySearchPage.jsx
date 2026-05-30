@@ -87,7 +87,9 @@ export default function ServiceHistorySearchPage() {
         openPopup("error", "โหลดประวัติไม่สำเร็จ", "ตรวจสอบว่า import workflow Service History API แล้ว");
       } finally { setLoadingHist(false); }
     })();
-    // 2) auto-check MyMoto by chassis -> if not registered, auto-notify LINE group
+    // 2) MyMoto = โปรแกรม Honda -> เช็ก/แจ้งเตือนเฉพาะรถ Honda เท่านั้น
+    const isHonda = /honda|ฮอนด้า/i.test(text(v.brand));
+    if (!isHonda) { setMymoto({ checking: false, skipped: true }); return; }
     try {
       setMymoto({ checking: true });
       const r = await apiPost(SVC_API, { action: "mymoto_status", chassis: v.frame_no });
@@ -196,7 +198,9 @@ export default function ServiceHistorySearchPage() {
                 ประวัติการเข้ารับบริการ — {text(selected.customer_name)} ({plateOf(selected)})
               </h3>
               {/* MyMoto status (auto-check by chassis; auto LINE alert if not registered) */}
-              {mymoto?.checking ? (
+              {mymoto?.skipped ? (
+                <span style={{ fontSize: 13, color: "#64748b", background: "#f1f5f9", padding: "6px 12px", borderRadius: 8 }}>ℹ️ MyMoto เฉพาะรถ Honda</span>
+              ) : mymoto?.checking ? (
                 <span style={{ fontSize: 13, color: "#64748b", background: "#f1f5f9", padding: "6px 12px", borderRadius: 8 }}>⏳ ตรวจสอบ MyMoto...</span>
               ) : mymoto?.registered ? (
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#065f46", background: "#ecfdf5", border: "1px solid #6ee7b7", padding: "6px 12px", borderRadius: 8 }}>✅ ลงทะเบียน MyMoto แล้ว</span>

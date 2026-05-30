@@ -49,6 +49,7 @@ import DepositSeizePage from "./pages/DepositSeizePage";
 import LoginPage from "./pages/LoginPage";
 import SalesOverviewPage from "./pages/SalesOverviewPage";
 import PartGiveawayReportPage from "./pages/PartGiveawayReportPage";
+import GiveawayReceiptPrintPage from "./pages/GiveawayReceiptPrintPage";
 import VehicleRegistrationPage from "./pages/VehicleRegistrationPage";
 import RegistrationSubmitPage from "./pages/RegistrationSubmitPage";
 import ReceiveRegistrationPage from "./pages/ReceiveRegistrationPage";
@@ -167,10 +168,10 @@ export default function App() {
     if (page === "partreceiptreport") return false;           // เฉพาะ admin (รายงานรับอะไหล่)
     if (page === "yamaharepairreport") return true;           // ทุก user เห็นรายงานใบแจ้งซ่อม
     if (page === "hondarepairreport") return true;
-    if (page === "partstatusinquiry") return true;            // สอบถามสถานะอะไหล่ — เปิดให้ทุก user
+    if (page === "partstatusinquiry") return false;           // เฉพาะ admin (สอบถามสถานะอะไหล่)
     if (page === "partwithdrawal") return true;               // บันทึกการเบิกอะไหล่ — เปิดให้ทุก user
-    if (page === "partorderinquiry") return true;             // สอบถามรายการอะไหล่สั่งซื้อ — เปิดให้ทุก user
-    if (page === "partdispensereport") return true;            // รายงานการจ่ายอะไหล่รายตัว — เปิดให้ทุก user
+    if (page === "partorderinquiry") return false;            // เฉพาะ admin (สอบถามรายการอะไหล่สั่งซื้อ)
+    if (page === "partdispensereport") return false;          // เฉพาะ admin (รายงานการจ่ายอะไหล่รายตัว)
     if (page === "servicehistory") return true;                // ค้นหาประวัติงานบริการ — เปิดให้ทุก user
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
@@ -179,6 +180,7 @@ export default function App() {
     if (page === "goodspayment") return false;        // เฉพาะ admin (บันทึกชำระค่าสินค้า)
     if (page === "convert") return false;
     if (page === "subunit") return false;
+    if (page === "receive") return false;              // เฉพาะ admin (รับวัสดุ)
     if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "incomecategory" || page === "expenserecord" || page === "position" || page === "motostock") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
@@ -199,6 +201,7 @@ export default function App() {
       <main className="main-content">
         {activeMenu === "salesoverview" && <SalesOverviewPage currentUser={currentUser} />}
         {activeMenu === "partgiveawayreport" && <PartGiveawayReportPage currentUser={currentUser} />}
+        {activeMenu === "giveawayreceipt" && <GiveawayReceiptPrintPage currentUser={currentUser} />}
         {activeMenu === "mymotoreport" && <MyMotoReportPage currentUser={currentUser} />}
         {activeMenu === "mymotoregister" && <MyMotorRegisterPage currentUser={currentUser} />}
         {activeMenu === "reportadmin" && <ReportAdminPage currentUser={currentUser} />}
@@ -553,11 +556,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
     <aside className="sidebar">
       <div className="sidebar-header">Management</div>
 
-      <MenuGroup title="Report" pages={["salesoverview","mymotoreport","mymotoregister","partgiveawayreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report" pages={["salesoverview","mymotoreport","mymotoregister","partgiveawayreport","giveawayreceipt"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="salesoverview" label="สรุปภาพรวม" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="mymotoreport" label="รายงานลงทะเบียน MyMoto" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="mymotoregister" label="บันทึกลงทะเบียน MyMoto" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="partgiveawayreport" label="รายงานของแถม" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
+        <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 90 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
       <MenuGroup title="Report Admin" pages={["reportadmin","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","stockturnover","partreceiptreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
