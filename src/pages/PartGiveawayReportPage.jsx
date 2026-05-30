@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from "react";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-giveaway-report";
 const STOCK_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api";
+const OVERRIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-giveaway-override";
 const STOCK_CODES = ["P-0111-1", "P-003"]; // รหัสของแถมหลักที่ตามสต๊อกคงเหลือ
 
 function fmt(v, d = 2) { const n = Number(v) || 0; return n.toLocaleString("th-TH", { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -20,7 +21,7 @@ function firstOfMonthISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-export default function PartGiveawayReportPage() {
+export default function PartGiveawayReportPage({ currentUser } = {}) {
   const [dateFrom, setDateFrom] = useState(firstOfMonthISO());
   const [dateTo, setDateTo] = useState(todayISO());
   const [rows, setRows] = useState([]);
@@ -33,6 +34,29 @@ export default function PartGiveawayReportPage() {
   const [showGap, setShowGap] = useState(false);
   const [showWholesale, setShowWholesale] = useState(false);
   const [stock, setStock] = useState([]);
+  const [editKey, setEditKey] = useState(null);   // sale_doc_no|part_code ที่กำลังแก้ไข
+  const [editInvoice, setEditInvoice] = useState("");
+  const [savingOvr, setSavingOvr] = useState(false);
+
+  // ปรับปรุงรายการของแถมซ้ำ -> บันทึกลงตาราง override แล้วโหลดรายงานใหม่
+  async function applyOverride(op, r, invoice_no) {
+    setSavingOvr(true);
+    try {
+      const res = await fetch(OVERRIDE_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op, sale_doc_no: r.sale_doc_no, part_code: r.part_code,
+          invoice_no: invoice_no || "", user: currentUser?.username || currentUser?.name || "",
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!j.success) throw new Error("server");
+      setEditKey(null); setEditInvoice("");
+      await load();   // รีโหลด -> รายการที่ปรับปรุงแล้วจะไม่ขึ้นซ้ำอีก
+    } catch (e) {
+      alert("บันทึกไม่สำเร็จ — ตรวจสอบว่า import workflow override + สร้างตารางแล้ว\n" + e);
+    } finally { setSavingOvr(false); }
+  }
 
   // ดึงสต๊อกคงเหลือของแถม (จากระบบอะไหล่หมุนเร็ว) เฉพาะรหัสที่กำหนด
   useEffect(() => {
@@ -283,11 +307,13 @@ export default function PartGiveawayReportPage() {
                         <th style={th}>ชื่ออะไหล่</th>
                         <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
                         <th style={{ ...th, textAlign: "right" }}>ต้นทุนรวม</th>
+                        <th style={{ ...th, textAlign: "center" }}>จัดการ</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rs.map((r, j) => {
                         const isDup = dupCodes.has(String(r.part_code || "").trim());
+                        const rkey = `${r.sale_doc_no}|${r.part_code}`;
                         return (
                           <tr key={r.id ?? j} style={{ borderTop: "1px solid #f3f4f6", background: isDup ? "#fee2e2" : "transparent" }}>
                             <td style={td}>{fmtDate(r.sale_date)}</td>
@@ -298,6 +324,30 @@ export default function PartGiveawayReportPage() {
                             <td style={td}>{(r.part_name || "-").slice(0, 50)}</td>
                             <td style={{ ...td, textAlign: "right" }}>{fmt(r.qty, 0)}</td>
                             <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{fmt(Number(r.unit_cost) * Number(r.qty))}</td>
+                            <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+                              {editKey === rkey ? (
+                                <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                                  <input value={editInvoice} onChange={e => setEditInvoice(e.target.value)} autoFocus
+                                    placeholder="เลขใบขายรถใหม่"
+                                    style={{ padding: "3px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 11, width: 150, fontFamily: "monospace" }} />
+                                  <button disabled={savingOvr || !editInvoice.trim()} title="บันทึก"
+                                    onClick={() => applyOverride("reassign", r, editInvoice.trim())}
+                                    style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 4, padding: "3px 7px", cursor: "pointer" }}>✓</button>
+                                  <button disabled={savingOvr} title="ยกเลิก"
+                                    onClick={() => { setEditKey(null); setEditInvoice(""); }}
+                                    style={{ background: "#9ca3af", color: "#fff", border: "none", borderRadius: 4, padding: "3px 7px", cursor: "pointer" }}>✕</button>
+                                </span>
+                              ) : (
+                                <span style={{ display: "inline-flex", gap: 6 }}>
+                                  <button disabled={savingOvr} title="ลบเลขใบขายของแถมนี้"
+                                    onClick={() => { if (window.confirm(`ลบรายการของแถม\n${r.sale_doc_no} · ${r.part_code} ?`)) applyOverride("delete", r); }}
+                                    style={{ background: "#fee2e2", color: "#b91c1c", border: "1px solid #fecaca", borderRadius: 4, padding: "3px 8px", cursor: "pointer", fontWeight: 600 }}>🗑️ ลบ</button>
+                                  <button disabled={savingOvr} title="แก้ไขอ้างอิงเลขใบขายรถใหม่"
+                                    onClick={() => { setEditKey(rkey); setEditInvoice(r.override_invoice_no || r.sale_invoice_no || ""); }}
+                                    style={{ background: "#dbeafe", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: 4, padding: "3px 8px", cursor: "pointer", fontWeight: 600 }}>✏️ แก้ไข</button>
+                                </span>
+                              )}
+                            </td>
                           </tr>
                         );
                       })}

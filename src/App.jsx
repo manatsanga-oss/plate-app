@@ -26,6 +26,7 @@ import MotoPriceCheckPage from "./pages/MotoPriceCheckPage";
 import MotoPriceQuotePage from "./pages/MotoPriceQuotePage";
 import MotoExpensePage from "./pages/MotoExpensePage";
 import SubunitPage from "./pages/SubunitPage";
+import OfficeStockAdjustPage from "./pages/OfficeStockAdjustPage";
 import FastMovingStockPage from "./pages/FastMovingStockPage";
 import HondaDepositPage from "./pages/HondaDepositPage";
 import SparePartsOrderPage from "./pages/SparePartsOrderPage";
@@ -207,6 +208,7 @@ export default function App() {
         {activeMenu === "issue" && canAccess("issue") && <IssuePage currentUser={currentUser} />}
         {activeMenu === "convert" && canAccess("convert") && <ConvertPage currentUser={currentUser} />}
         {activeMenu === "subunit" && canAccess("subunit") && <SubunitPage currentUser={currentUser} />}
+        {activeMenu === "officeadjust" && canAccess("officeadjust") && <OfficeStockAdjustPage currentUser={currentUser} />}
         {activeMenu === "users" && canAccess("users") && (
           <UserPage currentUser={currentUser} />
         )}
@@ -538,7 +540,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "customer", "deliveryfee", "pricemarkup"];
   const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "claim"];
-  const officePages = ["dashboard", "receive", "issue", "convert", "subunit"];
+  const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
   const uploadPages = ["upload", "uploadaccounting"];
 
@@ -604,6 +606,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="issue" label="เบิกวัสดุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="convert" label="แปลงหน่วยบรรจุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="subunit" label="บันทึกเพิ่มหน่วยย่อย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="officeadjust" label="ปรับปรุงวัสดุคงเหลือ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

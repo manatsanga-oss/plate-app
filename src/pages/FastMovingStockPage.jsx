@@ -15,6 +15,7 @@ export default function FastMovingStockPage() {
   const [hideRecentOrdered, setHideRecentOrdered] = useState(false);
   const [filterStoreStock, setFilterStoreStock] = useState("all");
   const [onlyStockNakhonluang, setOnlyStockNakhonluang] = useState(false);
+  const [onlyLoan, setOnlyLoan] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [jobDetail, setJobDetail] = useState(null); // { item_code, item_name, loading, rows }
 
@@ -96,6 +97,8 @@ export default function FastMovingStockPage() {
     if (filterPendingJob === "no" && Number(r.pending_job_qty || 0) > 0) return false;
     // แสดงเฉพาะอะไหล่สต๊อกนครหลวง
     if (onlyStockNakhonluang && !r.is_stock_nakhonluang) return false;
+    // แสดงเฉพาะรายการที่มีให้ยืม (ไม่ว่าง)
+    if (onlyLoan && Number(r.loan_qty || 0) <= 0) return false;
     // กรองตามร้าน (มีของ/ไม่มีของ)
     if (filterStoreStock !== "all") {
       const s = parseStores(r.stores);
@@ -133,6 +136,7 @@ export default function FastMovingStockPage() {
       filterStock !== "all" ? (filterStock === "in" ? "มีสต๊อก" : "สินค้าหมด") : "",
       filterBackorder !== "all" ? (filterBackorder === "yes" ? "มีค้างส่ง" : "ไม่มีค้างส่ง") : "",
       filterPendingJob !== "all" ? (filterPendingJob === "yes" ? "มีค้างปิด JOB" : "ไม่มีค้างปิด JOB") : "",
+      onlyLoan ? "มีให้ยืม" : "",
     ].filter(Boolean).join(" | ") || "ทั้งหมด";
     const fmtD = d => { if (!d) return "-"; const dt = new Date(d); if (isNaN(dt)) return d; return `${String(dt.getDate()).padStart(2,"0")}/${String(dt.getMonth()+1).padStart(2,"0")}/${dt.getFullYear()+543}`; };
     const rows = filtered.map((r, i) => {
@@ -239,6 +243,10 @@ export default function FastMovingStockPage() {
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#0369a1", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #7dd3fc", borderRadius: 8, background: onlyStockNakhonluang ? "#e0f2fe" : "#fff" }}>
           <input type="checkbox" checked={onlyStockNakhonluang} onChange={e => { setOnlyStockNakhonluang(e.target.checked); setCurrentPage(1); }} />
           🏪 สต๊อกนครหลวง
+        </label>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#ea580c", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fdba74", borderRadius: 8, background: onlyLoan ? "#fff7ed" : "#fff" }}>
+          <input type="checkbox" checked={onlyLoan} onChange={e => { setOnlyLoan(e.target.checked); setCurrentPage(1); }} />
+          🤝 มีให้ยืม
         </label>
         <span style={{ fontSize: 13, color: "#374151" }}>{filtered.length} รายการ</span>
       </div>
