@@ -126,8 +126,8 @@ function extractSingchaiOther(rows, sourceFile) {
 }
 
 /* ============================== Component ============================== */
-export default function OtherIncomeTaxUploadPage({ currentUser, embeddable = false }) {
-  const [branch, setBranch] = useState("PAPAO");
+export default function OtherIncomeTaxUploadPage({ currentUser, embeddable = false, forceBranch = null }) {
+  const [branch, setBranch] = useState(forceBranch || "PAPAO");
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState([]);
   const [parsing, setParsing] = useState(false);
@@ -178,23 +178,30 @@ export default function OtherIncomeTaxUploadPage({ currentUser, embeddable = fal
 
   const inner = (
     <>
-      <div style={{ background: "#fff", borderRadius: 12, padding: 20, boxShadow: "0 2px 12px rgba(7,45,107,0.10)", marginBottom: 20 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
-          <div>
-            <label style={lbl}>🏢 สาขา</label>
-            <select value={branch} onChange={e => { setBranch(e.target.value); setFile(null); setPreview([]); setMsg(""); }} style={inp}>
-              {BRANCH_OPTS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
-            </select>
-            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>
-              📦 Table: <code style={{ color: "#6366f1" }}>{branchOpt?.table}</code> · Format: {branchOpt?.format}
+      <div style={{ background: "#fff", borderRadius: 12, padding: 20, boxShadow: forceBranch ? "none" : "0 2px 12px rgba(7,45,107,0.10)", marginBottom: forceBranch ? 0 : 20 }}>
+        {!forceBranch && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+            <div>
+              <label style={lbl}>🏢 สาขา</label>
+              <select value={branch} onChange={e => { setBranch(e.target.value); setFile(null); setPreview([]); setMsg(""); }} style={inp}>
+                {BRANCH_OPTS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+              </select>
+              <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>
+                📦 Table: <code style={{ color: "#6366f1" }}>{branchOpt?.table}</code> · Format: {branchOpt?.format}
+              </div>
+            </div>
+            <div>
+              <label style={lbl}>👤 อัพโหลดโดย</label>
+              <input type="text" value={currentUser?.name || currentUser?.user_id || ""} readOnly
+                style={{ ...inp, background: "#f3f4f6", color: "#6b7280" }} />
             </div>
           </div>
-          <div>
-            <label style={lbl}>👤 อัพโหลดโดย</label>
-            <input type="text" value={currentUser?.name || currentUser?.user_id || ""} readOnly
-              style={{ ...inp, background: "#f3f4f6", color: "#6b7280" }} />
+        )}
+        {forceBranch && (
+          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 12, textAlign: "center" }}>
+            📦 Table: <code style={{ color: "#6366f1" }}>{branchOpt?.table}</code> · Format: {branchOpt?.format}
           </div>
-        </div>
+        )}
 
         <div style={{ padding: "14px 16px", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 10, marginBottom: 12 }}>
           <div style={{ fontSize: 14, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>

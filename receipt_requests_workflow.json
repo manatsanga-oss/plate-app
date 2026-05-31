@@ -1,0 +1,141 @@
+{
+  "name": "receipt-requests-api",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "receipt-requests-api",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-1",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [100, 300],
+      "webhookId": "receipt-requests-api"
+    },
+    {
+      "parameters": {
+        "dataType": "string",
+        "value1": "={{ $json.body.action }}",
+        "rules": {
+          "rules": [
+            { "operation": "equal", "value2": "create_ref", "output": 0 },
+            { "operation": "equal", "value2": "submit_customer", "output": 1 },
+            { "operation": "equal", "value2": "get_request", "output": 2 },
+            { "operation": "equal", "value2": "mark_issued", "output": 3 }
+          ]
+        },
+        "fallbackOutput": 2
+      },
+      "id": "switch-1",
+      "name": "Switch Action",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [320, 300]
+    },
+
+    {
+      "parameters": {
+        "functionCode": "// create_ref: สร้างเลขอ้างอิงใหม่ RC-YYYYMMDD-NNNN (ลำดับรายวัน) + insert status=pending\nconst b = $json.body || {};\nconst esc = s => String(s == null ? '' : s).replace(/'/g, \"''\");\nconst sql = `INSERT INTO receipt_requests (ref_no, status, created_by, branch_code, branch_name) VALUES ('RC-' || to_char(now(),'YYYYMMDD') || '-' || lpad((SELECT (count(*)+1)::text FROM receipt_requests WHERE created_at::date = now()::date), 4, '0'), 'pending', '${esc(b.created_by)}', '${esc(b.branch_code)}', '${esc(b.branch_name)}') RETURNING ref_no, status;`;\nreturn [{ json: { sql } }];"
+      },
+      "id": "fn-create",
+      "name": "Build create_ref SQL",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 120]
+    },
+
+    {
+      "parameters": {
+        "functionCode": "// submit_customer: ลูกค้ากรอกข้อมูลผ่าน LIFF -> update เป็น filled\nconst b = $json.body || {};\nconst esc = s => String(s == null ? '' : s).replace(/'/g, \"''\");\nconst sql = `UPDATE receipt_requests SET customer_name='${esc(b.customer_name)}', address='${esc(b.address)}', phone='${esc(b.phone)}', tax_id='${esc(b.tax_id)}', line_user_id='${esc(b.line_user_id)}', line_display_name='${esc(b.line_display_name)}', status='filled', filled_at=now() WHERE ref_no='${esc(b.ref_no)}' RETURNING ref_no, status;`;\nreturn [{ json: { sql } }];"
+      },
+      "id": "fn-submit",
+      "name": "Build submit_customer SQL",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 260]
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM receipt_requests WHERE ref_no = '{{ $json.body.ref_no }}' LIMIT 1;"
+      },
+      "id": "pg-get",
+      "name": "PG: get_request",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [600, 400],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "functionCode": "// mark_issued: บันทึกเลขใบเสร็จที่ออกจริง -> update เป็น issued\nconst b = $json.body || {};\nconst esc = s => String(s == null ? '' : s).replace(/'/g, \"''\");\nconst sql = `UPDATE receipt_requests SET invoice_no='${esc(b.invoice_no)}', issued_by='${esc(b.issued_by)}', status='issued', issued_at=now() WHERE ref_no='${esc(b.ref_no)}' RETURNING ref_no, status, invoice_no;`;\nreturn [{ json: { sql } }];"
+      },
+      "id": "fn-issue",
+      "name": "Build mark_issued SQL",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [600, 540]
+    },
+
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.sql }}"
+      },
+      "id": "pg-exec",
+      "name": "PG: Execute Write",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [860, 300],
+      "credentials": { "postgres": { "id": "REPLACE_PG_CRED_ID", "name": "Postgres" } }
+    },
+
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}"
+      },
+      "id": "respond",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Switch Action", "type": "main", "index": 0 }]]
+    },
+    "Switch Action": {
+      "main": [
+        [{ "node": "Build create_ref SQL", "type": "main", "index": 0 }],
+        [{ "node": "Build submit_customer SQL", "type": "main", "index": 0 }],
+        [{ "node": "PG: get_request", "type": "main", "index": 0 }],
+        [{ "node": "Build mark_issued SQL", "type": "main", "index": 0 }]
+      ]
+    },
+    "Build create_ref SQL": {
+      "main": [[{ "node": "PG: Execute Write", "type": "main", "index": 0 }]]
+    },
+    "Build submit_customer SQL": {
+      "main": [[{ "node": "PG: Execute Write", "type": "main", "index": 0 }]]
+    },
+    "Build mark_issued SQL": {
+      "main": [[{ "node": "PG: Execute Write", "type": "main", "index": 0 }]]
+    },
+    "PG: Execute Write": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "PG: get_request": {
+      "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "tags": ["receipt", "liff", "qr"]
+}

@@ -107,8 +107,16 @@ import CosmosInsurancePage from "./pages/CosmosInsurancePage";
 import CosmosBillingPage from "./pages/CosmosBillingPage";
 import PaymentPage from "./pages/PaymentPage";
 import GoodsPaymentPage from "./pages/GoodsPaymentPage";
+import ReceiptCustomerFormPage from "./pages/ReceiptCustomerFormPage";
+import ReceiptQrPrintPage from "./pages/ReceiptQrPrintPage";
+import ReceiptIssueFromQrPage from "./pages/ReceiptIssueFromQrPage";
 
 export default function App() {
+  // หน้าฟอร์มลูกค้า (เปิดผ่าน LINE LIFF) — ต้องเข้าได้โดยไม่ผ่าน login/sidebar
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/receipt-form")) {
+    return <ReceiptCustomerFormPage />;
+  }
+
   const [activeMenu, setActiveMenu] = useState("salesoverview");
   const [currentUser, setCurrentUser] = useState(null);
 
@@ -149,7 +157,7 @@ export default function App() {
     const explicitPages = getExplicitUserPages(currentUser.pages);
     if (explicitPages) return explicitPages.includes(page);
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "mymotoreport" || page === "mymotoregister" || page === "expensedoccheck" || page === "deliveryfee" || page === "pricemarkup" || page === "payment") return true;
+    if (page === "salesoverview" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "mymotoreport" || page === "mymotoregister" || page === "expensedoccheck" || page === "deliveryfee" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
     if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "motoinsuranceextra" || page === "cosmosinsurance" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrspecialcommission" || page === "hrtimetracking" || page === "hremployees" || page === "vehiclepayment") return false;
     // upload, master data, convert เฉพาะ admin
@@ -333,6 +341,12 @@ export default function App() {
         )}
         {activeMenu === "payment" && canAccess("payment") && (
           <PaymentPage currentUser={currentUser} />
+        )}
+        {activeMenu === "receiptqr" && canAccess("receiptqr") && (
+          <ReceiptQrPrintPage currentUser={currentUser} />
+        )}
+        {activeMenu === "receiptissue" && canAccess("receiptissue") && (
+          <ReceiptIssueFromQrPage currentUser={currentUser} />
         )}
         {activeMenu === "expenserecord" && canAccess("expenserecord") && (
           <ExpenseRecordPage currentUser={currentUser} />
@@ -546,7 +560,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "customer", "deliveryfee", "pricemarkup"];
+  const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "customer", "deliveryfee", "pricemarkup", "receiptqr", "receiptissue"];
   const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "claim"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
@@ -588,6 +602,8 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="customer" label="บันทึกข้อมูลลูกค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="deliveryfee" label="บันทึกค่านำพา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="pricemarkup" label="ราคาขายบวกเพิ่ม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="receiptqr" label="พิมพ์ QR ออกใบเสร็จ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="receiptissue" label="ออกใบเสร็จจาก QR" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Spare Parts" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
