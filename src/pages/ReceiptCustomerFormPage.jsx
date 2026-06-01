@@ -10,6 +10,8 @@ const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-r
 const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 // ข้อมูลที่อยู่ไทย (จังหวัด/อำเภอ/ตำบล + รหัสไปรษณีย์) — โหลดจาก CDN (gzip)
 const GEO_URL = "https://cdn.jsdelivr.net/gh/kongvut/thai-province-data@master/api/latest/province_with_district_and_sub_district.json";
+// ชื่อผู้ควบคุมข้อมูล (แสดงในข้อความยินยอม PDPA) — แก้ได้ตามจริง
+const COMPANY = "หจก.สิงห์ชัยสยามยนต์";
 
 const text = (v) => (v ?? "").toString().trim();
 
@@ -31,6 +33,9 @@ const T = {
     errName: "กรุณากรอกชื่อ-นามสกุล", errPhone: "กรุณากรอกเบอร์โทรศัพท์",
     errHouse: "กรุณากรอกบ้านเลขที่ / หมู่ / ถนน", errAddr: "กรุณาเลือกจังหวัด / อำเภอ / ตำบล ให้ครบ",
     errRef: "ไม่พบเลขอ้างอิง — กรุณาสแกน QR ใหม่อีกครั้ง", errSubmit: "ส่งข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
+    birth: "วันเกิด", gender: "เพศ", male: "ชาย", female: "หญิง",
+    consent: "ข้าพเจ้ายินยอมให้ " + COMPANY + " เก็บและใช้ข้อมูลส่วนบุคคลข้างต้น เพื่อออกใบเสร็จ/ใบกำกับภาษีและบริการที่เกี่ยวข้อง ตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล (PDPA)",
+    errConsent: "กรุณาติ๊กยินยอมการเก็บข้อมูลส่วนบุคคลก่อนส่ง",
   },
   en: {
     langName: "EN",
@@ -48,6 +53,9 @@ const T = {
     errName: "Please enter your name", errPhone: "Please enter your phone number",
     errHouse: "Please enter house no. / Moo / Road", errAddr: "Please select Province / District / Subdistrict",
     errRef: "Reference not found — please scan the QR again", errSubmit: "Submit failed, please try again",
+    birth: "Date of birth", gender: "Gender", male: "Male", female: "Female",
+    consent: "I consent to " + COMPANY + " collecting and using my personal data above to issue receipts/tax invoices and related services (PDPA).",
+    errConsent: "Please accept the personal data consent before submitting",
   },
   my: {
     langName: "မြန်မာ",
@@ -65,6 +73,9 @@ const T = {
     errName: "အမည်ဖြည့်ပါ", errPhone: "ဖုန်းနံပါတ်ဖြည့်ပါ",
     errHouse: "အိမ်အမှတ် / ရပ်ကွက် / လမ်း ဖြည့်ပါ", errAddr: "ခရိုင် / မြို့နယ် / ကျေးရွာအုပ်စု ရွေးပါ",
     errRef: "ကိုးကားနံပါတ် မတွေ့ပါ — QR ကို ပြန်စကင်ဖတ်ပါ", errSubmit: "ပေးပို့မအောင်မြင်ပါ၊ ထပ်ကြိုးစားပါ",
+    birth: "မွေးသက္ကရာဇ်", gender: "လိင်", male: "ကျား", female: "မ",
+    consent: COMPANY + " သည် ပြေစာ/အခွန်ပြေစာ ထုတ်ပေးရန်နှင့် ဆက်စပ်ဝန်ဆောင်မှုများအတွက် အထက်ပါ ကိုယ်ရေးအချက်အလက်များ စုဆောင်း/အသုံးပြုခြင်းကို သဘောတူပါသည် (PDPA)။",
+    errConsent: "ကိုယ်ရေးအချက်အလက် သဘောတူညီချက်ကို အမှန်ခြစ်ပါ",
   },
 };
 const LANGS = ["th", "en", "my"];
@@ -97,12 +108,13 @@ export default function ReceiptCustomerFormPage() {
   const [errorMsg, setErrorMsg] = useState("");
   const [refNo, setRefNo] = useState("");
   const [profile, setProfile] = useState(null);   // { userId, displayName }
-  const [form, setForm] = useState({ customer_name: "", phone: "", tax_id: "" });
+  const [form, setForm] = useState({ customer_name: "", phone: "", tax_id: "", gender: "", birth_date: "" });
 
   // ที่อยู่: บ้านเลขที่/ถนน + จังหวัด/อำเภอ/ตำบล (id) + zip (auto)
   const [addr, setAddr] = useState({ line: "", provinceId: "", districtId: "", subdistrictId: "", zip: "" });
   const [provinces, setProvinces] = useState([]);
   const [geoErr, setGeoErr] = useState(false);
+  const [consent, setConsent] = useState(false); // ยินยอม PDPA
 
   // อ่าน ref จาก URL
   useEffect(() => {
@@ -207,6 +219,7 @@ export default function ReceiptCustomerFormPage() {
       if (!text(addr.line)) { setErrorMsg(t.errHouse); return; }
       if (!addr.provinceId || !addr.districtId || !addr.subdistrictId) { setErrorMsg(t.errAddr); return; }
     }
+    if (!consent) { setErrorMsg(t.errConsent); return; }
     setErrorMsg("");
     setPhase("submitting");
     try {
@@ -217,6 +230,9 @@ export default function ReceiptCustomerFormPage() {
         address: composeAddress(),
         phone: text(form.phone),
         tax_id: text(form.tax_id),
+        gender: text(form.gender),
+        birth_date: form.birth_date || "",
+        consent: consent,
         line_user_id: profile?.userId || "",
         line_display_name: profile?.displayName || "",
       };
@@ -276,6 +292,15 @@ export default function ReceiptCustomerFormPage() {
             <label style={S.label}>{t.phone} *</label>
             <input style={S.input} value={form.phone} onChange={setField("phone")} inputMode="tel" placeholder={t.phonePh} />
 
+            <label style={S.label}>{t.birth}</label>
+            <input style={S.input} type="date" value={form.birth_date} onChange={setField("birth_date")} />
+
+            <label style={S.label}>{t.gender}</label>
+            <div style={{ display: "flex", gap: 20, padding: "4px 0" }}>
+              <label style={S.radio}><input type="radio" name="gender" checked={form.gender === "ชาย"} onChange={() => setForm((f) => ({ ...f, gender: "ชาย" }))} /> {t.male}</label>
+              <label style={S.radio}><input type="radio" name="gender" checked={form.gender === "หญิง"} onChange={() => setForm((f) => ({ ...f, gender: "หญิง" }))} /> {t.female}</label>
+            </div>
+
             {geoErr ? (
               <>
                 <label style={S.label}>{t.addrManual}</label>
@@ -312,6 +337,11 @@ export default function ReceiptCustomerFormPage() {
             <label style={S.label}>{t.taxId}</label>
             <input style={S.input} value={form.tax_id} onChange={setField("tax_id")} inputMode="numeric" placeholder={t.taxIdPh} />
 
+            <label style={S.consent}>
+              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} style={{ marginTop: 3, flexShrink: 0 }} />
+              <span>{t.consent}</span>
+            </label>
+
             {errorMsg && <div style={S.error}>{errorMsg}</div>}
 
             <button style={{ ...S.submit, opacity: phase === "submitting" ? 0.6 : 1 }} disabled={phase === "submitting"} onClick={handleSubmit}>
@@ -340,6 +370,8 @@ const S = {
   center: { padding: "40px 20px", textAlign: "center", color: "#333" },
   lineInfo: { fontSize: 13, color: "#06934a", background: "#eafaf0", padding: "6px 10px", borderRadius: 8, marginBottom: 12 },
   label: { display: "block", fontSize: 13, fontWeight: 600, color: "#444", margin: "12px 0 4px" },
+  radio: { display: "flex", alignItems: "center", gap: 6, fontSize: 15, cursor: "pointer" },
+  consent: { display: "flex", gap: 8, alignItems: "flex-start", marginTop: 16, fontSize: 13, color: "#444", lineHeight: 1.5, background: "#f7f8fa", padding: "10px 12px", borderRadius: 8, cursor: "pointer" },
   input: { width: "100%", boxSizing: "border-box", padding: "10px 12px", fontSize: 15, border: "1px solid #d0d5dd", borderRadius: 8, outline: "none" },
   error: { marginTop: 12, color: "#d92d20", background: "#fef3f2", padding: "8px 12px", borderRadius: 8, fontSize: 14 },
   submit: { width: "100%", marginTop: 18, padding: "13px", fontSize: 16, fontWeight: 700, color: "#fff", background: "#06C755", border: "none", borderRadius: 10, cursor: "pointer" },

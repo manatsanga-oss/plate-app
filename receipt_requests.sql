@@ -11,6 +11,10 @@ CREATE TABLE IF NOT EXISTS receipt_requests (
   address       TEXT,
   phone         TEXT,
   tax_id        TEXT,                            -- เลขผู้เสียภาษี (ถ้ามี/นิติบุคคล)
+  gender        TEXT,                            -- ชาย/หญิง
+  birth_date    DATE,                            -- วันเกิด
+  consent       BOOLEAN DEFAULT false,           -- ยินยอม PDPA
+  consent_at    TIMESTAMPTZ,                     -- เวลาที่ให้ความยินยอม
 
   -- ข้อมูลจาก LINE (ได้จาก liff.getProfile())
   line_user_id      TEXT,

@@ -49,7 +49,7 @@
 
     {
       "parameters": {
-        "functionCode": "// submit_customer: ลูกค้ากรอกข้อมูลผ่าน LIFF -> update เป็น filled\nconst b = $json.body || {};\nconst esc = s => String(s == null ? '' : s).replace(/'/g, \"''\");\nconst sql = `UPDATE receipt_requests SET customer_name='${esc(b.customer_name)}', address='${esc(b.address)}', phone='${esc(b.phone)}', tax_id='${esc(b.tax_id)}', line_user_id='${esc(b.line_user_id)}', line_display_name='${esc(b.line_display_name)}', status='filled', filled_at=now() WHERE ref_no='${esc(b.ref_no)}' RETURNING ref_no, status;`;\nreturn [{ json: { sql } }];"
+        "functionCode": "// submit_customer: ลูกค้ากรอกข้อมูลผ่าน LIFF -> update เป็น filled\nconst b = $json.body || {};\nconst esc = s => String(s == null ? '' : s).replace(/'/g, \"''\");\nconst birth = b.birth_date ? `'${esc(b.birth_date)}'` : 'NULL';\nconst consent = b.consent ? 'true' : 'false';\nconst consentAt = b.consent ? 'now()' : 'NULL';\nconst sql = `UPDATE receipt_requests SET customer_name='${esc(b.customer_name)}', address='${esc(b.address)}', phone='${esc(b.phone)}', tax_id='${esc(b.tax_id)}', gender='${esc(b.gender)}', birth_date=${birth}, consent=${consent}, consent_at=${consentAt}, line_user_id='${esc(b.line_user_id)}', line_display_name='${esc(b.line_display_name)}', status='filled', filled_at=now() WHERE ref_no='${esc(b.ref_no)}' RETURNING ref_no, status;`;\nreturn [{ json: { sql } }];"
       },
       "id": "fn-submit",
       "name": "Build submit_customer SQL",
