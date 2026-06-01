@@ -11,7 +11,7 @@ const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 // ข้อมูลที่อยู่ไทย (จังหวัด/อำเภอ/ตำบล + รหัสไปรษณีย์) — โหลดจาก CDN (gzip)
 const GEO_URL = "https://cdn.jsdelivr.net/gh/kongvut/thai-province-data@master/api/latest/province_with_district_and_sub_district.json";
 // ชื่อผู้ควบคุมข้อมูล (แสดงในข้อความยินยอม PDPA) — แก้ได้ตามจริง
-const COMPANY = "หจก.สิงห์ชัยสยามยนต์";
+const COMPANY = "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด";
 
 const text = (v) => (v ?? "").toString().trim();
 
@@ -34,6 +34,7 @@ const T = {
     errHouse: "กรุณากรอกบ้านเลขที่ / หมู่ / ถนน", errAddr: "กรุณาเลือกจังหวัด / อำเภอ / ตำบล ให้ครบ",
     errRef: "ไม่พบเลขอ้างอิง — กรุณาสแกน QR ใหม่อีกครั้ง", errSubmit: "ส่งข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
     birth: "วันเกิด", gender: "เพศ", male: "ชาย", female: "หญิง",
+    bdDay: "วัน", bdMonth: "เดือน", bdYear: "ปี (พ.ศ.)",
     consent: "ข้าพเจ้ายินยอมให้ " + COMPANY + " เก็บและใช้ข้อมูลส่วนบุคคลข้างต้น เพื่อออกใบเสร็จ/ใบกำกับภาษีและบริการที่เกี่ยวข้อง ตาม พ.ร.บ.คุ้มครองข้อมูลส่วนบุคคล (PDPA)",
     errConsent: "กรุณาติ๊กยินยอมการเก็บข้อมูลส่วนบุคคลก่อนส่ง",
   },
@@ -54,6 +55,7 @@ const T = {
     errHouse: "Please enter house no. / Moo / Road", errAddr: "Please select Province / District / Subdistrict",
     errRef: "Reference not found — please scan the QR again", errSubmit: "Submit failed, please try again",
     birth: "Date of birth", gender: "Gender", male: "Male", female: "Female",
+    bdDay: "Day", bdMonth: "Month", bdYear: "Year (B.E.)",
     consent: "I consent to " + COMPANY + " collecting and using my personal data above to issue receipts/tax invoices and related services (PDPA).",
     errConsent: "Please accept the personal data consent before submitting",
   },
@@ -74,11 +76,18 @@ const T = {
     errHouse: "အိမ်အမှတ် / ရပ်ကွက် / လမ်း ဖြည့်ပါ", errAddr: "ခရိုင် / မြို့နယ် / ကျေးရွာအုပ်စု ရွေးပါ",
     errRef: "ကိုးကားနံပါတ် မတွေ့ပါ — QR ကို ပြန်စကင်ဖတ်ပါ", errSubmit: "ပေးပို့မအောင်မြင်ပါ၊ ထပ်ကြိုးစားပါ",
     birth: "မွေးသက္ကရာဇ်", gender: "လိင်", male: "ကျား", female: "မ",
+    bdDay: "ရက်", bdMonth: "လ", bdYear: "ခုနှစ် (พ.ศ.)",
     consent: COMPANY + " သည် ပြေစာ/အခွန်ပြေစာ ထုတ်ပေးရန်နှင့် ဆက်စပ်ဝန်ဆောင်မှုများအတွက် အထက်ပါ ကိုယ်ရေးအချက်အလက်များ စုဆောင်း/အသုံးပြုခြင်းကို သဘောတူပါသည် (PDPA)။",
     errConsent: "ကိုယ်ရေးအချက်အလက် သဘောတူညီချက်ကို အမှန်ခြစ်ပါ",
   },
 };
 const LANGS = ["th", "en", "my"];
+const MONTHS = {
+  th: ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"],
+  en: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+  my: ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"],
+};
+const NOW_BE = new Date().getFullYear() + 543;
 
 // โหลด LIFF SDK จาก CDN (ครั้งเดียว)
 function loadLiffSdk() {
@@ -115,6 +124,7 @@ export default function ReceiptCustomerFormPage() {
   const [provinces, setProvinces] = useState([]);
   const [geoErr, setGeoErr] = useState(false);
   const [consent, setConsent] = useState(false); // ยินยอม PDPA
+  const [bd, setBd] = useState({ d: "", m: "", y: "" }); // วันเกิด: วัน/เดือน/ปี(พ.ศ.)
 
   // อ่าน ref จาก URL
   useEffect(() => {
@@ -172,6 +182,18 @@ export default function ReceiptCustomerFormPage() {
   }, []);
 
   const setField = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // วันเกิด: เลือก วัน/เดือน/ปี(พ.ศ.) -> เก็บเป็น ISO (ค.ศ.) ใน form.birth_date
+  const onBd = (key) => (e) => {
+    const nd = { ...bd, [key]: e.target.value };
+    setBd(nd);
+    if (nd.d && nd.m && nd.y) {
+      const ce = parseInt(nd.y, 10) - 543;
+      setForm((f) => ({ ...f, birth_date: `${ce}-${String(nd.m).padStart(2, "0")}-${String(nd.d).padStart(2, "0")}` }));
+    } else {
+      setForm((f) => ({ ...f, birth_date: "" }));
+    }
+  };
 
   const selProvince = useMemo(() => provinces.find((p) => String(p.id) === addr.provinceId) || null, [provinces, addr.provinceId]);
   const districts = useMemo(() => {
@@ -293,7 +315,20 @@ export default function ReceiptCustomerFormPage() {
             <input style={S.input} value={form.phone} onChange={setField("phone")} inputMode="tel" placeholder={t.phonePh} />
 
             <label style={S.label}>{t.birth}</label>
-            <input style={S.input} type="date" value={form.birth_date} onChange={setField("birth_date")} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <select style={S.input} value={bd.d} onChange={onBd("d")}>
+                <option value="">{t.bdDay}</option>
+                {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <select style={S.input} value={bd.m} onChange={onBd("m")}>
+                <option value="">{t.bdMonth}</option>
+                {MONTHS[lang].map((nm, i) => <option key={i} value={i + 1}>{nm}</option>)}
+              </select>
+              <select style={S.input} value={bd.y} onChange={onBd("y")}>
+                <option value="">{t.bdYear}</option>
+                {Array.from({ length: 101 }, (_, i) => NOW_BE - i).map((y) => <option key={y} value={y}>{y}</option>)}
+              </select>
+            </div>
 
             <label style={S.label}>{t.gender}</label>
             <div style={{ display: "flex", gap: 20, padding: "4px 0" }}>
