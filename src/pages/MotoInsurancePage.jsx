@@ -1105,6 +1105,7 @@ function HistoryPanel({ setMessage }) {
           batch={openBatch}
           onClose={() => setOpenBatch(null)}
           onEdit={(r) => { setOpenBatch(null); setEditTarget(r); }}
+          onAddRow={(b) => { setOpenBatch(null); setEditTarget({ insurance_id: null, record_batch_no: b.batch_no, contract_date: new Date().toISOString().slice(0, 10), policy_no: "", insured_name: "", chassis_no: "", plate_number: "", paid: "", premium: 0, stamp_duty: 0, tax: 0, total_premium: 0, commission: 0, premium_remit: 0 }); }}
           onDelete={async (id) => {
             await deleteOne(id);
             setOpenBatch(null);
@@ -1119,7 +1120,7 @@ function HistoryPanel({ setMessage }) {
   );
 }
 
-function BatchDetailDialog({ batch, onClose, onEdit, onDelete, onCancelBatch }) {
+function BatchDetailDialog({ batch, onClose, onEdit, onAddRow, onDelete, onCancelBatch }) {
   const [cancelling, setCancelling] = useState(false);
   const canCancel = batch.billed_count === 0 && batch.count > 0;
 
@@ -1146,6 +1147,11 @@ function BatchDetailDialog({ batch, onClose, onEdit, onDelete, onCancelBatch }) 
             {batch.count} รายการ · เบี้ยรวม {batch.total_premium.toLocaleString("th-TH", { minimumFractionDigits: 2 })} · วางบิลแล้ว {batch.billed_count}/{batch.count}
           </span>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
+            <button onClick={() => onAddRow(batch)}
+              title="เพิ่มรายการ พรบ. เข้าใบบันทึกนี้"
+              style={{ padding: "6px 14px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
+              ➕ เพิ่มแถว
+            </button>
             <button onClick={handleCancelBatch} disabled={!canCancel || cancelling}
               title={canCancel ? "ยกเลิกใบบันทึกทั้งใบ" : `วางบิลแล้ว ${batch.billed_count} รายการ — ยกเลิกไม่ได้`}
               style={{
@@ -1252,6 +1258,8 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
     invoice_no: record.invoice_no || "",
     customer_name: record.customer_name || "",
     match_source: "",
+    hide_invoice: !!record.hide_invoice,
+    hide_receipt: !!record.hide_receipt,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1327,6 +1335,8 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
       customer_name: r.customer_name || "",
       receipt_no: isReceipt ? (r.sale_doc_no || "") : prev.receipt_no,
       invoice_no: isReceipt ? prev.invoice_no : (r.sale_doc_no || ""),
+      hide_receipt: isReceipt ? false : prev.hide_receipt,   // re-add -> เลิกซ่อน
+      hide_invoice: isReceipt ? prev.hide_invoice : false,
       match_source: isReceipt ? "receipt" : "sale",
     }));
     setSearchSource(null);
@@ -1374,12 +1384,25 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
           }
         } catch { /* silent — validation อย่าทำให้ save fail */ }
       }
-      const body = { action: "update_insurance", insurance_id: record.insurance_id, ...form };
+      // แจ้งเตือนข้อมูลจำเป็น (กันบันทึกไม่ครบ → error จาก DB)
+      const missing = [];
+      if (!String(form.policy_no || "").trim()) missing.push("เลขกรมธรรม์");
+      if (!String(form.chassis_no || "").trim()) missing.push("เลขตัวถัง");
+      if (missing.length) {
+        setError("⚠️ กรุณากรอก: " + missing.join(" และ "));
+        setSaving(false);
+        return;
+      }
+      const body = record.insurance_id
+        ? { action: "update_insurance", insurance_id: record.insurance_id, ...form }
+        : { action: "add_insurance_row", record_batch_no: record.record_batch_no, ...form };
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error("save fail");
+      const data = await res.json().catch(() => null);
+      if (data && data.success === false) { setError("⚠️ " + (data.message || "บันทึกไม่สำเร็จ")); setSaving(false); return; }
       onSaved();
     } catch (e) { setError("บันทึกไม่สำเร็จ: " + e.message); }
     setSaving(false);
@@ -1392,7 +1415,7 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
       onClick={() => !saving && onClose()}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 720, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto" }}>
-        <h3 style={{ margin: "0 0 14px", color: "#0891b2" }}>✏️ แก้ไขข้อมูล พรบ.</h3>
+        <h3 style={{ margin: "0 0 14px", color: "#0891b2" }}>{record.insurance_id ? "✏️ แก้ไขข้อมูล พรบ." : `➕ เพิ่มรายการ พรบ.${record.record_batch_no ? " — " + record.record_batch_no : ""}`}</h3>
 
         {/* Manual override search buttons (like in OcrPanel edit dialog) */}
         <div style={{ display: "flex", gap: 8, marginBottom: 12, padding: "10px 12px", background: "#f8fafc", borderRadius: 8, border: "1px solid #e5e7eb", alignItems: "center", flexWrap: "wrap" }}>
@@ -1405,23 +1428,34 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
             🔍 ค้นหาเลขที่รับเรื่อง
           </button>
           {(form.invoice_no || form.receipt_no || form.customer_name) && (
-            <span style={{ fontSize: 12, color: form.match_source === 'receipt' ? "#059669" : "#0369a1", marginLeft: 6 }}>
-              ✓ <strong>{form.receipt_no || form.invoice_no || "-"}</strong> · {form.customer_name || "-"}
-              {form.match_source && (
-                <span style={{ marginLeft: 6, padding: "1px 6px", background: form.match_source === 'receipt' ? "#d1fae5" : "#dbeafe", borderRadius: 4 }}>
-                  {form.match_source === 'receipt' ? 'รับเรื่อง' : 'ใบขาย'}
+            <span style={{ display: "inline-flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginLeft: 6, fontSize: 12 }}>
+              {form.customer_name && <span style={{ color: "#374151" }}>👤 {form.customer_name}</span>}
+              {form.invoice_no && (
+                <span style={{ display: "inline-flex", gap: 4, alignItems: "center", padding: "2px 8px", background: "#dbeafe", color: "#0369a1", borderRadius: 6 }}>
+                  📄 ใบขาย: <strong>{form.invoice_no}</strong>
+                  <button title="ลบการอ้างอิงใบขาย (เลขที่รับเรื่องคงไว้)"
+                    onClick={() => setForm(p => ({ ...p, invoice_no: "", sale_id: null, hide_invoice: true, match_source: p.receipt_no ? "receipt" : "" }))}
+                    style={{ marginLeft: 2, padding: "0 6px", background: "#fecaca", color: "#991b1b", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button>
                 </span>
               )}
-              <button onClick={() => setForm(p => ({ ...p, receipt_no: "", invoice_no: "", customer_name: "", match_source: "" }))}
-                style={{ marginLeft: 8, padding: "1px 8px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
-                ✕ ล้าง
+              {form.receipt_no && (
+                <span style={{ display: "inline-flex", gap: 4, alignItems: "center", padding: "2px 8px", background: "#d1fae5", color: "#059669", borderRadius: 6 }}>
+                  📋 รับเรื่อง: <strong>{form.receipt_no}</strong>
+                  <button title="ลบการอ้างอิงเลขที่รับเรื่อง (ใบขายคงไว้)"
+                    onClick={() => setForm(p => ({ ...p, receipt_no: "", hide_receipt: true, match_source: p.invoice_no ? "sale" : "" }))}
+                    style={{ marginLeft: 2, padding: "0 6px", background: "#fecaca", color: "#991b1b", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button>
+                </span>
+              )}
+              <button onClick={() => setForm(p => ({ ...p, receipt_no: "", invoice_no: "", customer_name: "", match_source: "", sale_id: null, hide_invoice: true, hide_receipt: true }))}
+                style={{ padding: "1px 8px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>
+                ✕ ล้างทั้งหมด
               </button>
             </span>
           )}
         </div>
 
         {/* Match info (auto-match by chassis) */}
-        {(matchedReceipt || matchedSale) && !form.receipt_no && !form.invoice_no && (
+        {(matchedReceipt || matchedSale) && !form.receipt_no && !form.invoice_no && !form.hide_invoice && !form.hide_receipt && (
           <div style={{ background: "#ecfeff", border: "1px solid #67e8f9", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 12 }}>
             {matchedSale && (
               <div>📄 <b>ใบขาย (auto):</b> <code>{matchedSale.sale_doc_no}</code> · {matchedSale.customer_name || "-"}</div>
