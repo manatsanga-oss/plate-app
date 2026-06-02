@@ -59,9 +59,19 @@ export default function ReceiptQrPrintPage({ currentUser }) {
     <div style={{ padding: 24 }}>
       <style>{`
         @media print {
+          @page { margin: 0; }
           body * { visibility: hidden; }
           #receipt-qr-print, #receipt-qr-print * { visibility: visible; }
-          #receipt-qr-print { position: absolute; left: 0; top: 0; width: 100%; }
+          #receipt-qr-print {
+            position: absolute; top: 0; left: 0; right: 0;
+            margin: 0 auto !important;
+            width: 72mm !important;
+            border: none !important;
+            padding: 4mm 0 !important;
+            box-sizing: border-box;
+            text-align: center;
+          }
+          #receipt-qr-print img { width: 62mm !important; height: 62mm !important; margin: 0 auto !important; }
           .no-print { display: none !important; }
         }
       `}</style>
