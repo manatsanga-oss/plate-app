@@ -437,6 +437,14 @@ export default function InsuranceBillingPage({ currentUser }) {
     setTimeout(() => w.print(), 300);
   }
 
+  function printDetailBilling(d) {
+    const html = buildBillingHTML({ rows: d.rows, totalPremium: d.total_premium, commission: d.commission, remit: d.premium_remit });
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) { setMessage("popup blocked"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => w.print(), 300);
+  }
+
   function fmtNum(v) {
     const n = Number(v || 0);
     return n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -803,7 +811,8 @@ export default function InsuranceBillingPage({ currentUser }) {
                     💰 จ่ายแล้ว · {detailRow.paid_doc_no || ""}{detailRow.paid_to_vendor ? ` · ${detailRow.paid_to_vendor}` : ""}
                   </span>
                 )}
-                <button onClick={() => setDetailRow(null)} style={{ marginLeft: "auto", padding: "6px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>ปิด</button>
+                <button onClick={() => printDetailBilling(detailRow)} style={{ marginLeft: "auto", padding: "6px 14px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>🖨️ พิมพ์</button>
+                <button onClick={() => setDetailRow(null)} style={{ padding: "6px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>ปิด</button>
               </div>
               <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
                 <table className="data-table" style={{ fontSize: 12, width: "100%" }}>
@@ -1454,10 +1463,13 @@ function buildBillingHTML({ rows, totalPremium, commission, remit }) {
   const fmtDate = v => { if (!v) return "-"; const d = new Date(v); if (isNaN(d)) return String(v).slice(0, 10); return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`; };
   const today = new Date();
   const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear() + 543}`;
-  const trs = rows.map((r, i) => `<tr><td>${i + 1}</td><td>${fmtDate(r.contract_date)}</td><td>${safe(r.policy_no)}</td><td>${safe(r.insured_name)}</td><td class="mono">${safe(r.chassis_no)}</td><td>${safe(r.plate_number)}</td><td class="num">${fmtNum(r.total_premium)}</td><td class="num">${fmtNum(r.commission)}</td><td class="num">${fmtNum(r.premium_remit)}</td></tr>`).join("");
+  const trs = rows.map((r, i) => {
+    const sale = [r.invoice_no ? safe(r.invoice_no) : "", r.customer_name ? safe(r.customer_name) : ""].filter(Boolean).join("<br>") || "-";
+    return `<tr><td>${i + 1}</td><td>${fmtDate(r.contract_date)}</td><td>${safe(r.policy_no)}</td><td>${safe(r.insured_name)}</td><td class="mono">${safe(r.chassis_no)}</td><td>${safe(r.plate_number)}</td><td class="num">${fmtNum(r.total_premium)}</td><td class="num">${fmtNum(r.commission)}</td><td class="num">${fmtNum(r.premium_remit)}</td><td>${sale}</td><td>${safe(r.receipt_no) || "-"}</td></tr>`;
+  }).join("");
   return `<!doctype html><html><head><meta charset="utf-8"><title>ใบวางบิลพรบ.</title>
 <style>
-@page { size: A4 portrait; margin: 12mm; }
+@page { size: A4 landscape; margin: 10mm; }
 body { font-family: 'Tahoma','Arial',sans-serif; font-size: 11pt; }
 h1 { text-align: center; margin: 0 0 4px; font-size: 16pt; }
 .head { text-align: center; margin-bottom: 14px; font-size: 10pt; color: #444; }
@@ -1473,9 +1485,9 @@ th { background: #f0f4f9; }
 <h1>ใบวางบิล พรบ. รถใหม่</h1>
 <div class="head">วันที่: ${dateStr} · จำนวน ${rows.length} รายการ</div>
 <table>
-<thead><tr><th>#</th><th>วันที่ทำสัญญา</th><th>กรมธรรม์</th><th>ผู้เอาประกัน</th><th>เลขตัวถัง</th><th>ทะเบียน</th><th>เบี้ยรวม</th><th>ค่าคอม</th><th>เบี้ยนำส่ง</th></tr></thead>
+<thead><tr><th>#</th><th>วันที่ทำสัญญา</th><th>กรมธรรม์</th><th>ผู้เอาประกัน</th><th>เลขตัวถัง</th><th>ทะเบียน</th><th>เบี้ยรวม</th><th>ค่าคอม</th><th>เบี้ยนำส่ง</th><th>ใบขาย / ลูกค้า</th><th>เลขที่รับเรื่อง</th></tr></thead>
 <tbody>${trs}
-<tr class="total"><td colspan="6" style="text-align:right">รวมทั้งสิ้น</td><td class="num">${fmtNum(totalPremium)}</td><td class="num">${fmtNum(commission)}</td><td class="num">${fmtNum(remit)}</td></tr>
+<tr class="total"><td colspan="6" style="text-align:right">รวมทั้งสิ้น</td><td class="num">${fmtNum(totalPremium)}</td><td class="num">${fmtNum(commission)}</td><td class="num">${fmtNum(remit)}</td><td colspan="2"></td></tr>
 </tbody></table>
 <div style="margin-top: 30px;">
   <div class="sign-box"><div class="sign-line">ลงชื่อ ........................................................</div><div>ผู้วางบิล</div></div>
