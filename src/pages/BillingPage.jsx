@@ -23,6 +23,9 @@ export default function BillingPage({ currentUser }) {
   const [selectedBills, setSelectedBills] = useState({});  // {billing_doc_no: true}
   const [paymentDialog, setPaymentDialog] = useState(false);
   const [paymentForm, setPaymentForm] = useState({ paid_date: "", payment_method: "โอน", payment_note: "", paid_to_vendor: "", wht_rate: 0, wht_amount: 0, wht_base: 0, from_bank_account_id: "", credit_note_no: "", credit_note_date: "" });
+  // ค่าใช้จ่ายจ่ายล่วงหน้าที่ค้างของ vendor (เลือกหักได้)
+  const [pendingAdvances, setPendingAdvances] = useState([]);
+  const [selectedAdvanceIds, setSelectedAdvanceIds] = useState({}); // {id: true}
   const [savingPayment, setSavingPayment] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -170,6 +173,18 @@ export default function BillingPage({ currentUser }) {
     const base = calcWhtBase();
     const amount = Math.round((base * rate / 100) * 100) / 100;
     setPaymentForm(p => ({ ...p, paid_to_vendor: vendorName, wht_rate: rate, wht_base: base, wht_amount: amount }));
+    setSelectedAdvanceIds({});
+    // โหลด advance_expenses ค้าง (status=pending) ของ vendor นี้
+    if (v?.vendor_id) {
+      fetch("https://n8n-new-project-gwf2.onrender.com/webhook/advance-expense-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ op: "list", status: "pending", vendor_id: v.vendor_id }),
+      }).then(r => r.json()).then(data => {
+        setPendingAdvances(Array.isArray(data) ? data : (data?.data || []));
+      }).catch(() => setPendingAdvances([]));
+    } else {
+      setPendingAdvances([]);
+    }
   }
 
   function openPaymentDialog() {
@@ -179,6 +194,7 @@ export default function BillingPage({ currentUser }) {
     if (bankAccounts.length === 0) fetchBankAccounts();
     const today = new Date().toISOString().slice(0, 10);
     setPaymentForm({ paid_date: today, payment_method: "โอน", payment_note: "", paid_to_vendor: "", wht_rate: 0, wht_amount: 0, wht_base: calcWhtBase(), from_bank_account_id: "", credit_note_no: "", credit_note_date: today });
+    setPendingAdvances([]); setSelectedAdvanceIds({});
     setPaymentDialog(true);
   }
 
@@ -211,7 +227,15 @@ export default function BillingPage({ currentUser }) {
         credit_note_amount: isCreditNote ? selSum : null,
       });
       const payNo = res?.paid_doc_no || res?.[0]?.paid_doc_no || "";
-      setMessage(`✅ บันทึกจ่ายเงิน ${payNo} สำเร็จ`);
+      // หลังจ่ายเงินสำเร็จ → mark advance_expenses ที่เลือกว่าเคลียร์แล้ว
+      const advIds = Object.keys(selectedAdvanceIds).filter(k => selectedAdvanceIds[k]);
+      if (advIds.length) {
+        await Promise.all(advIds.map(id => fetch("https://n8n-new-project-gwf2.onrender.com/webhook/advance-expense-api", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ op: "clear", id: Number(id), cleared_by: currentUser?.username || currentUser?.name || "system" }),
+        }).catch(() => null)));
+      }
+      setMessage(`✅ บันทึกจ่ายเงิน ${payNo} สำเร็จ${advIds.length ? ` · เคลียร์ ${advIds.length} ใบล่วงหน้า` : ""}`);
       setPaymentDialog(false);
       setSelectedBills({});
       fetchData();
@@ -1455,12 +1479,38 @@ export default function BillingPage({ currentUser }) {
                       style={{ width: "100%", padding: "6px 8px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", fontWeight: 700, color: "#dc2626", boxSizing: "border-box" }} />
                   </div>
                 </div>
-                <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13 }}>
-                  <span>ยอดวางบิล: <strong>{selSum.toLocaleString()}</strong></span>
-                  <span style={{ marginLeft: 14, color: "#dc2626" }}>− หัก WHT: <strong>{Number(paymentForm.wht_amount || 0).toLocaleString()}</strong></span>
-                  <span style={{ marginLeft: 14, color: "#059669", fontWeight: 700 }}>= ยอดโอนจริง: {(selSum - Number(paymentForm.wht_amount || 0)).toLocaleString()}</span>
-                </div>
+                {(() => {
+                  const advTotal = pendingAdvances.filter(a => selectedAdvanceIds[a.id]).reduce((s, a) => s + Number(a.amount || 0), 0);
+                  const net = selSum - Number(paymentForm.wht_amount || 0) - advTotal;
+                  return (
+                    <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13 }}>
+                      <span>ยอดวางบิล: <strong>{selSum.toLocaleString()}</strong></span>
+                      <span style={{ marginLeft: 14, color: "#dc2626" }}>− หัก WHT: <strong>{Number(paymentForm.wht_amount || 0).toLocaleString()}</strong></span>
+                      {advTotal > 0 && <span style={{ marginLeft: 14, color: "#7c3aed" }}>− หักจ่ายล่วงหน้า: <strong>{advTotal.toLocaleString()}</strong></span>}
+                      <span style={{ marginLeft: 14, color: "#059669", fontWeight: 700 }}>= ยอดโอนจริง: {net.toLocaleString()}</span>
+                    </div>
+                  );
+                })()}
               </div>
+
+              {/* หักจ่ายล่วงหน้า — โผล่เมื่อ vendor มี advance_expenses ค้างชำระ */}
+              {pendingAdvances.length > 0 && (
+                <div style={{ marginTop: 12, padding: 10, background: "#f5f3ff", border: "1px solid #c4b5fd", borderRadius: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#5b21b6", marginBottom: 6 }}>💼 หักยอดจ่ายล่วงหน้า ({pendingAdvances.length} ใบค้างชำระของ {paymentForm.paid_to_vendor})</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {pendingAdvances.map(a => (
+                      <label key={a.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", background: selectedAdvanceIds[a.id] ? "#ede9fe" : "#fff", border: `1px solid ${selectedAdvanceIds[a.id] ? "#a78bfa" : "#e5e7eb"}`, borderRadius: 6, fontSize: 13, cursor: "pointer" }}>
+                        <input type="checkbox" checked={!!selectedAdvanceIds[a.id]}
+                          onChange={(e) => setSelectedAdvanceIds(s => ({ ...s, [a.id]: e.target.checked }))} />
+                        <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{a.doc_no}</span>
+                        <span style={{ color: "#64748b" }}>{a.doc_date ? new Date(a.doc_date).toLocaleDateString("th-TH") : "-"}</span>
+                        <span style={{ flex: 1, color: "#374151" }}>{a.description || a.note || "-"}</span>
+                        <span style={{ fontWeight: 700, color: "#dc2626" }}>฿ {Number(a.amount).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
               </>)}
 
               {/* Credit note info — แสดงเมื่อเลือกใบลดหนี้ */}

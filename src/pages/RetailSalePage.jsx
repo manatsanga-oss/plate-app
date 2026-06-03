@@ -95,6 +95,15 @@ export default function RetailSalePage({ currentUser }) {
   const [markups, setMarkups] = useState([]);
   const [saleExpenses, setSaleExpenses] = useState([]);
   const [colors, setColors] = useState([]);
+  const [reloadingGiveaways, setReloadingGiveaways] = useState(false);
+
+  async function reloadGiveaways() {
+    try {
+      setReloadingGiveaways(true);
+      const se = await fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_sale_expenses" }) }).then((r) => r.json()).catch(() => []);
+      setSaleExpenses(Array.isArray(se) ? se.filter((x) => x.expense_type === "promotion" && x.status === "active") : []);
+    } finally { setReloadingGiveaways(false); }
+  }
   const [selectedGiveaways, setSelectedGiveaways] = useState({}); // {expense_id: true}
   const [bookings, setBookings] = useState([]);
   const [allDeposits, setAllDeposits] = useState([]);
@@ -801,7 +810,14 @@ export default function RetailSalePage({ currentUser }) {
             <Card>
               <SectionHead title="🎁 ของแถม" />
               <CardBody>
-                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>เลือกของแถมที่ลูกค้าได้รับ — รายการมาจาก "บันทึกค่าใช้จ่ายการขาย" (ประเภท: โปรโมชั่น)</div>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <span>เลือกของแถมที่ลูกค้าได้รับ — รายการมาจาก "บันทึกค่าใช้จ่ายการขาย" (ประเภท: โปรโมชั่น)</span>
+                  <button type="button" onClick={reloadGiveaways} disabled={reloadingGiveaways}
+                    title="โหลดรายการของแถมใหม่จากระบบ (กรณีเพิ่ม/แก้รายการ)"
+                    style={{ padding: "4px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                    {reloadingGiveaways ? "..." : "🔄 รีเฟรช"}
+                  </button>
+                </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
                   {applicableGiveaways.map((g) => {
                     const checked = !!selectedGiveaways[g.expense_id];
