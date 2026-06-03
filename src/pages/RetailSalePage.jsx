@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import CustomerPickerModal from "./CustomerPickerModal";
 
 // ============================================================================
@@ -12,15 +12,15 @@ import CustomerPickerModal from "./CustomerPickerModal";
 // backend: n8n webhook retail-sale-api (actions: get_vehicle / save_sale / cancel_sale)
 // ============================================================================
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
+const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 
 const TEAL = "#54b0b8";
 const FIELD_BG = "#e9eef0";
 
 const FINANCE_OPTIONS = [
   { value: "none", label: "ไม่จัดไฟแนนซ์" },
-  { value: "moto", label: "จัดไฟแนนซ์ เฉพาะรถจักรยานยนต์" },
-  { value: "moto_kit", label: "จัดไฟแนนซ์ รถจักรยานยนต์พร้อมชุดแต่ง" },
-  { value: "full", label: "จัดไฟแนนซ์ ชำระเต็ม" },
+  { value: "moto", label: "จัดไฟแนนซ์" },
 ];
 const isFinance = (v) => v === "moto" || v === "moto_kit" || v === "full";
 
@@ -68,6 +68,7 @@ const blankForm = (currentUser) => ({
   other_sale: "",
   down_payment: "",
   booking_deposit: "",
+  deposit_no: "",
   finance_company_code: "",
   finance_company_name: "",
   interest_rate: "1.09",
@@ -84,6 +85,297 @@ export default function RetailSalePage({ currentUser }) {
   const [mode, setMode] = useState(null); // "new" | "view" | "sold_other"
   const [form, setForm] = useState(blankForm(currentUser));
   const [showCustomer, setShowCustomer] = useState(false);
+
+  // ===== Master data สำหรับค้นหา "ราคาประกาศ" จากรุ่นรถ (เหมือนหน้าคำนวณราคารถ) =====
+  const [motoTypes, setMotoTypes] = useState([]);
+  const [motoSeries, setMotoSeries] = useState([]);
+  const [priceTypes, setPriceTypes] = useState([]);
+  const [prices, setPrices] = useState([]);
+  const [financeCompanies, setFinanceCompanies] = useState([]);
+  const [markups, setMarkups] = useState([]);
+  const [saleExpenses, setSaleExpenses] = useState([]);
+  const [colors, setColors] = useState([]);
+  const [selectedGiveaways, setSelectedGiveaways] = useState({}); // {expense_id: true}
+  const [bookings, setBookings] = useState([]);
+  const [allDeposits, setAllDeposits] = useState([]);
+  const [showBookingPicker, setShowBookingPicker] = useState(false);
+  const [bookingBranchFilter, setBookingBranchFilter] = useState("");
+  const [bookingColorFilter, setBookingColorFilter] = useState("");
+
+  // ===== รายการปรับแต่ง (ค่านำพา / เงินดาวน์ออกแทน / ประกันออกแทน) =====
+  const [useDeliveryFee, setUseDeliveryFee] = useState(false);
+  const [deliveryFee, setDeliveryFee] = useState(0);
+  const [useDownPayout, setUseDownPayout] = useState(false);
+  const [downPayout, setDownPayout] = useState(0);
+  const [useInsurancePayout, setUseInsurancePayout] = useState(false);
+  const [insurancePayout, setInsurancePayout] = useState(0);
+  const [selectedTypeId, setSelectedTypeId] = useState(""); // เผื่อ model_code ตรงหลายแถว
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [t, s, pt, p, fc, m, se, cl] = await Promise.all([
+          fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_types" }) }).then((r) => r.json()).catch(() => []),
+          fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_series" }) }).then((r) => r.json()).catch(() => []),
+          fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_price_types" }) }).then((r) => r.json()).catch(() => []),
+          fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_moto_prices" }) }).then((r) => r.json()).catch(() => []),
+          fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_finance_companies" }) }).then((r) => r.json()).catch(() => []),
+          fetch(ACC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_price_markups" }) }).then((r) => r.json()).catch(() => []),
+          fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_sale_expenses" }) }).then((r) => r.json()).catch(() => []),
+          fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_colors" }) }).then((r) => r.json()).catch(() => []),
+        ]);
+        if (!alive) return;
+        setMotoTypes((Array.isArray(t) ? t : []).filter((m) => m.status === "active" && m.model_status === "active" && m.series_status === "active" && m.brand_status === "active"));
+        setMotoSeries(Array.isArray(s) ? s : []);
+        setPriceTypes(Array.isArray(pt) ? pt.filter((p) => p.status === "active") : []);
+        setPrices(Array.isArray(p) ? p : []);
+        setFinanceCompanies(Array.isArray(fc) ? fc.filter((x) => x.status === "active") : []);
+        setMarkups((Array.isArray(m) ? m : []).filter((x) => x.status === "active"));
+        setSaleExpenses(Array.isArray(se) ? se.filter((x) => x.expense_type === "promotion" && x.status === "active") : []);
+        setColors(Array.isArray(cl) ? cl.filter((x) => x.status === "active") : []);
+      } catch { /* silent */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // ดึงรายการจอง + เงินมัดจำ (ใช้ตอนเลือก "เงินจอง")
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [bks, deps] = await Promise.all([
+          fetch("https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_moto_bookings" }) }).then((r) => r.json()).catch(() => []),
+          fetch("https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_all_deposits" }) }).then((r) => r.json()).catch(() => []),
+        ]);
+        if (!alive) return;
+        setBookings(Array.isArray(bks) ? bks : []);
+        setAllDeposits(Array.isArray(deps) ? deps : []);
+      } catch { /* silent */ }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  // brand ใน stock เก็บเป็น "HONDA"/"YAMAHA" แต่ใน types เก็บเป็น "ฮอนด้า"/"ยามาฮ่า"
+  const normBrand = (b) => {
+    const s = String(b || "").toLowerCase();
+    if (s.includes("honda") || s.includes("ฮอนด้า")) return "honda";
+    if (s.includes("yamaha") || s.includes("ยามาฮ่า")) return "yamaha";
+    return s;
+  };
+  // stock เก็บ model_code เป็น "BASE (TYPE)" หรือ "BASE TYPE" — แยก base + type hint
+  const parsedModel = useMemo(() => {
+    if (!vehicle?.model_code) return { base: "", typeHint: "" };
+    const raw = String(vehicle.model_code).toUpperCase().trim();
+    // 1) "BASE (TYPE)" — มีวงเล็บ
+    const inParen = raw.match(/^(.+?)\s*\((.+)\)\s*$/);
+    if (inParen) return { base: inParen[1].trim(), typeHint: inParen[2].trim() };
+    // 2) "BASE TYPE" — เว้นวรรค ไม่มีวงเล็บ (ใช้ส่วนแรกเป็น base, ส่วนที่เหลือเป็น type hint)
+    const parts = raw.split(/\s+/);
+    if (parts.length > 1) return { base: parts[0], typeHint: parts.slice(1).join(" ").trim() };
+    return { base: raw, typeHint: "" };
+  }, [vehicle]);
+
+  // type rows ที่ match กับรถปัจจุบัน (brand + model_code base)
+  const matchedTypes = useMemo(() => {
+    if (!parsedModel.base) return [];
+    const vb = normBrand(vehicle?.brand);
+    return motoTypes.filter((m) => normBrand(m.brand_name) === vb && String(m.model_code || "").toUpperCase().trim() === parsedModel.base);
+  }, [motoTypes, vehicle, parsedModel.base]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // เลือก type อัตโนมัติเมื่อ match ได้ — ใช้ typeHint จาก stock ถ้ามี
+  useEffect(() => {
+    if (matchedTypes.length === 0) { setSelectedTypeId(""); return; }
+    const hit = parsedModel.typeHint && matchedTypes.find((m) => String(m.type_name || "").toUpperCase().trim() === parsedModel.typeHint);
+    if (hit) setSelectedTypeId(String(hit.type_id));
+    else if (!matchedTypes.find((m) => String(m.type_id) === String(selectedTypeId))) setSelectedTypeId(String(matchedTypes[0].type_id));
+  }, [matchedTypes, parsedModel.typeHint]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // หา "ราคาประกาศ" ตาม finance_type + branch
+  const branchCode = currentUser?.branch_code || currentUser?.branch || "";
+  const branchGroup = ["SCY05", "SCY06"].includes(String(branchCode).substring(0, 5)) ? "ป.เปา" : "สิงห์ชัย";
+  const announcedPrice = useMemo(() => {
+    if (!selectedTypeId || !priceTypes.length || !prices.length) return null;
+    const wantFinance = isFinance(form.finance_type);
+    const matchingPt = priceTypes.find((pt) => {
+      const name = String(pt.type_name || "").toLowerCase();
+      const branchMatch = name.includes(branchGroup.toLowerCase());
+      if (!branchMatch) return false;
+      if (wantFinance) return name.includes("ไฟแนนท์") || name.includes("ไฟแนนซ์");
+      return name.includes("เงินสด");
+    });
+    if (!matchingPt) return null;
+    const ptId = matchingPt.price_type_id || matchingPt.type_id;
+    const row = prices.find((x) => String(x.type_id) === String(selectedTypeId) && String(x.price_type_id) === String(ptId));
+    return row ? Number(row.amount || 0) : null;
+  }, [selectedTypeId, priceTypes, prices, form.finance_type, branchGroup]);
+
+  // series ที่ match ตามรถปัจจุบัน (ใช้แสดงชื่อ marketing + ภาษาไทย + ประเภทรถ + cc)
+  const selectedType = useMemo(() => motoTypes.find((m) => String(m.type_id) === String(selectedTypeId)), [selectedTypeId, motoTypes]);
+  const selectedSeries = useMemo(() => {
+    if (!selectedType) return null;
+    return motoSeries.find((x) => String(x.series_id) === String(selectedType.series_id)) || null;
+  }, [selectedType, motoSeries]);
+  const selectedSeriesCC = useMemo(() => selectedSeries ? Number(selectedSeries.engine_cc) : null, [selectedSeries]);
+
+  // จับคู่ color_code ของรถ → color_name (ไทย) จาก master colors
+  const vehicleColorName = useMemo(() => {
+    const code = String(vehicle?.model_color || "").trim();
+    if (!code) return null;
+    // ถ้าตรงกับ color_name อยู่แล้ว (yamaha คืน color_name ตรงๆ) — ใช้ค่าเดิม
+    const direct = colors.find((c) => String(c.color_name).trim() === code);
+    if (direct) return direct.color_name;
+    // ค้นจาก color_code + match brand/series ถ้าได้ (เคสที่ code ซ้ำข้าม brand)
+    const vb = normBrand(vehicle?.brand);
+    const filtered = colors.filter((c) => String(c.color_code).trim().toUpperCase() === code.toUpperCase());
+    const byBrand = filtered.find((c) => normBrand(c.brand_name) === vb);
+    if (byBrand) return byBrand.color_name;
+    // fallback: ตัวแรกที่ตรง code
+    return filtered[0]?.color_name || null;
+  }, [vehicle, colors]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // markups ที่เข้าเงื่อนไขกับรถ + ไฟแนนซ์ที่เลือก
+  const applicableMarkups = useMemo(() => {
+    if (!selectedTypeId || !isFinance(form.finance_type)) return [];
+    const sel = motoTypes.find((m) => String(m.type_id) === String(selectedTypeId));
+    if (!sel) return [];
+    const finName = financeCompanies.find((f) => String(f.company_id) === String(form.finance_company_code))?.company_name || "";
+    const norm = (s) => String(s || "").toLowerCase().replace(/[\s()[\].\-_]/g, "").trim();
+    const finN = norm(finName);
+    const brand = (sel.brand_name || "").toLowerCase();
+    const modelCode = (sel.model_code || "").toLowerCase();
+    const branchCodeUp = String(branchCode).substring(0, 5);
+    const branchG = ["SCY05", "SCY06"].includes(branchCodeUp) ? "papao" : "singchai";
+    const finMatch = (m) => {
+      if (!finN || !m.finance_company) return false;
+      const mN = norm(m.finance_company);
+      return mN === finN || mN.includes(finN) || finN.includes(mN);
+    };
+    return markups.filter((m) => {
+      if (m.markup_type === "finance") return finMatch(m);
+      if (m.markup_type === "finance_cc") {
+        if (!finMatch(m)) return false;
+        if (m.branch_group && m.branch_group !== "all" && m.branch_group !== branchCodeUp && m.branch_group !== branchG) return false;
+        if (selectedSeriesCC !== null) {
+          if (m.cc_min && selectedSeriesCC < Number(m.cc_min)) return false;
+          if (m.cc_max && selectedSeriesCC > Number(m.cc_max)) return false;
+        }
+        return true;
+      }
+      if (m.markup_type === "custom") {
+        if (m.brand && m.brand.toLowerCase() !== brand) return false;
+        if (m.model_code && m.model_code.toLowerCase() !== modelCode) return false;
+        if (m.branch_group && m.branch_group !== "all" && m.branch_group !== branchCodeUp && m.branch_group !== branchG) return false;
+        return true;
+      }
+      return false;
+    });
+  }, [selectedTypeId, motoTypes, markups, financeCompanies, form.finance_type, form.finance_company_code, selectedSeriesCC, branchCode]);
+  const markupsTotal = applicableMarkups.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
+
+  // ค่านำพา bonus (HONDA: 500→2000, YAMAHA: 500→1000)
+  const deliveryBonus = useMemo(() => {
+    if (!useDeliveryFee || !vehicle?.brand) return 0;
+    const fee = Number(deliveryFee || 0);
+    if (fee <= 0) return 0;
+    const b = String(vehicle.brand).toLowerCase();
+    const multiplier = b.includes("honda") || b.includes("ฮอนด้า") ? 2000 : b.includes("yamaha") || b.includes("ยามาฮ่า") ? 1000 : 0;
+    return Math.floor(fee / 500) * multiplier;
+  }, [useDeliveryFee, deliveryFee, vehicle]);
+
+  // เงินดาวน์ออกแทน: input × 1.07 ปัดขึ้นหลักร้อย
+  const downPayoutCalc = useDownPayout ? Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100 : 0;
+  // ประกันออกแทน: เอายอดตรงๆ
+  const insurancePayoutCalc = useInsurancePayout ? Number(insurancePayout || 0) : 0;
+  // รวมยอดรายการปรับแต่ง
+  const adjustmentsTotal = (useDeliveryFee ? Number(deliveryFee || 0) : 0) + deliveryBonus + downPayoutCalc + insurancePayoutCalc;
+
+  // ของแถม (promotion) ที่เข้าเงื่อนไขกับรถปัจจุบัน — รองรับ brand/type/cc/finance/province
+  const applicableGiveaways = useMemo(() => {
+    if (!selectedTypeId) return [];
+    const sel = motoTypes.find((m) => String(m.type_id) === String(selectedTypeId));
+    if (!sel) return [];
+    const rowCC = selectedSeriesCC;
+    const finId = form.finance_company_code;
+    return saleExpenses.filter((e) => {
+      if (e.group_by === "brand" && String(e.brand_id) === String(sel.brand_id)) return true;
+      if (e.group_by === "type" && String(e.type_id) === String(sel.type_id)) return true;
+      if (e.group_by === "cc" && rowCC && Number(e.engine_cc) === rowCC) return true;
+      if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return true;
+      if (e.group_by === "province") return true; // จังหวัด — แสดงทั้งหมด ให้ user เลือกเอง
+      return false;
+    });
+  }, [selectedTypeId, motoTypes, saleExpenses, selectedSeriesCC, form.finance_company_code]);
+  const giveawaysTotal = applicableGiveaways
+    .filter((g) => selectedGiveaways[g.expense_id])
+    .reduce((s, g) => s + Number(g.amount || 0), 0);
+
+  // ราคาประกาศ + บวกเพิ่ม + ปรับแต่ง = ราคารถสุดท้าย (ของแถมไม่บวกเข้า — เป็นต้นทุนของเจ้าของ ไม่ใช่ราคาขาย)
+  const finalPrice = announcedPrice == null ? null : announcedPrice + markupsTotal + adjustmentsTotal;
+
+  // จับคู่ booking กับ remaining_amount (deposit_no = receipt_no)
+  const depositMap = useMemo(() => {
+    const m = {};
+    for (const d of allDeposits) if (d.receipt_no) m[d.receipt_no] = Number(d.remaining_amount || 0);
+    return m;
+  }, [allDeposits]);
+
+  // bookings ที่ match รุ่นรถปัจจุบัน + ยังเป็น "จอง" + มีเงินมัดจำเหลือ
+  const normCode = (s) => String(s || "").toUpperCase().replace(/[\s()]/g, "");
+  const vehicleModelNorm = useMemo(() => normCode(vehicle?.model_code), [vehicle]);
+  // 1) เริ่มจาก match รุ่น + status + มีเงินเหลือ
+  const baseMatchingBookings = useMemo(() => {
+    if (!vehicleModelNorm) return [];
+    return bookings.filter((b) => {
+      if (b.status !== "จอง") return false;
+      const code = normCode(b.new_model_code || b.model_code);
+      return code === vehicleModelNorm || code.startsWith(parsedModel.base) || vehicleModelNorm.startsWith(code);
+    }).map((b) => ({ ...b, remaining: b.deposit_no ? (depositMap[b.deposit_no] || 0) : 0 }))
+      .filter((b) => b.remaining > 0); // ซ่อนแถวที่ไม่มีเงินเหลือ
+  }, [bookings, vehicleModelNorm, parsedModel.base, depositMap]);
+
+  // 2) options สำหรับ dropdown (มาจาก baseMatchingBookings)
+  const bookingBranchOpts = useMemo(() => [...new Set(baseMatchingBookings.map((b) => b.branch).filter(Boolean))].sort(), [baseMatchingBookings]);
+  const bookingColorOpts = useMemo(() => [...new Set(baseMatchingBookings.map((b) => b.new_color_name || b.color_name).filter(Boolean))].sort(), [baseMatchingBookings]);
+
+  // 3) default สาขา: ใช้ branch ของ user (match prefix SCY##)
+  useEffect(() => {
+    if (showBookingPicker && !bookingBranchFilter) {
+      const myBranch = String(currentUser?.branch || currentUser?.branch_code || "").substring(0, 5).toUpperCase();
+      const found = bookingBranchOpts.find((b) => String(b).toUpperCase().startsWith(myBranch));
+      if (found) setBookingBranchFilter(found);
+    }
+  }, [showBookingPicker, bookingBranchOpts, bookingBranchFilter, currentUser]);
+
+  // 4) bookings ที่กรองตาม dropdown
+  const matchingBookings = useMemo(() => {
+    return baseMatchingBookings.filter((b) => {
+      if (bookingBranchFilter && b.branch !== bookingBranchFilter) return false;
+      if (bookingColorFilter && (b.new_color_name || b.color_name) !== bookingColorFilter) return false;
+      return true;
+    });
+  }, [baseMatchingBookings, bookingBranchFilter, bookingColorFilter]);
+
+  function pickBooking(b) {
+    setForm((f) => ({
+      ...f,
+      deposit_no: b.deposit_no || "",
+      booking_deposit: String(b.remaining || ""),
+      customer_name: f.customer_name || b.customer_name || "",
+    }));
+    setShowBookingPicker(false);
+  }
+
+  // auto-fill ราคารถทุกครั้งที่ finalPrice เปลี่ยน (แต่ไม่ทับค่าที่ user แก้เอง)
+  const lastAutoPriceRef = React.useRef(null);
+  useEffect(() => {
+    if (finalPrice == null) return;
+    const cur = num(form.car_price);
+    // อัปเดตเมื่อ: car_price ว่าง/0 หรือ ตรงกับค่าที่ระบบเติมไว้ครั้งก่อน (= user ยังไม่ได้แก้)
+    if (!form.car_price || cur === 0 || cur === lastAutoPriceRef.current) {
+      lastAutoPriceRef.current = finalPrice;
+      setForm((f) => ({ ...f, car_price: String(finalPrice) }));
+    }
+  }, [finalPrice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function pickCustomer(c) {
     setForm((f) => ({
@@ -285,11 +577,36 @@ export default function RetailSalePage({ currentUser }) {
                 <Field
                   label="รุ่น/แบบ/สี"
                   value={
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                       <Box w={170}>{vehicle.model_code}</Box>
                       <Box w={70}>{vehicle.model_year}</Box>
                       <Box w={70}>{vehicle.model_color}</Box>
                       <span style={{ color: "#333", fontWeight: 600 }}>{vehicle.model_name}</span>
+                      {/* enriched จาก master series + colors */}
+                      {(selectedSeries || vehicleColorName) && (
+                        <span style={{ display: "inline-flex", gap: 6, marginLeft: 8, flexWrap: "wrap" }}>
+                          {selectedSeries?.marketing_name && (
+                            <span style={{ background: "#dbeafe", color: "#1e40af", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                              {selectedSeries.marketing_name}{selectedSeries.marketing_name_th ? ` (${selectedSeries.marketing_name_th})` : ""}
+                            </span>
+                          )}
+                          {selectedSeries?.vehicle_type && (
+                            <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                              {selectedSeries.vehicle_type}
+                            </span>
+                          )}
+                          {selectedSeriesCC != null && (
+                            <span style={{ background: "#fef3c7", color: "#854d0e", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                              {selectedSeriesCC} cc
+                            </span>
+                          )}
+                          {vehicleColorName && vehicleColorName !== vehicle.model_color && (
+                            <span style={{ background: "#fce7f3", color: "#9f1239", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
+                              🎨 {vehicleColorName}
+                            </span>
+                          )}
+                        </span>
+                      )}
                     </div>
                   }
                   full
@@ -330,6 +647,85 @@ export default function RetailSalePage({ currentUser }) {
                   ))}
                 </div>
 
+                {/* ราคาประกาศ + บวกเพิ่ม (auto จากรุ่นรถ + ไฟแนนซ์ที่เลือก + สาขา) */}
+                {editable && matchedTypes.length > 0 && (
+                  <div style={{ marginBottom: 14, padding: "10px 14px", background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, fontSize: 14 }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: applicableMarkups.length ? 6 : 0 }}>
+                      <span style={{ fontWeight: 700, color: "#0369a1" }}>📋 ราคาประกาศ</span>
+                      <span style={{ color: "#475569", fontSize: 12 }}>
+                        ({isFinance(form.finance_type) ? "ไฟแนนซ์" : "เงินสด"} · {branchGroup})
+                      </span>
+                      {announcedPrice != null ? (
+                        <span style={{ fontSize: 16, fontWeight: 700, color: "#0369a1" }}>{baht(announcedPrice)} บาท</span>
+                      ) : (
+                        <span style={{ color: "#9ca3af", fontSize: 13 }}>— ไม่พบราคาในตาราง —</span>
+                      )}
+                    </div>
+
+                    {applicableMarkups.length > 0 && (
+                      <div style={{ marginLeft: 18, marginTop: 4, fontSize: 13, color: "#7c3aed" }}>
+                        <div style={{ fontWeight: 700, marginBottom: 2 }}>+ บวกเพิ่ม</div>
+                        {applicableMarkups.map((m, i) => {
+                          const label = m.markup_type === "finance" ? `ตามไฟแนนท์: ${m.finance_company || "-"}`
+                            : m.markup_type === "finance_cc" ? `ตามไฟแนนท์+CC: ${m.finance_company || "-"} (${m.cc_min || "0"}-${m.cc_max || "∞"} cc)`
+                            : m.markup_type === "custom" ? `กำหนดเอง: ${m.brand || ""} ${m.model_code || ""}` : m.markup_type;
+                          return <div key={i} style={{ fontSize: 12 }}>• {label}: <strong>+{baht(m.markup_amount)}</strong></div>;
+                        })}
+                        <div style={{ fontWeight: 700, marginTop: 2 }}>รวมบวกเพิ่ม: +{baht(markupsTotal)}</div>
+                      </div>
+                    )}
+
+                    {/* รายการปรับแต่ง */}
+                    <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed #bae6fd" }}>
+                      <div style={{ fontWeight: 700, color: "#7c3aed", marginBottom: 6, fontSize: 13 }}>⚙️ รายการปรับแต่ง</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                        <AdjRow label="ค่านำพา" checked={useDeliveryFee} onCheck={setUseDeliveryFee}
+                          value={deliveryFee} onChange={setDeliveryFee}
+                          extra={deliveryBonus > 0 ? `(+โบนัส ${baht(deliveryBonus)})` : ""} />
+                        <AdjRow label="เงินดาวน์/ค่างวดออกแทน" checked={useDownPayout} onCheck={setUseDownPayout}
+                          value={downPayout} onChange={setDownPayout}
+                          extra={downPayoutCalc > 0 ? `(× 1.07 = ${baht(downPayoutCalc)})` : ""} />
+                        <AdjRow label="ประกันออกแทน" checked={useInsurancePayout} onCheck={setUseInsurancePayout}
+                          value={insurancePayout} onChange={setInsurancePayout} />
+                      </div>
+                      {adjustmentsTotal > 0 && (
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed", marginTop: 6 }}>รวมปรับแต่ง: +{baht(adjustmentsTotal)}</div>
+                      )}
+                    </div>
+
+                  </div>
+                )}
+
+                {/* บริษัทไฟแนนซ์ + จำนวนงวด + ดอกเบี้ย (โผล่เมื่อเลือกจัดไฟแนนซ์) */}
+                {editable && isFinance(form.finance_type) && (
+                  <Grid>
+                    <Field label="บริษัทไฟแนนซ์" full value={
+                      <select
+                        value={form.finance_company_code}
+                        onChange={(e) => {
+                          const code = e.target.value;
+                          const fc = financeCompanies.find((x) => String(x.company_code || x.company_id) === code);
+                          setForm((f) => ({ ...f, finance_company_code: code, finance_company_name: fc?.company_name || "" }));
+                        }}
+                        style={{ ...inp, width: "100%" }}>
+                        <option value="">— เลือกบริษัทไฟแนนซ์ —</option>
+                        {financeCompanies.map((fc) => (
+                          <option key={fc.company_id} value={String(fc.company_code || fc.company_id)}>
+                            {fc.company_name}{fc.company_code ? ` (${fc.company_code})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    } />
+                    <Field label="อัตราดอกเบี้ย" unitText="% (ต่อเดือน)" value={
+                      <input value={form.interest_rate} onChange={set("interest_rate")} style={money} />
+                    } />
+                    <Field label="จำนวนงวด" required unitText="งวด" value={
+                      <input value={form.installments} onChange={set("installments")} style={money} placeholder="0" />
+                    } />
+                    <Field label="ยอดผ่อน/งวด" unit value={<MoneyBox>{baht(calc.installment)}</MoneyBox>} />
+                  </Grid>
+                )}
+
                 <Grid>
                   <Field label="ราคารถ" required unit value={editable
                     ? <input value={form.car_price} onChange={set("car_price")} style={money} placeholder="0.00" />
@@ -345,7 +741,14 @@ export default function RetailSalePage({ currentUser }) {
                     ? <input value={form.down_payment} onChange={set("down_payment")} style={money} placeholder="0.00" />
                     : <MoneyBox>{baht(sale?.down_payment)}</MoneyBox>} />
                   <Field label="เงินจอง" unit value={editable
-                    ? <input value={form.booking_deposit} onChange={set("booking_deposit")} style={money} placeholder="0.00" />
+                    ? <div style={{ display: "flex", gap: 6, alignItems: "center", width: "100%" }}>
+                        <input value={form.booking_deposit} onChange={set("booking_deposit")} style={{ ...money, flex: 1 }} placeholder="0.00" />
+                        <button type="button" onClick={() => setShowBookingPicker(true)}
+                          title="ค้นหาจากรายการจอง (รุ่นเดียวกัน)"
+                          style={{ padding: "6px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+                          🔍{baseMatchingBookings.length > 0 ? ` (${baseMatchingBookings.length})` : ""}
+                        </button>
+                      </div>
                     : <MoneyBox>{baht(sale?.booking_deposit)}</MoneyBox>} />
                   <Field label="รวมยอดชำระ" unit value={<MoneyBox>{baht(editable ? calc.totalPayment : sale?.total_payment)}</MoneyBox>} />
                   <div />
@@ -368,36 +771,67 @@ export default function RetailSalePage({ currentUser }) {
             </Card>
           )}
 
-          {/* ===================== จัดไฟแนนซ์ ===================== */}
-          {mode !== "sold_other" && isFinance(editable ? form.finance_type : sale?.finance_type) && (
+          {/* ===================== จัดไฟแนนซ์ (view mode — แสดงข้อมูลที่บันทึกไว้) ===================== */}
+          {mode !== "sold_other" && !editable && isFinance(sale?.finance_type) && (
             <Card>
               <SectionHead title="จัดไฟแนนซ์" />
               <CardBody>
                 <Grid>
-                  <Field label="บริษัทไฟแนนซ์" full value={editable
-                    ? <div style={{ display: "flex", gap: 8, alignItems: "center", width: "100%" }}>
-                        <input value={form.finance_company_code} onChange={set("finance_company_code")} placeholder="รหัส" style={{ ...inp, maxWidth: 200 }} />
-                        <input value={form.finance_company_name} onChange={set("finance_company_name")} placeholder="ชื่อบริษัทไฟแนนซ์" style={inp} />
-                      </div>
-                    : <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                        <Box w={200}>{sale?.finance_company_code}</Box>
-                        <span style={{ color: "#333", fontWeight: 600 }}>{sale?.finance_company_name}</span>
-                      </div>} />
-                  <Field label="ราคารถ" unit value={<MoneyBox>{baht(editable ? calc.carPrice : sale?.car_price)}</MoneyBox>} />
-                  <Field label="เงินดาวน์" unit value={<MoneyBox>{baht(editable ? calc.down : sale?.down_payment)}</MoneyBox>} />
-                  <Field label="อัตราดอกเบี้ย" unitText="% (ต่อเดือน)" value={editable
-                    ? <input value={form.interest_rate} onChange={set("interest_rate")} style={money} />
-                    : <MoneyBox>{sale?.interest_rate}</MoneyBox>} />
-                  <Field label="ยอดจัดไฟแนนซ์" unit value={<MoneyBox>{baht(editable ? calc.financeAmount : sale?.finance_amount)}</MoneyBox>} />
-                  <Field label="จำนวนงวด" required unitText="งวด" value={editable
-                    ? <input value={form.installments} onChange={set("installments")} style={money} placeholder="0" />
-                    : <MoneyBox>{sale?.installments}</MoneyBox>} />
-                  <Field label="ยอดผ่อน/งวด" unit value={<MoneyBox>{baht(editable ? calc.installment : sale?.installment_amount)}</MoneyBox>} />
+                  <Field label="บริษัทไฟแนนซ์" full value={
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <Box w={200}>{sale?.finance_company_code}</Box>
+                      <span style={{ color: "#333", fontWeight: 600 }}>{sale?.finance_company_name}</span>
+                    </div>
+                  } />
+                  <Field label="ราคารถ" unit value={<MoneyBox>{baht(sale?.car_price)}</MoneyBox>} />
+                  <Field label="เงินดาวน์" unit value={<MoneyBox>{baht(sale?.down_payment)}</MoneyBox>} />
+                  <Field label="อัตราดอกเบี้ย" unitText="% (ต่อเดือน)" value={<MoneyBox>{sale?.interest_rate}</MoneyBox>} />
+                  <Field label="ยอดจัดไฟแนนซ์" unit value={<MoneyBox>{baht(sale?.finance_amount)}</MoneyBox>} />
+                  <Field label="จำนวนงวด" unitText="งวด" value={<MoneyBox>{sale?.installments}</MoneyBox>} />
+                  <Field label="ยอดผ่อน/งวด" unit value={<MoneyBox>{baht(sale?.installment_amount)}</MoneyBox>} />
                   <div />
-                  <Field label="หมายเหตุ" full value={editable
-                    ? <textarea value={form.finance_note} onChange={set("finance_note")} style={{ ...inp, minHeight: 60, resize: "vertical" }} />
-                    : <TextArea>{sale?.finance_note}</TextArea>} />
+                  <Field label="หมายเหตุ" full value={<TextArea>{sale?.finance_note}</TextArea>} />
                 </Grid>
+              </CardBody>
+            </Card>
+          )}
+
+          {/* ===================== ของแถม (จาก ค่าใช้จ่ายการขาย ประเภท=promotion) ===================== */}
+          {mode !== "sold_other" && editable && applicableGiveaways.length > 0 && (
+            <Card>
+              <SectionHead title="🎁 ของแถม" />
+              <CardBody>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>เลือกของแถมที่ลูกค้าได้รับ — รายการมาจาก "บันทึกค่าใช้จ่ายการขาย" (ประเภท: โปรโมชั่น)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
+                  {applicableGiveaways.map((g) => {
+                    const checked = !!selectedGiveaways[g.expense_id];
+                    return (
+                      <label key={g.expense_id}
+                        style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 10px", background: checked ? "#fef9c3" : "#fff", border: `1px solid ${checked ? "#facc15" : "#e2e8f0"}`, borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+                        <input type="checkbox" checked={checked}
+                          onChange={(e) => setSelectedGiveaways((s) => ({ ...s, [g.expense_id]: e.target.checked }))} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, color: "#1e293b" }}>{g.expense_name}</div>
+                          <div style={{ fontSize: 11, color: "#64748b" }}>
+                            {g.category && <span style={{ background: "#e0e7ff", color: "#3730a3", padding: "1px 6px", borderRadius: 3, marginRight: 4 }}>{g.category}</span>}
+                            {g.group_by === "brand" && g.brand_name && <span>🏷️ {g.brand_name}</span>}
+                            {g.group_by === "type" && <span>🔖 Type: {g.type_name || "-"}{g.brand_name ? ` (${g.brand_name})` : ""}</span>}
+                            {g.group_by === "cc" && g.engine_cc && <span>⚙️ {g.engine_cc} cc</span>}
+                            {g.group_by === "finance" && g.company_name && <span>💳 {g.company_name}</span>}
+                            {g.group_by === "province" && <span>📍 {g.province || g.province_target || "ตามจังหวัด"}</span>}
+                          </div>
+                        </div>
+                        <span style={{ fontWeight: 700, color: "#dc2626" }}>{baht(g.amount)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {giveawaysTotal > 0 && (
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end", gap: 10, fontSize: 14 }}>
+                    <span style={{ color: "#64748b" }}>รวมของแถมที่ให้:</span>
+                    <span style={{ fontWeight: 800, color: "#dc2626" }}>{baht(giveawaysTotal)} บาท</span>
+                  </div>
+                )}
               </CardBody>
             </Card>
           )}
@@ -418,6 +852,73 @@ export default function RetailSalePage({ currentUser }) {
 
       {showCustomer && (
         <CustomerPickerModal currentUser={currentUser} onSelect={pickCustomer} onClose={() => setShowCustomer(false)} />
+      )}
+
+      {showBookingPicker && (
+        <div onClick={() => setShowBookingPicker(false)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={(e) => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 10, width: "min(900px, 96vw)", maxHeight: "85vh", overflow: "auto", boxShadow: "0 10px 30px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", borderBottom: "1px solid #e5e7eb" }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#0369a1" }}>🔍 รายการจอง (รุ่น: {parsedModel.base || "-"})</h3>
+              <button onClick={() => setShowBookingPicker(false)} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: "#64748b" }}>✕</button>
+            </div>
+            <div style={{ padding: "10px 16px", display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", borderBottom: "1px solid #e5e7eb", background: "#f8fafc" }}>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+                <span style={{ color: "#475569" }}>สาขา:</span>
+                <select value={bookingBranchFilter} onChange={(e) => setBookingBranchFilter(e.target.value)}
+                  style={{ padding: "5px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13, minWidth: 200 }}>
+                  <option value="">ทุกสาขา</option>
+                  {bookingBranchOpts.map((b) => <option key={b} value={b}>{b}</option>)}
+                </select>
+              </label>
+              <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+                <span style={{ color: "#475569" }}>สี:</span>
+                <select value={bookingColorFilter} onChange={(e) => setBookingColorFilter(e.target.value)}
+                  style={{ padding: "5px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13, minWidth: 140 }}>
+                  <option value="">ทุกสี</option>
+                  {bookingColorOpts.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+              <span style={{ marginLeft: "auto", color: "#64748b", fontSize: 13 }}>{matchingBookings.length} รายการ</span>
+            </div>
+            <div style={{ padding: 12 }}>
+              {matchingBookings.length === 0 ? (
+                <div style={{ padding: 30, textAlign: "center", color: "#94a3b8" }}>ไม่พบรายการจองสำหรับรุ่นนี้</div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead style={{ background: "#f8fafc" }}>
+                    <tr>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 12 }}>วันจอง</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 12 }}>สาขา</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 12 }}>ลูกค้า</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 12 }}>รุ่น / สี</th>
+                      <th style={{ padding: "8px 10px", textAlign: "left", fontSize: 12 }}>เลขที่มัดจำ</th>
+                      <th style={{ padding: "8px 10px", textAlign: "right", fontSize: 12 }}>คงเหลือ</th>
+                      <th style={{ padding: "8px 10px", textAlign: "center", fontSize: 12 }}>เลือก</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matchingBookings.map((b) => (
+                      <tr key={b.booking_id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>{thaiDate(b.booking_date)}</td>
+                        <td style={{ padding: "7px 10px", fontSize: 12 }}>{b.branch || "-"}</td>
+                        <td style={{ padding: "7px 10px" }}>{b.customer_name || "-"}</td>
+                        <td style={{ padding: "7px 10px", fontSize: 12 }}>{b.new_model_code || b.model_code} / {b.new_color_name || b.color_name}</td>
+                        <td style={{ padding: "7px 10px", fontFamily: "monospace", fontSize: 11, color: "#0369a1" }}>{b.deposit_no || "-"}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "right", fontWeight: 700, color: b.remaining > 0 ? "#065f46" : "#9ca3af" }}>{baht(b.remaining)}</td>
+                        <td style={{ padding: "7px 10px", textAlign: "center" }}>
+                          <button onClick={() => pickBooking(b)} disabled={!b.deposit_no || b.remaining <= 0}
+                            style={{ padding: "4px 12px", background: b.deposit_no && b.remaining > 0 ? "#0369a1" : "#cbd5e1", color: "#fff", border: "none", borderRadius: 4, cursor: b.deposit_no && b.remaining > 0 ? "pointer" : "not-allowed", fontSize: 12 }}>เลือก</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -486,6 +987,17 @@ function TextArea({ children }) {
     <div style={{ width: "100%", background: "#fff", border: "1px solid #d6dcde", borderRadius: 4, padding: "8px 12px", fontSize: 15, color: "#333", minHeight: 64 }}>
       {children || " "}
     </div>
+  );
+}
+function AdjRow({ label, checked, onCheck, value, onChange, extra }) {
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "6px 10px", background: "#fefce8", border: "1px solid #fde047", borderRadius: 6, cursor: "pointer", minWidth: 280 }}>
+      <input type="checkbox" checked={checked} onChange={(e) => onCheck(e.target.checked)} />
+      <span style={{ flex: 1, color: "#713f12", fontWeight: 600 }}>{label}</span>
+      <input type="number" value={value} onChange={(e) => onChange(e.target.value)} disabled={!checked}
+        style={{ width: 90, padding: "3px 8px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13, textAlign: "right", background: checked ? "#fff" : "#f3f4f6" }} />
+      {extra && <span style={{ fontSize: 11, color: "#7c3aed" }}>{extra}</span>}
+    </label>
   );
 }
 function StatusFlag({ ok, label }) {
