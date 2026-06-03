@@ -8,7 +8,8 @@ const BANKS = [
   "เกียรตินาคิน", "แลนด์แอนด์เฮ้าส์",
 ];
 
-const ACCOUNT_TYPES = ["ออมทรัพย์", "กระแสรายวัน", "ฝากประจำ", "เงินสดย่อย"];
+const ACCOUNT_TYPES = ["ออมทรัพย์", "กระแสรายวัน", "ฝากประจำ", "เงินสดย่อย", "ลูกหนี้"];
+const TYPES_NO_BANK = ["เงินสดย่อย", "ลูกหนี้"]; // ประเภทที่ไม่ต้องระบุธนาคาร
 
 const emptyForm = () => ({
   account_name: "",
@@ -49,8 +50,9 @@ export default function BankAccountsPage({ currentUser }) {
   }
 
   async function handleSave() {
-    if (!form.account_name.trim() || !form.bank_name.trim() || !form.account_no.trim()) {
-      setMessage("❌ กรุณากรอกชื่อบัญชี, ธนาคาร, เลขบัญชี"); return;
+    const noBank = TYPES_NO_BANK.includes(form.account_type);
+    if (!form.account_name.trim() || !form.account_no.trim() || (!noBank && !form.bank_name.trim())) {
+      setMessage(noBank ? "❌ กรุณากรอกชื่อบัญชี, เลขบัญชี" : "❌ กรุณากรอกชื่อบัญชี, ธนาคาร, เลขบัญชี"); return;
     }
     setSaving(true); setMessage("");
     try {
@@ -60,6 +62,8 @@ export default function BankAccountsPage({ currentUser }) {
           action: editTarget ? "update_bank_account" : "save_bank_account",
           ...(editTarget ? { account_id: editTarget.account_id } : {}),
           ...form,
+          // backend ต้องการ bank_name ไม่ว่าง — ส่ง "-" ถ้าประเภทไม่ต้องระบุธนาคารและไม่ได้กรอก
+          bank_name: form.bank_name.trim() || (noBank ? "-" : form.bank_name),
         }),
       });
       setShowForm(false); setEditTarget(null); setForm(emptyForm());
@@ -235,8 +239,9 @@ export default function BankAccountsPage({ currentUser }) {
                   placeholder="เช่น บริษัท สิงห์ชัยลิสซิ่ง จำกัด" style={inp} />
               </div>
               <div>
-                <label style={lbl}>ธนาคาร *</label>
-                <input list="bank-list" value={form.bank_name} onChange={e => setForm(f => ({ ...f, bank_name: e.target.value }))} style={inp} />
+                <label style={lbl}>ธนาคาร {TYPES_NO_BANK.includes(form.account_type) ? "" : "*"}</label>
+                <input list="bank-list" value={form.bank_name} onChange={e => setForm(f => ({ ...f, bank_name: e.target.value }))} style={inp}
+                  placeholder={TYPES_NO_BANK.includes(form.account_type) ? "(ไม่จำเป็นต้องระบุ)" : ""} />
                 <datalist id="bank-list">{BANKS.map(b => <option key={b} value={b} />)}</datalist>
               </div>
               <div>

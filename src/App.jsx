@@ -10,6 +10,7 @@ import MotoBookingPage from "./pages/MotoBookingPage";
 import CustomerPage from "./pages/CustomerPage";
 import UploadPage from "./pages/UploadPage";
 import UploadAccountingPage from "./pages/UploadAccountingPage";
+import DirectorLoanPage from "./pages/DirectorLoanPage";
 import PartWithdrawalPage from "./pages/PartWithdrawalPage";
 import VehiclePurchaseReportPage from "./pages/VehiclePurchaseReportPage";
 import StockTurnoverReportPage from "./pages/StockTurnoverReportPage";
@@ -483,6 +484,9 @@ export default function App() {
         {activeMenu === "accfinancetransfer" && canAccess("accfinancetransfer") && (
           <FinanceTransferPage currentUser={currentUser} />
         )}
+        {activeMenu === "accdirectorloan" && canAccess("accdirectorloan") && (
+          <DirectorLoanPage currentUser={currentUser} />
+        )}
         {activeMenu === "financepayment" && canAccess("financepayment") && (
           <FinancePaymentMatchPage currentUser={currentUser} />
         )}
@@ -688,12 +692,13 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="searchreceiptwork" label="ค้นหางานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="accbankaccounts" label="บัญชีธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accloanaccounts" label="บัญชีเงินกู้ยืม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbankmovements" label="รายงานการเคลื่อนไหว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbanktransfer" label="โอนเงินระหว่างบัญชี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accfinancetransfer" label="บันทึกรับเงินโอนไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="accdirectorloan" label="บันทึกเงินให้กู้ยืมกรรมการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partstatusinquiry","partorderinquiry","partwithdrawal","partdispensereport","servicehistory"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
