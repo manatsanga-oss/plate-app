@@ -1321,7 +1321,7 @@ export default function IncomeRecordPage({ currentUser }) {
                           const q = allocSearch.toLowerCase();
                           return [s.invoice_no, s.customer_name, s.sale_customer_name, s.model_series, s.model, s.engine_no, s.chassis_no, s.frame_no]
                             .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
-                        }).slice(0, 500).map((s, idx) => {
+                        }).slice(0, 2000).map((s, idx) => {
                           const lineIdx = allocLines.findIndex(l => (l.sale_id && l.sale_id === s.id) || l.invoice_no === s.invoice_no);
                           const selected = lineIdx >= 0;
                           const line = selected ? allocLines[lineIdx] : null;

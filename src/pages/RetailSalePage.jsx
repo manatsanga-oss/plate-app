@@ -352,6 +352,11 @@ export default function RetailSalePage({ currentUser }) {
       if (e.group_by === "type" && String(e.type_id) === String(sel.type_id)) return true;
       if (e.group_by === "cc" && rowCC && Number(e.engine_cc) === rowCC) return true;
       if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return true;
+      if (e.group_by === "name_prefix") {
+        const pfx = String(e.note || "").replace(/\s+/g, "");
+        const cust = String(form.customer_name || "").replace(/\s+/g, "");
+        return pfx && cust && cust.startsWith(pfx);
+      }
       if (e.group_by === "province") {
         const stripProv = (s) => String(s || "").replace(/^จังหวัด/, "").trim();
         const eprov = stripProv(e.province);
@@ -393,7 +398,7 @@ export default function RetailSalePage({ currentUser }) {
       }
       return false;
     });
-  }, [selectedTypeId, motoTypes, saleExpenses, selectedSeriesCC, form.finance_company_code, form.customer_province, form.finance_type, form.plate_province, financeCompanies]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [selectedTypeId, motoTypes, saleExpenses, selectedSeriesCC, form.finance_company_code, form.customer_province, form.finance_type, form.plate_province, form.customer_name, financeCompanies]); // eslint-disable-line react-hooks/exhaustive-deps
   const giveawaysTotal = applicableGiveaways
     .filter((g) => selectedGiveaways[g.expense_id])
     .reduce((s, g) => s + Number(g.amount || 0), 0);
@@ -1206,6 +1211,7 @@ export default function RetailSalePage({ currentUser }) {
                             {g.group_by === "cc" && g.engine_cc && <span>⚙️ {g.engine_cc} cc</span>}
                             {g.group_by === "finance" && g.company_name && <span>💳 {g.company_name}</span>}
                             {g.group_by === "province" && <span>📍 {g.province || g.province_target || "ตามจังหวัด"}</span>}
+                            {g.group_by === "name_prefix" && <span>🔤 ขึ้นต้น: {g.note}</span>}
                           </div>
                         </div>
                         <span style={{ fontWeight: 700, color: "#dc2626" }}>{baht(g.amount)}</span>

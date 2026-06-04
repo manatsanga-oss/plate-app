@@ -163,6 +163,7 @@ export default function MotoExpensePage({ currentUser }) {
     if (form.group_by === "brand" && !form.brand_id) { setMessage("กรุณาเลือกยี่ห้อ"); return; }
     if (form.group_by === "type" && !form.type_id) { setMessage("กรุณาเลือก Type"); return; }
     if (form.group_by === "province" && !form.province?.trim()) { setMessage("กรุณากรอกชื่อจังหวัด"); return; }
+    if (form.group_by === "name_prefix" && !form.note?.trim()) { setMessage("กรุณากรอกคำนำหน้าชื่อ (เช่น เทศบาล)"); return; }
     setSaving(true);
     setMessage("");
     try {
@@ -280,13 +281,14 @@ export default function MotoExpensePage({ currentUser }) {
     return String(a.expense_name || "").localeCompare(String(b.expense_name || ""), "th");
   });
 
-  const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", type: "Type", province: "จังหวัดลูกค้า", register_province: "จังหวัดจดทะเบียน" };
+  const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", type: "Type", province: "จังหวัดลูกค้า", register_province: "จังหวัดจดทะเบียน", name_prefix: "คำนำหน้าชื่อ" };
   const groupLabel = (e) => {
     if (e.group_by === "cc") return e.engine_cc ? e.engine_cc + " cc" : "-";
     if (e.group_by === "finance") return e.company_name || "-";
     if (e.group_by === "brand") return e.brand_name || "-";
     if (e.group_by === "type") return e.type_name || "-";
     if (e.group_by === "province") return e.province || "-";
+    if (e.group_by === "name_prefix") return e.note ? "ขึ้นต้น: " + e.note : "-";
     return "-";
   };
 
@@ -305,7 +307,7 @@ export default function MotoExpensePage({ currentUser }) {
       <div className="page-topbar">
         <h2 className="page-title">💸 บันทึกค่าใช้จ่ายการขาย</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {[["cc", "ตาม CC"], ["finance", "ตามไฟแนนท์"], ["brand", "ตามยี่ห้อ"], ["type", "ตาม Type"], ["province", "ตามจังหวัดลูกค้า"], ["register_province", "ตามจังหวัดจดทะเบียน"]].map(([key, label]) => (
+          {[["cc", "ตาม CC"], ["finance", "ตามไฟแนนท์"], ["brand", "ตามยี่ห้อ"], ["type", "ตาม Type"], ["province", "ตามจังหวัดลูกค้า"], ["register_province", "ตามจังหวัดจดทะเบียน"], ["name_prefix", "ตามคำนำหน้าชื่อ"]].map(([key, label]) => (
             <button key={key} className={tab === key ? "btn-primary" : "btn-secondary"} onClick={() => setTab(key)}>
               {label}
             </button>
@@ -580,6 +582,23 @@ export default function MotoExpensePage({ currentUser }) {
               </>
             )}
 
+            {form.group_by === "name_prefix" && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>คำนำหน้าชื่อลูกค้า *</label>
+                <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
+                  placeholder="เช่น เทศบาล, องค์การบริหารส่วนตำบล, อบต."
+                  list="name-prefix-suggestions"
+                  style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+                <datalist id="name-prefix-suggestions">
+                  {[...new Set(expenses.filter(x => x.group_by === "name_prefix").map(x => x.note).filter(Boolean))].sort().map(p => <option key={p} value={p} />)}
+                  <option value="เทศบาล" />
+                  <option value="องค์การบริหารส่วนตำบล" />
+                  <option value="อบต." />
+                </datalist>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>💡 ขึ้นเมื่อชื่อลูกค้า "ขึ้นต้นด้วย" คำนี้ (เช่น เทศบาล → ค่าจดทะเบียน 100 เป็นข้อยกเว้น)</div>
+              </div>
+            )}
+
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>จำนวนเงิน (บาท) *</label>
               <input type="number" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}
@@ -602,12 +621,14 @@ export default function MotoExpensePage({ currentUser }) {
               </div>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>หมายเหตุ</label>
-              <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
-                placeholder="หมายเหตุ (ถ้ามี)"
-                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
-            </div>
+            {form.group_by !== "name_prefix" && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>หมายเหตุ</label>
+                <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}
+                  placeholder="หมายเหตุ (ถ้ามี)"
+                  style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+              </div>
+            )}
 
             <div style={{ marginBottom: 18 }}>
               <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>สถานะ</label>
