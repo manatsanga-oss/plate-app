@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS advance_expenses (
                  CHECK (status IN ('pending','cleared','cancelled')),
   cleared_at   TIMESTAMPTZ,                   -- เวลาเคลียร์
   cleared_by   TEXT,
+  cleared_by_payment_no TEXT,                 -- เลขที่ใบจ่ายเงินที่เคลียร์ใบนี้ (link กับ registration_submissions.paid_doc_no)
   created_by   TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -22,3 +23,7 @@ CREATE TABLE IF NOT EXISTS advance_expenses (
 CREATE INDEX IF NOT EXISTS idx_advance_expenses_date   ON advance_expenses (doc_date);
 CREATE INDEX IF NOT EXISTS idx_advance_expenses_status ON advance_expenses (status);
 CREATE INDEX IF NOT EXISTS idx_advance_expenses_payee  ON advance_expenses (payee_name);
+CREATE INDEX IF NOT EXISTS idx_advance_expenses_payment ON advance_expenses (cleared_by_payment_no);
+
+-- migration: เพิ่มคอลัมน์ใหม่ใน DB เดิม
+ALTER TABLE advance_expenses ADD COLUMN IF NOT EXISTS cleared_by_payment_no TEXT;

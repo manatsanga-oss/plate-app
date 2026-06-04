@@ -24,6 +24,7 @@ import DriverPage from "./pages/DriverPage";
 import FinancePage from "./pages/FinancePage";
 import MotoPricePage from "./pages/MotoPricePage";
 import MotoModelPage from "./pages/MotoModelPage";
+import GiveawayRulesPage from "./pages/GiveawayRulesPage";
 import MotoPriceCheckPage from "./pages/MotoPriceCheckPage";
 import MotoPriceQuotePage from "./pages/MotoPriceQuotePage";
 import MotoExpensePage from "./pages/MotoExpensePage";
@@ -194,7 +195,7 @@ export default function App() {
     if (page === "convert") return false;
     if (page === "subunit") return false;
     if (page === "receive") return false;              // เฉพาะ admin (รับวัสดุ)
-    if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "incomecategory" || page === "expenserecord" || page === "advanceexpense" || page === "position" || page === "motostock") return false;
+    if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "incomecategory" || page === "expenserecord" || page === "advanceexpense" || page === "position" || page === "motostock" || page === "giveawayrules") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
@@ -325,6 +326,9 @@ export default function App() {
         )}
         {activeMenu === "motomodel" && canAccess("motomodel") && (
           <MotoModelPage currentUser={currentUser} />
+        )}
+        {activeMenu === "giveawayrules" && canAccess("giveawayrules") && (
+          <GiveawayRulesPage currentUser={currentUser} />
         )}
         {activeMenu === "motoexpense" && canAccess("motoexpense") && (
           <MotoExpensePage currentUser={currentUser} />
@@ -577,7 +581,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "customer", "deliveryfee", "pricemarkup", "receiptqr", "receiptissue", "retailsale"];
   const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "claim"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust"];
-  const masterPages = ["motomodel", "motoprice", "motoexpense", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
+  const masterPages = ["motomodel", "motoprice", "motoexpense", "giveawayrules", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
   const uploadPages = ["upload", "uploadaccounting"];
 
   return (
@@ -731,6 +735,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="motomodel" label="ข้อมูลรุ่นรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="motoprice" label="บันทึกราคาขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="motoexpense" label="ค่าใช้จ่ายการขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="giveawayrules" label="บันทึกของแถม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="serviceexpense" label="ค่าใช้จ่ายงานบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="generalexpense" label="ค่าใช้จ่ายทั่วไป" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="incomecategory" label="หมวดรายได้" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

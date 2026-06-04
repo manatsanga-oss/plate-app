@@ -79,7 +79,7 @@ function SearchTab({ onSelect }) {
   );
 
   function pick(c) {
-    onSelect({ code: c.customer_id != null ? String(c.customer_id) : "", name: fullName(c) || "-", phone: c.phone || "" });
+    onSelect({ code: c.customer_id != null ? String(c.customer_id) : "", name: fullName(c) || "-", phone: c.phone || "", province: c.addr_province || "" });
   }
 
   return (

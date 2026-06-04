@@ -227,12 +227,12 @@ export default function BillingPage({ currentUser }) {
         credit_note_amount: isCreditNote ? selSum : null,
       });
       const payNo = res?.paid_doc_no || res?.[0]?.paid_doc_no || "";
-      // หลังจ่ายเงินสำเร็จ → mark advance_expenses ที่เลือกว่าเคลียร์แล้ว
+      // หลังจ่ายเงินสำเร็จ → mark advance_expenses ที่เลือกว่าเคลียร์แล้ว + link payment_no
       const advIds = Object.keys(selectedAdvanceIds).filter(k => selectedAdvanceIds[k]);
-      if (advIds.length) {
+      if (advIds.length && payNo) {
         await Promise.all(advIds.map(id => fetch("https://n8n-new-project-gwf2.onrender.com/webhook/advance-expense-api", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ op: "clear", id: Number(id), cleared_by: currentUser?.username || currentUser?.name || "system" }),
+          body: JSON.stringify({ op: "clear", id: Number(id), payment_no: payNo, cleared_by: currentUser?.username || currentUser?.name || "system" }),
         }).catch(() => null)));
       }
       setMessage(`✅ บันทึกจ่ายเงิน ${payNo} สำเร็จ${advIds.length ? ` · เคลียร์ ${advIds.length} ใบล่วงหน้า` : ""}`);
@@ -366,6 +366,18 @@ export default function BillingPage({ currentUser }) {
     setPaymentDialog(true);
     if (vendors.length === 0) fetchVendors();
     if (bankAccounts.length === 0) fetchBankAccounts();
+    // โหลด advance_expenses ที่ถูกเคลียร์ด้วยใบจ่ายเงินนี้ + advance ที่ค้างของ vendor (เผื่อแก้)
+    setPendingAdvances([]); setSelectedAdvanceIds({});
+    fetch("https://n8n-new-project-gwf2.onrender.com/webhook/advance-expense-api", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ op: "list_by_payment", payment_no: g.paid_doc_no }),
+    }).then(r => r.json()).then(data => {
+      const cleared = Array.isArray(data) ? data : (data?.data || []);
+      if (cleared.length) {
+        setPendingAdvances(cleared);
+        setSelectedAdvanceIds(Object.fromEntries(cleared.map(a => [a.id, true])));
+      }
+    }).catch(() => {});
   }
   async function saveEditPayment() {
     if (!editingPayDocNo) return;
