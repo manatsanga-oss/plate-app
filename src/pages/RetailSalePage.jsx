@@ -14,6 +14,8 @@ import CustomerPickerModal from "./CustomerPickerModal";
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
+const STOCK_SEARCH_API = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-search";
 
 const TEAL = "#54b0b8";
 const FIELD_BG = "#e9eef0";
@@ -60,6 +62,7 @@ const blankForm = (currentUser) => ({
   sale_date: todayISO(),
   customer_code: "",
   customer_name: "",
+  customer_province: "",
   seller: currentUser?.username || currentUser?.name || "",
   note: "",
   finance_type: "none",
@@ -78,6 +81,9 @@ const blankForm = (currentUser) => ({
 
 export default function RetailSalePage({ currentUser }) {
   const [keyword, setKeyword] = useState("");
+  const [suggestions, setSuggestions] = useState([]);   // ผลค้นหาจาก moto_stock (สินค้าคงเหลือ)
+  const [showSuggest, setShowSuggest] = useState(false);
+  const [searchingStock, setSearchingStock] = useState(false);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -95,6 +101,8 @@ export default function RetailSalePage({ currentUser }) {
   const [markups, setMarkups] = useState([]);
   const [saleExpenses, setSaleExpenses] = useState([]);
   const [colors, setColors] = useState([]);
+  const [productGiveaways, setProductGiveaways] = useState([]); // จาก giveaway_rules (สินค้าที่แถม)
+  const [selectedProductGiveaways, setSelectedProductGiveaways] = useState({}); // {rule_id: true}
   const [reloadingGiveaways, setReloadingGiveaways] = useState(false);
 
   async function reloadGiveaways() {
@@ -105,6 +113,11 @@ export default function RetailSalePage({ currentUser }) {
     } finally { setReloadingGiveaways(false); }
   }
   const [selectedGiveaways, setSelectedGiveaways] = useState({}); // {expense_id: true}
+  // รับชำระเงิน
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [payForm, setPayForm] = useState({ receipt_date: "", note: "" });
+  const [payLines, setPayLines] = useState([{ method: "เงินสด", account_id: "", amount: "" }]);
+  const [payingSave, setPayingSave] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [allDeposits, setAllDeposits] = useState([]);
   const [showBookingPicker, setShowBookingPicker] = useState(false);
@@ -147,6 +160,14 @@ export default function RetailSalePage({ currentUser }) {
     return () => { alive = false; };
   }, []);
 
+  // โหลดบัญชีธนาคาร (สำหรับเลือกบัญชีรับเงิน)
+  useEffect(() => {
+    let alive = true;
+    fetch(ACC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }) })
+      .then((r) => r.json()).then((d) => { if (alive) setBankAccounts(Array.isArray(d) ? d : (d?.data || [])); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   // ดึงรายการจอง + เงินมัดจำ (ใช้ตอนเลือก "เงินจอง")
   useEffect(() => {
     let alive = true;
@@ -171,14 +192,18 @@ export default function RetailSalePage({ currentUser }) {
     if (s.includes("yamaha") || s.includes("ยามาฮ่า")) return "yamaha";
     return s;
   };
-  // stock เก็บ model_code เป็น "BASE (TYPE)" หรือ "BASE TYPE" — แยก base + type hint
+  // หา base (แบบ) + typeHint (type) สำหรับ match master
   const parsedModel = useMemo(() => {
     if (!vehicle?.model_code) return { base: "", typeHint: "" };
     const raw = String(vehicle.model_code).toUpperCase().trim();
+    // ข้อมูล normalize แล้ว: model_code = แบบ เต็ม ๆ, model_type = type ตรง ๆ → ใช้เลย (ไม่ต้องแยก)
+    const mt = String(vehicle.model_type || "").toUpperCase().trim();
+    if (mt) return { base: raw, typeHint: mt };
+    // legacy fallback (ข้อมูลเก่าที่ type ฝังใน model_code):
     // 1) "BASE (TYPE)" — มีวงเล็บ
     const inParen = raw.match(/^(.+?)\s*\((.+)\)\s*$/);
     if (inParen) return { base: inParen[1].trim(), typeHint: inParen[2].trim() };
-    // 2) "BASE TYPE" — เว้นวรรค ไม่มีวงเล็บ (ใช้ส่วนแรกเป็น base, ส่วนที่เหลือเป็น type hint)
+    // 2) "BASE TYPE" — เว้นวรรค ไม่มีวงเล็บ
     const parts = raw.split(/\s+/);
     if (parts.length > 1) return { base: parts[0], typeHint: parts.slice(1).join(" ").trim() };
     return { base: raw, typeHint: "" };
@@ -190,6 +215,23 @@ export default function RetailSalePage({ currentUser }) {
     const vb = normBrand(vehicle?.brand);
     return motoTypes.filter((m) => normBrand(m.brand_name) === vb && String(m.model_code || "").toUpperCase().trim() === parsedModel.base);
   }, [motoTypes, vehicle, parsedModel.base]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // โหลดของแถม-สินค้า (จาก giveaway_rules) เมื่อ selectedTypeId เปลี่ยน — รวมทั้ง 3 ระดับ (brand/series/type)
+  useEffect(() => {
+    if (!selectedTypeId) { setProductGiveaways([]); return; }
+    let alive = true;
+    fetch(GIVEAWAY_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ op: "list_for_type", type_id: Number(selectedTypeId) }) })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!alive) return;
+        const rows = Array.isArray(data) ? data : (data?.data || []);
+        setProductGiveaways(rows.filter((r) => r && r.id));
+        // auto-tick ทุกรายการ (สมมุติให้ลูกค้าทุกคนได้ ถ้าไม่ต้องการให้ untick)
+        setSelectedProductGiveaways(Object.fromEntries(rows.filter(r => r && r.id).map(r => [r.id, true])));
+      })
+      .catch(() => { if (alive) { setProductGiveaways([]); setSelectedProductGiveaways({}); } });
+    return () => { alive = false; };
+  }, [selectedTypeId]);
 
   // เลือก type อัตโนมัติเมื่อ match ได้ — ใช้ typeHint จาก stock ถ้ามี
   useEffect(() => {
@@ -310,13 +352,71 @@ export default function RetailSalePage({ currentUser }) {
       if (e.group_by === "type" && String(e.type_id) === String(sel.type_id)) return true;
       if (e.group_by === "cc" && rowCC && Number(e.engine_cc) === rowCC) return true;
       if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return true;
-      if (e.group_by === "province") return true; // จังหวัด — แสดงทั้งหมด ให้ user เลือกเอง
+      if (e.group_by === "province") {
+        const stripProv = (s) => String(s || "").replace(/^จังหวัด/, "").trim();
+        const eprov = stripProv(e.province);
+        const mode = String(e.province_mode || "include").toLowerCase();
+        const target = String(e.province_target || "customer").toLowerCase();
+        // jังหวัดที่จดทะเบียน = สาขาที่ขาย (เมื่อยังไม่มี plate จริง ใช้ branchGroup เป็น proxy)
+        const plateProv = String(form.plate_province || "").replace(/^จังหวัด/, "").trim() || "พระนครศรีอยุธยา";
+        // หา finance address มี province ไหน
+        const finCompany = financeCompanies.find((f) => String(f.company_id) === String(finId));
+        const finAddr = String(finCompany?.address || "");
+        const finHasProv = eprov && finAddr.includes(eprov);
+        const customerProv = stripProv(form.customer_province);
+        const hasFinance = isFinance(form.finance_type) && finId;
+
+        if (mode === "cross") {
+          // cross = plate ตรงกับ expense จังหวัด AND (ไม่มีไฟแนนซ์ → customer ต่าง / มีไฟแนนซ์ → fin address ไม่มี province นี้)
+          if (eprov !== plateProv) return false;
+          if (!hasFinance) {
+            if (!customerProv) return true; // ยังไม่เลือกลูกค้า — แสดงไว้
+            return customerProv !== eprov;
+          }
+          return !finHasProv;
+        }
+        if (target === "registered") {
+          // ตามจังหวัดจดทะเบียน (plate)
+          if (mode === "exclude") return eprov !== plateProv;
+          return eprov === plateProv;
+        }
+        // target=customer (default)
+        if (hasFinance) {
+          // ใช้จังหวัดของ address ไฟแนนซ์
+          if (mode === "exclude") return !finHasProv;
+          return finHasProv;
+        }
+        // ไม่มีไฟแนนซ์ → ใช้ customer's province
+        if (!customerProv) return true; // ยังไม่เลือกลูกค้า แสดงไว้ก่อน
+        if (mode === "exclude") return eprov !== customerProv;
+        return eprov === customerProv;
+      }
       return false;
     });
-  }, [selectedTypeId, motoTypes, saleExpenses, selectedSeriesCC, form.finance_company_code]);
+  }, [selectedTypeId, motoTypes, saleExpenses, selectedSeriesCC, form.finance_company_code, form.customer_province, form.finance_type, form.plate_province, financeCompanies]); // eslint-disable-line react-hooks/exhaustive-deps
   const giveawaysTotal = applicableGiveaways
     .filter((g) => selectedGiveaways[g.expense_id])
     .reduce((s, g) => s + Number(g.amount || 0), 0);
+
+  // รวมรายการหมวด "ค่าจดทะเบียน" เป็นบรรทัดเดียว ยอดรวม ใช้ชื่อ "ค่าจดทะเบียน"
+  const REG_CATEGORY = "ค่าจดทะเบียน";
+  const displayGiveaways = useMemo(() => {
+    const reg = applicableGiveaways.filter((g) => String(g.category || "").trim() === REG_CATEGORY);
+    if (reg.length <= 1) return applicableGiveaways;
+    const merged = {
+      __merged: true, key: "__reg_merged__",
+      expense_name: REG_CATEGORY, category: REG_CATEGORY,
+      amount: reg.reduce((s, g) => s + Number(g.amount || 0), 0),
+      ids: reg.map((g) => g.expense_id), count: reg.length,
+    };
+    const out = []; let inserted = false;
+    for (const g of applicableGiveaways) {
+      if (String(g.category || "").trim() === REG_CATEGORY) {
+        if (!inserted) { out.push(merged); inserted = true; }
+      } else out.push(g);
+    }
+    return out;
+  }, [applicableGiveaways]);
 
   // ราคาประกาศ + บวกเพิ่ม + ปรับแต่ง = ราคารถสุดท้าย (ของแถมไม่บวกเข้า — เป็นต้นทุนของเจ้าของ ไม่ใช่ราคาขาย)
   const finalPrice = announcedPrice == null ? null : announcedPrice + markupsTotal + adjustmentsTotal;
@@ -391,6 +491,7 @@ export default function RetailSalePage({ currentUser }) {
       ...f,
       customer_code: c.code || f.customer_code,
       customer_name: c.name || f.customer_name,
+      customer_province: c.province || f.customer_province,
     }));
     setShowCustomer(false);
   }
@@ -420,8 +521,36 @@ export default function RetailSalePage({ currentUser }) {
     setForm(blankForm(currentUser));
   }
 
-  async function lookup() {
-    const kw = text(keyword);
+  // typeahead: ค้นหา moto_stock (สินค้าคงเหลือ) ด้วยเลขเครื่อง/เลขถัง (พิมพ์บางส่วน) → popup เลือก
+  useEffect(() => {
+    const kw = keyword.trim();
+    if (vehicle || kw.length < 2) { setSuggestions([]); setShowSuggest(false); return; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      setSearchingStock(true);
+      try {
+        const res = await fetch(STOCK_SEARCH_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keyword: kw }) });
+        const data = await res.json().catch(() => []);
+        const list = Array.isArray(data) ? data : (data?.results || []);
+        if (alive) { setSuggestions(list); setShowSuggest(true); }
+      } catch { if (alive) setSuggestions([]); }
+      finally { if (alive) setSearchingStock(false); }
+    }, 300);
+    return () => { alive = false; clearTimeout(t); };
+  }, [keyword, vehicle]);
+
+  // เลือกรถจาก popup → ใช้เลขเครื่องไปดึงข้อมูลจากตารางรับสินค้า (get_vehicle)
+  function pickStock(item) {
+    const kw = text(item.engine_no) || text(item.chassis_no);
+    setShowSuggest(false);
+    setSuggestions([]);
+    setKeyword(kw);
+    lookup(kw);
+  }
+
+  async function lookup(kwOverride) {
+    const kw = text(kwOverride != null ? kwOverride : keyword);
+    setShowSuggest(false);
     if (!kw) { setMessage("❌ กรอกหมายเลขเครื่อง / หมายเลขตัวถัง"); return; }
     setLoading(true);
     setMessage("");
@@ -533,8 +662,206 @@ export default function RetailSalePage({ currentUser }) {
     }
   }
 
+  function handlePrint() {
+    const s = sale || {};
+    const v = vehicle || {};
+    const money = (n) => (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const isFin = isFinance(s.finance_type);
+    const colorTxt = v.color_name || v.model_color || "-";
+    const row = (l, val) => `<tr><td class="lbl">${l}</td><td class="val">${esc(val || "-")}</td></tr>`;
+    const money2 = (l, n) => `<tr><td class="lbl">${l}</td><td class="val num">${money(n)} บาท</td></tr>`;
+    const finBlock = isFin ? `
+      <h3>จัดไฟแนนซ์</h3>
+      <table>
+        ${row("บริษัทไฟแนนซ์", s.finance_company_name)}
+        ${money2("ยอดจัดไฟแนนซ์", s.finance_amount)}
+        ${row("จำนวนงวด", (s.installments || "-") + " งวด")}
+        ${money2("ยอดผ่อน/งวด", s.installment_amount)}
+      </table>` : "";
+    // ของแถมที่ลูกค้าได้รับ (จากที่เลือกไว้) — บริการ + สินค้า
+    const givItems = [];
+    for (const g of displayGiveaways) {
+      const on = g.__merged ? g.ids.every((id) => selectedGiveaways[id]) : !!selectedGiveaways[g.expense_id];
+      if (on) givItems.push({ name: g.expense_name, amount: Number(g.amount || 0) });
+    }
+    const prodItems = (productGiveaways || []).filter((g) => selectedProductGiveaways[g.id])
+      .map((g) => ({ name: g.fmp_product_name || g.part_name || g.part_code || "-", qty: Number(g.qty || 1) }));
+    const givTotal = givItems.reduce((a, b) => a + b.amount, 0);
+    const givBlock = (givItems.length || prodItems.length) ? `
+      <h3>ของแถม / รายการที่ลูกค้าได้รับ</h3>
+      <table>
+        ${givItems.map((it) => `<tr><td class="val" style="width:60%">${esc(it.name)}</td><td class="val num">${money(it.amount)} บาท</td></tr>`).join("")}
+        ${prodItems.map((it) => `<tr><td class="val" style="width:60%">${esc(it.name)}</td><td class="val num">× ${it.qty}</td></tr>`).join("")}
+        ${givTotal > 0 ? `<tr><td class="lbl" style="font-weight:700;color:#1f2937">รวมมูลค่าของแถม</td><td class="val num" style="font-weight:700">${money(givTotal)} บาท</td></tr>` : ""}
+      </table>` : "";
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8">
+      <title>ใบขาย ${esc(s.sale_no)}</title>
+      <style>
+        * { font-family: "Sarabun","TH Sarabun New",Tahoma,sans-serif; box-sizing: border-box; }
+        body { margin: 24px; color: #1f2937; font-size: 14px; }
+        h1 { font-size: 20px; margin: 0 0 2px; }
+        h3 { font-size: 15px; margin: 16px 0 6px; border-bottom: 2px solid #1e40af; color: #1e40af; padding-bottom: 3px; }
+        .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111827; padding-bottom: 8px; }
+        .docno { text-align: right; font-size: 13px; }
+        .docno b { font-size: 16px; color: #b91c1c; }
+        table { width: 100%; border-collapse: collapse; }
+        td { padding: 3px 6px; vertical-align: top; }
+        td.lbl { color: #6b7280; width: 38%; }
+        td.val { font-weight: 600; }
+        td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        .grid { display: flex; gap: 24px; }
+        .grid > div { flex: 1; }
+        .foot { margin-top: 40px; display: flex; justify-content: space-between; }
+        .sign { text-align: center; width: 45%; }
+        .sign .line { margin-top: 40px; border-top: 1px dotted #6b7280; padding-top: 4px; color: #6b7280; }
+        @media print { body { margin: 12mm; } }
+      </style></head><body>
+      <div class="head">
+        <div><h1>ใบขายรถจักรยานยนต์</h1><div style="color:#6b7280">${esc(v.brand)}</div></div>
+        <div class="docno">เลขที่ <b>${esc(s.sale_no)}</b><br>วันที่ขาย ${esc(thaiDate(s.sale_date))}</div>
+      </div>
+      <div class="grid">
+        <div>
+          <h3>ข้อมูลรถ</h3>
+          <table>
+            ${row("ยี่ห้อ", v.brand)}
+            ${row("รุ่น", v.model_name)}
+            ${row("แบบ", v.model_code)}
+            ${row("type", v.model_type)}
+            ${row("สี", colorTxt)}
+            ${row("หมายเลขเครื่อง", v.engine_no)}
+            ${row("หมายเลขตัวถัง", v.chassis_no)}
+          </table>
+        </div>
+        <div>
+          <h3>ลูกค้า / ผู้ขาย</h3>
+          <table>
+            ${row("รหัสลูกค้า", s.customer_code)}
+            ${row("ชื่อลูกค้า", s.customer_name)}
+            ${row("ผู้ขาย", s.seller)}
+            ${row("การชำระ", isFin ? "จัดไฟแนนซ์" : "เงินสด / ไม่จัดไฟแนนซ์")}
+          </table>
+        </div>
+      </div>
+      <h3>ราคา / การชำระเงิน</h3>
+      <table>
+        ${money2("ราคารถ", s.car_price)}
+        ${money2("ส่วนลด", s.discount)}
+        ${money2("ราคารถสุทธิ", s.net_car_price)}
+        ${money2("ยอดขายอื่น ๆ", s.other_sale)}
+        ${money2("เงินดาวน์", s.down_payment)}
+        ${money2("เงินจอง", s.booking_deposit)}
+        ${money2("รวมยอดชำระ", s.total_payment)}
+      </table>
+      ${finBlock}
+      ${givBlock}
+      ${s.note ? `<h3>หมายเหตุ</h3><div>${esc(s.note)}</div>` : ""}
+      <div class="foot">
+        <div class="sign"><div class="line">ผู้ขาย</div></div>
+        <div class="sign"><div class="line">ลูกค้า</div></div>
+      </div>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=820,height=920");
+    if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup อาจถูกบล็อก)"); return; }
+    w.document.write(html);
+    w.document.close();
+    w.focus();
+    setTimeout(() => { try { w.print(); } catch { /* ignore */ } }, 350);
+  }
+
   const editable = mode === "new";
   const sale = vehicle?.sale || null;
+  const isPaid = (sale?.payment_status) === "paid";
+
+  // prefill ฟอร์มรับชำระเมื่อโหลดใบขาย
+  useEffect(() => {
+    if (!sale?.sale_no) return;
+    const today = new Date().toISOString().slice(0, 10);
+    if (isPaid && Array.isArray(sale.payment_methods) && sale.payment_methods.length) {
+      setPayLines(sale.payment_methods.map((p) => ({ method: p.method || "เงินสด", account_id: p.account_id || "", amount: p.amount ?? "" })));
+      setPayForm({ receipt_date: String(sale.receipt_date || "").slice(0, 10) || today, note: sale.payment_received_note || "" });
+    } else {
+      setPayLines([{ method: "เงินสด", account_id: "", amount: String(sale.total_payment || "") }]);
+      setPayForm({ receipt_date: today, note: "" });
+    }
+  }, [sale?.sale_no, sale?.payment_status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const PAY_METHODS = ["เงินสด", "โอน", "บัตร/QR", "ไฟแนนซ์", "เงินมัดจำ"];
+  const payTotal = payLines.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const updatePayLine = (i, patch) => setPayLines((ls) => ls.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const addPayLine = () => setPayLines((ls) => [...ls, { method: "เงินสด", account_id: "", amount: "" }]);
+  const removePayLine = (i) => setPayLines((ls) => ls.length > 1 ? ls.filter((_, j) => j !== i) : ls);
+
+  async function savePayment() {
+    if (!sale?.sale_no) return;
+    const lines = payLines.filter((p) => Number(p.amount) > 0).map((p) => ({
+      method: p.method,
+      account_id: p.account_id ? Number(p.account_id) : null,
+      account_name: bankAccounts.find((a) => String(a.account_id) === String(p.account_id))?.account_name || null,
+      amount: Number(p.amount) || 0,
+    }));
+    if (!lines.length) { setMessage("❌ ใส่ยอดรับชำระอย่างน้อย 1 รายการ"); return; }
+    setPayingSave(true); setMessage("");
+    try {
+      const row = await apiPost({
+        action: "save_payment", sale_no: sale.sale_no,
+        receipt_date: payForm.receipt_date, payments: lines,
+        paid_amount: lines.reduce((s, p) => s + p.amount, 0),
+        payment_note: payForm.note,
+        received_by: currentUser?.username || currentUser?.name || "",
+        branch_code: sale.branch_code || currentUser?.branch_code || currentUser?.branch || "",
+      });
+      const updated = row && (row.sale || row);
+      if (!updated || !updated.sale_no) throw new Error(row?.__error || row?.error || "บันทึกไม่สำเร็จ");
+      setVehicle((v) => ({ ...v, sale: updated }));
+      setMessage("✅ รับชำระเงินเรียบร้อย เลขที่ใบเสร็จ " + (updated.receipt_no || ""));
+    } catch (e) { setMessage("รับชำระไม่สำเร็จ: " + (e.message || e)); }
+    finally { setPayingSave(false); }
+  }
+
+  async function cancelPayment() {
+    if (!sale?.sale_no) return;
+    if (!window.confirm(`ยกเลิกการรับชำระของใบขาย ${sale.sale_no}? (ใบเสร็จ ${sale.receipt_no || "-"})`)) return;
+    setPayingSave(true); setMessage("");
+    try {
+      const row = await apiPost({ action: "cancel_payment", sale_no: sale.sale_no });
+      const updated = row && (row.sale || row);
+      if (!updated || !updated.sale_no) throw new Error(row?.__error || "ยกเลิกไม่สำเร็จ");
+      setVehicle((v) => ({ ...v, sale: updated }));
+      setMessage("✅ ยกเลิกการรับชำระแล้ว");
+    } catch (e) { setMessage("ยกเลิกไม่สำเร็จ: " + (e.message || e)); }
+    finally { setPayingSave(false); }
+  }
+
+  function handlePrintReceipt() {
+    const s = sale || {}, v = vehicle || {};
+    const money = (n) => (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const lines = Array.isArray(s.payment_methods) ? s.payment_methods : [];
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบเสร็จ ${esc(s.receipt_no)}</title>
+      <style>*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}body{margin:24px;color:#1f2937;font-size:14px}
+      h1{font-size:20px;margin:0 0 2px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:8px}
+      .docno{text-align:right}.docno b{font-size:16px;color:#047857}h3{font-size:15px;margin:16px 0 6px;border-bottom:2px solid #047857;color:#047857;padding-bottom:3px}
+      table{width:100%;border-collapse:collapse}td{padding:3px 6px}td.lbl{color:#6b7280;width:38%}td.val{font-weight:600}.num{text-align:right}
+      .tot{font-size:18px;font-weight:800;color:#047857}.foot{margin-top:40px;display:flex;justify-content:space-between}.sign{text-align:center;width:45%}.sign .line{margin-top:40px;border-top:1px dotted #6b7280;padding-top:4px;color:#6b7280}
+      @media print{body{margin:12mm}}</style></head><body>
+      <div class="head"><div><h1>ใบเสร็จรับเงิน</h1><div style="color:#6b7280">${esc(v.brand)} · อ้างอิงใบขาย ${esc(s.sale_no)}</div></div>
+        <div class="docno">เลขที่ <b>${esc(s.receipt_no) || "-"}</b><br>วันที่ ${esc(thaiDate(s.receipt_date))}</div></div>
+      <h3>ลูกค้า</h3><table>${row2("รหัสลูกค้า", s.customer_code)}${row2("ชื่อลูกค้า", s.customer_name)}${row2("รถ", (v.model_name || "") + " " + (v.model_code || "") + " / " + (v.engine_no || "-"))}</table>
+      <h3>ช่องทางการรับชำระ</h3><table>
+        ${lines.map((p) => `<tr><td class="val">${esc(p.method)}${p.account_name ? ` · ${esc(p.account_name)}` : ""}</td><td class="val num">${money(p.amount)} บาท</td></tr>`).join("") || `<tr><td colspan="2" style="color:#9ca3af">-</td></tr>`}
+      </table>
+      <table style="margin-top:10px;border-top:2px solid #047857"><tr><td class="lbl" style="font-weight:700;color:#1f2937">รวมรับชำระ</td><td class="num tot">${money(s.paid_amount)} บาท</td></tr></table>
+      ${s.payment_received_note ? `<h3>หมายเหตุ</h3><div>${esc(s.payment_received_note)}</div>` : ""}
+      <div class="foot"><div class="sign"><div class="line">ผู้รับเงิน</div></div><div class="sign"><div class="line">ผู้ชำระเงิน</div></div></div>
+    </body></html>`;
+    function row2(l, val) { return `<tr><td class="lbl">${l}</td><td class="val">${esc(val || "-")}</td></tr>`; }
+    const w = window.open("", "_blank", "width=820,height=900");
+    if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup ถูกบล็อก)"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => { try { w.print(); } catch { /* ignore */ } }, 350);
+  }
 
   return (
     <div style={{ padding: 20, background: "#fbf7f1", minHeight: "100%" }}>
@@ -543,16 +870,42 @@ export default function RetailSalePage({ currentUser }) {
         <div style={{ color: "#9aa0a6", fontSize: 14 }}>ขายรถ &nbsp;&gt;&nbsp; การขาย &nbsp;&gt;&nbsp; ขายปลีก</div>
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14, maxWidth: 620 }}>
-        <input
-          style={{ flex: 1, padding: "10px 12px", fontSize: 15, border: "1px solid #d0d5dd", borderRadius: 8 }}
-          placeholder="กรอก/สแกนหมายเลขเครื่อง หรือหมายเลขตัวถัง"
-          value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && lookup()}
-        />
-        <button onClick={lookup} disabled={loading} style={btn("#2563eb")}>{loading ? "ค้นหา…" : "🔍 ค้นหา"}</button>
-        {vehicle && <button onClick={() => { reset(); setKeyword(""); setMessage(""); }} style={btn("#8aa0a6")}>ล้าง</button>}
+      <div style={{ position: "relative", marginBottom: 14, maxWidth: 620 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            style={{ flex: 1, padding: "10px 12px", fontSize: 15, border: "1px solid #d0d5dd", borderRadius: 8 }}
+            placeholder="พิมพ์บางส่วนของเลขเครื่อง/เลขถัง แล้วเลือกจากรายการ"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && lookup()}
+            onFocus={() => { if (suggestions.length && !vehicle) setShowSuggest(true); }}
+            autoComplete="off"
+          />
+          <button onClick={() => lookup()} disabled={loading} style={btn("#2563eb")}>{loading ? "ค้นหา…" : "🔍 ค้นหา"}</button>
+          {vehicle && <button onClick={() => { reset(); setKeyword(""); setMessage(""); setSuggestions([]); setShowSuggest(false); }} style={btn("#8aa0a6")}>ล้าง</button>}
+        </div>
+        {showSuggest && !vehicle && keyword.trim().length >= 2 && (
+          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, marginTop: 4, background: "#fff", border: "1px solid #d0d5dd", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 50, maxHeight: 320, overflowY: "auto" }}>
+            {searchingStock && <div style={{ padding: "10px 12px", color: "#9aa0a6", fontSize: 13 }}>กำลังค้นหาในสินค้าคงเหลือ…</div>}
+            {!searchingStock && suggestions.length === 0 && <div style={{ padding: "10px 12px", color: "#9aa0a6", fontSize: 13 }}>ไม่พบในสินค้าคงเหลือ</div>}
+            {suggestions.map((it, i) => (
+              <div key={(it.engine_no || it.chassis_no || "") + "_" + i}
+                onMouseDown={(e) => { e.preventDefault(); pickStock(it); }}
+                style={{ padding: "8px 12px", borderTop: i ? "1px solid #f1f5f9" : "none", cursor: "pointer", fontSize: 13, display: "flex", justifyContent: "space-between", gap: 10 }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#f5f8ff")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "#fff")}>
+                <span>
+                  <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#0369a1" }}>{it.engine_no || "-"}</span>
+                  <span style={{ color: "#cbd5e1", margin: "0 6px" }}>|</span>
+                  <span style={{ fontFamily: "monospace", color: "#475569" }}>{it.chassis_no || "-"}</span>
+                </span>
+                <span style={{ color: "#64748b", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 220 }}>
+                  {(it.model_code || it.model_series || "-")}{it.color_name ? ` · ${it.color_name}` : ""}{it.brand ? ` · ${it.brand}` : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {message && (
@@ -584,34 +937,31 @@ export default function RetailSalePage({ currentUser }) {
                 <Field label="หมายเลขตัวถัง" value={<Box>{vehicle.chassis_no || "-"}</Box>} />
                 <Field label="หมายเลขเครื่อง" value={<Box>{vehicle.engine_no || "-"}</Box>} />
                 <Field
-                  label="รุ่น/แบบ/สี"
+                  label="รุ่น/แบบ/type/สี"
                   value={
-                    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <Box w={170}>{vehicle.model_code}</Box>
-                      <Box w={70}>{vehicle.model_year}</Box>
-                      <Box w={70}>{vehicle.model_color}</Box>
-                      <span style={{ color: "#333", fontWeight: 600 }}>{vehicle.model_name}</span>
-                      {/* enriched จาก master series + colors */}
-                      {(selectedSeries || vehicleColorName) && (
-                        <span style={{ display: "inline-flex", gap: 6, marginLeft: 8, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap" }}>
+                      {[
+                        ["รุ่น", vehicle.model_name, 150],
+                        ["แบบ", vehicle.model_code, 150],
+                        ["type", vehicle.model_type, 90],
+                        ["สี", vehicle.color_name || vehicleColorName || vehicle.model_color, 110],
+                      ].filter(([, v]) => v).map(([lab, v, w]) => (
+                        <span key={lab} style={{ display: "inline-flex", flexDirection: "column", gap: 3 }}>
+                          <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 700 }}>{lab}</span>
+                          <Box w={w}>{v}</Box>
+                        </span>
+                      ))}
+                      {/* enriched จาก master series */}
+                      {(selectedSeries?.marketing_name || selectedSeriesCC != null) && (
+                        <span style={{ display: "inline-flex", gap: 6, flexWrap: "wrap", paddingBottom: 6 }}>
                           {selectedSeries?.marketing_name && (
                             <span style={{ background: "#dbeafe", color: "#1e40af", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
                               {selectedSeries.marketing_name}{selectedSeries.marketing_name_th ? ` (${selectedSeries.marketing_name_th})` : ""}
                             </span>
                           )}
-                          {selectedSeries?.vehicle_type && (
-                            <span style={{ background: "#dcfce7", color: "#15803d", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
-                              {selectedSeries.vehicle_type}
-                            </span>
-                          )}
                           {selectedSeriesCC != null && (
                             <span style={{ background: "#fef3c7", color: "#854d0e", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
                               {selectedSeriesCC} cc
-                            </span>
-                          )}
-                          {vehicleColorName && vehicleColorName !== vehicle.model_color && (
-                            <span style={{ background: "#fce7f3", color: "#9f1239", padding: "2px 8px", borderRadius: 4, fontSize: 12, fontWeight: 600 }}>
-                              🎨 {vehicleColorName}
                             </span>
                           )}
                         </span>
@@ -772,7 +1122,10 @@ export default function RetailSalePage({ currentUser }) {
                   {editable ? (
                     <button style={btn("#2e9e4f")} disabled={saving} onClick={handleSave}>{saving ? "บันทึก…" : "💾 บันทึกการขาย"}</button>
                   ) : (
-                    <button style={btn("#e03b3b")} disabled={saving} onClick={handleCancel}>{saving ? "…" : "✖ ยกเลิกใบขาย"}</button>
+                    <>
+                      <button style={btn("#0369a1")} onClick={handlePrint}>🖨️ พิมพ์</button>
+                      <button style={btn("#e03b3b")} disabled={saving} onClick={handleCancel}>{saving ? "…" : "✖ ยกเลิกใบขาย"}</button>
+                    </>
                   )}
                   <button style={btn("#8aa0a6")} onClick={() => { reset(); setKeyword(""); }}>⤺ ปิด</button>
                 </div>
@@ -808,7 +1161,7 @@ export default function RetailSalePage({ currentUser }) {
           {/* ===================== ของแถม (จาก ค่าใช้จ่ายการขาย ประเภท=promotion) ===================== */}
           {mode !== "sold_other" && editable && applicableGiveaways.length > 0 && (
             <Card>
-              <SectionHead title="🎁 ของแถม" />
+              <SectionHead title="🎁 ของแถม-บริการ" />
               <CardBody>
                 <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <span>เลือกของแถมที่ลูกค้าได้รับ — รายการมาจาก "บันทึกค่าใช้จ่ายการขาย" (ประเภท: โปรโมชั่น)</span>
@@ -819,7 +1172,25 @@ export default function RetailSalePage({ currentUser }) {
                   </button>
                 </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
-                  {applicableGiveaways.map((g) => {
+                  {displayGiveaways.map((g) => {
+                    if (g.__merged) {
+                      const checked = g.ids.every((id) => selectedGiveaways[id]);
+                      return (
+                        <label key={g.key}
+                          style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 10px", background: checked ? "#fef9c3" : "#fff", border: `1px solid ${checked ? "#facc15" : "#e2e8f0"}`, borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+                          <input type="checkbox" checked={checked}
+                            onChange={(e) => setSelectedGiveaways((s) => { const ns = { ...s }; g.ids.forEach((id) => { ns[id] = e.target.checked; }); return ns; })} />
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, color: "#1e293b" }}>{g.expense_name}</div>
+                            <div style={{ fontSize: 11, color: "#64748b" }}>
+                              <span style={{ background: "#e0e7ff", color: "#3730a3", padding: "1px 6px", borderRadius: 3, marginRight: 4 }}>{g.category}</span>
+                              <span>· รวม {g.count} รายการ</span>
+                            </div>
+                          </div>
+                          <span style={{ fontWeight: 700, color: "#dc2626" }}>{baht(g.amount)}</span>
+                        </label>
+                      );
+                    }
                     const checked = !!selectedGiveaways[g.expense_id];
                     return (
                       <label key={g.expense_id}
@@ -846,6 +1217,114 @@ export default function RetailSalePage({ currentUser }) {
                   <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "flex-end", gap: 10, fontSize: 14 }}>
                     <span style={{ color: "#64748b" }}>รวมของแถมที่ให้:</span>
                     <span style={{ fontWeight: 800, color: "#dc2626" }}>{baht(giveawaysTotal)} บาท</span>
+                  </div>
+                )}
+              </CardBody>
+            </Card>
+          )}
+
+          {/* ===================== ของแถม-สินค้า (จาก giveaway_rules) ===================== */}
+          {mode !== "sold_other" && editable && productGiveaways.length > 0 && (
+            <Card>
+              <SectionHead title="🎁 ของแถม-สินค้า" />
+              <CardBody>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
+                  รายการมาจาก "Master Data → บันทึกของแถม" (รวมทั้งระดับยี่ห้อ/รุ่น/แบบ ที่ตรงกับรถคันนี้)
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
+                  {productGiveaways.map((g) => {
+                    const checked = !!selectedProductGiveaways[g.id];
+                    return (
+                      <label key={g.id}
+                        style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 10px", background: checked ? "#fef9c3" : "#fff", border: `1px solid ${checked ? "#facc15" : "#e2e8f0"}`, borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
+                        <input type="checkbox" checked={checked}
+                          onChange={(e) => setSelectedProductGiveaways((s) => ({ ...s, [g.id]: e.target.checked }))} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, color: "#1e293b" }}>
+                            <span style={{ fontFamily: "monospace", color: "#0369a1", marginRight: 6 }}>{g.part_code}</span>
+                            {g.fmp_product_name || g.part_name || "-"}
+                          </div>
+                          <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                            <span style={{ background: g.level === "type" ? "#dcfce7" : g.level === "series" ? "#fef3c7" : "#dbeafe", color: g.level === "type" ? "#15803d" : g.level === "series" ? "#a16207" : "#1e40af", padding: "1px 6px", borderRadius: 3, marginRight: 4, fontWeight: 700 }}>
+                              {g.level === "type" ? "แบบ" : g.level === "series" ? "รุ่น" : "ยี่ห้อ"}
+                            </span>
+                            {g.note && <span>· {g.note}</span>}
+                          </div>
+                        </div>
+                        <span style={{ fontWeight: 700, color: "#dc2626" }}>× {Number(g.qty || 1)}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </CardBody>
+            </Card>
+          )}
+
+          {/* ===================== รับชำระเงิน ===================== */}
+          {mode !== "sold_other" && !editable && sale && (
+            <Card>
+              <SectionHead title="💵 รับชำระเงิน" />
+              <CardBody>
+                {isPaid ? (
+                  <div>
+                    <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "baseline", marginBottom: 10 }}>
+                      <div><span style={{ color: "#64748b" }}>เลขที่ใบเสร็จ: </span><b style={{ color: "#047857", fontFamily: "monospace" }}>{sale.receipt_no || "-"}</b></div>
+                      <div><span style={{ color: "#64748b" }}>วันที่: </span><b>{thaiDate(sale.receipt_date)}</b></div>
+                      <div><span style={{ color: "#64748b" }}>รวมรับชำระ: </span><b style={{ color: "#047857" }}>{baht(sale.paid_amount)} บาท</b></div>
+                    </div>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
+                      {(Array.isArray(sale.payment_methods) ? sale.payment_methods : []).map((p, i) => (
+                        <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 12px", borderTop: i ? "1px solid #f1f5f9" : "none", fontSize: 13 }}>
+                          <span>{p.method}{p.account_name ? <span style={{ color: "#64748b" }}> · {p.account_name}</span> : null}</span>
+                          <b>{baht(p.amount)} บาท</b>
+                        </div>
+                      ))}
+                    </div>
+                    {sale.payment_received_note && <div style={{ marginTop: 8, fontSize: 13, color: "#475569" }}>หมายเหตุ: {sale.payment_received_note}</div>}
+                    <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 14 }}>
+                      <button style={btn("#0369a1")} onClick={handlePrintReceipt}>🖨️ พิมพ์ใบเสร็จ</button>
+                      <button style={btn("#e03b3b")} disabled={payingSave} onClick={cancelPayment}>{payingSave ? "…" : "✖ ยกเลิกรับชำระ"}</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <Grid>
+                      <Field label="วันที่รับชำระ" required value={<input type="date" value={payForm.receipt_date} onChange={(e) => setPayForm((f) => ({ ...f, receipt_date: e.target.value }))} style={inp} />} />
+                      <Field label="รวมยอดต้องชำระ" value={<MoneyBox>{baht(sale.total_payment)}</MoneyBox>} />
+                    </Grid>
+                    <div style={{ marginTop: 6, fontSize: 13, fontWeight: 600, color: "#334155" }}>ชำระโดย</div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
+                      {payLines.map((p, i) => {
+                        const needAcc = p.method !== "เงินมัดจำ" && p.method !== "ไฟแนนซ์";
+                        return (
+                          <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <select value={p.method} onChange={(e) => updatePayLine(i, { method: e.target.value })} style={{ ...inp, width: 130, flex: "none" }}>
+                              {PAY_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                            <select value={p.account_id} onChange={(e) => updatePayLine(i, { account_id: e.target.value })} disabled={!needAcc} style={{ ...inp, flex: 1, minWidth: 180, opacity: needAcc ? 1 : 0.5 }}>
+                              <option value="">{needAcc ? "— เลือกบัญชี —" : "—"}</option>
+                              {bankAccounts.map((a) => <option key={a.account_id} value={a.account_id}>{a.account_name}{a.bank_name && a.bank_name !== "-" ? ` (${a.bank_name})` : ""}</option>)}
+                            </select>
+                            <input type="number" value={p.amount} onChange={(e) => updatePayLine(i, { amount: e.target.value })} placeholder="ยอด" style={{ ...inp, width: 120, flex: "none", textAlign: "right" }} />
+                            <button type="button" onClick={() => removePayLine(i)} disabled={payLines.length <= 1} style={{ ...btn("#94a3b8"), padding: "6px 10px" }}>✕</button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, flexWrap: "wrap", gap: 8 }}>
+                      <button type="button" onClick={addPayLine} style={{ ...btn("#0ea5e9"), padding: "6px 12px" }}>+ เพิ่มช่องทาง</button>
+                      <div style={{ fontSize: 14 }}>
+                        <span style={{ color: "#64748b" }}>รวมรับชำระ: </span>
+                        <b style={{ color: payTotal === Number(sale.total_payment) ? "#047857" : "#d97706" }}>{baht(payTotal)} บาท</b>
+                        {payTotal !== Number(sale.total_payment) && <span style={{ color: "#d97706", fontSize: 12, marginLeft: 6 }}>(ต่างจากยอดต้องชำระ)</span>}
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 8 }}>
+                      <input value={payForm.note} onChange={(e) => setPayForm((f) => ({ ...f, note: e.target.value }))} placeholder="หมายเหตุการรับชำระ (ถ้ามี)" style={{ ...inp, width: "100%" }} />
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+                      <button style={btn("#2e9e4f")} disabled={payingSave} onClick={savePayment}>{payingSave ? "บันทึก…" : "💾 บันทึกรับชำระเงิน"}</button>
+                    </div>
                   </div>
                 )}
               </CardBody>

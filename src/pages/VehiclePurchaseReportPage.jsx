@@ -116,9 +116,12 @@ export default function VehiclePurchaseReportPage() {
                     <th style={th}>วันที่รับ</th>
                     <th style={th}>เลขที่ใบกำกับภาษี</th>
                     <th style={th}>เลขที่ใบรับสินค้า</th>
-                    <th style={th}>หมายเลขเครื่อง</th>
-                    <th style={th}>รุ่น/แบบ</th>
+                    <th style={th}>รุ่น</th>
+                    <th style={th}>แบบ</th>
+                    <th style={th}>type</th>
                     <th style={th}>สี</th>
+                    <th style={th}>เลขเครื่อง</th>
+                    <th style={th}>เลขถัง</th>
                     <th style={th}>ประเภท</th>
                     <th style={{ ...th, textAlign: "right" }}>ราคาทุน</th>
                     <th style={th}>สถานที่</th>
@@ -129,9 +132,10 @@ export default function VehiclePurchaseReportPage() {
                     <th style={th}>วันที่รับ</th>
                     <th style={th}>รุ่น</th>
                     <th style={th}>แบบ</th>
+                    <th style={th}>type</th>
                     <th style={th}>สี</th>
-                    <th style={th}>engine_no</th>
-                    <th style={th}>chassis_no</th>
+                    <th style={th}>เลขเครื่อง</th>
+                    <th style={th}>เลขถัง</th>
                     <th style={{ ...th, textAlign: "right" }}>ราคาทุน</th>
                     <th style={th}>เลขที่ใบกำกับ</th>
                     <th style={th}>ผู้ขาย</th>
@@ -141,7 +145,7 @@ export default function VehiclePurchaseReportPage() {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={11} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่พบรายการ</td></tr>
+                <tr><td colSpan={isHonda ? 14 : 12} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่พบรายการ</td></tr>
               ) : (
                 filtered.map((r, i) => (
                   <tr key={(r.chassis_no || r.id) + "_" + i} style={{ borderTop: "1px solid #e5e7eb" }}>
@@ -152,9 +156,12 @@ export default function VehiclePurchaseReportPage() {
                         <td style={td}>{fmtDate(r.gr_date)}</td>
                         <td style={{ ...td, fontFamily: "monospace" }}>{r.invoice_no || "-"}</td>
                         <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{r.ref_no || "-"}</td>
-                        <td style={{ ...td, fontFamily: "monospace" }}>{r.engine_no || "-"}</td>
+                        <td style={td}>{r.model_name || "-"}</td>
                         <td style={td}>{r.model_code || "-"}</td>
-                        <td style={td}>{r.color_code || "-"}</td>
+                        <td style={td}>{r.model_type || "-"}</td>
+                        <td style={td}>{r.color_name || r.color_code || "-"}</td>
+                        <td style={{ ...td, fontFamily: "monospace" }}>{r.engine_no || "-"}</td>
+                        <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{r.chassis_no || "-"}</td>
                         <td style={td}>{r.product_type || "-"}</td>
                         <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{fmtMoney(r.unit_cost)}</td>
                         <td style={td}>{r.location || "-"}</td>
@@ -164,6 +171,7 @@ export default function VehiclePurchaseReportPage() {
                         <td style={{ ...td, fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{r.receipt_no || "-"}</td>
                         <td style={td}>{fmtDate(r.receipt_date)}</td>
                         <td style={td}>{r.model_name || "-"}</td>
+                        <td style={td}>{r.model_code || "-"}</td>
                         <td style={td}>{r.model_type || "-"}</td>
                         <td style={td}>{r.color_name || r.color_code || "-"}</td>
                         <td style={{ ...td, fontFamily: "monospace" }}>{r.engine_no || "-"}</td>
