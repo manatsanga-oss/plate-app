@@ -1306,11 +1306,17 @@ export default function IncomeRecordPage({ currentUser }) {
                       </thead>
                       <tbody>
                         {allocSales.filter(s => {
-                          if (allocUsedInvoices.has(s.invoice_no) && !allocLines.some(l => l.invoice_no === s.invoice_no)) return false;
-                          if (allocShowSelectedOnly) {
-                            const sel = allocLines.some(l => l.invoice_no === s.invoice_no || (s.id && l.sale_id === s.id));
-                            if (!sel) return false;
+                          const isSel = allocLines.some(l => l.invoice_no === s.invoice_no || (s.id && l.sale_id === s.id));
+                          if (allocUsedInvoices.has(s.invoice_no) && !isSel) return false;
+                          // กรองเฉพาะที่ตรงกับลูกค้า/ไฟแนนซ์ของใบรับชำระ (เว้นรายการที่เลือกไว้แล้ว ให้คงอยู่)
+                          // ตัดสระ/วรรณยุกต์ไทย + ช่องว่าง ก่อนเทียบ — กันสะกดต่าง เช่น "กรุ๊ปลีส" vs "กรุ๊ปลิส"
+                          const nz = v => String(v == null ? "" : v).replace(/[ัิ-ฺ็-๎\s]/g, "").toLowerCase();
+                          const docCust = nz(allocDoc?.customer_name);
+                          if (docCust && !isSel) {
+                            const eqCust = a => { const x = nz(a); return x && (x === docCust || x.includes(docCust) || docCust.includes(x)); };
+                            if (!(eqCust(s.finance_company) || eqCust(s.customer_name) || eqCust(s.sale_customer_name))) return false;
                           }
+                          if (allocShowSelectedOnly && !isSel) return false;
                           if (!allocSearch.trim()) return true;
                           const q = allocSearch.toLowerCase();
                           return [s.invoice_no, s.customer_name, s.sale_customer_name, s.model_series, s.model, s.engine_no, s.chassis_no, s.frame_no]
