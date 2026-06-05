@@ -46,6 +46,9 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const [calcInterest, setCalcInterest] = useState("");
   const [calcInstallments, setCalcInstallments] = useState("");
   const [calcExtraDownPct, setCalcExtraDownPct] = useState("");
+  const [beCallN, setBeCallN] = useState("1"); // จำนวนงวดที่เรียก (ออกแทน) default 1
+  const [calcRound, setCalcRound] = useState("5"); // ปัดเศษค่างวด: 0=ไม่ปัด, 5, 10
+  const [capWarn, setCapWarn] = useState(null); // popup เตือนราคาเกินยอดจัดไฟแนนซ์
 
   useEffect(() => {
     fetchAll();
@@ -211,7 +214,10 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const calcInstallmentResult = (() => {
     const n = Number(calcInstallments) || 0;
     if (calcFinanceNet <= 0 || n <= 0) return 0;
-    return Math.ceil((calcFinanceNet * (1 + (Number(calcInterest) || 0) / 100)) / n / 100) * 100;
+    // ดอกเบี้ย flat ต่อเดือน: ยอดจัดสุทธิ × (1 + ดอกเบี้ย% × งวด) ÷ งวด
+    const raw = (calcFinanceNet * (1 + (Number(calcInterest) || 0) / 100 * n)) / n;
+    const step = Number(calcRound) || 0; // 0=ไม่ปัด(เต็มบาท ไม่มีสตางค์), 5, 10 (ปัดขึ้น)
+    return step > 0 ? Math.ceil(raw / step) * step : Math.round(raw);
   })();
   // ประกันออกแทน: ใช้ยอดตามที่ใส่ตรงๆ (ไม่มีสูตร)
   const insurancePayoutCalc = useInsurancePayout
@@ -225,11 +231,16 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const beN = Number(calcInstallments) || 0;       // จำนวนงวด
   const beFactor = 1 + (beInterest / 100) * beN;   // ตัวคูณยอดรวม เช่น 1 + 0.0111×48 = 1.5328
   const beK = beN > 0 ? (beFactor * 1.07) / beN : 0;
-  const beMarkupMin = (beBase > 0 && beN > 0 && beInterest > 0 && beK > 0 && beK < 1) ? (beBase * beK) / (1 - beK) : 0;
+  const beG = Math.max(1, Number(beCallN) || 1);   // จำนวนงวดที่เรียก (ออกแทน) เริ่มต้น 1
+  const beKeff = beG * beK;                          // คูณตามจำนวนงวดที่ออกแทน
+  const beMarkupMin = (beBase > 0 && beN > 0 && beInterest > 0 && beKeff > 0 && beKeff < 1) ? (beBase * beKeff) / (1 - beKeff) : 0;
   const beMarkup = beMarkupMin > 0 ? Math.ceil(beMarkupMin / 100) * 100 : 0;   // ปัดขึ้นหลักร้อย
   const beNewYodjad = beBase + beMarkup;
-  const beInstallment = (beMarkup > 0 && beN > 0) ? Math.ceil((beNewYodjad * beFactor / beN) / 5) * 5 : 0; // ค่างวด ปัด 5
-  const beCheck = beInstallment * 1.07;            // ตรวจกลับ ต้อง ≤ beMarkup
+  const beStep = Number(calcRound) || 0; // ปัดเศษค่างวด ตาม dropdown (0=ไม่ปัด, 5, 10)
+  const beInstallment = (beMarkup > 0 && beN > 0)
+    ? (beStep > 0 ? Math.ceil((beNewYodjad * beFactor / beN) / beStep) * beStep : Math.round(beNewYodjad * beFactor / beN))
+    : 0; // ค่างวด ปัดตาม dropdown (ไม่ปัด = เต็มบาท)
+  const beCheck = beG * beInstallment * 1.07;       // ตรวจกลับ (g งวด × ค่างวด × 1.07) ต้อง ≤ beMarkup
 
   // คำนวณยอด
   const totalPrice = (announcedPrice || 0)
@@ -311,7 +322,7 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
     setUseDeliveryFee(false); setDeliveryFee(0);
     setUseDownPayout(false); setDownPayout(0); setDownPayoutDirect(false);
     setUseInsurancePayout(false); setInsurancePayout(0);
-    setCalcFinanceAmt(""); setCalcInterest(""); setCalcInstallments(""); setCalcExtraDownPct("");
+    setCalcFinanceAmt(""); setCalcInterest(""); setCalcInstallments(""); setCalcExtraDownPct(""); setBeCallN("1"); setCalcRound("5");
     setTargetPrice("");
   }
 
@@ -394,6 +405,16 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
                 <Field label="เงินดาวน์เพิ่ม (%)">
                   <input type="number" value={calcExtraDownPct} onChange={e => setCalcExtraDownPct(e.target.value)} style={{ ...inp, textAlign: "right" }} placeholder="0" />
                 </Field>
+                <Field label="ปัดเศษค่างวด">
+                  <select value={calcRound} onChange={e => setCalcRound(e.target.value)} style={inp}>
+                    <option value="0">ไม่ปัด</option>
+                    <option value="5">ปัด 5</option>
+                    <option value="10">ปัด 10</option>
+                  </select>
+                </Field>
+                <Field label="จำนวนงวดที่เรียก (ออกแทน)">
+                  <input type="number" min="1" step="1" value={beCallN} onChange={e => setBeCallN(e.target.value)} style={{ ...inp, textAlign: "right" }} placeholder="1" />
+                </Field>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 8, borderTop: "1px dashed #d8b4fe" }}>
                   <span style={{ fontWeight: 700, color: "#6b21a8" }}>ค่างวด/งวด</span>
                   <span style={{ fontWeight: 800, fontSize: 18, color: "#7c3aed" }}>{fmt(calcInstallmentResult)} บาท</span>
@@ -404,15 +425,28 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
 
                 {beMarkup > 0 && (
                   <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #d8b4fe" }}>
-                    <div style={{ fontWeight: 700, color: "#7c3aed", fontSize: 13, marginBottom: 6 }}>🎯 ออกค่างวด/ดาวน์ให้ลูกค้า (คำนวณยอดบวกอัตโนมัติ)</div>
+                    <div style={{ fontWeight: 700, color: "#7c3aed", fontSize: 13, marginBottom: 6 }}>🎯 ออกค่างวด/ดาวน์ให้ลูกค้า ({beG} งวด)</div>
                     <div style={{ fontSize: 12, color: "#6b21a8", lineHeight: 1.8 }}>
                       <div style={{ display: "flex", justifyContent: "space-between" }}><span>ฐานราคา (ยอดจัดเริ่มต้น)</span><span style={{ fontFamily: "monospace" }}>{fmt(beBase)}</span></div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}><span>ยอดบวกขั้นต่ำ → ปัดร้อย</span><span style={{ fontFamily: "monospace", fontWeight: 700 }}>+{fmt(beMarkup)}</span></div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}><span>ยอดจัดใหม่</span><span style={{ fontFamily: "monospace", fontWeight: 700 }}>{fmt(beNewYodjad)}</span></div>
-                      <div style={{ display: "flex", justifyContent: "space-between" }}><span>ค่างวด (ปัด 5)</span><span style={{ fontFamily: "monospace", fontWeight: 700, color: "#7c3aed" }}>{fmt(beInstallment)}</span></div>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: beCheck <= beMarkup ? "#15803d" : "#dc2626" }}><span>ตรวจกลับ (ค่างวด × 1.07)</span><span style={{ fontFamily: "monospace" }}>{fmt(beCheck)} {beCheck <= beMarkup ? "✓ ไม่เกิน" : "✗ เกิน"}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span>ค่างวด ({calcRound === "0" ? "ไม่ปัด" : "ปัด " + calcRound})</span><span style={{ fontFamily: "monospace", fontWeight: 700, color: "#7c3aed" }}>{fmt(beInstallment)}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: beCheck <= beMarkup ? "#15803d" : "#dc2626" }}><span>ตรวจกลับ ({beG} งวด × ค่างวด × 1.07)</span><span style={{ fontFamily: "monospace" }}>{fmt(beCheck)} {beCheck <= beMarkup ? "✓ ไม่เกิน" : "✗ เกิน"}</span></div>
                     </div>
-                    <button onClick={() => { setUseDownPayout(true); setDownPayoutDirect(true); setDownPayout(beMarkup); }}
+                    {Number(calcFinanceAmt) > 0 && beNewYodjad > Number(calcFinanceAmt) && (
+                      <div style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>⚠️ ยอดจัดใหม่เกินยอดจัดไฟแนนซ์ที่กำหนด ({fmt(calcFinanceAmt)})</div>
+                    )}
+                    <button onClick={() => {
+                        const financeMax = Number(calcFinanceAmt) || 0;
+                        if (financeMax > 0 && beNewYodjad > financeMax) {
+                          const cappedMarkup = Math.max(0, Math.floor(financeMax - beBase));
+                          const cappedInst = beStep > 0 ? Math.ceil((financeMax * beFactor / beN) / beStep) * beStep : Math.round(financeMax * beFactor / beN);
+                          setCapWarn({ financeMax, newYodjad: beNewYodjad, origMarkup: beMarkup, cappedMarkup, cappedInst });
+                        } else {
+                          setUseDownPayout(true); setDownPayoutDirect(true); setDownPayout(beMarkup);
+                          setCalcFinanceAmt(String(beNewYodjad)); // อัปเดตยอดจัด → ค่างวด/งวด แสดงตามยอดจัดใหม่
+                        }
+                      }}
                       style={{ ...btn("#7c3aed"), padding: "6px 12px", fontSize: 12, marginTop: 8, width: "100%" }}>
                       ✓ ใส่ยอด {fmt(beMarkup)} เป็นเงินดาวน์/ค่างวดออกแทน
                     </button>
@@ -516,6 +550,27 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {capWarn && (
+        <div onClick={() => setCapWarn(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, maxWidth: 400, width: "100%", boxShadow: "0 10px 40px rgba(0,0,0,0.25)" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626", marginBottom: 10 }}>⚠️ ราคาเกินยอดจัดไฟแนนซ์</div>
+            <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
+              ราคาที่คำนวณได้ <b style={{ color: "#dc2626" }}>{fmt(capWarn.newYodjad)}</b> สูงกว่ายอดจัดไฟแนนซ์ที่กำหนด <b>{fmt(capWarn.financeMax)}</b>
+            </div>
+            <div style={{ marginTop: 10, padding: 10, background: "#f0fdf4", borderRadius: 6, fontSize: 12, lineHeight: 1.8 }}>
+              กด <b>ตกลง</b> เพื่อคำนวณใหม่ให้ไม่เกินยอดจัด:
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span>ยอดบวก</span><span style={{ fontFamily: "monospace" }}>{fmt(capWarn.origMarkup)} → <b style={{ color: "#15803d" }}>{fmt(capWarn.cappedMarkup)}</b></span></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span>ค่างวด</span><span style={{ fontFamily: "monospace", color: "#15803d", fontWeight: 700 }}>{fmt(capWarn.cappedInst)}</span></div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}><span>ยอดสุทธิ</span><span style={{ fontFamily: "monospace", color: "#15803d", fontWeight: 700 }}>{fmt(capWarn.financeMax)}</span></div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
+              <button onClick={() => setCapWarn(null)} style={{ ...btn("#6b7280"), flex: 1 }}>ยกเลิก</button>
+              <button onClick={() => { setUseDownPayout(true); setDownPayoutDirect(true); setDownPayout(capWarn.cappedMarkup); setCalcFinanceAmt(String(capWarn.financeMax)); setCapWarn(null); }} style={{ ...btn("#10b981"), flex: 1 }}>ตกลง คำนวณใหม่</button>
+            </div>
           </div>
         </div>
       )}
