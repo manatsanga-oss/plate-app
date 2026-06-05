@@ -40,6 +40,11 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const [useInsurancePayout, setUseInsurancePayout] = useState(false);
   const [insurancePayout, setInsurancePayout] = useState(0);
   const [targetPrice, setTargetPrice] = useState("");
+  // เครื่องคำนวณค่างวดไฟแนนซ์
+  const [calcFinanceAmt, setCalcFinanceAmt] = useState("");
+  const [calcInterest, setCalcInterest] = useState("");
+  const [calcInstallments, setCalcInstallments] = useState("");
+  const [calcExtraDownPct, setCalcExtraDownPct] = useState("");
 
   useEffect(() => {
     fetchAll();
@@ -196,9 +201,16 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const markupsTotal = applicableMarkups.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
 
   // เงินดาวน์ออกแทน: input × 107/100 ปัดขึ้นหลักร้อย → บวกเข้าราคา
-  const downPayoutCalc = useDownPayout
+  const downPayoutCalc = (useDownPayout && saleType === "ขายไฟแนนซ์")
     ? Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100
     : 0;
+  // ค่างวด/งวด = ปัดขึ้น100( ยอดจัดสุทธิ × (1+ดอกเบี้ย%) ÷ งวด ); ยอดจัดสุทธิ = ยอดจัดเต็ม × (1−ดาวน์เพิ่ม%)
+  const calcFinanceNet = (Number(calcFinanceAmt) || 0) * (1 - (Number(calcExtraDownPct) || 0) / 100);
+  const calcInstallmentResult = (() => {
+    const n = Number(calcInstallments) || 0;
+    if (calcFinanceNet <= 0 || n <= 0) return 0;
+    return Math.ceil((calcFinanceNet * (1 + (Number(calcInterest) || 0) / 100)) / n / 100) * 100;
+  })();
   // ประกันออกแทน: ใช้ยอดตามที่ใส่ตรงๆ (ไม่มีสูตร)
   const insurancePayoutCalc = useInsurancePayout
     ? Number(insurancePayout || 0)
@@ -351,14 +363,41 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
               </Field>
             )}
 
+            {saleType === "ขายไฟแนนซ์" && (
+              <div style={{ marginTop: 6, padding: 10, background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: 8 }}>
+                <div style={{ fontWeight: 700, marginBottom: 8, color: "#7c3aed" }}>💳 คำนวณค่างวด</div>
+                <Field label="ยอดจัดเต็มไฟแนนท์">
+                  <input type="number" value={calcFinanceAmt} onChange={e => setCalcFinanceAmt(e.target.value)} style={{ ...inp, textAlign: "right" }} placeholder="0" />
+                </Field>
+                <Field label="อัตราดอกเบี้ย (%)">
+                  <input type="number" value={calcInterest} onChange={e => setCalcInterest(e.target.value)} style={{ ...inp, textAlign: "right" }} placeholder="0" />
+                </Field>
+                <Field label="จำนวนงวด">
+                  <input type="number" value={calcInstallments} onChange={e => setCalcInstallments(e.target.value)} style={{ ...inp, textAlign: "right" }} placeholder="0" />
+                </Field>
+                <Field label="เงินดาวน์เพิ่ม (%)">
+                  <input type="number" value={calcExtraDownPct} onChange={e => setCalcExtraDownPct(e.target.value)} style={{ ...inp, textAlign: "right" }} placeholder="0" />
+                </Field>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, paddingTop: 8, borderTop: "1px dashed #d8b4fe" }}>
+                  <span style={{ fontWeight: 700, color: "#6b21a8" }}>ค่างวด/งวด</span>
+                  <span style={{ fontWeight: 800, fontSize: 18, color: "#7c3aed" }}>{fmt(calcInstallmentResult)} บาท</span>
+                </div>
+                {Number(calcExtraDownPct) > 0 && calcFinanceNet > 0 && (
+                  <div style={{ fontSize: 11, color: "#9333ea", marginTop: 4 }}>ยอดจัดสุทธิหลังหักดาวน์เพิ่ม {calcExtraDownPct}% = {fmt(calcFinanceNet)}</div>
+                )}
+              </div>
+            )}
+
             <div style={{ height: 1, background: "#e5e7eb", margin: "14px 0" }} />
             <div style={{ fontWeight: 700, marginBottom: 8, color: "#7c3aed" }}>⚙️ รายการปรับแต่ง</div>
 
             <CheckRow checked={useDeliveryFee} onChange={setUseDeliveryFee} label="ค่านำพา"
               amount={deliveryFee} onAmount={setDeliveryFee} />
-            <CheckRow checked={useDownPayout} onChange={setUseDownPayout} label="เงินดาวน์/ค่างวดออกแทน"
-              amount={downPayout} onAmount={setDownPayout}
-              suffix={useDownPayout && Number(downPayout) > 0 ? `× 1.07 ปัดร้อย = +${fmt(downPayoutCalc)}` : ""} />
+            {saleType === "ขายไฟแนนซ์" && (
+              <CheckRow checked={useDownPayout} onChange={setUseDownPayout} label="เงินดาวน์/ค่างวดออกแทน"
+                amount={downPayout} onAmount={setDownPayout}
+                suffix={useDownPayout && Number(downPayout) > 0 ? `× 1.07 ปัดร้อย = +${fmt(downPayoutCalc)}` : ""} />
+            )}
             <CheckRow checked={useInsurancePayout} onChange={setUseInsurancePayout} label="ประกันออกแทน"
               amount={insurancePayout} onAmount={setInsurancePayout} />
 

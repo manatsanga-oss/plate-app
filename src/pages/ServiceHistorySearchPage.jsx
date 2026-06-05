@@ -168,7 +168,7 @@ export default function ServiceHistorySearchPage() {
                 <thead style={{ background: "#f8fafc" }}>
                   <tr>
                     <th style={th}>เลขตัวถัง</th><th style={th}>เลขเครื่อง</th><th style={th}>ทะเบียน</th>
-                    <th style={th}>ลูกค้า</th><th style={th}>ยี่ห้อ/รุ่น</th><th style={th}></th>
+                    <th style={th}>ลูกค้า</th><th style={th}>ยี่ห้อ/รุ่น</th><th style={th}>วันที่ขาย</th><th style={th}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -179,6 +179,7 @@ export default function ServiceHistorySearchPage() {
                       <td style={td}>{plateOf(v)}</td>
                       <td style={td}>{text(v.customer_name) || "-"}</td>
                       <td style={td}>{text(v.brand)} {text(v.model)}</td>
+                      <td style={td}>{v.sale_date ? new Date(v.sale_date).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-"}</td>
                       <td style={td}>
                         <button className="btn-primary" style={{ padding: "4px 14px", fontSize: 12 }} onClick={() => selectVehicle(v)}>เลือก</button>
                       </td>

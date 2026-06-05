@@ -131,6 +131,8 @@ export default function RetailSalePage({ currentUser }) {
   const [downPayout, setDownPayout] = useState(0);
   const [useInsurancePayout, setUseInsurancePayout] = useState(false);
   const [insurancePayout, setInsurancePayout] = useState(0);
+  const [installmentOverride, setInstallmentOverride] = useState(""); // ยอดผ่อน/งวด แก้เองได้ (ว่าง = ใช้ค่าที่คำนวณ)
+  const [installmentTouched, setInstallmentTouched] = useState(false);
   const [selectedTypeId, setSelectedTypeId] = useState(""); // เผื่อ model_code ตรงหลายแถว
   useEffect(() => {
     let alive = true;
@@ -337,8 +339,8 @@ export default function RetailSalePage({ currentUser }) {
   const downPayoutCalc = useDownPayout ? Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100 : 0;
   // ประกันออกแทน: เอายอดตรงๆ
   const insurancePayoutCalc = useInsurancePayout ? Number(insurancePayout || 0) : 0;
-  // รวมยอดรายการปรับแต่ง
-  const adjustmentsTotal = (useDeliveryFee ? Number(deliveryFee || 0) : 0) + deliveryBonus + downPayoutCalc + insurancePayoutCalc;
+  // รวมยอดรายการปรับแต่ง — ค่านำพา "ไม่บวก" ตัวเลขที่กรอก (เป็นต้นทุน) เอาเฉพาะโบนัสเข้าราคา
+  const adjustmentsTotal = deliveryBonus + downPayoutCalc + insurancePayoutCalc;
 
   // ของแถม (promotion) ที่เข้าเงื่อนไขกับรถปัจจุบัน — รองรับ brand/type/cc/finance/province
   const applicableGiveaways = useMemo(() => {
@@ -352,6 +354,15 @@ export default function RetailSalePage({ currentUser }) {
       if (e.group_by === "type" && String(e.type_id) === String(sel.type_id)) return true;
       if (e.group_by === "cc" && rowCC && Number(e.engine_cc) === rowCC) return true;
       if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return true;
+      if (e.group_by === "series") {
+        const [sid, pc] = String(e.note || "").split("|");
+        if (String(sid) !== String(sel.series_id)) return false;
+        const cond = pc || "all";
+        const fin = isFinance(form.finance_type);
+        if (cond === "finance") return fin;
+        if (cond === "cash") return !fin;
+        return true;
+      }
       if (e.group_by === "name_prefix") {
         const pfx = String(e.note || "").replace(/\s+/g, "");
         const cust = String(form.customer_name || "").replace(/\s+/g, "");
@@ -399,6 +410,16 @@ export default function RetailSalePage({ currentUser }) {
       return false;
     });
   }, [selectedTypeId, motoTypes, saleExpenses, selectedSeriesCC, form.finance_company_code, form.customer_province, form.finance_type, form.plate_province, form.customer_name, financeCompanies]); // eslint-disable-line react-hooks/exhaustive-deps
+  // default: ติ๊กเลือกของแถม-บริการที่เข้าเงื่อนไขไว้ก่อน (รายการใหม่ที่โผล่ → ติ๊กอัตโนมัติ, ที่ผู้ใช้เอาออกเองคงไว้)
+  useEffect(() => {
+    setSelectedGiveaways((prev) => {
+      let changed = false; const next = { ...prev };
+      for (const g of applicableGiveaways) {
+        if (!(g.expense_id in next)) { next[g.expense_id] = true; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [applicableGiveaways]);
   const giveawaysTotal = applicableGiveaways
     .filter((g) => selectedGiveaways[g.expense_id])
     .reduce((s, g) => s + Number(g.amount || 0), 0);
@@ -518,12 +539,20 @@ export default function RetailSalePage({ currentUser }) {
     return { netCar, financeAmount, installment, totalPayment, carPrice, discount, otherSale, down, booking };
   }, [form]);
 
+  // ยอดผ่อน/งวด: default = ค่าที่คำนวณ แต่ผู้ใช้พิมพ์แก้เองได้
+  useEffect(() => {
+    if (!installmentTouched) setInstallmentOverride(calc.installment ? String(Math.round(calc.installment)) : "");
+  }, [calc.installment, installmentTouched]);
+  const effectiveInstallment = (installmentOverride !== "" && installmentOverride != null) ? Number(installmentOverride) : calc.installment;
+
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
 
   function reset() {
     setVehicle(null);
     setMode(null);
     setForm(blankForm(currentUser));
+    setInstallmentTouched(false);
+    setInstallmentOverride("");
   }
 
   // typeahead: ค้นหา moto_stock (สินค้าคงเหลือ) ด้วยเลขเครื่อง/เลขถัง (พิมพ์บางส่วน) → popup เลือก
@@ -623,7 +652,7 @@ export default function RetailSalePage({ currentUser }) {
         interest_rate: num(form.interest_rate),
         installments: num(form.installments),
         finance_amount: calc.financeAmount,
-        installment_amount: calc.installment,
+        installment_amount: effectiveInstallment,
         finance_note: form.finance_note,
         branch_code: currentUser?.branch_code || currentUser?.branch || "",
         branch_name: currentUser?.branch || "",
@@ -1086,7 +1115,11 @@ export default function RetailSalePage({ currentUser }) {
                     <Field label="จำนวนงวด" required unitText="งวด" value={
                       <input value={form.installments} onChange={set("installments")} style={money} placeholder="0" />
                     } />
-                    <Field label="ยอดผ่อน/งวด" unit value={<MoneyBox>{baht(calc.installment)}</MoneyBox>} />
+                    <Field label="ยอดผ่อน/งวด" unit value={
+                      <input value={installmentOverride}
+                        onChange={(e) => { setInstallmentOverride(e.target.value); setInstallmentTouched(true); }}
+                        style={money} placeholder={calc.installment ? baht(calc.installment) : "0"} />
+                    } />
                   </Grid>
                 )}
 
@@ -1211,6 +1244,7 @@ export default function RetailSalePage({ currentUser }) {
                             {g.group_by === "cc" && g.engine_cc && <span>⚙️ {g.engine_cc} cc</span>}
                             {g.group_by === "finance" && g.company_name && <span>💳 {g.company_name}</span>}
                             {g.group_by === "province" && <span>📍 {g.province || g.province_target || "ตามจังหวัด"}</span>}
+                            {g.group_by === "series" && <span>🏍️ รุ่น: {motoSeries.find(x => String(x.series_id) === String(String(g.note || "").split("|")[0]))?.series_name || selectedSeries?.series_name || "รุ่นนี้"}</span>}
                             {g.group_by === "name_prefix" && <span>🔤 ขึ้นต้น: {g.note}</span>}
                           </div>
                         </div>
@@ -1301,7 +1335,7 @@ export default function RetailSalePage({ currentUser }) {
                     <div style={{ marginTop: 6, fontSize: 13, fontWeight: 600, color: "#334155" }}>ชำระโดย</div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 6 }}>
                       {payLines.map((p, i) => {
-                        const needAcc = p.method !== "เงินมัดจำ" && p.method !== "ไฟแนนซ์";
+                        const needAcc = p.method === "โอน" || p.method === "บัตร/QR";
                         return (
                           <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                             <select value={p.method} onChange={(e) => updatePayLine(i, { method: e.target.value })} style={{ ...inp, width: 130, flex: "none" }}>
@@ -1309,7 +1343,7 @@ export default function RetailSalePage({ currentUser }) {
                             </select>
                             <select value={p.account_id} onChange={(e) => updatePayLine(i, { account_id: e.target.value })} disabled={!needAcc} style={{ ...inp, flex: 1, minWidth: 180, opacity: needAcc ? 1 : 0.5 }}>
                               <option value="">{needAcc ? "— เลือกบัญชี —" : "—"}</option>
-                              {bankAccounts.map((a) => <option key={a.account_id} value={a.account_id}>{a.account_name}{a.bank_name && a.bank_name !== "-" ? ` (${a.bank_name})` : ""}</option>)}
+                              {bankAccounts.filter((a) => a.account_type !== "เงินสดย่อย" && a.account_type !== "ลูกหนี้").map((a) => <option key={a.account_id} value={a.account_id}>{a.account_name}{a.account_no && a.account_no !== "-" ? ` · ${a.account_no}` : ""}{a.bank_name && a.bank_name !== "-" ? ` (${a.bank_name})` : ""}</option>)}
                             </select>
                             <input type="number" value={p.amount} onChange={(e) => updatePayLine(i, { amount: e.target.value })} placeholder="ยอด" style={{ ...inp, width: 120, flex: "none", textAlign: "right" }} />
                             <button type="button" onClick={() => removePayLine(i)} disabled={payLines.length <= 1} style={{ ...btn("#94a3b8"), padding: "6px 10px" }}>✕</button>

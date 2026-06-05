@@ -164,6 +164,7 @@ export default function MotoExpensePage({ currentUser }) {
     if (form.group_by === "type" && !form.type_id) { setMessage("กรุณาเลือก Type"); return; }
     if (form.group_by === "province" && !form.province?.trim()) { setMessage("กรุณากรอกชื่อจังหวัด"); return; }
     if (form.group_by === "name_prefix" && !form.note?.trim()) { setMessage("กรุณากรอกคำนำหน้าชื่อ (เช่น เทศบาล)"); return; }
+    if (form.group_by === "series" && !form.note?.trim()) { setMessage("กรุณาเลือกรุ่น"); return; }
     setSaving(true);
     setMessage("");
     try {
@@ -184,7 +185,7 @@ export default function MotoExpensePage({ currentUser }) {
           brand_id: form.group_by === "brand" ? Number(form.brand_id) : null,
           type_id: form.group_by === "type" ? Number(form.type_id) : null,
           amount: Number(form.amount),
-          note: form.note,
+          note: form.group_by === "series" ? `${form.note}|${form.pay_condition || "all"}` : form.note,
           status: form.status,
           effective_date: form.effective_date || null,
           end_date: form.end_date || null,
@@ -214,6 +215,9 @@ export default function MotoExpensePage({ currentUser }) {
 
   function openEdit(e) {
     setEditTarget(e);
+    const isSeries = e.group_by === "series";
+    const seriesId = isSeries ? String(e.note || "").split("|")[0] : "";
+    const payCond = isSeries ? (String(e.note || "").split("|")[1] || "all") : "all";
     setForm({
       expense_name: e.expense_name || "",
       expense_type: e.expense_type || "fixed",
@@ -223,7 +227,8 @@ export default function MotoExpensePage({ currentUser }) {
       brand_id: e.brand_id ? String(e.brand_id) : "",
       type_id: e.type_id ? String(e.type_id) : "",
       amount: e.amount ? String(e.amount) : "",
-      note: e.note || "",
+      note: isSeries ? seriesId : (e.note || ""),
+      pay_condition: payCond,
       status: e.status || "active",
       category: e.category || "",
       province: e.province || "",
@@ -239,6 +244,11 @@ export default function MotoExpensePage({ currentUser }) {
         setTypeSeries(String(t.series_id || ""));
         setTypeModel(String(t.model_id || ""));
       }
+    } else if (e.group_by === "series" && seriesId) {
+      const s = motoSeries.find(x => String(x.series_id) === String(seriesId));
+      setTypeBrand(s ? String(s.brand_id || "") : "");
+      setTypeSeries(String(seriesId));
+      setTypeModel("");
     } else {
       setTypeBrand(""); setTypeSeries(""); setTypeModel("");
     }
@@ -281,11 +291,13 @@ export default function MotoExpensePage({ currentUser }) {
     return String(a.expense_name || "").localeCompare(String(b.expense_name || ""), "th");
   });
 
-  const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", type: "Type", province: "จังหวัดลูกค้า", register_province: "จังหวัดจดทะเบียน", name_prefix: "คำนำหน้าชื่อ" };
+  const tabLabel = { cc: "CC", finance: "ไฟแนนท์", brand: "ยี่ห้อ", series: "รุ่น", type: "Type", province: "จังหวัดลูกค้า", register_province: "จังหวัดจดทะเบียน", name_prefix: "คำนำหน้าชื่อ" };
+  const seriesName = (id) => { const s = motoSeries.find(x => String(x.series_id) === String(id)); return s ? (s.marketing_name || s.series_name) : id; };
   const groupLabel = (e) => {
     if (e.group_by === "cc") return e.engine_cc ? e.engine_cc + " cc" : "-";
     if (e.group_by === "finance") return e.company_name || "-";
     if (e.group_by === "brand") return e.brand_name || "-";
+    if (e.group_by === "series") { if (!e.note) return "-"; const [sid, pc] = String(e.note).split("|"); const pl = pc === "cash" ? " · เงินสด" : pc === "finance" ? " · ไฟแนนซ์" : ""; return seriesName(sid) + pl; }
     if (e.group_by === "type") return e.type_name || "-";
     if (e.group_by === "province") return e.province || "-";
     if (e.group_by === "name_prefix") return e.note ? "ขึ้นต้น: " + e.note : "-";
@@ -294,6 +306,12 @@ export default function MotoExpensePage({ currentUser }) {
 
   // ดึงชื่อยี่ห้อ + รุ่น + แบบ จากการ lookup motoTypes (ผูก type_id)
   const lookupTypeInfo = (e) => {
+    if (e.group_by === "series") {
+      const sid = String(e.note || "").split("|")[0];
+      const s = motoSeries.find(x => String(x.series_id) === String(sid));
+      const b = s ? brands.find(x => String(x.brand_id) === String(s.brand_id)) : null;
+      return { brand: b?.brand_name || "-", series: s ? (s.marketing_name || s.series_name) : "-", model: "-" };
+    }
     const t = e.type_id ? motoTypes.find(x => String(x.type_id) === String(e.type_id)) : null;
     const brand = e.brand_name || t?.brand_name || (e.group_by === "brand" ? e.brand_name : "");
     const series = t?.marketing_name || t?.series_name || e.series_name || "";
@@ -307,7 +325,7 @@ export default function MotoExpensePage({ currentUser }) {
       <div className="page-topbar">
         <h2 className="page-title">💸 บันทึกค่าใช้จ่ายการขาย</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {[["cc", "ตาม CC"], ["finance", "ตามไฟแนนท์"], ["brand", "ตามยี่ห้อ"], ["type", "ตาม Type"], ["province", "ตามจังหวัดลูกค้า"], ["register_province", "ตามจังหวัดจดทะเบียน"], ["name_prefix", "ตามคำนำหน้าชื่อ"]].map(([key, label]) => (
+          {[["cc", "ตาม CC"], ["finance", "ตามไฟแนนท์"], ["brand", "ตามยี่ห้อ"], ["series", "ตามรุ่น"], ["type", "ตาม Type"], ["province", "ตามจังหวัดลูกค้า"], ["register_province", "ตามจังหวัดจดทะเบียน"], ["name_prefix", "ตามคำนำหน้าชื่อ"]].map(([key, label]) => (
             <button key={key} className={tab === key ? "btn-primary" : "btn-secondary"} onClick={() => setTab(key)}>
               {label}
             </button>
@@ -394,7 +412,9 @@ export default function MotoExpensePage({ currentUser }) {
                   <td style={{ whiteSpace: "nowrap", fontSize: 12, color: "#b91c1c" }}>
                     {e.end_date ? fmtThaiDate(e.end_date) : <span style={{ color: "#9ca3af" }}>-</span>}
                   </td>
-                  <td>{e.note || "-"}</td>
+                  <td>{e.group_by === "series"
+                    ? (() => { const pc = String(e.note || "").split("|")[1] || "all"; return pc === "cash" ? "เฉพาะเงินสด" : pc === "finance" ? "เฉพาะไฟแนนซ์" : "ทั้งหมด"; })()
+                    : (e.note || "-")}</td>
                   <td>
                     <span style={{
                       padding: "2px 10px", borderRadius: 12, fontSize: 12,
@@ -492,6 +512,38 @@ export default function MotoExpensePage({ currentUser }) {
                 </select>
               </div>
             )}
+
+            {form.group_by === "series" && (() => {
+              const brandOpts = [...new Set(motoSeries.map(s => s.brand_id))].map(id => brands.find(b => String(b.brand_id) === String(id))).filter(Boolean);
+              const seriesOpts = motoSeries.filter(s => typeBrand && String(s.brand_id) === String(typeBrand));
+              const selectStyle = { width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" };
+              return <>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>ยี่ห้อ *</label>
+                  <select value={typeBrand} onChange={e => { setTypeBrand(e.target.value); setTypeSeries(""); setForm({ ...form, note: "" }); }} style={selectStyle}>
+                    <option value="">-- เลือกยี่ห้อ --</option>
+                    {brandOpts.map(b => <option key={b.brand_id} value={b.brand_id}>{b.brand_name}</option>)}
+                  </select>
+                </div>
+                {typeBrand && (
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>รุ่น *</label>
+                    <select value={typeSeries} onChange={e => { setTypeSeries(e.target.value); setForm({ ...form, note: e.target.value }); }} style={selectStyle}>
+                      <option value="">-- เลือกรุ่น --</option>
+                      {seriesOpts.map(s => <option key={s.series_id} value={s.series_id}>{s.marketing_name || s.series_name}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เงื่อนไขการขาย</label>
+                  <select value={form.pay_condition || "all"} onChange={e => setForm({ ...form, pay_condition: e.target.value })} style={selectStyle}>
+                    <option value="all">ทั้งหมด (เงินสด + ไฟแนนซ์)</option>
+                    <option value="cash">เฉพาะขายเงินสด</option>
+                    <option value="finance">เฉพาะขายไฟแนนซ์</option>
+                  </select>
+                </div>
+              </>;
+            })()}
 
             {form.group_by === "type" && (() => {
               const brandOpts = [...new Set(motoSeries.map(s => s.brand_id))].map(id => brands.find(b => b.brand_id === id) || brands.find(b => String(b.brand_id) === String(id))).filter(Boolean);
@@ -621,7 +673,7 @@ export default function MotoExpensePage({ currentUser }) {
               </div>
             </div>
 
-            {form.group_by !== "name_prefix" && (
+            {form.group_by !== "name_prefix" && form.group_by !== "series" && (
               <div style={{ marginBottom: 12 }}>
                 <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>หมายเหตุ</label>
                 <input value={form.note} onChange={e => setForm({ ...form, note: e.target.value })}

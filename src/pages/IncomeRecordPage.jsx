@@ -1313,8 +1313,10 @@ export default function IncomeRecordPage({ currentUser }) {
                           const nz = v => String(v == null ? "" : v).replace(/[ัิ-ฺ็-๎\s]/g, "").toLowerCase();
                           const docCust = nz(allocDoc?.customer_name);
                           if (docCust && !isSel) {
+                            // เทียบเฉพาะชื่อในใบกำกับ (customer_name = คนที่ถูกเรียกเก็บ) — ไม่ใช้ finance_company (ค้าง/ผิดได้) หรือชื่อผู้ซื้อ
+                            // ขายเงินสด → ใบกำกับเป็นชื่อผู้ซื้อ → ไม่ match บริษัทไฟแนนซ์ → ซ่อน
                             const eqCust = a => { const x = nz(a); return x && (x === docCust || x.includes(docCust) || docCust.includes(x)); };
-                            if (!(eqCust(s.finance_company) || eqCust(s.customer_name) || eqCust(s.sale_customer_name))) return false;
+                            if (!eqCust(s.customer_name)) return false;
                           }
                           if (allocShowSelectedOnly && !isSel) return false;
                           if (!allocSearch.trim()) return true;

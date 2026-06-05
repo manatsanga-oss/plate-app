@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import CustomerFormModal from "./CustomerFormModal";
 
 // ============================================================================
 // Modal เลือกลูกค้า สำหรับหน้าบันทึกขายปลีก — 3 ทาง:
@@ -30,6 +31,26 @@ async function postJson(url, body) {
 export default function CustomerPickerModal({ currentUser, onSelect, onClose }) {
   const [tab, setTab] = useState("search");
 
+  // หลังบันทึกลูกค้าใหม่จากฟอร์มเต็ม → หา customer_id แล้วเลือกเลย
+  async function handleAddSaved(saved) {
+    let code = saved.customer_id != null ? String(saved.customer_id) : "";
+    if (!code) {
+      try {
+        const list = await postJson(URL_GET, {});
+        if (Array.isArray(list)) {
+          const match = [...list].reverse().find((c) =>
+            (saved.id_number && c.id_number === saved.id_number) ||
+            (saved.phone && c.phone === saved.phone) ||
+            (c.first_name === saved.first_name && c.last_name === saved.last_name)
+          );
+          if (match && match.customer_id != null) code = String(match.customer_id);
+        }
+      } catch { /* ignore — ใช้ชื่อที่กรอกแทน */ }
+    }
+    const name = [saved.title, saved.first_name, saved.last_name].filter(Boolean).join(" ").trim();
+    onSelect({ code, name, phone: saved.phone || "", province: saved.addr_province || "" });
+  }
+
   return (
     <div style={overlay} onClick={onClose}>
       <div style={modal} onClick={(e) => e.stopPropagation()}>
@@ -49,7 +70,7 @@ export default function CustomerPickerModal({ currentUser, onSelect, onClose }) 
         </div>
 
         {tab === "search" && <SearchTab onSelect={onSelect} />}
-        {tab === "add" && <AddTab onSelect={onSelect} />}
+        {tab === "add" && <CustomerFormModal onClose={() => setTab("search")} onSaved={handleAddSaved} />}
         {tab === "qr" && <QrTab currentUser={currentUser} onSelect={onSelect} />}
       </div>
     </div>
@@ -170,10 +191,18 @@ function AddTab({ onSelect }) {
 // ---------------------------------------------------------------------------
 function QrTab({ currentUser, onSelect }) {
   const [refNo, setRefNo] = useState("");
+  const [refInput, setRefInput] = useState("");
   const [status, setStatus] = useState("");
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(false);
   const pollRef = useRef(null);
+
+  async function lookupRef() {
+    const ref = refInput.trim();
+    if (!ref) { setErr("กรอกเลขที่อ้างอิง"); return; }
+    setErr(""); setStatus("⏳ กำลังตรวจสอบ…");
+    await check(ref, false);
+  }
 
   useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
@@ -221,6 +250,19 @@ function QrTab({ currentUser, onSelect }) {
 
   return (
     <div style={{ textAlign: "center" }}>
+      {/* มีเลขอ้างอิงอยู่แล้ว (สร้าง/พิมพ์ QR จากเมนูออกใบเสร็จ) → กรอกเพื่อดึงข้อมูล */}
+      <div style={{ textAlign: "left", marginBottom: 12 }}>
+        <label style={lbl}>มีเลขที่อ้างอิงอยู่แล้ว? กรอก/สแกนเพื่อดึงข้อมูลลูกค้า</label>
+        <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
+          <input autoFocus value={refInput} onChange={(e) => setRefInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && lookupRef()}
+            placeholder="กรอก/สแกนเลขอ้างอิง เช่น RC-20260531-0001" style={{ ...inp, flex: 1 }} />
+          <button onClick={lookupRef} style={{ ...primaryBtn, background: "#2563eb", whiteSpace: "nowrap" }}>🔍 ค้นหา</button>
+        </div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "12px 0", color: "#98a2b3", fontSize: 12 }}>
+        <div style={{ flex: 1, height: 1, background: "#eaecf0" }} /> หรือสร้าง QR ใหม่ <div style={{ flex: 1, height: 1, background: "#eaecf0" }} />
+      </div>
       {!refNo ? (
         <>
           <p style={{ color: "#667085" }}>กดสร้าง QR แล้วให้ลูกค้าสแกนด้วย LINE เพื่อกรอกข้อมูลเอง</p>
