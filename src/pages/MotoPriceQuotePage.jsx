@@ -37,6 +37,7 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [useDownPayout, setUseDownPayout] = useState(false);
   const [downPayout, setDownPayout] = useState(0);
+  const [downPayoutDirect, setDownPayoutDirect] = useState(false); // true = บวกยอดตรง (break-even), false = ×1.07 ปัดร้อย
   const [useInsurancePayout, setUseInsurancePayout] = useState(false);
   const [insurancePayout, setInsurancePayout] = useState(0);
   const [targetPrice, setTargetPrice] = useState("");
@@ -200,9 +201,10 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const deliveryBonus = deliveryFeeBonusAmount();
   const markupsTotal = applicableMarkups.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
 
-  // เงินดาวน์ออกแทน: input × 107/100 ปัดขึ้นหลักร้อย → บวกเข้าราคา
+  // เงินดาวน์ออกแทน: โหมดปกติ input × 107/100 ปัดขึ้นหลักร้อย → บวกเข้าราคา
+  //                  โหมด break-even (direct) ใช้ยอดที่บวกตรงๆ (ไม่คูณ 1.07 ซ้ำ)
   const downPayoutCalc = (useDownPayout && saleType === "ขายไฟแนนซ์")
-    ? Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100
+    ? (downPayoutDirect ? Math.round(Number(downPayout || 0)) : Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100)
     : 0;
   // ค่างวด/งวด = ปัดขึ้น100( ยอดจัดสุทธิ × (1+ดอกเบี้ย%) ÷ งวด ); ยอดจัดสุทธิ = ยอดจัดเต็ม × (1−ดาวน์เพิ่ม%)
   const calcFinanceNet = (Number(calcFinanceAmt) || 0) * (1 - (Number(calcExtraDownPct) || 0) / 100);
@@ -215,6 +217,19 @@ export default function MotoPriceQuotePage({ currentUser }) {
   const insurancePayoutCalc = useInsurancePayout
     ? Number(insurancePayout || 0)
     : 0;
+
+  // 🎯 Break-even: หายอดออกแทนขั้นต่ำ ให้ (ค่างวด × 1.07) ≤ ยอดที่บวกเข้าราคา
+  // ฐาน = ราคาประกาศ + บวกเพิ่ม + ค่านำพา + ประกันออกแทน (ไม่รวมเงินดาวน์ออกแทน)
+  const beBase = (announcedPrice || 0) + markupsTotal + deliveryBonus + (useDeliveryFee ? Number(deliveryFee || 0) : 0) + insurancePayoutCalc;
+  const beInterest = Number(calcInterest) || 0;   // อัตราดอกเบี้ย %/เดือน
+  const beN = Number(calcInstallments) || 0;       // จำนวนงวด
+  const beFactor = 1 + (beInterest / 100) * beN;   // ตัวคูณยอดรวม เช่น 1 + 0.0111×48 = 1.5328
+  const beK = beN > 0 ? (beFactor * 1.07) / beN : 0;
+  const beMarkupMin = (beBase > 0 && beN > 0 && beInterest > 0 && beK > 0 && beK < 1) ? (beBase * beK) / (1 - beK) : 0;
+  const beMarkup = beMarkupMin > 0 ? Math.ceil(beMarkupMin / 100) * 100 : 0;   // ปัดขึ้นหลักร้อย
+  const beNewYodjad = beBase + beMarkup;
+  const beInstallment = (beMarkup > 0 && beN > 0) ? Math.ceil((beNewYodjad * beFactor / beN) / 5) * 5 : 0; // ค่างวด ปัด 5
+  const beCheck = beInstallment * 1.07;            // ตรวจกลับ ต้อง ≤ beMarkup
 
   // คำนวณยอด
   const totalPrice = (announcedPrice || 0)
@@ -248,7 +263,7 @@ export default function MotoPriceQuotePage({ currentUser }) {
     }
     if (useDeliveryFee) lines.push({ label: "+ ค่านำพา", value: fmt(deliveryFee) });
     if (deliveryBonus > 0) lines.push({ label: "+ บวกเพิ่มค่านำพา", value: `+${fmt(deliveryBonus)}` });
-    if (useDownPayout && downPayoutCalc > 0) lines.push({ label: `+ เงินดาวน์/ค่างวดออกแทน (${fmt(downPayout)} × 1.07 ปัดร้อย)`, value: `+${fmt(downPayoutCalc)}` });
+    if (useDownPayout && downPayoutCalc > 0) lines.push({ label: downPayoutDirect ? `+ เงินดาวน์/ค่างวดออกแทน (ยอดบวกตรง)` : `+ เงินดาวน์/ค่างวดออกแทน (${fmt(downPayout)} × 1.07 ปัดร้อย)`, value: `+${fmt(downPayoutCalc)}` });
     if (useInsurancePayout && insurancePayoutCalc > 0) lines.push({ label: "+ ประกันออกแทน", value: `+${fmt(insurancePayoutCalc)}` });
 
     const w = window.open("", "_blank");
@@ -294,8 +309,9 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
     setFilterBrand(""); setFilterMarketing(""); setFilterModel(""); setFilterType("");
     setSaleType("เงินสด"); setFinanceId("");
     setUseDeliveryFee(false); setDeliveryFee(0);
-    setUseDownPayout(false); setDownPayout(0);
+    setUseDownPayout(false); setDownPayout(0); setDownPayoutDirect(false);
     setUseInsurancePayout(false); setInsurancePayout(0);
+    setCalcFinanceAmt(""); setCalcInterest(""); setCalcInstallments(""); setCalcExtraDownPct("");
     setTargetPrice("");
   }
 
@@ -385,6 +401,23 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
                 {Number(calcExtraDownPct) > 0 && calcFinanceNet > 0 && (
                   <div style={{ fontSize: 11, color: "#9333ea", marginTop: 4 }}>ยอดจัดสุทธิหลังหักดาวน์เพิ่ม {calcExtraDownPct}% = {fmt(calcFinanceNet)}</div>
                 )}
+
+                {beMarkup > 0 && (
+                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #d8b4fe" }}>
+                    <div style={{ fontWeight: 700, color: "#7c3aed", fontSize: 13, marginBottom: 6 }}>🎯 ออกค่างวด/ดาวน์ให้ลูกค้า (คำนวณยอดบวกอัตโนมัติ)</div>
+                    <div style={{ fontSize: 12, color: "#6b21a8", lineHeight: 1.8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span>ฐานราคา (ยอดจัดเริ่มต้น)</span><span style={{ fontFamily: "monospace" }}>{fmt(beBase)}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span>ยอดบวกขั้นต่ำ → ปัดร้อย</span><span style={{ fontFamily: "monospace", fontWeight: 700 }}>+{fmt(beMarkup)}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span>ยอดจัดใหม่</span><span style={{ fontFamily: "monospace", fontWeight: 700 }}>{fmt(beNewYodjad)}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}><span>ค่างวด (ปัด 5)</span><span style={{ fontFamily: "monospace", fontWeight: 700, color: "#7c3aed" }}>{fmt(beInstallment)}</span></div>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: beCheck <= beMarkup ? "#15803d" : "#dc2626" }}><span>ตรวจกลับ (ค่างวด × 1.07)</span><span style={{ fontFamily: "monospace" }}>{fmt(beCheck)} {beCheck <= beMarkup ? "✓ ไม่เกิน" : "✗ เกิน"}</span></div>
+                    </div>
+                    <button onClick={() => { setUseDownPayout(true); setDownPayoutDirect(true); setDownPayout(beMarkup); }}
+                      style={{ ...btn("#7c3aed"), padding: "6px 12px", fontSize: 12, marginTop: 8, width: "100%" }}>
+                      ✓ ใส่ยอด {fmt(beMarkup)} เป็นเงินดาวน์/ค่างวดออกแทน
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -395,8 +428,8 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
               amount={deliveryFee} onAmount={setDeliveryFee} />
             {saleType === "ขายไฟแนนซ์" && (
               <CheckRow checked={useDownPayout} onChange={setUseDownPayout} label="เงินดาวน์/ค่างวดออกแทน"
-                amount={downPayout} onAmount={setDownPayout}
-                suffix={useDownPayout && Number(downPayout) > 0 ? `× 1.07 ปัดร้อย = +${fmt(downPayoutCalc)}` : ""} />
+                amount={downPayout} onAmount={(v) => { setDownPayout(v); setDownPayoutDirect(false); }}
+                suffix={useDownPayout && Number(downPayout) > 0 ? (downPayoutDirect ? `ยอดบวกตรง (break-even) = +${fmt(downPayoutCalc)}` : `× 1.07 ปัดร้อย = +${fmt(downPayoutCalc)}`) : ""} />
             )}
             <CheckRow checked={useInsurancePayout} onChange={setUseInsurancePayout} label="ประกันออกแทน"
               amount={insurancePayout} onAmount={setInsurancePayout} />
@@ -473,7 +506,7 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
 
                 {useDeliveryFee && <Row label="+ ค่านำพา" value={fmt(deliveryFee)} color="#0369a1" />}
                 {deliveryBonus > 0 && <Row label={`+ บวกเพิ่มค่านำพา (${(selectedRow?.brand_name || "").toLowerCase().includes("honda") || (selectedRow?.brand_name || "").toLowerCase().includes("ฮอนด้า") ? "฿500→฿2,000" : "฿500→฿1,000"})`} value={`+${fmt(deliveryBonus)}`} color="#f97316" />}
-                {useDownPayout && downPayoutCalc > 0 && <Row label={`+ เงินดาวน์/ค่างวดออกแทน (${fmt(downPayout)} × 1.07 ปัดร้อย)`} value={`+${fmt(downPayoutCalc)}`} color="#0369a1" />}
+                {useDownPayout && downPayoutCalc > 0 && <Row label={downPayoutDirect ? `+ เงินดาวน์/ค่างวดออกแทน (ยอดบวกตรง)` : `+ เงินดาวน์/ค่างวดออกแทน (${fmt(downPayout)} × 1.07 ปัดร้อย)`} value={`+${fmt(downPayoutCalc)}`} color="#0369a1" />}
                 {useInsurancePayout && insurancePayoutCalc > 0 && <Row label="+ ประกันออกแทน" value={`+${fmt(insurancePayoutCalc)}`} color="#0369a1" />}
 
                 <div style={{ height: 2, background: "#072d6b", margin: "12px 0 6px" }} />
