@@ -12,4 +12,6 @@
 - **Backend:** ไม่ได้เขียนเป็นเซิร์ฟเวอร์โค้ดในโปรเจกต์ แต่เป็น **n8n webhook + Postgres** — แต่ละ feature = 1 webhook workflow ที่ switch ตาม `body.action` แล้วคุยกับ Postgres (base: `https://n8n-new-project-gwf2.onrender.com/webhook/<path>`)
 - **ทุก feature ใหม่ที่ต้องเก็บข้อมูล** ต้องทำ 3 ส่วน: (1) หน้า/โค้ด frontend, (2) n8n workflow JSON, (3) SQL DDL ของตาราง — โดยไฟล์ workflow/DDL เก็บไว้ที่ `C:\Users\manat\OneDrive\New folder` (naming: `*_Workflow.json` / `*_DDL.sql`)
 - หลัง import workflow ใน n8n ต้องตั้ง Postgres credential บน PG nodes + toggle **Active** เอง (production `/webhook/` ใช้ได้เมื่อ active เท่านั้น)
+- **n8n: เมื่อมีการแก้ไข logic/SQL ของ workflow ต้องแก้ที่ไฟล์ `*_Workflow.json` ใน `C:\Users\manat\OneDrive\New folder` ให้เสมอ** — ห้ามให้ user copy/paste แก้ใน n8n เอง (ให้แก้ไฟล์จริงทุกครั้ง ส่วน user แค่ re-import หรือ sync จากไฟล์) เก็บไฟล์เป็น source of truth
+- **n8n + Postgres ห้ามใส่ตัวอักษร `$` ใน SQL ที่ generate** (เช่น regex `[0-9]+$`) เพราะ Postgres node จะ mangle `$` ทำให้ syntax พัง — เลี่ยงไปใช้ `LIKE` + `SUBSTRING` แทนการ match ด้วย regex
 - รายละเอียดเพิ่มเติมดูใน memory: deploy/backend, ฟีเจอร์ใบเสร็จ QR/LIFF, ฟีเจอร์ขายปลีก

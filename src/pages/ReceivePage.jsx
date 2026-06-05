@@ -1,7 +1,13 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const API_URL =
   "https://n8n-new-project-gwf2.onrender.com/webhook/office-api";
+const ACC_API =
+  "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const RPAY_API =
+  "https://n8n-new-project-gwf2.onrender.com/webhook/receive-payment-api";
+
+const PAY_METHODS = ["เงินสด", "โอน", "บัตร/QR", "เช็ค"];
 
 function todayStr() {
   const d = new Date();
@@ -184,6 +190,35 @@ export default function ReceivePage({ currentUser }) {
   const [historyError, setHistoryError] = useState("");
   const [historyKeyword, setHistoryKeyword] = useState("");
 
+  // ชำระเงินเจ้าหนี้ (จ่ายผู้ขาย)
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [receiveSaved, setReceiveSaved] = useState(false); // บิลนี้ถูกบันทึกลง DB แล้ว
+  const [showPayment, setShowPayment] = useState(false);
+  const [payment, setPayment] = useState(null); // ข้อมูลการชำระที่บันทึกไว้แล้ว (ถ้ามี)
+  const [payForm, setPayForm] = useState({ pay_date: todayStr(), note: "" });
+  const [payLines, setPayLines] = useState([{ method: "เงินสด", account_id: "", amount: "" }]);
+  const [payingSave, setPayingSave] = useState(false);
+  const [payMessage, setPayMessage] = useState("");
+
+  // โหลดบัญชีธนาคาร/เงินสด สำหรับช่องทางชำระ
+  useEffect(() => {
+    let alive = true;
+    fetch(ACC_API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (alive) setBankAccounts(Array.isArray(d) ? d : (d?.data || [])); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  const payTotal = useMemo(
+    () => payLines.reduce((s, p) => s + toNumber(p.amount), 0),
+    [payLines]
+  );
+
   // ตั้งค่าผู้ซื้ออัตโนมัติจาก branch ของ user
   function getDefaultBuyer() {
     const branch = (currentUser?.branch || "").trim();
@@ -314,6 +349,12 @@ export default function ReceivePage({ currentUser }) {
     setProductAliases([]);
     setOcrStatus("");
     setErrorMessage("");
+    setReceiveSaved(false);
+    setShowPayment(false);
+    setPayment(null);
+    setPayForm({ pay_date: todayStr(), note: "" });
+    setPayLines([{ method: "เงินสด", account_id: "", amount: "" }]);
+    setPayMessage("");
   }
 
   function handleFileChange(e) {
@@ -674,6 +715,10 @@ export default function ReceivePage({ currentUser }) {
       if (result.doc_no) {
         setHeader(prev => ({ ...prev, doc_no: result.doc_no }));
       }
+      if (result.receive_id) {
+        setHeader(prev => ({ ...prev, receive_id: result.receive_id }));
+      }
+      setReceiveSaved(true);
 
       alert("บันทึกรับสินค้าเรียบร้อย");
     } catch (error) {
@@ -738,12 +783,134 @@ export default function ReceivePage({ currentUser }) {
       console.log("DOC DETAIL:", data);
 
       setFormFromDocumentData(data, true);
+      setReceiveSaved(true);
+      setShowPayment(false);
+      setPayment(null);
       setMode("form");
     } catch (error) {
       console.error(error);
       setErrorMessage("โหลดข้อมูลเอกสารไม่สำเร็จ");
     } finally {
       setLoadingOCR(false);
+    }
+  }
+
+  function updatePayLine(i, patch) {
+    setPayLines((prev) => prev.map((p, idx) => (idx === i ? { ...p, ...patch } : p)));
+  }
+  function addPayLine() {
+    setPayLines((prev) => [...prev, { method: "เงินสด", account_id: "", amount: "" }]);
+  }
+  function removePayLine(i) {
+    setPayLines((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
+  }
+
+  async function loadPayment(receiveNo) {
+    if (!T(receiveNo)) return;
+    try {
+      const res = await fetch(RPAY_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_receive_payment", receive_no: receiveNo }),
+      });
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : (data?.data || []);
+      const pay = rows[0] || null;
+      setPayment(pay);
+      if (pay) {
+        setPayForm({ pay_date: String(pay.pay_date || "").slice(0, 10) || todayStr(), note: pay.note || "" });
+        const methods = Array.isArray(pay.methods) ? pay.methods : [];
+        if (methods.length) {
+          setPayLines(methods.map((m) => ({ method: m.method || "เงินสด", account_id: m.account_id || "", amount: m.amount ?? "" })));
+        }
+      } else {
+        setPayForm({ pay_date: todayStr(), note: "" });
+        setPayLines([{ method: "เงินสด", account_id: "", amount: grandTotal ? String(grandTotal) : "" }]);
+      }
+    } catch (e) {
+      console.warn("loadPayment failed:", e);
+    }
+  }
+
+  function openPayment() {
+    if (!receiveSaved || !T(header.receive_no)) {
+      alert("กรุณาบันทึกรับสินค้าก่อน จึงจะชำระเงินได้");
+      return;
+    }
+    setShowPayment(true);
+    setPayMessage("");
+    loadPayment(header.receive_no);
+  }
+
+  async function savePayment() {
+    setPayMessage("");
+    const lines = payLines
+      .filter((p) => toNumber(p.amount) > 0)
+      .map((p) => {
+        const acc = bankAccounts.find((a) => String(a.account_id) === String(p.account_id));
+        return {
+          method: p.method,
+          account_id: p.account_id || "",
+          account_name: acc ? acc.account_name : "",
+          amount: toNumber(p.amount),
+        };
+      });
+    if (!lines.length) { setPayMessage("❌ ใส่ยอดชำระอย่างน้อย 1 รายการ"); return; }
+    try {
+      setPayingSave(true);
+      const res = await fetch(RPAY_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_receive_payment",
+          receive_no: header.receive_no,
+          receive_id: header.receive_id || "",
+          pay_date: payForm.pay_date,
+          vendor_name: header.vendor_name,
+          buyer_name: header.buyerName,
+          total_amount: grandTotal,
+          payments: lines,
+          note: payForm.note,
+          created_by: getCurrentUserName() || getCurrentUserId(),
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const rows = Array.isArray(data) ? data : (data?.data || []);
+      const saved = rows[0] || {};
+      setPayMessage("✅ บันทึกชำระเงินเรียบร้อย เลขที่ " + (saved.payment_no || ""));
+      await loadPayment(header.receive_no);
+    } catch (e) {
+      setPayMessage("บันทึกชำระไม่สำเร็จ: " + (e.message || e));
+    } finally {
+      setPayingSave(false);
+    }
+  }
+
+  async function cancelPayment() {
+    if (!payment) return;
+    if (!window.confirm(`ยกเลิกการชำระเงินของบิล ${header.receive_no}? (เลขที่ ${payment.payment_no || "-"})`)) return;
+    try {
+      setPayingSave(true);
+      const res = await fetch(RPAY_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "cancel_receive_payment",
+          payment_no: payment.payment_no,
+          receive_no: header.receive_no,
+          cancelled_by: getCurrentUserName() || getCurrentUserId(),
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setPayment(null);
+      setPayForm({ pay_date: todayStr(), note: "" });
+      setPayLines([{ method: "เงินสด", account_id: "", amount: grandTotal ? String(grandTotal) : "" }]);
+      setPayMessage("✅ ยกเลิกการชำระแล้ว");
+    } catch (e) {
+      setPayMessage("ยกเลิกไม่สำเร็จ: " + (e.message || e));
+    } finally {
+      setPayingSave(false);
     }
   }
 
@@ -762,6 +929,12 @@ export default function ReceivePage({ currentUser }) {
                   type="button" onClick={handleSave} disabled={saving}
                 >
                   {saving ? "กำลังบันทึก..." : "💾 บันทึกรับสินค้า"}
+                </button>
+                <button
+                  style={{ ...styles.secondaryButton, ...(receiveSaved ? { background: "#16a34a", color: "#fff" } : { opacity: 0.6 }) }}
+                  type="button" onClick={openPayment}
+                >
+                  💵 ชำระเงิน
                 </button>
                 <div style={styles.userInfo}>
                   👤 {currentUser?.name || currentUser?.username || getCurrentUserName() || "-"}
@@ -1098,6 +1271,91 @@ export default function ReceivePage({ currentUser }) {
               </div>
               </div>{/* cardBody */}
             </div>
+
+            {/* 4) ชำระเงินเจ้าหนี้ (จ่ายผู้ขาย) */}
+            {showPayment && (
+              <div style={styles.card}>
+                <div style={styles.cardHeader}>4) ชำระเงินเจ้าหนี้ (จ่ายผู้ขาย)</div>
+                <div style={styles.cardBody}>
+                  {payment ? (
+                    <div>
+                      <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "baseline", marginBottom: 10 }}>
+                        <div><span style={{ color: "#64748b" }}>เลขที่ชำระ: </span><b style={{ color: "#047857", fontFamily: "monospace" }}>{payment.payment_no || "-"}</b></div>
+                        <div><span style={{ color: "#64748b" }}>วันที่: </span><b>{payment.pay_date ? new Date(payment.pay_date).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-"}</b></div>
+                        <div><span style={{ color: "#64748b" }}>รวมที่จ่าย: </span><b style={{ color: "#047857" }}>{formatNumber(payment.paid_amount)} บาท</b></div>
+                      </div>
+                      <div style={{ border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
+                        {(Array.isArray(payment.methods) ? payment.methods : []).map((p, i) => (
+                          <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 12px", borderTop: i ? "1px solid #f1f5f9" : "none", fontSize: 13 }}>
+                            <span>{p.method}{p.account_name ? <span style={{ color: "#64748b" }}> · {p.account_name}</span> : null}</span>
+                            <b>{formatNumber(p.amount)} บาท</b>
+                          </div>
+                        ))}
+                      </div>
+                      {payment.note && <div style={{ marginTop: 8, fontSize: 13, color: "#475569" }}>หมายเหตุ: {payment.note}</div>}
+                      <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 14 }}>
+                        <button type="button" style={{ ...styles.secondaryButton, background: "#fee2e2", color: "#b91c1c" }} disabled={payingSave} onClick={cancelPayment}>
+                          {payingSave ? "…" : "✖ ยกเลิกการชำระ"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "end", marginBottom: 10 }}>
+                        <div style={{ minWidth: 160 }}>
+                          <label style={styles.label}>วันที่ชำระ *</label>
+                          <input type="date" style={styles.input} value={payForm.pay_date} onChange={(e) => setPayForm((f) => ({ ...f, pay_date: e.target.value }))} />
+                        </div>
+                        <div style={{ minWidth: 160 }}>
+                          <label style={styles.label}>ยอดบิลรวม</label>
+                          <div style={{ ...styles.input, background: "#f0f4ff", fontWeight: 700, color: "#072d6b", textAlign: "right" }}>{formatNumber(grandTotal)} บาท</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>ชำระโดย</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {payLines.map((p, i) => {
+                          const needAcc = p.method === "โอน" || p.method === "บัตร/QR" || p.method === "เช็ค";
+                          return (
+                            <div key={i} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <select value={p.method} onChange={(e) => updatePayLine(i, { method: e.target.value })} style={{ ...styles.input, width: 130, flex: "none" }}>
+                                {PAY_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                              </select>
+                              <select value={p.account_id} onChange={(e) => updatePayLine(i, { account_id: e.target.value })} disabled={!needAcc} style={{ ...styles.input, flex: 1, minWidth: 180, opacity: needAcc ? 1 : 0.5 }}>
+                                <option value="">{needAcc ? "— เลือกบัญชี —" : "—"}</option>
+                                {bankAccounts.filter((a) => a.account_type !== "ลูกหนี้").map((a) => (
+                                  <option key={a.account_id} value={a.account_id}>
+                                    {a.account_name}{a.account_no && a.account_no !== "-" ? ` · ${a.account_no}` : ""}{a.bank_name && a.bank_name !== "-" ? ` (${a.bank_name})` : ""}
+                                  </option>
+                                ))}
+                              </select>
+                              <input type="number" value={p.amount} onChange={(e) => updatePayLine(i, { amount: e.target.value })} placeholder="ยอด" style={{ ...styles.input, width: 120, flex: "none", textAlign: "right" }} />
+                              <button type="button" onClick={() => removePayLine(i)} disabled={payLines.length <= 1} style={{ ...styles.deleteButtonSmall, padding: "6px 10px" }}>✕</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, flexWrap: "wrap", gap: 8 }}>
+                        <button type="button" onClick={addPayLine} style={{ ...styles.secondaryButton, padding: "6px 12px" }}>+ เพิ่มช่องทาง</button>
+                        <div style={{ fontSize: 14 }}>
+                          <span style={{ color: "#64748b" }}>รวมที่จ่าย: </span>
+                          <b style={{ color: payTotal === Number(grandTotal) ? "#047857" : "#d97706" }}>{formatNumber(payTotal)} บาท</b>
+                          {payTotal !== Number(grandTotal) && <span style={{ color: "#d97706", fontSize: 12, marginLeft: 6 }}>(ต่างจากยอดบิล)</span>}
+                        </div>
+                      </div>
+                      <div style={{ marginTop: 8 }}>
+                        <input value={payForm.note} onChange={(e) => setPayForm((f) => ({ ...f, note: e.target.value }))} placeholder="หมายเหตุการชำระ (ถ้ามี)" style={{ ...styles.input, width: "100%" }} />
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
+                        <button type="button" style={{ ...styles.primaryButton, background: "#16a34a" }} disabled={payingSave} onClick={savePayment}>
+                          {payingSave ? "บันทึก…" : "💾 บันทึกชำระเงิน"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {payMessage && <div style={{ marginTop: 10, fontSize: 13, fontWeight: 600, color: payMessage.startsWith("✅") ? "#047857" : "#ef4444", textAlign: "center" }}>{payMessage}</div>}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+import ThaiAddressFields from "./ThaiAddressFields";
+import BirthDateField from "./BirthDateField";
 
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 const URL_GET    = `${BASE}/moto-sales-get-customers`;
@@ -100,19 +102,6 @@ export default function CustomerPage({ currentUser }) {
     setEditTarget(c);
     setForm({ ...emptyForm(), ...Object.fromEntries(Object.entries(c).filter(([k, v]) => v !== null)) });
     setShowForm(true); setMessage("");
-  }
-
-  // คำนวณอายุจากวันเกิด
-  function calcAge(birth) {
-    if (!birth) return "";
-    const m = String(birth).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (!m) return "";
-    const today = new Date();
-    const b = new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
-    let age = today.getFullYear() - b.getFullYear();
-    const md = today.getMonth() - b.getMonth();
-    if (md < 0 || (md === 0 && today.getDate() < b.getDate())) age--;
-    return String(age);
   }
 
   const kw = search.trim().toLowerCase();
@@ -262,13 +251,7 @@ export default function CustomerPage({ currentUser }) {
                   </div>
                 </Field>
                 <Field label="วัน/เดือน/ปี เกิด">
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <input type="date" value={form.birth_date}
-                      onChange={e => setForm({ ...form, birth_date: e.target.value, age: calcAge(e.target.value) })}
-                      style={{ ...inp, flex: 1 }} />
-                    <input value={form.age} readOnly placeholder="อายุ" style={{ ...inp, width: 70, textAlign: "center", background: "#f9fafb" }} />
-                    <span style={{ alignSelf: "center", fontSize: 12, color: "#6b7280" }}>ปี/เดือน</span>
-                  </div>
+                  <BirthDateField form={form} setForm={setForm} inp={inp} />
                 </Field>
                 <Field label="สัญชาติ">
                   <input value={form.nationality} onChange={e => setForm({ ...form, nationality: e.target.value })} style={inp} />
@@ -281,12 +264,6 @@ export default function CustomerPage({ currentUser }) {
                 </Field>
                 <Field label="เลขที่บัตร *">
                   <input value={form.id_number} onChange={e => setForm({ ...form, id_number: e.target.value })} style={inp} />
-                </Field>
-                <Field label="วันที่หมดอายุ">
-                  <input type="date" value={form.id_expiry_date} onChange={e => setForm({ ...form, id_expiry_date: e.target.value })} style={inp} />
-                </Field>
-                <Field label="ออกโดย">
-                  <input value={form.id_issued_by} onChange={e => setForm({ ...form, id_issued_by: e.target.value })} style={inp} />
                 </Field>
                 <Field label="E-mail" full>
                   <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} style={inp} />
@@ -328,18 +305,7 @@ export default function CustomerPage({ currentUser }) {
                 <Field label="ถนน">
                   <input value={form.addr_road} onChange={e => setForm({ ...form, addr_road: e.target.value })} style={inp} />
                 </Field>
-                <Field label="ตำบล/แขวง *">
-                  <input value={form.addr_subdistrict} onChange={e => setForm({ ...form, addr_subdistrict: e.target.value })} style={inp} />
-                </Field>
-                <Field label="จังหวัด *">
-                  <input value={form.addr_province} onChange={e => setForm({ ...form, addr_province: e.target.value })} style={inp} />
-                </Field>
-                <Field label="อำเภอ/เขต *">
-                  <input value={form.addr_district} onChange={e => setForm({ ...form, addr_district: e.target.value })} style={inp} />
-                </Field>
-                <Field label="รหัสไปรษณีย์ *">
-                  <input value={form.addr_postal_code} onChange={e => setForm({ ...form, addr_postal_code: e.target.value })} style={inp} />
-                </Field>
+                <ThaiAddressFields form={form} setForm={setForm} Field={Field} inp={inp} />
                 <Field label="โทรศัพท์ *">
                   <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inp} />
                 </Field>

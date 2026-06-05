@@ -28,6 +28,7 @@ const emptyForm = () => ({
   name: "",
   username: "",
   password: "",
+  email: "",
   role: "user",
   branch: "",
   position: "",
@@ -119,6 +120,7 @@ export default function UserPage({ currentUser }) {
       name: user.name || "",
       username: user.username || "",
       password: "",
+      email: user.email || "",
       role: user.role || "user",
       branch: user.branch || "",
       position: user.position || "",
@@ -273,6 +275,14 @@ export default function UserPage({ currentUser }) {
                 disabled={passwordDisabled}
                 style={{ background: passwordDisabled ? "#f8fafc" : "#fff" }}
                 autoComplete="new-password" />
+            </div>
+            <div className="form-row">
+              <label>อีเมล (สำหรับเข้าระบบด้วย Google)</label>
+              <input className="form-input" type="email" value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                placeholder="email@gmail.com" disabled={fieldDisabled}
+                style={{ background: fieldDisabled ? "#f8fafc" : "#fff" }}
+                autoComplete="off" />
             </div>
             <div className="form-row">
               <label>สาขา {isAdmin && "*"}</label>
