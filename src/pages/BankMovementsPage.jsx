@@ -60,14 +60,14 @@ export default function BankMovementsPage({ currentUser }) {
     setSavingDate(false);
   }
 
-  // doc_no = 'CC-YYMMDD' → return ISO original_date '20YY-MM-DD'
-  function parseOriginalDate(docNo) {
-    const m = String(docNo || "").match(/^CC-(\d{2})(\d{2})(\d{2})$/);
+  // doc_no = 'CC-YYMMDD' หรือ 'CC-YYMMDD-SCY01' → { date: '20YY-MM-DD', branch: 'SCY01' }
+  function parseCc(docNo) {
+    const m = String(docNo || "").match(/^CC-(\d{2})(\d{2})(\d{2})(?:-(.+))?$/);
     if (!m) return null;
-    return `20${m[1]}-${m[2]}-${m[3]}`;
+    return { date: `20${m[1]}-${m[2]}-${m[3]}`, branch: m[4] || "" };
   }
-  async function openCcDetail(originalDateISO, settlementDateStr, hasOverride) {
-    setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, rows: [], loading: true });
+  async function openCcDetail(originalDateISO, settlementDateStr, hasOverride, branch = "") {
+    setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, branch, rows: [], loading: true });
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -75,12 +75,13 @@ export default function BankMovementsPage({ currentUser }) {
           action: "list_credit_card_detail",
           account_id: Number(accountId),
           receipt_date: originalDateISO,
+          branch,
         }),
       });
       const data = await res.json();
-      setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, rows: Array.isArray(data) ? data : [], loading: false });
+      setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, branch, rows: Array.isArray(data) ? data : [], loading: false });
     } catch {
-      setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, rows: [], loading: false });
+      setCcDetail({ date: originalDateISO, settlement: settlementDateStr, hasOverride, branch, rows: [], loading: false });
     }
   }
 
@@ -241,7 +242,7 @@ export default function BankMovementsPage({ currentUser }) {
                     <td style={{ ...td, fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>
                       {String(m.doc_no || "").startsWith("CC-") ? (
                         <span style={{ cursor: "pointer", textDecoration: "underline" }}
-                              onClick={() => openCcDetail(parseOriginalDate(m.doc_no), String(m.movement_date).slice(0, 10), false)}>
+                              onClick={() => { const cc = parseCc(m.doc_no); if (cc) openCcDetail(cc.date, String(m.movement_date).slice(0, 10), false, cc.branch); }}>
                           {m.doc_no}
                         </span>
                       ) : (m.doc_no || "-")}
@@ -310,7 +311,7 @@ export default function BankMovementsPage({ currentUser }) {
           <div onClick={e => e.stopPropagation()}
                style={{ background: "#fff", borderRadius: 10, maxWidth: 1100, width: "92%", maxHeight: "85vh", overflow: "auto", padding: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ margin: 0, color: "#072d6b" }}>💳 รายละเอียดรับชำระบัตรเครดิต — {ccDetail.date}</h3>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>💳 รายละเอียดรับชำระบัตรเครดิต — {ccDetail.date}{ccDetail.branch ? ` · ${ccDetail.branch}` : ""}</h3>
               <button onClick={() => setCcDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
             </div>
             {ccDetail.loading ? (

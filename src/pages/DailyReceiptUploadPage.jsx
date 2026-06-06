@@ -108,7 +108,8 @@ function extractReceiptTransfers(rows, sourceFile) {
     // Subtotal/รวม row — skip
     if (c19.startsWith("รวม") || c19.startsWith("Page")) continue;
     // Data row: must have receipt_no and date
-    if (!c4 || !/^[A-Z0-9]+-(RM|REC)/.test(c4)) continue;
+    // รับทุกประเภทใบเสร็จ (RM/REC/RSV/RP/...) — รูปแบบ "สาขา-ประเภทเลขที่"
+    if (!c4 || !/^[A-Z0-9]+-[A-Z]+/.test(c4)) continue;
     if (!/^\d{2}\/\d{2}\/\d{2,4}$/.test(c1)) continue;
     const amount = num(r[13]);
     const fee = num(r[14]);

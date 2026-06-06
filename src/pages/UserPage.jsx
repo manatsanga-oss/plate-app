@@ -12,14 +12,50 @@ const BRANCHES = [
 ];
 
 const PAGE_OPTIONS = [
-  { key: "dashboard", label: "📊 ภาพรวม" },
-  { key: "receive",   label: "📥 รับวัสดุ" },
-  { key: "issue",     label: "📤 เบิกวัสดุ" },
-  { key: "users",     label: "👤 กำหนดผู้ใช้งาน" },
-  { key: "booking",   label: "🚗 จองคนขับรถ" },
-  { key: "moto",     label: "🏍️ จองรถจักรยานยนต์" },
+  // ── Report ──
+  { key: "salesoverview",   label: "📈 สรุปภาพรวม" },
+  { key: "mymotoreport",    label: "📋 รายงานลงทะเบียน MyMoto" },
+  { key: "mymotoregister",  label: "📝 บันทึกลงทะเบียน MyMoto" },
+  { key: "partgiveawayreport", label: "🎁 รายงานของแถม" },
+  // ── Sales ──
+  { key: "moto",       label: "🏍️ จองรถจักรยานยนต์" },
+  { key: "booking",    label: "🚗 จองคนขับรถ" },
+  { key: "pricequote", label: "🧮 คำนวณราคาขายรถ" },
+  { key: "stockcheck", label: "📦 เช็คสต๊อก" },
+  { key: "customer",   label: "🧑 บันทึกข้อมูลลูกค้า" },
+  { key: "deliveryfee", label: "🚚 บันทึกค่านำพา" },
+  { key: "pricemarkup", label: "➕ ราคาขายบวกเพิ่ม" },
+  { key: "receiptqr",  label: "🔳 พิมพ์ QR ออกใบเสร็จ" },
+  { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
+  { key: "retailsale", label: "🛒 บันทึกขายปลีก" },
+  // ── Spare Parts ──
+  { key: "spareorder", label: "🛠️ สั่งซื้ออะไหล่ HONDA" },
+  { key: "yamahaorder", label: "🛠️ สั่งซื้ออะไหล่ YAMAHA" },
+  { key: "outsideorder", label: "🛠️ สั่งซื้ออะไหล่นอกเงินมัดจำ" },
   { key: "fastmoving", label: "⚡ รายงานอะไหล่หมุนเร็ว" },
-  { key: "pettycash", label: "💰 เงินสดย่อย" },
+  { key: "claim",      label: "🔧 ระบบการเคลม" },
+  // ── Office Supplies (วัสดุสำนักงาน) ──
+  { key: "dashboard",  label: "📊 ภาพรวม (วัสดุ)" },
+  { key: "receive",    label: "📥 รับวัสดุ" },
+  { key: "issue",      label: "📤 เบิกวัสดุ" },
+  // ── Finance ──
+  { key: "pettycash",  label: "💰 เงินสดย่อย-ค่าน้ำมันรถใหม่" },
+  { key: "postage",    label: "📮 เงินสดย่อย-ค่าไปรษณีย์" },
+  { key: "pettycashgeneral",  label: "💵 เงินสดย่อย-ค่าใช้จ่ายทั่วไป" },
+  { key: "pettycashoffering", label: "🙏 เงินสดย่อย-ค่าของไหว้" },
+  { key: "payment",    label: "📱 รับชำระเงิน (QR PromptPay)" },
+  { key: "bankdeposit", label: "🏦 บันทึกรายการฝากเงิน" },
+  { key: "expensedoccheck", label: "📑 ตรวจสอบเอกสารค่าใช้จ่าย" },
+  // ── Vehicle Registration ──
+  { key: "vehicleregistration", label: "🔎 ค้นหาทะเบียนรถ" },
+  { key: "searchreceiptwork",   label: "🔎 ค้นหางานทะเบียนรับเรื่อง" },
+  // ── Service ──
+  { key: "yamaharepairreport", label: "📃 ใบแจ้งซ่อม YAMAHA" },
+  { key: "hondarepairreport",  label: "📃 ใบแจ้งซ่อม HONDA" },
+  { key: "partwithdrawal",     label: "📤 บันทึกการเบิกอะไหล่" },
+  { key: "servicehistory",     label: "🔎 ค้นหาประวัติงานบริการ" },
+  // ── จัดการผู้ใช้ ──
+  { key: "users",      label: "👤 กำหนดผู้ใช้งาน" },
 ];
 
 const DEFAULT_PAGES = ["dashboard", "receive", "issue"];
