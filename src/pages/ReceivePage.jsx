@@ -195,7 +195,7 @@ export default function ReceivePage({ currentUser }) {
   const [receiveSaved, setReceiveSaved] = useState(false); // บิลนี้ถูกบันทึกลง DB แล้ว
   const [showPayment, setShowPayment] = useState(false);
   const [payment, setPayment] = useState(null); // ข้อมูลการชำระที่บันทึกไว้แล้ว (ถ้ามี)
-  const [payForm, setPayForm] = useState({ pay_date: todayStr(), note: "" });
+  const [payForm, setPayForm] = useState({ pay_date: todayStr(), note: "", discount: "", vat: "", has_vat: false });
   const [payLines, setPayLines] = useState([{ method: "เงินสด", account_id: "", amount: "" }]);
   const [payingSave, setPayingSave] = useState(false);
   const [payMessage, setPayMessage] = useState("");
@@ -219,6 +219,20 @@ export default function ReceivePage({ currentUser }) {
     [payLines]
   );
 
+  // ปรับ ส่วนลด/VAT แล้วคำนวณ VAT 7% อัตโนมัติ (ถ้าเปิด)
+  function applyTotals(patch) {
+    setPayForm((f) => {
+      const m = { ...f, ...patch };
+      const disc = toNumber(m.discount);
+      if (m.has_vat && ("discount" in patch || "has_vat" in patch)) {
+        m.vat = (Math.max(0, grandTotal - disc) * 0.07).toFixed(2);
+      } else if (!m.has_vat && "has_vat" in patch) {
+        m.vat = "";
+      }
+      return m;
+    });
+  }
+
   // ตั้งค่าผู้ซื้ออัตโนมัติจาก branch ของ user
   function getDefaultBuyer() {
     const branch = (currentUser?.branch || "").trim();
@@ -241,6 +255,19 @@ export default function ReceivePage({ currentUser }) {
   const grandTotal = useMemo(() => {
     return items.reduce((sum, row) => sum + toNumber(row.amount), 0);
   }, [items]);
+
+  // ยอดที่ต้องจ่าย = ยอดบิล − ส่วนลด + VAT
+  const payGrand = useMemo(() => {
+    const disc = toNumber(payForm.discount);
+    const vat = toNumber(payForm.vat);
+    return Math.max(0, +(grandTotal - disc + vat).toFixed(2));
+  }, [grandTotal, payForm.discount, payForm.vat]);
+
+  // ถ้ามีช่องทางชำระช่องเดียว ให้เติมยอด = ยอดที่ต้องจ่าย อัตโนมัติเมื่อ ส่วนลด/VAT เปลี่ยน
+  useEffect(() => {
+    if (!showPayment || payment) return;
+    setPayLines((lines) => (lines.length === 1 ? [{ ...lines[0], amount: payGrand ? String(payGrand) : "" }] : lines));
+  }, [payGrand, showPayment, payment]);
 
   const filteredHistoryRows = useMemo(() => {
     const q = T(historyKeyword).toLowerCase();
@@ -352,7 +379,7 @@ export default function ReceivePage({ currentUser }) {
     setReceiveSaved(false);
     setShowPayment(false);
     setPayment(null);
-    setPayForm({ pay_date: todayStr(), note: "" });
+    setPayForm({ pay_date: todayStr(), note: "", discount: "", vat: "", has_vat: false });
     setPayLines([{ method: "เงินสด", account_id: "", amount: "" }]);
     setPayMessage("");
   }
@@ -818,13 +845,19 @@ export default function ReceivePage({ currentUser }) {
       const pay = rows[0] || null;
       setPayment(pay);
       if (pay) {
-        setPayForm({ pay_date: String(pay.pay_date || "").slice(0, 10) || todayStr(), note: pay.note || "" });
+        setPayForm({
+          pay_date: String(pay.pay_date || "").slice(0, 10) || todayStr(),
+          note: pay.note || "",
+          discount: pay.discount != null && pay.discount !== "" ? String(pay.discount) : "",
+          vat: pay.vat != null && pay.vat !== "" ? String(pay.vat) : "",
+          has_vat: toNumber(pay.vat) > 0,
+        });
         const methods = Array.isArray(pay.methods) ? pay.methods : [];
         if (methods.length) {
           setPayLines(methods.map((m) => ({ method: m.method || "เงินสด", account_id: m.account_id || "", amount: m.amount ?? "" })));
         }
       } else {
-        setPayForm({ pay_date: todayStr(), note: "" });
+        setPayForm({ pay_date: todayStr(), note: "", discount: "", vat: "", has_vat: false });
         setPayLines([{ method: "เงินสด", account_id: "", amount: grandTotal ? String(grandTotal) : "" }]);
       }
     } catch (e) {
@@ -869,6 +902,9 @@ export default function ReceivePage({ currentUser }) {
           vendor_name: header.vendor_name,
           buyer_name: header.buyerName,
           total_amount: grandTotal,
+          discount: toNumber(payForm.discount),
+          vat: toNumber(payForm.vat),
+          net_amount: payGrand,
           payments: lines,
           note: payForm.note,
           created_by: getCurrentUserName() || getCurrentUserId(),
@@ -904,7 +940,7 @@ export default function ReceivePage({ currentUser }) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setPayment(null);
-      setPayForm({ pay_date: todayStr(), note: "" });
+      setPayForm({ pay_date: todayStr(), note: "", discount: "", vat: "", has_vat: false });
       setPayLines([{ method: "เงินสด", account_id: "", amount: grandTotal ? String(grandTotal) : "" }]);
       setPayMessage("✅ ยกเลิกการชำระแล้ว");
     } catch (e) {
@@ -1284,6 +1320,13 @@ export default function ReceivePage({ currentUser }) {
                         <div><span style={{ color: "#64748b" }}>วันที่: </span><b>{payment.pay_date ? new Date(payment.pay_date).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-"}</b></div>
                         <div><span style={{ color: "#64748b" }}>รวมที่จ่าย: </span><b style={{ color: "#047857" }}>{formatNumber(payment.paid_amount)} บาท</b></div>
                       </div>
+                      {(toNumber(payment.discount) > 0 || toNumber(payment.vat) > 0) && (
+                        <div style={{ display: "flex", gap: 20, flexWrap: "wrap", fontSize: 13, color: "#475569", marginBottom: 10 }}>
+                          <div>ยอดบิล: <b>{formatNumber(payment.total_amount)}</b></div>
+                          <div>ส่วนลด: <b style={{ color: "#b91c1c" }}>{formatNumber(payment.discount)}</b></div>
+                          <div>VAT: <b>{formatNumber(payment.vat)}</b></div>
+                        </div>
+                      )}
                       <div style={{ border: "1px solid #e2e8f0", borderRadius: 6, overflow: "hidden" }}>
                         {(Array.isArray(payment.methods) ? payment.methods : []).map((p, i) => (
                           <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "7px 12px", borderTop: i ? "1px solid #f1f5f9" : "none", fontSize: 13 }}>
@@ -1301,14 +1344,32 @@ export default function ReceivePage({ currentUser }) {
                     </div>
                   ) : (
                     <div>
-                      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "end", marginBottom: 10 }}>
-                        <div style={{ minWidth: 160 }}>
+                      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end", marginBottom: 10 }}>
+                        <div style={{ minWidth: 140 }}>
                           <label style={styles.label}>วันที่ชำระ *</label>
                           <input type="date" style={styles.input} value={payForm.pay_date} onChange={(e) => setPayForm((f) => ({ ...f, pay_date: e.target.value }))} />
                         </div>
-                        <div style={{ minWidth: 160 }}>
+                        <div style={{ width: 120 }}>
                           <label style={styles.label}>ยอดบิลรวม</label>
-                          <div style={{ ...styles.input, background: "#f0f4ff", fontWeight: 700, color: "#072d6b", textAlign: "right" }}>{formatNumber(grandTotal)} บาท</div>
+                          <div style={{ ...styles.input, background: "#f8fafc", textAlign: "right" }}>{formatNumber(grandTotal)}</div>
+                        </div>
+                        <div style={{ width: 110 }}>
+                          <label style={styles.label}>ส่วนลด</label>
+                          <input type="number" style={{ ...styles.input, textAlign: "right" }} value={payForm.discount}
+                            onChange={(e) => applyTotals({ discount: e.target.value })} placeholder="0.00" />
+                        </div>
+                        <div style={{ width: 130 }}>
+                          <label style={styles.label}>
+                            <label style={{ display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontWeight: 700, fontSize: 12, color: "#64748b" }}>
+                              <input type="checkbox" checked={payForm.has_vat} onChange={(e) => applyTotals({ has_vat: e.target.checked })} /> VAT 7%
+                            </label>
+                          </label>
+                          <input type="number" style={{ ...styles.input, textAlign: "right" }} value={payForm.vat}
+                            onChange={(e) => setPayForm((f) => ({ ...f, vat: e.target.value }))} placeholder="0.00" />
+                        </div>
+                        <div style={{ width: 140 }}>
+                          <label style={styles.label}>ยอดที่ต้องจ่าย</label>
+                          <div style={{ ...styles.input, background: "#f0fdf4", fontWeight: 700, color: "#15803d", textAlign: "right" }}>{formatNumber(payGrand)}</div>
                         </div>
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 600, color: "#334155", marginBottom: 6 }}>ชำระโดย</div>
@@ -1338,8 +1399,8 @@ export default function ReceivePage({ currentUser }) {
                         <button type="button" onClick={addPayLine} style={{ ...styles.secondaryButton, padding: "6px 12px" }}>+ เพิ่มช่องทาง</button>
                         <div style={{ fontSize: 14 }}>
                           <span style={{ color: "#64748b" }}>รวมที่จ่าย: </span>
-                          <b style={{ color: payTotal === Number(grandTotal) ? "#047857" : "#d97706" }}>{formatNumber(payTotal)} บาท</b>
-                          {payTotal !== Number(grandTotal) && <span style={{ color: "#d97706", fontSize: 12, marginLeft: 6 }}>(ต่างจากยอดบิล)</span>}
+                          <b style={{ color: payTotal === Number(payGrand) ? "#047857" : "#d97706" }}>{formatNumber(payTotal)} บาท</b>
+                          {payTotal !== Number(payGrand) && <span style={{ color: "#d97706", fontSize: 12, marginLeft: 6 }}>(ต่างจากยอดที่ต้องจ่าย)</span>}
                         </div>
                       </div>
                       <div style={{ marginTop: 8 }}>
