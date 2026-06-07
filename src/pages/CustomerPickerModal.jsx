@@ -239,7 +239,7 @@ function QrTab({ currentUser, onSelect }) {
       if (r && (r.status === "filled" || r.status === "issued") && r.customer_name) {
         if (pollRef.current) clearInterval(pollRef.current);
         setStatus("✅ ลูกค้ากรอกข้อมูลแล้ว");
-        onSelect({ code: "", name: r.customer_name, phone: r.phone || "", address: r.address || "", tax_id: r.tax_id || "" });
+        onSelect({ code: "", name: r.customer_name, phone: r.phone || "", address: r.address || "", tax_id: r.tax_id || "", line_user_id: r.line_user_id || "" });
       } else if (!silent) {
         setStatus("⏳ ลูกค้ายังไม่ได้กรอกข้อมูล");
       }

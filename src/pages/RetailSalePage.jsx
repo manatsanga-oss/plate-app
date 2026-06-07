@@ -63,6 +63,7 @@ const blankForm = (currentUser) => ({
   customer_code: "",
   customer_name: "",
   customer_province: "",
+  customer_line_user_id: "",
   seller: currentUser?.username || currentUser?.name || "",
   note: "",
   finance_type: "none",
@@ -118,6 +119,9 @@ export default function RetailSalePage({ currentUser }) {
   const [payForm, setPayForm] = useState({ receipt_date: "", note: "" });
   const [payLines, setPayLines] = useState([{ method: "เงินสด", account_id: "", amount: "" }]);
   const [payingSave, setPayingSave] = useState(false);
+  const [lineSending, setLineSending] = useState(""); // "" | "sale" | "receipt"
+  const [actFile, setActFile] = useState(null);       // ไฟล์ PDF เอกสาร พ.ร.บ.
+  const [actUploading, setActUploading] = useState(false);
   const [bookings, setBookings] = useState([]);
   const [allDeposits, setAllDeposits] = useState([]);
   const [showBookingPicker, setShowBookingPicker] = useState(false);
@@ -518,6 +522,7 @@ export default function RetailSalePage({ currentUser }) {
       customer_code: c.code || f.customer_code,
       customer_name: c.name || f.customer_name,
       customer_province: c.province || f.customer_province,
+      customer_line_user_id: c.line_user_id || f.customer_line_user_id,
     }));
     setShowCustomer(false);
   }
@@ -635,6 +640,7 @@ export default function RetailSalePage({ currentUser }) {
         sale_date: form.sale_date,
         customer_code: form.customer_code,
         customer_name: form.customer_name,
+        line_user_id: form.customer_line_user_id,
         seller: form.seller,
         note: form.note,
         finance_type: form.finance_type,
@@ -866,6 +872,81 @@ export default function RetailSalePage({ currentUser }) {
       setMessage("✅ ยกเลิกการรับชำระแล้ว");
     } catch (e) { setMessage("ยกเลิกไม่สำเร็จ: " + (e.message || e)); }
     finally { setPayingSave(false); }
+  }
+
+  // ===== ส่งเข้า LINE (Flex) =====
+  async function sendSaleLine() {
+    const s = sale || {}, v = vehicle || {};
+    if (!s.sale_no) return;
+    setLineSending("sale"); setMessage("");
+    try {
+      await apiPost({
+        action: "send_sale_flex",
+        sale_no: s.sale_no, sale_date: s.sale_date,
+        customer_name: s.customer_name, customer_code: s.customer_code,
+        brand: v.brand || s.brand, model_name: v.model_name || s.model_name || s.model_code,
+        engine_no: v.engine_no || s.engine_no, chassis_no: v.chassis_no || s.chassis_no,
+        color: v.color_name || s.model_color, seller: s.seller,
+        car_price: s.car_price, discount: s.discount, total_payment: s.total_payment,
+        finance_type: s.finance_type, branch_name: s.branch_name || currentUser?.branch || "",
+        line_user_id: s.line_user_id || form.customer_line_user_id || "",
+        sent_by: currentUser?.name || currentUser?.username || "",
+      });
+      setMessage("✅ ส่งใบขายเข้า LINE แล้ว");
+    } catch (e) { setMessage("ส่งใบขายไม่สำเร็จ: " + (e.message || e)); }
+    finally { setLineSending(""); }
+  }
+
+  async function sendReceiptLine() {
+    const s = sale || {};
+    if (!s.sale_no || !isPaid) return;
+    setLineSending("receipt"); setMessage("");
+    try {
+      await apiPost({
+        action: "send_receipt_flex",
+        sale_no: s.sale_no, receipt_no: s.receipt_no, receipt_date: s.receipt_date,
+        customer_name: s.customer_name, paid_amount: s.paid_amount,
+        payment_methods: Array.isArray(s.payment_methods) ? s.payment_methods : [],
+        branch_name: s.branch_name || currentUser?.branch || "",
+        line_user_id: s.line_user_id || form.customer_line_user_id || "",
+        sent_by: currentUser?.name || currentUser?.username || "",
+      });
+      setMessage("✅ ส่งใบเสร็จเข้า LINE แล้ว");
+    } catch (e) { setMessage("ส่งใบเสร็จไม่สำเร็จ: " + (e.message || e)); }
+    finally { setLineSending(""); }
+  }
+
+  // อัปโหลด PDF เอกสาร พ.ร.บ. → เก็บใน DB → ส่ง Flex แจ้งเข้า LINE
+  async function uploadAndSendAct() {
+    const s = sale || {};
+    if (!actFile || !s.sale_no) return;
+    if (actFile.type !== "application/pdf") { setMessage("❌ ต้องเป็นไฟล์ PDF เท่านั้น"); return; }
+    if (actFile.size > 8 * 1024 * 1024) { setMessage("❌ ไฟล์ใหญ่เกิน 8 MB"); return; }
+    setActUploading(true); setMessage("");
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const r = new FileReader();
+        r.onload = (e) => resolve(String(e.target.result).split(",")[1] || "");
+        r.onerror = reject;
+        r.readAsDataURL(actFile);
+      });
+      await apiPost({
+        action: "upload_act_doc", sale_no: s.sale_no, filename: actFile.name,
+        pdf_base64: base64, uploaded_by: currentUser?.name || currentUser?.username || "",
+      });
+      await apiPost({
+        action: "send_act_flex", sale_no: s.sale_no,
+        customer_name: s.customer_name, branch_name: s.branch_name || currentUser?.branch || "",
+        line_user_id: s.line_user_id || form.customer_line_user_id || "",
+        sent_by: currentUser?.name || currentUser?.username || "",
+      });
+      setMessage("✅ อัปโหลด + แจ้งเอกสาร พ.ร.บ. เข้า LINE แล้ว");
+      setActFile(null);
+    } catch (e) {
+      setMessage("ส่งเอกสาร พ.ร.บ. ไม่สำเร็จ: " + (e.message || e));
+    } finally {
+      setActUploading(false);
+    }
   }
 
   function handlePrintReceipt() {
@@ -1162,11 +1243,26 @@ export default function RetailSalePage({ currentUser }) {
                   ) : (
                     <>
                       <button style={btn("#0369a1")} onClick={handlePrint}>🖨️ พิมพ์</button>
+                      <button style={btn("#06C755")} disabled={lineSending === "sale"} onClick={sendSaleLine}>{lineSending === "sale" ? "ส่ง…" : "📤 ส่งใบขาย LINE"}</button>
                       <button style={btn("#e03b3b")} disabled={saving} onClick={handleCancel}>{saving ? "…" : "✖ ยกเลิกใบขาย"}</button>
                     </>
                   )}
                   <button style={btn("#8aa0a6")} onClick={() => { reset(); setKeyword(""); }}>⤺ ปิด</button>
                 </div>
+
+                {!editable && sale?.sale_no && (
+                  <div style={{ marginTop: 12, padding: "10px 14px", background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: 10, display: "flex", gap: 10, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#6b21a8" }}>📄 เอกสาร พ.ร.บ. ลูกค้า:</span>
+                    <input type="file" accept="application/pdf" onChange={(e) => setActFile(e.target.files?.[0] || null)} style={{ fontSize: 12 }} />
+                    <button
+                      style={{ ...btn("#7c3aed"), opacity: (!actFile || actUploading) ? 0.6 : 1, cursor: (!actFile || actUploading) ? "not-allowed" : "pointer" }}
+                      disabled={!actFile || actUploading}
+                      onClick={uploadAndSendAct}
+                    >
+                      {actUploading ? "กำลังส่ง…" : "⬆️ อัปโหลด + แจ้ง พ.ร.บ. (LINE)"}
+                    </button>
+                  </div>
+                )}
               </CardBody>
             </Card>
           )}
@@ -1323,6 +1419,7 @@ export default function RetailSalePage({ currentUser }) {
                     {sale.payment_received_note && <div style={{ marginTop: 8, fontSize: 13, color: "#475569" }}>หมายเหตุ: {sale.payment_received_note}</div>}
                     <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 14 }}>
                       <button style={btn("#0369a1")} onClick={handlePrintReceipt}>🖨️ พิมพ์ใบเสร็จ</button>
+                      <button style={btn("#06C755")} disabled={lineSending === "receipt"} onClick={sendReceiptLine}>{lineSending === "receipt" ? "ส่ง…" : "🧾 ส่งใบเสร็จ LINE"}</button>
                       <button style={btn("#e03b3b")} disabled={payingSave} onClick={cancelPayment}>{payingSave ? "…" : "✖ ยกเลิกรับชำระ"}</button>
                     </div>
                   </div>

@@ -40,6 +40,7 @@ export default function DirectorLoanPage({ currentUser }) {
   // filter for history
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10); });
   const [dateTo, setDateTo] = useState(todayISO());
+  const [filterAcc, setFilterAcc] = useState(""); // กรองตามบัญชีลูกหนี้ ("" = ทุกบัญชี)
 
   async function loadAll() {
     setLoading(true); setMessage("");
@@ -90,6 +91,24 @@ export default function DirectorLoanPage({ currentUser }) {
     }
     return { count, current: opening + movement };
   }, [loanAccounts, directorTransfers, accById]);
+
+  // ยอดคงเหลือแยกรายบัญชี (opening + เคลื่อนไหวของบัญชีนั้น)
+  const perAccount = useMemo(() => {
+    const mvt = new Map();
+    for (const a of loanAccounts) mvt.set(String(a.account_id), 0);
+    for (const t of directorTransfers) {
+      const f = String(t.from_account_id), to = String(t.to_account_id), amt = num(t.amount);
+      if (mvt.has(to)) mvt.set(to, mvt.get(to) + amt);
+      if (mvt.has(f)) mvt.set(f, mvt.get(f) - amt);
+    }
+    return loanAccounts.map((a) => ({ ...a, current: num(a.opening_balance) + (mvt.get(String(a.account_id)) || 0) }));
+  }, [loanAccounts, directorTransfers]);
+
+  // ประวัติที่กรองตามบัญชีลูกหนี้ที่เลือก
+  const viewTransfers = useMemo(() => {
+    if (!filterAcc) return directorTransfers;
+    return directorTransfers.filter((t) => String(t.from_account_id) === String(filterAcc) || String(t.to_account_id) === String(filterAcc));
+  }, [directorTransfers, filterAcc]);
 
   function openPay() {
     if (loanAccounts.length === 0) { setMessage("⚠️ ยังไม่มีบัญชี \"ลูกหนี้\" — สร้างก่อนที่หน้าบัญชีธนาคาร"); return; }
@@ -156,13 +175,21 @@ export default function DirectorLoanPage({ currentUser }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 14 }}>
         <KPI label="📋 บัญชีลูกหนี้กรรมการ" value={String(totals.count)} unit="บัญชี" color="#0369a1" />
         <KPI label="💰 ลูกหนี้คงเหลือรวม" value={baht(totals.current)} unit="บาท" color={totals.current >= 0 ? "#dc2626" : "#16a34a"} />
+        {perAccount.map((a) => (
+          <KPI key={a.account_id} label={`👤 ${a.account_name}`} value={baht(a.current)} unit="บาท" color={a.current >= 0 ? "#dc2626" : "#16a34a"} />
+        ))}
       </div>
 
       {/* History */}
       <div style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
-          <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>📋 ประวัติการบันทึก ({directorTransfers.length})</h3>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+          <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>📋 ประวัติการบันทึก ({viewTransfers.length})</h3>
+          <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, flexWrap: "wrap" }}>
+            <span>บัญชี:</span>
+            <select value={filterAcc} onChange={(e) => setFilterAcc(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #d1d5db", borderRadius: 4 }}>
+              <option value="">ทุกบัญชี</option>
+              {loanAccounts.map((a) => <option key={a.account_id} value={a.account_id}>{a.account_name}</option>)}
+            </select>
             <span>ช่วงวันที่:</span>
             <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ padding: "4px 8px", border: "1px solid #d1d5db", borderRadius: 4 }} />
             <span>ถึง</span>
@@ -178,15 +205,16 @@ export default function DirectorLoanPage({ currentUser }) {
                 <th style={th}>ประเภท</th>
                 <th style={th}>บัญชีลูกหนี้</th>
                 <th style={th}>จ่ายออก / รับเข้า บัญชี</th>
-                <th style={{ ...th, textAlign: "right" }}>จำนวนเงิน</th>
+                <th style={{ ...th, textAlign: "right" }}>DR (เพิ่มลูกหนี้)</th>
+                <th style={{ ...th, textAlign: "right" }}>CR (ลดลูกหนี้)</th>
                 <th style={th}>หมายเหตุ</th>
                 <th style={{ ...th, textAlign: "center" }}>จัดการ</th>
               </tr>
             </thead>
             <tbody>
-              {loading ? (<tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>กำลังโหลด...</td></tr>)
-                : directorTransfers.length === 0 ? (<tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>ไม่มีรายการในช่วงนี้</td></tr>)
-                : directorTransfers.map((t) => {
+              {loading ? (<tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>กำลังโหลด...</td></tr>)
+                : viewTransfers.length === 0 ? (<tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#94a3b8" }}>ไม่มีรายการในช่วงนี้</td></tr>)
+                : viewTransfers.map((t) => {
                   const f = accById.get(String(t.from_account_id));
                   const to = accById.get(String(t.to_account_id));
                   const isPay = to?.account_type === RECEIVABLE_TYPE; // โอนเข้าลูกหนี้ = จ่าย
@@ -205,7 +233,8 @@ export default function DirectorLoanPage({ currentUser }) {
                       <td style={td}>{otherAcc?.account_name || `#${isPay ? t.from_account_id : t.to_account_id}`}<br />
                         <span style={{ fontSize: 11, color: "#64748b" }}>{otherAcc?.account_type || "-"}</span>
                       </td>
-                      <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{baht(t.amount)}</td>
+                      <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{isPay ? baht(t.amount) : "-"}</td>
+                      <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#16a34a" }}>{!isPay ? baht(t.amount) : "-"}</td>
                       <td style={{ ...td, fontSize: 12, color: "#475569" }}>{t.note || "-"}</td>
                       <td style={{ ...td, textAlign: "center" }}>
                         <button onClick={() => cancelTransfer(t)} style={{ ...btnSm, background: "#ef4444" }}>✕ ยกเลิก</button>
@@ -214,6 +243,23 @@ export default function DirectorLoanPage({ currentUser }) {
                   );
                 })}
             </tbody>
+            {viewTransfers.length > 0 && (() => {
+              let drSum = 0, crSum = 0;
+              for (const t of viewTransfers) {
+                const isPay = accById.get(String(t.to_account_id))?.account_type === RECEIVABLE_TYPE;
+                if (isPay) drSum += num(t.amount); else crSum += num(t.amount);
+              }
+              return (
+                <tfoot>
+                  <tr style={{ background: "#f1f5f9", fontWeight: 700 }}>
+                    <td style={td} colSpan={5}>รวม{filterAcc ? " (เฉพาะบัญชีที่เลือก)" : ""} · สุทธิ {baht(drSum - crSum)}</td>
+                    <td style={{ ...td, textAlign: "right", color: "#dc2626" }}>{baht(drSum)}</td>
+                    <td style={{ ...td, textAlign: "right", color: "#16a34a" }}>{baht(crSum)}</td>
+                    <td style={td} colSpan={2}></td>
+                  </tr>
+                </tfoot>
+              );
+            })()}
           </table>
         </div>
       </div>
@@ -233,15 +279,17 @@ export default function DirectorLoanPage({ currentUser }) {
                 <th style={th}>เลขที่บัญชี</th>
                 <th style={{ ...th, textAlign: "right" }}>ยอดยกมา</th>
                 <th style={th}>วันที่ยกมา</th>
+                <th style={{ ...th, textAlign: "right" }}>คงเหลือปัจจุบัน</th>
               </tr>
             </thead>
             <tbody>
-              {loanAccounts.map((a) => (
+              {perAccount.map((a) => (
                 <tr key={a.account_id}>
                   <td style={{ ...td, fontWeight: 600 }}>{a.account_name}</td>
                   <td style={td}>{a.account_no}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{baht(a.opening_balance)}</td>
                   <td style={td}>{thaiDate(a.opening_date)}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 700, color: a.current >= 0 ? "#dc2626" : "#16a34a" }}>{baht(a.current)}</td>
                 </tr>
               ))}
             </tbody>
