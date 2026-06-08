@@ -14,6 +14,21 @@ import CustomerPickerModal from "./CustomerPickerModal";
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+
+// หัวกระดาษใบขาย (hardcode) — แก้ข้อความ/ใส่ลิงก์โลโก้ได้ที่นี่
+const LETTERHEAD = {
+  HONDA: {
+    name: "บริษัท ป.เปามอเตอร์เซอร์วิส จำกัด - สำนักงานใหญ่",
+    addr: "189-191 ม.7 ต.ลำไทร อ.วังน้อย จ.พระนครศรีอยุธยา 13170",
+    tel: "โทรศัพท์ : (035)271146-7   แฟกซ์ : (035) 272613",
+    tax: "เลขประจำตัวผู้เสียภาษีอากร : 0145546000707   สำนักงานใหญ่",
+    logo: "", // วางลิงก์รูปโลโก้ HONDA ได้ (เว้นว่าง = แสดงชื่อยี่ห้อ)
+  },
+  YAMAHA: {
+    name: "หจก. สิงห์ชัย สยามยนต์",
+    addr: "", tel: "", tax: "", logo: "",
+  },
+};
 const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
 const STOCK_SEARCH_API = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-search";
 
@@ -64,6 +79,8 @@ const blankForm = (currentUser) => ({
   customer_name: "",
   customer_province: "",
   customer_line_user_id: "",
+  customer_address: "",
+  customer_tax_id: "",
   seller: currentUser?.username || currentUser?.name || "",
   note: "",
   finance_type: "none",
@@ -523,6 +540,8 @@ export default function RetailSalePage({ currentUser }) {
       customer_name: c.name || f.customer_name,
       customer_province: c.province || f.customer_province,
       customer_line_user_id: c.line_user_id || f.customer_line_user_id,
+      customer_address: c.address || f.customer_address,
+      customer_tax_id: c.tax_id || f.customer_tax_id,
     }));
     setShowCustomer(false);
   }
@@ -640,6 +659,8 @@ export default function RetailSalePage({ currentUser }) {
         sale_date: form.sale_date,
         customer_code: form.customer_code,
         customer_name: form.customer_name,
+        customer_address: form.customer_address,
+        customer_tax_id: form.customer_tax_id,
         line_user_id: form.customer_line_user_id,
         seller: form.seller,
         note: form.note,
@@ -650,6 +671,7 @@ export default function RetailSalePage({ currentUser }) {
         other_sale: calc.otherSale,
         down_payment: calc.down,
         booking_deposit: calc.booking,
+        deposit_no: form.deposit_no,
         total_payment: calc.totalPayment,
         payment_status: "unpaid",
         tax_invoice_status: "none",
@@ -702,106 +724,111 @@ export default function RetailSalePage({ currentUser }) {
     }
   }
 
-  function handlePrint() {
+  function buildSaleHtml() {
     const s = sale || {};
     const v = vehicle || {};
     const money = (n) => (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const isFin = isFinance(s.finance_type);
     const colorTxt = v.color_name || v.model_color || "-";
-    const row = (l, val) => `<tr><td class="lbl">${l}</td><td class="val">${esc(val || "-")}</td></tr>`;
-    const money2 = (l, n) => `<tr><td class="lbl">${l}</td><td class="val num">${money(n)} บาท</td></tr>`;
-    const finBlock = isFin ? `
-      <h3>จัดไฟแนนซ์</h3>
-      <table>
-        ${row("บริษัทไฟแนนซ์", s.finance_company_name)}
-        ${money2("ยอดจัดไฟแนนซ์", s.finance_amount)}
-        ${row("จำนวนงวด", (s.installments || "-") + " งวด")}
-        ${money2("ยอดผ่อน/งวด", s.installment_amount)}
-      </table>` : "";
-    // ของแถมที่ลูกค้าได้รับ (จากที่เลือกไว้) — บริการ + สินค้า
+    const lh = LETTERHEAD[String(v.brand || "").toUpperCase().indexOf("YAMAHA") >= 0 ? "YAMAHA" : "HONDA"] || LETTERHEAD.HONDA;
+    const dash = (n) => (Number(n) > 0 ? money(n) : "-");
+    const modelLine = [v.model_code, v.model_type,
+      (v.model_color ? v.model_color + (colorTxt && colorTxt !== "-" ? "(" + colorTxt + ")" : "") : colorTxt),
+      (v.model_series || "")].filter((x) => x && x !== "-").join(" / ");
+    // ของแถม (บริการ + สินค้า) พร้อมรหัส
     const givItems = [];
     for (const g of displayGiveaways) {
       const on = g.__merged ? g.ids.every((id) => selectedGiveaways[id]) : !!selectedGiveaways[g.expense_id];
-      if (on) givItems.push({ name: g.expense_name, amount: Number(g.amount || 0) });
+      if (on) givItems.push({ code: g.expense_code || g.code || "", name: g.expense_name, amount: Number(g.amount || 0) });
     }
     const prodItems = (productGiveaways || []).filter((g) => selectedProductGiveaways[g.id])
-      .map((g) => ({ name: g.fmp_product_name || g.part_name || g.part_code || "-", qty: Number(g.qty || 1) }));
+      .map((g) => ({ code: g.part_code || g.fmp_product_code || "", name: g.fmp_product_name || g.part_name || g.part_code || "-", qty: Number(g.qty || 1) }));
     const givTotal = givItems.reduce((a, b) => a + b.amount, 0);
-    const givBlock = (givItems.length || prodItems.length) ? `
-      <h3>ของแถม / รายการที่ลูกค้าได้รับ</h3>
-      <table>
-        ${givItems.map((it) => `<tr><td class="val" style="width:60%">${esc(it.name)}</td><td class="val num">${money(it.amount)} บาท</td></tr>`).join("")}
-        ${prodItems.map((it) => `<tr><td class="val" style="width:60%">${esc(it.name)}</td><td class="val num">× ${it.qty}</td></tr>`).join("")}
-        ${givTotal > 0 ? `<tr><td class="lbl" style="font-weight:700;color:#1f2937">รวมมูลค่าของแถม</td><td class="val num" style="font-weight:700">${money(givTotal)} บาท</td></tr>` : ""}
-      </table>` : "";
-    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8">
-      <title>ใบขาย ${esc(s.sale_no)}</title>
-      <style>
-        * { font-family: "Sarabun","TH Sarabun New",Tahoma,sans-serif; box-sizing: border-box; }
-        body { margin: 24px; color: #1f2937; font-size: 14px; }
-        h1 { font-size: 20px; margin: 0 0 2px; }
-        h3 { font-size: 15px; margin: 16px 0 6px; border-bottom: 2px solid #1e40af; color: #1e40af; padding-bottom: 3px; }
-        .head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #111827; padding-bottom: 8px; }
-        .docno { text-align: right; font-size: 13px; }
-        .docno b { font-size: 16px; color: #b91c1c; }
-        table { width: 100%; border-collapse: collapse; }
-        td { padding: 3px 6px; vertical-align: top; }
-        td.lbl { color: #6b7280; width: 38%; }
-        td.val { font-weight: 600; }
-        td.num { text-align: right; font-variant-numeric: tabular-nums; }
-        .grid { display: flex; gap: 24px; }
-        .grid > div { flex: 1; }
-        .foot { margin-top: 40px; display: flex; justify-content: space-between; }
-        .sign { text-align: center; width: 45%; }
-        .sign .line { margin-top: 40px; border-top: 1px dotted #6b7280; padding-top: 4px; color: #6b7280; }
-        @media print { body { margin: 12mm; } }
-      </style></head><body>
-      <div class="head">
-        <div><h1>ใบขายรถจักรยานยนต์</h1><div style="color:#6b7280">${esc(v.brand)}</div></div>
-        <div class="docno">เลขที่ <b>${esc(s.sale_no)}</b><br>วันที่ขาย ${esc(thaiDate(s.sale_date))}</div>
-      </div>
-      <div class="grid">
-        <div>
-          <h3>ข้อมูลรถ</h3>
-          <table>
-            ${row("ยี่ห้อ", v.brand)}
-            ${row("รุ่น", v.model_name)}
-            ${row("แบบ", v.model_code)}
-            ${row("type", v.model_type)}
-            ${row("สี", colorTxt)}
-            ${row("หมายเลขเครื่อง", v.engine_no)}
-            ${row("หมายเลขตัวถัง", v.chassis_no)}
-          </table>
-        </div>
-        <div>
-          <h3>ลูกค้า / ผู้ขาย</h3>
-          <table>
-            ${row("รหัสลูกค้า", s.customer_code)}
-            ${row("ชื่อลูกค้า", s.customer_name)}
-            ${row("ผู้ขาย", s.seller)}
-            ${row("การชำระ", isFin ? "จัดไฟแนนซ์" : "เงินสด / ไม่จัดไฟแนนซ์")}
-          </table>
-        </div>
-      </div>
-      <h3>ราคา / การชำระเงิน</h3>
-      <table>
-        ${money2("ราคารถ", s.car_price)}
-        ${money2("ส่วนลด", s.discount)}
-        ${money2("ราคารถสุทธิ", s.net_car_price)}
-        ${money2("ยอดขายอื่น ๆ", s.other_sale)}
-        ${money2("เงินดาวน์", s.down_payment)}
-        ${money2("เงินจอง", s.booking_deposit)}
-        ${money2("รวมยอดชำระ", s.total_payment)}
-      </table>
-      ${finBlock}
-      ${givBlock}
-      ${s.note ? `<h3>หมายเหตุ</h3><div>${esc(s.note)}</div>` : ""}
-      <div class="foot">
-        <div class="sign"><div class="line">ผู้ขาย</div></div>
-        <div class="sign"><div class="line">ลูกค้า</div></div>
-      </div>
-    </body></html>`;
+    const gRow = (code, name, qty, price, amt) => `<tr><td>${esc(code)}</td><td>${esc(name)}</td><td class="c">${qty}</td><td class="r">${price}</td><td class="r">${amt}</td></tr>`;
+    let gRows = "";
+    for (const it of givItems) gRows += gRow(it.code, it.name, 1, "-", it.amount ? money(it.amount) : "-");
+    for (const it of prodItems) gRows += gRow(it.code, it.name, it.qty, "-", "-");
+
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ใบขาย ${esc(s.sale_no)}</title>
+<style>
+*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
+body{margin:0;padding:14px;color:#222;font-size:13px;background:#fff}
+.wrap{max-width:800px;margin:0 auto}
+.hdr{display:flex;align-items:flex-start;gap:12px;margin-bottom:6px}
+.hdr .logo{width:120px;text-align:center;flex:none}
+.hdr .logo img{max-width:120px;max-height:72px}
+.hdr .logo .ph{color:#e10600;font-weight:800;font-size:20px;border:2px solid #e10600;border-radius:6px;padding:8px 4px}
+.hdr .co{flex:1}
+.hdr .co .nm{font-weight:700;font-size:15px;color:#111}
+.hdr .co div{font-size:12px;color:#555;margin-top:1px}
+.hdr .ttl{text-align:center;width:150px;flex:none}
+.hdr .ttl .b{font-size:24px;font-weight:800;line-height:1}
+.hdr .ttl .o{color:#c2185b;font-weight:700;margin-top:3px}
+table.bx{width:100%;border-collapse:collapse;margin-top:6px}
+table.bx>tbody>tr>td{border:1px solid #c2185b;padding:5px 8px;font-size:12px;vertical-align:top}
+.it{width:100%;border-collapse:collapse}.it td{border:1px solid #c2185b;padding:4px 8px;font-size:12px}
+.sec{background:#fde7f0;color:#a01049;font-weight:700;text-align:center}
+.lbl{color:#a01049;font-weight:600}.r{text-align:right}.c{text-align:center}.val{font-weight:600}
+.foot{display:flex;justify-content:space-between;margin-top:46px;padding:0 30px}
+.sg{text-align:center;width:40%;border-top:1px dotted #888;padding-top:4px;color:#666}
+@media print{body{padding:0}}
+</style></head><body><div class="wrap">
+
+<div class="hdr">
+  <div class="logo">${lh.logo ? `<img src="${esc(lh.logo)}">` : `<div class="ph">${esc(v.brand || "")}</div>`}</div>
+  <div class="co"><div class="nm">${esc(lh.name)}</div><div>${esc(lh.addr)}</div><div>${esc(lh.tel)}</div><div>${esc(lh.tax)}</div></div>
+  <div class="ttl"><div class="b">ใบขาย</div><div>Sales Order</div><div class="o">(ต้นฉบับ)</div></div>
+</div>
+
+<table class="bx"><tr>
+  <td style="width:62%"><div class="sec" style="margin:-5px -8px 5px;padding:3px">ชื่อลูกค้า/ที่อยู่</div>
+    <div class="val">${esc(s.customer_name)}${s.customer_code ? ` <span style="color:#888;font-weight:400">(รหัส ${esc(s.customer_code)})</span>` : ""}</div>
+    <div>${esc(s.customer_address || "")}</div>
+    <div>${s.customer_tax_id ? "เลขประจำตัวผู้เสียภาษี : " + esc(s.customer_tax_id) : ""}</div>
+  </td>
+  <td style="padding:0"><table class="it" style="border:none">
+    <tr><td class="sec">เลขที่ใบขาย</td><td class="sec">วันที่ขาย</td></tr>
+    <tr><td class="c val">${esc(s.sale_no)}</td><td class="c">${esc(thaiDate(s.sale_date))}</td></tr>
+    <tr><td class="sec">เลขที่ใบจอง</td><td class="sec">วันที่จอง</td></tr>
+    <tr><td class="c">${esc(s.booking_no || "")}</td><td class="c">${s.booking_date ? esc(thaiDate(s.booking_date)) : ""}</td></tr>
+  </table></td>
+</tr></table>
+
+<table class="bx"><tr>
+  <td style="width:62%;padding:0"><table class="it" style="border:none">
+    <tr><td class="sec">รุ่นรถ</td></tr>
+    <tr><td class="c val">${esc(modelLine)}</td></tr>
+    <tr><td class="sec" style="width:50%">หมายเลขตัวถัง</td><td class="sec">หมายเลขเครื่อง</td></tr>
+    <tr><td class="c val">${esc(v.chassis_no)}</td><td class="c val">${esc(v.engine_no)}</td></tr>
+  </table></td>
+  <td style="padding:0"><table class="it" style="border:none">
+    <tr><td class="lbl">ราคารถ</td><td class="r val">${money(s.car_price)}</td></tr>
+    <tr><td class="lbl">ส่วนลด</td><td class="r">${dash(s.discount)}</td></tr>
+    <tr><td class="lbl">ราคารถสุทธิ</td><td class="r val">${money(s.net_car_price || s.car_price)}</td></tr>
+    <tr><td class="lbl">เงินจอง</td><td class="r">${dash(s.booking_deposit)}</td></tr>
+  </table></td>
+</tr></table>
+
+${isFin ? `<table class="bx">
+  <tr><td colspan="5" class="sec">ไฟแนนซ์ : ${esc(s.finance_company_name || "-")}</td></tr>
+  <tr><td class="sec">ยอดจัดไฟแนนซ์</td><td class="sec">เงินดาวน์</td><td class="sec">อัตราดอกเบี้ย</td><td class="sec">จำนวนงวด</td><td class="sec">ยอดผ่อน/งวด</td></tr>
+  <tr><td class="r val">${money(s.finance_amount)}</td><td class="r val">${money(s.down_payment)}</td><td class="c">${esc(s.interest_rate || "-")}</td><td class="c">${esc(s.installments || "-")}</td><td class="r val">${money(s.installment_amount)}</td></tr>
+</table>` : ""}
+
+<table class="bx">
+  <tr><td class="sec" style="width:18%">รหัสสินค้า</td><td class="sec">รายละเอียด</td><td class="sec" style="width:9%">จำนวน</td><td class="sec" style="width:13%">ราคาหน่วย</td><td class="sec" style="width:14%">จำนวนเงิน</td></tr>
+  ${gRows ? `<tr><td colspan="5" class="lbl" style="text-decoration:underline">รายการแถม</td></tr>${gRows}` : `<tr><td colspan="5" class="c" style="color:#999">- ไม่มีของแถม -</td></tr>`}
+  ${givTotal > 0 ? `<tr><td colspan="4" class="r lbl">รวมมูลค่าของแถม</td><td class="r val">${money(givTotal)}</td></tr>` : ""}
+</table>
+${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ: ${esc(s.note)}</div>` : ""}
+<div class="foot"><div class="sg">ผู้ขาย</div><div class="sg">ลูกค้า / ผู้ซื้อ</div></div>
+</div></body></html>`;
+    return html;
+  }
+
+  function handlePrint() {
+    const html = buildSaleHtml();
     const w = window.open("", "_blank", "width=820,height=920");
     if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup อาจถูกบล็อก)"); return; }
     w.document.write(html);
@@ -890,6 +917,7 @@ export default function RetailSalePage({ currentUser }) {
         car_price: s.car_price, discount: s.discount, total_payment: s.total_payment,
         finance_type: s.finance_type, branch_name: s.branch_name || currentUser?.branch || "",
         line_user_id: s.line_user_id || form.customer_line_user_id || "",
+        doc_html: buildSaleHtml(),
         sent_by: currentUser?.name || currentUser?.username || "",
       });
       setMessage("✅ ส่งใบขายเข้า LINE แล้ว");
@@ -909,6 +937,7 @@ export default function RetailSalePage({ currentUser }) {
         payment_methods: Array.isArray(s.payment_methods) ? s.payment_methods : [],
         branch_name: s.branch_name || currentUser?.branch || "",
         line_user_id: s.line_user_id || form.customer_line_user_id || "",
+        doc_html: buildReceiptHtml(),
         sent_by: currentUser?.name || currentUser?.username || "",
       });
       setMessage("✅ ส่งใบเสร็จเข้า LINE แล้ว");
@@ -949,29 +978,71 @@ export default function RetailSalePage({ currentUser }) {
     }
   }
 
-  function handlePrintReceipt() {
+  function buildReceiptHtml() {
     const s = sale || {}, v = vehicle || {};
     const money = (n) => (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const lh = LETTERHEAD[String(v.brand || "").toUpperCase().indexOf("YAMAHA") >= 0 ? "YAMAHA" : "HONDA"] || LETTERHEAD.HONDA;
+    const carLine = [v.model_name || s.model_name, v.model_code || s.model_code, v.engine_no || s.engine_no].filter((x) => x && x !== "-").join(" / ");
     const lines = Array.isArray(s.payment_methods) ? s.payment_methods : [];
-    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบเสร็จ ${esc(s.receipt_no)}</title>
-      <style>*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}body{margin:24px;color:#1f2937;font-size:14px}
-      h1{font-size:20px;margin:0 0 2px}.head{display:flex;justify-content:space-between;border-bottom:2px solid #111827;padding-bottom:8px}
-      .docno{text-align:right}.docno b{font-size:16px;color:#047857}h3{font-size:15px;margin:16px 0 6px;border-bottom:2px solid #047857;color:#047857;padding-bottom:3px}
-      table{width:100%;border-collapse:collapse}td{padding:3px 6px}td.lbl{color:#6b7280;width:38%}td.val{font-weight:600}.num{text-align:right}
-      .tot{font-size:18px;font-weight:800;color:#047857}.foot{margin-top:40px;display:flex;justify-content:space-between}.sign{text-align:center;width:45%}.sign .line{margin-top:40px;border-top:1px dotted #6b7280;padding-top:4px;color:#6b7280}
-      @media print{body{margin:12mm}}</style></head><body>
-      <div class="head"><div><h1>ใบเสร็จรับเงิน</h1><div style="color:#6b7280">${esc(v.brand)} · อ้างอิงใบขาย ${esc(s.sale_no)}</div></div>
-        <div class="docno">เลขที่ <b>${esc(s.receipt_no) || "-"}</b><br>วันที่ ${esc(thaiDate(s.receipt_date))}</div></div>
-      <h3>ลูกค้า</h3><table>${row2("รหัสลูกค้า", s.customer_code)}${row2("ชื่อลูกค้า", s.customer_name)}${row2("รถ", (v.model_name || "") + " " + (v.model_code || "") + " / " + (v.engine_no || "-"))}</table>
-      <h3>ช่องทางการรับชำระ</h3><table>
-        ${lines.map((p) => `<tr><td class="val">${esc(p.method)}${p.account_name ? ` · ${esc(p.account_name)}` : ""}</td><td class="val num">${money(p.amount)} บาท</td></tr>`).join("") || `<tr><td colspan="2" style="color:#9ca3af">-</td></tr>`}
-      </table>
-      <table style="margin-top:10px;border-top:2px solid #047857"><tr><td class="lbl" style="font-weight:700;color:#1f2937">รวมรับชำระ</td><td class="num tot">${money(s.paid_amount)} บาท</td></tr></table>
-      ${s.payment_received_note ? `<h3>หมายเหตุ</h3><div>${esc(s.payment_received_note)}</div>` : ""}
-      <div class="foot"><div class="sign"><div class="line">ผู้รับเงิน</div></div><div class="sign"><div class="line">ผู้ชำระเงิน</div></div></div>
-    </body></html>`;
-    function row2(l, val) { return `<tr><td class="lbl">${l}</td><td class="val">${esc(val || "-")}</td></tr>`; }
+    let iRows = "", i = 0;
+    for (const p of lines) { i++; iRows += `<tr><td class="c">${i}</td><td>${esc(p.method)}${p.account_name ? " · " + esc(p.account_name) : ""}</td><td class="c">1</td><td class="r">${money(p.amount)}</td><td class="r">${money(p.amount)}</td></tr>`; }
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ใบเสร็จ ${esc(s.receipt_no)}</title>
+<style>
+*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
+body{margin:0;padding:14px;color:#222;font-size:13px;background:#fff}
+.wrap{max-width:800px;margin:0 auto}
+.hdr{display:flex;align-items:flex-start;gap:12px;margin-bottom:6px}
+.hdr .logo{width:120px;text-align:center;flex:none}.hdr .logo img{max-width:120px;max-height:72px}
+.hdr .logo .ph{color:#e10600;font-weight:800;font-size:20px;border:2px solid #e10600;border-radius:6px;padding:8px 4px}
+.hdr .co{flex:1}.hdr .co .nm{font-weight:700;font-size:15px;color:#111}.hdr .co div{font-size:12px;color:#555;margin-top:1px}
+.hdr .ttl{text-align:center;width:160px;flex:none}.hdr .ttl .b{font-size:22px;font-weight:800;line-height:1}.hdr .ttl .o{color:#047857;font-weight:700;margin-top:3px}
+table.bx{width:100%;border-collapse:collapse;margin-top:6px}
+table.bx>tbody>tr>td{border:1px solid #047857;padding:5px 8px;font-size:12px;vertical-align:top}
+.it{width:100%;border-collapse:collapse}.it td{border:1px solid #047857;padding:4px 8px;font-size:12px}
+.sec{background:#e7f6ef;color:#0a6e4b;font-weight:700;text-align:center}
+.lbl{color:#0a6e4b;font-weight:600}.r{text-align:right}.c{text-align:center}.val{font-weight:600}
+.tot{font-size:15px;font-weight:800;color:#047857}
+.foot{display:flex;justify-content:space-between;margin-top:46px;padding:0 30px}
+.sg{text-align:center;width:40%;border-top:1px dotted #888;padding-top:4px;color:#666}
+@media print{body{padding:0}}
+</style></head><body><div class="wrap">
+
+<div class="hdr">
+  <div class="logo">${lh.logo ? `<img src="${esc(lh.logo)}">` : `<div class="ph">${esc(v.brand || "")}</div>`}</div>
+  <div class="co"><div class="nm">${esc(lh.name)}</div><div>${esc(lh.addr)}</div><div>${esc(lh.tel)}</div><div>${esc(lh.tax)}</div></div>
+  <div class="ttl"><div class="b">ใบเสร็จรับเงิน</div><div>Receipt</div><div class="o">(ต้นฉบับ)</div></div>
+</div>
+
+<table class="bx"><tr>
+  <td style="width:62%"><div class="sec" style="margin:-5px -8px 5px;padding:3px">ชื่อลูกค้า/ที่อยู่</div>
+    <div class="val">${esc(s.customer_name)}${s.customer_code ? ` <span style="color:#888;font-weight:400">(รหัส ${esc(s.customer_code)})</span>` : ""}</div>
+    <div>${esc(s.customer_address || "")}</div>
+    <div>${s.customer_tax_id ? "เลขประจำตัวผู้เสียภาษี : " + esc(s.customer_tax_id) : ""}</div>
+  </td>
+  <td style="padding:0"><table class="it" style="border:none">
+    <tr><td class="sec">เลขที่ใบเสร็จ</td><td class="sec">วันที่</td></tr>
+    <tr><td class="c val">${esc(s.receipt_no) || "-"}</td><td class="c">${esc(thaiDate(s.receipt_date))}</td></tr>
+    <tr><td class="sec">อ้างอิงใบขาย</td><td class="sec">วันที่ขาย</td></tr>
+    <tr><td class="c">${esc(s.sale_no)}</td><td class="c">${esc(thaiDate(s.sale_date))}</td></tr>
+  </table></td>
+</tr></table>
+
+<table class="bx"><tr><td><span class="lbl">รถ : </span>${esc(carLine)}${(v.chassis_no || s.chassis_no) ? ` &nbsp; เลขถัง ${esc(v.chassis_no || s.chassis_no)}` : ""}</td></tr></table>
+
+<table class="bx">
+  <tr><td class="sec" style="width:8%">ลำดับ</td><td class="sec">รายละเอียด / ช่องทางรับชำระ</td><td class="sec" style="width:9%">จำนวน</td><td class="sec" style="width:15%">ราคา/หน่วย</td><td class="sec" style="width:15%">จำนวนเงิน</td></tr>
+  ${iRows || `<tr><td colspan="5" class="c" style="color:#999">-</td></tr>`}
+  <tr><td colspan="4" class="r tot">รวมรับชำระ</td><td class="r tot">${money(s.paid_amount)} บาท</td></tr>
+</table>
+${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ: ${esc(s.payment_received_note)}</div>` : ""}
+<div class="foot"><div class="sg">ผู้รับเงิน</div><div class="sg">ผู้ชำระเงิน</div></div>
+</div></body></html>`;
+    return html;
+  }
+
+  function handlePrintReceipt() {
+    const html = buildReceiptHtml();
     const w = window.open("", "_blank", "width=820,height=900");
     if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup ถูกบล็อก)"); return; }
     w.document.write(html); w.document.close(); w.focus();
@@ -984,6 +1055,17 @@ export default function RetailSalePage({ currentUser }) {
         <h2 style={{ margin: 0, fontSize: 26, color: "#333" }}>ขายปลีก</h2>
         <div style={{ color: "#9aa0a6", fontSize: 14 }}>ขายรถ &nbsp;&gt;&nbsp; การขาย &nbsp;&gt;&nbsp; ขายปลีก</div>
       </div>
+
+      {/* ข้อมูลลูกค้าซ่อน สำหรับ userscript ดึงไป autofill หน้า Cosmos ตรวจสอบประวัติลูกค้า */}
+      {sale && (
+        <div
+          id="retail-cosmos"
+          style={{ display: "none" }}
+          data-fullname={sale.customer_name || ""}
+          data-idcard={sale.customer_tax_id || ""}
+          data-code={sale.customer_code || ""}
+        />
+      )}
 
       <div style={{ position: "relative", marginBottom: 14, maxWidth: 620 }}>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>

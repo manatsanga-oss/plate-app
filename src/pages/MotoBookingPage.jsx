@@ -151,6 +151,17 @@ export default function MotoBookingPage({ currentUser }) {
       (Array.isArray(data) ? data : []).forEach(s => {
         if (s.invoice_no) map[s.invoice_no] = { sale_date: s.sale_date, customer_name: s.customer_name };
       });
+      // + ใบขายปลีก (retail_sales / MCSA) เพื่อแสดงชื่อผู้ซื้อ+วันที่ขายจริงในหน้าจอง
+      try {
+        const r2 = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_retail_sales" }),
+        });
+        const rs = await r2.json();
+        (Array.isArray(rs) ? rs : []).forEach(s => {
+          if (s.invoice_no) map[s.invoice_no] = { sale_date: s.sale_date, customer_name: s.customer_name };
+        });
+      } catch { /* ignore retail merge */ }
       setSalesMap(map);
     } catch { /* ignore */ }
   }
@@ -773,10 +784,14 @@ export default function MotoBookingPage({ currentUser }) {
                   {filterStatus === "ขาย" && (() => {
                     const sale = b.invoice_no ? salesMap[b.invoice_no] : null;
                     if (!b.invoice_no) return <><td>-</td><td>-</td></>;
-                    if (!sale) return <><td colSpan={2} style={{ color: "#ef4444", fontSize: 12 }}>เลขที่ใบขายไม่ถูกต้อง</td></>;
+                    // ใบขายปลีก (MCSA) ออกเลขอัตโนมัติ = ถูกต้องเสมอ แต่ไม่อยู่ใน moto_sales -> ใช้ข้อมูลจาก booking เอง
+                    const isRetail = /MCSA/i.test(b.invoice_no);
+                    if (!sale && !isRetail) return <><td colSpan={2} style={{ color: "#ef4444", fontSize: 12 }}>เลขที่ใบขายไม่ถูกต้อง</td></>;
+                    const sDate = sale?.sale_date || b.sold_date;
+                    const sName = sale?.customer_name || b.customer_name;
                     return <>
-                      <td style={{ whiteSpace: "nowrap" }}>{sale.sale_date ? new Date(sale.sale_date).toLocaleDateString("th-TH") : "-"}</td>
-                      <td>{sale.customer_name || "-"}</td>
+                      <td style={{ whiteSpace: "nowrap" }}>{sDate ? new Date(sDate).toLocaleDateString("th-TH") : "-"}</td>
+                      <td>{sName || "-"}</td>
                     </>;
                   })()}
                   {filterStatus === "ยกเลิก" && (() => {

@@ -207,8 +207,8 @@ export default function ReceiptCustomerFormPage() {
   }, [selDistrict]);
 
   const isBkk = selProvince?.name_th === "กรุงเทพมหานคร";
-  // ชื่อที่แสดงใน dropdown ตามภาษา (อังกฤษใช้ name_en, ที่เหลือใช้ไทย)
-  const optLabel = (x) => (lang === "en" && x?.name_en) ? x.name_en : x?.name_th;
+  // ชื่อที่แสดงใน dropdown ตามภาษา — ไม่ใช่ไทย (อังกฤษ/พม่า) ใช้ชื่ออังกฤษ, ไทยใช้ชื่อไทย
+  const optLabel = (x) => (lang !== "th" && x?.name_en) ? x.name_en : x?.name_th;
   // label ของช่อง อำเภอ/ตำบล (ไทยเท่านั้นที่แยก เขต/แขวง สำหรับ กทม.)
   const districtLabel = (lang === "th" && isBkk) ? t.khet : t.amphoe;
   const subdistrictLabel = (lang === "th" && isBkk) ? t.khwaeng : t.tambon;
