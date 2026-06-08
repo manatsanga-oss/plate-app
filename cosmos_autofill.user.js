@@ -89,15 +89,18 @@
     applyMember(a);
 
     const prov = document.getElementById("ctl00_MainContent_ddl_Province");
+    const amp = document.getElementById("ctl00_MainContent_ddl_Amphur");
     const pm = matchOpt(prov, a.province);
-    if (pm && prov.value !== pm.value) {
+    const am = amp ? matchOpt(amp, a.district) : null;
+    // ถ้าอำเภอยังไม่ match (ยังไม่โหลด/ผิด) -> เลือกจังหวัด + ยิง postback ให้อำเภอโหลด (แม้จังหวัดถูกอยู่แล้ว)
+    if (pm && !am) {
       sessionStorage.setItem(PENDING, JSON.stringify(a)); // จำไว้ ไป fill อำเภอ/ย้ำข้อมูลหลัง reload
       prov.value = pm.value;
-      toast("⏳ เลือกจังหวัด “" + pm.text.trim() + "” กำลังโหลดอำเภอ…");
-      prov.dispatchEvent(new Event("change", { bubbles: true })); // ⚡ postback → reload
+      toast("⏳ โหลดอำเภอ จ." + a.province + "…");
+      prov.dispatchEvent(new Event("change", { bubbles: true })); // ⚡ postback → reload → อำเภอโหลด
       return;
     }
-    selectAmphur(a, 0);
+    if (am) amp.value = am.value;
     alert("เติมข้อมูลแล้ว ✓\nที่อยู่: " + a.line + " ต." + a.subdistrict + " อ." + a.district + " จ." + a.province + " " + a.zip +
       "\nเบอร์: " + (a.phone || "-") + " | วันเกิด: " + (a.birthdate || "-") +
       "\nราคาขาย: " + (a.price || "-") +
