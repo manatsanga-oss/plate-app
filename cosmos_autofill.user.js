@@ -26,8 +26,9 @@
       if (!el) return;
       const d = {
         fullname: el.dataset.fullname || "", idcard: el.dataset.idcard || "", code: el.dataset.code || "",
-        address: el.dataset.address || "", chassis: el.dataset.chassis || "", engine: el.dataset.engine || "",
-        model: el.dataset.model || "", color: el.dataset.color || "",
+        address: el.dataset.address || "", phone: el.dataset.phone || "", birthdate: el.dataset.birthdate || "",
+        gender: el.dataset.gender || "", price: el.dataset.price || "", chassis: el.dataset.chassis || "",
+        engine: el.dataset.engine || "", model: el.dataset.model || "", color: el.dataset.color || "",
       };
       const sig = JSON.stringify(d);
       if (d.fullname && sig !== last) { last = sig; GM_setValue(KEY, d); toast("📋 เก็บข้อมูล “" + d.fullname + "” ไว้ส่ง Cosmos แล้ว"); }
@@ -44,7 +45,7 @@
   // สร้าง/คงปุ่มไว้ — เช็คซ้ำทุก 1.5 วิ กันปุ่มหายตอนหน้า re-render/postback
   function ensureButton() {
     try {
-      if (isMember) addButton("📋 เติมที่อยู่ จากขายปลีก", "#2e7d32", fillMemberAddress);
+      if (isMember) addButton("📋 เติมข้อมูล จากขายปลีก", "#2e7d32", fillMemberAddress);
       else if (isCheck) addButton("📋 เติมจากขายปลีก", "#1565c0", fillCheckMember);
     } catch (e) { console.error("[papao] addButton error", e); }
   }
@@ -57,12 +58,10 @@
     if (pend) {
       let d; try { d = JSON.parse(pend); } catch (e) { d = null; }
       if (d) setTimeout(function () {
-        setIfEmpty("ctl00_MainContent_txt_Address", d.line);
-        setIfEmpty("ctl00_MainContent_txt_District", d.subdistrict);
-        setIfEmpty("ctl00_MainContent_txt_ZipCode", d.zip);
-        selectAmphur(d, 0);
+        applyMember(d);          // ย้ำ text + เบอร์ + วันเกิด + เพศ (เผื่อ postback ล้าง)
+        selectAmphur(d, 0);      // เลือกอำเภอ (รอโหลดถ้ายังไม่มา)
         sessionStorage.removeItem(PENDING);
-        toast("✅ เติมที่อยู่ครบแล้ว — ตรวจ อำเภอ/จังหวัด อีกครั้ง");
+        toast("✅ เติมข้อมูลครบแล้ว — ตรวจ อำเภอ/วันเกิด อีกครั้ง");
       }, 900);
     }
   }
@@ -80,37 +79,77 @@
     alert("เติมแล้ว ✓\n" + (p.prefix ? p.prefix + " " : "") + p.first + " " + p.last + "\nเลขบัตร: " + (r.idcard || "-") + "\n\n⚠️ ตรวจ คำนำหน้า/ประเภทลูกค้า ก่อนกดตรวจสอบ");
   }
 
-  // ----- หน้า Member_AE: ที่อยู่ (cascade จังหวัด→อำเภอ) -----
+  // ----- หน้า Member_AE: ที่อยู่ + เบอร์ + วันเกิด + เพศ (cascade จังหวัด→อำเภอ) -----
   function fillMemberAddress() {
     const r = GM_getValue(KEY, null);
     if (!r) return noData();
-    if (!r.address) { alert("ใบขายนี้ไม่มีข้อมูลที่อยู่ลูกค้า\n(ลูกค้าต้องเลือกจากระบบ/QR ที่มีที่อยู่)"); return; }
-    const a = parseAddr(r.address);
-    a.line = a.line; // เผื่อ debug
-    setText("ctl00_MainContent_txt_Address", a.line);
-    setText("ctl00_MainContent_txt_District", a.subdistrict); // ตำบล = text
-    setText("ctl00_MainContent_txt_ZipCode", a.zip);
+    const a = parseAddr(r.address || "");
+    a.phone = r.phone || ""; a.birthdate = r.birthdate || ""; a.gender = r.gender || "";
+    a.price = r.price || ""; a.chassis = r.chassis || ""; a.engine = r.engine || "";
+    applyMember(a);
 
     const prov = document.getElementById("ctl00_MainContent_ddl_Province");
     const pm = matchOpt(prov, a.province);
     if (pm && prov.value !== pm.value) {
-      sessionStorage.setItem(PENDING, JSON.stringify(a)); // จำไว้ ไป fill อำเภอหลัง reload
+      sessionStorage.setItem(PENDING, JSON.stringify(a)); // จำไว้ ไป fill อำเภอ/ย้ำข้อมูลหลัง reload
       prov.value = pm.value;
       toast("⏳ เลือกจังหวัด “" + pm.text.trim() + "” กำลังโหลดอำเภอ…");
       prov.dispatchEvent(new Event("change", { bubbles: true })); // ⚡ postback → reload
       return;
     }
-    // จังหวัดถูกอยู่แล้ว → เลือกอำเภอเลย
     selectAmphur(a, 0);
-    alert("เติมที่อยู่แล้ว ✓\nที่อยู่: " + a.line + "\nตำบล: " + a.subdistrict + "\nอำเภอ: " + a.district + "\nจังหวัด: " + a.province + "\nไปรษณีย์: " + a.zip + "\n\n⚠️ ตรวจ อำเภอ/จังหวัด + กรอกเบอร์ติดต่อเอง");
+    alert("เติมข้อมูลแล้ว ✓\nที่อยู่: " + a.line + " ต." + a.subdistrict + " อ." + a.district + " จ." + a.province + " " + a.zip +
+      "\nเบอร์: " + (a.phone || "-") + " | วันเกิด: " + (a.birthdate || "-") +
+      "\nราคาขาย: " + (a.price || "-") +
+      "\nเลขถัง(9ท้าย): " + (a.chassis ? String(a.chassis).replace(/[^A-Za-z0-9]/g, "").slice(-9) : "-") +
+      " | เลขเครื่อง(หลังขีด): " + (a.engine && a.engine.indexOf("-") >= 0 ? a.engine.split("-").slice(1).join("") : (a.engine || "-")) +
+      "\n\n⚠️ เลือก รุ่น/ประเภท/สี + prefix เลขถัง/เครื่อง เอง (cascade) แล้วตรวจ serial");
+  }
+
+  // เติม text + เบอร์ + วันเกิด + เพศ (ส่วนที่ไม่ใช่ cascade)
+  function applyMember(a) {
+    setText("ctl00_MainContent_txt_Address", a.line);
+    setText("ctl00_MainContent_txt_District", a.subdistrict); // ตำบล = text
+    setText("ctl00_MainContent_txt_ZipCode", a.zip);
+    if (a.phone) setText("ctl00_MainContent_txt_Telephone", String(a.phone).replace(/[^0-9]/g, ""));
+    if (a.gender) setSelText("ctl00_MainContent_ddL_Gender", a.gender);
+    fillBirth(a.birthdate);
+    // ข้อมูลรถ + ราคา (text พิมพ์ได้ตรงๆ — dropdown prefix เลือกตามรุ่นเอง)
+    if (a.price) setText("ctl00_MainContent_txt_Sell_Price", String(a.price).replace(/[^0-9.]/g, ""));
+    // เลขถัง serial = 9 ตัวท้าย (ตัด prefix ที่อยู่ใน dropdown)
+    if (a.chassis) setText("ctl00_MainContent_txt_ChassisSerial", String(a.chassis).replace(/[^A-Za-z0-9]/g, "").slice(-9));
+    // เลขเครื่อง serial = หลังขีด (เลขล้วน)
+    if (a.engine) { const ep = String(a.engine).split("-"); setText("ctl00_MainContent_txt_EngineSerial", (ep.length > 1 ? ep.slice(1).join("") : ep[0]).replace(/[^0-9]/g, "")); }
+  }
+
+  // วันเกิด: iso "YYYY-MM-DD" (ค.ศ.) -> วัน/เดือน/ปี(พ.ศ.) — ตั้ง value ไม่ยิง postback
+  function fillBirth(iso) {
+    if (!iso || !/^\d{4}-\d{2}-\d{2}/.test(iso)) return;
+    const p = iso.slice(0, 10).split("-").map(Number);
+    const y = p[0], m = p[1], d = p[2], be = y + 543;
+    const TH = ["", "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+    selByNum("ctl00_MainContent_ddl_day_BD", d);
+    selMonth("ctl00_MainContent_ddl_month_BD", m, TH[m]);
+    selByNum("ctl00_MainContent_ddl_year_BD", be) || selByNum("ctl00_MainContent_ddl_year_BD", y);
+  }
+  function selByNum(id, n) {
+    const e = el(id); if (!e) return false;
+    for (let i = 0; i < e.options.length; i++) { const o = e.options[i]; if (parseInt(o.value, 10) === n || parseInt(o.text, 10) === n) { e.value = o.value; return true; } }
+    return false;
+  }
+  function selMonth(id, n, name) {
+    const e = el(id); if (!e) return;
+    for (let i = 0; i < e.options.length; i++) { if (parseInt(e.options[i].value, 10) === n) { e.value = e.options[i].value; return; } }
+    for (let i = 0; i < e.options.length; i++) { if (name && e.options[i].text.indexOf(name) >= 0) { e.value = e.options[i].value; return; } }
+    selByNum(id, n);
   }
 
   function selectAmphur(a, tries) {
     const amp = document.getElementById("ctl00_MainContent_ddl_Amphur");
     if (!amp) return;
     const m = matchOpt(amp, a.district);
-    if (m) { amp.value = m.value; return; }
-    if (amp.options.length <= 1 && tries < 10) { setTimeout(function () { selectAmphur(a, tries + 1); }, 500); }
+    if (m) { amp.value = m.value; toast("✅ เลือกอำเภอ: " + m.text.trim()); return; }
+    if (tries < 12) setTimeout(function () { selectAmphur(a, tries + 1); }, 500); // ยังไม่ match -> รอโหลด/ลองใหม่
   }
 
   // ----- parsers -----
