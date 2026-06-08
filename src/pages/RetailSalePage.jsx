@@ -1064,6 +1064,11 @@ ${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หม�
           data-fullname={sale.customer_name || ""}
           data-idcard={sale.customer_tax_id || ""}
           data-code={sale.customer_code || ""}
+          data-address={sale.customer_address || ""}
+          data-chassis={sale.chassis_no || ""}
+          data-engine={sale.engine_no || ""}
+          data-model={sale.model_code || ""}
+          data-color={sale.model_color || ""}
         />
       )}
 
