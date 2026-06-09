@@ -1,0 +1,70 @@
+{
+  "name": "Retail Sale Line Log API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "retail-sale-line-log",
+        "responseMode": "responseNode",
+        "options": { "allowedOrigins": "*" }
+      },
+      "id": "wh-rsll",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "retail-sale-line-log-uuid"
+    },
+    {
+      "parameters": {
+        "jsCode": "// log_line_send: append entry to retail_sales.line_send_log\nconst body = ($input.first().json && $input.first().json.body) || $input.first().json || {};\nconst esc = v => (v==null||v==='')?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";\nconst saleNo = String(body.sale_no || '').trim();\nif (!saleNo) return [{ json: { query: \"SELECT 'missing sale_no' AS message\" } }];\nconst type = String(body.type || '').trim();\nconst status = String(body.status || '').trim();\nif (!type || !status) return [{ json: { query: \"SELECT 'missing type or status' AS message\" } }];\nconst by = String(body.by || '').trim();\nconst error = String(body.error || '').trim();\nconst query = `UPDATE retail_sales SET line_send_log = COALESCE(line_send_log, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('type', ${esc(type)}, 'status', ${esc(status)}, 'at', NOW()::text, 'by', ${esc(by)}, 'error', ${esc(error)})), updated_at = NOW() WHERE sale_no = ${esc(saleNo)} RETURNING sale_no, line_send_log;`;\nreturn [{ json: { query } }];"
+      },
+      "id": "code-build-rsll",
+      "name": "Build SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}",
+        "options": {}
+      },
+      "id": "pg-exec-rsll",
+      "name": "PG Exec",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [680, 300],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "JLUeyZRAzUeRqlxu",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($input.all().map(i => i.json)) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [{ "name": "Access-Control-Allow-Origin", "value": "*" }]
+          }
+        }
+      },
+      "id": "resp-rsll",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Build SQL", "type": "main", "index": 0 }]] },
+    "Build SQL": { "main": [[{ "node": "PG Exec", "type": "main", "index": 0 }]] },
+    "PG Exec": { "main": [[{ "node": "Respond", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

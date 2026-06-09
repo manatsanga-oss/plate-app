@@ -95,6 +95,7 @@ import ReportAdminPage from "./pages/ReportAdminPage";
 import CreditNoteReportPage from "./pages/CreditNoteReportPage";
 import CarPaymentReportPage from "./pages/CarPaymentReportPage";
 import RegistrationSummaryReportPage from "./pages/RegistrationSummaryReportPage";
+import RetailSaleReportPage from "./pages/RetailSaleReportPage";
 import ReceiptTransferReportPage from "./pages/ReceiptTransferReportPage";
 import SalesExtraPayPage from "./pages/SalesExtraPayPage";
 import SpecialCommissionReportPage from "./pages/SpecialCommissionReportPage";
@@ -177,6 +178,7 @@ export default function App() {
     if (page === "salesbypayment") return false;     // เฉพาะ admin (รายงานการขายตามการชำระเงิน)
     if (page === "otherincometaxreport") return false;  // เฉพาะ admin (รายงานใบกำกับรายได้อื่นๆ)
     if (page === "registrationsummaryreport") return false;  // เฉพาะ admin (รายงานสรุปใบปะหน้า คชจ. ขายรถ)
+    if (page === "retailsalereport") return false;  // เฉพาะ admin (รายงานใบขายปลีก)
     if (page === "receipttransferreport") return false;       // เฉพาะ admin (รายงานสรุปรับชำระเงิน)
     if (page === "vehiclepurchasereport") return false;       // เฉพาะ admin (รายงานรับรถจักรยานยนต์)
     if (page === "stockturnover") return false;               // เฉพาะ admin (สินค้าคงเหลือ & turnover)
@@ -270,6 +272,9 @@ export default function App() {
         )}
         {activeMenu === "registrationsummaryreport" && canAccess("registrationsummaryreport") && (
           <RegistrationSummaryReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "retailsalereport" && canAccess("retailsalereport") && (
+          <RetailSaleReportPage currentUser={currentUser} />
         )}
         {activeMenu === "receipttransferreport" && canAccess("receipttransferreport") && (
           <ReceiptTransferReportPage currentUser={currentUser} />
@@ -601,8 +606,9 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hrspecialcommission" label="รายงานค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","stockturnover","partreceiptreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","stockturnover","partreceiptreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
+        <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="creditnotereport" label="รายงานใบลดหนี้รับ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="carpaymentreport" label="รายงานรับชำระเงินรายคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

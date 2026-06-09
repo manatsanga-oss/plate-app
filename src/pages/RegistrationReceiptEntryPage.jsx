@@ -360,10 +360,12 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                 {lines.map((l, i) => {
                   const net = num(l.qty) * num(l.price_before_discount) - num(l.discount);
                   const incomeTypeObj = incomeTypesMaster.find(x => x.type === l.income_type);
-                  // หา selected key สำหรับ code dropdown (match จาก code+name)
-                  const selectedKey = (incomeTypeObj?.codes || []).find(c => c.code === l.income_code && c.name === l.income_name)?._key
-                    || (incomeTypeObj?.codes || []).find(c => c.code === l.income_code)?._key
-                    || "";
+                  // หา selected key เฉพาะเมื่อ income_name ถูกเลือกแล้ว — ไม่ default ไปรายการแรก
+                  const selectedKey = l.income_name
+                    ? ((incomeTypeObj?.codes || []).find(c => c.code === l.income_code && c.name === l.income_name)?._key
+                       || (incomeTypeObj?.codes || []).find(c => c.name === l.income_name)?._key
+                       || "")
+                    : "";
                   return (
                     <tr key={i}>
                       <td style={td}>{i + 1}</td>
@@ -374,10 +376,19 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                         </select>
                       </td>
                       <td style={td}>
-                        <select value={selectedKey} onChange={e => onSelectIncomeCode(i, e.target.value)} style={{ ...inp, padding: "5px 8px", fontSize: 12, minWidth: 220 }} disabled={!l.income_type}>
-                          <option value="">— เลือกชื่อรายได้ —</option>
+                        <select value={selectedKey} onChange={e => {
+                          const opt = e.target.options[e.target.selectedIndex];
+                          const amtStr = opt?.dataset?.amount || "";
+                          const amt = amtStr !== "" ? Number(amtStr) : null;
+                          updateLine(i, {
+                            income_code: opt?.dataset?.code || "",
+                            income_name: opt?.dataset?.name || "",
+                            price_before_discount: amt != null && !Number.isNaN(amt) ? amt : (l.price_before_discount || 0),
+                          });
+                        }} style={{ ...inp, padding: "5px 8px", fontSize: 12, minWidth: 220 }} disabled={!l.income_type}>
+                          <option value="" data-amount="" data-code="" data-name="">— เลือกชื่อรายได้ —</option>
                           {(incomeTypeObj?.codes || []).map(c => (
-                            <option key={c._key} value={c._key}>{c.name}{c.amount != null ? ` (${c.amount.toLocaleString("th-TH")})` : ""}</option>
+                            <option key={c._key} value={c._key} data-amount={c.amount ?? ""} data-code={c.code || ""} data-name={c.name || ""}>{c.name}</option>
                           ))}
                         </select>
                       </td>
