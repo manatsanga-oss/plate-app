@@ -185,7 +185,9 @@ export default function MotoExpensePage({ currentUser }) {
           brand_id: form.group_by === "brand" ? Number(form.brand_id) : null,
           type_id: form.group_by === "type" ? Number(form.type_id) : null,
           amount: Number(form.amount),
-          note: form.group_by === "series" ? `${form.note}|${form.pay_condition || "all"}` : form.note,
+          note: form.group_by === "series" ? `${form.note}|${form.pay_condition || "all"}`
+              : form.group_by === "type" ? (form.pay_condition || "all")
+              : form.note,
           status: form.status,
           effective_date: form.effective_date || null,
           end_date: form.end_date || null,
@@ -216,8 +218,11 @@ export default function MotoExpensePage({ currentUser }) {
   function openEdit(e) {
     setEditTarget(e);
     const isSeries = e.group_by === "series";
+    const isType = e.group_by === "type";
     const seriesId = isSeries ? String(e.note || "").split("|")[0] : "";
-    const payCond = isSeries ? (String(e.note || "").split("|")[1] || "all") : "all";
+    const payCond = isSeries ? (String(e.note || "").split("|")[1] || "all")
+                  : isType ? (String(e.note || "").trim() || "all")
+                  : "all";
     setForm({
       expense_name: e.expense_name || "",
       expense_type: e.expense_type || "fixed",
@@ -227,7 +232,7 @@ export default function MotoExpensePage({ currentUser }) {
       brand_id: e.brand_id ? String(e.brand_id) : "",
       type_id: e.type_id ? String(e.type_id) : "",
       amount: e.amount ? String(e.amount) : "",
-      note: isSeries ? seriesId : (e.note || ""),
+      note: isSeries ? seriesId : isType ? "" : (e.note || ""),
       pay_condition: payCond,
       status: e.status || "active",
       category: e.category || "",
@@ -298,7 +303,7 @@ export default function MotoExpensePage({ currentUser }) {
     if (e.group_by === "finance") return e.company_name || "-";
     if (e.group_by === "brand") return e.brand_name || "-";
     if (e.group_by === "series") { if (!e.note) return "-"; const [sid, pc] = String(e.note).split("|"); const pl = pc === "cash" ? " · เงินสด" : pc === "finance" ? " · ไฟแนนซ์" : ""; return seriesName(sid) + pl; }
-    if (e.group_by === "type") return e.type_name || "-";
+    if (e.group_by === "type") { const pc = String(e.note || "").trim(); const pl = pc === "cash" ? " · เงินสด" : pc === "finance" ? " · ไฟแนนซ์" : ""; return (e.type_name || "-") + pl; }
     if (e.group_by === "province") return e.province || "-";
     if (e.group_by === "name_prefix") return e.note ? "ขึ้นต้น: " + e.note : "-";
     return "-";
@@ -414,6 +419,8 @@ export default function MotoExpensePage({ currentUser }) {
                   </td>
                   <td>{e.group_by === "series"
                     ? (() => { const pc = String(e.note || "").split("|")[1] || "all"; return pc === "cash" ? "เฉพาะเงินสด" : pc === "finance" ? "เฉพาะไฟแนนซ์" : "ทั้งหมด"; })()
+                    : e.group_by === "type"
+                    ? (() => { const pc = String(e.note || "").trim() || "all"; return pc === "cash" ? "เฉพาะเงินสด" : pc === "finance" ? "เฉพาะไฟแนนซ์" : "ทั้งหมด"; })()
                     : (e.note || "-")}</td>
                   <td>
                     <span style={{
@@ -586,6 +593,14 @@ export default function MotoExpensePage({ currentUser }) {
                     </select>
                   </div>
                 )}
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เงื่อนไขการขาย</label>
+                  <select value={form.pay_condition || "all"} onChange={e => setForm({ ...form, pay_condition: e.target.value })} style={selectStyle}>
+                    <option value="all">ทั้งหมด (เงินสด + ไฟแนนซ์)</option>
+                    <option value="cash">เฉพาะขายเงินสด</option>
+                    <option value="finance">เฉพาะขายไฟแนนซ์</option>
+                  </select>
+                </div>
               </>;
             })()}
 

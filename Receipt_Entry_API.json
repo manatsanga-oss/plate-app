@@ -1,0 +1,85 @@
+{
+  "name": "Receipt Entry API",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "receipt-entry-api",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "wh-rec-entry",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "receipt-entry-uuid"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Receipt Entry API — บันทึกรับเรื่องงานทะเบียนแบบ manual\nconst body = ($input.first().json && $input.first().json.body) || $input.first().json || {};\nconst action = String(body.action || body.op || '').trim();\nconst esc = v => (v==null||v==='')?'NULL':\"'\"+String(v).replace(/'/g,\"''\")+\"'\";\nconst num = v => isFinite(Number(v)) ? Number(v) : 0;\nconst intOrNull = v => (v==null||v==='')?null:(parseInt(v,10)||null);\nconst d = v => v && /^\\d{4}-\\d{2}-\\d{2}/.test(String(v)) ? `'${String(v).slice(0,10)}'::date` : 'NULL';\nlet query;\n\nif (action === 'get_next_receipt_no') {\n  // auto-gen: {BRANCH}-CA{YYMM}{NNNNN} → query MAX seq for branch + YYMM\n  const branch = String(body.branch_code || 'SCY01').trim();\n  const now = new Date();\n  const beYY = String((now.getFullYear() + 543) % 100).padStart(2,'0');\n  const mm = String(now.getMonth() + 1).padStart(2,'0');\n  const ym = beYY + mm;\n  const prefix = `${branch}-CA${ym}`;\n  query = `WITH last_seq AS (\n    SELECT COALESCE(MAX(CAST(SUBSTRING(receipt_no FROM '[0-9]{5}\\\\$') AS INTEGER)), 0) AS seq\n    FROM registration_receipts\n    WHERE receipt_no LIKE '${prefix}%'\n  )\n  SELECT '${prefix}' || LPAD((seq + 1)::text, 5, '0') AS next_receipt_no FROM last_seq;`;\n  // ใช้ LIKE + SUBSTRING แทน regex เพราะ Postgres node mangle $ — ใส่ใน LIKE pattern OK\n  // ปรับ: ใช้ LIKE matching ตำแหน่ง 5 ตัวสุดท้าย\n  query = `WITH last_seq AS (\n    SELECT COALESCE(MAX(CAST(RIGHT(receipt_no, 5) AS INTEGER)), 0) AS seq\n      FROM registration_receipts\n     WHERE receipt_no LIKE '${prefix}%'\n       AND LENGTH(receipt_no) = ${prefix.length + 5}\n       AND RIGHT(receipt_no, 5) !~ '[^0-9]'\n  )\n  SELECT '${prefix}' || LPAD((seq + 1)::text, 5, '0') AS next_receipt_no FROM last_seq;`;\n}\nelse if (action === 'search_similar') {\n  // ค้นใน 2 แหล่ง: moto_sales + registration_receipts — ทำเป็น UNION เพื่อให้รวมผลในคำสั่งเดียว\n  const kw = String(body.keyword || '').trim();\n  if (!kw) return [{ json: { query: \"SELECT 'missing keyword' AS message\" } }];\n  const k = kw.toUpperCase().replace(/'/g, \"''\");\n  query = `\n    SELECT 'sale' AS source, s.id::text AS ref_id, s.invoice_no AS ref_no, s.sale_date AS ref_date,\n      s.customer_name, s.address AS customer_address, s.customer_phone, s.id_card AS customer_id_card,\n      s.chassis_no, s.engine_no, s.color_name AS color,\n      s.brand, s.model_series, s.model_code, s.product_code,\n      r.plate_number, s.finance_company AS contract_ref,\n      NULL::text AS receipt_no, s.branch_code AS branch_code\n    FROM moto_sales s\n    LEFT JOIN moto_registrations r ON r.frame_no = s.chassis_no\n    WHERE UPPER(s.chassis_no) LIKE '%${k}%'\n       OR UPPER(s.engine_no) LIKE '%${k}%'\n       OR UPPER(COALESCE(r.plate_number,'')) LIKE '%${k}%'\n       OR UPPER(s.customer_name) LIKE '%${k}%'\n       OR UPPER(s.invoice_no) LIKE '%${k}%'\n    UNION ALL\n    SELECT 'receipt' AS source, r.receipt_no AS ref_id, r.receipt_no AS ref_no, r.receive_date AS ref_date,\n      r.customer_name, r.customer_address, r.customer_phone, r.customer_id_card,\n      r.chassis_no, r.engine_no, r.color,\n      r.brand, r.model_series, r.model_code, r.product_code,\n      r.plate_number, r.contract_ref,\n      r.receipt_no, r.branch_code\n    FROM registration_receipts r\n    WHERE UPPER(COALESCE(r.chassis_no,'')) LIKE '%${k}%'\n       OR UPPER(COALESCE(r.engine_no,'')) LIKE '%${k}%'\n       OR UPPER(COALESCE(r.plate_number,'')) LIKE '%${k}%'\n       OR UPPER(COALESCE(r.customer_name,'')) LIKE '%${k}%'\n    ORDER BY ref_date DESC NULLS LAST\n    LIMIT 30;`;\n}\nelse if (action === 'lookup_sale') {\n  // ค้น moto_sales จาก chassis_no หรือ engine_no\n  const chassis = String(body.chassis_no || '').trim();\n  const engine = String(body.engine_no || '').trim();\n  if (!chassis && !engine) return [{ json: { query: \"SELECT 'missing chassis_no or engine_no' AS message\" } }];\n  const wh = [];\n  if (chassis) wh.push(`UPPER(s.chassis_no) = UPPER(${esc(chassis)})`);\n  if (engine) wh.push(`UPPER(s.engine_no) = UPPER(${esc(engine)})`);\n  query = `SELECT s.id AS sale_id, s.invoice_no AS sale_invoice_no, s.sale_date,\n      s.customer_name, s.address AS customer_address, s.customer_phone, s.id_card AS customer_id_card,\n      s.chassis_no, s.engine_no, s.color_name AS color,\n      s.brand, s.model_series, s.model_code, s.product_code,\n      r.plate_number, s.finance_company AS contract_ref\n    FROM moto_sales s\n    LEFT JOIN moto_registrations r ON r.frame_no = s.chassis_no\n   WHERE ${wh.join(' OR ')}\n   ORDER BY s.sale_date DESC LIMIT 1;`;\n}\nelse if (action === 'list_receipts') {\n  // รายการที่บันทึก manual (filter ทั่วไป)\n  const wh = [];\n  if (body.branch_code) wh.push(`r.branch_code = ${esc(body.branch_code)}`);\n  if (body.date_from) wh.push(`r.receive_date >= ${d(body.date_from)}`);\n  if (body.date_to) wh.push(`r.receive_date <= ${d(body.date_to)}`);\n  if (body.keyword) {\n    const kw = esc('%' + body.keyword + '%');\n    wh.push(`(UPPER(r.receipt_no) LIKE UPPER(${kw}) OR UPPER(r.chassis_no) LIKE UPPER(${kw}) OR UPPER(r.engine_no) LIKE UPPER(${kw}) OR UPPER(r.customer_name) LIKE UPPER(${kw}))`);\n  }\n  // เฉพาะที่บันทึก manual: marker = receipt_status = 'manual' หรือ note LIKE 'MANUAL%' หรือเอาทั้งหมด\n  if (body.only_manual) wh.push(`r.entry_source = 'manual'`);\n  const where = wh.length ? ('WHERE ' + wh.join(' AND ')) : '';\n  query = `SELECT r.*, (\n      SELECT COALESCE(SUM(net_price), 0)\n        FROM registration_receipt_lines l WHERE l.receipt_no = r.receipt_no\n    ) AS line_total,\n    (SELECT COUNT(*) FROM registration_receipt_lines l WHERE l.receipt_no = r.receipt_no) AS line_count\n    FROM registration_receipts r\n    ${where}\n    ORDER BY r.receive_date DESC, r.receipt_no DESC LIMIT 1000;`;\n}\nelse if (action === 'get_receipt') {\n  const rno = String(body.receipt_no || '').trim();\n  if (!rno) return [{ json: { query: \"SELECT 'missing receipt_no' AS message\" } }];\n  query = `SELECT json_build_object(\n      'header', (SELECT row_to_json(r) FROM registration_receipts r WHERE r.receipt_no = ${esc(rno)}),\n      'lines',  (SELECT COALESCE(json_agg(l ORDER BY l.id), '[]'::json) FROM registration_receipt_lines l WHERE l.receipt_no = ${esc(rno)})\n    ) AS data;`;\n}\nelse if (action === 'save_receipt') {\n  // body: { receipt_no, ...header_fields, lines: [{income_type, income_code, income_name, description, qty, price, discount}] }\n  const h = body.header || body;\n  const lines = Array.isArray(body.lines) ? body.lines : [];\n  const rno = String(h.receipt_no || '').trim();\n  if (!rno) return [{ json: { query: \"SELECT 'missing receipt_no' AS message\" } }];\n  if (lines.length === 0) return [{ json: { query: \"SELECT 'no line items' AS message\" } }];\n  // total\n  let lineTotal = 0;\n  for (const ln of lines) {\n    const q = num(ln.qty || 1);\n    const p = num(ln.price_before_discount ?? ln.price ?? 0);\n    const dc = num(ln.discount || 0);\n    const net = q * p - dc;\n    ln._net = net;\n    lineTotal += net;\n  }\n  const vatRate = num(h.vat_rate || 0);\n  const priceBeforeVat = vatRate > 0 ? lineTotal / (1 + vatRate/100) : lineTotal;\n  const vat = lineTotal - priceBeforeVat;\n  const total = lineTotal;\n  // upsert header\n  const cols = ['receipt_no','receive_date','receipt_type','receive_status','receipt_status','note',\n    'product_value','discount','vat_rate','price_before_vat','vat','total',\n    'branch_code','branch_name','staff_recorder',\n    'customer_name','customer_address','customer_phone','customer_id_card',\n    'contract_no','contract_date','contract_ref','contract_status',\n    'brand','model_series','model_code','product_code','color',\n    'engine_no','chassis_no','plate_number','register_date','tax_paid_date',\n    'entry_source','created_by','updated_at'];\n  const vals = [\n    esc(rno), d(h.receive_date), esc(h.receipt_type || 'จดทะเบียนใหม่'), esc(h.receive_status || 'ปกติ'), esc(h.receipt_status || 'ปกติ'), esc(h.note),\n    num(lineTotal), num(h.discount || 0), num(vatRate), num(priceBeforeVat), num(vat), num(total),\n    esc(h.branch_code), esc(h.branch_name), esc(h.staff_recorder),\n    esc(h.customer_name), esc(h.customer_address), esc(h.customer_phone), esc(h.customer_id_card),\n    esc(h.contract_no), d(h.contract_date), esc(h.contract_ref), esc(h.contract_status),\n    esc(h.brand), esc(h.model_series), esc(h.model_code), esc(h.product_code), esc(h.color),\n    esc(h.engine_no), esc(h.chassis_no), esc(h.plate_number), d(h.register_date), d(h.tax_paid_date),\n    esc('manual'), esc(h.created_by || h.staff_recorder), 'NOW()'];\n  const updateSet = cols.filter(c => c !== 'receipt_no' && c !== 'created_by').map((c,i) => `${c} = EXCLUDED.${c}`).join(', ');\n  // sanitize line for SQL\n  const lineValues = lines.map(ln => {\n    const q = num(ln.qty || 1);\n    const p = num(ln.price_before_discount ?? ln.price ?? 0);\n    const dc = num(ln.discount || 0);\n    const net = q * p - dc;\n    return `(${esc(rno)}, ${esc(ln.income_type)}, ${esc(ln.income_code)}, ${esc(ln.income_name)}, ${esc(ln.description)}, ${num(q)}, ${num(p)}, ${num(dc)}, ${num(net)})`;\n  }).join(',\\n      ');\n  query = `\n    INSERT INTO registration_receipts (${cols.join(',')})\n    VALUES (${vals.join(',')})\n    ON CONFLICT (receipt_no) DO UPDATE SET ${updateSet};\n    DELETE FROM registration_receipt_lines WHERE receipt_no = ${esc(rno)};\n    INSERT INTO registration_receipt_lines (receipt_no, income_type, income_code, income_name, description, qty, price_before_discount, discount, net_price)\n    VALUES\n      ${lineValues};\n    SELECT * FROM registration_receipts WHERE receipt_no = ${esc(rno)};`;\n}\nelse if (action === 'delete_receipt') {\n  const rno = String(body.receipt_no || '').trim();\n  if (!rno) return [{ json: { query: \"SELECT 'missing receipt_no' AS message\" } }];\n  // soft delete: status = cancelled\n  query = `UPDATE registration_receipts SET receipt_status = 'ยกเลิก', updated_at = NOW()\n    WHERE receipt_no = ${esc(rno)} RETURNING receipt_no, receipt_status;`;\n}\nelse if (action === 'get_branches') {\n  query = `SELECT DISTINCT branch_code, branch_name FROM registration_receipts\n    WHERE branch_code IS NOT NULL AND branch_code <> ''\n    ORDER BY branch_code;`;\n}\nelse { query = \"SELECT 'unknown action' AS message\"; }\nreturn [{ json: { query } }];"
+      },
+      "id": "code-build-rec",
+      "name": "Build SQL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "={{ $json.query }}",
+        "options": {}
+      },
+      "id": "pg-exec-rec",
+      "name": "PG Exec",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [680, 300],
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "JLUeyZRAzUeRqlxu",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($input.all().map(i => i.json)) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "resp-rec",
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [920, 300]
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [[{ "node": "Build SQL", "type": "main", "index": 0 }]]
+    },
+    "Build SQL": {
+      "main": [[{ "node": "PG Exec", "type": "main", "index": 0 }]]
+    },
+    "PG Exec": {
+      "main": [[{ "node": "Respond", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
