@@ -70,23 +70,22 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       setServiceExpenses(Array.isArray(data) ? data : []);
     } catch { setServiceExpenses([]); }
   }
-  // จัดรูปแบบเป็น tree: income_type -> [{code, name, amount}]
+  // จัดรูปแบบเป็น tree: income_type -> [{code, name, amount}] — dedup โดยให้แถวที่มี amount ชนะ
   const incomeTypesMaster = useMemo(() => {
     const map = new Map();
     serviceExpenses.forEach((r) => {
       const t = String(r.income_type || "").trim();
       if (!t) return;
       if (!map.has(t)) map.set(t, []);
-      // unique by code+name
       const arr = map.get(t);
       const key = `${r.income_code || ""}|${r.income_name || ""}`;
-      if (!arr.find((x) => x._key === key)) {
-        arr.push({
-          _key: key,
-          code: r.income_code || "",
-          name: r.income_name || "",
-          amount: r.income_amount != null && r.income_amount !== "" ? Number(r.income_amount) : null,
-        });
+      const amt = r.income_amount != null && r.income_amount !== "" ? Number(r.income_amount) : null;
+      const existing = arr.find((x) => x._key === key);
+      if (!existing) {
+        arr.push({ _key: key, code: r.income_code || "", name: r.income_name || "", amount: amt });
+      } else if (existing.amount == null && amt != null) {
+        // อัปเดต amount ถ้าแถวก่อนหน้าเป็น null แต่แถวนี้มีค่า
+        existing.amount = amt;
       }
     });
     return Array.from(map.entries()).map(([type, codes]) => ({ type, codes: codes.sort((a,b) => String(a.code).localeCompare(String(b.code))) }));
