@@ -116,6 +116,7 @@ export default function ReceiptCustomerFormPage() {
   const [phase, setPhase] = useState("loading"); // loading | form | submitting | done | error
   const [errorMsg, setErrorMsg] = useState("");
   const [refNo, setRefNo] = useState("");
+  const [oa, setOa] = useState(""); // "singchai" = สาขา สิงห์ชัย → โชว์ปุ่มแอด สิงห์ชัย OA
   const [profile, setProfile] = useState(null);   // { userId, displayName }
   const [form, setForm] = useState({ customer_name: "", phone: "", tax_id: "", gender: "", birth_date: "" });
 
@@ -130,13 +131,15 @@ export default function ReceiptCustomerFormPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     let ref = params.get("ref") || "";
-    if (!ref) {
+    let oaParam = params.get("oa") || "";
+    if (!ref || !oaParam) {
       const state = params.get("liff.state");
       if (state) {
-        try { ref = new URLSearchParams(state.replace(/^\?/, "")).get("ref") || ""; } catch { /* noop */ }
+        try { const sp = new URLSearchParams(state.replace(/^\?/, "")); ref = ref || sp.get("ref") || ""; oaParam = oaParam || sp.get("oa") || ""; } catch { /* noop */ }
       }
     }
     setRefNo(ref);
+    setOa(oaParam);
   }, []);
 
   // โหลดข้อมูลที่อยู่ไทย
@@ -301,6 +304,12 @@ export default function ReceiptCustomerFormPage() {
             <div style={{ color: "#666", fontSize: 14 }}>
               {t.doneDescPre} <b>{refNo}</b> {t.doneDescPost}
             </div>
+            {oa === "singchai" && (
+              <a href="https://line.me/R/ti/p/@459eeeog" target="_blank" rel="noreferrer"
+                 style={{ display: "inline-block", marginTop: 18, background: "#06C755", color: "#fff", padding: "12px 22px", borderRadius: 8, fontWeight: 700, fontSize: 15, textDecoration: "none" }}>
+                ➕ เพิ่มเพื่อน สิงห์ชัยสยามยนต์ (เพื่อรับใบเสร็จ)
+              </a>
+            )}
           </div>
         )}
 

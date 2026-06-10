@@ -12,7 +12,9 @@ const LIFF_ID = "2010357741-OvPBYFXi";
 const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-requests-api";
 
 // URL ที่ฝังลงใน QR — เปิด LIFF พร้อมแนบ ref
-const liffUrl = (refNo) => `https://liff.line.me/${LIFF_ID}?ref=${encodeURIComponent(refNo)}`;
+const isPorpaoBranch = (bc) => { const c = String(bc || "").toUpperCase(); return c.startsWith("SCY05") || c.startsWith("SCY06"); };
+// สาขา ป.เปา (SCY05/06) ไม่แนบ oa; สาขาอื่น = สิงห์ชัย → แนบ &oa=singchai เพื่อโชว์ปุ่มแอด สิงห์ชัย ในฟอร์ม
+const liffUrl = (refNo, branchCode) => `https://liff.line.me/${LIFF_ID}?ref=${encodeURIComponent(refNo)}${isPorpaoBranch(branchCode) ? "" : "&oa=singchai"}`;
 // รูป QR (ใช้บริการสร้างรูปฟรี ไม่ต้องลง dependency เพิ่ม)
 const qrImageUrl = (data, size = 280) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=8&data=${encodeURIComponent(data)}`;
@@ -98,7 +100,7 @@ export default function ReceiptQrPrintPage({ currentUser }) {
           <div style={{ color: "#555", fontSize: 14, marginBottom: 16 }}>
             สแกน QR นี้ด้วยกล้องมือถือ → เพิ่มเพื่อน LINE ร้าน → กรอกข้อมูลของท่าน
           </div>
-          <img src={qrImageUrl(liffUrl(refNo))} alt="QR" width={280} height={280} style={{ display: "block", margin: "0 auto" }} />
+          <img src={qrImageUrl(liffUrl(refNo, currentUser?.branch_code || currentUser?.branch))} alt="QR" width={280} height={280} style={{ display: "block", margin: "0 auto" }} />
           <div style={{ fontSize: 22, fontWeight: 800, letterSpacing: 1, marginTop: 14 }}>{refNo}</div>
           <div style={{ color: "#888", fontSize: 12, marginTop: 6 }}>กรุณาแจ้งเลขอ้างอิงนี้กับพนักงาน</div>
         </div>

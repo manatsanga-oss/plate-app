@@ -14,7 +14,9 @@ const URL_SAVE = `${BASE}/moto-sales-save-customer`;
 const RECEIPT_API = `${BASE}/receipt-requests-api`;
 
 const LIFF_ID = "2010357741-OvPBYFXi";
-const liffUrl = (refNo) => `https://liff.line.me/${LIFF_ID}?ref=${encodeURIComponent(refNo)}`;
+const isPorpaoBranch = (bc) => { const c = String(bc || "").toUpperCase(); return c.startsWith("SCY05") || c.startsWith("SCY06"); };
+// สาขา ป.เปา (SCY05/06) ไม่แนบ oa (LIFF bot-link แอด ป.เปา ให้); สาขาอื่น = สิงห์ชัย → แนบ oa เพื่อโชว์ปุ่มแอด สิงห์ชัย
+const liffUrl = (refNo, branchCode) => `https://liff.line.me/${LIFF_ID}?ref=${encodeURIComponent(refNo)}${isPorpaoBranch(branchCode) ? "" : "&oa=singchai"}`;
 const qrImageUrl = (data, size = 240) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=8&data=${encodeURIComponent(data)}`;
 
@@ -271,7 +273,7 @@ function QrTab({ currentUser, onSelect }) {
       ) : (
         <>
           <div style={{ fontWeight: 700, marginBottom: 8 }}>{refNo}</div>
-          <img src={qrImageUrl(liffUrl(refNo))} alt="QR" style={{ width: 240, height: 240, border: "1px solid #eaecf0", borderRadius: 8 }} />
+          <img src={qrImageUrl(liffUrl(refNo, currentUser?.branch_code || currentUser?.branch))} alt="QR" style={{ width: 240, height: 240, border: "1px solid #eaecf0", borderRadius: 8 }} />
           <div style={{ margin: "10px 0", color: status.startsWith("✅") ? "#067647" : "#b54708" }}>{status}</div>
           <button onClick={() => check()} style={secondaryBtn}>🔄 ตรวจสอบตอนนี้</button>
         </>
