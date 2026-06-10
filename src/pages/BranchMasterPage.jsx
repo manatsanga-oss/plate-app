@@ -7,7 +7,7 @@ async function postAPI(body) {
   return r.json();
 }
 
-const empty = { branch_code: "", branch_name: "", affiliation: "", sales_target: "", note: "" };
+const empty = { branch_code: "", branch_name: "", branch_display_name: "", affiliation: "", sales_target: "", address: "", phone: "", mobile: "", tax_id: "", note: "" };
 
 export default function BranchMasterPage({ currentUser }) {
   const [rows, setRows] = useState([]);
@@ -36,7 +36,10 @@ export default function BranchMasterPage({ currentUser }) {
       await postAPI({
         action: "save_branch",
         branch_code: form.branch_code, branch_name: form.branch_name,
+        branch_display_name: form.branch_display_name,
         affiliation: form.affiliation, sales_target: form.sales_target,
+        address: form.address, phone: form.phone, mobile: form.mobile,
+        tax_id: form.tax_id,
         note: form.note,
         created_by: currentUser?.username || currentUser?.name || "system",
       });
@@ -50,7 +53,10 @@ export default function BranchMasterPage({ currentUser }) {
   function edit(r) {
     setForm({
       branch_code: r.branch_code, branch_name: r.branch_name || "",
+      branch_display_name: r.branch_display_name || "",
       affiliation: r.affiliation || "", sales_target: r.sales_target || "",
+      address: r.address || "", phone: r.phone || "", mobile: r.mobile || "",
+      tax_id: r.tax_id || "",
       note: r.note || "",
     });
     setEditing(true);
@@ -83,6 +89,9 @@ export default function BranchMasterPage({ currentUser }) {
           <Field label="ชื่อร้าน *">
             <input value={form.branch_name} onChange={e => setForm({ ...form, branch_name: e.target.value })} style={inp} />
           </Field>
+          <Field label="ชื่อสาขา">
+            <input value={form.branch_display_name} onChange={e => setForm({ ...form, branch_display_name: e.target.value })} style={inp} placeholder="เช่น สาขานครหลวง" />
+          </Field>
           <Field label="สังกัด">
             <select value={form.affiliation} onChange={e => setForm({ ...form, affiliation: e.target.value })} style={inp}>
               <option value="">-- เลือก --</option>
@@ -93,6 +102,20 @@ export default function BranchMasterPage({ currentUser }) {
           <Field label="เป้าการขาย (คัน/เดือน)">
             <input type="number" value={form.sales_target} onChange={e => setForm({ ...form, sales_target: e.target.value })}
                    style={{ ...inp, textAlign: "right" }} />
+          </Field>
+        </div>
+        <Field label="ที่อยู่">
+          <input value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} style={inp} />
+        </Field>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+          <Field label="เลขประจำตัวผู้เสียภาษี">
+            <input value={form.tax_id} onChange={e => setForm({ ...form, tax_id: e.target.value })} style={{ ...inp, fontFamily: "monospace" }} placeholder="13 หลัก" maxLength={13} />
+          </Field>
+          <Field label="เบอร์ร้าน">
+            <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} style={inp} placeholder="เช่น 035-123456" />
+          </Field>
+          <Field label="เบอร์มือถือ">
+            <input value={form.mobile} onChange={e => setForm({ ...form, mobile: e.target.value })} style={inp} placeholder="เช่น 081-2345678" />
           </Field>
         </div>
         <Field label="หมายเหตุ">
@@ -113,7 +136,11 @@ export default function BranchMasterPage({ currentUser }) {
                 <th style={th}>#</th>
                 <th style={th}>รหัสร้าน</th>
                 <th style={th}>ชื่อร้าน</th>
+                <th style={th}>ชื่อสาขา</th>
                 <th style={th}>สังกัด</th>
+                <th style={th}>ที่อยู่</th>
+                <th style={th}>เลขผู้เสียภาษี</th>
+                <th style={th}>เบอร์โทร</th>
                 <th style={{ ...th, textAlign: "right" }}>เป้าการขาย</th>
                 <th style={th}>หมายเหตุ</th>
                 <th style={th}>สถานะ</th>
@@ -121,14 +148,20 @@ export default function BranchMasterPage({ currentUser }) {
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={8} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-              {!loading && rows.length === 0 && <tr><td colSpan={8} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+              {loading && <tr><td colSpan={12} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+              {!loading && rows.length === 0 && <tr><td colSpan={12} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
               {rows.map((r, i) => (
                 <tr key={r.branch_code} style={{ borderTop: "1px solid #e5e7eb", opacity: r.active === false ? 0.5 : 1 }}>
                   <td style={td}>{i + 1}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.branch_code}</td>
                   <td style={td}>{r.branch_name}</td>
+                  <td style={td}>{r.branch_display_name || "-"}</td>
                   <td style={td}>{r.affiliation || "-"}</td>
+                  <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{r.address || "-"}</td>
+                  <td style={{ ...td, fontFamily: "monospace", fontSize: 12 }}>{r.tax_id || "-"}</td>
+                  <td style={{ ...td, fontFamily: "monospace", fontSize: 12, whiteSpace: "nowrap" }}>
+                    {r.phone || r.mobile ? <>{r.phone && <div>🏪 {r.phone}</div>}{r.mobile && <div>📱 {r.mobile}</div>}</> : "-"}
+                  </td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{r.sales_target || "-"}</td>
                   <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{r.note || ""}</td>
                   <td style={td}>{r.active === false ? <span style={{ color: "#dc2626" }}>ปิด</span> : <span style={{ color: "#059669" }}>ใช้งาน</span>}</td>

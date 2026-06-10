@@ -17,20 +17,24 @@ const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-ap
 const LINE_LOG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-line-log";
 const LINE_AUTO_SEND_DELAY = 10; // วินาทีก่อนส่ง LINE อัตโนมัติ
 
-// หัวกระดาษใบขาย (hardcode) — แก้ข้อความ/ใส่ลิงก์โลโก้ได้ที่นี่
+// หัวกระดาษใบขาย (fallback เมื่อยังโหลด branch_master ไม่ได้) — ปกติหัวกระดาษจริง
+// ดึงจากหน้า "บันทึกข้อมูลสาขา" (branch_master: ชื่อสาขา/ที่อยู่/เบอร์/เลขภาษี) ตามสาขาของใบขาย
 const LETTERHEAD = {
   HONDA: {
     name: "บริษัท ป.เปามอเตอร์เซอร์วิส จำกัด - สำนักงานใหญ่",
     addr: "189-191 ม.7 ต.ลำไทร อ.วังน้อย จ.พระนครศรีอยุธยา 13170",
     tel: "โทรศัพท์ : (035)271146-7   แฟกซ์ : (035) 272613",
     tax: "เลขประจำตัวผู้เสียภาษีอากร : 0145546000707   สำนักงานใหญ่",
-    logo: "", // วางลิงก์รูปโลโก้ HONDA ได้ (เว้นว่าง = แสดงชื่อยี่ห้อ)
+    logo: "",
   },
   YAMAHA: {
     name: "หจก. สิงห์ชัย สยามยนต์",
     addr: "", tel: "", tax: "", logo: "",
   },
 };
+// โลโก้หัวใบเสร็จรายสาขา — SCY01/SCY04/SCY07 = YAMAHA, SCY05/SCY06 = ปีกนก HONDA
+const BRANCH_LOGO = { SCY01: "yamaha", SCY04: "yamaha", SCY07: "yamaha", SCY05: "honda", SCY06: "honda" };
+const LOGO_FILES = { yamaha: "/logos/yamaha.svg", honda: "/logos/honda-wing.svg" };
 const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
 const STOCK_SEARCH_API = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-search";
 
@@ -215,11 +219,12 @@ export default function RetailSalePage({ currentUser }) {
   const [installmentRound, setInstallmentRound] = useState(false); // false = ไม่ปัด, true = ปัดขึ้นเป็นทวีคูณของ 5 (ลงท้าย 0/5)
   const [installmentTouched, setInstallmentTouched] = useState(false);
   const [selectedTypeId, setSelectedTypeId] = useState(""); // เผื่อ model_code ตรงหลายแถว
+  const [branchMaster, setBranchMaster] = useState([]); // ข้อมูลสาขา (ชื่อสาขา/ที่อยู่/เบอร์/เลขภาษี) สำหรับหัวใบเสร็จ
   useEffect(() => {
     let alive = true;
     (async () => {
       try {
-        const [t, s, pt, p, fc, m, se, cl] = await Promise.all([
+        const [t, s, pt, p, fc, m, se, cl, br] = await Promise.all([
           fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_types" }) }).then((r) => r.json()).catch(() => []),
           fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_series" }) }).then((r) => r.json()).catch(() => []),
           fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_price_types" }) }).then((r) => r.json()).catch(() => []),
@@ -228,6 +233,7 @@ export default function RetailSalePage({ currentUser }) {
           fetch(ACC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_price_markups" }) }).then((r) => r.json()).catch(() => []),
           fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_sale_expenses" }) }).then((r) => r.json()).catch(() => []),
           fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_colors" }) }).then((r) => r.json()).catch(() => []),
+          fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_branches" }) }).then((r) => r.json()).catch(() => []),
         ]);
         if (!alive) return;
         setMotoTypes((Array.isArray(t) ? t : []).filter((m) => m.status === "active" && m.model_status === "active" && m.series_status === "active" && m.brand_status === "active"));
@@ -238,6 +244,7 @@ export default function RetailSalePage({ currentUser }) {
         setMarkups((Array.isArray(m) ? m : []).filter((x) => x.status === "active"));
         setSaleExpenses(Array.isArray(se) ? se.filter((x) => x.expense_type === "promotion" && x.status === "active") : []);
         setColors(Array.isArray(cl) ? cl.filter((x) => x.status === "active") : []);
+        setBranchMaster(Array.isArray(br) ? br.filter((x) => x && x.branch_code) : []);
       } catch { /* silent */ }
     })();
     return () => { alive = false; };
@@ -840,6 +847,34 @@ export default function RetailSalePage({ currentUser }) {
     }
   }
 
+  // หัวกระดาษใบขาย/ใบเสร็จตามสาขาของเอกสาร — ชื่อสาขา/ที่อยู่/เบอร์/เลขภาษีจาก branch_master
+  // โลโก้ตาม BRANCH_LOGO (SCY01/04/07=YAMAHA, SCY05/06=ปีกนก HONDA) ถ้าไม่รู้สาขาใช้ยี่ห้อรถแทน
+  function letterheadFor(s, v) {
+    const bc = String(s?.branch_code || s?.sale_no || branchCode || "").substring(0, 5).toUpperCase();
+    const brandKey = String(v?.brand || "").toUpperCase().indexOf("YAMAHA") >= 0 ? "YAMAHA" : "HONDA";
+    const base = LETTERHEAD[brandKey] || LETTERHEAD.HONDA;
+    const logoKind = BRANCH_LOGO[bc] || (brandKey === "YAMAHA" ? "yamaha" : "honda");
+    const logo = (typeof window !== "undefined" ? window.location.origin : "") + LOGO_FILES[logoKind];
+    const brandText = logoKind === "yamaha" ? "YAMAHA" : "HONDA";
+    const b = branchMaster.find((x) => String(x.branch_code || "").toUpperCase() === bc);
+    if (!b) return { ...base, logo, brandText };
+    const tel = [b.phone ? `โทรศัพท์ : ${b.phone}` : "", b.mobile ? `มือถือ : ${b.mobile}` : ""].filter(Boolean).join("   ");
+    return {
+      name: b.branch_display_name || b.branch_name || base.name,
+      addr: b.address || base.addr,
+      tel: tel || base.tel,
+      tax: b.tax_id ? `เลขประจำตัวผู้เสียภาษีอากร : ${b.tax_id}` : base.tax,
+      logo, brandText,
+    };
+  }
+
+  // โลโก้หัวเอกสาร — รูปจาก /logos/ ถ้าโหลดไม่ได้ fallback เป็นกรอบชื่อยี่ห้อ
+  function logoHtml(lh, esc) {
+    const ph = `<div class="ph">${esc(lh.brandText || "")}</div>`;
+    if (!lh.logo) return ph;
+    return `<img src="${esc(lh.logo)}" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><div class="ph" style="display:none">${esc(lh.brandText || "")}</div>`;
+  }
+
   function buildSaleHtml(saleArg) {
     const s = saleArg || sale || {};
     const v = vehicle || {};
@@ -847,7 +882,7 @@ export default function RetailSalePage({ currentUser }) {
     const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const isFin = isFinance(s.finance_type);
     const colorTxt = v.color_name || v.model_color || "-";
-    const lh = LETTERHEAD[String(v.brand || "").toUpperCase().indexOf("YAMAHA") >= 0 ? "YAMAHA" : "HONDA"] || LETTERHEAD.HONDA;
+    const lh = letterheadFor(s, v);
     const dash = (n) => (Number(n) > 0 ? money(n) : "-");
     const modelLine = [v.model_code, v.model_type,
       (v.model_color ? v.model_color + (colorTxt && colorTxt !== "-" ? "(" + colorTxt + ")" : "") : colorTxt),
@@ -895,7 +930,7 @@ table.bx>tbody>tr>td{border:1px solid #c2185b;padding:5px 8px;font-size:12px;ver
 </style></head><body><div class="wrap">
 
 <div class="hdr">
-  <div class="logo">${lh.logo ? `<img src="${esc(lh.logo)}">` : `<div class="ph">${esc(v.brand || "")}</div>`}</div>
+  <div class="logo">${logoHtml(lh, esc)}</div>
   <div class="co"><div class="nm">${esc(lh.name)}</div><div>${esc(lh.addr)}</div><div>${esc(lh.tel)}</div><div>${esc(lh.tax)}</div></div>
   <div class="ttl"><div class="b">ใบขาย</div><div>Sales Order</div><div class="o">(ต้นฉบับ)</div></div>
 </div>
@@ -1110,7 +1145,7 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
     const s = sale || {}, v = vehicle || {};
     const money = (n) => (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
-    const lh = LETTERHEAD[String(v.brand || "").toUpperCase().indexOf("YAMAHA") >= 0 ? "YAMAHA" : "HONDA"] || LETTERHEAD.HONDA;
+    const lh = letterheadFor(s, v);
     const carLine = [v.model_name || s.model_name, v.model_code || s.model_code, v.engine_no || s.engine_no].filter((x) => x && x !== "-").join(" / ");
     const lines = Array.isArray(s.payment_methods) ? s.payment_methods : [];
     let iRows = "", i = 0;
@@ -1137,7 +1172,7 @@ table.bx>tbody>tr>td{border:1px solid #047857;padding:5px 8px;font-size:12px;ver
 </style></head><body><div class="wrap">
 
 <div class="hdr">
-  <div class="logo">${lh.logo ? `<img src="${esc(lh.logo)}">` : `<div class="ph">${esc(v.brand || "")}</div>`}</div>
+  <div class="logo">${logoHtml(lh, esc)}</div>
   <div class="co"><div class="nm">${esc(lh.name)}</div><div>${esc(lh.addr)}</div><div>${esc(lh.tel)}</div><div>${esc(lh.tax)}</div></div>
   <div class="ttl"><div class="b">ใบเสร็จรับเงิน</div><div>Receipt</div><div class="o">(ต้นฉบับ)</div></div>
 </div>
