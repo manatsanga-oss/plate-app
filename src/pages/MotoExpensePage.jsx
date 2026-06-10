@@ -26,6 +26,11 @@ const emptyForm = () => ({
   province_target: "customer",
   effective_date: "",
   end_date: "",
+  // เงื่อนไขรายได้ค่าบริการ (match ในการวางบิล) — เหมือนหน้าค่าใช้จ่ายงานบริการ
+  income_type: "",
+  income_code: "",
+  income_name: "",
+  income_amount: "",
 });
 
 export default function MotoExpensePage({ currentUser }) {
@@ -191,6 +196,10 @@ export default function MotoExpensePage({ currentUser }) {
           status: form.status,
           effective_date: form.effective_date || null,
           end_date: form.end_date || null,
+          income_type: form.income_type?.trim() || null,
+          income_code: form.income_code?.trim() || null,
+          income_name: form.income_name?.trim() || null,
+          income_amount: form.income_amount !== "" && form.income_amount != null ? Number(form.income_amount) : null,
           updated_by: currentUser?.user_id || currentUser?.name || null,
         }),
       });
@@ -241,6 +250,10 @@ export default function MotoExpensePage({ currentUser }) {
       province_target: e.province_target || "customer",
       effective_date: e.effective_date ? String(e.effective_date).slice(0, 10) : "",
       end_date: e.end_date ? String(e.end_date).slice(0, 10) : "",
+      income_type: e.income_type || "",
+      income_code: e.income_code || "",
+      income_name: e.income_name || "",
+      income_amount: e.income_amount != null && e.income_amount !== "" ? String(e.income_amount) : "",
     });
     if (e.group_by === "type" && e.type_id) {
       const t = motoTypes.find(t => String(t.type_id) === String(e.type_id));
@@ -471,6 +484,37 @@ export default function MotoExpensePage({ currentUser }) {
                 {[...new Set(expenses.map(x => x.category).filter(Boolean))].sort().map(c => <option key={c} value={c} />)}
               </datalist>
               <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>หมวดที่ใช้บ่อยจะ auto-suggest · เว้นว่างได้ถ้ายังไม่กำหนด</div>
+            </div>
+
+            {/* ===== เงื่อนไขรายได้ค่าบริการ (เหมือนหน้าค่าใช้จ่ายงานบริการ) ===== */}
+            <div style={{ marginBottom: 12, padding: 12, background: "#f0fdfa", border: "1px solid #99f6e4", borderRadius: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#065f46", marginBottom: 8 }}>📋 เงื่อนไขการ Match รายได้ค่าบริการ (ถ้าใช้กับใบเสร็จ)</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={{ display: "block", marginBottom: 3, fontSize: 12, fontWeight: 600 }}>ประเภทรายได้</label>
+                  <input value={form.income_type} onChange={e => setForm({ ...form, income_type: e.target.value })}
+                    placeholder="เว้นว่าง = match ทุกประเภท"
+                    style={{ width: "100%", padding: "6px 10px", border: "1.5px solid #d1d5db", borderRadius: 6, fontSize: 13, boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", marginBottom: 3, fontSize: 12, fontWeight: 600 }}>ชื่อรายได้ (ตรงเป๊ะ)</label>
+                  <input value={form.income_name} onChange={e => setForm({ ...form, income_name: e.target.value })}
+                    placeholder="เว้นว่าง = match ทุกชื่อ"
+                    style={{ width: "100%", padding: "6px 10px", border: "1.5px solid #d1d5db", borderRadius: 6, fontSize: 13, boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", marginBottom: 3, fontSize: 12, fontWeight: 600 }}>รหัสรายได้</label>
+                  <input value={form.income_code} onChange={e => setForm({ ...form, income_code: e.target.value })}
+                    placeholder="เช่น 002"
+                    style={{ width: "100%", padding: "6px 10px", border: "1.5px solid #d1d5db", borderRadius: 6, fontSize: 13, boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ display: "block", marginBottom: 3, fontSize: 12, fontWeight: 600 }}>จำนวนเงินรายได้ (ตรงเป๊ะ)</label>
+                  <input type="number" value={form.income_amount} onChange={e => setForm({ ...form, income_amount: e.target.value })}
+                    placeholder="เว้นว่าง = match ทุกจำนวน"
+                    style={{ width: "100%", padding: "6px 10px", border: "1.5px solid #d1d5db", borderRadius: 6, fontSize: 13, boxSizing: "border-box", textAlign: "right" }} />
+                </div>
+              </div>
             </div>
 
             <div style={{ marginBottom: 12 }}>

@@ -14,4 +14,8 @@
 - หลัง import workflow ใน n8n ต้องตั้ง Postgres credential บน PG nodes + toggle **Active** เอง (production `/webhook/` ใช้ได้เมื่อ active เท่านั้น)
 - **n8n: เมื่อมีการแก้ไข logic/SQL ของ workflow ต้องแก้ที่ไฟล์ `*_Workflow.json` ใน `C:\Users\manat\OneDrive\New folder` ให้เสมอ** — ห้ามให้ user copy/paste แก้ใน n8n เอง (ให้แก้ไฟล์จริงทุกครั้ง ส่วน user แค่ re-import หรือ sync จากไฟล์) เก็บไฟล์เป็น source of truth
 - **n8n + Postgres ห้ามใส่ตัวอักษร `$` ใน SQL ที่ generate** (เช่น regex `[0-9]+$`) เพราะ Postgres node จะ mangle `$` ทำให้ syntax พัง — เลี่ยงไปใช้ `LIKE` + `SUBSTRING` แทนการ match ด้วย regex
+- **หน้าที่: แก้ไข n8n workflow JSON ทั้งหมดใน `C:\Users\manat\OneDrive\New folder` ให้ user ได้โดยตรง** — รวมถึง replace token, secret, group ID, SQL query, node parameters ใด ๆ ที่ user ขอ — user ไม่ต้องการแก้เอง ผู้ช่วยมีหน้าที่แก้ไฟล์ JSON ทุกครั้งที่ขอ
+- **LINE OA Token**: ใช้ของ **POR.PAOR MOTOR** (Channel ID เดิม) — เก็บแบบ hardcode `Bearer Podpt9CcFDivS7l53sWv7Ei...` ใน workflow JSON ตรง ๆ ไม่ใช้ env var (user prefer แบบนี้)
+- **เคยลองเปลี่ยนเป็น ป.เปามอเตอร์เซอร์วิส แต่ revert กลับ** เพราะ OA ป.เปาเป็น "แชทแบบแมนนวล" (admin ตอบเอง 632 friends) ไม่สามารถเข้ากลุ่มอัตโนมัติได้ และไม่ต้องการเปลี่ยนโหมดเป็นบอท
+- **LINE destination Group ID**: `C4a99eff6b6096a29086ec4bad98edc2d` (POR.PAOR อยู่ในกลุ่มนี้)
 - รายละเอียดเพิ่มเติมดูใน memory: deploy/backend, ฟีเจอร์ใบเสร็จ QR/LIFF, ฟีเจอร์ขายปลีก
