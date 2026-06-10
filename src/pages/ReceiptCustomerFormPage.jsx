@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 // หน้านี้ "ไม่ผ่าน login" — ถูกเรียกตรงจาก App.jsx เมื่อ path = /receipt-form
 // รองรับ 3 ภาษา: ไทย / English / မြန်မာ
 // ============================================================================
-const LIFF_ID = "2010078995-B6jJD1OK";
+const LIFF_ID = "2010357741-OvPBYFXi";
 const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-requests-api";
 const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 // ข้อมูลที่อยู่ไทย (จังหวัด/อำเภอ/ตำบล + รหัสไปรษณีย์) — โหลดจาก CDN (gzip)

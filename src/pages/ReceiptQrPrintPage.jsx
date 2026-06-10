@@ -8,7 +8,7 @@ import React, { useState } from "react";
 //   - LIFF_ID     : เอาจาก LINE Developers Console > LIFF (ตัวเดียวกับหน้าฟอร์มลูกค้า)
 //   - RECEIPT_API : webhook ของ n8n สำหรับงานนี้
 // ============================================================================
-const LIFF_ID = "2010078995-B6jJD1OK";
+const LIFF_ID = "2010357741-OvPBYFXi";
 const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-requests-api";
 
 // URL ที่ฝังลงใน QR — เปิด LIFF พร้อมแนบ ref

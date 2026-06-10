@@ -5,6 +5,67 @@ const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-dat
 
 const RECEIPT_TYPES = ["จดทะเบียนใหม่", "โอน", "พรบ./ประกันภัย", "ต่อทะเบียน", "อื่น ๆ"];
 
+// ประเภทรายได้คงที่ 3 อย่าง — 1&2 ดึงชื่อรายได้จาก master service_expenses, 3 (พรบ.) ดึงอัตโนมัติจากค่าใช้จ่ายการขายตาม CC
+const TYPE_REGISTER = "รายได้งานทะเบียน";
+const TYPE_INSURANCE = "รายได้ประกัน";
+const TYPE_PRB = "รายได้ พรบ.";
+const FIXED_INCOME_TYPES = [TYPE_REGISTER, TYPE_INSURANCE, TYPE_PRB];
+const stripDots = (s) => String(s || "").replace(/[.\s]/g, "");
+const containsPrb = (s) => stripDots(s).includes("พรบ");
+const normName = (s) => String(s || "").toLowerCase().replace(/\s+/g, "").trim();
+// แปลงประเภทเดิม (ก่อนแยก 3 อย่าง) ให้ match dropdown ใหม่ เวลาเปิดแก้ไขเอกสารเก่า
+const normalizeIncomeType = (t) => {
+  const s = String(t || "").trim();
+  if (!s || FIXED_INCOME_TYPES.includes(s)) return s;
+  if (containsPrb(s) && !s.includes("ประกัน")) return TYPE_PRB;
+  if (s.includes("ประกัน")) return TYPE_INSURANCE;
+  if (s.includes("ทะเบียน")) return TYPE_REGISTER;
+  return s;
+};
+
+// ===== normalize รุ่น/แบบ/type จาก moto_sales ให้ตรง master (รูปแบบต่างกันฮอนด้า/ยามาฮ่า) =====
+const normBrand = (b) => {
+  const s = String(b || "").toLowerCase();
+  if (s.includes("honda") || s.includes("ฮอนด้า")) return "honda";
+  if (s.includes("yamaha") || s.includes("ยามาฮ่า")) return "yamaha";
+  return s;
+};
+const upCode = (s) => String(s || "").toUpperCase().replace(/\s+/g, "").trim();
+// ฮอนด้า: model_code = "ACB160CATR (TH) CLICK 160..." → base="ACB160CATR", type="TH"
+const parseHondaModelCode = (mc) => {
+  const raw = String(mc || "").trim();
+  const m = raw.match(/^([A-Za-z0-9\-/]+)\s*\(([^)]+)\)/);
+  if (m) return { base: m[1].trim(), type: m[2].trim() };
+  return { base: raw.split(/\s+/)[0] || "", type: "" };
+};
+// คืน { brand, model_series(รุ่น), model_code(แบบ), model_type(type) } โดย validate กับ master types
+function normalizeVehicleModel(raw, types) {
+  const nb = normBrand(raw.brand);
+  const series = String(raw.model_series || "").trim();
+  const already = String(raw.model_type || "").trim(); // มี = normalize แล้ว (ข้อมูลที่บันทึกภายหลัง)
+  let parsedCode = "", parsedType = "";
+  if (already) { parsedType = upCode(already); parsedCode = upCode(raw.model_code); }
+  else if (nb === "yamaha") { parsedType = upCode(raw.model_code); }       // ยามาฮ่า: model_code = type code (เช่น DT0300)
+  else { const p = parseHondaModelCode(raw.model_code); parsedCode = upCode(p.base); parsedType = upCode(p.type); }
+
+  const pool = (Array.isArray(types) ? types : []).filter(
+    (t) => normBrand(t.brand_name) === nb && upCode(t.series_name) === upCode(series)
+  );
+  let hit = null;
+  if (parsedType) hit = pool.find((t) => upCode(t.type_name) === parsedType);
+  if (!hit && parsedCode) hit = pool.find((t) => upCode(t.model_code) === parsedCode);
+  if (!hit && pool.length === 1) hit = pool[0];
+
+  if (hit) return { brand: hit.brand_name || raw.brand || "", model_series: hit.series_name || series, model_code: hit.model_code || "", model_type: hit.type_name || "" };
+  // fallback: ไม่เจอใน master → ใช้ค่าที่ parse ได้ (ยามาฮ่า แบบ มัก = ชื่อรุ่น)
+  return {
+    brand: String(raw.brand || "").trim(),
+    model_series: series,
+    model_code: already ? String(raw.model_code || "").trim() : (nb === "yamaha" ? series : parsedCode),
+    model_type: parsedType,
+  };
+}
+
 const text = (v) => (v ?? "").toString().trim();
 const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const baht = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -39,8 +100,8 @@ const blankHeader = (currentUser) => ({
   staff_recorder: currentUser?.name || currentUser?.username || "",
   customer_name: "", customer_address: "", customer_phone: "", customer_id_card: "",
   contract_no: "", contract_date: "", contract_ref: "", contract_status: "",
-  brand: "", model_series: "", model_code: "", product_code: "", color: "",
-  engine_no: "", chassis_no: "", plate_number: "", register_date: "", tax_paid_date: "",
+  brand: "", model_series: "", model_code: "", model_type: "", product_code: "", color: "",
+  engine_no: "", chassis_no: "", plate_category: "", plate_number: "", register_date: "", tax_paid_date: "",
 });
 
 export default function RegistrationReceiptEntryPage({ currentUser }) {
@@ -70,6 +131,31 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       setServiceExpenses(Array.isArray(data) ? data : []);
     } catch { setServiceExpenses([]); }
   }
+  // รายการค่าใช้จ่ายการขาย (ใช้ดึง พรบ. ตาม CC) + ข้อมูลรุ่นรถ (ใช้หา engine_cc จากรุ่น)
+  const [saleExpenses, setSaleExpenses] = useState([]);
+  const [motoSeries, setMotoSeries] = useState([]);
+  async function loadSaleExpenses() {
+    try {
+      const r = await fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_sale_expenses" }) });
+      const data = await r.json();
+      setSaleExpenses(Array.isArray(data) ? data : []);
+    } catch { setSaleExpenses([]); }
+  }
+  async function loadMotoSeries() {
+    try {
+      const r = await fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_series" }) });
+      const data = await r.json();
+      setMotoSeries(Array.isArray(data) ? data : []);
+    } catch { setMotoSeries([]); }
+  }
+  const [motoTypes, setMotoTypes] = useState([]);
+  async function loadMotoTypes() {
+    try {
+      const r = await fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_types" }) });
+      const data = await r.json();
+      setMotoTypes(Array.isArray(data) ? data : []);
+    } catch { setMotoTypes([]); }
+  }
   // จัดรูปแบบเป็น tree: income_type -> [{code, name, amount}] — dedup โดยให้แถวที่มี amount ชนะ
   const incomeTypesMaster = useMemo(() => {
     const map = new Map();
@@ -91,6 +177,46 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     return Array.from(map.entries()).map(([type, codes]) => ({ type, codes: codes.sort((a,b) => String(a.code).localeCompare(String(b.code))) }));
   }, [serviceExpenses]);
 
+  // หา CC ของรถจาก "รุ่น" (model_series) เทียบกับข้อมูลรุ่นรถ (moto_series.engine_cc)
+  const vehicleCC = useMemo(() => {
+    const target = normName(header.model_series);
+    if (!target) return null;
+    const hits = motoSeries.filter((s) => normName(s.series_name) === target || normName(s.marketing_name) === target);
+    if (hits.length === 0) return null;
+    const tb = normName(header.brand);
+    const hit = (tb && hits.find((s) => normName(s.brand_name) === tb)) || hits[0];
+    return hit && hit.engine_cc != null && hit.engine_cc !== "" ? Number(hit.engine_cc) : null;
+  }, [header.model_series, header.brand, motoSeries]);
+
+  // รายการ พรบ. = ค่าใช้จ่ายการขายแบบ group_by=cc ที่ CC ตรง + ชื่อ/หมวดมีคำว่า "พรบ" + ยังใช้งาน (ในช่วงวันที่)
+  const prbCodes = useMemo(() => {
+    if (vehicleCC == null) return [];
+    const today = todayISO();
+    const activeOn = (e) => {
+      if (e.status && e.status !== "active") return false;
+      const eff = e.effective_date ? String(e.effective_date).slice(0, 10) : null;
+      const end = e.end_date ? String(e.end_date).slice(0, 10) : null;
+      if (eff && eff > today) return false;
+      if (end && end < today) return false;
+      return true;
+    };
+    return saleExpenses
+      .filter((e) => e.group_by === "cc" && Number(e.engine_cc) === Number(vehicleCC) && activeOn(e) && (containsPrb(e.expense_name) || containsPrb(e.category)))
+      .map((e) => ({ _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: e.amount != null && e.amount !== "" ? Number(e.amount) : null }));
+  }, [saleExpenses, vehicleCC]);
+
+  // คืน list ชื่อรายได้ตามประเภทที่เลือก — พรบ. ดึงอัตโนมัติตาม CC, อีก 2 ประเภทดึงจาก master
+  function getCodesForType(label) {
+    if (label === TYPE_PRB) return prbCodes;
+    const pred = label === TYPE_REGISTER ? (t) => t.includes("ทะเบียน")
+              : label === TYPE_INSURANCE ? (t) => t.includes("ประกัน")
+              : null;
+    if (!pred) return [];
+    const out = [];
+    incomeTypesMaster.forEach(({ type, codes }) => { if (pred(type)) out.push(...codes); });
+    return out;
+  }
+
   async function loadList() {
     setLoading(true);
     try {
@@ -104,7 +230,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     } catch { setRows([]); }
     setLoading(false);
   }
-  useEffect(() => { loadList(); loadServiceExpenses(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { loadList(); loadServiceExpenses(); loadSaleExpenses(); loadMotoSeries(); loadMotoTypes(); /* eslint-disable-next-line */ }, []);
 
   async function openNew() {
     setEditMode(false);
@@ -129,13 +255,18 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       const item = data?.[0]?.data || data?.[0] || {};
       const h = item.header || {};
       const ls = item.lines || [];
+      const nv = normalizeVehicleModel(h, motoTypes);
       setHeader({ ...blankHeader(currentUser), ...h,
+        brand: nv.brand || h.brand || "",
+        model_series: nv.model_series || h.model_series || "",
+        model_code: nv.model_code || h.model_code || "",
+        model_type: nv.model_type || h.model_type || "",
         receive_date: h.receive_date ? String(h.receive_date).slice(0,10) : todayISO(),
         contract_date: h.contract_date ? String(h.contract_date).slice(0,10) : "",
         register_date: h.register_date ? String(h.register_date).slice(0,10) : "",
         tax_paid_date: h.tax_paid_date ? String(h.tax_paid_date).slice(0,10) : "",
       });
-      setLines(ls.length ? ls.map((l) => ({ ...blankLine(), ...l })) : [blankLine()]);
+      setLines(ls.length ? ls.map((l) => ({ ...blankLine(), ...l, income_type: normalizeIncomeType(l.income_type) })) : [blankLine()]);
       setView("form");
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e.message || e).slice(0, 100));
@@ -167,6 +298,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   }
 
   function pickResult(s) {
+    const nv = normalizeVehicleModel(s, motoTypes);
     setHeader((h) => ({ ...h,
       chassis_no: s.chassis_no || h.chassis_no,
       engine_no: s.engine_no || h.engine_no,
@@ -174,11 +306,13 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       customer_address: s.customer_address || h.customer_address,
       customer_phone: s.customer_phone || h.customer_phone,
       customer_id_card: s.customer_id_card || h.customer_id_card,
-      brand: s.brand || h.brand,
-      model_series: s.model_series || h.model_series,
-      model_code: s.model_code || h.model_code,
+      brand: nv.brand || s.brand || h.brand,
+      model_series: nv.model_series || s.model_series || h.model_series,
+      model_code: nv.model_code || s.model_code || h.model_code,
+      model_type: nv.model_type || s.model_type || h.model_type,
       product_code: s.product_code || h.product_code,
-      color: s.color || h.color,
+      color: s.color_name || s.color || h.color,
+      plate_category: s.plate_category || h.plate_category,
       plate_number: s.plate_number || h.plate_number,
       contract_ref: s.contract_ref || h.contract_ref,
     }));
@@ -196,6 +330,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       const data = await apiPost({ action: "lookup_sale", chassis_no: chassis, engine_no: engine });
       const s = data?.[0];
       if (!s || !s.chassis_no) { setMessage("ℹ️ ไม่พบข้อมูลขายที่ตรงกับเลขถัง/เลขเครื่องนี้"); return; }
+      const nv = normalizeVehicleModel(s, motoTypes);
       setHeader((h) => ({ ...h,
         chassis_no: s.chassis_no || h.chassis_no,
         engine_no: s.engine_no || h.engine_no,
@@ -203,11 +338,13 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         customer_address: s.customer_address || h.customer_address,
         customer_phone: s.customer_phone || h.customer_phone,
         customer_id_card: s.customer_id_card || h.customer_id_card,
-        brand: s.brand || h.brand,
-        model_series: s.model_series || h.model_series,
-        model_code: s.model_code || h.model_code,
+        brand: nv.brand || s.brand || h.brand,
+        model_series: nv.model_series || s.model_series || h.model_series,
+        model_code: nv.model_code || s.model_code || h.model_code,
+        model_type: nv.model_type || s.model_type || h.model_type,
         product_code: s.product_code || h.product_code,
-        color: s.color || h.color,
+        color: s.color_name || s.color || h.color,
+        plate_category: s.plate_category || h.plate_category,
         plate_number: s.plate_number || h.plate_number,
         contract_ref: s.contract_ref || h.contract_ref,
       }));
@@ -315,11 +452,16 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             <Field label="เลขถัง *"><input value={header.chassis_no} onChange={e => setHeader({ ...header, chassis_no: e.target.value.toUpperCase() })} style={{ ...inp, fontFamily: "monospace" }} /></Field>
             <Field label="เลขเครื่อง"><input value={header.engine_no} onChange={e => setHeader({ ...header, engine_no: e.target.value.toUpperCase() })} style={{ ...inp, fontFamily: "monospace" }} /></Field>
-            <Field label="ทะเบียน"><input value={header.plate_number} onChange={e => setHeader({ ...header, plate_number: e.target.value })} style={inp} /></Field>
+            <Field label="ทะเบียน (หมวด + เลข)">
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={header.plate_category} onChange={e => setHeader({ ...header, plate_category: e.target.value })} style={{ ...inp, flex: "0 0 90px" }} placeholder="หมวด" title="หมวด เช่น 2 กช" />
+                <input value={header.plate_number} onChange={e => setHeader({ ...header, plate_number: e.target.value })} style={{ ...inp, flex: 1 }} placeholder="เลขทะเบียน" title="เลขทะเบียน เช่น 5205" />
+              </div>
+            </Field>
             <Field label="ยี่ห้อ"><input value={header.brand} onChange={e => setHeader({ ...header, brand: e.target.value })} style={inp} /></Field>
             <Field label="รุ่น"><input value={header.model_series} onChange={e => setHeader({ ...header, model_series: e.target.value })} style={inp} /></Field>
-            <Field label="รหัสรุ่น"><input value={header.model_code} onChange={e => setHeader({ ...header, model_code: e.target.value })} style={inp} /></Field>
-            <Field label="แบบ"><input value={header.product_code} onChange={e => setHeader({ ...header, product_code: e.target.value })} style={inp} /></Field>
+            <Field label="แบบ"><input value={header.model_code} onChange={e => setHeader({ ...header, model_code: e.target.value })} style={inp} /></Field>
+            <Field label="type"><input value={header.model_type} onChange={e => setHeader({ ...header, model_type: e.target.value })} style={inp} /></Field>
             <Field label="สี"><input value={header.color} onChange={e => setHeader({ ...header, color: e.target.value })} style={inp} /></Field>
           </div>
         </div>
@@ -359,11 +501,11 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
               <tbody>
                 {lines.map((l, i) => {
                   const net = num(l.qty) * num(l.price_before_discount) - num(l.discount);
-                  const incomeTypeObj = incomeTypesMaster.find(x => x.type === l.income_type);
+                  const codes = getCodesForType(l.income_type);
                   // หา selected key เฉพาะเมื่อ income_name ถูกเลือกแล้ว — ไม่ default ไปรายการแรก
                   const selectedKey = l.income_name
-                    ? ((incomeTypeObj?.codes || []).find(c => c.code === l.income_code && c.name === l.income_name)?._key
-                       || (incomeTypeObj?.codes || []).find(c => c.name === l.income_name)?._key
+                    ? (codes.find(c => c.code === l.income_code && c.name === l.income_name)?._key
+                       || codes.find(c => c.name === l.income_name)?._key
                        || "")
                     : "";
                   return (
@@ -372,7 +514,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                       <td style={td}>
                         <select value={l.income_type} onChange={e => onSelectIncomeType(i, e.target.value)} style={{ ...inp, padding: "5px 8px", fontSize: 12 }}>
                           <option value="">— เลือกประเภท —</option>
-                          {incomeTypesMaster.map(t => <option key={t.type} value={t.type}>{t.type}</option>)}
+                          {FIXED_INCOME_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                         </select>
                       </td>
                       <td style={td}>
@@ -387,10 +529,16 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                           });
                         }} style={{ ...inp, padding: "5px 8px", fontSize: 12, minWidth: 220 }} disabled={!l.income_type}>
                           <option value="" data-amount="" data-code="" data-name="">— เลือกชื่อรายได้ —</option>
-                          {(incomeTypeObj?.codes || []).map(c => (
+                          {codes.map(c => (
                             <option key={c._key} value={c._key} data-amount={c.amount ?? ""} data-code={c.code || ""} data-name={c.name || ""}>{c.name}</option>
                           ))}
                         </select>
+                        {l.income_type === TYPE_PRB && vehicleCC == null && (
+                          <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>⚠️ ไม่พบ CC ของรุ่น "{header.model_series || "-"}" — เลือก/แก้รุ่นรถก่อน</div>
+                        )}
+                        {l.income_type === TYPE_PRB && vehicleCC != null && codes.length === 0 && (
+                          <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>ไม่มีรายการ พรบ. สำหรับ {vehicleCC} cc</div>
+                        )}
                       </td>
                       <td style={td}><input type="number" value={l.qty} onChange={e => updateLine(i, { qty: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right", maxWidth: 70 }} /></td>
                       <td style={td}><input type="number" value={l.price_before_discount} onChange={e => updateLine(i, { price_before_discount: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right" }} /></td>
@@ -475,7 +623,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                             </td>
                             <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.chassis_no || "-"}</td>
                             <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.engine_no || "-"}</td>
-                            <td style={td}>{s.plate_number || "-"}</td>
+                            <td style={td}>{[s.plate_category, s.plate_number].filter(Boolean).join(" ") || "-"}</td>
                             <td style={td}>{s.customer_name || "-"}</td>
                             <td style={td}>{[s.brand, s.model_series, s.model_code].filter(Boolean).join(" · ") || "-"}</td>
                             <td style={td}>{fmtBE(s.ref_date)}</td>

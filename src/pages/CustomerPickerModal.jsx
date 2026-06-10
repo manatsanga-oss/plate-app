@@ -13,7 +13,7 @@ const URL_GET = `${BASE}/moto-sales-get-customers`;
 const URL_SAVE = `${BASE}/moto-sales-save-customer`;
 const RECEIPT_API = `${BASE}/receipt-requests-api`;
 
-const LIFF_ID = "2010078995-B6jJD1OK";
+const LIFF_ID = "2010357741-OvPBYFXi";
 const liffUrl = (refNo) => `https://liff.line.me/${LIFF_ID}?ref=${encodeURIComponent(refNo)}`;
 const qrImageUrl = (data, size = 240) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=8&data=${encodeURIComponent(data)}`;
