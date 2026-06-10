@@ -5,7 +5,15 @@ import React, { useEffect, useMemo, useState } from "react";
 // หน้านี้ "ไม่ผ่าน login" — ถูกเรียกตรงจาก App.jsx เมื่อ path = /receipt-form
 // รองรับ 3 ภาษา: ไทย / English / မြန်မာ
 // ============================================================================
-const LIFF_ID = "2010357741-OvPBYFXi";
+const LIFF_PORPAO = "2010357741-OvPBYFXi";   // ป.เปา (SCY05/06)
+const LIFF_SINGCHAI = "2010360709-hznV4KSo"; // สิงห์ชัย (SCY01/04/07)
+// อ่าน oa จาก URL/liff.state เพื่อเลือก LIFF ให้ init ตรงกับตัวที่ลูกค้าเปิด (สำคัญ — ผิดตัว init จะ fail)
+function liffIdFromUrl() {
+  const sp = new URLSearchParams(window.location.search);
+  let oa = sp.get("oa") || "";
+  if (!oa) { const st = sp.get("liff.state"); if (st) { try { oa = new URLSearchParams(st.replace(/^\?/, "")).get("oa") || ""; } catch { /* noop */ } } }
+  return oa === "singchai" ? LIFF_SINGCHAI : LIFF_PORPAO;
+}
 const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-requests-api";
 const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 // ข้อมูลที่อยู่ไทย (จังหวัด/อำเภอ/ตำบล + รหัสไปรษณีย์) — โหลดจาก CDN (gzip)
@@ -169,7 +177,7 @@ export default function ReceiptCustomerFormPage() {
     (async () => {
       try {
         const liff = await loadLiffSdk();
-        await liff.init({ liffId: LIFF_ID });
+        await liff.init({ liffId: liffIdFromUrl() });
         if (!liff.isLoggedIn()) { liff.login(); return; }
         const p = await liff.getProfile();
         if (cancelled) return;

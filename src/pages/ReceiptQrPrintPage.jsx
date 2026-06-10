@@ -8,13 +8,14 @@ import React, { useState } from "react";
 //   - LIFF_ID     : เอาจาก LINE Developers Console > LIFF (ตัวเดียวกับหน้าฟอร์มลูกค้า)
 //   - RECEIPT_API : webhook ของ n8n สำหรับงานนี้
 // ============================================================================
-const LIFF_ID = "2010357741-OvPBYFXi";
+const LIFF_PORPAO = "2010357741-OvPBYFXi";   // ป.เปา (SCY05/06)
+const LIFF_SINGCHAI = "2010360709-hznV4KSo"; // สิงห์ชัย (SCY01/04/07)
 const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-requests-api";
 
 // URL ที่ฝังลงใน QR — เปิด LIFF พร้อมแนบ ref
 const isPorpaoBranch = (bc) => { const c = String(bc || "").toUpperCase(); return c.startsWith("SCY05") || c.startsWith("SCY06"); };
 // สาขา ป.เปา (SCY05/06) ไม่แนบ oa; สาขาอื่น = สิงห์ชัย → แนบ &oa=singchai เพื่อโชว์ปุ่มแอด สิงห์ชัย ในฟอร์ม
-const liffUrl = (refNo, branchCode) => `https://liff.line.me/${LIFF_ID}?ref=${encodeURIComponent(refNo)}${isPorpaoBranch(branchCode) ? "" : "&oa=singchai"}`;
+const liffUrl = (refNo, branchCode) => { const porpao = isPorpaoBranch(branchCode); return `https://liff.line.me/${porpao ? LIFF_PORPAO : LIFF_SINGCHAI}?ref=${encodeURIComponent(refNo)}${porpao ? "" : "&oa=singchai"}`; };
 // รูป QR (ใช้บริการสร้างรูปฟรี ไม่ต้องลง dependency เพิ่ม)
 const qrImageUrl = (data, size = 280) =>
   `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=8&data=${encodeURIComponent(data)}`;
