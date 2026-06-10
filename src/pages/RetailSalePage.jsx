@@ -1033,7 +1033,7 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
         engine_no: v.engine_no || s.engine_no, chassis_no: v.chassis_no || s.chassis_no,
         color: v.color_name || s.model_color, seller: s.seller,
         car_price: s.car_price, discount: s.discount, total_payment: s.total_payment,
-        finance_type: s.finance_type, branch_name: s.branch_name || currentUser?.branch || "",
+        finance_type: s.finance_type, branch_name: s.branch_name || currentUser?.branch || "", branch_code: s.branch_code || currentUser?.branch_code || currentUser?.branch || "",
         line_user_id: s.line_user_id || form.customer_line_user_id || "",
         doc_html: buildSaleHtml(s),
         sent_by: currentUser?.name || currentUser?.username || "",
@@ -1057,7 +1057,7 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
         sale_no: s.sale_no, receipt_no: s.receipt_no, receipt_date: s.receipt_date,
         customer_name: s.customer_name, paid_amount: s.paid_amount,
         payment_methods: Array.isArray(s.payment_methods) ? s.payment_methods : [],
-        branch_name: s.branch_name || currentUser?.branch || "",
+        branch_name: s.branch_name || currentUser?.branch || "", branch_code: s.branch_code || currentUser?.branch_code || currentUser?.branch || "",
         line_user_id: s.line_user_id || form.customer_line_user_id || "",
         doc_html: buildReceiptHtml(),
         sent_by: currentUser?.name || currentUser?.username || "",
@@ -1095,7 +1095,7 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
       const docKey = docType === "act" ? "act" : (docType === "cosmos" ? "cosmos" : docType);
       scheduleLineSend(docKey, label, () => apiPost({
         action: "send_act_flex", sale_no: s.sale_no, doc_type: docType,
-        customer_name: s.customer_name, branch_name: s.branch_name || currentUser?.branch || "",
+        customer_name: s.customer_name, branch_name: s.branch_name || currentUser?.branch || "", branch_code: s.branch_code || currentUser?.branch_code || currentUser?.branch || "",
         line_user_id: s.line_user_id || form.customer_line_user_id || "",
         sent_by: currentUser?.name || currentUser?.username || "",
       }).then(() => setMessage("✅ แจ้ง" + label + " เข้า LINE แล้ว")), s.sale_no);
