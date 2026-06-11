@@ -12,6 +12,7 @@ const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 const URL_GET = `${BASE}/moto-sales-get-customers`;
 const URL_SAVE = `${BASE}/moto-sales-save-customer`;
 const RECEIPT_API = `${BASE}/receipt-requests-api`;
+const SEARCH_ALL_API = `${BASE}/booking-deposit-api`; // action: search_customers — ค้นรวม ฐานลูกค้า + QR/LINE + ใบขายปลีก + ประวัติขาย
 
 const LIFF_PORPAO = "2010357741-OvPBYFXi";   // ป.เปา (SCY05/06)
 const LIFF_SINGCHAI = "2010360709-hznV4KSo"; // สิงห์ชัย (SCY01/04/07)
@@ -81,54 +82,95 @@ export default function CustomerPickerModal({ currentUser, onSelect, onClose }) 
 }
 
 // ---------------------------------------------------------------------------
-// แท็บ 1: ค้นจากฐานข้อมูล
+// แท็บ 1: ค้นจากฐานข้อมูล — ค้นรวมหลายตาราง:
+//   ฐานลูกค้า (เพิ่มข้อมูลลูกค้า) + QR/LINE (receipt_requests) + ใบขายปลีก + ประวัติขาย
+// ผ่าน booking-deposit-api action search_customers
+// ถ้า API นั้นยังไม่ active → fallback ค้นเฉพาะฐานลูกค้า (แบบเดิม)
 // ---------------------------------------------------------------------------
 function SearchTab({ onSelect }) {
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
   const [kw, setKw] = useState("");
   const [err, setErr] = useState("");
 
-  useEffect(() => {
-    setLoading(true);
-    postJson(URL_GET, {})
-      .then((d) => setList(Array.isArray(d) ? d : []))
-      .catch(() => setErr("โหลดรายชื่อลูกค้าไม่สำเร็จ"))
-      .finally(() => setLoading(false));
-  }, []);
-
-  const q = kw.trim().toLowerCase();
-  const filtered = !q ? list : list.filter((c) =>
-    [c.first_name, c.last_name, c.nickname, c.id_number, c.phone, c.addr_province].filter(Boolean).join(" ").toLowerCase().includes(q)
-  );
+  async function search() {
+    const q = kw.trim();
+    if (!q) { setErr("กรอกคำค้นหา"); return; }
+    setLoading(true); setErr(""); setSearched(true);
+    let out = [];
+    try {
+      const d = await postJson(SEARCH_ALL_API, { action: "search_customers", keyword: q });
+      const arr = Array.isArray(d) ? d.filter((x) => x && x.customer_name) : [];
+      // กรองรายการซ้ำข้ามตาราง (ชื่อ+เบอร์เดียวกัน เก็บแถวแรก = ใหม่สุด)
+      const seen = new Set();
+      for (const c of arr) {
+        const key = `${String(c.customer_name).replace(/\s+/g, "")}|${c.customer_phone || ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          source: c.source || "", code: c.customer_code || "", name: c.customer_name,
+          phone: c.customer_phone || "", address: c.customer_address || "",
+          tax_id: c.customer_tax_id || "", line_user_id: c.line_user_id || "",
+          province: c.customer_province || "",
+        });
+      }
+    } catch {
+      // fallback: ค้นเฉพาะตาราง customers แบบเดิม
+      try {
+        const all = await postJson(URL_GET, {});
+        const ql = q.toLowerCase();
+        out = (Array.isArray(all) ? all : [])
+          .filter((c) => [c.first_name, c.last_name, c.nickname, c.id_number, c.phone, c.addr_province].filter(Boolean).join(" ").toLowerCase().includes(ql))
+          .slice(0, 100)
+          .map((c) => ({
+            source: "ฐานลูกค้า", code: c.customer_id != null ? String(c.customer_id) : "",
+            name: fullName(c) || "-", phone: c.phone || "", address: "",
+            tax_id: c.id_number || "", line_user_id: "", province: c.addr_province || "",
+          }));
+      } catch { setErr("ค้นหาไม่สำเร็จ"); }
+    } finally {
+      setLoading(false);
+    }
+    setList(out);
+  }
 
   function pick(c) {
-    onSelect({ code: c.customer_id != null ? String(c.customer_id) : "", name: fullName(c) || "-", phone: c.phone || "", province: c.addr_province || "" });
+    onSelect({ code: c.code, name: c.name, phone: c.phone, province: c.province, address: c.address, tax_id: c.tax_id, line_user_id: c.line_user_id });
   }
 
   return (
     <div>
-      <input autoFocus value={kw} onChange={(e) => setKw(e.target.value)} placeholder="ค้นหา ชื่อ / เลขบัตร / เบอร์ / จังหวัด" style={inp} />
+      <div style={{ display: "flex", gap: 8 }}>
+        <input autoFocus value={kw} onChange={(e) => setKw(e.target.value)} onKeyDown={(e) => e.key === "Enter" && search()}
+          placeholder="ค้นหา ชื่อ / เลขบัตร / เบอร์ — รวมฐานลูกค้า + QR/LINE + ประวัติขาย" style={{ ...inp, flex: 1 }} />
+        <button onClick={search} disabled={loading} style={{ ...primaryBtn, whiteSpace: "nowrap" }}>{loading ? "..." : "🔍 ค้นหา"}</button>
+      </div>
       {err && <div style={{ color: "#b42318", marginTop: 8 }}>{err}</div>}
       <div style={{ marginTop: 10, maxHeight: 360, overflowY: "auto", border: "1px solid #eaecf0", borderRadius: 8 }}>
         {loading ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#98a2b3" }}>กำลังโหลด…</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#98a2b3" }}>ไม่พบลูกค้า</div>
+          <div style={{ padding: 24, textAlign: "center", color: "#98a2b3" }}>กำลังค้นหา…</div>
+        ) : list.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "#98a2b3" }}>{searched ? "ไม่พบลูกค้า" : "พิมพ์คำค้นหาแล้วกด Enter หรือปุ่มค้นหา"}</div>
         ) : (
-          filtered.slice(0, 200).map((c, i) => (
-            <div key={c.customer_id || i} onClick={() => pick(c)} style={rowItem}>
-              <div style={{ fontWeight: 600 }}>{fullName(c) || "-"}</div>
-              <div style={{ fontSize: 12, color: "#667085", display: "flex", gap: 14 }}>
-                {c.phone && <span>📞 {c.phone}</span>}
-                {c.id_number && <span>🪪 {c.id_number}</span>}
-                {c.addr_province && <span>📍 {c.addr_province}</span>}
+          list.map((c, i) => (
+            <div key={i} onClick={() => pick(c)} style={rowItem}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ fontWeight: 600 }}>{c.name}</div>
+                {c.source && <span style={srcChip}>{c.source}</span>}
               </div>
+              <div style={{ fontSize: 12, color: "#667085", display: "flex", gap: 14, flexWrap: "wrap" }}>
+                {c.phone && <span>📞 {c.phone}</span>}
+                {c.tax_id && <span>🪪 {c.tax_id}</span>}
+                {c.province && <span>📍 {c.province}</span>}
+                {c.line_user_id && <span style={{ color: "#067647" }}>LINE ✓</span>}
+              </div>
+              {c.address && <div style={{ fontSize: 12, color: "#98a2b3", marginTop: 2 }}>{c.address}</div>}
             </div>
           ))
         )}
       </div>
-      <div style={{ fontSize: 12, color: "#98a2b3", marginTop: 6 }}>{filtered.length} รายการ — คลิกเพื่อเลือก</div>
+      <div style={{ fontSize: 12, color: "#98a2b3", marginTop: 6 }}>{list.length} รายการ — คลิกเพื่อเลือก</div>
     </div>
   );
 }
@@ -290,6 +332,7 @@ const modal = { background: "#fff", borderRadius: 12, padding: 20, width: "100%"
 const inp = { width: "100%", padding: "9px 12px", fontSize: 15, border: "1px solid #d0d5dd", borderRadius: 8, boxSizing: "border-box" };
 const lbl = { fontSize: 14, color: "#344054" };
 const rowItem = { padding: "10px 14px", borderBottom: "1px solid #f2f4f7", cursor: "pointer" };
+const srcChip = { fontSize: 11, fontWeight: 700, color: "#175cd3", background: "#eff8ff", border: "1px solid #b2ddff", borderRadius: 999, padding: "1px 8px", whiteSpace: "nowrap", alignSelf: "flex-start" };
 const tabBtn = (active) => ({ flex: 1, padding: "8px 6px", fontSize: 13, fontWeight: 600, borderRadius: 8, cursor: "pointer", border: active ? "none" : "1px solid #d0d5dd", background: active ? "#2563eb" : "#fff", color: active ? "#fff" : "#344054" });
 const primaryBtn = { padding: "10px 18px", fontSize: 15, fontWeight: 700, color: "#fff", background: "#2e9e4f", border: "none", borderRadius: 8, cursor: "pointer" };
 const secondaryBtn = { padding: "8px 16px", fontSize: 14, fontWeight: 600, color: "#344054", background: "#fff", border: "1px solid #d0d5dd", borderRadius: 8, cursor: "pointer" };
