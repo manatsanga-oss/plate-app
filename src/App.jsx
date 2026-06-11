@@ -18,6 +18,8 @@ import PartReceiptReportPage from "./pages/PartReceiptReportPage";
 import PartOrderInquiryPage from "./pages/PartOrderInquiryPage";
 import PartDispenseReportPage from "./pages/PartDispenseReportPage";
 import ServiceHistorySearchPage from "./pages/ServiceHistorySearchPage";
+import ServiceRateSearchPage from "./pages/ServiceRateSearchPage";
+import ServiceRateImportPage from "./pages/ServiceRateImportPage";
 import TaxInvoiceReportPage from "./pages/TaxInvoiceReportPage";
 import StockCheckPage from "./pages/StockCheckPage";
 import DriverPage from "./pages/DriverPage";
@@ -196,6 +198,8 @@ export default function App() {
     if (page === "partorderinquiry") return false;            // เฉพาะ admin (สอบถามรายการอะไหล่สั่งซื้อ)
     if (page === "partdispensereport") return false;          // เฉพาะ admin (รายงานการจ่ายอะไหล่รายตัว)
     if (page === "servicehistory") return true;                // ค้นหาประวัติงานบริการ — เปิดให้ทุก user
+    if (page === "servicerate") return true;                   // ค้นหาค่าบริการ (FRT) — เปิดให้ทุก user
+    if (page === "servicerateimport") return false;            // เฉพาะ admin (นำเข้า FRT)
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
@@ -308,6 +312,12 @@ export default function App() {
         )}
         {activeMenu === "servicehistory" && canAccess("servicehistory") && (
           <ServiceHistorySearchPage currentUser={currentUser} />
+        )}
+        {activeMenu === "servicerate" && canAccess("servicerate") && (
+          <ServiceRateSearchPage currentUser={currentUser} />
+        )}
+        {activeMenu === "servicerateimport" && canAccess("servicerateimport") && (
+          <ServiceRateImportPage currentUser={currentUser} />
         )}
         {activeMenu === "partwithdrawal" && canAccess("partwithdrawal") && (
           <PartWithdrawalPage currentUser={currentUser} />
@@ -730,7 +740,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="accdirectorloan" label="บันทึกเงินให้กู้ยืมกรรมการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partstatusinquiry","partorderinquiry","partwithdrawal","partdispensereport","servicehistory"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partstatusinquiry","partorderinquiry","partwithdrawal","partdispensereport","servicehistory","servicerate","servicerateimport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="yamaharepairreport" label="รายงานใบแจ้งซ่อม YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hondarepairreport" label="รายงานใบแจ้งซ่อม HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partstatusinquiry" label="สอบถามสถานะอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -738,6 +748,8 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="partwithdrawal" label="บันทึกการเบิกอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partdispensereport" label="รายงานการจ่ายอะไหล่รายตัว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicehistory" label="ค้นหาประวัติงานบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="servicerate" label="ค้นหาค่าบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="servicerateimport" label="📤 นำเข้า FRT (Admin)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrnormalcommission","hrsalesrecord","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

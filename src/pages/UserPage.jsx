@@ -55,6 +55,7 @@ const PAGE_OPTIONS = [
   { key: "hondarepairreport",  label: "📃 ใบแจ้งซ่อม HONDA" },
   { key: "partwithdrawal",     label: "📤 บันทึกการเบิกอะไหล่" },
   { key: "servicehistory",     label: "🔎 ค้นหาประวัติงานบริการ" },
+  { key: "servicerate",        label: "💲 ค้นหาค่าบริการ" },
   // ── จัดการผู้ใช้ ──
   { key: "users",      label: "👤 กำหนดผู้ใช้งาน" },
 ];
