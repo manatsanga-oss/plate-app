@@ -189,6 +189,24 @@ export default function BookingDepositPage({ currentUser }) {
         } catch {
           extras.push("⚠️ สร้างใบจองอัตโนมัติไม่สำเร็จ (ไปกดจองเองที่ระบบจองรถ)");
         }
+        // แจ้งมัดจำใหม่เข้ากลุ่ม LINE ป.เปา (เหมือนระบบจองคนขับรถ)
+        try {
+          await postJson(DEPOSIT_API, {
+            action: "notify_deposit_group",
+            deposit_no: r.deposit_no,
+            deposit_date: thaiDate(form.deposit_date),
+            customer_name: form.customer_name,
+            customer_phone: form.customer_phone,
+            car: carLabel(form),
+            deposit_amount: form.deposit_amount,
+            payment_method: form.payment_method,
+            branch_name: currentUser?.branch || branchCode,
+            created_by: currentUser?.username || currentUser?.name || "",
+          });
+          extras.push("แจ้งเข้ากลุ่ม LINE แล้ว 🔔");
+        } catch {
+          extras.push("⚠️ แจ้งกลุ่ม LINE ไม่สำเร็จ");
+        }
       }
       // ลูกค้ามี LINE → ส่งใบเสร็จมัดจำเข้า LINE อัตโนมัติ (OA รายสาขา)
       if (form.line_user_id) {
