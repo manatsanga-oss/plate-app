@@ -117,11 +117,16 @@ import ReceiptQrPrintPage from "./pages/ReceiptQrPrintPage";
 import ReceiptIssueFromQrPage from "./pages/ReceiptIssueFromQrPage";
 import RetailSalePage from "./pages/RetailSalePage";
 import BookingDepositPage from "./pages/BookingDepositPage";
+import BookingQueueStatusPage from "./pages/BookingQueueStatusPage";
 
 export default function App() {
   // หน้าฟอร์มลูกค้า (เปิดผ่าน LINE LIFF) — ต้องเข้าได้โดยไม่ผ่าน login/sidebar
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/receipt-form")) {
     return <ReceiptCustomerFormPage />;
+  }
+  // หน้าสถานะคิวจองรถสำหรับลูกค้า (เปิดจากปุ่มในการ์ด LINE) — public ไม่ต้อง login
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/booking-status")) {
+    return <BookingQueueStatusPage />;
   }
 
   const [activeMenu, setActiveMenu] = useState("salesoverview");
