@@ -93,6 +93,7 @@ export default function BookingDepositPage({ currentUser }) {
   const [statusFilter, setStatusFilter] = useState("all");
 
   const branchCode = currentUser?.branch_code || currentUser?.branch || "";
+  const isAdmin = currentUser?.role === "admin";
 
   useEffect(() => {
     let alive = true;
@@ -619,8 +620,12 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                       {r.status !== "refunded" && (
                         <>
                           <button onClick={() => createBookingFor(r)} style={btnSmGreen} title="สร้างใบจองในระบบจองรถ">📋 สร้างใบจอง</button>
-                          <button onClick={() => editRow(r)} style={btnSmYellow}>✏️ แก้ไข</button>
-                          <button onClick={() => setRefundTarget(r)} style={btnSmRed}>↩️ คืนเงิน</button>
+                          {isAdmin && (
+                            <>
+                              <button onClick={() => editRow(r)} style={btnSmYellow}>✏️ แก้ไข</button>
+                              <button onClick={() => setRefundTarget(r)} style={btnSmRed}>↩️ คืนเงิน</button>
+                            </>
+                          )}
                         </>
                       )}
                       {r.status === "refunded" && (
