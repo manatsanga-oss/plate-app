@@ -652,9 +652,6 @@ export default function MotoBookingPage({ currentUser }) {
     <div className="page-container">
       <div className="page-topbar">
         <h2 className="page-title">🏍️ ระบบจองรถจักรยานยนต์</h2>
-        <button className="btn-primary" onClick={() => { setForm(emptyForm()); setMode("add"); setMessage(""); }}>
-          + จองรถ
-        </button>
       </div>
 
       {/* Filters */}
