@@ -15,6 +15,12 @@ function liffIdFromUrl() {
   return oa === "singchai" ? LIFF_SINGCHAI : LIFF_PORPAO;
 }
 const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-requests-api";
+// ลิงก์เพิ่มเพื่อน OA รายสาขา (Basic ID) — ป.เปา: ใส่ Basic ID ของ OA ป.เปา (เช่น "@xxxxxxx") เมื่อทราบ
+const OA_ADD_FRIEND = {
+  singchai: { url: "https://line.me/R/ti/p/@459eeeog", label: "สิงห์ชัยสยามยนต์" },
+  porpao: { url: "https://line.me/R/ti/p/@975ltwhp", label: "ป.เปามอเตอร์เซอร์วิส" },
+};
+const oaInfo = (oa) => (oa === "singchai" ? OA_ADD_FRIEND.singchai : OA_ADD_FRIEND.porpao);
 const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 // ข้อมูลที่อยู่ไทย (จังหวัด/อำเภอ/ตำบล + รหัสไปรษณีย์) — โหลดจาก CDN (gzip)
 const GEO_URL = "https://cdn.jsdelivr.net/gh/kongvut/thai-province-data@master/api/latest/province_with_district_and_sub_district.json";
@@ -126,6 +132,7 @@ export default function ReceiptCustomerFormPage() {
   const [refNo, setRefNo] = useState("");
   const [oa, setOa] = useState(""); // "singchai" = สาขา สิงห์ชัย → โชว์ปุ่มแอด สิงห์ชัย OA
   const [profile, setProfile] = useState(null);   // { userId, displayName }
+  const [isFriend, setIsFriend] = useState(null); // true/false จาก liff.getFriendship() | null = ไม่ทราบ
   const [form, setForm] = useState({ customer_name: "", phone: "", tax_id: "", gender: "", birth_date: "" });
 
   // ที่อยู่: บ้านเลขที่/ถนน + จังหวัด/อำเภอ/ตำบล (id) + zip (auto)
@@ -182,6 +189,11 @@ export default function ReceiptCustomerFormPage() {
         const p = await liff.getProfile();
         if (cancelled) return;
         setProfile({ userId: p.userId, displayName: p.displayName });
+        // เช็คว่าลูกค้าเป็นเพื่อนกับ OA แล้วหรือยัง (ต้อง link bot กับ LIFF ใน LINE Developers)
+        try {
+          const fs = await liff.getFriendship();
+          if (!cancelled) setIsFriend(!!fs?.friendFlag);
+        } catch { /* getFriendship ใช้ไม่ได้ (ไม่ได้ link bot) — ไม่ทราบสถานะ */ }
         setPhase("form");
       } catch (e) {
         if (cancelled) return;
@@ -312,10 +324,10 @@ export default function ReceiptCustomerFormPage() {
             <div style={{ color: "#666", fontSize: 14 }}>
               {t.doneDescPre} <b>{refNo}</b> {t.doneDescPost}
             </div>
-            {oa === "singchai" && (
-              <a href="https://line.me/R/ti/p/@459eeeog" target="_blank" rel="noreferrer"
+            {oaInfo(oa).url && isFriend !== true && (
+              <a href={oaInfo(oa).url} target="_blank" rel="noreferrer"
                  style={{ display: "inline-block", marginTop: 18, background: "#06C755", color: "#fff", padding: "12px 22px", borderRadius: 8, fontWeight: 700, fontSize: 15, textDecoration: "none" }}>
-                ➕ เพิ่มเพื่อน สิงห์ชัยสยามยนต์ (เพื่อรับใบเสร็จ)
+                ➕ เพิ่มเพื่อน {oaInfo(oa).label} (เพื่อรับใบเสร็จ)
               </a>
             )}
           </div>
@@ -324,6 +336,17 @@ export default function ReceiptCustomerFormPage() {
         {(phase === "form" || phase === "submitting") && (
           <div style={S.body}>
             {profile && <div style={S.lineInfo}>LINE: {profile.displayName}</div>}
+
+            {/* ยังไม่ได้เพิ่มเพื่อน OA → แบนเนอร์ปุ่มแอดเพื่อนเด่น ๆ (จำเป็นเพื่อรับใบเสร็จทาง LINE) */}
+            {isFriend === false && oaInfo(oa).url && (
+              <div style={{ background: "#ecfdf3", border: "1.5px solid #06C755", borderRadius: 10, padding: "10px 12px", marginBottom: 12, textAlign: "center" }}>
+                <div style={{ fontSize: 13, color: "#067647", marginBottom: 8 }}>คุณยังไม่ได้เพิ่มเพื่อน {oaInfo(oa).label} — กดเพิ่มเพื่อนก่อน เพื่อรับใบเสร็จทาง LINE</div>
+                <a href={oaInfo(oa).url} target="_blank" rel="noreferrer"
+                   style={{ display: "inline-block", background: "#06C755", color: "#fff", padding: "10px 18px", borderRadius: 8, fontWeight: 700, fontSize: 14, textDecoration: "none" }}>
+                  ➕ เพิ่มเพื่อน {oaInfo(oa).label}
+                </a>
+              </div>
+            )}
 
             <label style={S.label}>{t.name} *</label>
             <input style={S.input} value={form.customer_name} onChange={setField("customer_name")} placeholder={t.namePh} />
