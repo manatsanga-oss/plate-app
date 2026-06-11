@@ -28,6 +28,7 @@ const PAGE_OPTIONS = [
   { key: "receiptqr",  label: "🔳 พิมพ์ QR ออกใบเสร็จ" },
   { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
   { key: "retailsale", label: "🛒 บันทึกขายปลีก" },
+  { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
   // ── Spare Parts ──
   { key: "spareorder", label: "🛠️ สั่งซื้ออะไหล่ HONDA" },
   { key: "yamahaorder", label: "🛠️ สั่งซื้ออะไหล่ YAMAHA" },
@@ -58,7 +59,7 @@ const PAGE_OPTIONS = [
   { key: "users",      label: "👤 กำหนดผู้ใช้งาน" },
 ];
 
-const DEFAULT_PAGES = ["dashboard", "receive", "issue"];
+const DEFAULT_PAGES = ["dashboard", "receive", "issue", "bookingdeposit"];
 
 const emptyForm = () => ({
   name: "",
