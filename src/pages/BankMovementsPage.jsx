@@ -6,6 +6,7 @@ export default function BankMovementsPage({ currentUser }) {
   const [accounts, setAccounts] = useState([]);
   const [accountId, setAccountId] = useState("");
   const [movements, setMovements] = useState([]);
+  const [priorSum, setPriorSum] = useState(0); // ผลรวมรายการก่อน date_from (สำหรับยอดยกมาของช่วง)
   const [loading, setLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -116,18 +117,36 @@ export default function BankMovementsPage({ currentUser }) {
   async function fetchMovements() {
     setLoading(true); setMessage("");
     try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "list_bank_movements",
-          account_id: Number(accountId),
-          date_from: dateFrom,
-          date_to: dateTo,
+      // วันสุดท้ายก่อนช่วงที่เลือก — สำหรับคำนวณยอดยกมาสะสม
+      const prev = new Date(dateFrom + "T00:00:00");
+      prev.setDate(prev.getDate() - 1);
+      const prevISO = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}-${String(prev.getDate()).padStart(2, "0")}`;
+      const [res, resPrior] = await Promise.all([
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "list_bank_movements",
+            account_id: Number(accountId),
+            date_from: dateFrom,
+            date_to: dateTo,
+          }),
         }),
-      });
+        // รายการทั้งหมดก่อนช่วง → ยอดยกมา = opening_balance + ผลรวมนี้ (ใช้ action เดียวกัน เลขตรงกับตารางแน่นอน)
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "list_bank_movements",
+            account_id: Number(accountId),
+            date_from: "2000-01-01",
+            date_to: prevISO,
+          }),
+        }),
+      ]);
       const data = await res.json();
       setMovements(Array.isArray(data) ? data : []);
-    } catch { setMessage("❌ โหลดไม่สำเร็จ"); setMovements([]); }
+      const prior = await resPrior.json().catch(() => []);
+      setPriorSum((Array.isArray(prior) ? prior : []).reduce((s, m) => s + Number(m.amount || 0), 0));
+    } catch { setMessage("❌ โหลดไม่สำเร็จ"); setMovements([]); setPriorSum(0); }
     setLoading(false);
   }
 
@@ -144,7 +163,16 @@ export default function BankMovementsPage({ currentUser }) {
   }
 
   // Calculate balances (amount เป็น NET หลังหัก WHT แล้ว — out = ติดลบ, in = บวก)
-  const opening = Number(acc?.opening_balance || 0);
+  // ยอดยกมาของช่วง = ยอดตั้งต้นบัญชี + รายการสะสมทั้งหมดก่อนวันเริ่มช่วง (เช่น เดือน 5 = ยอดปิด 30/04)
+  const opening = Number(acc?.opening_balance || 0) + priorSum;
+  // วันที่ของยอดยกมา: วันก่อนเริ่มช่วง — แต่ถ้าช่วงเริ่มก่อน/เท่ากับวันเปิดบัญชี ใช้วันเปิดบัญชีเดิม
+  const prevOfFrom = (() => {
+    if (!dateFrom) return acc?.opening_date || "";
+    const d = new Date(dateFrom + "T00:00:00");
+    d.setDate(d.getDate() - 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  })();
+  const openingDateLabel = acc?.opening_date && String(acc.opening_date).slice(0, 10) >= dateFrom ? acc.opening_date : prevOfFrom;
   const totalIn = movements.filter(m => m.direction === "in").reduce((s, m) => s + Number(m.amount || 0), 0);
   const totalOut = movements.filter(m => m.direction === "out").reduce((s, m) => s + Math.abs(Number(m.amount || 0)), 0);
   const currentBalance = opening + totalIn - totalOut;
@@ -192,7 +220,7 @@ export default function BankMovementsPage({ currentUser }) {
       {/* Balance summary */}
       {acc && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 12 }}>
-          <Card label="ยอดยกมา" value={fmtNum(opening)} color="#6b7280" sub={acc.opening_date ? fmtDate(acc.opening_date) : ""} />
+          <Card label="ยอดยกมา" value={fmtNum(opening)} color="#6b7280" sub={openingDateLabel ? fmtDate(openingDateLabel) : ""} />
           <Card label="💰 รับเข้า (DR)" value={fmtNum(totalIn)} color="#059669" />
           <Card label="📤 จ่ายออก (CR)" value={fmtNum(totalOut)} color="#dc2626" />
           <Card label="💵 ยอดคงเหลือ" value={fmtNum(currentBalance)} color="#7c3aed" highlight />
@@ -225,7 +253,7 @@ export default function BankMovementsPage({ currentUser }) {
             <tbody>
               {/* Opening balance row */}
               <tr style={{ borderTop: "1px solid #e5e7eb", background: "#fef9c3", fontWeight: 600 }}>
-                <td style={td}>{acc?.opening_date ? fmtDate(acc.opening_date) : "-"}</td>
+                <td style={td}>{openingDateLabel ? fmtDate(openingDateLabel) : "-"}</td>
                 <td style={{ ...td }} colSpan={5}>📌 ยอดยกมา</td>
                 <td style={tdNum}>-</td>
                 <td style={tdNum}>-</td>
