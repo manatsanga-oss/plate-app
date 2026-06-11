@@ -766,6 +766,34 @@ function CombinedSearchTab({ onSelect }) {
   );
 }
 
+// พิมพ์ QR ให้ลูกค้าสแกน (กระดาษแผ่นเดียว: หัวเรื่อง + เลขอ้างอิง + QR ใหญ่ + วิธีใช้)
+function printQrSheet(refNo, branchCode, branchName) {
+  const qr = qrImageUrl(liffUrl(refNo, branchCode), 420);
+  const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+  const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>QR ${esc(refNo)}</title>
+<style>
+*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
+body{margin:0;padding:30px;text-align:center;color:#222}
+h2{margin:0 0 4px}
+.ref{font-size:20px;font-weight:800;font-family:monospace;margin:8px 0}
+img{width:420px;max-width:90%;border:1px solid #ddd;border-radius:12px;padding:10px}
+.hint{margin-top:14px;font-size:15px;color:#444;line-height:1.7}
+.branch{margin-top:10px;color:#888;font-size:13px}
+@media print{body{padding:10px}}
+</style></head><body>
+<h2>📷 สแกน QR ด้วยแอป LINE</h2>
+<div>แอดเพื่อน + กรอกข้อมูลลูกค้าด้วยตัวเอง</div>
+<div class="ref">${esc(refNo)}</div>
+<img src="${esc(qr)}" onload="setTimeout(function(){window.print()},150)">
+<div class="hint">1. เปิดแอป LINE แล้วสแกน QR นี้<br>2. กดเพิ่มเพื่อน (ถ้ายังไม่ได้เพิ่ม)<br>3. กรอกชื่อ-ที่อยู่-เบอร์โทร แล้วกดส่ง</div>
+${branchName ? `<div class="branch">สาขา: ${esc(branchName)}</div>` : ""}
+</body></html>`;
+  const w = window.open("", "_blank", "width=560,height=760");
+  if (!w) return false;
+  w.document.write(html); w.document.close(); w.focus();
+  return true;
+}
+
 // แท็บ 3: QR ให้ลูกค้าสแกนแอดเพื่อน + กรอกข้อมูลผ่าน LINE LIFF (โครงเดียวกับหน้าขายปลีก)
 function QrLineTab({ currentUser, onSelect }) {
   const [refNo, setRefNo] = useState("");
@@ -844,7 +872,10 @@ function QrLineTab({ currentUser, onSelect }) {
           <div style={{ fontWeight: 700, marginBottom: 8 }}>{refNo}</div>
           <img src={qrImageUrl(liffUrl(refNo, currentUser?.branch_code || currentUser?.branch))} alt="QR" style={{ width: 240, height: 240, border: "1px solid #eaecf0", borderRadius: 8 }} />
           <div style={{ margin: "10px 0", color: status.startsWith("✅") ? "#067647" : "#b54708" }}>{status}</div>
-          <button onClick={() => check()} style={pSecondaryBtn}>🔄 ตรวจสอบตอนนี้</button>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button onClick={() => check()} style={pSecondaryBtn}>🔄 ตรวจสอบตอนนี้</button>
+            <button onClick={() => { if (!printQrSheet(refNo, currentUser?.branch_code || currentUser?.branch, currentUser?.branch || "")) setErr("เปิดหน้าต่างพิมพ์ไม่ได้ (popup ถูกบล็อก)"); }} style={{ ...pPrimaryBtn, background: "#2563eb" }}>🖨️ พิมพ์ QR</button>
+          </div>
         </>
       )}
       {err && <div style={{ color: "#b42318", marginTop: 10 }}>{err}</div>}
