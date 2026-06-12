@@ -54,27 +54,33 @@ export default function CarPaymentReportPage() {
 
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
 
+  // ยอดรับชำระรวม = daily_receipts + FT (paid_from_amount)
+  const combinedPaid = (r) => Number(r.total_paid || 0) + Number(r.paid_from_amount || 0);
+  // สถานะ 3 แบบ: paid = ครบพอดี / over = ชำระเกิน / unpaid = ยังไม่ครบ
+  const statusOf = (r) => {
+    const total = Number(r.total_amount || 0);
+    if (total <= 0) return "unpaid";
+    const diff = total - combinedPaid(r);
+    if (diff < -0.01) return "over";
+    if (diff <= 0.01) return "paid";
+    return "unpaid";
+  };
+
   const kw = search.trim().toLowerCase();
   const filtered = rows.filter(r => {
     if (branchFilter !== "all" && r.branch !== branchFilter) return false;
-    const combined = Number(r.total_paid || 0) + Number(r.paid_from_amount || 0);
-    const full = combined >= Number(r.total_amount || 0) - 0.01 && Number(r.total_amount || 0) > 0;
-    if (paidFilter === "paid" && !full) return false;
-    if (paidFilter === "unpaid" && full) return false;
+    if (paidFilter !== "all" && statusOf(r) !== paidFilter) return false;
     if (!kw) return true;
     const hay = [r.tax_invoice_no, r.customer_name, r.sale_customer_name, r.chassis_no, r.engine_no, r.model_name, r.sale_finance_company, r.sale_invoice_no]
       .filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
 
-  // ยอดรับชำระรวม = daily_receipts + FT (paid_from_amount)
-  const combinedPaid = (r) => Number(r.total_paid || 0) + Number(r.paid_from_amount || 0);
-  const isFull = (r) => combinedPaid(r) >= Number(r.total_amount || 0) - 0.01 && Number(r.total_amount || 0) > 0;
-
   const totalAll = filtered.reduce((s, r) => s + Number(r.total_amount || 0), 0);
   const totalReceived = filtered.reduce((s, r) => s + combinedPaid(r), 0);
-  const countFull = filtered.filter(r => isFull(r)).length;
-  const countPartial = filtered.length - countFull;
+  const countFull = filtered.filter(r => statusOf(r) === "paid").length;
+  const countOver = filtered.filter(r => statusOf(r) === "over").length;
+  const countPartial = filtered.filter(r => statusOf(r) === "unpaid").length;
   const totalRemaining = filtered.reduce((s, r) => s + Math.max(0, Number(r.total_amount || 0) - combinedPaid(r)), 0);
 
   function exportCSV() {
@@ -86,7 +92,7 @@ export default function CarPaymentReportPage() {
       const ftPaid = Number(r.paid_from_amount || 0);
       const combined = dailyPaid + ftPaid;
       const remaining = Number(r.total_amount || 0) - combined;
-      const full = combined >= Number(r.total_amount || 0) - 0.01 && Number(r.total_amount || 0) > 0;
+      const st = statusOf(r);
       const row = [
         i + 1,
         BRANCH_LABEL[r.branch]?.label || r.branch || "",
@@ -105,7 +111,7 @@ export default function CarPaymentReportPage() {
         r.sale_invoice_no || "",
         r.sale_date ? String(r.sale_date).slice(0, 10) : "",
         r.ft_doc_no || (r.paid_from_ft_id ? `FT-${r.paid_from_ft_id}` : ""),
-        full ? "ครบ" : "ไม่ครบ",
+        st === "paid" ? "ครบ" : st === "over" ? "ชำระเกิน" : "ไม่ครบ",
       ];
       lines.push(row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
     });
@@ -161,6 +167,7 @@ export default function CarPaymentReportPage() {
         {[
           { key: "all", label: "ทั้งหมด", count: filtered.length, bg: "#072d6b" },
           { key: "paid", label: "✅ ครบ", count: countFull, bg: "#10b981" },
+          { key: "over", label: "🟠 ชำระเกิน", count: countOver, bg: "#d97706" },
           { key: "unpaid", label: "🔴 ไม่ครบ", count: countPartial, bg: "#dc2626" },
         ].map(f => (
           <button key={f.key} onClick={() => setPaidFilter(f.key)}
@@ -225,7 +232,7 @@ export default function CarPaymentReportPage() {
               {filtered.map((r, i) => {
                 const b = BRANCH_LABEL[r.branch] || { label: r.branch || "-", bg: "#e5e7eb", color: "#374151" };
                 const combined = combinedPaid(r);
-                const full = isFull(r);
+                const st = statusOf(r);
                 return (
                   <tr key={`${r.branch}|${r.tax_invoice_no}|${i}`} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                     <td style={{ ...td, textAlign: "center" }}>{i + 1}</td>
@@ -261,9 +268,14 @@ export default function CarPaymentReportPage() {
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.sale_invoice_no || "-"}</td>
                     <td style={td}>{fmtDate(r.sale_date)}</td>
                     <td style={{ ...td, textAlign: "center" }}>
-                      {full ? (
+                      {st === "paid" ? (
                         <span style={{ display: "inline-block", padding: "3px 10px", background: "#d1fae5", color: "#065f46", borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
                           ✅ ครบ
+                        </span>
+                      ) : st === "over" ? (
+                        <span style={{ display: "inline-block", padding: "3px 10px", background: "#fef3c7", color: "#b45309", borderRadius: 12, fontSize: 11, fontWeight: 700 }}
+                          title={`ชำระเกิน ${fmt(combined - Number(r.total_amount))}`}>
+                          🟠 ชำระเกิน
                         </span>
                       ) : (
                         <span style={{ display: "inline-block", padding: "3px 10px", background: "#fee2e2", color: "#991b1b", borderRadius: 12, fontSize: 11, fontWeight: 700 }}
@@ -308,7 +320,9 @@ export default function CarPaymentReportPage() {
         const totalFtPaid = Number(detailRow.paid_from_amount) || 0;
         const totalCombined = totalDailyPaid + totalFtPaid;
         const remaining = Number(detailRow.total_amount) - totalCombined;
-        const isFullPayment = Math.abs(remaining) < 0.01 && Number(detailRow.total_amount) > 0;
+        const hasTotal = Number(detailRow.total_amount) > 0;
+        const isFullPayment = hasTotal && Math.abs(remaining) <= 0.01;
+        const isOverPayment = hasTotal && remaining < -0.01;
         const sumField = (k) => receipts.reduce((s, r) => s + Number(r[k] || 0), 0);
         return (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
@@ -342,8 +356,8 @@ export default function CarPaymentReportPage() {
                     </span>
                   )}
                 </div>
-                <div>คงเหลือ: <strong style={{ color: isFullPayment ? "#10b981" : "#dc2626" }}>{fmt(remaining)}</strong></div>
-                <div>สถานะ: <strong style={{ color: isFullPayment ? "#065f46" : "#92400e" }}>{isFullPayment ? "✅ ครบ" : "🔴 ยังไม่ครบ"}</strong></div>
+                <div>{isOverPayment ? "ชำระเกิน" : "คงเหลือ"}: <strong style={{ color: isFullPayment ? "#10b981" : isOverPayment ? "#d97706" : "#dc2626" }}>{fmt(isOverPayment ? -remaining : remaining)}</strong></div>
+                <div>สถานะ: <strong style={{ color: isFullPayment ? "#065f46" : isOverPayment ? "#b45309" : "#92400e" }}>{isFullPayment ? "✅ ครบ" : isOverPayment ? "🟠 ชำระเกิน" : "🔴 ยังไม่ครบ"}</strong></div>
               </div>
             </div>
 

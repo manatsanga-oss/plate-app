@@ -11,27 +11,66 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from extract_service_frt import extract, esc, OUT_DIR
 
 PAT_FILENAME_PAREN = re.compile(
-    r"PL-([A-Za-z0-9_]+)-\(([A-Za-z0-9]+)\)\.pdf", re.IGNORECASE
+    r"PL-([A-Za-z0-9_\s]+?)-\(([A-Za-z0-9_]+)\)\.pdf", re.IGNORECASE
 )
 PAT_FILENAME_NOPAREN = re.compile(
-    r"PL-([A-Za-z0-9_]+)-([A-Za-z0-9]+)\.pdf", re.IGNORECASE
+    r"PL-([A-Za-z0-9_\s]+?)-([A-Za-z0-9_]+)\.pdf", re.IGNORECASE
+)
+# pattern ของ Honda code บนหน้า 1 ของ PDF: เลข เลข [CODE 4 ตัว] ตัวอักษร เลข ตัวอักษร
+# ตัวอย่าง: "1 3 K2JT T 1 TH" / "1 3 K93F T 1 AP" / "1 3 KZYA T 1 TH"
+PAT_PDF_CODE = re.compile(
+    r"\b\d\s+\d\s+([A-Z][A-Z0-9]{3,5})\s+[A-Z]\s+\d\s+[A-Z]+"
 )
 
 
 def normalize_model(name):
-    # Honda เรียกชื่อรุ่นด้วย i ตัวเล็ก (PCX150, WAVE110i, CLICK125i)
-    return re.sub(r"I$", "i", name.upper()).replace("PCX", "PCX")
+    # ตัด space ในชื่อรุ่น (เช่น "SCOOPY I" → "SCOOPYI") แล้วแปลง I ท้ายเป็น i เล็ก
+    s = re.sub(r"\s+", "", name).upper()
+    return re.sub(r"I$", "i", s)
+
+
+def detect_from_pdf(path):
+    """อ่าน MODEL และ CODE จากหน้า 1 ของ PDF (เชื่อถือได้กว่าชื่อไฟล์)"""
+    try:
+        import pdfplumber
+        with pdfplumber.open(path) as pdf:
+            text = pdf.pages[0].extract_text() or ""
+        lines = [l.strip() for l in text.split("\n")[:10] if l.strip()]
+        # MODEL — ปกติอยู่บรรทัดที่ 2 (หลัง "คู่มือรายการอะไหล่")
+        model = ""
+        for l in lines:
+            if l.startswith("คู่มือ") or l.startswith("Parts"):
+                continue
+            # บรรทัดที่เป็นชื่อรุ่น (มีตัวอักษร, ไม่มี dots/many digits)
+            if re.match(r"^[A-Za-z][A-Za-z0-9\s]{2,30}$", l) and not PAT_PDF_CODE.search(l):
+                model = normalize_model(l)
+                break
+        # CODE — หาจาก pattern "1 3 XXXX T 1 TH"
+        code = ""
+        for l in lines:
+            m = PAT_PDF_CODE.search(l)
+            if m:
+                code = m.group(1)
+                break
+        return model, code
+    except Exception:
+        return "", ""
 
 
 def detect_model_code(path):
+    # 1) priority แรก = อ่านจาก PDF (เชื่อถือได้สุด)
+    m_pdf, c_pdf = detect_from_pdf(path)
+    if m_pdf and c_pdf:
+        return m_pdf, c_pdf
+    # 2) fallback = parse จากชื่อไฟล์
     name = os.path.basename(path)
     m = PAT_FILENAME_PAREN.search(name)
     if m:
-        return normalize_model(m.group(1)), m.group(2).upper()
+        return m_pdf or normalize_model(m.group(1)), c_pdf or m.group(2).upper()
     m = PAT_FILENAME_NOPAREN.search(name)
     if m:
-        return normalize_model(m.group(1)), m.group(2).upper()
-    return "", ""
+        return m_pdf or normalize_model(m.group(1)), c_pdf or m.group(2).upper()
+    return m_pdf, c_pdf
 
 
 def write_sql(path, model, model_code, sections, rows):

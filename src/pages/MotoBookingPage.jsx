@@ -73,6 +73,7 @@ export default function MotoBookingPage({ currentUser }) {
   const [deposits, setDeposits] = useState([]);
   const [salesMap, setSalesMap] = useState({});
   const [allDeposits, setAllDeposits] = useState([]);
+  const [bookingDeposits, setBookingDeposits] = useState([]); // จากระบบ "มัดจำจองรถ" (BookingDeposit)
 
   const isAdmin = currentUser?.role === "admin";
 
@@ -83,8 +84,21 @@ export default function MotoBookingPage({ currentUser }) {
     fetchDeposits();
     fetchSales();
     fetchAllDeposits();
+    fetchBookingDeposits();
     if (isAdmin) fetchBankAccounts();
   }, []);
+
+  async function fetchBookingDeposits() {
+    try {
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_deposits", status: "all" }),
+      });
+      const data = await res.json();
+      setBookingDeposits(Array.isArray(data) ? data : []);
+    } catch { /* ignore */ }
+  }
 
   async function fetchBankAccounts() {
     try {
@@ -466,6 +480,12 @@ export default function MotoBookingPage({ currentUser }) {
     if (d.receipt_no) depositMap[d.receipt_no] = { remaining_amount: Number(d.remaining_amount) || 0 };
   });
 
+  // bookingDepositMap: deposit_no จากระบบ "มัดจำจองรถ" (BookingDeposit) — booking ที่มี deposit_no ตรงนี้ ไม่ต้องเช็คความถูกต้อง
+  const bookingDepositMap = {};
+  bookingDeposits.forEach((d) => {
+    if (d.deposit_no) bookingDepositMap[d.deposit_no] = true;
+  });
+
   // normalize: TRIM + ยุบทุก whitespace (รวม newline) เป็น space เดียว — กันชื่อ/รหัสที่มี space เกินหรือ newline
   const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
 
@@ -813,7 +833,7 @@ export default function MotoBookingPage({ currentUser }) {
                     {b.status === "ขาย" && b.invoice_no && (
                       <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>ใบขาย: {b.invoice_no}</div>
                     )}
-                    {b.status === "จอง" && b.deposit_no && !depositMap[b.deposit_no] && (
+                    {b.status === "จอง" && b.deposit_no && !depositMap[b.deposit_no] && !bookingDepositMap[b.deposit_no] && (
                       <div style={{ fontSize: 11, color: "#ef4444", marginTop: 3, fontWeight: 600 }}>เลขที่มัดจำไม่ถูกต้อง</div>
                     )}
                     {isQueueReady(b) && (() => {

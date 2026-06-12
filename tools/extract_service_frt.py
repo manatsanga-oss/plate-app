@@ -12,7 +12,7 @@ if __name__ == "__main__":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 import pdfplumber
 
-OUT_DIR = r"C:\Users\manat\OneDrive\New folder"
+OUT_DIR = r"C:\Users\manat\OneDrive\New folder\โฟลเดอร์ใหม่"
 
 # ── ทำความสะอาดข้อความจากฟอนต์ Honda ──
 COMBINING = "ัิีึืุู็่้๊๋์ำ"
@@ -50,6 +50,8 @@ def extract(path, model, model_code):
     sections = {}   # code -> {"th":..., "en":...}
     frt_jobs = []   # (section, job_name, hours)
     parts = []      # (section, ref, part_no, th, qty, en)
+    seen_parts = set()    # tuples (section, ref, part_no) — กัน dup จาก PDF layout ซ้ำหน้า
+    seen_jobs = set()     # tuples (section, norm_name) — กัน dup ของ FRT jobs
     cur_sec = None
     pending_name = {"th": False, "en": False}
     last_frt_time = None
@@ -99,7 +101,10 @@ def extract(path, model, model_code):
                 mp = PAT_PART.match(seg)
                 if mp and cur_sec and pos < LEFT_COL:
                     ref, pno_, th, qty, en = mp.groups()
-                    parts.append((cur_sec, int(ref), pno_, clean(th), int(qty), en.strip()))
+                    key = (cur_sec, int(ref), pno_)
+                    if key not in seen_parts:
+                        seen_parts.add(key)
+                        parts.append((cur_sec, int(ref), pno_, clean(th), int(qty), en.strip()))
                     continue
 
                 # FRT (คอลัมน์ขวา) — ข้ามบรรทัดหมายเหตุที่ขึ้นต้นด้วย "."
@@ -109,14 +114,20 @@ def extract(path, model, model_code):
                 if mf and cur_sec:
                     name = PAT_SECTION_PREFIX.sub("", clean(mf.group(1))).strip()
                     if name and not re.match(r"^\d", name):
-                        frt_jobs.append((cur_sec, name, float(mf.group(2))))
+                        jkey = (cur_sec, norm_name(name))
+                        if jkey not in seen_jobs:
+                            seen_jobs.add(jkey)
+                            frt_jobs.append((cur_sec, name, float(mf.group(2))))
                         last_frt_time = float(mf.group(2))
                     continue
                 md = PAT_FRT_DITTO.match(seg)
                 if md and cur_sec and last_frt_time is not None:
                     name = PAT_SECTION_PREFIX.sub("", clean(md.group(1))).strip()
                     if name:
-                        frt_jobs.append((cur_sec, name, last_frt_time))
+                        jkey = (cur_sec, norm_name(name))
+                        if jkey not in seen_jobs:
+                            seen_jobs.add(jkey)
+                            frt_jobs.append((cur_sec, name, last_frt_time))
                     continue
 
                 # ชื่อหมวด: คอลัมน์ซ้ายเท่านั้น ไทยก่อน แล้วอังกฤษ (ไม่มีจุด/ตัวเลข)

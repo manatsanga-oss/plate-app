@@ -20,6 +20,7 @@ import PartDispenseReportPage from "./pages/PartDispenseReportPage";
 import ServiceHistorySearchPage from "./pages/ServiceHistorySearchPage";
 import ServiceRateSearchPage from "./pages/ServiceRateSearchPage";
 import ServiceRateImportPage from "./pages/ServiceRateImportPage";
+import ServiceRateLookupPage from "./pages/ServiceRateLookupPage";
 import TaxInvoiceReportPage from "./pages/TaxInvoiceReportPage";
 import StockCheckPage from "./pages/StockCheckPage";
 import DriverPage from "./pages/DriverPage";
@@ -139,6 +140,15 @@ export default function App() {
     localStorage.removeItem("user");
   }, []);
 
+  // listen หา request เปลี่ยน page จาก child components (เช่น ServiceRateLookupPage → ServiceRateSearchPage)
+  useEffect(() => {
+    const handler = (e) => {
+      if (typeof e.detail === "string") setActiveMenu(e.detail);
+    };
+    window.addEventListener("nav-to-page", handler);
+    return () => window.removeEventListener("nav-to-page", handler);
+  }, []);
+
   const handleLogin = (user) => {
     setCurrentUser(user);
   };
@@ -199,6 +209,7 @@ export default function App() {
     if (page === "partdispensereport") return false;          // เฉพาะ admin (รายงานการจ่ายอะไหล่รายตัว)
     if (page === "servicehistory") return true;                // ค้นหาประวัติงานบริการ — เปิดให้ทุก user
     if (page === "servicerate") return true;                   // ค้นหาค่าบริการ (FRT) — เปิดให้ทุก user
+    if (page === "serviceratelookup") return true;             // ค้นหา FRT จากรุ่น/แบบ — เปิดให้ทุก user
     if (page === "servicerateimport") return false;            // เฉพาะ admin (นำเข้า FRT)
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
@@ -315,6 +326,9 @@ export default function App() {
         )}
         {activeMenu === "servicerate" && canAccess("servicerate") && (
           <ServiceRateSearchPage currentUser={currentUser} />
+        )}
+        {activeMenu === "serviceratelookup" && canAccess("serviceratelookup") && (
+          <ServiceRateLookupPage currentUser={currentUser} />
         )}
         {activeMenu === "servicerateimport" && canAccess("servicerateimport") && (
           <ServiceRateImportPage currentUser={currentUser} />
