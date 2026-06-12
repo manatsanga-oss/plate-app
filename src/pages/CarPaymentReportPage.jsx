@@ -67,8 +67,10 @@ export default function CarPaymentReportPage() {
 
   useEffect(() => { fetchData(); fetchMarkups(); /* eslint-disable-next-line */ }, []);
 
-  // ยอดรับชำระรวม = daily_receipts + FT (paid_from_amount)
-  const combinedPaid = (r) => Number(r.total_paid || 0) + Number(r.paid_from_amount || 0);
+  // ยอดตัดรับ FT เข้าใบกำกับ = เฉพาะค่ารถ (paid_vehicle_price) ถ้ามี breakdown — ค่าส่งเสริมไม่นับเป็นค่าสินค้า
+  const ftPaid = (r) => r.paid_vehicle_price != null ? Number(r.paid_vehicle_price) : Number(r.paid_from_amount || 0);
+  // ยอดรับชำระรวม = daily_receipts + FT (เฉพาะส่วนค่ารถ)
+  const combinedPaid = (r) => Number(r.total_paid || 0) + ftPaid(r);
 
   // จำแนกยี่ห้อ (เหมือน SalesByPaymentReportPage): sale_brand → chassis prefix → model_code → model name
   const detectBrand = (r) => {
@@ -206,8 +208,8 @@ export default function CarPaymentReportPage() {
     const lines = [header.join(",")];
     filtered.forEach((r, i) => {
       const dailyPaid = Number(r.total_paid || 0);
-      const ftPaid = Number(r.paid_from_amount || 0);
-      const combined = dailyPaid + ftPaid;
+      const ftVehicle = ftPaid(r); // เฉพาะค่ารถ — ไม่รวมค่าส่งเสริม
+      const combined = dailyPaid + ftVehicle;
       const remaining = Number(r.total_amount || 0) - combined;
       const st = statusOf(r);
       const row = [
@@ -221,7 +223,7 @@ export default function CarPaymentReportPage() {
         (r.model_name || "").replace(/,/g, " "),
         Number(r.total_amount || 0).toFixed(2),
         dailyPaid.toFixed(2),
-        ftPaid.toFixed(2),
+        ftVehicle.toFixed(2),
         combined.toFixed(2),
         remaining.toFixed(2),
         deliveryFeeBonus(r).toFixed(2),
@@ -374,7 +376,7 @@ export default function CarPaymentReportPage() {
                     <td style={{ ...tdNum, fontWeight: 700, color: combined > 0 ? "#7c3aed" : "#9ca3af",
                                  cursor: combined > 0 ? "pointer" : "default", textDecoration: combined > 0 ? "underline" : "none" }}
                       onClick={() => combined > 0 && setDetailRow(r)}
-                      title={combined > 0 ? `คลิกดูรายละเอียด · daily_receipts: ${fmt(r.total_paid || 0)} + FT: ${fmt(r.paid_from_amount || 0)}` : ""}>
+                      title={combined > 0 ? `คลิกดูรายละเอียด · daily_receipts: ${fmt(r.total_paid || 0)} + FT (ค่ารถ): ${fmt(ftPaid(r))}${Number(r.paid_promotion_fee || 0) > 0 ? ` · ค่าส่งเสริม ${fmt(r.paid_promotion_fee)} ไม่นับเป็นค่าสินค้า` : ""}` : ""}>
                       {combined > 0 ? fmt(combined) : "-"}
                       {(Number(r.receipt_count) > 0 || r.paid_from_ft_id) && (
                         <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "Tahoma", textDecoration: "none" }}>
@@ -438,20 +440,22 @@ export default function CarPaymentReportPage() {
       {detailRow && (() => {
         const receipts = Array.isArray(detailRow.receipts_json) ? detailRow.receipts_json
           : (typeof detailRow.receipts_json === "string" ? (() => { try { return JSON.parse(detailRow.receipts_json); } catch { return []; } })() : []);
-        // เพิ่ม FT เป็นแถวพิเศษ ถ้ามีการตัดรับ
+        // เพิ่ม FT เป็นแถวพิเศษ ถ้ามีการตัดรับ — แสดงเฉพาะส่วนค่ารถ (ค่าส่งเสริมไม่นับเป็นค่าสินค้า)
+        const ftVehicleOnly = ftPaid(detailRow);
+        const ftPromo = Number(detailRow.paid_promotion_fee || 0);
         const ftRow = detailRow.paid_from_ft_id ? {
           receipt_no: detailRow.ft_doc_no || `FT-${detailRow.paid_from_ft_id}`,
           receipt_date: detailRow.paid_at || detailRow.ft_transfer_date,
-          income_type: "ตัดรับจากเงินโอนไฟแนนท์",
+          income_type: ftPromo > 0 ? `ตัดรับจากเงินโอนไฟแนนท์ (ค่ารถ — ค่าส่งเสริม ${fmt(ftPromo)} แยกไว้)` : "ตัดรับจากเงินโอนไฟแนนท์",
           customer_name: detailRow.sale_finance_company || "-",
           employee_name: detailRow.ft_matched_by || "-",
-          ft_paid_amount: Number(detailRow.paid_from_amount || 0),
-          total_amount: Number(detailRow.paid_from_amount || 0),
+          ft_paid_amount: ftVehicleOnly,
+          total_amount: ftVehicleOnly,
           isFT: true,
         } : null;
         const allRows = ftRow ? [...receipts, ftRow] : receipts;
         const totalDailyPaid = Number(detailRow.total_paid) || 0;
-        const totalFtPaid = Number(detailRow.paid_from_amount) || 0;
+        const totalFtPaid = ftVehicleOnly;
         const totalCombined = totalDailyPaid + totalFtPaid;
         const remaining = Number(detailRow.total_amount) - totalCombined;
         const hasTotal = Number(detailRow.total_amount) > 0;

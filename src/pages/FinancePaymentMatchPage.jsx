@@ -473,6 +473,9 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                             <th style={th}>เลขเครื่อง</th>
                             <th style={th}>เลขถัง</th>
                             <th style={th}>ทะเบียน</th>
+                            <th style={{ ...th, textAlign: "right" }}>ค่ารถ</th>
+                            <th style={{ ...th, textAlign: "right" }}>ค่าส่งเสริม</th>
+                            <th style={{ ...th, textAlign: "right" }}>WHT</th>
                             <th style={{ ...th, textAlign: "right" }}>จำนวนที่ตัด</th>
                           </tr>
                         </thead>
@@ -492,11 +495,23 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                               <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{it.engine_no || "-"}</td>
                               <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{it.chassis_no || "-"}</td>
                               <td style={td}>{it.plate_number || "-"}</td>
+                              <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{it.vehicle_price != null ? fmt(it.vehicle_price) : "-"}</td>
+                              <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#a16207" }}>{it.promotion_fee != null && Number(it.promotion_fee) !== 0 ? fmt(it.promotion_fee) : "-"}</td>
+                              <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontSize: 11 }}>{it.wht_amount != null && Number(it.wht_amount) !== 0 ? fmt(it.wht_amount) : "-"}</td>
                               <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#15803d" }}>{fmt(it.amount)}</td>
                             </tr>
                           ))}
                           <tr style={{ borderTop: "2px solid #15803d", background: "#dcfce7", fontWeight: 700 }}>
                             <td colSpan={7} style={{ ...td, textAlign: "right" }}>รวม</td>
+                            <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
+                              {items.some(x => x.vehicle_price != null) ? fmt(items.reduce((s, x) => s + Number(x.vehicle_price || 0), 0)) : "-"}
+                            </td>
+                            <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#a16207" }}>
+                              {items.some(x => Number(x.promotion_fee || 0) !== 0) ? fmt(items.reduce((s, x) => s + Number(x.promotion_fee || 0), 0)) : "-"}
+                            </td>
+                            <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>
+                              {items.some(x => Number(x.wht_amount || 0) !== 0) ? fmt(items.reduce((s, x) => s + Number(x.wht_amount || 0), 0)) : "-"}
+                            </td>
                             <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d" }}>
                               {fmt(items.reduce((s, x) => s + Number(x.amount || 0), 0))}
                             </td>
@@ -671,9 +686,12 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                       )}
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>
                         {isChecked ? (() => {
-                          const remain = Number(r.total_amount || 0) - Number(selectedItems[key] || 0);
+                          // คงเหลือของใบกำกับ = ยอดรวม - ยอดตัดชำระค่าสินค้า (เฉพาะค่ารถ ถ้ามี breakdown — ค่าส่งเสริมไม่นับ)
+                          const bd = itemBreakdowns[key];
+                          const credited = bd && bd.vehicle_price != null ? Number(bd.vehicle_price) : Number(selectedItems[key] || 0);
+                          const remain = Number(r.total_amount || 0) - credited;
                           if (Math.abs(remain) < 0.01) return <span style={{ color: "#15803d" }}>✓ ครบ</span>;
-                          if (remain > 0) return <span style={{ color: "#dc2626" }}>{fmt(remain)}</span>;
+                          if (remain > 0) return <span style={{ color: "#dc2626" }} title={bd ? `ตัดชำระเฉพาะค่ารถ ${fmt(credited)} (ไม่รวมค่าส่งเสริม)` : ""}>{fmt(remain)}</span>;
                           return <span style={{ color: "#7c3aed" }}>+{fmt(-remain)}</span>;
                         })() : "-"}
                       </td>
@@ -766,12 +784,16 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                   title="คำนวณอัตโนมัติ = (ค่าส่งเสริม / 1.07) × 3%  |  สามารถปรับแก้ได้" />
               </div>
 
-              <div style={{ marginTop: 16, padding: "10px 14px", background: "#eff6ff", borderRadius: 8, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>💵 ยอดสุทธิที่ตัดรับชำระ:</span>
-                <strong style={{ fontSize: 18, color: "#072d6b" }}>฿ {fmt(net)}</strong>
+              <div style={{ marginTop: 16, padding: "10px 14px", background: "#f0fdf4", borderRadius: 8, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>🚗 ยอดตัดชำระค่าสินค้า (เฉพาะค่ารถ):</span>
+                <strong style={{ fontSize: 18, color: "#15803d" }}>฿ {fmt(v)}</strong>
+              </div>
+              <div style={{ marginTop: 6, padding: "10px 14px", background: "#eff6ff", borderRadius: 8, fontSize: 13, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>💵 ยอดตัดจากเงินโอนไฟแนนท์:</span>
+                <strong style={{ fontSize: 16, color: "#072d6b" }}>฿ {fmt(net)}</strong>
               </div>
               <div style={{ marginTop: 4, fontSize: 11, color: "#6b7280", textAlign: "right" }}>
-                = ค่ารถ + ค่าส่งเสริม (หัก WHT แล้ว)
+                ตัดจากเงินโอน = ค่ารถ + ค่าส่งเสริม (หัก WHT แล้ว) · ตัดชำระใบกำกับ = ค่ารถเท่านั้น
               </div>
 
               <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
