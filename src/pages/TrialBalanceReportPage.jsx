@@ -94,8 +94,11 @@ export default function TrialBalanceReportPage({ currentUser }) {
           action: "list_car_payment_receipts", date_from: "2000-01-01", date_to: date,
         }));
         const ftPaid = (r) => (r.paid_vehicle_price != null ? Number(r.paid_vehicle_price) : Number(r.paid_from_amount || 0));
+        // ขายก่อน 1 พ.ค. 2569 = ข้อมูลเก่า → ถือว่าชำระครบ ไม่นับเป็นลูกหนี้ (ตรงกับหน้ารับชำระเงินรายคัน)
+        const isPreCutoff = (r) => { const d = String(r.sale_date || r.invoice_date || "").slice(0, 10); return d !== "" && d < "2026-05-01"; };
         let arCount = 0;
         const receivable = cpr.reduce((s, r) => {
+          if (isPreCutoff(r)) return s;
           const rem = Number(r.total_amount || 0) - (Number(r.total_paid || 0) + ftPaid(r));
           if (rem > 0.01) arCount++;
           return s + Math.max(0, rem);

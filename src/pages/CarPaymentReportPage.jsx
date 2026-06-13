@@ -72,6 +72,13 @@ export default function CarPaymentReportPage() {
   // ยอดรับชำระรวม = daily_receipts + FT (เฉพาะส่วนค่ารถ)
   const combinedPaid = (r) => Number(r.total_paid || 0) + ftPaid(r);
 
+  // รถที่ขายก่อน 1 พ.ค. 2569 (2026-05-01) = ข้อมูลเก่า/ยกมา → ถือว่าชำระครบแล้วเสมอ (ไม่นับเป็นค้างชำระ)
+  const PAID_CUTOFF_ISO = "2026-05-01";
+  const isPreCutoff = (r) => {
+    const d = String(r.sale_date || r.invoice_date || "").slice(0, 10);
+    return d !== "" && d < PAID_CUTOFF_ISO;
+  };
+
   // จำแนกยี่ห้อ (เหมือน SalesByPaymentReportPage): sale_brand → chassis prefix → model_code → model name
   const detectBrand = (r) => {
     const brand = (r.sale_brand || "").toLowerCase();
@@ -167,6 +174,7 @@ export default function CarPaymentReportPage() {
   // สถานะ: paid = ครบพอดี / paid_delivery = ส่วนเกิน = บวกเพิ่มค่านำพาพอดี /
   //         paid_rule = รับชำระตรงกับ ราคาประกาศ+บวกเพิ่ม+ค่านำพา / over = ชำระเกิน / unpaid = ยังไม่ครบ
   const statusOf = (r) => {
+    if (isPreCutoff(r)) return "paid"; // ขายก่อน 1 พ.ค. 2569 → ชำระครบเสมอ
     const total = Number(r.total_amount || 0);
     if (total <= 0) return "unpaid";
     const combined = combinedPaid(r);
@@ -200,7 +208,7 @@ export default function CarPaymentReportPage() {
   const countFull = filtered.filter(r => ["paid", "paid_delivery", "paid_rule"].includes(statusOf(r))).length;
   const countOver = filtered.filter(r => statusOf(r) === "over").length;
   const countPartial = filtered.filter(r => statusOf(r) === "unpaid").length;
-  const totalRemaining = filtered.reduce((s, r) => s + Math.max(0, Number(r.total_amount || 0) - combinedPaid(r)), 0);
+  const totalRemaining = filtered.reduce((s, r) => s + (isPreCutoff(r) ? 0 : Math.max(0, Number(r.total_amount || 0) - combinedPaid(r))), 0);
 
   function exportCSV() {
     if (filtered.length === 0) { setMessage("ไม่มีข้อมูลให้ส่งออก"); return; }
@@ -210,7 +218,7 @@ export default function CarPaymentReportPage() {
       const dailyPaid = Number(r.total_paid || 0);
       const ftVehicle = ftPaid(r); // เฉพาะค่ารถ — ไม่รวมค่าส่งเสริม
       const combined = dailyPaid + ftVehicle;
-      const remaining = Number(r.total_amount || 0) - combined;
+      const remaining = isPreCutoff(r) ? 0 : (Number(r.total_amount || 0) - combined);
       const st = statusOf(r);
       const row = [
         i + 1,
