@@ -153,6 +153,8 @@ export default function BookingDepositPage({ currentUser }) {
   async function save() {
     if (!form.customer_name.trim()) { setMessage("❌ กรุณาเลือก/กรอกข้อมูลลูกค้า"); return; }
     if (!form.brand) { setMessage("❌ เลือกยี่ห้อรถ"); return; }
+    // บังคับเลือก Type เมื่อรุ่นที่เลือกมี type ให้เลือก — ไม่งั้นใบจองที่สร้างจะขาด type จับคิว/สต๊อกไม่ตรง
+    if (typeOpts.length > 0 && !form.model_type) { setMessage("❌ เลือก Type ของรถ (เพื่อให้ระบบจองจับคิว/สต๊อกได้ถูก)"); return; }
     if (!(Number(String(form.deposit_amount).replace(/,/g, "")) > 0)) { setMessage("❌ กรอกจำนวนเงินมัดจำ"); return; }
     if (form.payment_method === "เงินโอน" && !form.payment_account) { setMessage("❌ เลือกบัญชีรับเงิน"); return; }
     setSaving(true); setMessage("");
@@ -486,7 +488,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                   {modelOpts.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
               </Field>
-              <Field label="Type">
+              <Field label={`Type${typeOpts.length > 0 ? " *" : ""}`}>
                 <select value={form.model_type} onChange={(e) => setForm({ ...form, model_type: e.target.value, color_name: "" })} style={inp} disabled={!form.model_code}>
                   <option value="">-- เลือก --</option>
                   {typeOpts.map((t) => <option key={t.type_id} value={t.type_name}>{t.type_name}</option>)}
