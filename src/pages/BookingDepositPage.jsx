@@ -178,7 +178,9 @@ export default function BookingDepositPage({ currentUser }) {
             branch: currentUser?.branch || branchCode,
             brand: form.brand,
             marketing_name: selectedType?.marketing_name || form.model_series,
-            model_code: form.model_code,
+            // ระบบจองรถ/สต๊อก (car_models, moto_stock) เก็บ "แบบ" เป็น "<model_code> <type>" (เว้นวรรค)
+            // เช่น "AFS125CSBT TH" — ต้องส่ง type ต่อท้ายด้วย ไม่งั้นจับคู่สต๊อก/คิดคิวไม่ตรง (กลายเป็นคิวที่ 1 เสมอ)
+            model_code: [form.model_code, form.model_type].filter(Boolean).join(" "),
             color_name: form.color_name,
             customer_name: form.customer_name,
             customer_phone: form.customer_phone,
@@ -300,7 +302,8 @@ export default function BookingDepositPage({ currentUser }) {
         branch: r.branch_name || r.branch_code || currentUser?.branch || "",
         brand: r.brand,
         marketing_name: t?.marketing_name || r.model_series,
-        model_code: r.model_code,
+        // ต้องส่ง "<model_code> <type>" ให้ตรง car_models/moto_stock (ดู comment ใน save())
+        model_code: [r.model_code, r.model_type].filter(Boolean).join(" "),
         color_name: r.color_name,
         customer_name: r.customer_name,
         customer_phone: r.customer_phone,
