@@ -1,171 +1,188 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 // ============================================================================
-// หน้า "รายงานงบทดลอง" (Trial Balance) — เฟส 1: เงินสด + เงินฝากธนาคาร
+// หน้า "รายงานงบทดลอง" (Trial Balance) — แบบ 6 ช่อง รายเดือน
 // ----------------------------------------------------------------------------
-// ระบบไม่มีบัญชีแยกประเภท (GL) รวม — ยอดคงเหลือของแต่ละบัญชีคิดแบบ "เดียวกับหน้า
-// ความเคลื่อนไหวธนาคาร" (BankMovementsPage):
-//     ยอด ณ วันที่ = opening_balance + Σ(amount ของ movements ที่ ≤ วันที่)
-// (amount เป็น NET หลังหัก WHT — รับเข้า = บวก, จ่ายออก = ลบ → ตรงกับหน้าธนาคารเป๊ะ)
+// แต่ละหมวด (เงินสด / เงินฝากธนาคาร / ลูกหนี้) แสดง 6 ช่อง:
+//   ยอดยกมา (DR/CR) · ระหว่างงวด (DR/CR) · ยอดยกไป (DR/CR)
+// ตารางหลักโชว์ยอดรวมหมวด → คลิกเปิด popup ดูรายละเอียดรายตัว (lazy)
 //
-// แหล่งข้อมูล: webhook เฉพาะ "trial-balance-api" (ไฟล์ Trial_Balance_API.json)
-//   action get_trial_balance { as_of_date } → คิดยอดทุกบัญชีในครั้งเดียวฝั่ง server
-//   (ใช้ SQL movements ชุดเดียวกับ list_bank_movements ครอบด้วย LATERAL ต่อบัญชี)
-//   คืน array: { account_id, account_name, bank_name, account_no, account_type,
-//               opening_balance, balance }  (เรียงเงินสดก่อน → ธนาคาร, ตามชื่อบัญชี)
-// จัดกลุ่มงบทดลอง:
-//   เงินสด          = account_type "เงินสดย่อย"
-//   เงินฝากธนาคาร   = "ออมทรัพย์" / "กระแสรายวัน" / "ฝากประจำ"
-// บัญชีสินทรัพย์ → ยอดบวกลงช่อง "เดบิต", ยอดติดลบ (เบิกเกินบัญชี) ลงช่อง "เครดิต"
+// คิดยอดแบบเดียวกับหน้า "ความเคลื่อนไหวธนาคาร":
+//   เงินสด/ธนาคาร: opening = opening_balance + Σ movements ก่อนต้นเดือน,
+//                  ระหว่างงวด DR = รับเข้าในเดือน, CR = จ่ายออกในเดือน, closing = opening+DR−CR
+//   ลูกหนี้ (ค่ารถ): บักเกตตามวันที่ขาย — ยกมา=ขายก่อนเดือน, ระหว่างงวด(DR)=ขายในเดือน, ยกไป=คงเหลือถึงสิ้นเดือน
+// แหล่งข้อมูล: accounting-api (list_bank_accounts / list_bank_movements / list_car_payment_receipts)
 // ============================================================================
-const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/trial-balance-api";
-// ลูกหนี้การค้า (ค้างชำระค่ารถ) — ดึงจาก action เดียวกับหน้า "รายงานรับชำระเงินรายคัน"
 const ACCOUNTING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 
 const CASH_TYPES = ["เงินสดย่อย"];
 const BANK_TYPES = ["ออมทรัพย์", "กระแสรายวัน", "ฝากประจำ"];
+const AR_CUTOFF_ISO = "2026-05-01"; // ขายก่อนวันนี้ = ข้อมูลเก่า ถือว่าชำระครบ ไม่นับเป็นลูกหนี้
 
-function todayISO() {
+const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+
+function curYM() {
   const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
-
+function monthRange(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  const start = `${ym}-01`;
+  const last = new Date(y, m, 0).getDate();
+  const end = `${ym}-${String(last).padStart(2, "0")}`;
+  return { start, end };
+}
+function ymLabelTH(ym) {
+  const [y, m] = String(ym).split("-").map(Number);
+  if (!y || !m) return ym;
+  return `${TH_MONTHS[m - 1]} ${y + 543}`;
+}
 function fmtN(n) {
-  return Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const v = Number(n || 0);
+  return v === 0 ? "-" : v.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-
 function fmtDateTH(iso) {
-  if (!iso) return "-";
-  const m = String(iso).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return iso;
-  return `${m[3]}/${m[2]}/${parseInt(m[1], 10) + 543}`;
+  const m = String(iso || "").slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? `${m[3]}/${m[2]}/${parseInt(m[1], 10) + 543}` : "-";
 }
+const r2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
 
-async function postJson(url, body) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+async function postAcc(body) {
+  const res = await fetch(ACCOUNTING_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const raw = await res.text();
   return raw.trim() ? JSON.parse(raw) : [];
 }
-
 const asArray = (d) => (Array.isArray(d) ? d : d?.data || d?.rows || []);
 
-export default function TrialBalanceReportPage({ currentUser }) {
-  const [asOfDate, setAsOfDate] = useState(todayISO());
-  const [rows, setRows] = useState([]); // [{ account_id, account_name, account_no, bank_name, account_type, group, balance }]
+// แตกยอดเป็น DR/CR ของสินทรัพย์: ยอดบวก→DR, ยอดลบ→CR
+const drcr = (bal) => ({ dr: bal >= 0 ? r2(bal) : 0, cr: bal < 0 ? r2(-bal) : 0 });
+
+export default function TrialBalanceReportPage() {
+  const [ym, setYm] = useState(curYM());
+  const [loadedYm, setLoadedYm] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const [loadedDate, setLoadedDate] = useState(""); // วันที่ของข้อมูลที่โหลดล่าสุด (ไว้โชว์หัวรายงาน)
-  const [arDetail, setArDetail] = useState([]); // รายการลูกหนี้รายคัน (สำหรับ popup)
-  const [popup, setPopup] = useState(null); // null | "cash" | "bank" | "ar" — หมวดที่เปิดดูรายละเอียด
+  // รายการรายตัวต่อหมวด: { account_id, name, sub, opening, periodDr, periodCr, closing }
+  const [cashRows, setCashRows] = useState([]);
+  const [bankRows, setBankRows] = useState([]);
+  // ลูกหนี้รายคัน (สำหรับ popup) + ยอดสรุป
+  const [arRows, setArRows] = useState([]); // { customer, doc, sale, opening, periodDr, closing }
+  const [popup, setPopup] = useState(null); // null | "cash" | "bank" | "ar"
 
-  async function loadReport(date = asOfDate) {
+  async function loadReport(targetYm = ym) {
     setLoading(true);
     setMessage("");
+    const { start, end } = monthRange(targetYm);
     try {
-      // คิดยอดทุกบัญชี ณ วันที่ ในครั้งเดียวฝั่ง server (เลขตรงกับหน้าความเคลื่อนไหวธนาคาร)
-      const data = asArray(await postJson(API_URL, { action: "get_trial_balance", as_of_date: date }));
-      const computed = data.map((a) => {
-        const type = String(a.account_type || "").trim();
-        const group = CASH_TYPES.includes(type) ? "cash" : "bank"; // backend คืนเฉพาะเงินสด+ธนาคารแล้ว
-        return {
-          account_id: a.account_id,
-          account_name: a.account_name,
-          account_no: a.account_no && a.account_no !== "-" ? a.account_no : "",
-          bank_name: a.bank_name && a.bank_name !== "-" ? a.bank_name : "",
-          account_type: type,
-          group,
-          balance: Math.round((Number(a.balance || 0) + Number.EPSILON) * 100) / 100,
-        };
-      });
-      // backend เรียงเงินสดก่อน → ธนาคาร ตามชื่อบัญชีมาแล้ว — กันเหนียวเรียงซ้ำฝั่ง client
-      computed.sort((a, b) => {
-        if (a.group !== b.group) return a.group === "cash" ? -1 : 1;
-        return String(a.account_name || "").localeCompare(String(b.account_name || ""), "th");
-      });
+      // ---------- เงินสด + เงินฝากธนาคาร ----------
+      const accs = asArray(await postAcc({ action: "list_bank_accounts", include_inactive: "false" }))
+        .filter((a) => {
+          const t = String(a.account_type || "").trim();
+          return CASH_TYPES.includes(t) || BANK_TYPES.includes(t);
+        });
 
-      // ----- ลูกหนี้การค้า (ค้างชำระค่ารถ) — ทุกใบที่ออกถึงวันที่เลือก -----
-      // สูตรคงเหลือเดียวกับหน้า "รายงานรับชำระเงินรายคัน":
-      //   คงเหลือ = Σ max(0, ยอดรวม − (รับชำระ daily + FT เฉพาะค่ารถ))
-      try {
-        const cpr = asArray(await postJson(ACCOUNTING_URL, {
-          action: "list_car_payment_receipts", date_from: "2000-01-01", date_to: date,
-        }));
-        const ftPaid = (r) => (r.paid_vehicle_price != null ? Number(r.paid_vehicle_price) : Number(r.paid_from_amount || 0));
-        // ขายก่อน 1 พ.ค. 2569 = ข้อมูลเก่า → ถือว่าชำระครบ ไม่นับเป็นลูกหนี้ (ตรงกับหน้ารับชำระเงินรายคัน)
-        const isPreCutoff = (r) => { const d = String(r.sale_date || r.invoice_date || "").slice(0, 10); return d !== "" && d < "2026-05-01"; };
-        const arRows = [];
-        let receivable = 0;
-        cpr.forEach((r) => {
-          if (isPreCutoff(r)) return;
-          const rem = Number(r.total_amount || 0) - (Number(r.total_paid || 0) + ftPaid(r));
-          if (rem > 0.01) {
-            receivable += rem;
-            arRows.push({
-              customer_name: r.sale_customer_name || r.customer_name || "-",
-              tax_invoice_no: r.tax_invoice_no || "",
-              sale_invoice_no: r.sale_invoice_no || "",
-              sale_date: r.sale_date || r.invoice_date || "",
-              model_name: r.model_name || "",
-              engine_no: r.engine_no || "",
-              finance: r.sale_finance_company || "",
-              remaining: Math.round((rem + Number.EPSILON) * 100) / 100,
-            });
+      const accComputed = await Promise.all(accs.map(async (a) => {
+        const type = String(a.account_type || "").trim();
+        const group = CASH_TYPES.includes(type) ? "cash" : "bank";
+        let mv = [];
+        try {
+          mv = asArray(await postAcc({ action: "list_bank_movements", account_id: Number(a.account_id), date_from: "2000-01-01", date_to: end }));
+        } catch { /* ไม่มี movements → ใช้ยอดยกมาอย่างเดียว */ }
+        const opening0 = Number(a.opening_balance || 0);
+        let preSum = 0, periodDr = 0, periodCr = 0;
+        mv.forEach((m) => {
+          const d = String(m.movement_date || "").slice(0, 10);
+          const amt = Number(m.amount || 0);
+          if (d < start) { preSum += amt; }
+          else if (d <= end) {
+            if (m.direction === "in") periodDr += amt;
+            else periodCr += Math.abs(amt);
           }
         });
-        arRows.sort((a, b) => b.remaining - a.remaining);
-        setArDetail(arRows);
-        if (receivable > 0) {
-          computed.push({
-            account_id: "ar-car-payment",
-            account_name: "ลูกหนี้การค้า — ค้างชำระค่ารถ",
-            account_no: "",
-            bank_name: `${arRows.length} คัน`,
-            account_type: "ลูกหนี้",
-            group: "ar",
-            balance: Math.round((receivable + Number.EPSILON) * 100) / 100,
-          });
-        } else {
-          setArDetail([]);
-        }
-      } catch { setArDetail([]); /* ดึงลูกหนี้ไม่ได้ → ข้ามหมวดนี้ (ไม่ให้ทั้งรายงานพัง) */ }
+        const opening = r2(opening0 + preSum);
+        const closing = r2(opening + periodDr - periodCr);
+        return {
+          group,
+          account_id: a.account_id,
+          name: a.account_name,
+          sub: [a.bank_name && a.bank_name !== "-" ? a.bank_name : "", a.account_no && a.account_no !== "-" ? a.account_no : ""].filter(Boolean).join(" · "),
+          opening, periodDr: r2(periodDr), periodCr: r2(periodCr), closing,
+        };
+      }));
+      accComputed.sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""), "th"));
+      setCashRows(accComputed.filter((x) => x.group === "cash"));
+      setBankRows(accComputed.filter((x) => x.group === "bank"));
 
-      setRows(computed);
-      setLoadedDate(date);
+      // ---------- ลูกหนี้ค้างชำระค่ารถ (บักเกตตามวันที่ขาย) ----------
+      try {
+        const cpr = asArray(await postAcc({ action: "list_car_payment_receipts", date_from: "2000-01-01", date_to: end }));
+        const ftPaid = (r) => (r.paid_vehicle_price != null ? Number(r.paid_vehicle_price) : Number(r.paid_from_amount || 0));
+        const ar = [];
+        cpr.forEach((r) => {
+          const sd = String(r.sale_date || r.invoice_date || "").slice(0, 10);
+          if (sd && sd < AR_CUTOFF_ISO) return; // ขายก่อน 1 พ.ค. 2569 → ถือว่าชำระครบ
+          const rem = Number(r.total_amount || 0) - (Number(r.total_paid || 0) + ftPaid(r));
+          if (rem <= 0.01) return;
+          ar.push({
+            customer: r.sale_customer_name || r.customer_name || "-",
+            doc: r.tax_invoice_no || r.sale_invoice_no || "",
+            sale_invoice_no: r.sale_invoice_no || "",
+            finance: r.sale_finance_company || "",
+            sale_date: sd,
+            inMonth: sd >= start && sd <= end,
+            beforeMonth: sd < start,
+            remaining: r2(rem),
+          });
+        });
+        ar.sort((a, b) => b.remaining - a.remaining);
+        setArRows(ar);
+      } catch { setArRows([]); }
+
+      setLoadedYm(targetYm);
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + (e.message || e));
-      setRows([]);
+      setCashRows([]); setBankRows([]); setArRows([]);
     }
     setLoading(false);
   }
 
   useEffect(() => { loadReport(); /* eslint-disable-next-line */ }, []);
 
-  // debit/credit ต่อแถว — สินทรัพย์: ยอดบวก = เดบิต, ยอดลบ = เครดิต
-  const lines = useMemo(
-    () => rows.map((r) => ({
-      ...r,
-      debit: r.balance >= 0 ? r.balance : 0,
-      credit: r.balance < 0 ? Math.abs(r.balance) : 0,
-    })),
-    [rows]
-  );
+  // ---------- สรุป 6 ช่องต่อหมวด ----------
+  // เงินสด/ธนาคาร: รวม DR/CR ของแต่ละช่วงจากรายบัญชี
+  const aggAcc = (rows) => {
+    const o = { openDr: 0, openCr: 0, perDr: 0, perCr: 0, closeDr: 0, closeCr: 0 };
+    rows.forEach((r) => {
+      const op = drcr(r.opening), cl = drcr(r.closing);
+      o.openDr += op.dr; o.openCr += op.cr;
+      o.perDr += r.periodDr; o.perCr += r.periodCr;
+      o.closeDr += cl.dr; o.closeCr += cl.cr;
+    });
+    return o;
+  };
+  const cashAgg = useMemo(() => aggAcc(cashRows), [cashRows]);
+  const bankAgg = useMemo(() => aggAcc(bankRows), [bankRows]);
+  // ลูกหนี้ (สินทรัพย์ ยอดเป็น DR): ยกมา=ขายก่อนเดือน, ระหว่างงวด DR=ขายในเดือน, ยกไป=รวม
+  const arAgg = useMemo(() => {
+    const opening = arRows.filter((r) => r.beforeMonth).reduce((s, r) => s + r.remaining, 0);
+    const perDr = arRows.filter((r) => r.inMonth).reduce((s, r) => s + r.remaining, 0);
+    const closing = arRows.reduce((s, r) => s + r.remaining, 0);
+    return { openDr: r2(opening), openCr: 0, perDr: r2(perDr), perCr: 0, closeDr: r2(closing), closeCr: 0 };
+  }, [arRows]);
 
-  const cashLines = lines.filter((r) => r.group === "cash");
-  const bankLines = lines.filter((r) => r.group === "bank");
-  const arLines = lines.filter((r) => r.group === "ar");
-  const sumDebit = lines.reduce((s, r) => s + r.debit, 0);
-  const sumCredit = lines.reduce((s, r) => s + r.credit, 0);
-  const cashTotal = cashLines.reduce((s, r) => s + r.balance, 0);
-  const bankTotal = bankLines.reduce((s, r) => s + r.balance, 0);
-  const arTotal = arLines.reduce((s, r) => s + r.balance, 0);
-  // เดบิต/เครดิตรวมต่อหมวด (gross) สำหรับบรรทัดสรุป
-  const grp = (ls) => ({ debit: ls.reduce((s, r) => s + r.debit, 0), credit: ls.reduce((s, r) => s + r.credit, 0) });
-  const cashG = grp(cashLines), bankG = grp(bankLines), arG = grp(arLines);
+  const groups = [
+    { key: "cash", label: "เงินสด", color: "#065f46", count: cashRows.length, agg: cashAgg, has: cashRows.length > 0 },
+    { key: "bank", label: "เงินฝากธนาคาร", color: "#1e40af", count: bankRows.length, agg: bankAgg, has: bankRows.length > 0 },
+    { key: "ar", label: "ลูกหนี้การค้า (ค้างชำระค่ารถ)", color: "#991b1b", count: arRows.length, agg: arAgg, has: arRows.length > 0 },
+  ];
+  const tot = groups.reduce((o, g) => ({
+    openDr: o.openDr + g.agg.openDr, openCr: o.openCr + g.agg.openCr,
+    perDr: o.perDr + g.agg.perDr, perCr: o.perCr + g.agg.perCr,
+    closeDr: o.closeDr + g.agg.closeDr, closeCr: o.closeCr + g.agg.closeCr,
+  }), { openDr: 0, openCr: 0, perDr: 0, perCr: 0, closeDr: 0, closeCr: 0 });
+
+  const hasData = cashRows.length + bankRows.length + arRows.length > 0;
 
   return (
     <div className="page-container">
@@ -173,49 +190,36 @@ export default function TrialBalanceReportPage({ currentUser }) {
         @media print {
           .no-print, .no-print * { display: none !important; }
           .sidebar, aside.sidebar, .page-topbar { display: none !important; }
-          body, html, #root, .page-container { background: #fff !important; margin: 0 !important; padding: 0 !important; }
-          .tb-table { font-size: 12px !important; width: 100% !important; }
-          .tb-table th, .tb-table td { padding: 4px 8px !important; }
-          @page { size: portrait; margin: 14mm; }
+          body, html, #root, .page-container { background:#fff !important; margin:0 !important; padding:0 !important; }
+          .tb6 { font-size:11px !important; } .tb6 th, .tb6 td { padding:3px 5px !important; }
+          @page { size: landscape; margin: 10mm; }
         }
       `}</style>
 
       <div className="page-topbar">
-        <div className="page-title">📋 รายงานงบทดลอง — เงินสด / เงินฝากธนาคาร / ลูกหนี้</div>
+        <div className="page-title">📋 รายงานงบทดลอง (รายเดือน)</div>
       </div>
 
       {/* Filters */}
       <div className="no-print" style={{ background: "#fff", borderRadius: 12, padding: 14, boxShadow: "0 2px 12px rgba(7,45,107,0.10)", marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div>
-            <label style={lbl}>📅 ณ วันที่</label>
-            <input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} style={{ ...inp, minWidth: 160 }} />
+            <label style={lbl}>📅 เดือน</label>
+            <input type="month" value={ym} onChange={(e) => setYm(e.target.value)} style={{ ...inp, minWidth: 160 }} />
           </div>
-          <div>
-            <button onClick={() => loadReport()} disabled={loading}
-              style={{ padding: "8px 18px", background: loading ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: loading ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600 }}>
-              🔄 {loading ? "กำลังคิดยอด..." : "ดูรายงาน"}
-            </button>
-          </div>
-          <div style={{ fontSize: 12, color: "#6b7280" }}>
-            คิดยอดแบบเดียวกับหน้า "ความเคลื่อนไหวธนาคาร" (ยอดยกมา + ความเคลื่อนไหวถึงวันที่เลือก)
+          <button onClick={() => loadReport()} disabled={loading}
+            style={{ padding: "8px 18px", background: loading ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: loading ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600 }}>
+            🔄 {loading ? "กำลังคิดยอด..." : "ดูรายงาน"}
+          </button>
+          <div style={{ fontSize: 12, color: "#6b7280", maxWidth: 420 }}>
+            ยอดยกมา = สิ้นเดือนก่อน · ระหว่างงวด = ในเดือน · ยอดยกไป = สิ้นเดือน — คลิกที่หมวดเพื่อดูรายละเอียด
           </div>
           <div style={{ marginLeft: "auto" }}>
-            <button onClick={() => window.print()} disabled={loading || rows.length === 0}
-              style={{ padding: "8px 14px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>
-              🖨️ พิมพ์
-            </button>
+            <button onClick={() => window.print()} disabled={loading || !hasData}
+              style={{ padding: "8px 14px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>🖨️ พิมพ์</button>
           </div>
         </div>
         {message && <div style={{ marginTop: 8, padding: "6px 12px", background: "#fef2f2", color: "#b91c1c", borderRadius: 6, fontSize: 12 }}>{message}</div>}
-      </div>
-
-      {/* Summary */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
-        <SummaryCard color="#dcfce7" textColor="#065f46" label="💵 รวมเงินสด" value={cashTotal} />
-        <SummaryCard color="#dbeafe" textColor="#1e40af" label="🏦 รวมเงินฝากธนาคาร" value={bankTotal} />
-        <SummaryCard color="#fee2e2" textColor="#991b1b" label="🧾 รวมลูกหนี้ (ค้างชำระค่ารถ)" value={arTotal} />
-        <SummaryCard color="#fef3c7" textColor="#92400e" label="รวมทั้งสิ้น (เดบิตสุทธิ)" value={cashTotal + bankTotal + arTotal} />
       </div>
 
       {/* Report */}
@@ -223,40 +227,62 @@ export default function TrialBalanceReportPage({ currentUser }) {
         <div style={{ textAlign: "center", marginBottom: 12 }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#072d6b" }}>งบทดลอง</div>
           <div style={{ fontSize: 13, color: "#374151" }}>หมวดเงินสด เงินฝากธนาคาร และลูกหนี้</div>
-          <div style={{ fontSize: 13, color: "#6b7280" }}>ณ วันที่ {fmtDateTH(loadedDate || asOfDate)}</div>
+          <div style={{ fontSize: 13, color: "#6b7280" }}>ประจำเดือน {ymLabelTH(loadedYm || ym)}</div>
         </div>
 
         {loading ? (
           <div style={{ textAlign: "center", padding: 30, color: "#6b7280" }}>กำลังคิดยอด...</div>
-        ) : lines.length === 0 ? (
-          <div style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>ไม่มีข้อมูลบัญชี</div>
+        ) : !hasData ? (
+          <div style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>ไม่มีข้อมูล</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table className="tb-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <table className="tb6" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
               <thead>
                 <tr style={{ background: "#072d6b", color: "#fff" }}>
-                  <th style={{ ...th, width: 40 }}>#</th>
-                  <th style={{ ...th, textAlign: "left" }}>หมวดบัญชี</th>
-                  <th style={{ ...th, textAlign: "center", width: 110 }}>จำนวน</th>
-                  <th style={{ ...th, textAlign: "right", width: 160 }}>เดบิต</th>
-                  <th style={{ ...th, textAlign: "right", width: 160 }}>เครดิต</th>
+                  <th style={{ ...th, width: 34 }} rowSpan={2}>#</th>
+                  <th style={{ ...th, textAlign: "left" }} rowSpan={2}>หมวดบัญชี</th>
+                  <th style={{ ...th, borderLeft: "1px solid #2b4a86" }} colSpan={2}>ยอดยกมา</th>
+                  <th style={{ ...th, borderLeft: "1px solid #2b4a86" }} colSpan={2}>ระหว่างงวด</th>
+                  <th style={{ ...th, borderLeft: "1px solid #2b4a86" }} colSpan={2}>ยอดยกไป</th>
+                </tr>
+                <tr style={{ background: "#0a3a82", color: "#fff" }}>
+                  {["เดบิต", "เครดิต", "เดบิต", "เครดิต", "เดบิต", "เครดิต"].map((h, i) => (
+                    <th key={i} style={{ ...th, fontSize: 11, borderLeft: i % 2 === 0 ? "1px solid #2b4a86" : "none" }}>{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                <SummaryRow index={1} label="เงินสด" color="#065f46" count={cashLines.length}
-                  debit={cashG.debit} credit={cashG.credit} onClick={() => cashLines.length && setPopup("cash")} />
-                <SummaryRow index={2} label="เงินฝากธนาคาร" color="#1e40af" count={bankLines.length}
-                  debit={bankG.debit} credit={bankG.credit} onClick={() => bankLines.length && setPopup("bank")} />
-                {arLines.length > 0 && (
-                  <SummaryRow index={3} label="ลูกหนี้การค้า (ค้างชำระค่ารถ)" color="#991b1b" count={arDetail.length}
-                    debit={arG.debit} credit={arG.credit} onClick={() => setPopup("ar")} />
-                )}
+                {groups.map((g, i) => (
+                  <tr key={g.key}
+                    onClick={() => g.has && setPopup(g.key)}
+                    title={g.has ? "คลิกดูรายละเอียด" : ""}
+                    style={{ borderBottom: "1px solid #e5e7eb", cursor: g.has ? "pointer" : "default" }}
+                    onMouseEnter={(e) => g.has && (e.currentTarget.style.background = "#f8fafc")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+                    <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                    <td style={{ ...td, fontWeight: 700 }}>
+                      <span style={{ color: g.color }}>{g.label}</span>
+                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>({g.count})</span>
+                      {g.has && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍</span>}
+                    </td>
+                    <td style={tdNum}>{fmtN(g.agg.openDr)}</td>
+                    <td style={{ ...tdNum, color: g.agg.openCr ? "#dc2626" : undefined }}>{fmtN(g.agg.openCr)}</td>
+                    <td style={{ ...tdNum, color: g.agg.perDr ? "#047857" : undefined }}>{fmtN(g.agg.perDr)}</td>
+                    <td style={{ ...tdNum, color: g.agg.perCr ? "#dc2626" : undefined }}>{fmtN(g.agg.perCr)}</td>
+                    <td style={{ ...tdNum, fontWeight: 700 }}>{fmtN(g.agg.closeDr)}</td>
+                    <td style={{ ...tdNum, fontWeight: 700, color: g.agg.closeCr ? "#dc2626" : undefined }}>{fmtN(g.agg.closeCr)}</td>
+                  </tr>
+                ))}
               </tbody>
               <tfoot>
                 <tr style={{ background: "#f1f5f9", fontWeight: 700, color: "#072d6b", borderTop: "2px solid #072d6b" }}>
-                  <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวมทั้งสิ้น</td>
-                  <td style={{ ...tdNum }}>{fmtN(sumDebit)}</td>
-                  <td style={{ ...tdNum }}>{fmtN(sumCredit)}</td>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>รวมทั้งสิ้น</td>
+                  <td style={tdNum}>{fmtN(tot.openDr)}</td>
+                  <td style={tdNum}>{fmtN(tot.openCr)}</td>
+                  <td style={tdNum}>{fmtN(tot.perDr)}</td>
+                  <td style={tdNum}>{fmtN(tot.perCr)}</td>
+                  <td style={tdNum}>{fmtN(tot.closeDr)}</td>
+                  <td style={tdNum}>{fmtN(tot.closeCr)}</td>
                 </tr>
               </tfoot>
             </table>
@@ -264,16 +290,17 @@ export default function TrialBalanceReportPage({ currentUser }) {
         )}
 
         <div className="no-print" style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
-          * คลิกที่หมวดเพื่อดูรายละเอียด · ลูกหนี้ = ยอดค้างชำระค่ารถทุกใบที่ออกถึงวันที่เลือก (สูตรเดียวกับหน้า "รายงานรับชำระเงินรายคัน") — หมวดอื่น (เจ้าหนี้/รายได้/ค่าใช้จ่าย ฯลฯ) จะทยอยเพิ่มภายหลัง
+          * เงินสด/ธนาคารคิดแบบเดียวกับหน้า "ความเคลื่อนไหวธนาคาร" · ลูกหนี้บักเกตตามวันที่ขาย (รถขายก่อน 1 พ.ค. 2569 ถือว่าชำระครบ) — หมวดอื่นจะทยอยเพิ่มภายหลัง
         </div>
       </div>
 
       {popup && (
         <DetailModal
           popup={popup}
-          cashLines={cashLines}
-          bankLines={bankLines}
-          arDetail={arDetail}
+          ym={loadedYm || ym}
+          cashRows={cashRows}
+          bankRows={bankRows}
+          arRows={arRows}
           onClose={() => setPopup(null)}
         />
       )}
@@ -281,117 +308,117 @@ export default function TrialBalanceReportPage({ currentUser }) {
   );
 }
 
-// บรรทัดสรุปหมวด (คลิกเปิด popup รายละเอียด)
-function SummaryRow({ index, label, color, count, debit, credit, onClick }) {
-  return (
-    <tr onClick={onClick} title="คลิกดูรายละเอียด"
-      style={{ borderBottom: "1px solid #e5e7eb", cursor: "pointer" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
-      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{index}</td>
-      <td style={{ ...td, fontWeight: 700 }}>
-        <span style={{ color }}>{label}</span>
-        <span className="no-print" style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ดูรายละเอียด</span>
-      </td>
-      <td style={{ ...td, textAlign: "center", fontSize: 12, color: "#6b7280" }}>{count} รายการ</td>
-      <td style={{ ...tdNum }}>{debit > 0 ? fmtN(debit) : "-"}</td>
-      <td style={{ ...tdNum, color: credit > 0 ? "#dc2626" : undefined }}>{credit > 0 ? fmtN(credit) : "-"}</td>
-    </tr>
-  );
-}
-
-// Popup รายละเอียดรายหมวด
-function DetailModal({ popup, cashLines, bankLines, arDetail, onClose }) {
+// ===================== Popup รายละเอียดรายตัว =====================
+function DetailModal({ popup, ym, cashRows, bankRows, arRows, onClose }) {
   const isAr = popup === "ar";
   const title = popup === "cash" ? "💵 เงินสด" : popup === "bank" ? "🏦 เงินฝากธนาคาร" : "🧾 ลูกหนี้การค้า (ค้างชำระค่ารถ)";
-  const accLines = popup === "cash" ? cashLines : bankLines;
-  const accDebit = accLines.reduce((s, r) => s + r.debit, 0);
-  const accCredit = accLines.reduce((s, r) => s + r.credit, 0);
-  const arTotal = arDetail.reduce((s, r) => s + Number(r.remaining || 0), 0);
+  const accRows = popup === "cash" ? cashRows : bankRows;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: "min(820px, 96vw)", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: "min(920px, 97vw)", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b" }}>{title}</div>
           <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: "#6b7280", lineHeight: 1 }}>×</button>
         </div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ประจำเดือน {ym}</div>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: "#072d6b", color: "#fff" }}>
-                <th style={{ ...th, width: 36 }}>#</th>
-                {isAr ? (
-                  <>
-                    <th style={{ ...th, textAlign: "left" }}>ลูกค้า</th>
-                    <th style={{ ...th, textAlign: "left" }}>เลขที่ใบกำกับ / ใบขาย</th>
-                    <th style={{ ...th, textAlign: "center" }}>วันที่ขาย</th>
-                    <th style={{ ...th, textAlign: "right" }}>ยอดค้าง</th>
-                  </>
-                ) : (
-                  <>
-                    <th style={{ ...th, textAlign: "left" }}>ชื่อบัญชี</th>
-                    <th style={{ ...th, textAlign: "left" }}>ธนาคาร / เลขที่บัญชี</th>
-                    <th style={{ ...th, textAlign: "right" }}>เดบิต</th>
-                    <th style={{ ...th, textAlign: "right" }}>เครดิต</th>
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {isAr
-                ? arDetail.map((r, i) => (
-                    <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
-                      <td style={{ ...td }}>{r.customer_name}{r.finance ? <div style={{ fontSize: 11, color: "#6b7280" }}>📋 {r.finance}</div> : null}</td>
-                      <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.tax_invoice_no || "-"}{r.sale_invoice_no ? <div style={{ color: "#0369a1" }}>{r.sale_invoice_no}</div> : null}</td>
-                      <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>{fmtDateTH(r.sale_date)}</td>
-                      <td style={{ ...tdNum, color: "#991b1b" }}>{fmtN(r.remaining)}</td>
-                    </tr>
-                  ))
-                : accLines.map((r, i) => (
-                    <tr key={r.account_id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
-                      <td style={{ ...td }}>{r.account_name}</td>
-                      <td style={{ ...td, fontSize: 11, color: "#6b7280" }}>{[r.bank_name, r.account_no].filter(Boolean).join(" · ") || "-"}</td>
-                      <td style={{ ...tdNum }}>{r.debit > 0 ? fmtN(r.debit) : "-"}</td>
-                      <td style={{ ...tdNum, color: r.credit > 0 ? "#dc2626" : undefined }}>{r.credit > 0 ? fmtN(r.credit) : "-"}</td>
-                    </tr>
-                  ))}
-            </tbody>
-            <tfoot>
-              <tr style={{ background: "#f1f5f9", fontWeight: 700, color: "#072d6b" }}>
-                {isAr ? (
-                  <>
-                    <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม {arDetail.length} คัน</td>
-                    <td style={{ ...tdNum, color: "#991b1b" }}>{fmtN(arTotal)}</td>
-                  </>
-                ) : (
-                  <>
-                    <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม</td>
-                    <td style={{ ...tdNum }}>{fmtN(accDebit)}</td>
-                    <td style={{ ...tdNum }}>{fmtN(accCredit)}</td>
-                  </>
-                )}
-              </tr>
-            </tfoot>
-          </table>
+          {isAr ? <ArDetailTable rows={arRows} /> : <AccDetailTable rows={accRows} />}
         </div>
       </div>
     </div>
   );
 }
 
-function SummaryCard({ color, textColor, label, value }) {
+function AccDetailTable({ rows }) {
+  const sum = rows.reduce((o, r) => {
+    const op = drcr(r.opening), cl = drcr(r.closing);
+    return { openDr: o.openDr + op.dr, openCr: o.openCr + op.cr, perDr: o.perDr + r.periodDr, perCr: o.perCr + r.periodCr, closeDr: o.closeDr + cl.dr, closeCr: o.closeCr + cl.cr };
+  }, { openDr: 0, openCr: 0, perDr: 0, perCr: 0, closeDr: 0, closeCr: 0 });
   return (
-    <div style={{ padding: "12px 16px", background: color, borderRadius: 10 }}>
-      <div style={{ fontSize: 12, color: textColor, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 22, color: textColor, fontWeight: 700, marginTop: 4 }}>{fmtN(value)}</div>
-    </div>
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      <thead>
+        <tr style={{ background: "#072d6b", color: "#fff" }}>
+          <th style={{ ...th, width: 30 }} rowSpan={2}>#</th>
+          <th style={{ ...th, textAlign: "left" }} rowSpan={2}>บัญชี</th>
+          <th style={th} colSpan={2}>ยอดยกมา</th>
+          <th style={th} colSpan={2}>ระหว่างงวด</th>
+          <th style={th} colSpan={2}>ยอดยกไป</th>
+        </tr>
+        <tr style={{ background: "#0a3a82", color: "#fff" }}>
+          {["DR", "CR", "DR", "CR", "DR", "CR"].map((h, i) => <th key={i} style={{ ...th, fontSize: 11 }}>{h}</th>)}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => {
+          const op = drcr(r.opening), cl = drcr(r.closing);
+          return (
+            <tr key={r.account_id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+              <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+              <td style={td}>{r.name}{r.sub ? <div style={{ fontSize: 11, color: "#6b7280" }}>{r.sub}</div> : null}</td>
+              <td style={tdNum}>{fmtN(op.dr)}</td>
+              <td style={{ ...tdNum, color: op.cr ? "#dc2626" : undefined }}>{fmtN(op.cr)}</td>
+              <td style={{ ...tdNum, color: r.periodDr ? "#047857" : undefined }}>{fmtN(r.periodDr)}</td>
+              <td style={{ ...tdNum, color: r.periodCr ? "#dc2626" : undefined }}>{fmtN(r.periodCr)}</td>
+              <td style={{ ...tdNum, fontWeight: 600 }}>{fmtN(cl.dr)}</td>
+              <td style={{ ...tdNum, fontWeight: 600, color: cl.cr ? "#dc2626" : undefined }}>{fmtN(cl.cr)}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+      <tfoot>
+        <tr style={{ background: "#f1f5f9", fontWeight: 700, color: "#072d6b" }}>
+          <td colSpan={2} style={{ ...td, textAlign: "right" }}>รวม</td>
+          <td style={tdNum}>{fmtN(sum.openDr)}</td><td style={tdNum}>{fmtN(sum.openCr)}</td>
+          <td style={tdNum}>{fmtN(sum.perDr)}</td><td style={tdNum}>{fmtN(sum.perCr)}</td>
+          <td style={tdNum}>{fmtN(sum.closeDr)}</td><td style={tdNum}>{fmtN(sum.closeCr)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
+function ArDetailTable({ rows }) {
+  const total = rows.reduce((s, r) => s + Number(r.remaining || 0), 0);
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+      <thead>
+        <tr style={{ background: "#072d6b", color: "#fff" }}>
+          <th style={{ ...th, width: 30 }}>#</th>
+          <th style={{ ...th, textAlign: "left" }}>ลูกค้า</th>
+          <th style={{ ...th, textAlign: "left" }}>เลขที่ใบกำกับ / ใบขาย</th>
+          <th style={{ ...th, textAlign: "center" }}>วันที่ขาย</th>
+          <th style={{ ...th, textAlign: "center" }}>งวด</th>
+          <th style={{ ...th, textAlign: "right" }}>ยอดค้าง</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r, i) => (
+          <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
+            <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+            <td style={td}>{r.customer}{r.finance ? <div style={{ fontSize: 11, color: "#6b7280" }}>📋 {r.finance}</div> : null}</td>
+            <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.doc || "-"}{r.sale_invoice_no && r.sale_invoice_no !== r.doc ? <div style={{ color: "#0369a1" }}>{r.sale_invoice_no}</div> : null}</td>
+            <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>{fmtDateTH(r.sale_date)}</td>
+            <td style={{ ...td, textAlign: "center" }}>
+              <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, background: r.inMonth ? "#dcfce7" : "#e5e7eb", color: r.inMonth ? "#166534" : "#6b7280" }}>
+                {r.inMonth ? "ในเดือน" : "ยกมา"}
+              </span>
+            </td>
+            <td style={{ ...tdNum, color: "#991b1b" }}>{fmtN(r.remaining)}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr style={{ background: "#f1f5f9", fontWeight: 700, color: "#072d6b" }}>
+          <td colSpan={5} style={{ ...td, textAlign: "right" }}>รวม {rows.length} คัน</td>
+          <td style={{ ...tdNum, color: "#991b1b" }}>{fmtN(total)}</td>
+        </tr>
+      </tfoot>
+    </table>
   );
 }
 
 const lbl = { display: "block", fontSize: 11, fontWeight: 600, color: "#374151", marginBottom: 3 };
 const inp = { padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, fontFamily: "Tahoma", boxSizing: "border-box" };
-const th = { padding: "8px 10px", textAlign: "center", fontWeight: 600 };
-const td = { padding: "6px 10px", verticalAlign: "top" };
-const tdNum = { padding: "6px 10px", textAlign: "right", fontFamily: "monospace", fontWeight: 600, whiteSpace: "nowrap" };
+const th = { padding: "7px 9px", textAlign: "center", fontWeight: 600 };
+const td = { padding: "6px 9px", verticalAlign: "top" };
+const tdNum = { padding: "6px 9px", textAlign: "right", fontFamily: "monospace", whiteSpace: "nowrap" };
