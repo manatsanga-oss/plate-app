@@ -40,7 +40,7 @@ const T = {
     houseLine: "บ้านเลขที่ / หมู่ / ถนน", houseLinePh: "เช่น 189-191 หมู่ 7 ถ.พหลโยธิน",
     province: "จังหวัด", amphoe: "อำเภอ", tambon: "ตำบล", khet: "เขต", khwaeng: "แขวง",
     zip: "รหัสไปรษณีย์", zipPh: "เลือกตำบลแล้วเติมให้อัตโนมัติ",
-    taxId: "เลขประจำตัวผู้เสียภาษี (ถ้ามี)", taxIdPh: "13 หลัก (กรณีนิติบุคคล)",
+    taxId: "เลขผู้เสียภาษี / พาสปอร์ต (ถ้ามี)", taxIdPh: "13 หลัก หรือเลขพาสปอร์ต",
     addrManual: "ที่อยู่", addrManualPh: "บ้านเลขที่ / ถนน / ตำบล / อำเภอ / จังหวัด / รหัสไปรษณีย์",
     selSelect: "— เลือก —", selLoading: "กำลังโหลด…", firstProvince: "เลือกจังหวัดก่อน", firstDistrict: "เลือกอำเภอก่อน",
     submit: "ส่งข้อมูล", submitting: "กำลังส่ง…",
@@ -61,7 +61,7 @@ const T = {
     houseLine: "House no. / Moo / Road", houseLinePh: "e.g. 189-191 Moo 7 Phahonyothin Rd.",
     province: "Province", amphoe: "District", tambon: "Subdistrict", khet: "District", khwaeng: "Subdistrict",
     zip: "Postal code", zipPh: "Auto-filled after selecting subdistrict",
-    taxId: "Tax ID (if any)", taxIdPh: "13 digits (for companies)",
+    taxId: "Tax ID / Passport (if any)", taxIdPh: "13 digits or passport no.",
     addrManual: "Address", addrManualPh: "House no. / Road / Subdistrict / District / Province / Postal code",
     selSelect: "— Select —", selLoading: "Loading…", firstProvince: "Select province first", firstDistrict: "Select district first",
     submit: "Submit", submitting: "Submitting…",
@@ -82,7 +82,7 @@ const T = {
     houseLine: "အိမ်အမှတ် / ရပ်ကွက် / လမ်း", houseLinePh: "ဥပမာ - 189-191 Moo 7 Phahonyothin Rd.",
     province: "ခရိုင် (จังหวัด)", amphoe: "မြို့နယ် (อำเภอ)", tambon: "ကျေးရွာအုပ်စု (ตำบล)", khet: "မြို့နယ်", khwaeng: "ရပ်ကွက်",
     zip: "စာတိုက်ကုဒ်", zipPh: "ကျေးရွာအုပ်စုရွေးပြီးပါက အလိုအလျောက်ဖြည့်မည်",
-    taxId: "အခွန်ထမ်းနံပါတ် (ရှိလျှင်)", taxIdPh: "ဂဏန်း ၁၃ လုံး (ကုမ္ပဏီအတွက်)",
+    taxId: "အခွန်ထမ်းနံပါတ် / Passport (ရှိလျှင်)", taxIdPh: "ဂဏန်း ၁၃ လုံး သို့မဟုတ် Passport",
     addrManual: "လိပ်စာ", addrManualPh: "အိမ်အမှတ် / လမ်း / ตำบล / อำเภอ / จังหวัด / စာတိုက်ကုဒ်",
     selSelect: "— ရွေးချယ်ပါ —", selLoading: "ဖွင့်နေသည်…", firstProvince: "ခရိုင်အရင်ရွေးပါ", firstDistrict: "မြို့နယ်အရင်ရွေးပါ",
     submit: "ပေးပို့မည်", submitting: "ပေးပို့နေသည်…",
@@ -410,7 +410,7 @@ export default function ReceiptCustomerFormPage() {
             )}
 
             <label style={S.label}>{t.taxId}</label>
-            <input style={S.input} value={form.tax_id} onChange={setField("tax_id")} inputMode="numeric" placeholder={t.taxIdPh} />
+            <input style={S.input} value={form.tax_id} onChange={setField("tax_id")} inputMode="text" placeholder={t.taxIdPh} />
 
             <label style={S.consent}>
               <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} style={{ marginTop: 3, flexShrink: 0 }} />
