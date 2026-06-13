@@ -204,7 +204,7 @@ export default function CarPaymentReportPage() {
 
   function exportCSV() {
     if (filtered.length === 0) { setMessage("ไม่มีข้อมูลให้ส่งออก"); return; }
-    const header = ["#", "สาขา", "เลขที่ใบกำกับ", "วันที่", "ลูกค้า", "เลขถัง", "เลขเครื่อง", "รุ่น", "ยอดรวม", "รับชำระ(daily)", "ตัดรับ FT", "รวมรับชำระ", "คงเหลือ", "บวกเพิ่มค่านำพา", "ไฟแนนท์", "ใบขาย", "วันที่ขาย", "เลขใบโอน(FT)", "สถานะ"];
+    const header = ["#", "สาขา", "เลขที่ใบกำกับ", "วันที่", "ลูกค้า", "เลขถัง", "เลขเครื่อง", "รุ่น", "ยอดรวม", "รับชำระ(daily)", "ตัดรับ FT", "รวมรับชำระ", "คงเหลือ", "ค่าส่งเสริม", "บวกเพิ่มค่านำพา", "ไฟแนนท์", "ใบขาย", "วันที่ขาย", "เลขใบโอน(FT)", "สถานะ"];
     const lines = [header.join(",")];
     filtered.forEach((r, i) => {
       const dailyPaid = Number(r.total_paid || 0);
@@ -226,6 +226,7 @@ export default function CarPaymentReportPage() {
         ftVehicle.toFixed(2),
         combined.toFixed(2),
         remaining.toFixed(2),
+        (Number(r.paid_promotion_fee || 0) + Number(r.promo_income_amount || 0)).toFixed(2),
         deliveryFeeBonus(r).toFixed(2),
         (r.sale_finance_company || "").replace(/,/g, " "),
         r.sale_invoice_no || "",
@@ -338,11 +339,11 @@ export default function CarPaymentReportPage() {
                 <th style={th}>เลขที่ใบกำกับ</th>
                 <th style={th}>วันที่</th>
                 <th style={th}>ลูกค้า / ไฟแนนท์</th>
-                <th style={th}>เลขถัง</th>
                 <th style={th}>เลขเครื่อง</th>
                 <th style={th}>รุ่น</th>
                 <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
                 <th style={{ ...th, textAlign: "right" }}>รับชำระ</th>
+                <th style={{ ...th, textAlign: "right" }}>ค่าส่งเสริม</th>
                 <th style={th}>เลขใบขาย</th>
                 <th style={th}>วันที่ขาย</th>
                 <th style={{ ...th, textAlign: "center" }}>สถานะ</th>
@@ -369,7 +370,6 @@ export default function CarPaymentReportPage() {
                         <div style={{ fontSize: 11, color: "#6b7280" }}>📋 {r.sale_finance_company}</div>
                       )}
                     </td>
-                    <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.engine_no || "-"}</td>
                     <td style={{ ...td, fontSize: 12 }}>{r.model_name || "-"}</td>
                     <td style={{ ...tdNum, fontWeight: 700, color: "#dc2626" }}>{fmt(r.total_amount)}</td>
@@ -390,6 +390,15 @@ export default function CarPaymentReportPage() {
                           🚚 นำพา <span style={{ color: "#dc2626", fontWeight: 700 }}>{fmt(r.delivery_fee_amount)}</span> → +{fmt(deliveryFeeBonus(r))}
                         </div>
                       )}
+                    </td>
+                    <td style={{ ...tdNum, fontWeight: 700, color: "#a16207" }}
+                      title={(Number(r.paid_promotion_fee || 0) > 0 || Number(r.promo_income_amount || 0) > 0)
+                        ? `จากตัดรับ FT: ${fmt(r.paid_promotion_fee || 0)} · จากบันทึกรายได้อื่นๆ (003): ${fmt(r.promo_income_amount || 0)}`
+                        : ""}>
+                      {(() => {
+                        const promo = Number(r.paid_promotion_fee || 0) + Number(r.promo_income_amount || 0);
+                        return promo > 0 ? fmt(promo) : "-";
+                      })()}
                     </td>
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.sale_invoice_no || "-"}</td>
                     <td style={td}>{fmtDate(r.sale_date)}</td>
@@ -503,6 +512,13 @@ export default function CarPaymentReportPage() {
                 {salePrice > 0 && (
                   <div>ราคาประกาศ: <strong style={{ color: "#047857" }}>{fmt(salePrice)}</strong>
                     {detailRow.price_date && <span style={{ fontSize: 10, color: "#6b7280", marginLeft: 6 }}>({fmtDate(detailRow.price_date)})</span>}
+                  </div>
+                )}
+                {(ftPromo > 0 || Number(detailRow.promo_income_amount || 0) > 0) && (
+                  <div>ค่าส่งเสริม: <strong style={{ color: "#a16207" }}>{fmt(ftPromo + Number(detailRow.promo_income_amount || 0))}</strong>
+                    <span style={{ fontSize: 10, color: "#6b7280", marginLeft: 6 }}>
+                      (FT {fmt(ftPromo)} + รายได้อื่นๆ {fmt(detailRow.promo_income_amount || 0)})
+                    </span>
                   </div>
                 )}
                 {mkSum !== 0 && (
