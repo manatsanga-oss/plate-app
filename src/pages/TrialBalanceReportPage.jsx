@@ -19,6 +19,8 @@ import React, { useEffect, useMemo, useState } from "react";
 // บัญชีสินทรัพย์ → ยอดบวกลงช่อง "เดบิต", ยอดติดลบ (เบิกเกินบัญชี) ลงช่อง "เครดิต"
 // ============================================================================
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/trial-balance-api";
+// ลูกหนี้การค้า (ค้างชำระค่ารถ) — ดึงจาก action เดียวกับหน้า "รายงานรับชำระเงินรายคัน"
+const ACCOUNTING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 
 const CASH_TYPES = ["เงินสดย่อย"];
 const BANK_TYPES = ["ออมทรัพย์", "กระแสรายวัน", "ฝากประจำ"];
@@ -39,8 +41,8 @@ function fmtDateTH(iso) {
   return `${m[3]}/${m[2]}/${parseInt(m[1], 10) + 543}`;
 }
 
-async function postJson(body) {
-  const res = await fetch(API_URL, {
+async function postJson(url, body) {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -64,7 +66,7 @@ export default function TrialBalanceReportPage({ currentUser }) {
     setMessage("");
     try {
       // คิดยอดทุกบัญชี ณ วันที่ ในครั้งเดียวฝั่ง server (เลขตรงกับหน้าความเคลื่อนไหวธนาคาร)
-      const data = asArray(await postJson({ action: "get_trial_balance", as_of_date: date }));
+      const data = asArray(await postJson(API_URL, { action: "get_trial_balance", as_of_date: date }));
       const computed = data.map((a) => {
         const type = String(a.account_type || "").trim();
         const group = CASH_TYPES.includes(type) ? "cash" : "bank"; // backend คืนเฉพาะเงินสด+ธนาคารแล้ว
@@ -83,6 +85,34 @@ export default function TrialBalanceReportPage({ currentUser }) {
         if (a.group !== b.group) return a.group === "cash" ? -1 : 1;
         return String(a.account_name || "").localeCompare(String(b.account_name || ""), "th");
       });
+
+      // ----- ลูกหนี้การค้า (ค้างชำระค่ารถ) — ทุกใบที่ออกถึงวันที่เลือก -----
+      // สูตรคงเหลือเดียวกับหน้า "รายงานรับชำระเงินรายคัน":
+      //   คงเหลือ = Σ max(0, ยอดรวม − (รับชำระ daily + FT เฉพาะค่ารถ))
+      try {
+        const cpr = asArray(await postJson(ACCOUNTING_URL, {
+          action: "list_car_payment_receipts", date_from: "2000-01-01", date_to: date,
+        }));
+        const ftPaid = (r) => (r.paid_vehicle_price != null ? Number(r.paid_vehicle_price) : Number(r.paid_from_amount || 0));
+        let arCount = 0;
+        const receivable = cpr.reduce((s, r) => {
+          const rem = Number(r.total_amount || 0) - (Number(r.total_paid || 0) + ftPaid(r));
+          if (rem > 0.01) arCount++;
+          return s + Math.max(0, rem);
+        }, 0);
+        if (receivable > 0) {
+          computed.push({
+            account_id: "ar-car-payment",
+            account_name: "ลูกหนี้การค้า — ค้างชำระค่ารถ",
+            account_no: "",
+            bank_name: `${arCount} คัน`,
+            account_type: "ลูกหนี้",
+            group: "ar",
+            balance: Math.round((receivable + Number.EPSILON) * 100) / 100,
+          });
+        }
+      } catch { /* ดึงลูกหนี้ไม่ได้ → ข้ามหมวดนี้ (ไม่ให้ทั้งรายงานพัง) */ }
+
       setRows(computed);
       setLoadedDate(date);
     } catch (e) {
@@ -106,10 +136,12 @@ export default function TrialBalanceReportPage({ currentUser }) {
 
   const cashLines = lines.filter((r) => r.group === "cash");
   const bankLines = lines.filter((r) => r.group === "bank");
+  const arLines = lines.filter((r) => r.group === "ar");
   const sumDebit = lines.reduce((s, r) => s + r.debit, 0);
   const sumCredit = lines.reduce((s, r) => s + r.credit, 0);
   const cashTotal = cashLines.reduce((s, r) => s + r.balance, 0);
   const bankTotal = bankLines.reduce((s, r) => s + r.balance, 0);
+  const arTotal = arLines.reduce((s, r) => s + r.balance, 0);
 
   return (
     <div className="page-container">
@@ -125,7 +157,7 @@ export default function TrialBalanceReportPage({ currentUser }) {
       `}</style>
 
       <div className="page-topbar">
-        <div className="page-title">📋 รายงานงบทดลอง — เงินสดและเงินฝากธนาคาร</div>
+        <div className="page-title">📋 รายงานงบทดลอง — เงินสด / เงินฝากธนาคาร / ลูกหนี้</div>
       </div>
 
       {/* Filters */}
@@ -155,17 +187,18 @@ export default function TrialBalanceReportPage({ currentUser }) {
       </div>
 
       {/* Summary */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, marginBottom: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 14 }}>
         <SummaryCard color="#dcfce7" textColor="#065f46" label="💵 รวมเงินสด" value={cashTotal} />
         <SummaryCard color="#dbeafe" textColor="#1e40af" label="🏦 รวมเงินฝากธนาคาร" value={bankTotal} />
-        <SummaryCard color="#fef3c7" textColor="#92400e" label="รวมทั้งสิ้น (เดบิตสุทธิ)" value={cashTotal + bankTotal} />
+        <SummaryCard color="#fee2e2" textColor="#991b1b" label="🧾 รวมลูกหนี้ (ค้างชำระค่ารถ)" value={arTotal} />
+        <SummaryCard color="#fef3c7" textColor="#92400e" label="รวมทั้งสิ้น (เดบิตสุทธิ)" value={cashTotal + bankTotal + arTotal} />
       </div>
 
       {/* Report */}
       <div style={{ background: "#fff", borderRadius: 12, padding: 18, boxShadow: "0 2px 12px rgba(7,45,107,0.10)" }}>
         <div style={{ textAlign: "center", marginBottom: 12 }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#072d6b" }}>งบทดลอง</div>
-          <div style={{ fontSize: 13, color: "#374151" }}>หมวดเงินสดและเงินฝากธนาคาร</div>
+          <div style={{ fontSize: 13, color: "#374151" }}>หมวดเงินสด เงินฝากธนาคาร และลูกหนี้</div>
           <div style={{ fontSize: 13, color: "#6b7280" }}>ณ วันที่ {fmtDateTH(loadedDate || asOfDate)}</div>
         </div>
 
@@ -188,6 +221,9 @@ export default function TrialBalanceReportPage({ currentUser }) {
               <tbody>
                 <GroupBlock title="เงินสด" lines={cashLines} startIndex={0} />
                 <GroupBlock title="เงินฝากธนาคาร" lines={bankLines} startIndex={cashLines.length} />
+                {arLines.length > 0 && (
+                  <GroupBlock title="ลูกหนี้" lines={arLines} startIndex={cashLines.length + bankLines.length} />
+                )}
               </tbody>
               <tfoot>
                 <tr style={{ background: "#f1f5f9", fontWeight: 700, color: "#072d6b", borderTop: "2px solid #072d6b" }}>
@@ -201,7 +237,7 @@ export default function TrialBalanceReportPage({ currentUser }) {
         )}
 
         <div className="no-print" style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
-          * เฟสแรกแสดงเฉพาะหมวดเงินสดและเงินฝากธนาคาร — หมวดอื่น (ลูกหนี้/เจ้าหนี้/รายได้/ค่าใช้จ่าย ฯลฯ) จะทยอยเพิ่มภายหลัง
+          * ลูกหนี้ = ยอดค้างชำระค่ารถทุกใบที่ออกถึงวันที่เลือก (สูตรคงเหลือเดียวกับหน้า "รายงานรับชำระเงินรายคัน") — หมวดอื่น (เจ้าหนี้/รายได้/ค่าใช้จ่าย ฯลฯ) จะทยอยเพิ่มภายหลัง
         </div>
       </div>
     </div>
