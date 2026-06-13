@@ -60,6 +60,8 @@ export default function TrialBalanceReportPage({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [loadedDate, setLoadedDate] = useState(""); // วันที่ของข้อมูลที่โหลดล่าสุด (ไว้โชว์หัวรายงาน)
+  const [arDetail, setArDetail] = useState([]); // รายการลูกหนี้รายคัน (สำหรับ popup)
+  const [popup, setPopup] = useState(null); // null | "cash" | "bank" | "ar" — หมวดที่เปิดดูรายละเอียด
 
   async function loadReport(date = asOfDate) {
     setLoading(true);
@@ -96,25 +98,41 @@ export default function TrialBalanceReportPage({ currentUser }) {
         const ftPaid = (r) => (r.paid_vehicle_price != null ? Number(r.paid_vehicle_price) : Number(r.paid_from_amount || 0));
         // ขายก่อน 1 พ.ค. 2569 = ข้อมูลเก่า → ถือว่าชำระครบ ไม่นับเป็นลูกหนี้ (ตรงกับหน้ารับชำระเงินรายคัน)
         const isPreCutoff = (r) => { const d = String(r.sale_date || r.invoice_date || "").slice(0, 10); return d !== "" && d < "2026-05-01"; };
-        let arCount = 0;
-        const receivable = cpr.reduce((s, r) => {
-          if (isPreCutoff(r)) return s;
+        const arRows = [];
+        let receivable = 0;
+        cpr.forEach((r) => {
+          if (isPreCutoff(r)) return;
           const rem = Number(r.total_amount || 0) - (Number(r.total_paid || 0) + ftPaid(r));
-          if (rem > 0.01) arCount++;
-          return s + Math.max(0, rem);
-        }, 0);
+          if (rem > 0.01) {
+            receivable += rem;
+            arRows.push({
+              customer_name: r.sale_customer_name || r.customer_name || "-",
+              tax_invoice_no: r.tax_invoice_no || "",
+              sale_invoice_no: r.sale_invoice_no || "",
+              sale_date: r.sale_date || r.invoice_date || "",
+              model_name: r.model_name || "",
+              engine_no: r.engine_no || "",
+              finance: r.sale_finance_company || "",
+              remaining: Math.round((rem + Number.EPSILON) * 100) / 100,
+            });
+          }
+        });
+        arRows.sort((a, b) => b.remaining - a.remaining);
+        setArDetail(arRows);
         if (receivable > 0) {
           computed.push({
             account_id: "ar-car-payment",
             account_name: "ลูกหนี้การค้า — ค้างชำระค่ารถ",
             account_no: "",
-            bank_name: `${arCount} คัน`,
+            bank_name: `${arRows.length} คัน`,
             account_type: "ลูกหนี้",
             group: "ar",
             balance: Math.round((receivable + Number.EPSILON) * 100) / 100,
           });
+        } else {
+          setArDetail([]);
         }
-      } catch { /* ดึงลูกหนี้ไม่ได้ → ข้ามหมวดนี้ (ไม่ให้ทั้งรายงานพัง) */ }
+      } catch { setArDetail([]); /* ดึงลูกหนี้ไม่ได้ → ข้ามหมวดนี้ (ไม่ให้ทั้งรายงานพัง) */ }
 
       setRows(computed);
       setLoadedDate(date);
@@ -145,6 +163,9 @@ export default function TrialBalanceReportPage({ currentUser }) {
   const cashTotal = cashLines.reduce((s, r) => s + r.balance, 0);
   const bankTotal = bankLines.reduce((s, r) => s + r.balance, 0);
   const arTotal = arLines.reduce((s, r) => s + r.balance, 0);
+  // เดบิต/เครดิตรวมต่อหมวด (gross) สำหรับบรรทัดสรุป
+  const grp = (ls) => ({ debit: ls.reduce((s, r) => s + r.debit, 0), credit: ls.reduce((s, r) => s + r.credit, 0) });
+  const cashG = grp(cashLines), bankG = grp(bankLines), arG = grp(arLines);
 
   return (
     <div className="page-container">
@@ -215,17 +236,20 @@ export default function TrialBalanceReportPage({ currentUser }) {
               <thead>
                 <tr style={{ background: "#072d6b", color: "#fff" }}>
                   <th style={{ ...th, width: 40 }}>#</th>
-                  <th style={{ ...th, textAlign: "left" }}>ชื่อบัญชี</th>
-                  <th style={{ ...th, textAlign: "left" }}>ธนาคาร / เลขที่บัญชี</th>
-                  <th style={{ ...th, textAlign: "right", width: 150 }}>เดบิต</th>
-                  <th style={{ ...th, textAlign: "right", width: 150 }}>เครดิต</th>
+                  <th style={{ ...th, textAlign: "left" }}>หมวดบัญชี</th>
+                  <th style={{ ...th, textAlign: "center", width: 110 }}>จำนวน</th>
+                  <th style={{ ...th, textAlign: "right", width: 160 }}>เดบิต</th>
+                  <th style={{ ...th, textAlign: "right", width: 160 }}>เครดิต</th>
                 </tr>
               </thead>
               <tbody>
-                <GroupBlock title="เงินสด" lines={cashLines} startIndex={0} />
-                <GroupBlock title="เงินฝากธนาคาร" lines={bankLines} startIndex={cashLines.length} />
+                <SummaryRow index={1} label="เงินสด" color="#065f46" count={cashLines.length}
+                  debit={cashG.debit} credit={cashG.credit} onClick={() => cashLines.length && setPopup("cash")} />
+                <SummaryRow index={2} label="เงินฝากธนาคาร" color="#1e40af" count={bankLines.length}
+                  debit={bankG.debit} credit={bankG.credit} onClick={() => bankLines.length && setPopup("bank")} />
                 {arLines.length > 0 && (
-                  <GroupBlock title="ลูกหนี้" lines={arLines} startIndex={cashLines.length + bankLines.length} />
+                  <SummaryRow index={3} label="ลูกหนี้การค้า (ค้างชำระค่ารถ)" color="#991b1b" count={arDetail.length}
+                    debit={arG.debit} credit={arG.credit} onClick={() => setPopup("ar")} />
                 )}
               </tbody>
               <tfoot>
@@ -240,43 +264,120 @@ export default function TrialBalanceReportPage({ currentUser }) {
         )}
 
         <div className="no-print" style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
-          * ลูกหนี้ = ยอดค้างชำระค่ารถทุกใบที่ออกถึงวันที่เลือก (สูตรคงเหลือเดียวกับหน้า "รายงานรับชำระเงินรายคัน") — หมวดอื่น (เจ้าหนี้/รายได้/ค่าใช้จ่าย ฯลฯ) จะทยอยเพิ่มภายหลัง
+          * คลิกที่หมวดเพื่อดูรายละเอียด · ลูกหนี้ = ยอดค้างชำระค่ารถทุกใบที่ออกถึงวันที่เลือก (สูตรเดียวกับหน้า "รายงานรับชำระเงินรายคัน") — หมวดอื่น (เจ้าหนี้/รายได้/ค่าใช้จ่าย ฯลฯ) จะทยอยเพิ่มภายหลัง
         </div>
       </div>
+
+      {popup && (
+        <DetailModal
+          popup={popup}
+          cashLines={cashLines}
+          bankLines={bankLines}
+          arDetail={arDetail}
+          onClose={() => setPopup(null)}
+        />
+      )}
     </div>
   );
 }
 
-// กลุ่มบัญชี: หัวข้อกลุ่ม + แถวบัญชี + ยอดรวมกลุ่ม
-function GroupBlock({ title, lines, startIndex }) {
-  const subDebit = lines.reduce((s, r) => s + r.debit, 0);
-  const subCredit = lines.reduce((s, r) => s + r.credit, 0);
+// บรรทัดสรุปหมวด (คลิกเปิด popup รายละเอียด)
+function SummaryRow({ index, label, color, count, debit, credit, onClick }) {
   return (
-    <>
-      <tr style={{ background: "#eff6ff" }}>
-        <td colSpan={5} style={{ padding: "6px 10px", fontWeight: 700, color: "#1e40af" }}>{title}</td>
-      </tr>
-      {lines.length === 0 ? (
-        <tr><td colSpan={5} style={{ ...td, color: "#9ca3af", textAlign: "center" }}>— ไม่มีบัญชี —</td></tr>
-      ) : (
-        lines.map((r, i) => (
-          <tr key={r.account_id} style={{ borderBottom: "1px solid #f3f4f6" }}>
-            <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{startIndex + i + 1}</td>
-            <td style={{ ...td }}>{r.account_name}</td>
-            <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>
-              {[r.bank_name, r.account_no].filter(Boolean).join(" · ") || "-"}
-            </td>
-            <td style={{ ...tdNum }}>{r.debit > 0 ? fmtN(r.debit) : "-"}</td>
-            <td style={{ ...tdNum, color: r.credit > 0 ? "#dc2626" : undefined }}>{r.credit > 0 ? fmtN(r.credit) : "-"}</td>
-          </tr>
-        ))
-      )}
-      <tr style={{ background: "#f8fafc", fontWeight: 600 }}>
-        <td colSpan={3} style={{ ...td, textAlign: "right", color: "#374151" }}>รวม{title}</td>
-        <td style={{ ...tdNum }}>{fmtN(subDebit)}</td>
-        <td style={{ ...tdNum }}>{fmtN(subCredit)}</td>
-      </tr>
-    </>
+    <tr onClick={onClick} title="คลิกดูรายละเอียด"
+      style={{ borderBottom: "1px solid #e5e7eb", cursor: "pointer" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{index}</td>
+      <td style={{ ...td, fontWeight: 700 }}>
+        <span style={{ color }}>{label}</span>
+        <span className="no-print" style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ดูรายละเอียด</span>
+      </td>
+      <td style={{ ...td, textAlign: "center", fontSize: 12, color: "#6b7280" }}>{count} รายการ</td>
+      <td style={{ ...tdNum }}>{debit > 0 ? fmtN(debit) : "-"}</td>
+      <td style={{ ...tdNum, color: credit > 0 ? "#dc2626" : undefined }}>{credit > 0 ? fmtN(credit) : "-"}</td>
+    </tr>
+  );
+}
+
+// Popup รายละเอียดรายหมวด
+function DetailModal({ popup, cashLines, bankLines, arDetail, onClose }) {
+  const isAr = popup === "ar";
+  const title = popup === "cash" ? "💵 เงินสด" : popup === "bank" ? "🏦 เงินฝากธนาคาร" : "🧾 ลูกหนี้การค้า (ค้างชำระค่ารถ)";
+  const accLines = popup === "cash" ? cashLines : bankLines;
+  const accDebit = accLines.reduce((s, r) => s + r.debit, 0);
+  const accCredit = accLines.reduce((s, r) => s + r.credit, 0);
+  const arTotal = arDetail.reduce((s, r) => s + Number(r.remaining || 0), 0);
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: "min(820px, 96vw)", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b" }}>{title}</div>
+          <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: "#6b7280", lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: "#072d6b", color: "#fff" }}>
+                <th style={{ ...th, width: 36 }}>#</th>
+                {isAr ? (
+                  <>
+                    <th style={{ ...th, textAlign: "left" }}>ลูกค้า</th>
+                    <th style={{ ...th, textAlign: "left" }}>เลขที่ใบกำกับ / ใบขาย</th>
+                    <th style={{ ...th, textAlign: "center" }}>วันที่ขาย</th>
+                    <th style={{ ...th, textAlign: "right" }}>ยอดค้าง</th>
+                  </>
+                ) : (
+                  <>
+                    <th style={{ ...th, textAlign: "left" }}>ชื่อบัญชี</th>
+                    <th style={{ ...th, textAlign: "left" }}>ธนาคาร / เลขที่บัญชี</th>
+                    <th style={{ ...th, textAlign: "right" }}>เดบิต</th>
+                    <th style={{ ...th, textAlign: "right" }}>เครดิต</th>
+                  </>
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {isAr
+                ? arDetail.map((r, i) => (
+                    <tr key={i} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                      <td style={{ ...td }}>{r.customer_name}{r.finance ? <div style={{ fontSize: 11, color: "#6b7280" }}>📋 {r.finance}</div> : null}</td>
+                      <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.tax_invoice_no || "-"}{r.sale_invoice_no ? <div style={{ color: "#0369a1" }}>{r.sale_invoice_no}</div> : null}</td>
+                      <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>{fmtDateTH(r.sale_date)}</td>
+                      <td style={{ ...tdNum, color: "#991b1b" }}>{fmtN(r.remaining)}</td>
+                    </tr>
+                  ))
+                : accLines.map((r, i) => (
+                    <tr key={r.account_id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                      <td style={{ ...td }}>{r.account_name}</td>
+                      <td style={{ ...td, fontSize: 11, color: "#6b7280" }}>{[r.bank_name, r.account_no].filter(Boolean).join(" · ") || "-"}</td>
+                      <td style={{ ...tdNum }}>{r.debit > 0 ? fmtN(r.debit) : "-"}</td>
+                      <td style={{ ...tdNum, color: r.credit > 0 ? "#dc2626" : undefined }}>{r.credit > 0 ? fmtN(r.credit) : "-"}</td>
+                    </tr>
+                  ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ background: "#f1f5f9", fontWeight: 700, color: "#072d6b" }}>
+                {isAr ? (
+                  <>
+                    <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม {arDetail.length} คัน</td>
+                    <td style={{ ...tdNum, color: "#991b1b" }}>{fmtN(arTotal)}</td>
+                  </>
+                ) : (
+                  <>
+                    <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม</td>
+                    <td style={{ ...tdNum }}>{fmtN(accDebit)}</td>
+                    <td style={{ ...tdNum }}>{fmtN(accCredit)}</td>
+                  </>
+                )}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
   );
 }
 
