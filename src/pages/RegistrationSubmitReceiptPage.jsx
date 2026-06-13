@@ -49,11 +49,8 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const arr = Array.isArray(data) ? data : (data?.rows || data?.data || []);
-      // ซ่อนรายการรอส่งที่รับเรื่องก่อน 30 เม.ย. 2569 (ของเก่า — ไม่ต้องส่งงานทะเบียนอีก)
-      const SUBMIT_CUTOFF_ISO = "2026-04-30";
-      const visible = arr.filter(r => !r.receive_date || String(r.receive_date).slice(0, 10) >= SUBMIT_CUTOFF_ISO);
-      setRows(visible);
-      if (visible.length === 0) setMessage("");
+      setRows(arr);
+      if (arr.length === 0) setMessage("");
     } catch (e) {
       setRows([]);
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e.message || e).slice(0, 100));
