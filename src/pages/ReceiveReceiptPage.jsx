@@ -182,7 +182,7 @@ th { background: #f0f4f9; }
     return { label: "⏳ รอรับ", color: "#92400e", bg: "#fef3c7" };
   }
 
-  const grandItems = batches.reduce((s, b) => s + (b.items_count || 0), 0);
+  const grandItems = batches.reduce((s, b) => s + Number(b.items_count || 0), 0);
   const grandTotal = batches.reduce((s, b) => s + Number(b.total_amount || 0), 0);
   const totalSelected = Object.values(selected).filter(Boolean).length;
 
