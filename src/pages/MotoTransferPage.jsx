@@ -4,25 +4,25 @@ import React, { useEffect, useMemo, useState } from "react";
 // หน้า "บันทึกโอนรถจักรยานยนต์ ระหว่างสาขา" — เมนู Sales
 // ----------------------------------------------------------------------------
 // แท็บ:
-//  1) โอนออก — เลือกสาขาต้นทาง → สาขาปลายทาง → ระบบโหลดสต๊อกคงเหลือของต้นทาง
-//             → ติ๊กได้หลายคัน → บันทึกโอน (status=sent)
-//  2) รับโอน — เลือกสาขา(ตัวเอง) → เห็นรายการที่โอนมายังไม่รับ (sent) → ยืนยันรับ (received)
+//  1) โอนออก — ฟอร์มใบโอน: เลือกสาขาต้นทาง/ปลายทาง/วันที่ → กดปุ่ม "เลือกรถจักรยานยนต์"
+//             เปิด popup ค้นหา (เลขเครื่อง/เลขถัง/รุ่น) จากสต๊อกคงเหลือของต้นทาง → ติ๊กหลายคัน
+//             → เพิ่มลงรายการใบโอน → บันทึกใบโอน (status=sent)
+//  2) รับโอน — เลือกสาขา → เห็นรายการ sent ที่ to_branch=สาขานั้น → ยืนยันรับ (received)
 //  3) ประวัติ — รายการโอนทั้งหมด + ยกเลิก
-// "สาขาปัจจุบัน" ของรถ = ปลายทางของการโอนล่าสุดที่ received แล้ว, ถ้าไม่มี = สาขากลางตามยี่ห้อ
-//   (YAMAHA→SCY01, HONDA→SCY06) · รถที่ sent ค้าง (ยังไม่รับ) ถือว่า "กำลังโอน" ไม่อยู่สาขาใด
-// backend: moto-transfer-api (save_transfer/list_transfers/receive_transfer/cancel_transfer)
-//          + stock-turnover-api stock_on_hand (สต๊อกคงเหลือรถใหม่)
+// "สาขาปัจจุบัน" ของรถ = ปลายทางของโอนล่าสุดที่ received, ไม่งั้น=สาขากลางตามยี่ห้อ
+//   (YAMAHA→SCY01, HONDA→SCY06); status=sent ค้าง=กำลังโอน
+// backend: moto-transfer-api (save/list/receive/cancel) + stock-turnover-api stock_on_hand
 // ============================================================================
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 const TRANSFER_API = `${BASE}/moto-transfer-api`;
 const STOCK_API = `${BASE}/stock-turnover-api`;
 
 const BRANCHES = [
-  { code: "SCY01", label: "SCY01 สำนักงานใหญ่ (สิงห์ชัย)", brand: "YAMAHA" },
-  { code: "SCY04", label: "SCY04 สีขวา (สิงห์ชัย)", brand: "YAMAHA" },
-  { code: "SCY05", label: "SCY05 ป.เปา นครหลวง", brand: "HONDA" },
-  { code: "SCY06", label: "SCY06 ป.เปา วังน้อย", brand: "HONDA" },
-  { code: "SCY07", label: "SCY07 สิงห์ชัยตลาด (สิงห์ชัย)", brand: "YAMAHA" },
+  { code: "SCY01", label: "SCY01 สำนักงานใหญ่ (สิงห์ชัย)" },
+  { code: "SCY04", label: "SCY04 สีขวา (สิงห์ชัย)" },
+  { code: "SCY05", label: "SCY05 ป.เปา นครหลวง" },
+  { code: "SCY06", label: "SCY06 ป.เปา วังน้อย" },
+  { code: "SCY07", label: "SCY07 สิงห์ชัยตลาด (สิงห์ชัย)" },
 ];
 const brandOf = (code) => (["SCY05", "SCY06"].includes(code) ? "HONDA" : "YAMAHA");
 const centralOf = (brand) => (brand === "YAMAHA" ? "SCY01" : "SCY06");
@@ -44,27 +44,31 @@ async function postJson(url, body) {
   return raw.trim() ? JSON.parse(raw) : [];
 }
 const asArray = (d) => (Array.isArray(d) ? d : d?.data || d?.rows || []);
+const bikeName = (r) => [r.model, r.model_type, r.color].filter(Boolean).join(" · ");
 
 export default function MotoTransferPage({ currentUser }) {
-  const [tab, setTab] = useState("out"); // out | receive | history
+  const [tab, setTab] = useState("out");
   const [message, setMessage] = useState("");
   const who = currentUser?.username || currentUser?.name || "system";
 
-  // ---------- โอนออก ----------
+  // ---------- โอนออก (ฟอร์มใบโอน) ----------
   const [fromBranch, setFromBranch] = useState("SCY06");
   const [toBranch, setToBranch] = useState("");
   const [transferDate, setTransferDate] = useState(todayISO());
   const [note, setNote] = useState("");
-  const [stockRows, setStockRows] = useState([]);
-  const [sel, setSel] = useState({}); // key -> bool
+  const [items, setItems] = useState([]);        // รถที่เลือกลงใบโอน
+  const [stockRows, setStockRows] = useState([]); // สต๊อกคงเหลือของสาขาต้นทาง
   const [loadingStock, setLoadingStock] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [stockSearch, setStockSearch] = useState("");
+  // popup เลือกรถ
+  const [showPicker, setShowPicker] = useState(false);
+  const [pickerSel, setPickerSel] = useState({});
+  const [pickerSearch, setPickerSearch] = useState("");
 
   // ---------- รับโอน ----------
   const [recvBranch, setRecvBranch] = useState("");
   const [incoming, setIncoming] = useState([]);
-  const [selRecv, setSelRecv] = useState({}); // id -> bool
+  const [selRecv, setSelRecv] = useState({});
   const [loadingRecv, setLoadingRecv] = useState(false);
 
   // ---------- ประวัติ ----------
@@ -73,31 +77,27 @@ export default function MotoTransferPage({ currentUser }) {
   const [hStatus, setHStatus] = useState("");
   const [loadingHist, setLoadingHist] = useState(false);
 
-  // โหลดสต๊อกคงเหลือของสาขาต้นทาง = stock_on_hand(brand) กรองด้วย "สาขาปัจจุบัน" จาก transfers
   async function loadStock(from = fromBranch) {
-    setLoadingStock(true); setMessage(""); setSel({});
+    setLoadingStock(true); setMessage("");
     try {
       const brand = brandOf(from);
       const [stock, trans] = await Promise.all([
         postJson(STOCK_API, { action: "stock_on_hand", brand, as_of: todayISO(), new_only: true, deduct_sales: true }),
         postJson(TRANSFER_API, { action: "list_transfers", brand }).catch(() => []),
       ]);
-      // latest non-cancelled transfer per bike
       const latest = new Map();
       asArray(trans).filter((t) => t.status !== "cancelled").forEach((t) => {
-        const k = bikeKey(t);
-        const cur = latest.get(k);
+        const k = bikeKey(t); const cur = latest.get(k);
         const ord = (x) => `${String(x.transfer_date || "").slice(0, 10)}#${String(x.id).padStart(10, "0")}`;
         if (!cur || ord(t) > ord(cur)) latest.set(k, t);
       });
       const curBranch = (r) => {
         const t = latest.get(bikeKey(r));
-        if (!t) return centralOf(brand);          // ยังไม่เคยโอน = อยู่สาขากลาง
-        if (t.status === "received") return t.to_branch; // รับแล้ว = อยู่ปลายทาง
-        return "__in_transit__";                  // sent ค้าง = กำลังโอน
+        if (!t) return centralOf(brand);
+        if (t.status === "received") return t.to_branch;
+        return "__in_transit__";
       };
-      const avail = asArray(stock).filter((r) => curBranch(r) === from);
-      setStockRows(avail);
+      setStockRows(asArray(stock).filter((r) => curBranch(r) === from));
     } catch (e) {
       setMessage("❌ โหลดสต๊อกไม่สำเร็จ: " + (e.message || e));
       setStockRows([]);
@@ -105,25 +105,41 @@ export default function MotoTransferPage({ currentUser }) {
     setLoadingStock(false);
   }
 
+  // เปลี่ยนสาขาต้นทาง → ล้างรายการที่เลือก + โหลดสต๊อกใหม่
+  function changeFrom(code) {
+    setFromBranch(code);
+    if (toBranch === code) setToBranch("");
+    setItems([]);
+    loadStock(code);
+  }
+  function openPicker() {
+    if (!fromBranch) { setMessage("❌ เลือกสาขาต้นทางก่อน"); return; }
+    setPickerSel({}); setPickerSearch(""); setShowPicker(true);
+  }
+  function addPicked() {
+    const have = new Set(items.map(bikeKey));
+    const add = stockRows.filter((r) => pickerSel[bikeKey(r)] && !have.has(bikeKey(r)))
+      .map((r) => ({ engine_no: r.engine_no || "", chassis_no: r.chassis_no || "", model: r.model || "", model_type: r.model_type || "", color: r.color || "", received_date: r.received_date }));
+    setItems((cur) => [...cur, ...add]);
+    setShowPicker(false);
+  }
+  const removeItem = (k) => setItems((cur) => cur.filter((r) => bikeKey(r) !== k));
+
   async function saveTransfer() {
     if (!fromBranch || !toBranch) { setMessage("❌ เลือกสาขาต้นทาง/ปลายทาง"); return; }
     if (fromBranch === toBranch) { setMessage("❌ สาขาต้นทางและปลายทางต้องต่างกัน"); return; }
-    const items = stockRows.filter((r) => sel[bikeKey(r)]).map((r) => ({
-      engine_no: r.engine_no || "", chassis_no: r.chassis_no || "",
-      model: [r.model, r.model_type].filter(Boolean).join(" / "), color: r.color || "",
-    }));
-    if (!items.length) { setMessage("❌ ติ๊กเลือกรถอย่างน้อย 1 คัน"); return; }
+    if (!items.length) { setMessage("❌ เลือกรถอย่างน้อย 1 คัน"); return; }
     setSaving(true); setMessage("");
     try {
       const r = await postJson(TRANSFER_API, {
         action: "save_transfer", brand: brandOf(fromBranch),
-        from_branch: fromBranch, to_branch: toBranch, transfer_date: transferDate, note, created_by: who, items,
+        from_branch: fromBranch, to_branch: toBranch, transfer_date: transferDate, note, created_by: who,
+        items: items.map((r) => ({ engine_no: r.engine_no, chassis_no: r.chassis_no, model: [r.model, r.model_type].filter(Boolean).join(" / "), color: r.color })),
       });
-      const rows = asArray(r);
-      const no = rows[0]?.transfer_no;
+      const rows = asArray(r); const no = rows[0]?.transfer_no;
       if (!no) throw new Error("บันทึกไม่สำเร็จ");
-      setMessage(`✅ บันทึกโอน ${rows.length} คัน — เลขที่ ${no} (${brLabel(fromBranch)} → ${brLabel(toBranch)})`);
-      setSel({});
+      setMessage(`✅ บันทึกใบโอน ${rows.length} คัน — เลขที่ ${no} (${fromBranch} → ${toBranch})`);
+      setItems([]); setNote("");
       loadStock(fromBranch);
     } catch (e) {
       setMessage("❌ บันทึกไม่สำเร็จ: " + (e.message || e));
@@ -134,51 +150,44 @@ export default function MotoTransferPage({ currentUser }) {
   async function loadIncoming(br = recvBranch) {
     if (!br) { setIncoming([]); return; }
     setLoadingRecv(true); setSelRecv({});
-    try {
-      const d = await postJson(TRANSFER_API, { action: "list_transfers", status: "sent", to_branch: br });
-      setIncoming(asArray(d).filter((x) => x && x.id != null));
-    } catch { setIncoming([]); }
+    try { setIncoming(asArray(await postJson(TRANSFER_API, { action: "list_transfers", status: "sent", to_branch: br })).filter((x) => x && x.id != null)); }
+    catch { setIncoming([]); }
     setLoadingRecv(false);
   }
   async function confirmReceive() {
     const ids = incoming.filter((r) => selRecv[r.id]).map((r) => r.id);
     if (!ids.length) { setMessage("❌ ติ๊กเลือกรายการที่จะรับ"); return; }
-    try {
-      await postJson(TRANSFER_API, { action: "receive_transfer", ids, received_by: who });
-      setMessage(`✅ รับโอน ${ids.length} คัน เข้าสาขา ${recvBranch} แล้ว`);
-      loadIncoming(recvBranch);
-    } catch (e) { setMessage("❌ " + (e.message || e)); }
+    try { await postJson(TRANSFER_API, { action: "receive_transfer", ids, received_by: who }); setMessage(`✅ รับโอน ${ids.length} คัน เข้าสาขา ${recvBranch} แล้ว`); loadIncoming(recvBranch); }
+    catch (e) { setMessage("❌ " + (e.message || e)); }
   }
 
   async function loadHist() {
     setLoadingHist(true);
-    try {
-      const d = await postJson(TRANSFER_API, { action: "list_transfers", keyword: hKeyword.trim(), status: hStatus });
-      setHist(asArray(d).filter((x) => x && x.id != null));
-    } catch { setHist([]); }
+    try { setHist(asArray(await postJson(TRANSFER_API, { action: "list_transfers", keyword: hKeyword.trim(), status: hStatus })).filter((x) => x && x.id != null)); }
+    catch { setHist([]); }
     setLoadingHist(false);
   }
   async function cancelRow(r) {
     if (!window.confirm(`ยกเลิกการโอน ${r.transfer_no} (เลขเครื่อง ${r.engine_no || r.chassis_no})?`)) return;
-    try {
-      await postJson(TRANSFER_API, { action: "cancel_transfer", ids: [r.id], cancelled_by: who });
-      setMessage(`✅ ยกเลิกแล้ว`); loadHist();
-    } catch (e) { setMessage("❌ " + (e.message || e)); }
+    try { await postJson(TRANSFER_API, { action: "cancel_transfer", ids: [r.id], cancelled_by: who }); setMessage("✅ ยกเลิกแล้ว"); loadHist(); }
+    catch (e) { setMessage("❌ " + (e.message || e)); }
   }
 
   useEffect(() => { loadStock(fromBranch); /* eslint-disable-next-line */ }, []);
   useEffect(() => { if (tab === "history") loadHist(); /* eslint-disable-next-line */ }, [tab]);
 
-  const skw = stockSearch.trim().toLowerCase();
-  const visibleStock = useMemo(() => (!skw ? stockRows : stockRows.filter((r) =>
-    [r.engine_no, r.chassis_no, r.model, r.color].some((v) => String(v || "").toLowerCase().includes(skw)))), [stockRows, skw]);
-  const selCount = Object.values(sel).filter(Boolean).length;
-  const allSel = visibleStock.length > 0 && visibleStock.every((r) => sel[bikeKey(r)]);
+  // สต๊อกที่ยังเลือกได้ใน popup (ตัดที่อยู่ในใบโอนแล้ว + กรองคำค้น)
+  const have = useMemo(() => new Set(items.map(bikeKey)), [items]);
+  const pkw = pickerSearch.trim().toLowerCase();
+  const pickable = useMemo(() => stockRows.filter((r) => !have.has(bikeKey(r)))
+    .filter((r) => !pkw || [r.engine_no, r.chassis_no, r.model, r.color].some((v) => String(v || "").toLowerCase().includes(pkw))), [stockRows, have, pkw]);
+  const pickerCount = Object.values(pickerSel).filter(Boolean).length;
+  const allPick = pickable.length > 0 && pickable.every((r) => pickerSel[bikeKey(r)]);
   const selRecvCount = Object.values(selRecv).filter(Boolean).length;
 
   return (
     <div className="page-container">
-      <div className="page-topbar"><h2 className="page-title">🔁 บันทึกโอนรถจักรยานยนต์ ระหว่างสาขา</h2></div>
+      <div className="page-topbar"><h2 className="page-title">🔁 บันทึกใบโอนรถจักรยานยนต์ ระหว่างสาขา</h2></div>
 
       {message && <div style={{ padding: 10, marginBottom: 10, borderRadius: 6, background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : "#991b1b" }}>{message}</div>}
 
@@ -191,64 +200,54 @@ export default function MotoTransferPage({ currentUser }) {
       {/* ===================== โอนออก ===================== */}
       {tab === "out" && (
         <div style={card}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12, marginBottom: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
             <Field label="สาขาต้นทาง *">
-              <select value={fromBranch} onChange={(e) => { setFromBranch(e.target.value); if (toBranch === e.target.value) setToBranch(""); loadStock(e.target.value); }} style={inp}>
+              <select value={fromBranch} onChange={(e) => changeFrom(e.target.value)} style={inp}>
                 {BRANCHES.map((b) => <option key={b.code} value={b.code}>{b.label}</option>)}
               </select>
             </Field>
-            <Field label="สาขาปลายทาง *">
+            <Field label="สาขาปลายทาง (รับโอน) *">
               <select value={toBranch} onChange={(e) => setToBranch(e.target.value)} style={inp}>
-                <option value="">-- เลือก --</option>
+                <option value="">-- เลือกสาขารับโอน --</option>
                 {BRANCHES.filter((b) => b.code !== fromBranch).map((b) => <option key={b.code} value={b.code}>{b.label}</option>)}
               </select>
             </Field>
-            <Field label="วันที่โอน">
-              <input type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} style={inp} />
-            </Field>
-            <Field label="หมายเหตุ">
-              <input value={note} onChange={(e) => setNote(e.target.value)} style={inp} placeholder="(ไม่บังคับ)" />
-            </Field>
+            <Field label="วันที่โอน"><input type="date" value={transferDate} onChange={(e) => setTransferDate(e.target.value)} style={inp} /></Field>
+            <Field label="พนักงานผู้โอน"><input value={who} readOnly style={{ ...inp, background: "#f3f4f6" }} /></Field>
           </div>
+          <Field label="หมายเหตุ"><input value={note} onChange={(e) => setNote(e.target.value)} style={{ ...inp, marginTop: 0 }} placeholder="(ไม่บังคับ)" /></Field>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-            <span style={{ fontWeight: 600 }}>สต๊อกคงเหลือ {brLabel(fromBranch)} <span style={{ color: "#6b7280", fontWeight: 400 }}>({stockRows.length} คัน · {brandOf(fromBranch)})</span></span>
-            <button onClick={() => loadStock(fromBranch)} disabled={loadingStock} style={btnBlueSm}>{loadingStock ? "..." : "🔄 โหลดสต๊อก"}</button>
-            <input value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="🔍 ค้นเลขเครื่อง/เลขถัง"
-              style={{ ...inp, width: 220, padding: "6px 10px" }} />
-            {skw && <span style={{ fontSize: 12, color: "#6b7280" }}>พบ {visibleStock.length}</span>}
-            <span style={{ marginLeft: "auto", fontSize: 13, color: "#047857", fontWeight: 600 }}>เลือก {selCount} คัน</span>
-            <button onClick={saveTransfer} disabled={saving || selCount === 0 || !toBranch} style={{ ...btnGreen, opacity: (saving || selCount === 0 || !toBranch) ? 0.5 : 1 }}>
-              {saving ? "..." : `💾 บันทึกโอน${toBranch ? " → " + toBranch : ""}`}
+          {/* ปุ่มเลือกรถ + บันทึก */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "14px 0 8px" }}>
+            <button onClick={openPicker} disabled={loadingStock} style={btnBlue}>
+              {loadingStock ? "กำลังโหลดสต๊อก..." : "🏍️ เลือกรถจักรยานยนต์"}
+            </button>
+            <span style={{ fontSize: 12, color: "#6b7280" }}>สต๊อกคงเหลือ {fromBranch}: {stockRows.length} คัน</span>
+            <span style={{ marginLeft: "auto", fontSize: 13, color: "#047857", fontWeight: 600 }}>ในใบโอน {items.length} คัน</span>
+            <button onClick={saveTransfer} disabled={saving || items.length === 0 || !toBranch}
+              style={{ ...btnGreen, opacity: (saving || items.length === 0 || !toBranch) ? 0.5 : 1 }}>
+              {saving ? "..." : `💾 บันทึกใบโอน${toBranch ? " → " + toBranch : ""}`}
             </button>
           </div>
 
+          {/* รายการในใบโอน */}
           <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead style={{ background: "#072d6b", color: "#fff" }}>
-                <tr>
-                  <th style={{ ...th, width: 36 }}><input type="checkbox" checked={allSel} onChange={(e) => { const v = e.target.checked; setSel((s) => { const m = { ...s }; visibleStock.forEach((r) => { m[bikeKey(r)] = v; }); return m; }); }} /></th>
-                  <th style={{ ...th, textAlign: "left" }}>รุ่น/แบบ</th><th style={th}>type</th><th style={{ ...th, textAlign: "left" }}>สี</th>
-                  <th style={{ ...th, textAlign: "left" }}>เลขเครื่อง</th><th style={{ ...th, textAlign: "left" }}>เลขถัง</th><th style={{ ...th, textAlign: "right" }}>รับเมื่อ</th>
-                </tr>
+                <tr><th style={{ ...th, width: 44 }}>No</th><th style={{ ...th, textAlign: "left" }}>เลขเครื่อง</th><th style={{ ...th, textAlign: "left" }}>ชื่อสินค้า (รุ่น/แบบ/สี)</th><th style={{ ...th, textAlign: "left" }}>เลขถัง</th><th style={th}>รับเมื่อ</th><th style={{ ...th, width: 70 }}></th></tr>
               </thead>
               <tbody>
-                {loadingStock && <tr><td colSpan={7} style={{ padding: 18, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-                {!loadingStock && visibleStock.length === 0 && <tr><td colSpan={7} style={{ padding: 18, textAlign: "center", color: "#9ca3af" }}>{stockRows.length === 0 ? "ไม่มีสต๊อกคงเหลือที่สาขานี้" : "ไม่พบรถตามคำค้นหา"}</td></tr>}
-                {visibleStock.map((r) => {
-                  const k = bikeKey(r);
-                  return (
-                    <tr key={r.id} style={{ borderTop: "1px solid #eef2f7", background: sel[k] ? "#ecfdf5" : "transparent", cursor: "pointer" }} onClick={() => setSel((s) => ({ ...s, [k]: !s[k] }))}>
-                      <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={!!sel[k]} onChange={() => {}} /></td>
-                      <td style={td}>{r.model || "-"}</td>
-                      <td style={{ ...td, textAlign: "center" }}>{r.model_type || "-"}</td>
-                      <td style={td}>{r.color || "-"}</td>
-                      <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.engine_no || "-"}</td>
-                      <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
-                      <td style={{ ...td, textAlign: "right", whiteSpace: "nowrap" }}>{fmtDateTH(r.received_date)}</td>
-                    </tr>
-                  );
-                })}
+                {items.length === 0 && <tr><td colSpan={6} style={{ padding: 18, textAlign: "center", color: "#9ca3af" }}>ยังไม่ได้เลือกรถ — กด "เลือกรถจักรยานยนต์"</td></tr>}
+                {items.map((r, i) => (
+                  <tr key={bikeKey(r)} style={{ borderTop: "1px solid #eef2f7" }}>
+                    <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                    <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{r.engine_no || "-"}</td>
+                    <td style={td}>{bikeName(r) || "-"}</td>
+                    <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
+                    <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>{fmtDateTH(r.received_date)}</td>
+                    <td style={{ ...td, textAlign: "center" }}><button onClick={() => removeItem(bikeKey(r))} style={btnRedSm}>✕ ลบ</button></td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -272,11 +271,7 @@ export default function MotoTransferPage({ currentUser }) {
           <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead style={{ background: "#072d6b", color: "#fff" }}>
-                <tr>
-                  <th style={{ ...th, width: 36 }}><input type="checkbox" checked={incoming.length > 0 && incoming.every((r) => selRecv[r.id])} onChange={(e) => { const v = e.target.checked; const m = {}; if (v) incoming.forEach((r) => (m[r.id] = true)); setSelRecv(m); }} /></th>
-                  <th style={th}>เลขที่โอน</th><th style={th}>วันที่</th><th style={th}>จากสาขา</th>
-                  <th style={{ ...th, textAlign: "left" }}>รุ่น/แบบ</th><th style={{ ...th, textAlign: "left" }}>เลขเครื่อง</th><th style={th}>โดย</th>
-                </tr>
+                <tr><th style={{ ...th, width: 36 }}><input type="checkbox" checked={incoming.length > 0 && incoming.every((r) => selRecv[r.id])} onChange={(e) => { const v = e.target.checked; const m = {}; if (v) incoming.forEach((r) => (m[r.id] = true)); setSelRecv(m); }} /></th><th style={th}>เลขที่โอน</th><th style={th}>วันที่</th><th style={th}>จากสาขา</th><th style={{ ...th, textAlign: "left" }}>รุ่น/แบบ</th><th style={{ ...th, textAlign: "left" }}>เลขเครื่อง</th><th style={th}>โดย</th></tr>
               </thead>
               <tbody>
                 {loadingRecv && <tr><td colSpan={7} style={{ padding: 18, textAlign: "center" }}>กำลังโหลด...</td></tr>}
@@ -335,6 +330,53 @@ export default function MotoTransferPage({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* ===================== Popup เลือกรถจักรยานยนต์ ===================== */}
+      {showPicker && (
+        <div onClick={() => setShowPicker(false)} style={overlay}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: "min(900px, 97vw)", maxHeight: "92vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b" }}>🏍️ ค้นหารถจักรยานยนต์ — สต๊อก {fromBranch} ({brandOf(fromBranch)})</div>
+              <button onClick={() => setShowPicker(false)} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: "#6b7280", lineHeight: 1 }}>×</button>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0 10px" }}>
+              <input autoFocus value={pickerSearch} onChange={(e) => setPickerSearch(e.target.value)} placeholder="🔍 พิมพ์เลขเครื่อง / เลขถัง / รุ่น (บางส่วน)" style={{ ...inp, flex: 1 }} />
+              <span style={{ fontSize: 12, color: "#6b7280", whiteSpace: "nowrap" }}>{pickable.length} คัน</span>
+            </div>
+            <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: "55vh", overflowY: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                <thead style={{ background: "#072d6b", color: "#fff", position: "sticky", top: 0 }}>
+                  <tr>
+                    <th style={{ ...th, width: 36 }}><input type="checkbox" checked={allPick} onChange={(e) => { const v = e.target.checked; setPickerSel((s) => { const m = { ...s }; pickable.forEach((r) => { m[bikeKey(r)] = v; }); return m; }); }} /></th>
+                    <th style={{ ...th, textAlign: "left" }}>เลขเครื่อง</th><th style={{ ...th, textAlign: "left" }}>เลขถัง</th><th style={{ ...th, textAlign: "left" }}>รุ่น/แบบ</th><th style={th}>type</th><th style={{ ...th, textAlign: "left" }}>สี</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingStock && <tr><td colSpan={6} style={{ padding: 16, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+                  {!loadingStock && pickable.length === 0 && <tr><td colSpan={6} style={{ padding: 16, textAlign: "center", color: "#9ca3af" }}>{stockRows.length === 0 ? "ไม่มีสต๊อกคงเหลือที่สาขานี้" : "ไม่พบรถตามคำค้น / เลือกครบแล้ว"}</td></tr>}
+                  {pickable.map((r) => {
+                    const k = bikeKey(r);
+                    return (
+                      <tr key={r.id} style={{ borderTop: "1px solid #eef2f7", background: pickerSel[k] ? "#ecfdf5" : "transparent", cursor: "pointer" }} onClick={() => setPickerSel((s) => ({ ...s, [k]: !s[k] }))}>
+                        <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={!!pickerSel[k]} onChange={() => {}} /></td>
+                        <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.engine_no || "-"}</td>
+                        <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
+                        <td style={td}>{r.model || "-"}</td>
+                        <td style={{ ...td, textAlign: "center" }}>{r.model_type || "-"}</td>
+                        <td style={td}>{r.color || "-"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+              <button onClick={() => setShowPicker(false)} style={{ ...btnBlueSm, background: "#8aa0a6" }}>ปิด</button>
+              <button onClick={addPicked} disabled={pickerCount === 0} style={{ ...btnGreen, opacity: pickerCount === 0 ? 0.5 : 1 }}>➕ เพิ่มที่เลือก ({pickerCount})</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -347,9 +389,11 @@ function StatusBadge({ s }) {
 function Field({ label, children }) {
   return <div><label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 4 }}>{label}</label>{children}</div>;
 }
+const overlay = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 };
 const card = { background: "#fff", borderRadius: 12, padding: 18, boxShadow: "0 2px 12px rgba(7,45,107,0.10)" };
-const inp = { width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, fontFamily: "Tahoma", boxSizing: "border-box" };
+const inp = { width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, fontFamily: "Tahoma", boxSizing: "border-box", marginTop: 4 };
 const tabBtn = (on) => ({ padding: "8px 16px", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 600, fontSize: 14, background: on ? "#072d6b" : "#e5e7eb", color: on ? "#fff" : "#374151" });
+const btnBlue = { padding: "9px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 700, whiteSpace: "nowrap" };
 const btnBlueSm = { padding: "7px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" };
 const btnGreen = { padding: "9px 18px", background: "#2e9e4f", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 700, whiteSpace: "nowrap" };
 const btnRedSm = { padding: "4px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 };
