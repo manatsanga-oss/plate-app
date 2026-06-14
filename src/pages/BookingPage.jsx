@@ -20,7 +20,7 @@ function fmtArrivedAt(iso) {
   return `${hh}:${mi}`;
 }
 
-const DELIVERY_TYPES = ["ส่งรถ", "ทำสัญญา", "อื่น ๆ"];
+const DELIVERY_TYPES = ["ส่งรถ", "ทำสัญญา", "ส่งรถระหว่างสาขา", "อื่น ๆ"];
 
 const emptyForm = () => ({
   car_model: "",
@@ -40,6 +40,7 @@ export default function BookingPage({ currentUser }) {
   const [drivers, setDrivers] = useState([]);
   const [financeCompanies, setFinanceCompanies] = useState([]);
   const [form, setForm] = useState(emptyForm());
+  const [transferData, setTransferData] = useState(null); // ข้อมูลรถที่โอน (มาจากหน้าบันทึกโอนรถ)
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -80,6 +81,19 @@ export default function BookingPage({ currentUser }) {
     fetchCarModels();
     fetchDrivers();
     fetchFinanceCompanies();
+  }, []);
+
+  // รับข้อมูลรถที่โอนจากหน้า "บันทึกโอนรถ" → เปิดฟอร์มจองคนขับ + เติมประเภท "ส่งรถระหว่างสาขา"
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("moto_transfer_to_booking");
+      if (!raw) return;
+      sessionStorage.removeItem("moto_transfer_to_booking");
+      const p = JSON.parse(raw);
+      setTransferData(p);
+      setForm((f) => ({ ...f, delivery_type: "ส่งรถระหว่างสาขา", destination: p.to_label || p.to_branch || "" }));
+      setMode("add");
+    } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
@@ -211,7 +225,7 @@ export default function BookingPage({ currentUser }) {
       setMessage("กรุณากรอกข้อมูลให้ครบถ้วน");
       return;
     }
-    if (!distanceInfo || !distanceInfo._confirmed) {
+    if (form.delivery_type !== "ส่งรถระหว่างสาขา" && (!distanceInfo || !distanceInfo._confirmed)) {
       setMessage("กรุณากดปุ่ม 🔍 ค้นหา เพื่อดึงระยะทาง/เวลาการเดินทาง ก่อนบันทึก");
       return;
     }
@@ -225,6 +239,13 @@ export default function BookingPage({ currentUser }) {
     }
     setSaving(true);
     setMessage("");
+    // ส่งรถระหว่างสาขา: สรุปรุ่น+เลขเครื่องที่ส่ง → เก็บใน purpose (บันทึกลงตาราง bookings)
+    const isTransfer = form.delivery_type === "ส่งรถระหว่างสาขา";
+    const tBikes = transferData?.bikes || [];
+    const transferPurpose = isTransfer
+      ? `[ใบโอน ${transferData?.transfer_no || "-"}] ${transferData?.from_branch || ""}→${transferData?.to_branch || ""} | ` +
+        tBikes.map((b) => `${b.model || ""} (${b.engine_no || b.chassis_no || "-"})`).join(", ")
+      : form.purpose;
     try {
       const res = await fetch(API_URL, {
         method: "POST",
@@ -234,6 +255,9 @@ export default function BookingPage({ currentUser }) {
           booker_name: currentUser?.name,
           branch: currentUser?.branch,
           ...form,
+          purpose: transferPurpose,
+          transfer_no: transferData?.transfer_no || null,
+          transfer_items: isTransfer ? JSON.stringify(tBikes) : null,
           status: "pending",
           car_model: form.car_model || null,
           driver_id: form.driver_id || null,
@@ -471,6 +495,42 @@ export default function BookingPage({ currentUser }) {
                 </select>
               </div>
             </>
+          )}
+
+          {/* ส่งรถระหว่างสาขา: รายการรถที่จัดส่ง (รุ่น + เลขเครื่อง) */}
+          {form.delivery_type === "ส่งรถระหว่างสาขา" && (
+            <div className="form-row">
+              <label>รถที่จัดส่ง {transferData?.transfer_no ? `(ใบโอน ${transferData.transfer_no})` : ""}</label>
+              {transferData?.bikes?.length ? (
+                <div style={{ border: "1px solid #cbd5e1", borderRadius: 8, overflow: "hidden" }}>
+                  <div style={{ background: "#eff6ff", padding: "6px 12px", fontSize: 12, color: "#1e40af", fontWeight: 600 }}>
+                    {transferData.from_branch} → {transferData.to_branch} · {transferData.bikes.length} คัน
+                  </div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                    <thead><tr style={{ background: "#f8fafc" }}>
+                      <th style={{ padding: "6px 8px", width: 36 }}>#</th>
+                      <th style={{ padding: "6px 8px", textAlign: "left" }}>รุ่น/แบบ</th>
+                      <th style={{ padding: "6px 8px", textAlign: "left" }}>เลขเครื่อง</th>
+                      <th style={{ padding: "6px 8px", textAlign: "left" }}>เลขถัง</th>
+                    </tr></thead>
+                    <tbody>
+                      {transferData.bikes.map((b, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid #eef2f7" }}>
+                          <td style={{ padding: "6px 8px", textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                          <td style={{ padding: "6px 8px" }}>{b.model || "-"}</td>
+                          <td style={{ padding: "6px 8px", fontFamily: "monospace" }}>{b.engine_no || "-"}</td>
+                          <td style={{ padding: "6px 8px", fontFamily: "monospace", fontSize: 11 }}>{b.chassis_no || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div style={{ fontSize: 12, color: "#92400e", background: "#fef3c7", padding: "8px 12px", borderRadius: 8 }}>
+                  ⚠️ ไม่มีรายการรถ — กรุณาเริ่มจากหน้า "บันทึกโอนรถระหว่างสาขา" แล้วกดปุ่ม "บันทึกจองคนขับรถ"
+                </div>
+              )}
+            </div>
           )}
 
           {/* อื่น ๆ: วัตถุประสงค์ */}

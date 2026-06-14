@@ -147,7 +147,10 @@ export default function MotoTransferPage({ currentUser, onNavigate }) {
       const rows = asArray(r); const no = rows[0]?.transfer_no;
       if (!no) throw new Error("บันทึกไม่สำเร็จ");
       setMessage(`✅ บันทึกใบโอน ${rows.length} คัน — เลขที่ ${no} (${fromBranch} → ${toBranch})`);
-      setLastTransfer({ no, count: rows.length, from: fromBranch, to: toBranch });
+      setLastTransfer({
+        no, count: rows.length, from: fromBranch, to: toBranch, to_label: brLabel(toBranch),
+        bikes: items.map((r) => ({ model: [r.model, r.model_type].filter(Boolean).join(" / "), engine_no: r.engine_no, chassis_no: r.chassis_no })),
+      });
       setItems([]); setNote("");
       loadStock(fromBranch);
     } catch (e) {
@@ -212,7 +215,10 @@ export default function MotoTransferPage({ currentUser, onNavigate }) {
           {lastTransfer && (
             <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 10, padding: "12px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
               <span style={{ color: "#065f46", fontWeight: 600 }}>✅ บันทึกใบโอน {lastTransfer.no} แล้ว ({lastTransfer.count} คัน · {lastTransfer.from} → {lastTransfer.to})</span>
-              <button onClick={() => onNavigate && onNavigate("booking")} style={{ ...btnBlue, background: "#7c3aed" }}>🚗 บันทึกจองคนขับรถ</button>
+              <button onClick={() => {
+                try { sessionStorage.setItem("moto_transfer_to_booking", JSON.stringify({ transfer_no: lastTransfer.no, from_branch: lastTransfer.from, to_branch: lastTransfer.to, to_label: lastTransfer.to_label, bikes: lastTransfer.bikes || [] })); } catch { /* ignore */ }
+                onNavigate && onNavigate("booking");
+              }} style={{ ...btnBlue, background: "#7c3aed" }}>🚗 บันทึกจองคนขับรถ</button>
               <button onClick={() => setLastTransfer(null)} style={{ ...btnBlueSm, background: "#8aa0a6" }}>ปิด</button>
             </div>
           )}
