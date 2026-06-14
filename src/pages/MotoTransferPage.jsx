@@ -59,6 +59,7 @@ export default function MotoTransferPage({ currentUser }) {
   const [sel, setSel] = useState({}); // key -> bool
   const [loadingStock, setLoadingStock] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [stockSearch, setStockSearch] = useState("");
 
   // ---------- รับโอน ----------
   const [recvBranch, setRecvBranch] = useState("");
@@ -168,8 +169,11 @@ export default function MotoTransferPage({ currentUser }) {
   useEffect(() => { loadStock(fromBranch); /* eslint-disable-next-line */ }, []);
   useEffect(() => { if (tab === "history") loadHist(); /* eslint-disable-next-line */ }, [tab]);
 
+  const skw = stockSearch.trim().toLowerCase();
+  const visibleStock = useMemo(() => (!skw ? stockRows : stockRows.filter((r) =>
+    [r.engine_no, r.chassis_no, r.model, r.color].some((v) => String(v || "").toLowerCase().includes(skw)))), [stockRows, skw]);
   const selCount = Object.values(sel).filter(Boolean).length;
-  const allSel = stockRows.length > 0 && stockRows.every((r) => sel[bikeKey(r)]);
+  const allSel = visibleStock.length > 0 && visibleStock.every((r) => sel[bikeKey(r)]);
   const selRecvCount = Object.values(selRecv).filter(Boolean).length;
 
   return (
@@ -210,6 +214,9 @@ export default function MotoTransferPage({ currentUser }) {
           <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
             <span style={{ fontWeight: 600 }}>สต๊อกคงเหลือ {brLabel(fromBranch)} <span style={{ color: "#6b7280", fontWeight: 400 }}>({stockRows.length} คัน · {brandOf(fromBranch)})</span></span>
             <button onClick={() => loadStock(fromBranch)} disabled={loadingStock} style={btnBlueSm}>{loadingStock ? "..." : "🔄 โหลดสต๊อก"}</button>
+            <input value={stockSearch} onChange={(e) => setStockSearch(e.target.value)} placeholder="🔍 ค้นเลขเครื่อง/เลขถัง"
+              style={{ ...inp, width: 220, padding: "6px 10px" }} />
+            {skw && <span style={{ fontSize: 12, color: "#6b7280" }}>พบ {visibleStock.length}</span>}
             <span style={{ marginLeft: "auto", fontSize: 13, color: "#047857", fontWeight: 600 }}>เลือก {selCount} คัน</span>
             <button onClick={saveTransfer} disabled={saving || selCount === 0 || !toBranch} style={{ ...btnGreen, opacity: (saving || selCount === 0 || !toBranch) ? 0.5 : 1 }}>
               {saving ? "..." : `💾 บันทึกโอน${toBranch ? " → " + toBranch : ""}`}
@@ -220,15 +227,15 @@ export default function MotoTransferPage({ currentUser }) {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead style={{ background: "#072d6b", color: "#fff" }}>
                 <tr>
-                  <th style={{ ...th, width: 36 }}><input type="checkbox" checked={allSel} onChange={(e) => { const v = e.target.checked; const m = {}; if (v) stockRows.forEach((r) => (m[bikeKey(r)] = true)); setSel(m); }} /></th>
+                  <th style={{ ...th, width: 36 }}><input type="checkbox" checked={allSel} onChange={(e) => { const v = e.target.checked; setSel((s) => { const m = { ...s }; visibleStock.forEach((r) => { m[bikeKey(r)] = v; }); return m; }); }} /></th>
                   <th style={{ ...th, textAlign: "left" }}>รุ่น/แบบ</th><th style={th}>type</th><th style={{ ...th, textAlign: "left" }}>สี</th>
                   <th style={{ ...th, textAlign: "left" }}>เลขเครื่อง</th><th style={{ ...th, textAlign: "left" }}>เลขถัง</th><th style={{ ...th, textAlign: "right" }}>รับเมื่อ</th>
                 </tr>
               </thead>
               <tbody>
                 {loadingStock && <tr><td colSpan={7} style={{ padding: 18, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-                {!loadingStock && stockRows.length === 0 && <tr><td colSpan={7} style={{ padding: 18, textAlign: "center", color: "#9ca3af" }}>ไม่มีสต๊อกคงเหลือที่สาขานี้</td></tr>}
-                {stockRows.map((r) => {
+                {!loadingStock && visibleStock.length === 0 && <tr><td colSpan={7} style={{ padding: 18, textAlign: "center", color: "#9ca3af" }}>{stockRows.length === 0 ? "ไม่มีสต๊อกคงเหลือที่สาขานี้" : "ไม่พบรถตามคำค้นหา"}</td></tr>}
+                {visibleStock.map((r) => {
                   const k = bikeKey(r);
                   return (
                     <tr key={r.id} style={{ borderTop: "1px solid #eef2f7", background: sel[k] ? "#ecfdf5" : "transparent", cursor: "pointer" }} onClick={() => setSel((s) => ({ ...s, [k]: !s[k] }))}>
