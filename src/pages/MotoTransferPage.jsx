@@ -50,9 +50,15 @@ export default function MotoTransferPage({ currentUser }) {
   const [tab, setTab] = useState("out");
   const [message, setMessage] = useState("");
   const who = currentUser?.username || currentUser?.name || "system";
+  // สาขาต้นทาง default = สาขาของ user ที่ login (ดึง SCYxx จาก branch_code/branch) ถ้าไม่เข้าพวกใช้ SCY06
+  const userBranch = (() => {
+    const m = String(currentUser?.branch_code || currentUser?.branch || "").match(/SCY\d+/i);
+    const code = m ? m[0].toUpperCase() : "";
+    return BRANCHES.some((b) => b.code === code) ? code : "SCY06";
+  })();
 
   // ---------- โอนออก (ฟอร์มใบโอน) ----------
-  const [fromBranch, setFromBranch] = useState("SCY06");
+  const [fromBranch, setFromBranch] = useState(userBranch);
   const [toBranch, setToBranch] = useState("");
   const [transferDate, setTransferDate] = useState(todayISO());
   const [note, setNote] = useState("");
