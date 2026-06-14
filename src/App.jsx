@@ -446,7 +446,7 @@ export default function App() {
         )}
         {activeMenu === "fastmovingstock" && canAccess("fastmovingstock") && <FastMovingStockPage />}
         {activeMenu === "motostock" && canAccess("motostock") && <MotoStockPage />}
-        {activeMenu === "mototransfer" && canAccess("mototransfer") && <MotoTransferPage currentUser={currentUser} />}
+        {activeMenu === "mototransfer" && canAccess("mototransfer") && <MotoTransferPage currentUser={currentUser} onNavigate={setActiveMenu} />}
         {activeMenu === "pettycash" && canAccess("pettycash") && <PettyCashFuelPage currentUser={currentUser} />}
         {activeMenu === "postage" && canAccess("postage") && <PettyCashPostagePage currentUser={currentUser} />}
         {activeMenu === "pettycashgeneral" && canAccess("pettycashgeneral") && <PettyCashGeneralPage currentUser={currentUser} />}

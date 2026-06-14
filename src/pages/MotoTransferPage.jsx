@@ -46,7 +46,7 @@ async function postJson(url, body) {
 const asArray = (d) => (Array.isArray(d) ? d : d?.data || d?.rows || []);
 const bikeName = (r) => [r.model, r.model_type, r.color].filter(Boolean).join(" · ");
 
-export default function MotoTransferPage({ currentUser }) {
+export default function MotoTransferPage({ currentUser, onNavigate }) {
   const [tab, setTab] = useState("out");
   const [message, setMessage] = useState("");
   const who = currentUser?.username || currentUser?.name || "system";
@@ -66,6 +66,7 @@ export default function MotoTransferPage({ currentUser }) {
   const [stockRows, setStockRows] = useState([]); // สต๊อกคงเหลือของสาขาต้นทาง
   const [loadingStock, setLoadingStock] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [lastTransfer, setLastTransfer] = useState(null); // สรุปใบโอนที่เพิ่งบันทึก (โชว์ปุ่มจองคนขับ)
   // popup เลือกรถ
   const [showPicker, setShowPicker] = useState(false);
   const [pickerSel, setPickerSel] = useState({});
@@ -115,7 +116,7 @@ export default function MotoTransferPage({ currentUser }) {
   function changeFrom(code) {
     setFromBranch(code);
     if (toBranch === code) setToBranch("");
-    setItems([]);
+    setItems([]); setLastTransfer(null);
     loadStock(code);
   }
   function openPicker() {
@@ -127,6 +128,7 @@ export default function MotoTransferPage({ currentUser }) {
     const add = stockRows.filter((r) => pickerSel[bikeKey(r)] && !have.has(bikeKey(r)))
       .map((r) => ({ engine_no: r.engine_no || "", chassis_no: r.chassis_no || "", model: r.model || "", model_type: r.model_type || "", color: r.color || "", received_date: r.received_date }));
     setItems((cur) => [...cur, ...add]);
+    setLastTransfer(null);
     setShowPicker(false);
   }
   const removeItem = (k) => setItems((cur) => cur.filter((r) => bikeKey(r) !== k));
@@ -145,6 +147,7 @@ export default function MotoTransferPage({ currentUser }) {
       const rows = asArray(r); const no = rows[0]?.transfer_no;
       if (!no) throw new Error("บันทึกไม่สำเร็จ");
       setMessage(`✅ บันทึกใบโอน ${rows.length} คัน — เลขที่ ${no} (${fromBranch} → ${toBranch})`);
+      setLastTransfer({ no, count: rows.length, from: fromBranch, to: toBranch });
       setItems([]); setNote("");
       loadStock(fromBranch);
     } catch (e) {
@@ -206,6 +209,13 @@ export default function MotoTransferPage({ currentUser }) {
       {/* ===================== โอนออก ===================== */}
       {tab === "out" && (
         <div style={card}>
+          {lastTransfer && (
+            <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 10, padding: "12px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+              <span style={{ color: "#065f46", fontWeight: 600 }}>✅ บันทึกใบโอน {lastTransfer.no} แล้ว ({lastTransfer.count} คัน · {lastTransfer.from} → {lastTransfer.to})</span>
+              <button onClick={() => onNavigate && onNavigate("booking")} style={{ ...btnBlue, background: "#7c3aed" }}>🚗 บันทึกจองคนขับรถ</button>
+              <button onClick={() => setLastTransfer(null)} style={{ ...btnBlueSm, background: "#8aa0a6" }}>ปิด</button>
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
             <Field label="สาขาต้นทาง *">
               <select value={fromBranch} onChange={(e) => changeFrom(e.target.value)} style={inp}>
