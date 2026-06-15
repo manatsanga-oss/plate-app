@@ -183,6 +183,8 @@ export default function App() {
     // รายงานงบทดลอง — เห็นเฉพาะ user "admin" คนเดียว (จำกัดก่อนเช็ค role admin ทั่วไป)
     if (page === "trialbalance") return currentUser.username === "admin";
     if (currentUser.role === "admin") return true;
+    // บันทึกโอนรถระหว่างสาขา — เปิดให้ user ทุกคน (ก่อนเช็ค explicit pages)
+    if (page === "mototransfer") return true;
     // ตั้งค่าค่าใช้จ่าย (การขาย/งานบริการ/ทั่วไป) — เฉพาะ admin เท่านั้น (override explicit pages)
     if (page === "motoexpense" || page === "serviceexpense" || page === "generalexpense") return false;
     // ถ้า user มี pages column เซ็ตชัดเจน → strict allowlist (เห็นเฉพาะที่ระบุเท่านั้น)
