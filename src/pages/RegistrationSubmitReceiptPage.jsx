@@ -50,8 +50,12 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
       const data = await res.json();
       const arr = Array.isArray(data) ? data : (data?.rows || data?.data || []);
       // ซ่อนรายการรอส่งที่รับเรื่องก่อน 31 ธ.ค. 2568 (ของเก่า — ไม่ต้องส่งงานทะเบียนอีก)
+      // และซ่อนใบที่สถานะ "ยกเลิก" (ยกเลิกรับเรื่องจากต้นทางแล้ว)
       const SUBMIT_CUTOFF_ISO = "2025-12-31";
-      const visible = arr.filter(r => !r.receive_date || String(r.receive_date).slice(0, 10) >= SUBMIT_CUTOFF_ISO);
+      const visible = arr.filter(r =>
+        r.receive_status !== "ยกเลิก" &&
+        (!r.receive_date || String(r.receive_date).slice(0, 10) >= SUBMIT_CUTOFF_ISO)
+      );
       setRows(visible);
       if (visible.length === 0) setMessage("");
     } catch (e) {
