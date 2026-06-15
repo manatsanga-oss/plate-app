@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
+const REFUND_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-refund-api";
 
 export default function ReceiptBillingPage({ currentUser }) {
   const [viewMode, setViewMode] = useState("pending");  // 'pending' | 'history' | 'paidHistory'
@@ -31,7 +32,20 @@ export default function ReceiptBillingPage({ currentUser }) {
   const [savingPayment, setSavingPayment] = useState(false);
   const [editingPayDocNo, setEditingPayDocNo] = useState(null); // paid_doc_no ที่กำลังแก้ไข
 
+  // ----- tab คืนเงินรับเรื่อง -----
+  const [refundRows, setRefundRows] = useState([]);          // daily_expenses หัวข้อ 041 + สถานะจับคู่
+  const [refundLoading, setRefundLoading] = useState(false);
+  const [refundOnlyUnmatched, setRefundOnlyUnmatched] = useState(false);
+  const [refundSearch, setRefundSearch] = useState("");
+  const [pickerExpense, setPickerExpense] = useState(null);  // expense row ที่กำลังจับคู่
+  const [pickerReceipts, setPickerReceipts] = useState([]);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
+  const [pickerAmount, setPickerAmount] = useState("");
+  const [savingRefund, setSavingRefund] = useState(false);
+
   useEffect(() => { fetchVendors(); fetchBankAccounts(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { if (viewMode === "refund") fetchRefundExpenses(); /* eslint-disable-next-line */ }, [viewMode, refundOnlyUnmatched]);
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [vendor, incomeType, showBilled]);
   useEffect(() => {
     if (viewMode === "history" || viewMode === "paidHistory") setShowBilled(true);
@@ -326,6 +340,84 @@ ${transferSummary.length > 0 ? `
     setSaving(false);
   }
 
+  // ===== คืนเงินรับเรื่อง =====
+  async function fetchRefundExpenses() {
+    setRefundLoading(true); setMessage("");
+    try {
+      const res = await fetch(REFUND_API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_refund_expenses", only_unmatched: refundOnlyUnmatched }),
+      });
+      const data = await res.json();
+      setRefundRows(Array.isArray(data) ? data : []);
+    } catch { setMessage("❌ โหลดรายการคืนเงินไม่สำเร็จ"); setRefundRows([]); }
+    setRefundLoading(false);
+  }
+
+  async function openRefundPicker(exp) {
+    setPickerExpense(exp);
+    setPickerSearch("");
+    setPickerAmount(String(exp.refund_amount != null ? exp.refund_amount : (exp.total_amount || "")));
+    setPickerReceipts([]);
+    fetchUnsubmittedReceipts("");
+  }
+
+  async function fetchUnsubmittedReceipts(kw) {
+    setPickerLoading(true);
+    try {
+      const res = await fetch(REFUND_API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_unsubmitted_receipts", keyword: kw || "" }),
+      });
+      const data = await res.json();
+      setPickerReceipts(Array.isArray(data) ? data : []);
+    } catch { setPickerReceipts([]); }
+    setPickerLoading(false);
+  }
+
+  async function saveRefund(receipt) {
+    if (!pickerExpense) return;
+    setSavingRefund(true); setMessage("");
+    try {
+      const res = await fetch(REFUND_API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_receipt_refund",
+          expense_id: pickerExpense.expense_id,
+          payment_no: pickerExpense.payment_no,
+          payment_date: pickerExpense.payment_date ? String(pickerExpense.payment_date).slice(0, 10) : null,
+          pay_to: pickerExpense.pay_to,
+          detail: pickerExpense.detail,
+          refund_amount: Number(pickerAmount) || 0,
+          receipt_no: receipt.receipt_no,
+          customer_name: receipt.customer_name,
+          branch_code: receipt.branch_code,
+          created_by: currentUser?.username || currentUser?.name || "system",
+        }),
+      });
+      const data = await res.json().catch(() => ([]));
+      const first = Array.isArray(data) ? data[0] : data;
+      if (first?.__error) { setMessage(`❌ ${first.__error}`); setSavingRefund(false); return; }
+      setMessage(`✅ บันทึกคืนเงิน ${receipt.receipt_no} แล้ว`);
+      setPickerExpense(null);
+      fetchRefundExpenses();
+    } catch { setMessage("❌ บันทึกคืนเงินไม่สำเร็จ"); }
+    setSavingRefund(false);
+  }
+
+  async function cancelRefund(exp) {
+    if (!window.confirm(`ยกเลิกการจับคู่คืนเงิน?\n\nรายการ ${exp.payment_no || ""} ↔ ${exp.receipt_no}`)) return;
+    try {
+      const res = await fetch(REFUND_API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel_receipt_refund", expense_id: exp.expense_id, cancelled_by: currentUser?.username || currentUser?.name || "system" }),
+      });
+      if (!res.ok) throw new Error("fail");
+      setMessage(`✅ ยกเลิกการจับคู่ ${exp.receipt_no} แล้ว`);
+      fetchRefundExpenses();
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
+
   async function fetchVendors() {
     try {
       const res = await fetch(MASTER_API_URL, {
@@ -404,6 +496,176 @@ ${transferSummary.length > 0 ? `
     }
   }
 
+  // ===== render tab คืนเงินรับเรื่อง =====
+  function renderRefundTab() {
+    const rkw = refundSearch.trim().toLowerCase();
+    const list = refundRows.filter(r => {
+      if (!rkw) return true;
+      const hay = [r.payment_no, r.pay_to, r.detail, r.receipt_no, r.refund_customer].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(rkw);
+    });
+    const matchedCount = refundRows.filter(r => r.refund_id).length;
+    return (
+      <div>
+        {/* toolbar */}
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+          <strong style={{ fontSize: 14, color: "#92400e" }}>
+            💸 ค่าใช้จ่ายรายวัน หัวข้อ <span style={{ color: "#dc2626" }}>041 คืนเงินลูกค้างานทะเบียน</span>
+          </strong>
+          <span style={{ fontSize: 13, color: "#6b7280" }}>· จับคู่แล้ว {matchedCount}/{refundRows.length}</span>
+          <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}>
+            <input type="checkbox" checked={refundOnlyUnmatched} onChange={e => setRefundOnlyUnmatched(e.target.checked)} />
+            เฉพาะที่ยังไม่จับคู่
+          </label>
+          <input type="text" placeholder="🔍 ค้นหา (เลขจ่าย, ผู้รับ, รายละเอียด, เลขที่รับ)"
+            value={refundSearch} onChange={e => setRefundSearch(e.target.value)}
+            style={{ ...inp, marginLeft: "auto", flex: 1, minWidth: 220, maxWidth: 340 }} />
+          <button onClick={fetchRefundExpenses}
+            style={{ padding: "7px 12px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔄</button>
+        </div>
+
+        {refundLoading ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+        ) : list.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 60, color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px dashed #d1d5db" }}>
+            ไม่มีรายการค่าใช้จ่ายหัวข้อ 041 (คืนเงินลูกค้างานทะเบียน) — upload "ค่าใช้จ่ายรายวัน" ก่อน
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead style={{ background: "#072d6b", color: "#fff" }}>
+                <tr>
+                  <th style={th}>วันที่จ่าย</th>
+                  <th style={th}>เลขที่จ่าย</th>
+                  <th style={th}>ผู้รับเงิน / รายละเอียด</th>
+                  <th style={{ ...th, textAlign: "right" }}>ยอดจ่าย</th>
+                  <th style={th}>เลขที่รับเรื่องที่คืนเงิน</th>
+                  <th style={{ ...th, textAlign: "center" }}>จัดการ</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.map(r => {
+                  const matched = !!r.refund_id;
+                  return (
+                    <tr key={r.expense_id} style={{ background: matched ? "#ecfdf5" : "transparent", borderTop: "1px solid #e5e7eb" }}>
+                      <td style={td}>{fmtDate(r.payment_date)}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{r.payment_no || "-"}</td>
+                      <td style={td}>
+                        <div style={{ fontWeight: 600 }}>{r.pay_to || "-"}</div>
+                        {r.detail && <div style={{ fontSize: 11, color: "#6b7280" }}>{r.detail}</div>}
+                      </td>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmtNum(r.total_amount)}</td>
+                      <td style={td}>
+                        {matched ? (
+                          <div>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#065f46" }}>{r.receipt_no}</span>
+                            <div style={{ fontSize: 11, color: "#6b7280" }}>
+                              {r.refund_customer || ""}{r.refund_amount != null ? ` · ฿${fmtNum(r.refund_amount)}` : ""}
+                            </div>
+                          </div>
+                        ) : (
+                          <span style={{ color: "#9ca3af", fontStyle: "italic" }}>ยังไม่จับคู่</span>
+                        )}
+                      </td>
+                      <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+                        {matched ? (
+                          <button onClick={() => cancelRefund(r)}
+                            style={{ padding: "4px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                            🚫 ยกเลิกจับคู่
+                          </button>
+                        ) : (
+                          <button onClick={() => openRefundPicker(r)}
+                            style={{ padding: "4px 12px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                            🔗 เลือกเลขที่รับเรื่อง
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Picker modal — เลือกเลขที่รับเรื่องที่ยังไม่ส่งงานทะเบียน */}
+        {pickerExpense && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+            onClick={() => !savingRefund && setPickerExpense(null)}>
+            <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 760, maxWidth: "96vw", maxHeight: "90vh", overflowY: "auto" }}>
+              <h3 style={{ margin: "0 0 6px", color: "#072d6b" }}>🔗 เลือกเลขที่รับเรื่องที่จะคืนเงิน</h3>
+              <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+                <div><strong>เลขที่จ่าย:</strong> {pickerExpense.payment_no || "-"} · {fmtDate(pickerExpense.payment_date)}</div>
+                <div><strong>ผู้รับเงิน:</strong> {pickerExpense.pay_to || "-"}{pickerExpense.detail ? ` · ${pickerExpense.detail}` : ""}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                  <strong>ยอดคืนเงิน:</strong>
+                  <input type="number" step="0.01" min="0" value={pickerAmount} onChange={e => setPickerAmount(e.target.value)}
+                    style={{ ...inp, width: 130, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }} />
+                  <span style={{ fontSize: 11, color: "#6b7280" }}>(ค่าตั้งต้น = ยอดจ่าย {fmtNum(pickerExpense.total_amount)})</span>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                <input type="text" placeholder="🔍 ค้นหา (ลูกค้า, ทะเบียน, เลขถัง, เลขเครื่อง, เลขที่รับ)"
+                  value={pickerSearch} onChange={e => setPickerSearch(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") fetchUnsubmittedReceipts(pickerSearch); }}
+                  style={{ ...inp, flex: 1 }} />
+                <button onClick={() => fetchUnsubmittedReceipts(pickerSearch)}
+                  style={{ padding: "7px 16px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔍 ค้นหา</button>
+              </div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>* แสดงเฉพาะใบที่ <strong>ยังไม่ได้ส่งงานทะเบียน</strong> และยังไม่ถูกจับคู่คืนเงิน</div>
+
+              {pickerLoading ? (
+                <div style={{ textAlign: "center", padding: 30, color: "#6b7280" }}>กำลังโหลด...</div>
+              ) : pickerReceipts.length === 0 ? (
+                <div style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>ไม่พบใบรับเรื่องที่ยังไม่ส่งงาน</div>
+              ) : (
+                <div style={{ maxHeight: 360, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead style={{ background: "#f3f4f6", position: "sticky", top: 0 }}>
+                      <tr>
+                        <th style={th}>เลขที่รับเรื่อง</th>
+                        <th style={th}>วันที่รับ</th>
+                        <th style={th}>ลูกค้า</th>
+                        <th style={th}>ทะเบียน</th>
+                        <th style={th}>ยี่ห้อ/รุ่น</th>
+                        <th style={{ ...th, textAlign: "right" }}>ยอด</th>
+                        <th style={{ ...th, textAlign: "center" }}>เลือก</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pickerReceipts.map(rc => (
+                        <tr key={rc.receipt_no} style={{ borderTop: "1px solid #e5e7eb" }}>
+                          <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{rc.receipt_no}</td>
+                          <td style={td}>{fmtDate(rc.receive_date)}</td>
+                          <td style={td}>{rc.customer_name || "-"}</td>
+                          <td style={td}>{rc.plate_number || "-"}</td>
+                          <td style={td}>{`${rc.brand || ""} ${rc.model_series || ""}`.trim() || "-"}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(rc.total_amount)}</td>
+                          <td style={{ ...td, textAlign: "center" }}>
+                            <button disabled={savingRefund} onClick={() => saveRefund(rc)}
+                              style={{ padding: "4px 14px", background: savingRefund ? "#9ca3af" : "#15803d", color: "#fff", border: "none", borderRadius: 5, cursor: savingRefund ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 700 }}>
+                              ✓ เลือก
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+                <button onClick={() => setPickerExpense(null)} disabled={savingRefund}
+                  style={{ padding: "8px 24px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>ปิด</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="page-container">
       <div className="page-topbar">
@@ -416,6 +678,7 @@ ${transferSummary.length > 0 ? `
           ["pending", "📋 รอวางบิล"],
           ["history", "💵 บันทึกจ่ายเงิน"],
           ["paidHistory", "📜 ประวัติการจ่ายเงิน"],
+          ["refund", "💸 คืนเงินรับเรื่อง"],
         ].map(([v, label]) => (
           <button key={v} onClick={() => setViewMode(v)}
             style={{ padding: "10px 22px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
@@ -432,6 +695,9 @@ ${transferSummary.length > 0 ? `
         </div>
       )}
 
+      {viewMode === "refund" && renderRefundTab()}
+
+      {viewMode !== "refund" && (<>
       {/* Filters */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
         <label style={{ fontSize: 13, fontWeight: 600 }}>Vendor:</label>
@@ -724,6 +990,7 @@ ${transferSummary.length > 0 ? `
           </table>
         </div>
       )}
+      </>)}
 
       {/* Detail popup */}
       {detailRow && (
