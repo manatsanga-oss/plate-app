@@ -22,6 +22,7 @@ const PAGE_OPTIONS = [
   { key: "booking",    label: "🚗 จองคนขับรถ" },
   { key: "pricequote", label: "🧮 คำนวณราคาขายรถ" },
   { key: "stockcheck", label: "📦 เช็คสต๊อก" },
+  { key: "mototransfer", label: "🔁 บันทึกโอนรถระหว่างสาขา" },
   { key: "customer",   label: "🧑 บันทึกข้อมูลลูกค้า" },
   { key: "deliveryfee", label: "🚚 บันทึกค่านำพา" },
   { key: "pricemarkup", label: "➕ ราคาขายบวกเพิ่ม" },
@@ -60,7 +61,7 @@ const PAGE_OPTIONS = [
   { key: "users",      label: "👤 กำหนดผู้ใช้งาน" },
 ];
 
-const DEFAULT_PAGES = ["dashboard", "receive", "issue", "bookingdeposit"];
+const DEFAULT_PAGES = ["dashboard", "receive", "issue", "bookingdeposit", "mototransfer"];
 
 const emptyForm = () => ({
   name: "",
