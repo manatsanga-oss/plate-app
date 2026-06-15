@@ -169,9 +169,9 @@ export default function App() {
 
   function canAccess(page) {
     if (!currentUser) return false;
-    // เมนู HR — เห็นเฉพาะ admin + SUKANYA + WARUT เท่านั้น
+    // เมนู HR — เห็นเฉพาะ admin + WARUT เท่านั้น (ตัด SUKANYA ออก)
     const HR_PAGES = ["hremployees", "hrholidays", "hrmonthlyextras", "hrpayroll", "hrpayrollpayment", "hrpayrollaccounts", "hrtimetracking", "hrspecialcommission", "hrnormalcommission", "hrsalesrecord"];
-    const HR_USERS = ["admin", "SUKANYA", "WARUT"];
+    const HR_USERS = ["admin", "WARUT"];
     if (HR_PAGES.includes(page)) {
       return HR_USERS.includes(currentUser.username);
     }
