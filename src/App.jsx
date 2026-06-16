@@ -125,8 +125,13 @@ import RetailSalePage from "./pages/RetailSalePage";
 import BookingDepositPage from "./pages/BookingDepositPage";
 import BookingQueueStatusPage from "./pages/BookingQueueStatusPage";
 import PartImageLookupPage from "./pages/PartImageLookupPage";
+import QuoteViewPage from "./pages/QuoteViewPage";
 
 export default function App() {
+  // หน้าดูใบประเมินราคา (เปิดจากลิงก์ใน LINE) — public ไม่ต้อง login
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/quote-view")) {
+    return <QuoteViewPage />;
+  }
   // หน้าฟอร์มลูกค้า (เปิดผ่าน LINE LIFF) — ต้องเข้าได้โดยไม่ผ่าน login/sidebar
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/receipt-form")) {
     return <ReceiptCustomerFormPage />;

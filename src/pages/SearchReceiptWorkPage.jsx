@@ -48,6 +48,37 @@ export default function SearchReceiptWorkPage({ currentUser }) {
     return <span style={{ display: "inline-block", padding: "4px 12px", background: x.bg, color: x.color, borderRadius: 12, fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" }}>{x.label}</span>;
   }
 
+  // แสดงสถานะแยก 3 ส่วน: งานทะเบียน / พรบ / COSMOS — ค้างถ้ามีส่วนใดยังไม่วางบิล
+  function partStatus(r) {
+    const T = v => v === true || v === "t" || v === "true" || v === 1;
+    const has = { reg: T(r.has_reg), prb: T(r.has_prb), cosmos: T(r.has_cosmos) };
+    const billed = { reg: T(r.reg_billed), prb: T(r.prb_billed), cosmos: T(r.cosmos_billed) };
+    // ไม่มีข้อมูลส่วน (workflow เก่า) → ใช้ badge เดิม
+    if (!has.reg && !has.prb && !has.cosmos) return statusBadge(r.work_status);
+    const chip = (label, ok) => (
+      <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 10, fontSize: 11, fontWeight: 600, whiteSpace: "nowrap",
+        background: ok ? "#dcfce7" : "#fee2e2", color: ok ? "#065f46" : "#991b1b" }}>
+        {ok ? "✅" : "⏳"} {label}
+      </span>
+    );
+    const regLabel = billed.reg ? "ทะเบียน: วางบิลแล้ว"
+      : r.work_status === "returned" ? "ทะเบียน: คืนลูกค้าแล้ว (รอวางบิล)"
+      : r.work_status === "received_back" ? "ทะเบียน: รับคืนแล้ว (รอวางบิล)"
+      : r.work_status === "submitted" ? "ทะเบียน: ส่งแล้ว (รอวางบิล)"
+      : "ทะเบียน: รอส่ง";
+    const pending = (has.reg && !billed.reg) || (has.prb && !billed.prb) || (has.cosmos && !billed.cosmos);
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: pending ? "#991b1b" : "#065f46" }}>
+          {pending ? "⏳ ยังค้าง" : "✅ ครบแล้ว"}
+        </span>
+        {has.reg && chip(regLabel, billed.reg)}
+        {has.prb && chip("พรบ: " + (billed.prb ? "วางบิลแล้ว" : "รอวางบิล"), billed.prb)}
+        {has.cosmos && chip("COSMOS: " + (billed.cosmos ? "วางบิลแล้ว" : "รอวางบิล"), billed.cosmos)}
+      </div>
+    );
+  }
+
   return (
     <div className="page-container">
       <div className="page-topbar">
@@ -137,7 +168,7 @@ export default function SearchReceiptWorkPage({ currentUser }) {
                         ? r.batch_codes.map(b => <div key={b} style={{ color: "#7c3aed" }}>{b}</div>)
                         : <span style={{ color: "#9ca3af" }}>-</span>}
                     </td>
-                    <td style={td}>{statusBadge(r.work_status)}</td>
+                    <td style={td}>{partStatus(r)}</td>
                   </tr>
                   );
                 })}

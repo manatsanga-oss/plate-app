@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
+const REFUND_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-refund-api";
 
 export default function RegistrationSubmitReceiptPage({ currentUser }) {
   const [tab, setTab] = useState("pending");  // 'pending' | 'history'
@@ -49,11 +50,26 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       const arr = Array.isArray(data) ? data : (data?.rows || data?.data || []);
+      // ดึงเลขที่รับเรื่องที่คืนเงินลูกค้าแล้ว (จะได้ไม่ต้องส่งงานทะเบียนอีก)
+      const refunded = new Set();
+      try {
+        const rr = await fetch(REFUND_API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_refund_expenses" }),
+        });
+        const rd = await rr.json();
+        (Array.isArray(rd) ? rd : []).forEach(x => { if (x.receipt_no) refunded.add(String(x.receipt_no).trim()); });
+      } catch {}
       // ซ่อนรายการรอส่งที่รับเรื่องก่อน 31 ธ.ค. 2568 (ของเก่า — ไม่ต้องส่งงานทะเบียนอีก)
-      // และซ่อนใบที่สถานะ "ยกเลิก" (ยกเลิกรับเรื่องจากต้นทางแล้ว)
+      // ซ่อนใบที่สถานะ "ยกเลิก" (ยกเลิกรับเรื่องจากต้นทางแล้ว)
+      // ซ่อนบรรทัด พรบ/ประกัน (income_type มี "ประกัน"/"พรบ") — เป็น flow วางบิลประกัน ไม่ต้องส่งงานทะเบียน
+      // ซ่อนใบที่คืนเงินลูกค้าแล้ว (อยู่ใน receipt_refunds) — ไม่ต้องส่งงานทะเบียน
       const SUBMIT_CUTOFF_ISO = "2025-12-31";
+      const isInsuranceLine = r => /ประกัน|พรบ/.test(String(r.income_type || ""));
       const visible = arr.filter(r =>
         r.receive_status !== "ยกเลิก" &&
+        !isInsuranceLine(r) &&
+        !refunded.has(String(r.receipt_no || "").trim()) &&
         (!r.receive_date || String(r.receive_date).slice(0, 10) >= SUBMIT_CUTOFF_ISO)
       );
       setRows(visible);
