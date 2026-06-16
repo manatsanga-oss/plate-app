@@ -126,6 +126,7 @@ import BookingDepositPage from "./pages/BookingDepositPage";
 import BookingQueueStatusPage from "./pages/BookingQueueStatusPage";
 import PartImageLookupPage from "./pages/PartImageLookupPage";
 import QuoteViewPage from "./pages/QuoteViewPage";
+import MailInboxPage from "./pages/MailInboxPage";
 
 export default function App() {
   // หน้าดูใบประเมินราคา (เปิดจากลิงก์ใน LINE) — public ไม่ต้อง login
@@ -223,6 +224,7 @@ export default function App() {
     if (page === "serviceratelookup") return true;             // ค้นหา FRT จากรุ่น/แบบ — เปิดให้ทุก user
     if (page === "servicerateimport") return false;            // เฉพาะ admin (นำเข้า FRT)
     if (page === "partimagelookup") return true;               // ค้นรูปอะไหล่ (ชุดสี) — เปิดให้ทุก user
+    if (page === "mailinbox") return true;                     // บันทึกจดหมายเข้า — เปิดให้ทุก user
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
@@ -266,6 +268,7 @@ export default function App() {
         {activeMenu === "convert" && canAccess("convert") && <ConvertPage currentUser={currentUser} />}
         {activeMenu === "subunit" && canAccess("subunit") && <SubunitPage currentUser={currentUser} />}
         {activeMenu === "officeadjust" && canAccess("officeadjust") && <OfficeStockAdjustPage currentUser={currentUser} />}
+        {activeMenu === "mailinbox" && canAccess("mailinbox") && <MailInboxPage currentUser={currentUser} />}
         {activeMenu === "users" && canAccess("users") && (
           <UserPage currentUser={currentUser} />
         )}
@@ -640,7 +643,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "deliveryfee", "pricemarkup", "receiptqr", "receiptissue", "retailsale", "bookingdeposit"];
   const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "claim"];
-  const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust"];
+  const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust", "mailinbox"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "giveawayrules", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
   const uploadPages = ["upload", "uploadaccounting"];
 
@@ -719,6 +722,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="convert" label="แปลงหน่วยบรรจุ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="subunit" label="บันทึกเพิ่มหน่วยย่อย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="officeadjust" label="ปรับปรุงวัสดุคงเหลือ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="mailinbox" label="📬 บันทึกจดหมายเข้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
@@ -776,6 +780,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
       </MenuGroup>
 
       <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partstatusinquiry","partorderinquiry","partwithdrawal","partdispensereport","servicehistory","servicerate","servicerateimport","partimagelookup"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="partimagelookup" label="บันทึกใบประเมินราคา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="yamaharepairreport" label="รายงานใบแจ้งซ่อม YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hondarepairreport" label="รายงานใบแจ้งซ่อม HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partstatusinquiry" label="สอบถามสถานะอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -784,7 +789,6 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="partdispensereport" label="รายงานการจ่ายอะไหล่รายตัว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicehistory" label="ค้นหาประวัติงานบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicerate" label="ค้นหาค่าบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="partimagelookup" label="🖼️ ค้นรูปอะไหล่ (ชุดสี)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicerateimport" label="📤 นำเข้า FRT (Admin)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
