@@ -86,34 +86,83 @@ export default function MailInboxPage({ currentUser }) {
 function EntryPanel({ currentUser, setMessage }) {
   const [rows, setRows] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [cameraOn, setCameraOn] = useState(false);
+  const [capturing, setCapturing] = useState(false);
+  const videoRef = React.useRef(null);
+  const streamRef = React.useRef(null);
+
+  const makeRow = (dataUrl, name) => ({
+    _key: `m-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+    preview: dataUrl,
+    mime_type: "image/jpeg",
+    file_name: name,
+    received_date: todayStr(),
+    sender: "", recipient: "", mail_type: "", tracking_no: "", note: "",
+    _ocr: "pending", _ocrErr: "", _selected: true, _saved: false,
+  });
+
+  async function addAndOcr(newRows) {
+    if (newRows.length === 0) return;
+    setRows((rs) => [...rs, ...newRows]);
+    setMessage(`เพิ่ม ${newRows.length} รูป — กำลังอ่านข้อมูลอัตโนมัติ...`);
+    for (const row of newRows) await runOcr(row._key, row); // OCR ทีละรูป (กัน rate limit)
+  }
 
   async function handleFiles(e) {
     const files = Array.from(e.target.files || []);
     e.target.value = "";
     if (files.length === 0) return;
-
     const newRows = [];
     for (const file of files) {
-      try {
-        const dataUrl = await downscaleImage(file);
-        newRows.push({
-          _key: `m-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
-          preview: dataUrl,
-          mime_type: "image/jpeg",
-          file_name: file.name,
-          received_date: todayStr(),
-          sender: "", recipient: "", mail_type: "", tracking_no: "", note: "",
-          _ocr: "pending", _ocrErr: "", _selected: true, _saved: false,
-        });
-      } catch {
-        /* skip unreadable file */
-      }
+      try { newRows.push(makeRow(await downscaleImage(file), file.name)); } catch { /* skip */ }
     }
-    setRows((rs) => [...rs, ...newRows]);
-    setMessage(`เพิ่ม ${newRows.length} รูป — กำลังอ่านข้อมูลอัตโนมัติ...`);
-    // OCR ทีละรูป (กันโดน rate limit)
-    for (const row of newRows) await runOcr(row._key, row);
+    await addAndOcr(newRows);
   }
+
+  // ===== กล้องสด: ถ่ายแล้วเข้าระบบตรง ไม่มีไฟล์ลงเครื่อง =====
+  async function openCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: "environment" } }, audio: false,
+      });
+      streamRef.current = stream;
+      setCameraOn(true);
+      // รอ render video element แล้วค่อยต่อ stream
+      setTimeout(() => { if (videoRef.current) { videoRef.current.srcObject = stream; videoRef.current.play().catch(() => {}); } }, 50);
+    } catch (e) {
+      setMessage("❌ เปิดกล้องไม่สำเร็จ: " + String(e.message || e).slice(0, 120) + " (ต้องเปิดผ่าน https และอนุญาตสิทธิ์กล้อง)");
+    }
+  }
+
+  function closeCamera() {
+    if (streamRef.current) { streamRef.current.getTracks().forEach((t) => t.stop()); streamRef.current = null; }
+    setCameraOn(false);
+  }
+
+  async function capturePhoto() {
+    const video = videoRef.current;
+    if (!video || !video.videoWidth) return;
+    setCapturing(true);
+    try {
+      const maxDim = 1600;
+      const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
+      const w = Math.round(video.videoWidth * scale);
+      const h = Math.round(video.videoHeight * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(video, 0, 0, w, h);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+      const p = (n) => String(n).padStart(2, "0");
+      const now = new Date();
+      const name = `cam-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}.jpg`;
+      await addAndOcr([makeRow(dataUrl, name)]);
+    } finally {
+      setCapturing(false);
+    }
+  }
+
+  // ปิดกล้องเมื่อออกจากหน้า
+  useEffect(() => () => { if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop()); }, []);
 
   async function runOcr(key, rowData) {
     setRows((rs) => rs.map((r) => (r._key === key ? { ...r, _ocr: "loading" } : r)));
@@ -194,12 +243,34 @@ function EntryPanel({ currentUser, setMessage }) {
     <div>
       <div style={{ border: "1px dashed #93c5fd", borderRadius: 10, padding: 16, background: "#f8fafc", marginBottom: 14 }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 8 }}>
-          เลือกรูปจดหมาย (เลือกได้หลายรูปพร้อมกัน — 1 รูป = 1 จดหมาย) ระบบจะอ่านชื่อผู้ส่ง/ผู้รับให้อัตโนมัติ
+          เลือกรูปจดหมาย หรือถ่ายด้วยกล้องสด (1 รูป = 1 จดหมาย) ระบบจะอ่านชื่อผู้ส่ง/ผู้รับให้อัตโนมัติ
         </div>
-        <label style={{ display: "inline-block", padding: "8px 16px", background: "#072d6b", color: "#fff", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
-          📷 เลือก / ถ่ายรูป
-          <input type="file" accept="image/*" capture="environment" multiple onChange={handleFiles} style={{ display: "none" }} />
-        </label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <label style={{ display: "inline-block", padding: "8px 16px", background: "#072d6b", color: "#fff", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+            🖼️ เลือกรูปจากเครื่อง
+            <input type="file" accept="image/*" multiple onChange={handleFiles} style={{ display: "none" }} />
+          </label>
+          {!cameraOn ? (
+            <button onClick={openCamera} style={{ padding: "8px 16px", background: "#0e7490", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+              📷 ถ่ายด้วยกล้อง (ไม่เก็บไฟล์)
+            </button>
+          ) : (
+            <button onClick={closeCamera} style={{ padding: "8px 16px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+              ✕ ปิดกล้อง
+            </button>
+          )}
+        </div>
+
+        {cameraOn && (
+          <div style={{ marginTop: 12 }}>
+            <video ref={videoRef} playsInline muted style={{ width: "100%", maxWidth: 420, borderRadius: 10, background: "#000", display: "block" }} />
+            <button onClick={capturePhoto} disabled={capturing}
+              style={{ marginTop: 8, padding: "10px 22px", background: capturing ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 8, cursor: capturing ? "default" : "pointer", fontWeight: 700, fontSize: 15 }}>
+              {capturing ? "กำลังจับภาพ..." : "📸 ถ่าย & อ่านข้อมูล"}
+            </button>
+            <div style={{ marginTop: 4, fontSize: 11, color: "#6b7280" }}>ถ่ายได้หลายซองต่อเนื่อง — แต่ละครั้ง = 1 จดหมาย (รูปไม่ถูกบันทึกลงเครื่อง)</div>
+          </div>
+        )}
       </div>
 
       {rows.length > 0 && (
