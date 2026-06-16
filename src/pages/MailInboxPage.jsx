@@ -271,7 +271,7 @@ function MailCard({ row, setField, toggleSel, removeRow, reOcr }) {
           <input style={inp} value={row.mail_type} disabled={row._saved} onChange={(e) => setField(row._key, "mail_type", e.target.value)} />
         </div>
         <div>
-          <label style={lbl}>เลขพัสดุ/EMS</label>
+          <label style={lbl}>เลขพัสดุ/ลงทะเบียน/EMS</label>
           <input style={inp} value={row.tracking_no} disabled={row._saved} onChange={(e) => setField(row._key, "tracking_no", e.target.value)} />
         </div>
         <div>
@@ -346,7 +346,7 @@ function HistoryPanel({ setMessage }) {
                 <th style={th}>ผู้ส่ง</th>
                 <th style={th}>ผู้รับ</th>
                 <th style={th}>ประเภท</th>
-                <th style={th}>เลขพัสดุ/EMS</th>
+                <th style={th}>เลขพัสดุ/ลงทะเบียน/EMS</th>
                 <th style={th}>หมายเหตุ</th>
                 <th style={th}></th>
               </tr>
