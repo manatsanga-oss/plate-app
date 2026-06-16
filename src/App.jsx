@@ -191,6 +191,8 @@ export default function App() {
     if (currentUser.role === "admin") return true;
     // ตั้งค่าค่าใช้จ่าย (การขาย/งานบริการ/ทั่วไป) — เฉพาะ admin เท่านั้น (override explicit pages)
     if (page === "motoexpense" || page === "serviceexpense" || page === "generalexpense") return false;
+    // บันทึกจดหมายเข้า — เปิดให้ทุก user ทุกคน (override explicit allowlist)
+    if (page === "mailinbox") return true;
     // ถ้า user มี pages column เซ็ตชัดเจน → strict allowlist (เห็นเฉพาะที่ระบุเท่านั้น)
     const explicitPages = getExplicitUserPages(currentUser.pages);
     if (explicitPages) return explicitPages.includes(page);
@@ -224,7 +226,6 @@ export default function App() {
     if (page === "serviceratelookup") return true;             // ค้นหา FRT จากรุ่น/แบบ — เปิดให้ทุก user
     if (page === "servicerateimport") return false;            // เฉพาะ admin (นำเข้า FRT)
     if (page === "partimagelookup") return true;               // ค้นรูปอะไหล่ (ชุดสี) — เปิดให้ทุก user
-    if (page === "mailinbox") return true;                     // บันทึกจดหมายเข้า — เปิดให้ทุก user
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
