@@ -40,6 +40,7 @@ async function fetchPrice(code) {
 }
 
 export default function PartImageLookupPage({ currentUser } = {}) {
+  const [selBrand, setSelBrand] = useState("");
   const [modelIdx, setModelIdx] = useState(0);
   const [selBaeb, setSelBaeb] = useState("");
   const [selType, setSelType] = useState("");
@@ -81,12 +82,17 @@ export default function PartImageLookupPage({ currentUser } = {}) {
     let bt = types[0];
     if (typeTok) { const hit = types.find((t) => t.toUpperCase().includes(typeTok)); if (hit) bt = hit; }
 
-    setModelIdx(bi); setSelBaeb(bb); setSelType(bt); setColorPage(null);
+    setSelBrand(m.brand || "HONDA"); setModelIdx(bi); setSelBaeb(bb); setSelType(bt); setColorPage(null);
     const typeNote = typeTok && !types.some((t) => t.toUpperCase().includes(typeTok)) ? ` (ไม่มี type ${typeTok} ใช้ ${bt} แทน)` : "";
     setSearchMsg(`พบ: ${m.model} · ${bb} · ${bt}${typeNote}`);
   };
 
-  const model = catalog[modelIdx] || catalog[0];
+  // ตัวกรองยี่ห้อ → กรองรุ่น
+  const brands = uniq(catalog.map((m) => m.brand || "HONDA"));
+  const brand = brands.includes(selBrand) ? selBrand : brands[0];
+  const brandModels = catalog.map((m, i) => ({ m, i })).filter((x) => (x.m.brand || "HONDA") === brand);
+  const modelIdxEff = brandModels.some((x) => x.i === modelIdx) ? modelIdx : (brandModels[0]?.i ?? 0);
+  const model = catalog[modelIdxEff] || catalog[0];
   const allColors = model.colors || [];
   const pagesMap = model.pages || {};
   const baebOf = (c) => c.model_code || NO_BAEB;
@@ -203,7 +209,14 @@ export default function PartImageLookupPage({ currentUser } = {}) {
       const rows = Array.isArray(r) ? r : r?.data || [];
       const no = rows[0]?.quote_no || "";
       setSavedNo(no);
-      alert("บันทึกใบประเมินสำเร็จ" + (no ? " เลขที่ " + no : ""));
+      // ส่ง LINE อัตโนมัติหลังบันทึก (ถ้าลูกค้ามี LINE)
+      let extra = "";
+      if (no && q.customer_line_user_id) {
+        extra = (await doSendLine(no)) ? " · ส่ง LINE ให้ลูกค้าแล้ว ✅" : " · (ส่ง LINE ไม่สำเร็จ)";
+      } else if (!q.customer_line_user_id) {
+        extra = " · (ลูกค้าไม่มี LINE — ไม่ได้ส่ง)";
+      }
+      alert("บันทึกใบประเมินสำเร็จ" + (no ? " เลขที่ " + no : "") + extra);
     } catch (e) {
       alert("บันทึกไม่สำเร็จ: " + (e.message || e));
     } finally { setSaving(false); }
@@ -227,25 +240,28 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   // พิมพ์จากประวัติ (record จาก DB)
   const printSavedQuote = (rec) => openQuotePrint(recordToQuoteData(rec));
 
-  // ส่งใบประเมินให้ลูกค้าทาง LINE (ต้องบันทึกก่อน + ลูกค้ามี LINE)
-  const sendLine = async () => {
-    if (!savedNo) { alert("กรุณาบันทึกใบประเมินก่อน"); return; }
-    if (!q.customer_line_user_id) { alert("ลูกค้ารายนี้ยังไม่ได้ผูก LINE — เลือกลูกค้าที่มี LINE ✓"); return; }
+  // ส่งใบประเมินให้ลูกค้าทาง LINE — แกนกลาง (คืน true/false ไม่ alert)
+  const doSendLine = async (quoteNo) => {
+    if (!quoteNo || !q.customer_line_user_id) return false;
     try {
       const res = await fetch(QUOTE_LINE_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          quote_no: savedNo, line_user_id: q.customer_line_user_id,
+          quote_no: quoteNo, line_user_id: q.customer_line_user_id,
           branch: currentUser?.branch_code || currentUser?.branch || "",
           customer_name: q.customer_name, model: model?.model || "", color: current?.name || "",
           grand_total: grand,
         }),
       });
-      const ok = res.ok;
       const data = await res.json().catch(() => ({}));
-      if (ok && data.success !== false) alert("ส่งใบประเมินให้ลูกค้าทาง LINE แล้ว ✅");
-      else alert("ส่งไม่สำเร็จ: " + (data.error || "HTTP " + res.status));
-    } catch (e) { alert("ส่งไม่สำเร็จ: " + (e.message || e)); }
+      return res.ok && data.success !== false;
+    } catch { return false; }
+  };
+  // ปุ่มส่งเอง (เผื่อส่งซ้ำ)
+  const sendLine = async () => {
+    if (!savedNo) { alert("กรุณาบันทึกใบประเมินก่อน"); return; }
+    if (!q.customer_line_user_id) { alert("ลูกค้ารายนี้ยังไม่ได้ผูก LINE — เลือกลูกค้าที่มี LINE ✓"); return; }
+    alert((await doSendLine(savedNo)) ? "ส่งใบประเมินให้ลูกค้าทาง LINE แล้ว ✅" : "ส่ง LINE ไม่สำเร็จ");
   };
 
   const openHistory = async () => {
@@ -300,13 +316,19 @@ export default function PartImageLookupPage({ currentUser } = {}) {
         )}
       </div>
 
-      {/* cascade: รุ่น → แบบ → type → สี */}
+      {/* cascade: ยี่ห้อ → รุ่น → แบบ → type → สี */}
       <div className="form-card">
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+          <div style={{ flex: "1 1 130px" }}>
+            <label style={lbl}>ยี่ห้อ</label>
+            <select value={brand} onChange={(e) => { const b = e.target.value; const first = catalog.findIndex((m) => (m.brand || "HONDA") === b); setSelBrand(b); setModelIdx(first < 0 ? 0 : first); setSelBaeb(""); setSelType(""); setColorPage(null); }} style={selStyle}>
+              {brands.map((b) => (<option key={b} value={b}>{b}</option>))}
+            </select>
+          </div>
           <div style={{ flex: "1 1 160px" }}>
             <label style={lbl}>รุ่น</label>
-            <select value={modelIdx} onChange={(e) => { setModelIdx(Number(e.target.value)); setSelBaeb(""); setSelType(""); setColorPage(null); }} style={selStyle}>
-              {catalog.map((m, i) => (
+            <select value={modelIdxEff} onChange={(e) => { setModelIdx(Number(e.target.value)); setSelBaeb(""); setSelType(""); setColorPage(null); }} style={selStyle}>
+              {brandModels.map(({ m, i }) => (
                 <option key={m.model} value={i}>{m.model}</option>
               ))}
             </select>

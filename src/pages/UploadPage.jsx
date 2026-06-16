@@ -18,7 +18,8 @@ const UPLOAD_GROUPS = [
     title: "UPLOAD ข้อมูลบริการและอะไหล่",
     items: [
       { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด (ป.เปา + ห้าห้อง + สช.ตลาด + นครหลวง)", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
-      { key: "part-price", label: "ราคาอะไหล่ (Price List)", desc: "ไฟล์ XLSX ข้อมูลสินค้าคงคลัง · ใช้คอลัมน์ รหัสสินค้า/ชื่อสินค้า/ราคาPrice List · UPSERT (part_code)", db: "part_prices", url: `${BASE}/upload-part-price` },
+      { key: "part-price", label: "ราคาอะไหล่ HONDA (Price List)", desc: "ไฟล์ XLSX ข้อมูลสินค้าคงคลัง · ใช้คอลัมน์ รหัสสินค้า/ชื่อสินค้า/ราคาPrice List · UPSERT (part_code)", db: "part_prices", url: `${BASE}/upload-part-price` },
+      { key: "part-price-yamaha", label: "ราคาอะไหล่ YAMAHA (Stock)", desc: "ไฟล์ XLSX รายงาน STOCK อะไหล่ YAMAHA · ใช้คอลัมน์ รหัสอะไหล่2/ชื่ออะไหล่/ราคาขายต่อหน่วย · UPSERT (part_code) ลง part_prices เดียวกัน", db: "part_prices", url: `${BASE}/upload-part-price-yamaha` },
       { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (apc_order_no + line_no + part_number)", db: "dcs_spare_orders", url: `${BASE}/upload-dcs-orders` },
       { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
       { key: "honda-loan-parts", label: "รายงานอะไหล่ให้ยืมยังไม่ได้รับคืน", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (HONDA snapshot)", db: "honda_loan_parts", url: `${BASE}/upload-honda-loan-parts` },
@@ -75,7 +76,8 @@ const FILE_UPLOAD_KEYS = new Set([
   "honda-part-sales",     // รายงานขายอะไหล่รายตัว HONDA — เลือกไฟล์เอง
   "yamaha-part-dispense", // รายงานการจ่ายอะไหล่ YAMAHA — เลือกไฟล์เอง
   "part-giveaway",        // รายการสินค้าของแถม — เลือกไฟล์เอง
-  "part-price",           // ราคาอะไหล่ Price List — เลือกไฟล์เอง
+  "part-price",           // ราคาอะไหล่ HONDA Price List — เลือกไฟล์เอง
+  "part-price-yamaha",    // ราคาอะไหล่ YAMAHA Stock — เลือกไฟล์เอง
 ]); // รายการที่ต้องเลือกไฟล์เอง — dcs-orders, dcs-backorders, honda-loan-parts, pending-job, yamaha-b2b-backorders ย้ายไป OneDrive
 
 export default function UploadPage({ currentUser } = {}) {

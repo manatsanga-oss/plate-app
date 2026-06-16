@@ -322,7 +322,19 @@
       "Bash(python tools/_fix_quote_api.py)",
       "Bash(rm -f _mc.json)",
       "Bash(git rm *)",
-      "Bash(grep -E \"_mc|\\\\.json$\")"
+      "Bash(grep -E \"_mc|\\\\.json$\")",
+      "WebFetch(domain:docs.mistral.ai)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" -X POST https://n8n-new-project-gwf2.onrender.com/webhook/mail-inbox-api -H \"Content-Type: application/json\" -d '{\"action\":\"get_mails\"}')",
+      "Bash(curl -s -w \"\\\\nHTTP %{http_code}\\\\n\" -X POST https://n8n-new-project-gwf2.onrender.com/webhook/ocr-mail-image -H \"Content-Type: application/json\" -d '{\"image_base64\":\"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==\",\"mime_type\":\"image/png\"}')",
+      "Bash(python tools/_add3.py)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); rows=d if isinstance\\(d,list\\) else d.get\\('data',[]\\); print\\([ \\(r.get\\('series_name'\\),r.get\\('marketing_name'\\)\\) for r in rows if r.get\\('series_name'\\) in \\('ACB160','CT125'\\) or 'CT125' in str\\(r.get\\('marketing_name',''\\)\\) or 'Click160' in str\\(r.get\\('marketing_name',''\\)\\)]\\)\")",
+      "Bash(python tools/_addmany.py)",
+      "Bash(python tools/_addmany2.py)",
+      "Bash(rm -rf src/data/_h4 tools/_addmany2.py)",
+      "Bash(python tools/_yamaha_aerox.py)",
+      "Bash(rm -f tools/_yamaha_aerox.py)",
+      "Bash(python tools/_yamaha_all.py)",
+      "Bash(rm -f tools/_yamaha_all.py)"
     ]
   }
 }
