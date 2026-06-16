@@ -419,6 +419,7 @@ function HistoryPanel({ setMessage }) {
                 <th style={th}>ประเภท</th>
                 <th style={th}>เลขพัสดุ/ลงทะเบียน/EMS</th>
                 <th style={th}>หมายเหตุ</th>
+                <th style={th}>ผู้บันทึก</th>
                 <th style={th}></th>
               </tr>
             </thead>
@@ -426,12 +427,13 @@ function HistoryPanel({ setMessage }) {
               {mails.map((m) => (
                 <tr key={m.id}>
                   <td style={td}>{m.mail_no}</td>
-                  <td style={{ ...td, whiteSpace: "nowrap" }}>{m.received_date}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{String(m.received_date || "").slice(0, 10)}</td>
                   <td style={td}>{m.sender}</td>
                   <td style={td}>{m.recipient}</td>
                   <td style={td}>{m.mail_type}</td>
                   <td style={td}>{m.tracking_no}</td>
                   <td style={td}>{m.note}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>{m.created_by}</td>
                   <td style={td}>
                     <button onClick={() => del(m.id)} style={{ padding: "3px 10px", fontSize: 12, border: "none", borderRadius: 6, background: "#ef4444", color: "#fff", cursor: "pointer" }}>ลบ</button>
                   </td>
