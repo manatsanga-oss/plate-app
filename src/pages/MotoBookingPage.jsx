@@ -486,6 +486,12 @@ export default function MotoBookingPage({ currentUser }) {
     if (d.deposit_no) bookingDepositMap[d.deposit_no] = true;
   });
 
+  // map: deposit_no -> line_user_id (ใช้แสดงเครื่องหมาย LINE ✓ ในคอลัมน์ลูกค้า เหมือนหน้าประวัติมัดจำ)
+  const lineByDeposit = {};
+  bookingDeposits.forEach((d) => {
+    if (d.deposit_no && d.line_user_id) lineByDeposit[d.deposit_no] = d.line_user_id;
+  });
+
   // normalize: TRIM + ยุบทุก whitespace (รวม newline) เป็น space เดียว — กันชื่อ/รหัสที่มี space เกินหรือ newline
   const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, " ").trim();
 
@@ -797,7 +803,12 @@ export default function MotoBookingPage({ currentUser }) {
                   <td>{b.marketing_name || "-"}</td>
                   <td>{b.new_model_code || b.model_code || "-"}</td>
                   <td>{b.new_color_name || b.color_name || "-"}</td>
-                  <td>{b.customer_name || "-"}</td>
+                  <td>
+                    <div>{b.customer_name || "-"}</div>
+                    {b.deposit_no && lineByDeposit[b.deposit_no] && (
+                      <div style={{ fontSize: 12, color: "#059669" }}>LINE ✓</div>
+                    )}
+                  </td>
                   {filterStatus === "ขาย" && (() => {
                     const sale = b.invoice_no ? salesMap[b.invoice_no] : null;
                     if (!b.invoice_no) return <><td>-</td><td>-</td></>;

@@ -383,7 +383,8 @@
       "Bash(ls *Receipt*DDL* *receipt*DDL*)",
       "Bash(grep -li \"honda_part_receipt\\\\|yamaha_part_receipt\" *.sql)",
       "Read(//c/Users/manat/**)",
-      "Bash(python -c \"import openpyxl; print\\('ok'\\)\")"
+      "Bash(python -c \"import openpyxl; print\\('ok'\\)\")",
+      "Bash(curl -s -X POST \"https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api\" -H \"Content-Type: application/json\" -d '{\"action\":\"get_deposits\",\"status\":\"all\",\"keyword\":\"SCY04-DEP-2606-00002\"}')"
     ]
   }
 }

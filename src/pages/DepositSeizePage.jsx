@@ -22,6 +22,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
   const [search, setSearch] = useState("");
   const [filterBrand, setFilterBrand] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
+  const [filterSeized, setFilterSeized] = useState("all"); // all | seized
   const [orderPopup, setOrderPopup] = useState(null);
   const [seizePopup, setSeizePopup] = useState(null);
   const [seizureMap, setSeizureMap] = useState({}); // "BRAND:doc_no" -> seizure
@@ -122,6 +123,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
     if (o.status === "อะไหล่ค้างส่ง") return false;
     if (filterBrand !== "all" && o.brand !== filterBrand) return false;
     if (filterStatus !== "all" && o.status !== filterStatus) return false;
+    if (filterSeized === "seized" && !seizureMap[`${o.brand}:${o.deposit_doc_no}`]) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return [o.customer_name, o.deposit_doc_no, o.technician, o.license_plate, o.model_name]
@@ -150,6 +152,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
     HONDA: baseOrders.filter(o => o.brand === "HONDA").length,
     YAMAHA: baseOrders.filter(o => o.brand === "YAMAHA").length,
   };
+  const seizedCount = baseOrders.filter(o => seizureMap[`${o.brand}:${o.deposit_doc_no}`]).length;
 
   async function openSeize(o) {
     const dep = deposits[`${o.brand}:${o.deposit_doc_no}`];
@@ -360,6 +363,11 @@ export default function DepositSeizePage({ currentUser } = {}) {
             {st} ({statusCounts[st] || 0})
           </button>
         ))}
+        <span style={{ borderLeft: "1px solid #d1d5db", margin: "0 2px" }} />
+        <button onClick={() => setFilterSeized(filterSeized === "seized" ? "all" : "seized")}
+          style={chip(filterSeized === "seized", "#16a34a")}>
+          🔒 ยึดเงินมัดจำแล้ว ({seizedCount})
+        </button>
       </div>
 
       <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>

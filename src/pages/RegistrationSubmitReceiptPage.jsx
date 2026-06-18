@@ -60,17 +60,20 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
         const rd = await rr.json();
         (Array.isArray(rd) ? rd : []).forEach(x => { if (x.receipt_no) refunded.add(String(x.receipt_no).trim()); });
       } catch {}
-      // ซ่อนรายการรอส่งที่รับเรื่องก่อน 31 ธ.ค. 2568 (ของเก่า — ไม่ต้องส่งงานทะเบียนอีก)
+      // ซ่อนรายการรอส่งที่รับเรื่องก่อน 1 พ.ค. 2569 (ของเก่า — ส่งเรื่องหมดแล้ว ไม่ต้องส่งงานทะเบียนอีก)
+      // ยกเว้นเลขที่รับเรื่องใน KEEP_RECEIPTS = งานค้างจริงที่ยังไม่ได้ส่งเรื่อง (ไม่ซ่อน)
       // ซ่อนใบที่สถานะ "ยกเลิก" (ยกเลิกรับเรื่องจากต้นทางแล้ว)
       // ซ่อนบรรทัด พรบ/ประกัน (income_type มี "ประกัน"/"พรบ") — เป็น flow วางบิลประกัน ไม่ต้องส่งงานทะเบียน
       // ซ่อนใบที่คืนเงินลูกค้าแล้ว (อยู่ใน receipt_refunds) — ไม่ต้องส่งงานทะเบียน
-      const SUBMIT_CUTOFF_ISO = "2025-12-31";
+      const SUBMIT_CUTOFF_ISO = "2026-05-01";
+      const KEEP_RECEIPTS = new Set(["SCY01-CA260400033", "SCY01-CA260400031"]);
       const isInsuranceLine = r => /ประกัน|พรบ/.test(String(r.income_type || ""));
       const visible = arr.filter(r =>
         r.receive_status !== "ยกเลิก" &&
         !isInsuranceLine(r) &&
         !refunded.has(String(r.receipt_no || "").trim()) &&
-        (!r.receive_date || String(r.receive_date).slice(0, 10) >= SUBMIT_CUTOFF_ISO)
+        (KEEP_RECEIPTS.has(String(r.receipt_no || "").trim()) ||
+          !r.receive_date || String(r.receive_date).slice(0, 10) >= SUBMIT_CUTOFF_ISO)
       );
       setRows(visible);
       if (visible.length === 0) setMessage("");
