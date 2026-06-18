@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api";
+const DEPOSIT_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
 
 const BRANCHES = [
   "SCY01 สำนักงานใหญ่",
@@ -329,6 +330,32 @@ export default function MotoBookingPage({ currentUser }) {
       fetchBookings();
     } catch { setMessage("เกิดข้อผิดพลาด"); }
     setSaving(false);
+  }
+
+  // ส่งข้อความแจ้งลูกค้าทาง LINE ว่ารถถึงคิวรับรถแล้ว → ลูกค้ากดเลือกวันรับรถ (LIFF)
+  async function notifyPickup(b) {
+    const lineId = b.deposit_no ? lineByDeposit[b.deposit_no] : null;
+    if (!lineId) { setMessage("ลูกค้ารายนี้ไม่ได้ผูก LINE — ส่งข้อความไม่ได้"); return; }
+    if (!window.confirm(`ส่งข้อความแจ้ง "รถถึงคิวรับรถแล้ว" ให้ลูกค้า ${b.customer_name || ""} ทาง LINE?\n(ลูกค้าจะเลือกวันสะดวกรับรถกลับมาเอง)`)) return;
+    try {
+      const car = [b.brand, b.marketing_name, b.new_model_code || b.model_code, b.new_color_name || b.color_name].filter(Boolean).join(" / ");
+      const res = await fetch(DEPOSIT_API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_pickup_notify",
+          line_user_id: lineId,
+          deposit_no: b.deposit_no,
+          customer_name: b.customer_name || "",
+          car,
+          branch_code: String(b.branch || "").split(" ")[0],
+          branch_name: b.branch || "",
+        }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      setMessage(`📲 ส่งข้อความแจ้งรับรถให้ ${b.customer_name || "ลูกค้า"} ทาง LINE แล้ว`);
+    } catch (e) {
+      setMessage("❌ ส่ง LINE ไม่สำเร็จ: " + (e.message || e));
+    }
   }
 
   // เช็คเงื่อนไขก่อนยกเลิก: รถอยู่ในสต๊อก + เป็นคิวแรก → ยกเลิกไม่ได้
@@ -929,6 +956,14 @@ export default function MotoBookingPage({ currentUser }) {
                             onClick={() => { setAppointmentTarget(b); setAppointmentDate(b.appointment_date ? b.appointment_date.slice(0,10) : ""); setAppointmentNote(b.appointment_note || ""); }}
                             style={{ padding: "3px 8px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
                             📅 นัดหมาย{b.appointment_date ? " ✓" : ""}
+                          </button>
+                        )}
+                        {isQueueReady(b) && b.deposit_no && lineByDeposit[b.deposit_no] && (
+                          <button
+                            onClick={() => notifyPickup(b)}
+                            title="ส่งข้อความแจ้งลูกค้าทาง LINE ว่ารถถึงคิวรับรถแล้ว (ลูกค้าเลือกวันรับรถกลับมาเอง)"
+                            style={{ padding: "3px 8px", background: "#06c755", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+                            📲 แจ้งรับรถ
                           </button>
                         )}
                       </div>

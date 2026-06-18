@@ -120,6 +120,7 @@ import CosmosBillingPage from "./pages/CosmosBillingPage";
 import PaymentPage from "./pages/PaymentPage";
 import GoodsPaymentPage from "./pages/GoodsPaymentPage";
 import ReceiptCustomerFormPage from "./pages/ReceiptCustomerFormPage";
+import PickupConfirmPage from "./pages/PickupConfirmPage";
 import ReceiptQrPrintPage from "./pages/ReceiptQrPrintPage";
 import ReceiptIssueFromQrPage from "./pages/ReceiptIssueFromQrPage";
 import RetailSalePage from "./pages/RetailSalePage";
@@ -141,6 +142,10 @@ export default function App() {
   // หน้าสถานะคิวจองรถสำหรับลูกค้า (เปิดจากปุ่มในการ์ด LINE) — public ไม่ต้อง login
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/booking-status")) {
     return <BookingQueueStatusPage />;
+  }
+  // หน้าเลือกวันรับรถสำหรับลูกค้า (เปิดจากปุ่มในการ์ด LINE แจ้งรถถึงคิว) — public ไม่ต้อง login
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/pickup-confirm")) {
+    return <PickupConfirmPage />;
   }
 
   const [activeMenu, setActiveMenu] = useState("salesoverview");

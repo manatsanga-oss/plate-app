@@ -276,7 +276,25 @@ export default function BookingDepositPage({ currentUser }) {
         refunded_by: currentUser?.username || currentUser?.name || "system",
       });
       if (!r || !r.deposit_no) throw new Error("คืนเงินไม่สำเร็จ (รายการอาจถูกคืนเงินไปแล้ว)");
-      setMessage(`✅ คืนเงินมัดจำ ${r.deposit_no} แล้ว (${r.refund_method || "-"} ${baht(r.refund_amount)} บาท)`);
+      // คืนเงินมัดจำแล้ว → ยกเลิกใบจองในระบบจองรถที่ผูกเลขมัดจำนี้ (ถ้ายังเป็น "จอง")
+      let bookingMsg = "";
+      try {
+        const bks = await postJson(MOTO_BOOKING_API, { action: "get_moto_bookings" }).catch(() => []);
+        const linked = (Array.isArray(bks) ? bks : []).find(b => b.deposit_no === r.deposit_no && b.status === "จอง");
+        if (linked) {
+          await postJson(MOTO_BOOKING_API, {
+            action: "cancel_moto_booking",
+            booking_id: linked.booking_id,
+            cancel_reason: "คืนเงินมัดจำ",
+            deposit_action: "คืนเงินมัดจำ",
+            refund_account_no: payload.refund_account_no || "",
+            refund_bank: payload.refund_bank || "",
+            refund_amount: String(payload.refund_amount || r.refund_amount || "").replace(/,/g, ""),
+          });
+          bookingMsg = " · ยกเลิกใบจองในระบบจองรถแล้ว";
+        }
+      } catch { bookingMsg = " · ⚠️ ยกเลิกใบจองอัตโนมัติไม่สำเร็จ (ไปกดยกเลิกเองที่ระบบจองรถ)"; }
+      setMessage(`✅ คืนเงินมัดจำ ${r.deposit_no} แล้ว (${r.refund_method || "-"} ${baht(r.refund_amount)} บาท)${bookingMsg}`);
       setRefundTarget(null);
       loadRows();
       if (form.deposit_no === r.deposit_no) startNew();

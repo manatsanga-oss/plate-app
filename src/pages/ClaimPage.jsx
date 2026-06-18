@@ -203,12 +203,24 @@ export default function ClaimPage({ currentUser }) {
     setSaving(false);
   }
 
-  async function handleDelete(id) {
-    if (!window.confirm("ยืนยันลบใบเคลม?")) return;
+  // ยกเลิก/คืนสถานะใบเคลม — mark status (ไม่ลบทิ้ง) ผ่าน update_claim
+  async function handleCancel(c) {
+    const isCancelled = c.status === "cancelled";
+    if (isCancelled) {
+      if (!window.confirm(`คืนสถานะใบเคลม ${c.claim_no || ""} กลับมาใช้งาน?`)) return;
+    } else {
+      if (!window.confirm(`ยกเลิกใบเคลม ${c.claim_no || ""}?\n(ทำเครื่องหมายว่ายกเลิก ไม่ได้ลบทิ้ง — คืนสถานะภายหลังได้)`)) return;
+    }
     try {
       await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete_claim", id }),
+        body: JSON.stringify({
+          action: "update_claim",
+          ...c,
+          doc_date: c.doc_date ? String(c.doc_date).slice(0, 10) : c.doc_date,
+          status: isCancelled ? "pending" : "cancelled",
+          items: Array.isArray(c.items) ? c.items : [],
+        }),
       });
       fetchClaims();
     } catch {}
@@ -317,6 +329,9 @@ export default function ClaimPage({ currentUser }) {
 
   const filtered = claims.filter(c => {
     if (filterStatus !== "all") {
+      if (filterStatus === "cancelled") return c.status === "cancelled";
+      // ตัวกรองขั้นตอนอื่น ๆ ไม่แสดงใบที่ยกเลิกแล้ว
+      if (c.status === "cancelled") return false;
       if (filterStatus === "not_submitted" && c.submitted) return false;
       if (filterStatus === "submitted" && (!c.submitted || c.parts_received)) return false;
       if (filterStatus === "parts_received" && (!c.parts_received || c.appointment_notified)) return false;
@@ -546,6 +561,7 @@ export default function ClaimPage({ currentUser }) {
           <option value="job_closed">เปิด JOB แล้ว (ยังไม่คืนซาก)</option>
           <option value="scrap_returned">คืนซากแล้ว (ยังไม่ชำระ)</option>
           <option value="payment_received">ชำระเงินแล้ว (เสร็จสิ้น)</option>
+          <option value="cancelled">❌ ยกเลิกแล้ว</option>
         </select>
         <span style={{ fontSize: 13, color: "#6b7280" }}>{filtered.length} รายการ</span>
       </div>
@@ -565,10 +581,14 @@ export default function ClaimPage({ currentUser }) {
               : filtered.map((c, i) => {
                 const doneSteps = TRACKING_STEPS.filter(s => c[s.key]).length;
                 const pct = (doneSteps / TRACKING_STEPS.length) * 100;
+                const isCancelled = c.status === "cancelled";
                 return (
-                <tr key={c.id}>
+                <tr key={c.id} style={isCancelled ? { opacity: 0.6, background: "#fef2f2" } : undefined}>
                   <td>{i + 1}</td>
-                  <td style={{ fontWeight: 600 }}>{c.claim_no || "-"}</td>
+                  <td style={{ fontWeight: 600 }}>
+                    {c.claim_no || "-"}
+                    {isCancelled && <div style={{ fontSize: 10, color: "#dc2626", fontWeight: 700 }}>❌ ยกเลิกแล้ว</div>}
+                  </td>
                   <td>{c.doc_date ? new Date(c.doc_date).toLocaleDateString("th-TH") : "-"}</td>
                   <td>
                     <div>{c.contact_name}</div>
@@ -599,7 +619,11 @@ export default function ClaimPage({ currentUser }) {
                   <td style={{ whiteSpace: "nowrap" }}>
                     <button onClick={() => openEdit(c)} style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, marginRight: 4 }}>แก้ไข</button>
                     <button onClick={() => printClaim(c)} style={{ padding: "3px 10px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🖨</button>
-                    <button onClick={() => handleDelete(c.id)} style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>ลบ</button>
+                    {isCancelled ? (
+                      <button onClick={() => handleCancel(c)} style={{ padding: "3px 10px", background: "#16a34a", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>↶ คืนสถานะ</button>
+                    ) : (
+                      <button onClick={() => handleCancel(c)} style={{ padding: "3px 10px", background: "#b45309", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>🚫 ยกเลิก</button>
+                    )}
                   </td>
                 </tr>
                 );
