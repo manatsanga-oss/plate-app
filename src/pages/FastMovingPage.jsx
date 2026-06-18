@@ -43,7 +43,22 @@ export default function FastMovingPage() {
   const [aDiscontinued, setADiscontinued] = useState(false);
   const [aSaving, setASaving] = useState(false);
   const [aError, setAError] = useState("");
+  const [syncing, setSyncing] = useState(false);
+  const [selected, setSelected] = useState({}); // { [part_id]: true }
   const PAGE_SIZE = 30;
+
+  async function syncYamahaModels() {
+    if (!window.confirm("เติมรุ่น/แบบ/type ของ Yamaha + Honda จากประวัติเบิกจริง (เฉพาะกลุ่ม PG-001–022, 027, 028, 031)?\nรายการที่เติมอัตโนมัติเดิมจะถูกแทนที่ (ของที่กรอกมือไม่กระทบ)")) return;
+    setSyncing(true);
+    try {
+      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sync_models" }) });
+      const data = await res.json().catch(() => []);
+      const n = Array.isArray(data) ? (data[0]?.count ?? data.length) : (data?.count || 0);
+      alert("✅ เติมรุ่น Yamaha + Honda สำเร็จ " + n + " รายการ");
+      await fetchData();
+    } catch (e) { alert("❌ ไม่สำเร็จ: " + e.message); }
+    setSyncing(false);
+  }
 
   function openAddPopup() {
     setAddPopup(true);
@@ -286,12 +301,54 @@ export default function FastMovingPage() {
     return true;
   });
 
-  const totalValue = filtered.reduce((sum, r) => sum + Number(r.total_value || 0), 0);
   const inStockCount = filtered.filter(r => Number(r.quantity || 0) > 0).length;
   const outStockCount = filtered.filter(r => Number(r.quantity || 0) <= 0).length;
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  // ===== เลือกแถว + พิมพ์ใบปิดหน้ากล่อง =====
+  const filteredIds = filtered.map(r => r.id);
+  const allSelected = filteredIds.length > 0 && filteredIds.every(id => selected[id]);
+  const selectedRows = rows.filter(r => selected[r.id]);
+  function toggleAll() {
+    if (allSelected) setSelected({});
+    else { const m = {}; filteredIds.forEach(id => { m[id] = true; }); setSelected(m); }
+  }
+  function toggleOne(id) { setSelected(s => ({ ...s, [id]: !s[id] })); }
+  function runsOf(r) { return [...new Set((r.models || []).map(m => m.sel_run || m.sel_vehicle_type || m.sel_brand).filter(Boolean))]; }
+
+  function printLabels() {
+    if (selectedRows.length === 0) { alert("เลือกอะไหล่ก่อน (ติ๊ก checkbox)"); return; }
+    const esc = s => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const labels = selectedRows.map(r => {
+      const runs = runsOf(r);
+      return `<div class="label">
+        <div class="code">${esc(r.part_code)}</div>
+        <div class="name">${esc(r.product_name) || "-"}</div>
+        <div class="runs"><b>รุ่นที่ใช้:</b> ${runs.length ? esc(runs.join(", ")) : "ทั่วไป"}</div>
+        <div class="bc">${code39SVG(r.part_code)}</div>
+        <div class="bctext">${esc(r.part_code)}</div>
+      </div>`;
+    }).join("");
+    const w = window.open("", "_blank", "width=950,height=720");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบปิดหน้ากล่องอะไหล่</title>
+<style>
+  body{font-family:'Tahoma',sans-serif;margin:0;padding:8px;}
+  .grid{display:flex;flex-wrap:wrap;gap:8px;}
+  .label{border:1px solid #000;border-radius:6px;padding:10px 12px;width:340px;box-sizing:border-box;page-break-inside:avoid;}
+  .code{font-size:20px;font-weight:800;letter-spacing:.5px;}
+  .name{font-size:13px;margin:3px 0;}
+  .runs{font-size:11px;color:#333;margin-bottom:6px;line-height:1.35;}
+  .bc{width:100%;}
+  .bc svg{width:100%;height:46px;display:block;}
+  .bctext{font-family:monospace;font-size:12px;text-align:center;letter-spacing:2px;margin-top:2px;}
+  @media print{ body{padding:0;} }
+</style></head><body><div class="grid">${labels}</div>
+<script>window.onload=function(){window.print();}<\/script>
+</body></html>`);
+    w.document.close();
+  }
 
   const th = { padding: "10px 8px", textAlign: "left", whiteSpace: "nowrap", fontSize: 12 };
   const td = { padding: "8px", whiteSpace: "nowrap", fontSize: 12 };
@@ -351,10 +408,18 @@ export default function FastMovingPage() {
         </select>
         <button onClick={fetchData} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
         <button onClick={openAddPopup} style={{ padding: "8px 16px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>+ เพิ่มอะไหล่</button>
+        <button onClick={syncYamahaModels} disabled={syncing} title="เติมรุ่น/แบบ/type ของ Yamaha + Honda จากประวัติเบิก (เฉพาะกลุ่ม PG-001 ถึง PG-022, PG-027, PG-028, PG-031)"
+          style={{ padding: "8px 16px", fontSize: 13, background: syncing ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: syncing ? "not-allowed" : "pointer", fontWeight: 700 }}>
+          {syncing ? "กำลังเติม..." : "🔄 เติมรุ่น Yamaha+Honda"}
+        </button>
+        <button onClick={printLabels} disabled={selectedRows.length === 0} title="พิมพ์ใบปิดหน้ากล่องของรายการที่เลือก (รหัส + ชื่อ + รุ่นที่ใช้ + บาร์โค้ด)"
+          style={{ padding: "8px 16px", fontSize: 13, background: selectedRows.length === 0 ? "#9ca3af" : "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: selectedRows.length === 0 ? "not-allowed" : "pointer", fontWeight: 700 }}>
+          🖨️ พิมพ์ใบปิดกล่อง ({selectedRows.length})
+        </button>
         <button onClick={() => { setSearch(""); setFilterProductGroup("all"); setFilterBrand("all"); setFilterRun("all"); setFilterCode("all"); setCurrentPage(1); }}
           style={{ padding: "8px 16px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>✕ ล้างกรอง</button>
         <span style={{ fontSize: 13, color: "#374151" }}>
-          {filtered.length} รายการ | มีสต๊อก: <b style={{ color: "#10b981" }}>{inStockCount}</b> | ไม่มีสต๊อก: <b style={{ color: "#ef4444" }}>{outStockCount}</b> | มูลค่ารวม: <b style={{ color: "#072d6b" }}>{fmt(totalValue)}</b>
+          {filtered.length} รายการ | มีสต๊อก: <b style={{ color: "#10b981" }}>{inStockCount}</b> | ไม่มีสต๊อก: <b style={{ color: "#ef4444" }}>{outStockCount}</b>
         </span>
       </div>
 
@@ -362,6 +427,7 @@ export default function FastMovingPage() {
         <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "#072d6b", color: "#fff" }}>
+              <th style={{ ...th, textAlign: "center" }}><input type="checkbox" checked={allSelected} onChange={toggleAll} title="เลือกทั้งหมด (ตามที่กรอง)" /></th>
               <th style={th}>#</th>
               <th style={th}>กลุ่มสินค้า</th>
               <th style={th}>รหัสอะไหล่</th>
@@ -369,20 +435,20 @@ export default function FastMovingPage() {
               <th style={th}>รุ่นที่ใช้</th>
               <th style={{ ...th, textAlign: "right" }}>คงเหลือ</th>
               <th style={{ ...th, textAlign: "right" }}>ราคา</th>
-              <th style={{ ...th, textAlign: "right" }}>มูลค่า</th>
               <th style={th}>หน่วย</th>
               <th style={th}>ร้าน (จำนวน + ที่เก็บ)</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={12} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={13} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
             ) : paged.length === 0 ? (
-              <tr><td colSpan={12} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={13} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
             ) : paged.map((r, i) => {
               const qty = Number(r.quantity || 0);
               return (
-                <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: qty <= 0 ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: selected[r.id] ? "#fef9c3" : qty <= 0 ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                  <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={!!selected[r.id]} onChange={() => toggleOne(r.id)} /></td>
                   <td style={{ ...td, textAlign: "center" }}>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
                   <td onClick={() => openInfoEdit(r)} style={{ ...td, cursor: "pointer", color: "#1e40af" }}>{r.product_group || "-"}</td>
                   <td style={td}>{r.part_code}</td>
@@ -394,12 +460,12 @@ export default function FastMovingPage() {
                       </span>
                     )}
                   </td>
-                  <td onClick={() => openEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer" }}>
+                  <td onClick={() => openEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer" }} title="คลิกเพื่อดู/แก้ไขรายละเอียด แบบ/type">
                     {Array.isArray(r.models) && r.models.length > 0 ? (
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                        {r.models.map((m, idx) => (
-                          <span key={m.pm_id || idx} style={{ background: "#dbeafe", color: "#1e40af", padding: "1px 6px", borderRadius: 4, fontSize: 10 }}>
-                            {[m.sel_brand, m.sel_vehicle_type, m.sel_engine_cc && `CC${m.sel_engine_cc}`, m.sel_run, m.sel_code, m.sel_type].filter(Boolean).join("/")}
+                        {[...new Set(r.models.map(m => m.sel_run || m.sel_vehicle_type || m.sel_brand).filter(Boolean))].map((run, idx) => (
+                          <span key={idx} style={{ background: "#dbeafe", color: "#1e40af", padding: "1px 6px", borderRadius: 4, fontSize: 10 }}>
+                            {run}
                           </span>
                         ))}
                       </div>
@@ -407,7 +473,6 @@ export default function FastMovingPage() {
                   </td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: qty <= 0 ? "#ef4444" : "#065f46" }}>{fmtQty(qty)}</td>
                   <td style={{ ...td, textAlign: "right" }}>{fmt(r.unit_price)}</td>
-                  <td style={{ ...td, textAlign: "right" }}>{fmt(r.total_value)}</td>
                   <td style={td}>{r.unit}</td>
                   <td style={{ ...td, whiteSpace: "normal", maxWidth: 260, fontSize: 11 }}>{r.stores || r.location}</td>
                 </tr>
@@ -528,7 +593,7 @@ export default function FastMovingPage() {
       {/* ===== Popup แก้ไข หมวดหมู่/ชื่อสินค้า ===== */}
       {infoPopup && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 420, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>แก้ไข หมวดหมู่ / ชื่อสินค้า</h3>
               <button onClick={() => setInfoPopup(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
@@ -590,7 +655,7 @@ export default function FastMovingPage() {
       {/* ===== Popup เลือก ยี่ห้อ/รุ่น/แบบ/type ===== */}
       {editPopup && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 420, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
               <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>เลือกยี่ห้อ / รุ่น / แบบ / type</h3>
               <button onClick={() => setEditPopup(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
@@ -682,4 +747,35 @@ export default function FastMovingPage() {
       )}
     </div>
   );
+}
+
+// ===== CODE39 barcode → SVG (รองรับ 0-9 A-Z - . space $ / + %) =====
+const CODE39 = {
+  '0': "000110100", '1': "100100001", '2': "001100001", '3': "101100000",
+  '4': "000110001", '5': "100110000", '6': "001110000", '7': "000100101",
+  '8': "100100100", '9': "001100100", 'A': "100001001", 'B': "001001001",
+  'C': "101001000", 'D': "000011001", 'E': "100011000", 'F': "001011000",
+  'G': "000001101", 'H': "100001100", 'I': "001001100", 'J': "000011100",
+  'K': "100000011", 'L': "001000011", 'M': "101000010", 'N': "000010011",
+  'O': "100010010", 'P': "001010010", 'Q': "000000111", 'R': "100000110",
+  'S': "001000110", 'T': "000010110", 'U': "110000001", 'V': "011000001",
+  'W': "111000000", 'X': "010010001", 'Y': "110010000", 'Z': "011010000",
+  '-': "010000101", '.': "110000100", ' ': "011000100", '$': "010101000",
+  '/': "010100010", '+': "010001010", '%': "000101010", '*': "010010100",
+};
+function code39SVG(data) {
+  const text = "*" + String(data || "").toUpperCase().replace(/[^0-9A-Z\-. $/+%]/g, "") + "*";
+  const narrow = 1.6, wide = narrow * 3, h = 46;
+  let x = 0; const rects = [];
+  for (const ch of text) {
+    const pat = CODE39[ch];
+    if (!pat) continue;
+    for (let i = 0; i < 9; i++) {
+      const w = pat[i] === '1' ? wide : narrow;
+      if (i % 2 === 0) rects.push(`<rect x="${x.toFixed(2)}" y="0" width="${w.toFixed(2)}" height="${h}"/>`);
+      x += w;
+    }
+    x += narrow; // inter-character gap
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${x.toFixed(0)}" height="${h}" viewBox="0 0 ${x.toFixed(2)} ${h}" preserveAspectRatio="none">${rects.join("")}</svg>`;
 }

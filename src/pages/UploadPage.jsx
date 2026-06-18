@@ -33,6 +33,7 @@ const UPLOAD_GROUPS = [
       { key: "pending-job", label: "รายการอะไหล่เบิกค้างปิด JOB", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "pending_job_parts", url: `${BASE}/upload-pending-job` },
       { key: "yamaha-repair", label: "Upload ใบแจ้งซ่อม Yamaha", desc: "39 คอลัมน์ · UPSERT (job_no + item_type + repair_type_code + mechanic_code)", db: "yamaha_repair_invoices", url: `${BASE}/upload-yamaha-repair` },
       { key: "honda-repair", label: "Upload ใบแจ้งซ่อม HONDA", desc: "XLS DMS รายงานช่างที่ซ่อม · UPSERT (job_no)", db: "honda_repair_jobs", url: `${BASE}/upload-honda-repair` },
+      { key: "honda-repair-intake", label: "Upload รับงานซ่อม HONDA (รุ่น/เลขถัง)", desc: "ไฟล์ XLS (TIS-620) รายงานรับงานซ่อม · มีเลขถัง+รุ่น/แบบ/สี+ลูกค้า ต่อใบงาน · UPSERT (job_no)", db: "honda_repair_intake", url: `${BASE}/upload-honda-repair-intake` },
     ],
   },
   {
@@ -68,7 +69,7 @@ function fmtDateTime(iso) {
 // items ที่รับ year_month override (ระบุเดือนเพื่อ upload ไฟล์ย้อนหลัง)
 const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
 const FILE_UPLOAD_KEYS = new Set([
-  "time-tracking", "yamaha-repair", "honda-repair",
+  "time-tracking", "yamaha-repair", "honda-repair", "honda-repair-intake",
   "yamaha-b2b-orders",
   "honda-warranty",
   "honda-part-receipt",   // รับอะไหล่ HONDA — เลือกไฟล์เอง

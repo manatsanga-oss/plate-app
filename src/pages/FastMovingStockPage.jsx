@@ -12,10 +12,11 @@ export default function FastMovingStockPage() {
   const [filterStockType, setFilterStockType] = useState("all");
   const [filterBackorder, setFilterBackorder] = useState("all");
   const [filterPendingJob, setFilterPendingJob] = useState("all");
-  const [hideRecentOrdered, setHideRecentOrdered] = useState(false);
+  const [hidePendingReceipt, setHidePendingReceipt] = useState(false);
   const [filterStoreStock, setFilterStoreStock] = useState("all");
   const [onlyStockNakhonluang, setOnlyStockNakhonluang] = useState(false);
   const [onlyLoan, setOnlyLoan] = useState(false);
+  const [tab, setTab] = useState("stock"); // stock | loan
   const [currentPage, setCurrentPage] = useState(1);
   const [jobDetail, setJobDetail] = useState(null); // { item_code, item_name, loading, rows }
 
@@ -108,12 +109,14 @@ export default function FastMovingStockPage() {
       if (mode === "has" && qty <= 0) return false;
       if (mode === "none" && qty > 0) return false;
     }
-    // ซ่อนรายการที่สั่งซื้อภายใน 7 วันที่ผ่านมา (นับจากวันที่ปัจจุบันย้อนไป 7 วัน)
-    if (hideRecentOrdered && r.last_order_date) {
+    // "ไม่ค้างรับเข้า": ซ่อนรายการที่ค้างรับเข้าสต๊อก
+    // (ค้างรับเข้า = สั่งซื้อแล้ว + ไม่ค้างส่ง + วันที่สั่งซื้อ > วันที่รับเข้าล่าสุด หรือยังไม่เคยรับเข้า)
+    if (hidePendingReceipt && r.last_order_date && Number(r.backorder_qty || 0) <= 0) {
       const orderDate = new Date(r.last_order_date);
       if (!isNaN(orderDate)) {
-        const diffDays = (Date.now() - orderDate.getTime()) / 86400000;
-        if (diffDays >= 0 && diffDays <= 7) return false;
+        const receiptDate = r.last_receipt_date ? new Date(r.last_receipt_date) : null;
+        const received = receiptDate && !isNaN(receiptDate) && receiptDate.getTime() >= orderDate.getTime();
+        if (!received) return false; // ยังค้างรับเข้า → ซ่อน
       }
     }
     if (search) {
@@ -190,6 +193,21 @@ export default function FastMovingStockPage() {
         <div className="page-title">ระบบจัดการสต๊อกอะไหล่หมุนเร็ว</div>
       </div>
 
+      {/* Tabs */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, borderBottom: "2px solid #e5e7eb" }}>
+        {[{ k: "stock", l: "📦 สต๊อกอะไหล่หมุนเร็ว" }, { k: "loan", l: "🤝 ใบให้ยืม / รอตัดสต๊อก" }].map(t => (
+          <button key={t.k} onClick={() => setTab(t.k)}
+            style={{ padding: "8px 18px", fontSize: 14, fontWeight: 700, border: "none", background: "transparent",
+              borderBottom: tab === t.k ? "3px solid #072d6b" : "3px solid transparent",
+              color: tab === t.k ? "#072d6b" : "#6b7280", cursor: "pointer", marginBottom: -2 }}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {tab === "loan" && <LoanWriteoffTab apiUrl={API_URL} />}
+
+      {tab === "stock" && (<>
       <div style={{ display: "flex", gap: 10, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
           placeholder="ค้นหา รหัส / ชื่อสินค้า / กลุ่มสินค้า"
@@ -228,9 +246,9 @@ export default function FastMovingStockPage() {
           <input type="checkbox" checked={filterPendingJob === "no"} onChange={e => { setFilterPendingJob(e.target.checked ? "no" : "all"); setCurrentPage(1); }} />
           ไม่ค้างปิด JOB
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#dc2626", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: hideRecentOrdered ? "#fef2f2" : "#fff" }}>
-          <input type="checkbox" checked={hideRecentOrdered} onChange={e => { setHideRecentOrdered(e.target.checked); setCurrentPage(1); }} />
-          ไม่สั่งซื้อ 7 วัน
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#dc2626", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: hidePendingReceipt ? "#fef2f2" : "#fff" }}>
+          <input type="checkbox" checked={hidePendingReceipt} onChange={e => { setHidePendingReceipt(e.target.checked); setCurrentPage(1); }} />
+          📥 ไม่ค้างรับเข้า
         </label>
         <select value={filterStoreStock} onChange={e => { setFilterStoreStock(e.target.value); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #0ea5e9", borderRadius: 8, color: "#0369a1", fontWeight: 600 }}>
@@ -383,6 +401,162 @@ export default function FastMovingStockPage() {
                 </tbody>
               </table>
             )}
+          </div>
+        </div>
+      )}
+      </>)}
+    </div>
+  );
+}
+
+function LoanWriteoffTab({ apiUrl }) {
+  const [active, setActive] = useState([]);
+  const [recorded, setRecorded] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [busy, setBusy] = useState("");
+  const [search, setSearch] = useState("");
+  const [detail, setDetail] = useState(null); // { loan_no, loading, rows }
+
+  async function openDetail(loan_no) {
+    setDetail({ loan_no, loading: true, rows: [] });
+    try { const rows = await post({ action: "loan_detail", loan_no }); setDetail({ loan_no, loading: false, rows: Array.isArray(rows) ? rows.filter(Boolean) : [] }); }
+    catch { setDetail({ loan_no, loading: false, rows: [] }); }
+  }
+
+  async function post(body) {
+    const res = await fetch(apiUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const d = await res.json().catch(() => []);
+    return Array.isArray(d) ? d : (d?.data || []);
+  }
+  async function load() {
+    setLoading(true);
+    try {
+      const [a, r] = await Promise.all([post({ action: "list_loans" }), post({ action: "list_loan_writeoff" })]);
+      setActive(Array.isArray(a) ? a.filter(Boolean) : []);
+      setRecorded(Array.isArray(r) ? r.filter(Boolean) : []);
+    } catch { setActive([]); setRecorded([]); }
+    setLoading(false);
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  async function save(loan_no) { setBusy(loan_no); try { await post({ action: "save_loan_writeoff", loan_no }); await load(); } catch {} setBusy(""); }
+  async function undo(loan_no) { setBusy(loan_no); try { await post({ action: "delete_loan_writeoff", loan_no }); await load(); } catch {} setBusy(""); }
+
+  const fmtN = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  const fmtB = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtD = v => v ? new Date(v).toLocaleDateString("th-TH") : "-";
+  const q = search.trim().toLowerCase();
+  const fActive = active.filter(r => !q || String(r.loan_no).toLowerCase().includes(q) || String(r.borrower || "").toLowerCase().includes(q));
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหา เลขใบยืม / ผู้ยืม"
+          style={{ padding: "8px 14px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, width: 260 }} />
+        <button onClick={load} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
+      </div>
+
+      <h3 style={{ margin: "6px 0", color: "#ea580c", fontSize: 15 }}>🤝 ใบให้ยืมที่ยังค้าง (ยังไม่รับคืน) — {fActive.length} ใบ</h3>
+      <div style={{ overflowX: "auto", marginBottom: 22 }}>
+        <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr style={{ background: "#072d6b", color: "#fff" }}>
+            <th style={th}>เลขที่ใบยืม</th><th style={th}>วันที่ยืม</th><th style={th}>ผู้ยืม</th>
+            <th style={{ ...th, textAlign: "right" }}>รายการ</th><th style={{ ...th, textAlign: "right" }}>จำนวน</th><th style={{ ...th, textAlign: "right" }}>มูลค่า</th><th style={th}></th>
+          </tr></thead>
+          <tbody>
+            {loading ? <tr><td colSpan={7} style={{ textAlign: "center", padding: 16 }}>กำลังโหลด...</td></tr>
+              : fActive.length === 0 ? <tr><td colSpan={7} style={{ textAlign: "center", padding: 16, color: "#9ca3af" }}>ไม่มีใบยืมค้าง</td></tr>
+                : fActive.map(r => (
+                  <tr key={r.loan_no} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                    <td style={td}><span onClick={() => openDetail(r.loan_no)} title="ดูรายการสินค้าในใบยืม"
+                      style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1", cursor: "pointer", textDecoration: "underline" }}>{r.loan_no}</span></td>
+                    <td style={td}>{fmtD(r.loan_date)}</td>
+                    <td style={td}>{r.borrower || "-"}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{fmtN(r.item_count)}</td>
+                    <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#ea580c" }}>{fmtN(r.total_qty)}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{fmtB(r.total_amount)}</td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      <button disabled={busy === r.loan_no} onClick={() => save(r.loan_no)}
+                        style={{ padding: "5px 14px", fontSize: 12, fontWeight: 700, background: busy === r.loan_no ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>💾 บันทึก</button>
+                    </td>
+                  </tr>
+                ))}
+          </tbody>
+        </table>
+      </div>
+
+      <h3 style={{ margin: "6px 0", color: "#7c3aed", fontSize: 15 }}>📋 บันทึกแล้ว — รอตัดสินค้าขาดสต๊อก — {recorded.length} ใบ</h3>
+      <div style={{ overflowX: "auto" }}>
+        <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead><tr style={{ background: "#7c3aed", color: "#fff" }}>
+            <th style={th}>เลขที่ใบยืม</th><th style={th}>วันที่ยืม</th><th style={th}>ผู้ยืม</th>
+            <th style={{ ...th, textAlign: "right" }}>รายการ</th><th style={{ ...th, textAlign: "right" }}>จำนวน</th><th style={{ ...th, textAlign: "right" }}>มูลค่า</th>
+            <th style={th}>บันทึกเมื่อ</th><th style={th}></th>
+          </tr></thead>
+          <tbody>
+            {recorded.length === 0 ? <tr><td colSpan={8} style={{ textAlign: "center", padding: 16, color: "#9ca3af" }}>ยังไม่มีรายการ</td></tr>
+              : recorded.map(r => (
+                <tr key={r.loan_no} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  <td style={td}><span onClick={() => openDetail(r.loan_no)} title="ดูรายการสินค้าในใบยืม"
+                    style={{ fontFamily: "monospace", fontWeight: 600, color: "#0369a1", cursor: "pointer", textDecoration: "underline" }}>{r.loan_no}</span></td>
+                  <td style={td}>{fmtD(r.loan_date)}</td>
+                  <td style={td}>{r.borrower || "-"}</td>
+                  <td style={{ ...td, textAlign: "right" }}>{fmtN(r.item_count)}</td>
+                  <td style={{ ...td, textAlign: "right" }}>{fmtN(r.total_qty)}</td>
+                  <td style={{ ...td, textAlign: "right" }}>{fmtB(r.total_amount)}</td>
+                  <td style={td}>{fmtD(r.recorded_at)}</td>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    <button disabled={busy === r.loan_no} onClick={() => undo(r.loan_no)}
+                      style={{ padding: "5px 12px", fontSize: 12, background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>↩ ถอนคืน</button>
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+
+      {detail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 2000 }}
+             onClick={() => setDetail(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 800, width: "95%", maxHeight: "88vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#0369a1" }}>🤝 รายการในใบยืม · {detail.loan_no}</h3>
+              <button onClick={() => setDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            {detail.loading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div>
+              : detail.rows.length === 0 ? <div style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่พบรายการ</div>
+                : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                    <thead style={{ background: "#f0f4f9" }}>
+                      <tr>
+                        <th style={{ padding: 8, textAlign: "left" }}>#</th>
+                        <th style={{ padding: 8, textAlign: "left" }}>รหัสอะไหล่</th>
+                        <th style={{ padding: 8, textAlign: "left" }}>ชื่ออะไหล่</th>
+                        <th style={{ padding: 8, textAlign: "right" }}>จำนวน</th>
+                        <th style={{ padding: 8, textAlign: "right" }}>ราคาทุน</th>
+                        <th style={{ padding: 8, textAlign: "right" }}>รวม</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {detail.rows.map((r, i) => (
+                        <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                          <td style={{ padding: 7 }}>{i + 1}</td>
+                          <td style={{ padding: 7, fontFamily: "monospace" }}>{r.part_code || "-"}</td>
+                          <td style={{ padding: 7 }}>{r.part_name || "-"}</td>
+                          <td style={{ padding: 7, textAlign: "right", fontWeight: 600 }}>{Number(r.qty || 0).toLocaleString("th-TH")}</td>
+                          <td style={{ padding: 7, textAlign: "right" }}>{Number(r.unit_cost || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td style={{ padding: 7, textAlign: "right" }}>{Number(r.total_amount || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                      <tr style={{ background: "#eff6ff", fontWeight: 700 }}>
+                        <td colSpan={3} style={{ padding: 7, textAlign: "right" }}>รวม {detail.rows.length} รายการ</td>
+                        <td style={{ padding: 7, textAlign: "right" }}>{detail.rows.reduce((s, r) => s + Number(r.qty || 0), 0).toLocaleString("th-TH")}</td>
+                        <td></td>
+                        <td style={{ padding: 7, textAlign: "right", color: "#0369a1" }}>{detail.rows.reduce((s, r) => s + Number(r.total_amount || 0), 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                )}
           </div>
         </div>
       )}

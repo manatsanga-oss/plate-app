@@ -1,7 +1,56 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 
-const REG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const SVC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
+const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
+
+// ===== normalize รุ่น/แบบ/type เทียบ master moto_types (ตรรกะเดียวกับ RegistrationReceiptEntryPage) =====
+const upCode = (s) => String(s || "").toUpperCase().replace(/\s+/g, "").trim();
+const normBrand = (b) => {
+  const s = String(b || "").toLowerCase();
+  if (s.includes("honda") || s.includes("ฮอนด้า")) return "honda";
+  if (s.includes("yamaha") || s.includes("ยามาฮ่า")) return "yamaha";
+  return s;
+};
+// ฮอนด้า: model_code = "ACB160CATR (TH) CLICK 160..." → base="ACB160CATR", type="TH"
+const parseHondaModelCode = (mc) => {
+  const raw = String(mc || "").trim();
+  const m = raw.match(/^([A-Za-z0-9\-/]+)\s*\(([^)]+)\)/);
+  if (m) return { base: m[1].trim(), type: m[2].trim() };
+  return { base: raw.split(/\s+/)[0] || "", type: "" };
+};
+// คืน { brand, model_series(รุ่น), model_code(แบบ), model_type(type) } validate กับ master types
+function normalizeVehicleModel(raw, types) {
+  const nb = normBrand(raw.brand);
+  let series = String(raw.model_series || "").trim();
+  let parsedCode = "", parsedType = "";
+  if (nb === "yamaha") { parsedType = upCode(raw.model_code); }       // ยามาฮ่า: model_code = type code (เช่น DT0300)
+  else { const p = parseHondaModelCode(raw.model_code); parsedCode = upCode(p.base); parsedType = upCode(p.type); }
+
+  // Honda ที่ไม่มี series (เช่น honda_repair_intake) — เดารุ่นจาก code: prefix master ก่อน ไม่เจอใช้ regex
+  if (!series && nb === "honda" && parsedCode) {
+    const cand = (Array.isArray(types) ? types : [])
+      .filter((t) => normBrand(t.brand_name) === "honda" && parsedCode.startsWith(upCode(t.series_name)))
+      .sort((a, b) => upCode(b.series_name).length - upCode(a.series_name).length);
+    if (cand.length) series = cand[0].series_name;
+    else { const mm = parsedCode.match(/^[A-Z]+[0-9]+/); if (mm) series = mm[0]; }
+  }
+
+  const pool = (Array.isArray(types) ? types : []).filter(
+    (t) => normBrand(t.brand_name) === nb && upCode(t.series_name) === upCode(series)
+  );
+  let hit = null;
+  if (parsedType) hit = pool.find((t) => upCode(t.type_name) === parsedType);
+  if (!hit && parsedCode) hit = pool.find((t) => upCode(t.model_code) === parsedCode);
+  if (!hit && pool.length === 1) hit = pool[0];
+
+  if (hit) return { brand: hit.brand_name || raw.brand || "", model_series: hit.series_name || series, model_code: hit.model_code || "", model_type: hit.type_name || "" };
+  return {
+    brand: String(raw.brand || "").trim(),
+    model_series: series,
+    model_code: nb === "yamaha" ? series : parsedCode,
+    model_type: parsedType,
+  };
+}
 
 const text = (v) => (v ?? "").toString().trim();
 const fmtMoney = (v) => Number(v || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -30,7 +79,19 @@ export default function ServiceHistorySearchPage() {
   const [history, setHistory] = useState([]);
   const [loadingHist, setLoadingHist] = useState(false);
   const [mymoto, setMymoto] = useState(null); // { checking, registered, notified }
+  const [types, setTypes] = useState([]); // master moto_types (สำหรับ normalize รุ่น/แบบ/type)
   const [popup, setPopup] = useState({ open: false, type: "success", title: "", message: "" });
+
+  // โหลด master types ครั้งเดียวตอนเปิดหน้า
+  useEffect(() => {
+    (async () => {
+      try {
+        const d = await apiPost(MASTER_API, { action: "get_types" });
+        setTypes(Array.isArray(d) ? d : d?.data || []);
+      } catch { setTypes([]); }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openPopup = (type, title, message) => setPopup({ open: true, type, title, message });
   const closePopup = () => setPopup((p) => ({ ...p, open: false }));
@@ -50,7 +111,7 @@ export default function ServiceHistorySearchPage() {
     if (!text(keyword)) return;
     try {
       setSearching(true); setSelected(null); setHistory([]);
-      const d = await apiPost(REG_API, { action: "search_registrations", source: "sale", field, keyword: text(keyword) });
+      const d = await apiPost(SVC_API, { action: "search_vehicles", field, keyword: text(keyword) });
       setVehicles(norm(d));
     } catch {
       setVehicles([]);
@@ -168,23 +229,29 @@ export default function ServiceHistorySearchPage() {
                 <thead style={{ background: "#f8fafc" }}>
                   <tr>
                     <th style={th}>เลขตัวถัง</th><th style={th}>เลขเครื่อง</th><th style={th}>ทะเบียน</th>
-                    <th style={th}>ลูกค้า</th><th style={th}>ยี่ห้อ/รุ่น</th><th style={th}>วันที่ขาย</th><th style={th}></th>
+                    <th style={th}>ลูกค้า</th><th style={th}>ยี่ห้อ</th><th style={th}>รุ่น</th><th style={th}>แบบ</th><th style={th}>type</th><th style={th}>วันที่ขาย</th><th style={th}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {vehicles.map((v, i) => (
+                  {vehicles.map((v, i) => {
+                    const nm = normalizeVehicleModel({ brand: v.brand, model_series: v.model_series, model_code: v.model_code }, types);
+                    return (
                     <tr key={`${v.frame_no}-${i}`} style={{ background: selected && selected.frame_no === v.frame_no ? "#eff6ff" : "transparent" }}>
                       <td style={{ ...td, fontFamily: "monospace" }}>{text(v.frame_no) || "-"}</td>
                       <td style={{ ...td, fontFamily: "monospace" }}>{text(v.engine_no) || "-"}</td>
                       <td style={td}>{plateOf(v)}</td>
                       <td style={td}>{text(v.customer_name) || "-"}</td>
-                      <td style={td}>{text(v.brand)} {text(v.model)}</td>
+                      <td style={td}>{text(nm.brand) || text(v.brand)}</td>
+                      <td style={td}>{text(nm.model_series) || "-"}</td>
+                      <td style={td}>{text(nm.model_code) || "-"}</td>
+                      <td style={td}>{text(nm.model_type) || "-"}</td>
                       <td style={td}>{v.sale_date ? new Date(v.sale_date).toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" }) : "-"}</td>
                       <td style={td}>
                         <button className="btn-primary" style={{ padding: "4px 14px", fontSize: 12 }} onClick={() => selectVehicle(v)}>เลือก</button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

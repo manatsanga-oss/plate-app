@@ -54,6 +54,7 @@ import DepositSeizePage from "./pages/DepositSeizePage";
 import LoginPage from "./pages/LoginPage";
 import SalesOverviewPage from "./pages/SalesOverviewPage";
 import PartGiveawayReportPage from "./pages/PartGiveawayReportPage";
+import PartModelUsageReportPage from "./pages/PartModelUsageReportPage";
 import GiveawayReceiptPrintPage from "./pages/GiveawayReceiptPrintPage";
 import VehicleRegistrationPage from "./pages/VehicleRegistrationPage";
 import RegistrationSubmitPage from "./pages/RegistrationSubmitPage";
@@ -222,6 +223,7 @@ export default function App() {
     if (page === "partorderinquiry") return false;            // เฉพาะ admin (สอบถามรายการอะไหล่สั่งซื้อ)
     if (page === "partdispensereport") return false;          // เฉพาะ admin (รายงานการจ่ายอะไหล่รายตัว)
     if (page === "servicehistory") return true;                // ค้นหาประวัติงานบริการ — เปิดให้ทุก user
+    if (page === "partmodelusage") return true;                 // รายงานรหัสอะไหล่ใช้กับรุ่น — เปิดให้ทุก user
     if (page === "servicerate") return true;                   // ค้นหาค่าบริการ (FRT) — เปิดให้ทุก user
     if (page === "serviceratelookup") return true;             // ค้นหา FRT จากรุ่น/แบบ — เปิดให้ทุก user
     if (page === "servicerateimport") return false;            // เฉพาะ admin (นำเข้า FRT)
@@ -341,6 +343,9 @@ export default function App() {
         )}
         {activeMenu === "servicehistory" && canAccess("servicehistory") && (
           <ServiceHistorySearchPage currentUser={currentUser} />
+        )}
+        {activeMenu === "partmodelusage" && canAccess("partmodelusage") && (
+          <PartModelUsageReportPage currentUser={currentUser} />
         )}
         {activeMenu === "servicerate" && canAccess("servicerate") && (
           <ServiceRateSearchPage currentUser={currentUser} />
@@ -789,6 +794,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="partwithdrawal" label="บันทึกการเบิกอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partdispensereport" label="รายงานการจ่ายอะไหล่รายตัว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicehistory" label="ค้นหาประวัติงานบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="partmodelusage" label="รายงานรหัสอะไหล่ใช้กับรุ่น" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicerate" label="ค้นหาค่าบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicerateimport" label="📤 นำเข้า FRT (Admin)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>

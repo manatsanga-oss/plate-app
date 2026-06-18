@@ -1322,16 +1322,18 @@ function ClaimItemsDialog({ insurance, onClose, onSaved }) {
         });
         const data = await res.json();
         if (cancelled) return;
-        // กรองเฉพาะรายการ พรบ./ประกัน ของใบรับเรื่องนี้เท่านั้น
-        const isInsurance = (l) => {
+        // กรองเฉพาะรายการ พรบ. ของใบรับเรื่องนี้เท่านั้น — ตัดประกันภาคสมัครใจ (คอสมอส) ออก
+        const isPrb = (l) => {
           const t = String(l.income_type || "").toLowerCase();
           const n = String(l.income_name || "").toLowerCase();
-          return t.includes("ประกัน") || t.includes("พรบ") || t.includes("พ.ร.บ") ||
-                 n.includes("ประกัน") || n.includes("พรบ") || n.includes("พ.ร.บ");
+          const d = String(l.description || "").toLowerCase();
+          const hasPrb = t.includes("พรบ") || t.includes("พ.ร.บ") || n.includes("พรบ") || n.includes("พ.ร.บ");
+          const isVoluntary = n.includes("คอสมอส") || d.includes("คอสมอส");
+          return hasPrb && !isVoluntary;
         };
         const lines = (Array.isArray(data) ? data : [])
           .filter(l => l.receipt_no === insurance.receipt_no)
-          .filter(isInsurance);
+          .filter(isPrb);
         setItems(lines);
 
         // pre-select existing claimed
