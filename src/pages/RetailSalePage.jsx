@@ -672,8 +672,8 @@ export default function RetailSalePage({ currentUser }) {
   const roundInstallment = (amt) => {
     const n = Number(amt) || 0;
     if (n <= 0) return 0;
-    if (installmentRound) return Math.ceil(n / 5) * 5;
-    return Math.round(n);
+    if (installmentRound) return Math.ceil(n / 5) * 5;   // ปัด 5: ปัดขึ้นเป็นทวีคูณของ 5
+    return Math.ceil(n);                                  // ปัด 0: ปัดขึ้นเป็นจำนวนเต็มเสมอ (1271.05 → 1272)
   };
   // ยอดผ่อน/งวด: default = ค่าที่คำนวณ (ปัดเศษตาม option) แต่ผู้ใช้พิมพ์แก้เองได้
   useEffect(() => {
@@ -1046,6 +1046,11 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
       if (!updated || !updated.sale_no) throw new Error(row?.__error || row?.error || "บันทึกไม่สำเร็จ");
       setVehicle((v) => ({ ...v, sale: updated }));
       setMessage("✅ รับชำระเงินเรียบร้อย เลขที่ใบเสร็จ " + (updated.receipt_no || ""));
+      // ส่งใบเสร็จเข้า LINE อัตโนมัติ (เหมือนบันทึกใบขาย) ถ้าลูกค้ามี LINE
+      const hasLineUser = updated.line_user_id || sale?.line_user_id || form.customer_line_user_id;
+      if (hasLineUser) {
+        scheduleLineSend("receipt", "ใบเสร็จ", () => sendReceiptLineNow(updated), updated.sale_no);
+      }
     } catch (e) { setMessage("รับชำระไม่สำเร็จ: " + (e.message || e)); }
     finally { setPayingSave(false); }
   }
@@ -1093,9 +1098,9 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
     scheduleLineSend("sale", "ใบขาย", () => sendSaleLineNow(s), s.sale_no);
   }
 
-  async function sendReceiptLineNow() {
-    const s = sale || {};
-    if (!s.sale_no || !isPaid) throw new Error("not paid");
+  async function sendReceiptLineNow(saleArg) {
+    const s = saleArg || sale || {};
+    if (!s.sale_no || s.payment_status !== "paid") throw new Error("not paid");
     setLineSending("receipt"); setMessage("");
     try {
       await apiPost({
@@ -1105,7 +1110,7 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
         payment_methods: Array.isArray(s.payment_methods) ? s.payment_methods : [],
         branch_name: s.branch_name || currentUser?.branch || "", branch_code: s.branch_code || currentUser?.branch_code || currentUser?.branch || "",
         line_user_id: s.line_user_id || form.customer_line_user_id || "",
-        doc_html: buildReceiptHtml(),
+        doc_html: buildReceiptHtml(s),
         sent_by: currentUser?.name || currentUser?.username || "",
       });
       setMessage("✅ ส่งใบเสร็จเข้า LINE แล้ว");
@@ -1152,8 +1157,8 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
     }
   }
 
-  function buildReceiptHtml() {
-    const s = sale || {}, v = vehicle || {};
+  function buildReceiptHtml(saleArg) {
+    const s = saleArg || sale || {}, v = vehicle || {};
     const money = (n) => (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const lh = letterheadFor(s, v);
