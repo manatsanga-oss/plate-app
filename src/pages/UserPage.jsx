@@ -57,6 +57,7 @@ const PAGE_OPTIONS = [
   { key: "partwithdrawal",     label: "📤 บันทึกการเบิกอะไหล่" },
   { key: "servicehistory",     label: "🔎 ค้นหาประวัติงานบริการ" },
   { key: "servicerate",        label: "💲 ค้นหาค่าบริการ" },
+  { key: "partimagelookup",    label: "📋 บันทึกใบประเมินราคา" },
   // ── จัดการผู้ใช้ ──
   { key: "users",      label: "👤 กำหนดผู้ใช้งาน" },
 ];

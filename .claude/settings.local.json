@@ -386,7 +386,11 @@
       "Bash(python -c \"import openpyxl; print\\('ok'\\)\")",
       "Bash(curl -s -X POST \"https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api\" -H \"Content-Type: application/json\" -d '{\"action\":\"get_deposits\",\"status\":\"all\",\"keyword\":\"SCY04-DEP-2606-00002\"}')",
       "Bash(cd \"/c/Users/manat/plate-app\" && echo \"=== LIFF routes / customer pages in App.jsx \\(no-login\\) ===\" && grep -n \"liff\\\\|LIFF\\\\|ref=\\\\|customer.*form\\\\|ReceiptCustomerForm\\\\|window.location.*ref\\\\|URLSearchParams\" src/App.jsx src/main.jsx 2>/dev/null | head -30)",
-      "Bash(PYTHONIOENCODING=utf-8 python3 -c ' *)"
+      "Bash(PYTHONIOENCODING=utf-8 python3 -c ' *)",
+      "Bash(ls *amaha*art*eceipt*.json)",
+      "Bash(grep -l \"upload-honda-inventory\" *.json)",
+      "Bash(grep -l \"upload-yamaha-part-receipt\" *.json)",
+      "Bash(cd \"/c/Users/manat/plate-app/src\" && echo \"=== App.jsx: บันทึกใบประเมินราคา / Service ===\"; grep -n \"บันทึกใบประเมินราคา\\\\|ประเมินราคา\\\\|quote\\\\|Quote\\\\|Service\" pages/../App.jsx | head -20)"
     ]
   }
 }

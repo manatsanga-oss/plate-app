@@ -23,8 +23,8 @@ const UPLOAD_GROUPS = [
       { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (apc_order_no + line_no + part_number)", db: "dcs_spare_orders", url: `${BASE}/upload-dcs-orders` },
       { key: "dcs-backorders", label: "รายงานอะไหล่ค้างส่ง DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "dcs_backorders", url: `${BASE}/upload-dcs-backorders` },
       { key: "honda-loan-parts", label: "รายงานอะไหล่ให้ยืมยังไม่ได้รับคืน", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (HONDA snapshot)", db: "honda_loan_parts", url: `${BASE}/upload-honda-loan-parts` },
-      { key: "honda-part-receipt", label: "รายงานรับอะไหล่ HONDA (รายการรับสินค้า)", desc: "เลือกไฟล์ XLS · UPSERT (pd_no) · header + line items", db: "honda_part_receipts", url: `${BASE}/upload-honda-part-receipt` },
-      { key: "yamaha-part-receipt", label: "รายงานรับอะไหล่ YAMAHA (รายการ)", desc: "ไฟล์ XLSX รายงานการรับอะไหล่ · UPSERT (receipt_no+part+doc)", db: "yamaha_part_receipt_items", url: `${BASE}/upload-yamaha-part-receipt` },
+      { key: "honda-part-receipt", label: "รายงานรับอะไหล่ HONDA (รายการรับสินค้า)", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (pd_no) · header + line items", db: "honda_part_receipts", url: `${BASE}/upload-honda-part-receipt` },
+      { key: "yamaha-part-receipt", label: "รายงานรับอะไหล่ YAMAHA (รายการ)", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (receipt_no+part+doc)", db: "yamaha_part_receipt_items", url: `${BASE}/upload-yamaha-part-receipt` },
       { key: "honda-part-sales", label: "รายงานขายอะไหล่รายตัว HONDA", desc: "ไฟล์ XLS (TIS-620) ยอดขายอะไหล่รายตัว · UPSERT (sale_doc_no + part_code)", db: "honda_part_sales", url: `${BASE}/upload-honda-part-sales` },
       { key: "yamaha-part-dispense", label: "รายงานการจ่ายอะไหล่ YAMAHA", desc: "ไฟล์ XLSX การจ่าย/ขายอะไหล่รายตัว · UPSERT (doc_no + part_code + ref_doc_no)", db: "yamaha_part_dispense", url: `${BASE}/upload-yamaha-part-dispense` },
       { key: "part-giveaway", label: "รายการสินค้าของแถม", desc: "ไฟล์ XLSX รายงานขายอะไหล่ — กรองเฉพาะ ของแถม · UPSERT (sale_doc_no + part_code)", db: "part_giveaway_items", url: `${BASE}/upload-part-giveaway` },
@@ -72,8 +72,6 @@ const FILE_UPLOAD_KEYS = new Set([
   "time-tracking", "yamaha-repair", "honda-repair", "honda-repair-intake",
   "yamaha-b2b-orders",
   "honda-warranty",
-  "honda-part-receipt",   // รับอะไหล่ HONDA — เลือกไฟล์เอง
-  "yamaha-part-receipt",  // รับอะไหล่ YAMAHA — เลือกไฟล์เอง
   "honda-part-sales",     // รายงานขายอะไหล่รายตัว HONDA — เลือกไฟล์เอง
   "yamaha-part-dispense", // รายงานการจ่ายอะไหล่ YAMAHA — เลือกไฟล์เอง
   "part-giveaway",        // รายการสินค้าของแถม — เลือกไฟล์เอง

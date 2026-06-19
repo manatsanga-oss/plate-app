@@ -37,6 +37,11 @@ export default function StockTurnoverReportPage() {
   const [dateTo, setDateTo] = useState(todayISO());
   const [turnoverData, setTurnoverData] = useState({ summary: null, byModel: [] });
   const [turnLoading, setTurnLoading] = useState(false);
+  // ตัวกรอง cascade: รุ่น/แบบ → type → สี (จากข้อมูลจริงในช่วง)
+  const [dims, setDims] = useState([]);          // [{model, type, color}]
+  const [fModel, setFModel] = useState("");
+  const [fType, setFType] = useState("");
+  const [fColor, setFColor] = useState("");
 
   async function loadStock() {
     setStockLoading(true);
@@ -44,17 +49,29 @@ export default function StockTurnoverReportPage() {
     setStockRows(Array.isArray(data) ? data : []);
     setStockLoading(false);
   }
-  async function loadTurnover() {
+  async function loadTurnover(over = {}) {
     setTurnLoading(true);
-    const data = await callApi({ action: "turnover", brand, date_from: dateFrom, date_to: dateTo });
+    const fm = over.fModel !== undefined ? over.fModel : fModel;
+    const ft = over.fType !== undefined ? over.fType : fType;
+    const fc = over.fColor !== undefined ? over.fColor : fColor;
+    const data = await callApi({ action: "turnover", brand, date_from: dateFrom, date_to: dateTo, f_model: fm, f_type: ft, f_color: fc });
     if (Array.isArray(data)) {
       const summary = data.find(r => r.kind === "summary")?.data || null;
       const byModel = data.filter(r => r.kind === "by_model").map(r => r.data);
+      const dimRows = data.filter(r => r.kind === "dims").map(r => r.data);
       setTurnoverData({ summary, byModel });
-    } else setTurnoverData({ summary: null, byModel: [] });
+      setDims(dimRows);
+    } else { setTurnoverData({ summary: null, byModel: [] }); setDims([]); }
     setTurnLoading(false);
   }
-  useEffect(() => { if (tab === "stock") loadStock(); else loadTurnover(); /* eslint-disable-next-line */ }, [tab, brand]);
+  // เลือกยี่ห้อ → ล้างตัวกรอง cascade
+  function pickBrand(b) { setBrand(b); setFModel(""); setFType(""); setFColor(""); }
+  useEffect(() => { if (tab === "stock") loadStock(); else loadTurnover({ fModel: "", fType: "", fColor: "" }); /* eslint-disable-next-line */ }, [tab, brand]);
+
+  // ตัวเลือก dropdown แบบ cascade (กรองชั้นบนก่อน)
+  const modelOpts = useMemo(() => [...new Set(dims.map(d => d.model).filter(Boolean))].sort(), [dims]);
+  const typeOpts = useMemo(() => [...new Set(dims.filter(d => !fModel || d.model === fModel).map(d => d.type).filter(Boolean))].sort(), [dims, fModel]);
+  const colorOpts = useMemo(() => [...new Set(dims.filter(d => (!fModel || d.model === fModel) && (!fType || d.type === fType)).map(d => d.color).filter(Boolean))].sort(), [dims, fModel, fType]);
 
   const stockSummary = useMemo(() => {
     const total = stockRows.length;
@@ -87,7 +104,7 @@ export default function StockTurnoverReportPage() {
       {/* Brand selector */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         {["HONDA", "YAMAHA"].map(b => (
-          <button key={b} onClick={() => setBrand(b)}
+          <button key={b} onClick={() => pickBrand(b)}
             style={{ padding: "8px 18px", borderRadius: 8, border: "none", fontWeight: 700, fontSize: 14, cursor: "pointer",
               background: brand === b ? (b === "HONDA" ? "#dc2626" : "#1e40af") : "#e5e7eb",
               color: brand === b ? "#fff" : "#374151" }}>
@@ -172,10 +189,34 @@ export default function StockTurnoverReportPage() {
             <span>ถึง</span>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               style={{ padding: "7px 12px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 14 }} />
-            <button onClick={loadTurnover} disabled={turnLoading}
+            <button onClick={() => { setFModel(""); setFType(""); setFColor(""); loadTurnover({ fModel: "", fType: "", fColor: "" }); }} disabled={turnLoading}
               style={{ padding: "8px 20px", background: turnLoading ? "#9ca3af" : (brand === "HONDA" ? "#dc2626" : "#1e40af"), color: "#fff", border: "none", borderRadius: 6, fontWeight: 700, cursor: "pointer" }}>
               {turnLoading ? "⏳ โหลด..." : "🔍 ค้นหา"}
             </button>
+          </div>
+
+          {/* ตัวกรอง cascade: รุ่น/แบบ → type → สี (จากข้อมูลจริงในช่วง) */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, padding: 12, background: "#fff", borderRadius: 8, border: "1px solid #e5e7eb", alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontWeight: 600, color: "#374151" }}>🔎 กรอง:</span>
+            <select value={fModel} onChange={e => { const v = e.target.value; setFModel(v); setFType(""); setFColor(""); loadTurnover({ fModel: v, fType: "", fColor: "" }); }}
+              style={selFil}>
+              <option value="">รุ่น/แบบ ทั้งหมด</option>
+              {modelOpts.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <select value={fType} onChange={e => { const v = e.target.value; setFType(v); setFColor(""); loadTurnover({ fType: v, fColor: "" }); }}
+              style={selFil} disabled={!fModel && typeOpts.length === 0}>
+              <option value="">type ทั้งหมด</option>
+              {typeOpts.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select value={fColor} onChange={e => { const v = e.target.value; setFColor(v); loadTurnover({ fColor: v }); }}
+              style={selFil}>
+              <option value="">สี ทั้งหมด</option>
+              {colorOpts.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            {(fModel || fType || fColor) && (
+              <button onClick={() => { setFModel(""); setFType(""); setFColor(""); loadTurnover({ fModel: "", fType: "", fColor: "" }); }}
+                style={{ padding: "6px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>✕ ล้างตัวกรอง</button>
+            )}
           </div>
 
           {/* KPI cards */}
@@ -200,7 +241,8 @@ export default function StockTurnoverReportPage() {
                 <thead style={{ background: "#f9fafb", position: "sticky", top: 0 }}>
                   <tr>
                     <th style={th}>#</th>
-                    <th style={th}>รุ่น</th>
+                    <th style={th}>รุ่น/แบบ</th>
+                    <th style={th}>type</th>
                     <th style={th}>สี</th>
                     <th style={{ ...th, textAlign: "right" }}>ขาย (คัน)</th>
                     <th style={{ ...th, textAlign: "right" }}>วันเฉลี่ย</th>
@@ -209,13 +251,14 @@ export default function StockTurnoverReportPage() {
                 </thead>
                 <tbody>
                   {turnLoading ? (
-                    <tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
+                    <tr><td colSpan={7} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
                   ) : turnoverData.byModel.length === 0 ? (
-                    <tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
+                    <tr><td colSpan={7} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
                   ) : turnoverData.byModel.map((r, i) => (
                     <tr key={i} style={{ borderTop: "1px solid #f3f4f6" }}>
                       <td style={td}>{i + 1}</td>
                       <td style={{ ...td, fontWeight: 600 }}>{r.model || "-"}</td>
+                      <td style={td}>{r.type || "-"}</td>
                       <td style={td}>{r.color || "-"}</td>
                       <td style={{ ...td, textAlign: "right", fontWeight: 600, color: "#059669" }}>{fmtInt(r.sold_qty)}</td>
                       <td style={{ ...td, textAlign: "right", color: r.avg_days > 90 ? "#dc2626" : r.avg_days > 60 ? "#d97706" : "#374151", fontWeight: 600 }}>{r.avg_days != null ? fmt(r.avg_days, 1) : "-"}</td>
@@ -242,5 +285,6 @@ function KPI({ label, value, unit, color }) {
   );
 }
 
+const selFil = { padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, minWidth: 130 };
 const th = { padding: "8px 10px", textAlign: "left", fontWeight: 700, fontSize: 11, color: "#374151", whiteSpace: "nowrap" };
 const td = { padding: "6px 10px", fontSize: 12, verticalAlign: "middle" };

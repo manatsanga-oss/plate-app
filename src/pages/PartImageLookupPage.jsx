@@ -108,6 +108,24 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   const pageList = current ? (current.pages || [current.page]) : [];
   const imgList = current ? (current.imgs || [current.img]) : [];
 
+  function printImages() {
+    if (!current) return;
+    const urls = (imgList && imgList.length ? imgList : [current.img]).filter(Boolean);
+    if (!urls.length) return;
+    const title = `${model.model} · ${baeb} · ${type} · สี${current.name} (${current.code}${current.color_code ? " · " + current.color_code : ""})`;
+    const esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+    const w = window.open("", "_blank", "width=1000,height=800");
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(title)}</title>
+<style>@page{size:A4 landscape;margin:6mm} body{margin:0;font-family:Tahoma,sans-serif} .h{font-size:13px;font-weight:700;padding:5px 8px} img{width:100%;height:auto;display:block;page-break-after:always}</style>
+</head><body>
+<div class="h">${esc(title)}</div>
+${urls.map((u) => `<img src="${esc(u)}">`).join("")}
+<script>var n=${urls.length},c=0;function go(){window.focus();window.print();}window.onload=function(){var im=document.images;if(!im.length){go();return;}for(var i=0;i<im.length;i++){if(im[i].complete){c++;}else{im[i].onload=im[i].onerror=function(){c++;if(c>=n)go();};}}if(c>=n)go();};<\/script>
+</body></html>`);
+    w.document.close();
+  }
+
   const isPicked = (code, m) => picked.some((x) => x.code === code && x.model === m);
 
   const togglePart = (p) => {
@@ -368,9 +386,15 @@ export default function PartImageLookupPage({ currentUser } = {}) {
               {model.model} · {baeb} · {type} · สี{current.name}{" "}
               <span style={{ color: "#64748b", fontWeight: 400 }}>({current.code}{current.color_code ? ` · ${current.color_code}` : ""})</span>
             </div>
-            <a href={current.img} target="_blank" rel="noopener" style={{ fontSize: 13, color: "#1e3a8a" }}>
-              เปิดรูปเต็ม ↗
-            </a>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <button onClick={printImages} title="พิมพ์รูปชุดสีหน้านี้"
+                style={{ fontSize: 13, fontWeight: 600, color: "#fff", background: "#0369a1", border: "none", borderRadius: 6, padding: "5px 12px", cursor: "pointer" }}>
+                🖨️ พิมพ์
+              </button>
+              <a href={current.img} target="_blank" rel="noopener" style={{ fontSize: 13, color: "#1e3a8a" }}>
+                เปิดรูปเต็ม ↗
+              </a>
+            </div>
           </div>
 
           <div style={{ fontSize: 12, color: "#2563eb", marginBottom: 8 }}>

@@ -19,6 +19,7 @@ export default function FastMovingStockPage() {
   const [tab, setTab] = useState("stock"); // stock | loan
   const [currentPage, setCurrentPage] = useState(1);
   const [jobDetail, setJobDetail] = useState(null); // { item_code, item_name, loading, rows }
+  const [loanDetail, setLoanDetail] = useState(null); // { part_code, product_name, loading, rows }
 
   async function openJobDetail(part_code, product_name) {
     setJobDetail({ part_code, product_name, loading: true, rows: [] });
@@ -31,6 +32,20 @@ export default function FastMovingStockPage() {
       setJobDetail({ part_code, product_name, loading: false, rows: Array.isArray(data) ? data.filter(r => r) : [] });
     } catch {
       setJobDetail({ part_code, product_name, loading: false, rows: [] });
+    }
+  }
+
+  async function openLoanDetail(part_code, product_name) {
+    setLoanDetail({ part_code, product_name, loading: true, rows: [] });
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_part_loans", item_code: part_code }),
+      });
+      const data = await res.json();
+      setLoanDetail({ part_code, product_name, loading: false, rows: Array.isArray(data) ? data.filter(r => r) : [] });
+    } catch {
+      setLoanDetail({ part_code, product_name, loading: false, rows: [] });
     }
   }
   const PAGE_SIZE = 30;
@@ -178,7 +193,7 @@ export default function FastMovingStockPage() {
 <div class="info">ตัวกรอง: ${filterLabel} | จำนวน: ${filtered.length} รายการ | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
 <table>
   <thead><tr>
-    <th>#</th><th>กลุ่มสินค้า</th><th>รหัสสินค้า</th><th>ชื่อสินค้า</th><th>จำนวน</th><th>ป.เปา</th><th>ห้าห้อง</th><th>สช.ตลาด</th><th>นครหลวง</th><th>ให้ยืม</th><th>วันที่สั่งล่าสุด</th><th>เฉลี่ยสั่ง/เดือน</th><th>ค้างส่ง</th><th>คาดว่าได้รับ</th><th>ค้างปิด JOB</th>
+    <th>#</th><th>กลุ่มสินค้า</th><th>รหัสสินค้า</th><th>ชื่อสินค้า</th><th>จำนวน</th><th>ป.เปา</th><th>ห้าห้อง</th><th>สช.ตลาด</th><th>นครหลวง</th><th>ให้ยืม</th><th>วันที่สั่งล่าสุด</th><th>จ่ายอะไหล่เฉลี่ย (3ด.)</th><th>ค้างส่ง</th><th>คาดว่าได้รับ</th><th>ค้างปิด JOB</th>
   </tr></thead>
   <tbody>${rows}</tbody>
 </table>
@@ -284,7 +299,7 @@ export default function FastMovingStockPage() {
               <th style={{ ...th, textAlign: "right" }}>นครหลวง</th>
               <th style={{ ...th, textAlign: "right" }}>ให้ยืม</th>
               <th style={th}>วันที่สั่งล่าสุด</th>
-              <th style={{ ...th, textAlign: "right" }}>เฉลี่ยสั่ง/เดือน (3ด.)</th>
+              <th style={{ ...th, textAlign: "right" }}>จ่ายอะไหล่เฉลี่ย (3ด.)</th>
               <th style={{ ...th, textAlign: "right" }}>ค้างส่ง</th>
               <th style={th}>คาดว่าได้รับ</th>
               <th style={{ ...th, textAlign: "right" }}>ค้างปิด JOB</th>
@@ -310,7 +325,11 @@ export default function FastMovingStockPage() {
                   <td style={{ ...td, textAlign: "right" }}>{s.sachtalad}</td>
                   <td style={{ ...td, textAlign: "right" }}>{s.nakhonluang}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.loan_qty || 0) > 0 ? "#ea580c" : undefined, fontWeight: Number(r.loan_qty || 0) > 0 ? 700 : undefined }}>
-                    {Number(r.loan_qty || 0) > 0 ? fmtQty(r.loan_qty) : ""}
+                    {Number(r.loan_qty || 0) > 0 ? (
+                      <span onClick={() => openLoanDetail(r.part_code, r.product_name)}
+                        style={{ cursor: "pointer", textDecoration: "underline" }}
+                        title="คลิกดูเลขที่ใบให้ยืม">{fmtQty(r.loan_qty)}</span>
+                    ) : ""}
                   </td>
                   <td style={td}>{r.last_order_date ? new Date(r.last_order_date).toLocaleDateString("th-TH") : ""}</td>
                   <td style={{ ...td, textAlign: "right" }}>{Number(r.avg_order_qty_3m || 0) > 0 ? Number(r.avg_order_qty_3m).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : ""}</td>
@@ -396,6 +415,60 @@ export default function FastMovingStockPage() {
                     <td></td>
                     <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", color: "#7c3aed" }}>
                       {jobDetail.rows.reduce((s, r) => s + Number(r.total_price || 0), 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {loanDetail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 2000 }}
+             onClick={() => setLoanDetail(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 900, width: "95%", maxHeight: "88vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#ea580c" }}>🤝 ใบให้ยืม · {loanDetail.part_code} · {loanDetail.product_name}</h3>
+              <button onClick={() => setLoanDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            {loanDetail.loading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div> : loanDetail.rows.length === 0 ? (
+              <div style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่พบใบให้ยืม</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                <thead style={{ background: "#fff7ed" }}>
+                  <tr>
+                    <th style={{ padding: 8, textAlign: "left" }}>#</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>เลขที่ใบให้ยืม</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>วันที่ยืม</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>ผู้ยืม</th>
+                    <th style={{ padding: 8, textAlign: "left" }}>ชื่ออะไหล่</th>
+                    <th style={{ padding: 8, textAlign: "right" }}>จำนวน</th>
+                    <th style={{ padding: 8, textAlign: "right" }}>ราคาทุน</th>
+                    <th style={{ padding: 8, textAlign: "right" }}>รวม</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loanDetail.rows.map((r, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <td style={{ padding: 7 }}>{i + 1}</td>
+                      <td style={{ padding: 7, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.loan_no || "-"}</td>
+                      <td style={{ padding: 7 }}>{r.loan_date ? new Date(r.loan_date).toLocaleDateString("th-TH") : "-"}</td>
+                      <td style={{ padding: 7 }}>{r.borrower || "-"}</td>
+                      <td style={{ padding: 7 }}>{r.part_name || "-"}</td>
+                      <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: "#ea580c" }}>{Number(r.qty || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>
+                      <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.unit_cost || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.total_amount || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#fff7ed", fontWeight: 700 }}>
+                    <td colSpan={5} style={{ padding: 7, textAlign: "right" }}>รวม {loanDetail.rows.length} ใบ</td>
+                    <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", color: "#ea580c" }}>
+                      {loanDetail.rows.reduce((s, r) => s + Number(r.qty || 0), 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
+                    </td>
+                    <td></td>
+                    <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", color: "#ea580c" }}>
+                      {loanDetail.rows.reduce((s, r) => s + Number(r.total_amount || 0), 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </td>
                   </tr>
                 </tbody>
