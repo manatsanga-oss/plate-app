@@ -390,7 +390,8 @@
       "Bash(ls *amaha*art*eceipt*.json)",
       "Bash(grep -l \"upload-honda-inventory\" *.json)",
       "Bash(grep -l \"upload-yamaha-part-receipt\" *.json)",
-      "Bash(cd \"/c/Users/manat/plate-app/src\" && echo \"=== App.jsx: บันทึกใบประเมินราคา / Service ===\"; grep -n \"บันทึกใบประเมินราคา\\\\|ประเมินราคา\\\\|quote\\\\|Quote\\\\|Service\" pages/../App.jsx | head -20)"
+      "Bash(cd \"/c/Users/manat/plate-app/src\" && echo \"=== App.jsx: บันทึกใบประเมินราคา / Service ===\"; grep -n \"บันทึกใบประเมินราคา\\\\|ประเมินราคา\\\\|quote\\\\|Quote\\\\|Service\" pages/../App.jsx | head -20)",
+      "Bash(grep -n \"receiptDetail && \\(\\\\|detailRow && \\(\\\\|editingReceiptGrouped && \\(\\\\|^    </div>\\\\s*$\\\\|^  \\);\\\\s*$\\\\|^}\\\\s*$\" BillingPage.jsx)"
     ]
   }
 }

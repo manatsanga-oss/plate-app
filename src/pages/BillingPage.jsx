@@ -33,6 +33,11 @@ export default function BillingPage({ currentUser }) {
   const [receiptGroupedPayments, setReceiptGroupedPayments] = useState([]);
   const [editingReceiptGrouped, setEditingReceiptGrouped] = useState(null); // row ที่กำลังแก้
   const [receiptDetail, setReceiptDetail] = useState(null); // ข้อมูลใบรับเรื่องที่จะแสดงใน popup
+  const [linkPicker, setLinkPicker] = useState(null);   // แถวที่กำลังผูกใบรับเรื่อง
+  const [linkKw, setLinkKw] = useState("");
+  const [linkResults, setLinkResults] = useState([]);
+  const [linkLoading, setLinkLoading] = useState(false);
+  const [linkSaving, setLinkSaving] = useState(false);
   const [editingPayDocNo, setEditingPayDocNo] = useState(null); // paid_doc_no ที่กำลัง edit (null = new payment mode)
   const [receiptSelectedKeys, setReceiptSelectedKeys] = useState(new Set()); // checkbox ใน popup
   const [receiptSaving, setReceiptSaving] = useState(false);
@@ -437,6 +442,35 @@ export default function BillingPage({ currentUser }) {
       fetchData();
     } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
     setReceiptSaving(false);
+  }
+
+  // ── ผูกใบรับเรื่อง (linked_receipt_no) ให้รายการที่ยังไม่มีเลขที่รับเรื่อง ──
+  function openLinkPicker(r) {
+    setLinkPicker(r);
+    const kw0 = r.chassis_no || r.engine_no || r.customer_name || "";
+    setLinkKw(kw0);
+    setLinkResults([]);
+    if (kw0.trim()) searchLinkReceipts(kw0);
+  }
+  async function searchLinkReceipts(k = linkKw) {
+    if (!String(k).trim()) { setLinkResults([]); return; }
+    setLinkLoading(true);
+    try {
+      const data = await post({ action: "search_receipt_work", keyword: String(k).trim() });
+      setLinkResults(Array.isArray(data) ? data.filter(Boolean) : []);
+    } catch { setLinkResults([]); }
+    setLinkLoading(false);
+  }
+  async function linkReceipt(receiptNo) {
+    if (!linkPicker || !receiptNo) return;
+    setLinkSaving(true);
+    try {
+      await post({ action: "update_submission", submission_id: linkPicker.submission_id, linked_receipt_no: receiptNo });
+      setMessage(`✅ ผูกใบรับเรื่อง ${receiptNo} แล้ว — กดบันทึกวางบิลเพื่อสร้างยอดบิล`);
+      setLinkPicker(null);
+      fetchData();
+    } catch { setMessage("❌ ผูกใบรับเรื่องไม่สำเร็จ"); }
+    setLinkSaving(false);
   }
 
   const kw = search.trim().toLowerCase();
@@ -935,7 +969,10 @@ export default function BillingPage({ currentUser }) {
                       <a onClick={() => openReceiptDetail(r)} style={{ color: "#7c3aed", cursor: "pointer", textDecoration: "underline" }}>
                         {r.linked_receipt_no || r.receipt_no}
                       </a>
-                    ) : "-"}
+                    ) : (
+                      <button onClick={() => openLinkPicker(r)} title="ผูกกับใบรับเรื่อง (เพื่อให้ขึ้นยอดบิลในวางบิลงานรับเรื่อง)"
+                        style={{ padding: "3px 8px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, whiteSpace: "nowrap" }}>🔗 ผูกใบรับเรื่อง</button>
+                    )}
                   </td>
                                   <td style={{ textAlign: "right", fontWeight: 700, fontSize: 15, color: "#072d6b" }}>
                                     {r.bill_amount ? Number(r.bill_amount).toLocaleString() : "—"}
@@ -1006,7 +1043,10 @@ export default function BillingPage({ currentUser }) {
                       <a onClick={() => openReceiptDetail(r)} style={{ color: "#7c3aed", cursor: "pointer", textDecoration: "underline" }}>
                         {r.linked_receipt_no || r.receipt_no}
                       </a>
-                    ) : "-"}
+                    ) : (
+                      <button onClick={() => openLinkPicker(r)} title="ผูกกับใบรับเรื่อง (เพื่อให้ขึ้นยอดบิลในวางบิลงานรับเรื่อง)"
+                        style={{ padding: "3px 8px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, whiteSpace: "nowrap" }}>🔗 ผูกใบรับเรื่อง</button>
+                    )}
                   </td>
                   <td style={{ fontSize: 11 }}>
                     {(() => {
@@ -1579,6 +1619,64 @@ export default function BillingPage({ currentUser }) {
           </div>
         );
       })()}
+
+      {/* ── Popup ผูกใบรับเรื่อง ── */}
+      {linkPicker && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+          onClick={() => setLinkPicker(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 760, maxWidth: "96vw", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <h3 style={{ margin: 0, color: "#7c3aed" }}>🔗 ผูกใบรับเรื่อง</h3>
+              <button onClick={() => setLinkPicker(null)} style={{ padding: "4px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+              ใบขาย <b style={{ fontFamily: "monospace" }}>{linkPicker.invoice_no || "-"}</b> · ลูกค้า {linkPicker.customer_name || "-"} · เลขเครื่อง {linkPicker.engine_no || "-"} · เลขถัง {linkPicker.chassis_no || "-"}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              <input value={linkKw} onChange={e => setLinkKw(e.target.value)} onKeyDown={e => e.key === "Enter" && searchLinkReceipts()}
+                placeholder="ค้นหา เลขที่รับเรื่อง / ลูกค้า / เลขถัง / เลขเครื่อง / ทะเบียน"
+                style={{ flex: 1, padding: "8px 12px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 13 }} />
+              <button onClick={() => searchLinkReceipts()} disabled={linkLoading}
+                style={{ padding: "8px 18px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+                {linkLoading ? "..." : "🔍 ค้นหา"}
+              </button>
+            </div>
+            {linkLoading ? <div style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>กำลังค้นหา...</div>
+              : linkResults.length === 0 ? <div style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่พบใบรับเรื่อง</div>
+                : (
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <thead style={{ background: "#faf5ff" }}>
+                      <tr>
+                        <th style={{ padding: 8, textAlign: "left" }}>เลขที่รับเรื่อง</th>
+                        <th style={{ padding: 8, textAlign: "left" }}>ลูกค้า</th>
+                        <th style={{ padding: 8, textAlign: "left" }}>เลขถัง</th>
+                        <th style={{ padding: 8, textAlign: "left" }}>รุ่น</th>
+                        <th style={{ padding: 8, textAlign: "right" }}>ยอด</th>
+                        <th style={{ padding: 8 }}></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {linkResults.map((r, i) => (
+                        <tr key={(r.receipt_no || "") + "-" + i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                          <td style={{ padding: 7, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.receipt_no || "-"}</td>
+                          <td style={{ padding: 7 }}>{r.customer_name || "-"}</td>
+                          <td style={{ padding: 7, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
+                          <td style={{ padding: 7 }}>{[r.brand, r.model_series].filter(Boolean).join(" ") || "-"}</td>
+                          <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.work_total || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td style={{ padding: 7, textAlign: "center" }}>
+                            <button onClick={() => linkReceipt(r.receipt_no)} disabled={linkSaving || !r.receipt_no}
+                              style={{ padding: "4px 12px", background: linkSaving ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 6, cursor: linkSaving ? "not-allowed" : "pointer", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
+                              ✓ ผูกอันนี้
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
