@@ -137,7 +137,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     setPicked((prev) =>
       prev.some((x) => x.code === p.code && x.model === m)
         ? prev
-        : [...prev, { model: m, code: p.code, color: current?.name || "", name: null, price: null, loading: true }]
+        : [...prev, { model: m, code: p.code, color: current?.name || "", name: null, price: null, qty: 1, loading: true }]
     );
     fetchPrice(p.code).then((info) => {
       setPicked((prev) =>
@@ -179,7 +179,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     const m = model.model;
     if (isPicked(code, m)) { setAddStatus("dup"); return; }
     const priceNum = addPrice === "" ? null : Number(addPrice);
-    setPicked((prev) => [...prev, { model: m, code, color: "เพิ่มเอง", name: addName.trim(), price: isNaN(priceNum) ? null : priceNum, loading: false }]);
+    setPicked((prev) => [...prev, { model: m, code, color: "เพิ่มเอง", name: addName.trim(), price: isNaN(priceNum) ? null : priceNum, qty: 1, loading: false }]);
     setShowAdd(false);
   };
 
@@ -200,7 +200,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
   const [hist, setHist] = useState(null);
 
   // คำนวณเงิน (ราคาอะไหล่ = VAT-incl ตามฟอร์ม)
-  const partsTotal = picked.reduce((s, p) => s + (Number(p.price) || 0), 0);
+  const partsTotal = picked.reduce((s, p) => s + (Number(p.price) || 0) * (Number(p.qty) || 1), 0);
   const laborNet = (Number(q.labor) || 0) - (Number(q.labor_discount) || 0);
   const partsNet = partsTotal - (Number(q.parts_discount) || 0);
   const grand = laborNet + partsNet;            // รวมภาษี
@@ -216,7 +216,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     labor: Number(q.labor) || 0, labor_discount: Number(q.labor_discount) || 0,
     parts_total: partsTotal, parts_discount: Number(q.parts_discount) || 0,
     subtotal, vat, grand_total: grand,
-    items: picked.map((p) => ({ code: p.code, name: p.name || "", model: p.model, color: p.color, qty: 1, price: Number(p.price) || 0, amount: Number(p.price) || 0 })),
+    items: picked.map((p) => ({ code: p.code, name: p.name || "", model: p.model, color: p.color, qty: Number(p.qty) || 1, price: Number(p.price) || 0, amount: (Number(p.price) || 0) * (Number(p.qty) || 1) })),
   });
 
   const saveQuote = async () => {
@@ -248,7 +248,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
       customer_name: q.customer_name, customer_address: q.customer_address, customer_phone: q.customer_phone, customer_tax_id: q.customer_tax_id,
       model: (model?.model || "") + (current?.name ? " " + current.name : ""), color: current?.code || "",
       plate_no: q.plate_no, model_year: q.model_year, mileage: q.mileage, vin: q.vin, engine_no: q.engine_no, problem: q.problem,
-      items: picked.map((p) => ({ code: p.code, name: p.name || "", amount: Number(p.price) || 0 })),
+      items: picked.map((p) => ({ code: p.code, name: p.name || "", qty: Number(p.qty) || 1, price: Number(p.price) || 0, amount: (Number(p.price) || 0) * (Number(p.qty) || 1) })),
       labor: Number(q.labor) || 0, labor_discount: Number(q.labor_discount) || 0, laborNet,
       parts_total: partsTotal, parts_discount: Number(q.parts_discount) || 0, partsNet,
       subtotal, vat, grand_total: grand,
@@ -299,7 +299,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     } catch (e) { alert("เปิดไม่สำเร็จ: " + (e.message || e)); }
   };
 
-  const total = picked.reduce((s, p) => s + (Number(p.price) || 0), 0);
+  const total = picked.reduce((s, p) => s + (Number(p.price) || 0) * (Number(p.qty) || 1), 0);
   const selStyle = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 14, background: "#fff" };
   const lbl = { fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 };
 
@@ -473,7 +473,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
                   <th>รุ่น</th>
                   <th>รหัสอะไหล่</th>
                   <th>ชื่ออะไหล่</th>
-                  <th>สี</th>
+                  <th style={{ width: 80, textAlign: "right" }}>จำนวน</th>
                   <th style={{ textAlign: "right" }}>ราคาขาย</th>
                   <th style={{ width: 40 }}></th>
                 </tr>
@@ -505,7 +505,16 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
                           />
                         ) : p.loading ? <span style={{ color: "#94a3b8" }}>…</span> : (p.name || <span style={{ color: "#cbd5e1" }}>-</span>)}
                       </td>
-                      <td style={{ fontSize: 12, color: "#64748b" }}>{p.color}</td>
+                      <td style={{ textAlign: "right" }}>
+                        <input
+                          type="number"
+                          min="1"
+                          value={p.qty ?? 1}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => updateRow(i, "qty", Math.max(1, Number(e.target.value) || 1))}
+                          style={{ width: 60, padding: "4px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontSize: 13, textAlign: "right" }}
+                        />
+                      </td>
                       <td style={{ textAlign: "right", fontWeight: 600 }}>
                         {editing ? (
                           <input
