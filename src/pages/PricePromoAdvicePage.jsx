@@ -175,8 +175,7 @@ export default function PricePromoAdvicePage() {
       all.sort((a, b) => b.sold - a.sold);
       setRows(all);
       const matchPrice = all.filter((r) => r.price != null).length;
-      const dbg = all.find((r) => r.code === "ACB125CBTP"); // Click125 — debug ชั่วคราว
-      setMessage(`✅ [BUILD-v3] ${all.length} รุ่น/แบบ · มีราคา ${matchPrice} · ช่วงขาย ${W.from} ถึง ${W.to} · DBG Click125 ราคาปัจจุบัน=${dbg ? dbg.price : "?"} โรงงาน=${dbg ? dbg.priceFactory : "?"}`);
+      setMessage(`✅ ${all.length} รุ่น/แบบ · มีราคา ${matchPrice} · ช่วงขาย ${W.from} ถึง ${W.to} (เทียบรอบก่อน ${W.pfrom}–${W.pto})`);
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + (e && e.message ? e.message : String(e)));
       setRows([]);
