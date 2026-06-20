@@ -92,12 +92,13 @@ export default function PricePromoAdvicePage() {
   async function load() {
     setLoading(true); setMessage("");
     try {
-      const [thCur, tyCur, thPrev, tyPrev, prices, expenses, types] = await Promise.all([
+      const [thCur, tyCur, thPrev, tyPrev, pricesNow, pricesPrev, expenses, types] = await Promise.all([
         post(ST_API, { action: "turnover", brand: "HONDA", date_from: W.from, date_to: W.to }),
         post(ST_API, { action: "turnover", brand: "YAMAHA", date_from: W.from, date_to: W.to }),
         post(ST_API, { action: "turnover", brand: "HONDA", date_from: W.pfrom, date_to: W.pto }),
         post(ST_API, { action: "turnover", brand: "YAMAHA", date_from: W.pfrom, date_to: W.pto }),
-        post(MASTER_API, { action: "get_moto_prices" }),
+        post(MASTER_API, { action: "get_moto_prices", as_of: W.to }),   // ราคา ณ สิ้นรอบนี้
+        post(MASTER_API, { action: "get_moto_prices", as_of: W.pto }),  // ราคา ณ สิ้นรอบก่อน (เทียบ)
         post(MASTER_API, { action: "get_sale_expenses" }),
         post(MASTER_API, { action: "get_types" }),
       ]);
@@ -108,33 +109,34 @@ export default function PricePromoAdvicePage() {
         typeByKey[norm(t.model_code) + "|" + norm(t.type_name)] = t;
         typeById[t.type_id] = t;
       }
-      // ราคาแนะนำล่าสุดต่อ type_id (effective_date <= วันนี้, เอาล่าสุด)
-      const today = todayISO();
-      const priceByType = {}; // type_id → {factory:{amount,eff}, adj:{amount,eff}}
-      for (const p of prices) {
-        const lv = Number(p.price_type_id);
-        if (lv !== PRICE_FACTORY && lv !== PRICE_ADJ) continue;
-        const eff = String(p.effective_date || "").slice(0, 10);
-        if (eff && eff > today) continue;
-        const slot = lv === PRICE_FACTORY ? "factory" : "adj";
-        const rec = priceByType[p.type_id] || (priceByType[p.type_id] = {});
-        if (!rec[slot] || eff > rec[slot].eff) rec[slot] = { amount: Number(p.amount), eff };
-      }
-      // กรองด้วย "ชื่อโปร" = ค่าคอมพิเศษ / เงินดาวน์ออกแทน (โปรที่มีผลต่อยอดขายจริง)
-      // อยู่ได้หลายระดับ (type/series/brand) · ไม่เอาค่าประกัน/อื่น ๆ
+      // ราคา id=1(โรงงาน)/id=5(สิงห์ชัย ไฟแนนซ์) ต่อ type_id — แยกรอบนี้/รอบก่อน (server กรอง as_of แล้ว)
+      const buildPrices = (rows) => {
+        const m = {};
+        for (const p of (Array.isArray(rows) ? rows : [])) {
+          const lv = Number(p.price_type_id);
+          if (lv !== PRICE_FACTORY && lv !== PRICE_ADJ) continue;
+          const eff = String(p.effective_date || "").slice(0, 10);
+          const slot = lv === PRICE_FACTORY ? "factory" : "adj";
+          const rec = m[p.type_id] || (m[p.type_id] = {});
+          if (!rec[slot] || eff > rec[slot].eff) rec[slot] = { amount: Number(p.amount), eff };
+        }
+        return m;
+      };
+      const priceByType = buildPrices(pricesNow);
+      const priceByTypePrev = buildPrices(pricesPrev);
+
+      // โปร ค่าคอมพิเศษ/เงินดาวน์ออกแทน ทุกระดับ (type/series/brand) — เก็บ eff/end ไว้คำนวณ active ณ วันที่
       const isSalesPromo = (name) => { const n = String(name || ""); return n.includes("คอมพิเศษ") || n.includes("ดาวน์ออกแทน"); };
-      const promoByType = {}, promoBySeries = {}, promoByBrand = {};
+      const promoType = {}, promoSeries = {}, promoBrand = {};
       for (const e of expenses) {
         if (e.expense_type !== "promotion" || e.status !== "active") continue;
         if (!isSalesPromo(e.expense_name)) continue;
-        const eff = String(e.effective_date || "").slice(0, 10), end = String(e.end_date || "").slice(0, 10);
-        if (eff && eff > today) continue;
-        if (end && end < today) continue;
-        const item = { name: e.expense_name, amount: Number(e.amount) || 0 };
-        if (e.group_by === "type" && e.type_id != null) (promoByType[String(e.type_id)] || (promoByType[String(e.type_id)] = [])).push(item);
-        else if (e.group_by === "series") { const sid = String(e.note || "").split("|")[0]; if (sid) (promoBySeries[sid] || (promoBySeries[sid] = [])).push(item); }
-        else if (e.group_by === "brand" && e.brand_id != null) (promoByBrand[String(e.brand_id)] || (promoByBrand[String(e.brand_id)] = [])).push(item);
+        const item = { name: e.expense_name, amount: Number(e.amount) || 0, eff: String(e.effective_date || "").slice(0, 10), end: String(e.end_date || "").slice(0, 10) };
+        if (e.group_by === "type" && e.type_id != null) (promoType[String(e.type_id)] || (promoType[String(e.type_id)] = [])).push(item);
+        else if (e.group_by === "series") { const sid = String(e.note || "").split("|")[0]; if (sid) (promoSeries[sid] || (promoSeries[sid] = [])).push(item); }
+        else if (e.group_by === "brand" && e.brand_id != null) (promoBrand[String(e.brand_id)] || (promoBrand[String(e.brand_id)] = [])).push(item);
       }
+      const activeAt = (items, D) => items.filter((x) => (!x.eff || x.eff <= D) && (!x.end || x.end >= D));
 
       // รวม turnover เป็นระดับ (model_code|type) ต่อยี่ห้อ
       function aggregate(curRows, prevRows, brand) {
@@ -151,23 +153,31 @@ export default function PricePromoAdvicePage() {
         return Object.entries(cur).map(([k, v]) => {
           const t = typeByKey[k];
           const tid = t ? t.type_id : null;
+          const amt = (rec, slot) => (rec && rec[slot] && Number.isFinite(rec[slot].amount) ? rec[slot].amount : null);
           const pinfo = tid != null ? priceByType[tid] : null;
-          const priceAdj = pinfo && pinfo.adj && Number.isFinite(pinfo.adj.amount) ? pinfo.adj.amount : null;
-          const priceFactory = pinfo && pinfo.factory && Number.isFinite(pinfo.factory.amount) ? pinfo.factory.amount : null;
-          // ค่าคอม/เงินดาวน์ออกแทน ที่ใช้กับรุ่นนี้ — รวมทุกระดับ (type + รุ่น/series + ยี่ห้อ/brand)
-          const promoItems = [
-            ...((tid != null && promoByType[String(tid)]) || []),
-            ...((t && promoBySeries[String(t.series_id)]) || []),
-            ...((t && promoByBrand[String(t.brand_id)]) || []),
+          const pinfoPrev = tid != null ? priceByTypePrev[tid] : null;
+          const priceAdj = amt(pinfo, "adj");          // ราคา id=5 รอบนี้
+          const priceAdjPrev = amt(pinfoPrev, "adj");  // ราคา id=5 รอบก่อน
+          const priceFactory = amt(pinfo, "factory");
+          const priceChanged = priceAdj !== priceAdjPrev; // เปลี่ยน → โชว์สีแดง+ค่าก่อน
+          // ค่าคอม/เงินดาวน์ออกแทน ทุกระดับ (type + series + brand) แล้วกรอง active ณ สิ้นรอบนี้/รอบก่อน
+          const poolItems = [
+            ...((tid != null && promoType[String(tid)]) || []),
+            ...((t && promoSeries[String(t.series_id)]) || []),
+            ...((t && promoBrand[String(t.brand_id)]) || []),
           ];
-          const promo = promoItems.reduce((s, x) => s + x.amount, 0);
-          const promoTotal = promo;
-          const a = advise(v.sold, prev[k] != null ? prev[k] : null, v.stock, promo, v.received);
+          const promoItems = activeAt(poolItems, W.to);
+          const promoPrevItems = activeAt(poolItems, W.pto);
+          const promoTotal = promoItems.reduce((s, x) => s + x.amount, 0);
+          const promoPrevTotal = promoPrevItems.reduce((s, x) => s + x.amount, 0);
+          const promoChanged = promoTotal !== promoPrevTotal;
+          const a = advise(v.sold, prev[k] != null ? prev[k] : null, v.stock, promoTotal, v.received);
           return {
             brand, key: brand + "|" + k, model: v.model, code: v.code, type: v.type,
             series: t ? t.marketing_name || t.series_name : v.model,
             sold: v.sold, soldPrev: prev[k] != null ? prev[k] : null, stock: v.stock, received: v.received,
-            priceAdj, priceFactory, promoTotal, promoItems, ...a,
+            priceAdj, priceAdjPrev, priceChanged, priceFactory,
+            promoTotal, promoPrevTotal, promoChanged, promoItems, ...a,
           };
         });
       }
@@ -252,13 +262,17 @@ export default function PricePromoAdvicePage() {
                 <td style={{ ...td, fontWeight: 700, color: r.sell >= 0.8 ? "#059669" : r.sell >= 0.5 ? "#d97706" : "#dc2626" }}>{Math.round(r.sell * 100)}%</td>
                 <td style={td}>{r.sold > 0 ? r.mos.toFixed(1) : r.stock > 0 ? "∞" : "-"}</td>
                 <td style={{ ...td, textAlign: "right", color: "#6b7280" }}>{baht(r.priceFactory)}</td>
-                <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(r.priceAdj)}</td>
+                <td style={{ ...td, textAlign: "right" }}>
+                  <span style={{ fontWeight: 700, color: r.priceChanged ? "#dc2626" : "#111827" }}>{baht(r.priceAdj)}</span>
+                  {r.priceChanged && <div style={{ fontSize: 9, color: "#9ca3af" }}>เดือนก่อน {baht(r.priceAdjPrev)}</div>}
+                </td>
                 <td style={{ ...td, textAlign: "left", fontSize: 11 }} title={r.promoItems.map((x) => `${x.name} ${baht(x.amount)}`).join("\n")}>
-                  {r.promoItems.length === 0 ? <span style={{ color: "#9ca3af" }}>-</span> : (
+                  {r.promoItems.length === 0 && !r.promoChanged ? <span style={{ color: "#9ca3af" }}>-</span> : (
                     <>
-                      <div style={{ fontWeight: 700, textAlign: "right" }}>{baht(r.promoTotal)}</div>
+                      <div style={{ fontWeight: 700, textAlign: "right", color: r.promoChanged ? "#dc2626" : "#111827" }}>{r.promoItems.length === 0 ? "0" : baht(r.promoTotal)}</div>
                       {r.promoItems.slice(0, 3).map((x, i) => <div key={i} style={{ color: "#6b7280", fontSize: 9, whiteSpace: "nowrap" }}>{x.name} {baht(x.amount)}</div>)}
                       {r.promoItems.length > 3 && <div style={{ fontSize: 9, color: "#9ca3af" }}>+{r.promoItems.length - 3} อื่น ๆ</div>}
+                      {r.promoChanged && <div style={{ fontSize: 9, color: "#9ca3af" }}>เดือนก่อน {baht(r.promoPrevTotal)}</div>}
                     </>
                   )}
                 </td>
