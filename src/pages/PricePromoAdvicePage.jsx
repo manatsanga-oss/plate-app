@@ -120,16 +120,20 @@ export default function PricePromoAdvicePage() {
         const rec = priceByType[p.type_id] || (priceByType[p.type_id] = {});
         if (!rec[slot] || eff > rec[slot].eff) rec[slot] = { amount: Number(p.amount), eff };
       }
-      // โปรระดับ TYPE เท่านั้น (ค่าคอมพิเศษ / เงินดาวน์ออกแทน) = โปรที่มีผลต่อยอดขายจริง
-      // โปรระดับยี่ห้อ/รุ่น (ประกัน ฯลฯ) ไม่ค่อยเปลี่ยน ไม่มีผลกับยอดขาย → ไม่รวม
-      const promoByType = {};
+      // กรองด้วย "ชื่อโปร" = ค่าคอมพิเศษ / เงินดาวน์ออกแทน (โปรที่มีผลต่อยอดขายจริง)
+      // อยู่ได้หลายระดับ (type/series/brand) · ไม่เอาค่าประกัน/อื่น ๆ
+      const isSalesPromo = (name) => { const n = String(name || ""); return n.includes("คอมพิเศษ") || n.includes("ดาวน์ออกแทน"); };
+      const promoByType = {}, promoBySeries = {}, promoByBrand = {};
       for (const e of expenses) {
-        if (e.group_by !== "type" || e.expense_type !== "promotion" || e.status !== "active") continue;
+        if (e.expense_type !== "promotion" || e.status !== "active") continue;
+        if (!isSalesPromo(e.expense_name)) continue;
         const eff = String(e.effective_date || "").slice(0, 10), end = String(e.end_date || "").slice(0, 10);
         if (eff && eff > today) continue;
         if (end && end < today) continue;
-        if (e.type_id == null) continue;
-        (promoByType[String(e.type_id)] || (promoByType[String(e.type_id)] = [])).push({ name: e.expense_name, amount: Number(e.amount) || 0 });
+        const item = { name: e.expense_name, amount: Number(e.amount) || 0 };
+        if (e.group_by === "type" && e.type_id != null) (promoByType[String(e.type_id)] || (promoByType[String(e.type_id)] = [])).push(item);
+        else if (e.group_by === "series") { const sid = String(e.note || "").split("|")[0]; if (sid) (promoBySeries[sid] || (promoBySeries[sid] = [])).push(item); }
+        else if (e.group_by === "brand" && e.brand_id != null) (promoByBrand[String(e.brand_id)] || (promoByBrand[String(e.brand_id)] = [])).push(item);
       }
 
       // รวม turnover เป็นระดับ (model_code|type) ต่อยี่ห้อ
@@ -150,7 +154,12 @@ export default function PricePromoAdvicePage() {
           const pinfo = tid != null ? priceByType[tid] : null;
           const priceAdj = pinfo && pinfo.adj && Number.isFinite(pinfo.adj.amount) ? pinfo.adj.amount : null;
           const priceFactory = pinfo && pinfo.factory && Number.isFinite(pinfo.factory.amount) ? pinfo.factory.amount : null;
-          const promoItems = (tid != null && promoByType[String(tid)]) || [];
+          // ค่าคอม/เงินดาวน์ออกแทน ที่ใช้กับรุ่นนี้ — รวมทุกระดับ (type + รุ่น/series + ยี่ห้อ/brand)
+          const promoItems = [
+            ...((tid != null && promoByType[String(tid)]) || []),
+            ...((t && promoBySeries[String(t.series_id)]) || []),
+            ...((t && promoByBrand[String(t.brand_id)]) || []),
+          ];
           const promo = promoItems.reduce((s, x) => s + x.amount, 0);
           const promoTotal = promo;
           const a = advise(v.sold, prev[k] != null ? prev[k] : null, v.stock, promo, v.received);
