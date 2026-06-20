@@ -42,10 +42,11 @@ export default function StockTurnoverReportPage() {
   const [fModel, setFModel] = useState("");
   const [fType, setFType] = useState("");
   const [fColor, setFColor] = useState("");
+  const [expandedRuns, setExpandedRuns] = useState({}); // กดขยายดูแบบ/สีในแต่ละรุ่น
 
   async function loadStock() {
     setStockLoading(true);
-    const data = await callApi({ action: "stock_on_hand", brand, as_of: asOf });
+    const data = await callApi({ action: "stock_on_hand", brand, as_of: asOf, deduct_sales: true });
     setStockRows(Array.isArray(data) ? data : []);
     setStockLoading(false);
   }
@@ -72,6 +73,31 @@ export default function StockTurnoverReportPage() {
   const modelOpts = useMemo(() => [...new Set(dims.map(d => d.model).filter(Boolean))].sort(), [dims]);
   const typeOpts = useMemo(() => [...new Set(dims.filter(d => !fModel || d.model === fModel).map(d => d.type).filter(Boolean))].sort(), [dims, fModel]);
   const colorOpts = useMemo(() => [...new Set(dims.filter(d => (!fModel || d.model === fModel) && (!fType || d.type === fType)).map(d => d.color).filter(Boolean))].sort(), [dims, fModel, fType]);
+
+  // tree ซ้อน: รุ่น → แบบ(code) → type → สี (รวม KPI ทุกชั้น) จาก byModel
+  const tree = useMemo(() => {
+    const runs = new Map();
+    for (const r of turnoverData.byModel) {
+      const run = r.model || "-", code = r.code || "-", type = r.type || "-", color = r.color || "-";
+      if (!runs.has(run)) runs.set(run, { name: run, _a: aggInit(), codes: new Map() });
+      const R = runs.get(run); aggAdd(R._a, r);
+      if (!R.codes.has(code)) R.codes.set(code, { name: code, _a: aggInit(), types: new Map() });
+      const C = R.codes.get(code); aggAdd(C._a, r);
+      if (!C.types.has(type)) C.types.set(type, { name: type, _a: aggInit(), colors: [] });
+      const T = C.types.get(type); aggAdd(T._a, r);
+      const ca = aggInit(); aggAdd(ca, r);
+      T.colors.push({ name: color, agg: aggFinal(ca) });
+    }
+    const arr = [...runs.values()].map(R => ({
+      name: R.name, agg: aggFinal(R._a),
+      codes: [...R.codes.values()].map(C => ({
+        name: C.name, agg: aggFinal(C._a),
+        types: [...C.types.values()].map(T => ({ name: T.name, agg: aggFinal(T._a), colors: T.colors })),
+      })),
+    }));
+    arr.sort((a, b) => (a.agg.avg_days ?? 1e9) - (b.agg.avg_days ?? 1e9));
+    return arr;
+  }, [turnoverData.byModel]);
 
   const stockSummary = useMemo(() => {
     const total = stockRows.length;
@@ -200,7 +226,7 @@ export default function StockTurnoverReportPage() {
             <span style={{ fontWeight: 600, color: "#374151" }}>🔎 กรอง:</span>
             <select value={fModel} onChange={e => { const v = e.target.value; setFModel(v); setFType(""); setFColor(""); loadTurnover({ fModel: v, fType: "", fColor: "" }); }}
               style={selFil}>
-              <option value="">รุ่น/แบบ ทั้งหมด</option>
+              <option value="">รุ่น ทั้งหมด</option>
               {modelOpts.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             <select value={fType} onChange={e => { const v = e.target.value; setFType(v); setFColor(""); loadTurnover({ fType: v, fColor: "" }); }}
@@ -219,52 +245,58 @@ export default function StockTurnoverReportPage() {
             )}
           </div>
 
-          {/* KPI cards */}
-          {turnoverData.summary && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 14 }}>
-              <KPI label="📦 ขายในช่วง" value={fmtInt(turnoverData.summary.sold_qty)} unit="คัน" color="#059669" />
-              <KPI label="📥 รับเข้าในช่วง" value={fmtInt(turnoverData.summary.received_qty)} unit="คัน" color="#0369a1" />
-              <KPI label="📊 สต๊อกเฉลี่ย" value={fmt(turnoverData.summary.avg_stock, 1)} unit="คัน" color="#7c3aed" />
-              <KPI label="🔄 Turnover Ratio" value={fmt(turnoverData.summary.turnover_ratio, 2)} unit="รอบ" color="#dc2626" />
-              <KPI label="⏱️ วันเฉลี่ยที่ขายได้" value={fmt(turnoverData.summary.avg_days_to_sell, 1)} unit="วัน" color="#d97706" />
-              <KPI label="💰 COGS" value={fmt(turnoverData.summary.cogs, 0)} unit="บาท" color="#374151" />
-            </div>
-          )}
-
-          {/* By Model table */}
+          {/* ตารางกลุ่มตามรุ่น (กดขยายดูแบบ/type/สี) */}
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflow: "hidden" }}>
             <div style={{ padding: "10px 14px", background: "#f3f4f6", borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>
-              📋 ตามรุ่น/สี (เรียงจากหมุนไว → ช้า)
+              📋 ตามรุ่น (เรียงจากหมุนไว → ช้า) · กดที่รุ่นเพื่อดูแบบ/type/สี
             </div>
-            <div style={{ overflowX: "auto", maxHeight: "55vh" }}>
+            <div style={{ overflowX: "auto", maxHeight: "62vh" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead style={{ background: "#f9fafb", position: "sticky", top: 0 }}>
                   <tr>
                     <th style={th}>#</th>
-                    <th style={th}>รุ่น/แบบ</th>
-                    <th style={th}>type</th>
-                    <th style={th}>สี</th>
+                    <th style={th}>รุ่น</th>
                     <th style={{ ...th, textAlign: "right" }}>ขาย (คัน)</th>
                     <th style={{ ...th, textAlign: "right" }}>วันเฉลี่ย</th>
+                    <th style={{ ...th, textAlign: "right" }}>อัตราหมุน<br/><span style={{ fontWeight: 400, fontSize: 10, color: "#6b7280" }}>(รอบ)</span></th>
                     <th style={{ ...th, textAlign: "right" }}>สต๊อกคงเหลือ<br/><span style={{ fontWeight: 400, fontSize: 10, color: "#6b7280" }}>(ณ {fmtDate(dateTo)})</span></th>
                   </tr>
                 </thead>
                 <tbody>
                   {turnLoading ? (
-                    <tr><td colSpan={7} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
-                  ) : turnoverData.byModel.length === 0 ? (
-                    <tr><td colSpan={7} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
-                  ) : turnoverData.byModel.map((r, i) => (
-                    <tr key={i} style={{ borderTop: "1px solid #f3f4f6" }}>
-                      <td style={td}>{i + 1}</td>
-                      <td style={{ ...td, fontWeight: 600 }}>{r.model || "-"}</td>
-                      <td style={td}>{r.type || "-"}</td>
-                      <td style={td}>{r.color || "-"}</td>
-                      <td style={{ ...td, textAlign: "right", fontWeight: 600, color: "#059669" }}>{fmtInt(r.sold_qty)}</td>
-                      <td style={{ ...td, textAlign: "right", color: r.avg_days > 90 ? "#dc2626" : r.avg_days > 60 ? "#d97706" : "#374151", fontWeight: 600 }}>{r.avg_days != null ? fmt(r.avg_days, 1) : "-"}</td>
-                      <td style={{ ...td, textAlign: "right", color: "#0369a1" }}>{fmtInt(r.stock_end_qty)}</td>
-                    </tr>
-                  ))}
+                    <tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
+                  ) : tree.length === 0 ? (
+                    <tr><td colSpan={6} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
+                  ) : tree.map((R, ri) => {
+                    const rk = R.name, ro = !!expandedRuns[rk];
+                    const tog = (k) => setExpandedRuns(s => ({ ...s, [k]: !s[k] }));
+                    return (
+                      <React.Fragment key={rk}>
+                        {metricRow({ level: 0, num: ri + 1, label: R.name, agg: R.agg, hasChildren: true, open: ro, onToggle: () => tog(rk) })}
+                        {ro && R.codes.map((C) => {
+                          const ck = rk + "|" + C.name, co = !!expandedRuns[ck];
+                          return (
+                            <React.Fragment key={ck}>
+                              {metricRow({ level: 1, num: null, label: "แบบ " + C.name, agg: C.agg, hasChildren: true, open: co, onToggle: () => tog(ck) })}
+                              {co && C.types.map((T) => {
+                                const tk = ck + "|" + T.name, to = !!expandedRuns[tk];
+                                return (
+                                  <React.Fragment key={tk}>
+                                    {metricRow({ level: 2, num: null, label: "type " + T.name, agg: T.agg, hasChildren: true, open: to, onToggle: () => tog(tk) })}
+                                    {to && T.colors.map((L, li) => (
+                                      <React.Fragment key={tk + "|c" + li}>
+                                        {metricRow({ level: 3, num: null, label: "สี " + L.name, agg: L.agg, hasChildren: false, open: false, onToggle: null })}
+                                      </React.Fragment>
+                                    ))}
+                                  </React.Fragment>
+                                );
+                              })}
+                            </React.Fragment>
+                          );
+                        })}
+                      </React.Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -275,13 +307,37 @@ export default function StockTurnoverReportPage() {
   );
 }
 
-function KPI({ label, value, unit, color }) {
+function aggInit() { return { sold_qty: 0, received_qty: 0, stock_start: 0, stock_end: 0, sumDays: 0, soldForDays: 0 }; }
+function aggAdd(a, r) {
+  const sold = Number(r.sold_qty) || 0;
+  a.sold_qty += sold;
+  a.received_qty += Number(r.received_qty) || 0;
+  a.stock_start += Number(r.stock_start_qty) || 0;
+  a.stock_end += Number(r.stock_end_qty) || 0;
+  if (r.avg_days != null && sold > 0) { a.sumDays += Number(r.avg_days) * sold; a.soldForDays += sold; }
+}
+function aggFinal(a) {
+  const avgStock = (a.stock_start + a.stock_end) / 2;
+  return {
+    sold_qty: a.sold_qty, received_qty: a.received_qty, stock_start: a.stock_start, stock_end: a.stock_end,
+    avg_days: a.soldForDays > 0 ? a.sumDays / a.soldForDays : null,
+    turnover_ratio: avgStock > 0 ? a.sold_qty / avgStock : 0,
+  };
+}
+function metricRow({ level, num, label, agg, hasChildren, open, onToggle }) {
+  const bg = level === 0 ? (open ? "#eff6ff" : "#fff") : level === 1 ? "#f8fafc" : level === 2 ? "#fbfdff" : "#fff";
   return (
-    <div style={{ padding: 12, background: "#fff", borderRadius: 10, border: `2px solid ${color}`, textAlign: "center" }}>
-      <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 800, color }}>{value}</div>
-      <div style={{ fontSize: 11, color: "#6b7280" }}>{unit}</div>
-    </div>
+    <tr onClick={hasChildren ? onToggle : undefined}
+      style={{ borderTop: "1px solid #f1f5f9", cursor: hasChildren ? "pointer" : "default", background: bg, fontWeight: level === 0 ? 700 : level === 1 ? 600 : level === 2 ? 500 : 400 }}>
+      <td style={td}>{num ?? ""}</td>
+      <td style={{ ...td, paddingLeft: 8 + level * 22, color: level >= 1 ? "#475569" : "#111" }}>
+        {hasChildren ? (open ? "▾ " : "▸ ") : ""}{label}
+      </td>
+      <td style={{ ...td, textAlign: "right", color: "#059669" }}>{fmtInt(agg.sold_qty)}</td>
+      <td style={{ ...td, textAlign: "right" }}>{agg.avg_days != null ? fmt(agg.avg_days, 1) : "-"}</td>
+      <td style={{ ...td, textAlign: "right", color: "#dc2626" }}>{fmt(agg.turnover_ratio, 2)}</td>
+      <td style={{ ...td, textAlign: "right", color: "#0369a1" }}>{fmtInt(agg.stock_end)}</td>
+    </tr>
   );
 }
 
