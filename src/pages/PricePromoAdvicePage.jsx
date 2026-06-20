@@ -167,14 +167,14 @@ export default function PricePromoAdvicePage() {
             brand, key: brand + "|" + k, model: v.model, code: v.code, type: v.type,
             series: t ? t.marketing_name || t.series_name : v.model,
             sold: v.sold, soldPrev: prev[k] != null ? prev[k] : null, stock: v.stock, received: v.received,
-            price: priceAdj, priceFactory, promo, promoTotal, promoItems, ...a,
+            priceAdj, priceFactory, promoTotal, promoItems, ...a,
           };
         });
       }
       const all = [...aggregate(thCur, thPrev, "HONDA"), ...aggregate(tyCur, tyPrev, "YAMAHA")];
       all.sort((a, b) => b.sold - a.sold);
       setRows(all);
-      const matchPrice = all.filter((r) => r.price != null).length;
+      const matchPrice = all.filter((r) => r.priceAdj != null).length;
       setMessage(`✅ ${all.length} รุ่น/แบบ · มีราคา ${matchPrice} · ช่วงขาย ${W.from} ถึง ${W.to} (เทียบรอบก่อน ${W.pfrom}–${W.pto})`);
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + (e && e.message ? e.message : String(e)));
@@ -252,7 +252,7 @@ export default function PricePromoAdvicePage() {
                 <td style={{ ...td, fontWeight: 700, color: r.sell >= 0.8 ? "#059669" : r.sell >= 0.5 ? "#d97706" : "#dc2626" }}>{Math.round(r.sell * 100)}%</td>
                 <td style={td}>{r.sold > 0 ? r.mos.toFixed(1) : r.stock > 0 ? "∞" : "-"}</td>
                 <td style={{ ...td, textAlign: "right", color: "#6b7280" }}>{baht(r.priceFactory)}</td>
-                <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(r.price)}</td>
+                <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(r.priceAdj)}</td>
                 <td style={{ ...td, textAlign: "left", fontSize: 11 }} title={r.promoItems.map((x) => `${x.name} ${baht(x.amount)}`).join("\n")}>
                   {r.promoItems.length === 0 ? <span style={{ color: "#9ca3af" }}>-</span> : (
                     <>
