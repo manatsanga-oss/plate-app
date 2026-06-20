@@ -126,12 +126,14 @@ export default function FastMovingStockPage() {
     }
     // "ไม่ค้างรับเข้า": ซ่อนรายการที่ค้างรับเข้าสต๊อก
     // (ค้างรับเข้า = สั่งซื้อแล้ว + ไม่ค้างส่ง + วันที่สั่งซื้อ > วันที่รับเข้าล่าสุด หรือยังไม่เคยรับเข้า)
+    // เงื่อนไขเพิ่ม: สั่งซื้อก่อน 31/5/2569 (2026-05-31) ถือว่ารับเข้าหมดแล้ว → ไม่นับเป็นค้าง
     if (hidePendingReceipt && r.last_order_date && Number(r.backorder_qty || 0) <= 0) {
       const orderDate = new Date(r.last_order_date);
-      if (!isNaN(orderDate)) {
+      const RECEIPT_CUTOFF = new Date("2026-05-31"); // สั่งก่อนวันนี้ = รับเข้าแล้ว
+      if (!isNaN(orderDate) && orderDate.getTime() >= RECEIPT_CUTOFF.getTime()) {
         const receiptDate = r.last_receipt_date ? new Date(r.last_receipt_date) : null;
         const received = receiptDate && !isNaN(receiptDate) && receiptDate.getTime() >= orderDate.getTime();
-        if (!received) return false; // ยังค้างรับเข้า → ซ่อน
+        if (!received) return false; // ค้างรับเข้า (สั่งตั้งแต่ 31/5/2569 แต่ยังไม่รับ) → ซ่อน
       }
     }
     if (search) {

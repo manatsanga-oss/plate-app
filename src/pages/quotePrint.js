@@ -40,7 +40,7 @@ export function recordToQuoteData(rec) {
     customer_name: rec.customer_name, customer_address: rec.customer_address, customer_phone: rec.customer_phone, customer_tax_id: rec.customer_tax_id,
     model: rec.model || "", color: rec.color || "",
     plate_no: rec.plate_no, model_year: rec.model_year, mileage: rec.mileage, vin: rec.vin, engine_no: rec.engine_no, problem: rec.problem,
-    items: (items || []).map((it) => ({ code: it.code, name: it.name, amount: it.amount })),
+    items: (items || []).map((it) => ({ code: it.code, name: it.name, qty: Number(it.qty) || 1, price: it.price != null ? Number(it.price) : (Number(it.amount) || 0) / (Number(it.qty) || 1), amount: it.amount })),
     labor: Number(rec.labor) || 0, labor_discount: Number(rec.labor_discount) || 0, laborNet,
     parts_total: Number(rec.parts_total) || 0, parts_discount: Number(rec.parts_discount) || 0, partsNet,
     subtotal: Number(rec.subtotal) || 0, vat: Number(rec.vat) || 0, grand_total: Number(rec.grand_total) || 0,
@@ -51,7 +51,7 @@ export function recordToQuoteData(rec) {
 export function quoteDocHTML(d) {
   let rows = "";
   (d.items || []).forEach((it, i) => {
-    rows += `<tr><td class=c>${i + 1}</td><td>${_e(it.code)}</td><td>${_e(it.name)}</td><td class=c>1</td><td class=r>${_m(it.amount)}</td><td class=r>${_m(it.amount)}</td></tr>`;
+    rows += `<tr><td class=c>${i + 1}</td><td>${_e(it.code)}</td><td>${_e(it.name)}</td><td class=c>${Number(it.qty) || 1}</td><td class=r>${_m(it.price != null ? it.price : it.amount)}</td><td class=r>${_m(it.amount)}</td></tr>`;
   });
   if ((Number(d.laborNet) || 0) > 0) rows += `<tr><td class=c>${(d.items || []).length + 1}</td><td>001</td><td>ค่าบริการ</td><td class=c>-</td><td class=r>-</td><td class=r>${_m(d.laborNet)}</td></tr>`;
   return `<!doctype html><html><head><meta charset=utf-8><title>ใบประเมินราคา ${_e(d.quote_no)}</title>
