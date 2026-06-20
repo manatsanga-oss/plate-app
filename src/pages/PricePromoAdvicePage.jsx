@@ -13,7 +13,7 @@ const PRICE_ADJ = 5;     // ไฟแนนซ์ สิงห์ชัย = ร
 const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, "").toUpperCase();
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const todayISO = () => iso(new Date());
-const baht = (n) => (n == null ? "-" : Number(n).toLocaleString("th-TH"));
+const baht = (n) => (n == null || !Number.isFinite(Number(n)) ? "-" : Number(n).toLocaleString("th-TH"));
 
 // รอบ 21 เดือนก่อน→20 เดือนปัจจุบัน + รอบก่อนหน้า (สำหรับเทรนด์)
 function windows() {
@@ -120,17 +120,16 @@ export default function PricePromoAdvicePage() {
         const rec = priceByType[p.type_id] || (priceByType[p.type_id] = {});
         if (!rec[slot] || eff > rec[slot].eff) rec[slot] = { amount: Number(p.amount), eff };
       }
-      // โปร active ต่อ type_id (group_by=type, promotion, ในช่วงวันที่)
+      // โปรระดับ TYPE เท่านั้น (ค่าคอมพิเศษ / เงินดาวน์ออกแทน) = โปรที่มีผลต่อยอดขายจริง
+      // โปรระดับยี่ห้อ/รุ่น (ประกัน ฯลฯ) ไม่ค่อยเปลี่ยน ไม่มีผลกับยอดขาย → ไม่รวม
       const promoByType = {};
       for (const e of expenses) {
         if (e.group_by !== "type" || e.expense_type !== "promotion" || e.status !== "active") continue;
         const eff = String(e.effective_date || "").slice(0, 10), end = String(e.end_date || "").slice(0, 10);
         if (eff && eff > today) continue;
         if (end && end < today) continue;
-        const k = e.type_id;
-        if (!promoByType[k]) promoByType[k] = { sum: 0, names: [] };
-        promoByType[k].sum += Number(e.amount) || 0;
-        promoByType[k].names.push(`${e.expense_name} ${baht(e.amount)}`);
+        if (e.type_id == null) continue;
+        (promoByType[String(e.type_id)] || (promoByType[String(e.type_id)] = [])).push({ name: e.expense_name, amount: Number(e.amount) || 0 });
       }
 
       // รวม turnover เป็นระดับ (model_code|type) ต่อยี่ห้อ
@@ -149,16 +148,17 @@ export default function PricePromoAdvicePage() {
           const t = typeByKey[k];
           const tid = t ? t.type_id : null;
           const pinfo = tid != null ? priceByType[tid] : null;
-          const priceAdj = pinfo && pinfo.adj ? pinfo.adj.amount : null;
-          const priceFactory = pinfo && pinfo.factory ? pinfo.factory.amount : null;
-          const promoInfo = tid != null ? promoByType[tid] : null;
-          const promo = promoInfo ? promoInfo.sum : 0;
+          const priceAdj = pinfo && pinfo.adj && Number.isFinite(pinfo.adj.amount) ? pinfo.adj.amount : null;
+          const priceFactory = pinfo && pinfo.factory && Number.isFinite(pinfo.factory.amount) ? pinfo.factory.amount : null;
+          const promoItems = (tid != null && promoByType[String(tid)]) || [];
+          const promo = promoItems.reduce((s, x) => s + x.amount, 0);
+          const promoTotal = promo;
           const a = advise(v.sold, prev[k] != null ? prev[k] : null, v.stock, promo, v.received);
           return {
             brand, key: brand + "|" + k, model: v.model, code: v.code, type: v.type,
             series: t ? t.marketing_name || t.series_name : v.model,
             sold: v.sold, soldPrev: prev[k] != null ? prev[k] : null, stock: v.stock, received: v.received,
-            price: priceAdj, priceFactory, promo, promoNames: promoInfo ? promoInfo.names : [], ...a,
+            price: priceAdj, priceFactory, promo, promoTotal, promoItems, ...a,
           };
         });
       }
@@ -219,8 +219,8 @@ export default function PricePromoAdvicePage() {
               <th style={th}>สต๊อก</th>
               <th style={th}>ขายออก%</th>
               <th style={th}>เดือน<br />คงคลัง</th>
-              <th style={th}>ราคาโรงงาน<br /><span style={{ fontSize: 9, fontWeight: 400 }}>(อ้างอิง)</span></th>
-              <th style={th}>ราคาปรับได้<br /><span style={{ fontSize: 9, fontWeight: 400 }}>(ฟn.สิงห์ชัย)</span></th>
+              <th style={th}>ราคาโรงงาน<br /><span style={{ fontSize: 9, fontWeight: 400 }}>(แนะนำ-อ้างอิง)</span></th>
+              <th style={th}>ราคาขายปัจจุบัน<br /><span style={{ fontSize: 9, fontWeight: 400 }}>(สิงห์ชัย ไฟแนนซ์)</span></th>
               <th style={th}>โปรปัจจุบัน</th>
               <th style={{ ...th, width: 200 }}>💰 แนะนำค่าส่งเสริม</th>
               <th style={{ ...th, width: 200 }}>🏷️ แนะนำราคา</th>
@@ -244,7 +244,15 @@ export default function PricePromoAdvicePage() {
                 <td style={td}>{r.sold > 0 ? r.mos.toFixed(1) : r.stock > 0 ? "∞" : "-"}</td>
                 <td style={{ ...td, textAlign: "right", color: "#6b7280" }}>{baht(r.priceFactory)}</td>
                 <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(r.price)}</td>
-                <td style={{ ...td, textAlign: "right" }} title={r.promoNames.join("\n")}>{r.promo > 0 ? baht(r.promo) : "-"}</td>
+                <td style={{ ...td, textAlign: "left", fontSize: 11 }} title={r.promoItems.map((x) => `${x.name} ${baht(x.amount)}`).join("\n")}>
+                  {r.promoItems.length === 0 ? <span style={{ color: "#9ca3af" }}>-</span> : (
+                    <>
+                      <div style={{ fontWeight: 700, textAlign: "right" }}>{baht(r.promoTotal)}</div>
+                      {r.promoItems.slice(0, 3).map((x, i) => <div key={i} style={{ color: "#6b7280", fontSize: 9, whiteSpace: "nowrap" }}>{x.name} {baht(x.amount)}</div>)}
+                      {r.promoItems.length > 3 && <div style={{ fontSize: 9, color: "#9ca3af" }}>+{r.promoItems.length - 3} อื่น ๆ</div>}
+                    </>
+                  )}
+                </td>
                 <td style={td}><AdviceBadge a={r.promo} /></td>
                 <td style={td}>
                   <AdviceBadge a={r.price} />
