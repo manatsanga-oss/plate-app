@@ -18,7 +18,7 @@ const baht = (n) => (n == null || !Number.isFinite(Number(n)) ? "-" : Number(n).
 // รอบ 21 เดือนก่อน→20 เดือนปัจจุบัน + รอบก่อนหน้า (สำหรับเทรนด์)
 function windows() {
   const d = new Date();
-  const end = d.getDate() > 20 ? new Date(d.getFullYear(), d.getMonth() + 1, 20) : new Date(d.getFullYear(), d.getMonth(), 20);
+  const end = d.getDate() > 20 ? new Date(d.getFullYear(), d.getMonth(), 20) : new Date(d.getFullYear(), d.getMonth() - 1, 20);
   const start = new Date(end.getFullYear(), end.getMonth() - 1, 21);
   const pend = new Date(end.getFullYear(), end.getMonth() - 1, 20);
   const pstart = new Date(end.getFullYear(), end.getMonth() - 2, 21);
@@ -97,8 +97,8 @@ export default function PricePromoAdvicePage() {
         post(ST_API, { action: "turnover", brand: "YAMAHA", date_from: W.from, date_to: W.to }),
         post(ST_API, { action: "turnover", brand: "HONDA", date_from: W.pfrom, date_to: W.pto }),
         post(ST_API, { action: "turnover", brand: "YAMAHA", date_from: W.pfrom, date_to: W.pto }),
-        post(MASTER_API, { action: "get_moto_prices", as_of: W.to }),   // ราคา ณ สิ้นรอบนี้
-        post(MASTER_API, { action: "get_moto_prices", as_of: W.pto }),  // ราคา ณ สิ้นรอบก่อน (เทียบ)
+        post(MASTER_API, { action: "get_moto_prices", as_of: W.from }),  // ราคา ณ ต้นรอบนี้ (= ราคาเดือนนี้)
+        post(MASTER_API, { action: "get_moto_prices", as_of: W.pfrom }), // ราคา ณ ต้นรอบก่อน (= ราคาเดือนก่อน)
         post(MASTER_API, { action: "get_sale_expenses" }),
         post(MASTER_API, { action: "get_types" }),
       ]);
