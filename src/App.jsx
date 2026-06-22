@@ -15,6 +15,7 @@ import PartWithdrawalPage from "./pages/PartWithdrawalPage";
 import VehiclePurchaseReportPage from "./pages/VehiclePurchaseReportPage";
 import HondaSalesReportPage from "./pages/HondaSalesReportPage";
 import PricePromoAdvicePage from "./pages/PricePromoAdvicePage";
+import PriceImpactAnalysisPage from "./pages/PriceImpactAnalysisPage";
 import StockTurnoverReportPage from "./pages/StockTurnoverReportPage";
 import PartReceiptReportPage from "./pages/PartReceiptReportPage";
 import PartOrderInquiryPage from "./pages/PartOrderInquiryPage";
@@ -223,6 +224,7 @@ export default function App() {
     if (page === "vehiclepurchasereport") return false;       // เฉพาะ admin (รายงานรับรถจักรยานยนต์)
     if (page === "hondasalesreport") return false;            // เฉพาะ admin (ส่งรายงาน HONDA)
     if (page === "pricepromoadvice") return false;            // เฉพาะ admin (แนะนำราคา/ค่าส่งเสริม)
+    if (page === "priceimpact") return false;                 // เฉพาะ admin (วิเคราะห์ผลราคา/โปร ต่อยอดขาย)
     if (page === "stockturnover") return false;               // เฉพาะ admin (สินค้าคงเหลือ & turnover)
     if (page === "partreceiptreport") return false;           // เฉพาะ admin (รายงานรับอะไหล่)
     if (page === "yamaharepairreport") return true;           // ทุก user เห็นรายงานใบแจ้งซ่อม
@@ -273,6 +275,7 @@ export default function App() {
         {activeMenu === "vehiclepurchasereport" && canAccess("vehiclepurchasereport") && <VehiclePurchaseReportPage currentUser={currentUser} />}
         {activeMenu === "hondasalesreport" && canAccess("hondasalesreport") && <HondaSalesReportPage currentUser={currentUser} />}
         {activeMenu === "pricepromoadvice" && canAccess("pricepromoadvice") && <PricePromoAdvicePage currentUser={currentUser} />}
+        {activeMenu === "priceimpact" && canAccess("priceimpact") && <PriceImpactAnalysisPage currentUser={currentUser} />}
         {activeMenu === "stockturnover" && canAccess("stockturnover") && <StockTurnoverReportPage currentUser={currentUser} />}
         {activeMenu === "partreceiptreport" && canAccess("partreceiptreport") && <PartReceiptReportPage currentUser={currentUser} />}
         {activeMenu === "trialbalance" && canAccess("trialbalance") && <TrialBalanceReportPage currentUser={currentUser} />}
@@ -678,7 +681,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hrspecialcommission" label="รายงานค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","stockturnover","partreceiptreport","trialbalance"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","trialbalance"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -691,6 +694,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="vehiclepurchasereport" label="รายงานรับรถจักรยานยนต์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hondasalesreport" label="ส่งรายงาน HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="pricepromoadvice" label="แนะนำราคา/ค่าส่งเสริม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="priceimpact" label="วิเคราะห์ผลราคา/โปร ต่อยอดขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="stockturnover" label="สินค้าคงเหลือ & อัตราการหมุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partreceiptreport" label="รายงานรับอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="trialbalance" label="รายงานงบทดลอง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
