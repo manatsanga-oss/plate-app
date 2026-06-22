@@ -21,6 +21,9 @@ export default function MotoPricePage({ currentUser }) {
   const [historyRow, setHistoryRow] = useState(null); // row obj for history modal
   const [historyData, setHistoryData] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [histEditDate, setHistEditDate] = useState(null); // effective_date กำลังแก้ใน modal
+  const [histEditPrices, setHistEditPrices] = useState({}); // { price_type_id: value_string }
+  const [histBusy, setHistBusy] = useState(false); // กำลัง save/delete แถวประวัติ
   const [filterBrand, setFilterBrand] = useState("");
   const [filterMarketing, setFilterMarketing] = useState("");
   const [filterModel, setFilterModel] = useState("");
@@ -98,6 +101,65 @@ export default function MotoPricePage({ currentUser }) {
       setHistoryData(Array.isArray(data) ? data : []);
     } catch { setHistoryData([]); }
     setHistoryLoading(false);
+  }
+
+  function handleStartHistEdit(g) {
+    const snap = {};
+    activeTypes.forEach(t => {
+      snap[t.type_id] = g.fullPrices[t.type_id] != null ? String(g.fullPrices[t.type_id]) : "";
+    });
+    setHistEditPrices(snap);
+    setHistEditDate(g.effective);
+  }
+
+  function handleCancelHistEdit() {
+    setHistEditDate(null);
+    setHistEditPrices({});
+  }
+
+  async function handleSaveHistEdit(g) {
+    setHistBusy(true);
+    try {
+      // เซฟเฉพาะระดับราคาที่เปลี่ยนจริง ณ วันที่นี้ (ON CONFLICT type_id,price_type_id,effective_date)
+      const changed = activeTypes.filter(t => {
+        const oldVal = g.fullPrices[t.type_id] != null ? String(g.fullPrices[t.type_id]) : "";
+        const newVal = String(histEditPrices[t.type_id] ?? "");
+        return oldVal !== newVal && newVal !== "";
+      });
+      await Promise.all(changed.map(t => fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_moto_price",
+          type_id: historyRow.type_id,
+          price_type_id: t.type_id,
+          amount: Number(histEditPrices[t.type_id]) || 0,
+          effective_date: g.effective,
+        }),
+      })));
+      setHistEditDate(null);
+      setHistEditPrices({});
+      await handleOpenHistory(historyRow);
+      fetchPrices();
+    } catch { setMessage("บันทึกไม่สำเร็จ"); }
+    setHistBusy(false);
+  }
+
+  async function handleDeleteHistRow(g) {
+    if (!window.confirm(`ลบราคาทั้งหมดของวันที่ประกาศใช้ ${g.effective} ?`)) return;
+    setHistBusy(true);
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "delete_moto_price",
+          type_id: historyRow.type_id,
+          effective_date: g.effective,
+        }),
+      });
+      await handleOpenHistory(historyRow);
+      fetchPrices();
+    } catch { setMessage("ลบไม่สำเร็จ"); }
+    setHistBusy(false);
   }
 
   function handleStartEdit(row) {
@@ -492,7 +554,7 @@ export default function MotoPricePage({ currentUser }) {
       {/* History Modal */}
       {historyRow && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
-          onClick={() => { setHistoryRow(null); setHistoryData([]); }}>
+          onClick={() => { setHistoryRow(null); setHistoryData([]); setHistEditDate(null); setHistEditPrices({}); }}>
           <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 720, maxWidth: "94vw", maxHeight: "88vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}
             onClick={e => e.stopPropagation()}>
             <h3 style={{ marginTop: 0, marginBottom: 6 }}>📜 ประวัติราคา</h3>
@@ -511,6 +573,7 @@ export default function MotoPricePage({ currentUser }) {
                     <th style={{ whiteSpace: "nowrap" }}>วันที่ประกาศใช้</th>
                     {activeTypes.map(t => <th key={t.type_id} style={{ whiteSpace: "nowrap", textAlign: "right" }}>{t.type_name}</th>)}
                     <th style={{ whiteSpace: "nowrap" }}>วันที่แก้ไข</th>
+                    <th style={{ whiteSpace: "nowrap" }}>จัดการ</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -522,7 +585,12 @@ export default function MotoPricePage({ currentUser }) {
                       byDate[d].prices[r.price_type_id] = r.amount;
                       if (r.updated_at && (!byDate[d].updated || r.updated_at > byDate[d].updated)) byDate[d].updated = r.updated_at;
                     });
-                    const rows = Object.values(byDate).sort((a, b) => (a.effective < b.effective ? 1 : -1));
+                    // ต่อยอดราคาที่ไม่เปลี่ยนจากวันก่อนหน้า (carry-forward) เหมือนตารางหลัก
+                    // DB เก็บเฉพาะระดับที่เปลี่ยนในแต่ละวัน → เติมระดับที่ไม่เปลี่ยนให้ครบ
+                    const asc = Object.values(byDate).sort((a, b) => (a.effective < b.effective ? -1 : 1));
+                    let carry = {};
+                    asc.forEach(g => { carry = { ...carry, ...g.prices }; g.fullPrices = { ...carry }; });
+                    const rows = asc.slice().sort((a, b) => (a.effective < b.effective ? 1 : -1));
                     const today = new Date().toISOString().slice(0, 10);
                     return rows.map(g => {
                       const isCurrent = g.effective <= today && rows.filter(x => x.effective <= today)[0]?.effective === g.effective;
@@ -536,11 +604,42 @@ export default function MotoPricePage({ currentUser }) {
                           </td>
                           {activeTypes.map(t => (
                             <td key={t.type_id} style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                              {g.prices[t.type_id] != null ? Number(g.prices[t.type_id]).toLocaleString() : "-"}
+                              {histEditDate === g.effective ? (
+                                <input type="number" value={histEditPrices[t.type_id] ?? ""}
+                                  onChange={e => setHistEditPrices(p => ({ ...p, [t.type_id]: e.target.value }))}
+                                  style={{ width: 90, padding: "4px 6px", textAlign: "right", border: "1.5px solid #d1d5db", borderRadius: 6, fontFamily: "Tahoma", fontSize: 13 }} />
+                              ) : (
+                                g.fullPrices[t.type_id] != null ? Number(g.fullPrices[t.type_id]).toLocaleString() : "-"
+                              )}
                             </td>
                           ))}
                           <td style={{ whiteSpace: "nowrap", fontSize: 12, color: "#6b7280" }}>
                             {g.updated ? new Date(g.updated).toLocaleString("th-TH", { day: "2-digit", month: "2-digit", year: "2-digit", hour: "2-digit", minute: "2-digit" }) : "-"}
+                          </td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            {histEditDate === g.effective ? (
+                              <span style={{ display: "flex", gap: 6 }}>
+                                <button onClick={() => handleSaveHistEdit(g)} disabled={histBusy}
+                                  style={{ padding: "3px 10px", background: "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                                  {histBusy ? "..." : "บันทึก"}
+                                </button>
+                                <button onClick={handleCancelHistEdit} disabled={histBusy}
+                                  style={{ padding: "3px 10px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                                  ยกเลิก
+                                </button>
+                              </span>
+                            ) : (
+                              <span style={{ display: "flex", gap: 6 }}>
+                                <button onClick={() => handleStartHistEdit(g)} disabled={histBusy || histEditDate !== null}
+                                  style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                                  แก้ไข
+                                </button>
+                                <button onClick={() => handleDeleteHistRow(g)} disabled={histBusy || histEditDate !== null}
+                                  style={{ padding: "3px 10px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
+                                  ลบ
+                                </button>
+                              </span>
+                            )}
                           </td>
                         </tr>
                       );
@@ -551,7 +650,7 @@ export default function MotoPricePage({ currentUser }) {
             )}
 
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>
-              <button onClick={() => { setHistoryRow(null); setHistoryData([]); }}
+              <button onClick={() => { setHistoryRow(null); setHistoryData([]); setHistEditDate(null); setHistEditPrices({}); }}
                 style={{ padding: "8px 22px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 14 }}>
                 ปิด
               </button>
