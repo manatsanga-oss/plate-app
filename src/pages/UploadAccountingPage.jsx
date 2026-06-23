@@ -4,6 +4,7 @@ import OtherIncomeTaxUploadPage from "./OtherIncomeTaxUploadPage";
 import DailyReceiptUploadPage from "./DailyReceiptUploadPage";
 import VehiclePurchaseReceiptUploadPage from "./VehiclePurchaseReceiptUploadPage";
 import PartTaxInvoiceUploadCard from "./PartTaxInvoiceUploadCard";
+import AccountingExpenseUploadCard from "./AccountingExpenseUploadCard";
 
 export default function UploadAccountingPage({ currentUser } = {}) {
   return (
@@ -44,6 +45,11 @@ export default function UploadAccountingPage({ currentUser } = {}) {
           <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>🚗 รับรถเข้าจากการซื้อ (HONDA ป.เปา · YAMAHA สิงห์ชัย)</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ไฟล์ XLS รายงานรับรถเข้าจากการซื้อ จาก DMS — UPSERT ที่ chassis_no</div>
           <VehiclePurchaseReceiptUploadPage currentUser={currentUser} embeddable />
+        </div>
+        <div style={{ background: "#fff", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>📒 ค่าใช้จ่ายงานบัญชี (Excel)</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ไฟล์รายงานค่าใช้จ่าย (Excel) — ข้ามแถวที่ mark "ไม่เอา" · เลือกสังกัด (ป.เปา / สิงห์ชัย) · นำเข้าเป็น "ร่าง" ไปแสดงที่หน้าบันทึกค่าใช้จ่าย</div>
+          <AccountingExpenseUploadCard currentUser={currentUser} />
         </div>
         <div style={{ background: "#fff", borderRadius: "0 0 14px 14px", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 14, textAlign: "center" }}>🧾 ใบกำกับภาษีซื้ออะไหล่ (HONDA · YAMAHA)</div>

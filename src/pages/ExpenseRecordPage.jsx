@@ -34,6 +34,7 @@ const emptyForm = () => ({
   paid_doc_no: "",
   from_bank_account_id: "",
   status: "draft",  // draft | paid | cancelled
+  affiliation: "",  // สังกัด: ป.เปา | สิงห์ชัย
   items: [emptyItem()],
 });
 
@@ -52,6 +53,8 @@ export default function ExpenseRecordPage({ currentUser }) {
   const [dateTo, setDateTo] = useState("");
   const [message, setMessage] = useState("");
   const [tab, setTab] = useState("draft"); // draft | pay | history
+  const [statusFilter, setStatusFilter] = useState({ draft: true, paid: true, cancelled: true }); // กรองแสดงตามสถานะ (แท็บรายการค่าใช้จ่าย)
+  const [filterAff, setFilterAff] = useState(""); // กรองตามสังกัด (ป.เปา / สิงห์ชัย) — "" = ทั้งหมด
   const [selected, setSelected] = useState({}); // { expense_doc_id: true }
   const [payDialog, setPayDialog] = useState(false);
   const [payForm, setPayForm] = useState({ paid_date: todayISO(), payment_note: "" });
@@ -144,6 +147,7 @@ export default function ExpenseRecordPage({ currentUser }) {
       paid_doc_no: d.paid_doc_no || "",
       from_bank_account_id: d.from_bank_account_id || "",
       status: d.status || "draft",
+      affiliation: d.affiliation || "",
       items: Array.isArray(d.items) && d.items.length ? d.items : [emptyItem()],
     });
     setShowForm(true);
@@ -230,6 +234,7 @@ export default function ExpenseRecordPage({ currentUser }) {
         total: totalIncVat,
         net_to_pay: netToPay,
         status: form.status,
+        affiliation: form.affiliation || null,
         items: form.items.filter(it => it.expense_name || Number(it.amount) > 0),
         created_by: currentUser?.username || currentUser?.name || "system",
       };
@@ -263,12 +268,18 @@ export default function ExpenseRecordPage({ currentUser }) {
 
   const kw = search.trim().toLowerCase();
   const filtered = docs.filter(d => {
+    if (filterAff && String(d.affiliation || "") !== filterAff) return false;
     if (!kw) return true;
     const hay = [d.expense_doc_no, d.vendor_name, d.reference_no, d.description].filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
 
   const totalAll = filtered.reduce((s, d) => s + Number(d.total || 0), 0);
+
+  // กรองตามสถานะ (เฉพาะแท็บ "รายการค่าใช้จ่าย")
+  const statusOf = d => (d.status || "draft");
+  const statusFiltered = filtered.filter(d => statusFilter[statusOf(d)]);
+  const statusTotal = statusFiltered.reduce((s, d) => s + Number(d.total || 0), 0);
 
   // Tab data
   const draftDocs = filtered.filter(d => (d.status || "draft") === "draft");
@@ -442,6 +453,11 @@ export default function ExpenseRecordPage({ currentUser }) {
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inp} />
         <span>ถึง</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
+        <select value={filterAff} onChange={e => setFilterAff(e.target.value)} style={inp} title="กรองตามสังกัด">
+          <option value="">🏢 สังกัด: ทั้งหมด</option>
+          <option value="ป.เปา">ป.เปา</option>
+          <option value="สิงห์ชัย">สิงห์ชัย</option>
+        </select>
         <input type="text" value={search} onChange={e => setSearch(e.target.value)}
           placeholder="🔎 ค้นหา (เลขเอกสาร / Vendor / รายละเอียด)"
           style={{ ...inp, flex: 1, minWidth: 200 }} />
@@ -452,11 +468,23 @@ export default function ExpenseRecordPage({ currentUser }) {
       {/* TAB: รายการค่าใช้จ่าย (ทั้งหมด) */}
       {tab === "draft" && (
         <>
-          <div style={{ display: "flex", gap: 14, padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12 }}>
-            <span>📑 เอกสาร: <strong>{filtered.length}</strong></span>
-            <span style={{ color: "#dc2626" }}>💰 ยอดรวม: <strong>{fmt(totalAll)}</strong> บาท</span>
+          <div style={{ display: "flex", gap: 14, alignItems: "center", flexWrap: "wrap", padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12 }}>
+            <span>📑 เอกสาร: <strong>{statusFiltered.length}</strong></span>
+            <span style={{ color: "#dc2626" }}>💰 ยอดรวม: <strong>{fmt(statusTotal)}</strong> บาท</span>
+            <div style={{ flex: 1 }} />
+            <span style={{ color: "#6b7280", fontSize: 13 }}>แสดงสถานะ:</span>
+            {[
+              { key: "draft", label: "ร่าง", color: "#78350f" },
+              { key: "paid", label: "ชำระแล้ว", color: "#065f46" },
+              { key: "cancelled", label: "ยกเลิก", color: "#991b1b" },
+            ].map(s => (
+              <label key={s.key} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 13, fontWeight: 600, color: s.color }}>
+                <input type="checkbox" checked={statusFilter[s.key]} onChange={e => setStatusFilter(f => ({ ...f, [s.key]: e.target.checked }))} />
+                {s.label}
+              </label>
+            ))}
           </div>
-          <DocsTable docs={filtered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} showCheckbox={false} />
+          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} showCheckbox={false} />
         </>
       )}
 
@@ -666,6 +694,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, showCheckbox, select
             </th>}
             <th style={th}>เลขเอกสาร</th>
             <th style={th}>วันที่</th>
+            <th style={th}>สังกัด</th>
             <th style={th}>Vendor</th>
             <th style={th}>เลขที่อ้างอิง</th>
             <th style={th}>รายละเอียด</th>
@@ -686,6 +715,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, showCheckbox, select
                 </td>}
                 <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#072d6b" }}>{d.expense_doc_no}</td>
                 <td style={td}>{fmtDate(d.doc_date)}</td>
+                <td style={td}>{d.affiliation ? <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: d.affiliation === "ป.เปา" ? "#fee2e2" : "#dbeafe", color: d.affiliation === "ป.เปา" ? "#991b1b" : "#1e40af" }}>{d.affiliation}</span> : "-"}</td>
                 <td style={td}>{d.vendor_name || "-"}</td>
                 <td style={td}>{d.reference_no || "-"}</td>
                 <td style={{ ...td, color: "#6b7280", fontSize: 12 }}>{d.description || "-"}</td>
@@ -731,6 +761,14 @@ function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAc
           <div>
             <label style={lbl}>เลขที่อ้างอิง</label>
             <input type="text" value={form.reference_no} onChange={e => setForm(f => ({ ...f, reference_no: e.target.value }))} placeholder="เช่น ใบกำกับภาษี" style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>🏢 สังกัด</label>
+            <select value={form.affiliation} onChange={e => setForm(f => ({ ...f, affiliation: e.target.value }))} style={inp}>
+              <option value="">-- ไม่ระบุ --</option>
+              <option value="ป.เปา">ป.เปา</option>
+              <option value="สิงห์ชัย">สิงห์ชัย</option>
+            </select>
           </div>
           <div style={{ gridColumn: "1 / span 2" }}>
             <label style={lbl}>Vendor (ผู้จำหน่าย) *</label>
