@@ -93,6 +93,7 @@ export default function PriceImpactAnalysisPage() {
   const [brandFilter, setBrandFilter] = useState("ALL");
   const [seriesFilter, setSeriesFilter] = useState("");
   const [onlyChanged, setOnlyChanged] = useState(false);
+  const [monthHasData, setMonthHasData] = useState(MONTHS.map(() => true));
 
   const seriesOptions = useMemo(() => {
     const base = brandFilter === "ALL" ? rows : rows.filter((r) => r.brand === brandFilter);
@@ -144,6 +145,9 @@ export default function PriceImpactAnalysisPage() {
         soldByMonth[mi][k] = (soldByMonth[mi][k] || 0) + (Number(r.sold) || 0);
         if (!meta[k]) meta[k] = { brand: r.brand, code: r.code, type: r.type, model: r.model };
       }
+      // เดือนที่ "มีข้อมูลขายจริง" (ยอดรวม > 0) — เดือนที่ไม่มีจะไม่เอาไปวิเคราะห์ และโชว์ "—"
+      const mhd = MONTHS.map((_, mi) => Object.values(soldByMonth[mi]).some((v) => v > 0));
+      setMonthHasData(mhd);
 
       const out = Object.entries(meta).map(([k, mt]) => {
         const t = typeByKey[k];
@@ -154,7 +158,7 @@ export default function PriceImpactAnalysisPage() {
           price: (tid != null && priceByMonth[mi][tid]) ? priceByMonth[mi][tid].amount : null,
           promo: tid != null || t ? promoAt(t, tid, m.to) : null,
         }));
-        const an = analyze(series);
+        const an = analyze(series.filter((_, i) => mhd[i]));
         const totalSold = series.reduce((s, x) => s + x.sold, 0);
         return {
           key: mt.brand + "|" + k, brand: mt.brand, model: mt.model, code: mt.code, type: mt.type,
@@ -240,7 +244,7 @@ export default function PriceImpactAnalysisPage() {
                     const prev = mi > 0 ? r.months[mi - 1] : null;
                     return (
                       <td key={mo.ym} style={{ ...td, textAlign: "right" }}>
-                        <div style={{ fontWeight: 700, color: "#065f46" }}>{mo.sold}</div>
+                        <div style={{ fontWeight: 700, color: monthHasData[mi] ? "#065f46" : "#cbd5e1" }} title={monthHasData[mi] ? "" : "ไม่มีข้อมูลขายในระบบเดือนนี้"}>{monthHasData[mi] ? mo.sold : "—"}</div>
                         <div style={{ fontSize: 11, color: prev && mo.price !== prev.price ? "#dc2626" : "#374151" }}>
                           {baht(mo.price)}{delta(mo.price, prev?.price)}
                         </div>
@@ -264,6 +268,7 @@ export default function PriceImpactAnalysisPage() {
       <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
         * ราคา = ไฟแนนซ์ สิงห์ชัย (ราคาที่ปรับจริง) · โปร = ค่าคอมพิเศษ + เงินดาวน์ออกแทน (ใช้ร่วม ป.เปา/สิงห์ชัย) · ▲▼ = เทียบเดือนก่อน
         <br />* "วิเคราะห์ผลล่าสุด" = transition ล่าสุดที่มีการปรับราคา/โปร แล้วยอดขายตอบสนองอย่างไร (ใช้วางแผนเดือนถัดไป)
+        <br />* เดือนที่ขายขึ้น "—" = ไม่มีข้อมูลขายในระบบเดือนนั้น (ปัจจุบันมีข้อมูลขายตั้งแต่ พ.ค. 2569) → ไม่ถูกนำไปวิเคราะห์
       </div>
     </div>
   );
