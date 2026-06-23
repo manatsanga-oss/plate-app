@@ -4,6 +4,7 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rule
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const FAST_MOVING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-api";
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+const PART_PRICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-price-api";
 
 const text = (v) => (v ?? "").toString().trim();
 const baht = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
@@ -298,7 +299,7 @@ export default function GiveawayRulesPage({ currentUser }) {
 }
 
 function VehicleGiveawayTab({ currentUser, lookupPartName }) {
-  const blankV = () => ({ id: null, chassis_no: "", engine_no: "", brand: "", model_name: "", model_code: "", color_name: "", customer_name: "", given_date: todayISO(), note: "", status: "active", items: [{ part_code: "", part_name: "", qty: 1 }] });
+  const blankV = () => ({ id: null, chassis_no: "", engine_no: "", brand: "", model_name: "", model_code: "", color_name: "", customer_name: "", sale_invoice_no: "", given_date: todayISO(), note: "", status: "active", items: [{ part_code: "", part_name: "", qty: 1, price: 0, addon_price: 0 }] });
   const [list, setList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [kw, setKw] = useState("");
@@ -319,11 +320,23 @@ function VehicleGiveawayTab({ currentUser, lookupPartName }) {
     setForm({
       id: r.id, chassis_no: r.chassis_no || "", engine_no: r.engine_no || "", brand: r.brand || "",
       model_name: r.model_name || "", model_code: r.model_code || "", color_name: r.color_name || "",
-      customer_name: r.customer_name || "", given_date: r.given_date ? String(r.given_date).slice(0, 10) : todayISO(),
+      customer_name: r.customer_name || "", sale_invoice_no: r.sale_invoice_no || "", given_date: r.given_date ? String(r.given_date).slice(0, 10) : todayISO(),
       note: r.note || "", status: r.status || "active",
-      items: Array.isArray(r.items) && r.items.length ? r.items.map(it => ({ part_code: it.part_code || "", part_name: it.part_name || "", qty: it.qty || 1 })) : [{ part_code: "", part_name: "", qty: 1 }],
+      items: Array.isArray(r.items) && r.items.length ? r.items.map(it => ({ part_code: it.part_code || "", part_name: it.part_name || "", qty: it.qty || 1, price: Number(it.price) || 0, addon_price: Number(it.addon_price) || 0 })) : [{ part_code: "", part_name: "", qty: 1, price: 0, addon_price: 0 }],
     });
     setMsg(""); setShowForm(true);
+  }
+
+  // พิมพ์รหัส → ดึงชื่อ+ราคาจากตารางราคา (part_prices) ที่ upload
+  async function lookupPrice(i, code) {
+    const c = text(code);
+    if (!c) return;
+    try {
+      const rows = await apiPost(PART_PRICE_API, { action: "get_price", code: c });
+      const r = Array.isArray(rows) ? rows[0] : rows;
+      if (r && (r.name || r.price != null)) setItem(i, { part_name: r.name || lookupPartName(c) || "", price: Number(r.price) || 0 });
+      else setItem(i, { part_name: lookupPartName(c) || "" });
+    } catch { /* ignore */ }
   }
 
   async function lookupVehicle() {
@@ -338,6 +351,7 @@ function VehicleGiveawayTab({ currentUser, lookupPartName }) {
         chassis_no: v.chassis_no || f.chassis_no, engine_no: v.engine_no || f.engine_no,
         brand: v.brand || f.brand, model_name: v.model_name || f.model_name, model_code: v.model_code || f.model_code,
         color_name: v.color_name || f.color_name, customer_name: (v.sale && v.sale.customer_name) || f.customer_name,
+        sale_invoice_no: v.sold_invoice_no || (v.sale && v.sale.invoice_no) || f.sale_invoice_no,
       }));
       setMsg(`✅ พบรถ: ${[v.brand, v.model_name, v.model_code].filter(Boolean).join(" ")}`);
     } catch { setMsg("❌ ดึงข้อมูลรถไม่สำเร็จ"); }
@@ -350,7 +364,7 @@ function VehicleGiveawayTab({ currentUser, lookupPartName }) {
 
   async function save() {
     if (!text(form.chassis_no) && !text(form.engine_no)) { setMsg("❌ ใส่หมายเลขตัวถังหรือเลขเครื่อง"); return; }
-    const items = form.items.filter(it => text(it.part_code)).map(it => ({ part_code: text(it.part_code), part_name: lookupPartName(it.part_code) || text(it.part_name), qty: Number(it.qty) || 1 }));
+    const items = form.items.filter(it => text(it.part_code)).map(it => ({ part_code: text(it.part_code), part_name: text(it.part_name) || lookupPartName(it.part_code), qty: Number(it.qty) || 1, price: Number(it.price) || 0, addon_price: Number(it.addon_price) || 0 }));
     if (!items.length) { setMsg("❌ ใส่รหัสของแถมอย่างน้อย 1 รายการ"); return; }
     try {
       await apiPost(API_URL, { op: form.id ? "update_vehicle" : "save_vehicle", ...form, items, created_by: currentUser?.username || currentUser?.name || "system" });
@@ -393,7 +407,7 @@ function VehicleGiveawayTab({ currentUser, lookupPartName }) {
                     <td style={td}>{[r.brand, r.model_name, r.model_code].filter(Boolean).join(" ") || "-"}</td>
                     <td style={td}>{r.customer_name || "-"}</td>
                     <td style={td}>{fmtDate(r.given_date)}</td>
-                    <td style={td}>{Array.isArray(r.items) && r.items.length ? r.items.map((it, i) => <div key={i} style={{ fontSize: 12 }}>{it.part_code}{it.part_name ? ` · ${it.part_name}` : ""} ×{baht(it.qty)}</div>) : "-"}</td>
+                    <td style={td}>{Array.isArray(r.items) && r.items.length ? r.items.map((it, i) => <div key={i} style={{ fontSize: 12 }}>{it.part_code}{it.part_name ? ` · ${it.part_name}` : ""} ×{baht(it.qty)}{Number(it.price) > 0 ? ` · ${baht(it.price)}฿` : ""}{Number(it.addon_price) > 0 ? <span style={{ color: "#16a34a" }}> · บวก {baht(it.addon_price)}฿</span> : ""}</div>) : "-"}</td>
                     <td style={{ ...td, textAlign: "center" }}><span style={{ padding: "2px 10px", borderRadius: 4, fontSize: 12, fontWeight: 600, background: r.status === "active" ? "#dcfce7" : "#fee2e2", color: r.status === "active" ? "#16a34a" : "#dc2626" }}>{r.status === "active" ? "ใช้งาน" : "ปิด"}</span></td>
                     <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
                       <button onClick={() => openEdit(r)} style={{ ...btnSm, background: "#f59e0b" }}>✏️</button>
@@ -422,21 +436,43 @@ function VehicleGiveawayTab({ currentUser, lookupPartName }) {
               </div>
             )}
             <Field label="ลูกค้า"><input value={form.customer_name} onChange={e => setForm(f => ({ ...f, customer_name: e.target.value }))} style={inp} /></Field>
+            <Field label="เลขที่ใบขาย (สำหรับบวกเพิ่มราคาขาย)">
+              <input value={form.sale_invoice_no} onChange={e => setForm(f => ({ ...f, sale_invoice_no: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} placeholder="เช่น SCY04-SS260600083 (ดึงอัตโนมัติจากตัวถัง)" />
+              <div style={{ fontSize: 11, marginTop: 2, color: "#64748b" }}>ยอด "ราคาขายของแต่งบวกเพิ่ม" รวมจะไปสร้างเงื่อนไขบวกเพิ่มราคาขาย ผูกกับใบขายนี้</div>
+            </Field>
             <Field label="วันที่ให้ของแถม"><input type="date" value={form.given_date} onChange={e => setForm(f => ({ ...f, given_date: e.target.value }))} style={inp} /></Field>
 
             <div style={{ borderTop: "1px solid #e5e7eb", margin: "6px 0", paddingTop: 8 }}>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>รายการของแถม *</label>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>รายการของแถม * <span style={{ fontWeight: 400, color: "#94a3b8" }}>(พิมพ์รหัส → ดึงชื่อ/ราคาอัตโนมัติ)</span></label>
+              <div style={{ display: "flex", gap: 6, marginBottom: 4, fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+                <div style={{ flex: 1 }}>รหัส / ชื่อ · ราคา</div>
+                <div style={{ width: 60, textAlign: "center" }}>จำนวน</div>
+                <div style={{ width: 110, textAlign: "center" }}>ราคาขายของแต่ง<br />บวกเพิ่ม</div>
+                <div style={{ width: 32 }} />
+              </div>
               {form.items.map((it, i) => (
                 <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "flex-start" }}>
                   <div style={{ flex: 1 }}>
-                    <input value={it.part_code} onChange={e => setItem(i, { part_code: e.target.value })} style={{ ...inp, fontFamily: "monospace" }} placeholder="รหัสของแถม เช่น P-003" />
-                    {it.part_code && <div style={{ fontSize: 11, marginTop: 2, color: lookupPartName(it.part_code) ? "#15803d" : "#b91c1c" }}>{lookupPartName(it.part_code) ? "✅ " + lookupPartName(it.part_code) : "⚠️ ไม่พบในอะไหล่หมุนเร็ว"}</div>}
+                    <input value={it.part_code} onChange={e => setItem(i, { part_code: e.target.value })} onBlur={e => lookupPrice(i, e.target.value)}
+                      style={{ ...inp, fontFamily: "monospace" }} placeholder="รหัสของแถม เช่น P-003" />
+                    {it.part_code && (
+                      <div style={{ fontSize: 11, marginTop: 2, color: it.part_name ? "#15803d" : "#b91c1c" }}>
+                        {it.part_name ? `✅ ${it.part_name}` : "⚠️ ไม่พบในตารางราคา"}
+                        {Number(it.price) > 0 && <span style={{ color: "#0369a1", marginLeft: 6 }}>· ราคา {baht(it.price)}</span>}
+                      </div>
+                    )}
                   </div>
-                  <input type="number" min="1" value={it.qty} onChange={e => setItem(i, { qty: e.target.value })} style={{ ...inp, width: 70 }} />
+                  <input type="number" min="1" value={it.qty} onChange={e => setItem(i, { qty: e.target.value })} style={{ ...inp, width: 60 }} />
+                  <input type="number" min="0" value={it.addon_price} onChange={e => setItem(i, { addon_price: e.target.value })} style={{ ...inp, width: 110 }} placeholder="0" />
                   <button onClick={() => removeItem(i)} style={{ ...btnSm, background: "#ef4444", padding: "7px 10px" }}>✕</button>
                 </div>
               ))}
               <button onClick={addItem} style={{ ...btnGrey, fontSize: 12 }}>➕ เพิ่มของแถม</button>
+              {form.items.reduce((s, it) => s + (Number(it.addon_price) || 0) * (Number(it.qty) || 1), 0) > 0 && (
+                <div style={{ marginTop: 8, padding: "6px 10px", background: "#ecfdf5", border: "1px solid #6ee7b7", borderRadius: 6, fontSize: 13, color: "#065f46", fontWeight: 600 }}>
+                  💰 รวมราคาขายของแต่งบวกเพิ่ม: {baht(form.items.reduce((s, it) => s + (Number(it.addon_price) || 0) * (Number(it.qty) || 1), 0))} บาท → บวกในราคาขายรถ{form.sale_invoice_no ? ` (ใบขาย ${form.sale_invoice_no})` : " (⚠️ ยังไม่มีเลขใบขาย)"}
+                </div>
+              )}
             </div>
 
             <Field label="หมายเหตุ"><textarea value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} style={{ ...inp, minHeight: 44 }} /></Field>

@@ -21,6 +21,7 @@ const TABS = [
   { key: "custom",             label: "กำหนดเอง",                            emoji: "✏️", color: "#ea580c" },
   { key: "installment_bonus",  label: "บวกเพิ่มจากค่างวดออกแทน",            emoji: "🧮", color: "#0891b2" },
   { key: "cosmos_insurance",   label: "ประกัน COSMOS ซื้อเพิ่ม",             emoji: "🛡️", color: "#92400e" },
+  { key: "accessory",          label: "บวกเพิ่มจากของแต่ง/ของแถม",          emoji: "🎁", color: "#16a34a" },
   { key: "other_income",       label: "หักจากบันทึกรายได้",                  emoji: "💰", color: "#dc2626" },
 ];
 
@@ -278,7 +279,7 @@ export default function SalePriceMarkupPage({ currentUser }) {
               </>
             )}
 
-            {edit.markup_type === "installment_bonus" && (
+            {(edit.markup_type === "installment_bonus" || edit.markup_type === "accessory") && (
               <>
                 <Field label="ใบขาย *">
                   {edit.sale_invoice_no ? (
