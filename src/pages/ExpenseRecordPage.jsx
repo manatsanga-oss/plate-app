@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
@@ -266,6 +266,123 @@ export default function ExpenseRecordPage({ currentUser }) {
     } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
   }
 
+  // สร้างซ้ำ — เปิดฟอร์มใหม่ (ร่าง) โดยดึงข้อมูลจากเอกสารเดิม แต่เป็นใบใหม่
+  function openDuplicate(d) {
+    setEditTarget(null);
+    setForm({
+      expense_doc_no: "",
+      doc_date: todayISO(),
+      vendor_id: d.vendor_id || "",
+      vendor_name: d.vendor_name || "",
+      vendor_tax_id: d.vendor_tax_id || "",
+      vendor_address: d.vendor_address || "",
+      reference_no: d.reference_no || "",
+      description: d.description || "",
+      note: d.note || "",
+      discount_pct: Number(d.discount_pct) || 0,
+      vat_pct: Number(d.vat_pct) || 0,
+      wht_rate: Number(d.wht_rate) || 0,
+      wht_amount: 0,
+      payment_method: "",
+      paid_at: "",
+      paid_doc_no: "",
+      from_bank_account_id: "",
+      status: "draft",
+      affiliation: d.affiliation || "",
+      items: Array.isArray(d.items) && d.items.length
+        ? d.items.map(it => ({
+            expense_code: it.expense_code || "",
+            expense_name: it.expense_name || "",
+            description: it.description || "",
+            qty: Number(it.qty) || 1,
+            unit_price: Number(it.unit_price) || 0,
+            amount: Number(it.amount) || 0,
+            wht_pct: Number(it.wht_pct) || 0,
+          }))
+        : [emptyItem()],
+    });
+    setShowForm(true);
+    setMessage("📋 สร้างซ้ำจาก " + (d.expense_doc_no || "") + " — ตรวจสอบแล้วกดบันทึก");
+  }
+
+  // พิมพ์ — เปิดหน้าต่างใหม่แล้วสั่งพิมพ์ใบค่าใช้จ่าย
+  function handlePrint(d) {
+    const w = window.open("", "_blank", "width=820,height=960");
+    if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (ป๊อปอัพถูกบล็อก)"); return; }
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const items = Array.isArray(d.items) ? d.items : [];
+    const rows = items.map((it, i) => `
+      <tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>${esc(it.expense_name)}${it.description ? `<div style="color:#6b7280;font-size:11px">${esc(it.description)}</div>` : ""}</td>
+        <td style="text-align:right">${fmt(it.qty)}</td>
+        <td style="text-align:right">${fmt(it.unit_price)}</td>
+        <td style="text-align:right">${fmt(it.amount)}</td>
+      </tr>`).join("");
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(d.expense_doc_no)}</title>
+      <style>
+        *{font-family:'Tahoma','Sarabun',sans-serif;box-sizing:border-box}
+        body{margin:24px;color:#111827;font-size:13px}
+        h1{font-size:20px;margin:0 0 4px}
+        .muted{color:#6b7280}
+        .row{display:flex;justify-content:space-between;gap:16px;margin-bottom:12px}
+        table{width:100%;border-collapse:collapse;margin-top:10px}
+        th,td{border:1px solid #d1d5db;padding:6px 8px}
+        th{background:#f3f4f6;text-align:left;font-size:12px}
+        tfoot td{border:none;padding:3px 8px}
+        .tot{display:flex;justify-content:flex-end;margin-top:10px}
+        .tot table{width:320px}
+        .tot td{border:none;padding:3px 0}
+        @media print{body{margin:0}}
+      </style></head><body>
+      <div class="row">
+        <div>
+          <h1>ใบบันทึกค่าใช้จ่าย</h1>
+          <div class="muted">เลขที่ <b>${esc(d.expense_doc_no)}</b> · วันที่ ${fmtDate(d.doc_date)}</div>
+          ${d.affiliation ? `<div class="muted">สังกัด: ${esc(d.affiliation)}</div>` : ""}
+        </div>
+        <div style="text-align:right">
+          <div><b>${esc(d.vendor_name)}</b></div>
+          ${d.vendor_tax_id ? `<div class="muted">เลขผู้เสียภาษี: ${esc(d.vendor_tax_id)}</div>` : ""}
+          ${d.vendor_address ? `<div class="muted" style="max-width:300px">${esc(d.vendor_address)}</div>` : ""}
+          ${d.reference_no ? `<div class="muted">อ้างอิง: ${esc(d.reference_no)}</div>` : ""}
+        </div>
+      </div>
+      ${d.description ? `<div class="muted">รายละเอียด: ${esc(d.description)}</div>` : ""}
+      <table>
+        <thead><tr><th style="width:36px;text-align:center">#</th><th>รายการ</th><th style="text-align:right;width:70px">จำนวน</th><th style="text-align:right;width:110px">ราคา/หน่วย</th><th style="text-align:right;width:120px">รวม</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" style="text-align:center;color:#9ca3af">ไม่มีรายการ</td></tr>`}</tbody>
+      </table>
+      <div class="tot"><table>
+        <tr><td class="muted">รวมเป็นเงิน</td><td style="text-align:right">${fmt(d.subtotal)}</td></tr>
+        ${Number(d.discount_amount) > 0 ? `<tr><td class="muted">ส่วนลด</td><td style="text-align:right">-${fmt(d.discount_amount)}</td></tr>` : ""}
+        ${Number(d.vat_amount) > 0 ? `<tr><td class="muted">ภาษีมูลค่าเพิ่ม</td><td style="text-align:right">${fmt(d.vat_amount)}</td></tr>` : ""}
+        <tr><td><b>จำนวนเงินรวมทั้งสิ้น</b></td><td style="text-align:right"><b>${fmt(d.total)}</b></td></tr>
+        ${Number(d.wht_amount) > 0 ? `<tr><td class="muted">หัก ณ ที่จ่าย</td><td style="text-align:right;color:#dc2626">-${fmt(d.wht_amount)}</td></tr>` : ""}
+        <tr><td><b>ยอดสุทธิที่ต้องจ่าย</b></td><td style="text-align:right"><b>${fmt(d.net_to_pay || d.total)}</b></td></tr>
+      </table></div>
+      ${d.note ? `<div class="muted" style="margin-top:14px">หมายเหตุ: ${esc(d.note)}</div>` : ""}
+      <script>window.onload=function(){window.print();}<\/script>
+      </body></html>`;
+    w.document.write(html);
+    w.document.close();
+  }
+
+  // ลบ — ลบถาวร (เฉพาะเอกสารที่ยังไม่ชำระ)
+  async function handleDelete(d) {
+    if (!window.confirm(`ลบเอกสาร ${d.expense_doc_no}?\n⚠️ ลบถาวร กู้คืนไม่ได้`)) return;
+    try {
+      const res = await fetch(ACC_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "expense_record", op: "delete", expense_doc_id: d.expense_doc_id }),
+      });
+      const data = await res.json();
+      const deleted = Number(data?.deleted_count ?? data?.[0]?.deleted_count ?? 0);
+      if (deleted > 0) { setMessage("✅ ลบเรียบร้อย"); fetchDocs(); }
+      else setMessage("❌ ลบไม่ได้ (เอกสารที่ชำระแล้วต้องยกเลิกใบจ่ายก่อน)");
+    } catch (e) { setMessage("❌ ลบไม่สำเร็จ: " + e.message); }
+  }
+
   const kw = search.trim().toLowerCase();
   const filtered = docs.filter(d => {
     if (filterAff && String(d.affiliation || "") !== filterAff) return false;
@@ -484,7 +601,7 @@ export default function ExpenseRecordPage({ currentUser }) {
               </label>
             ))}
           </div>
-          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} showCheckbox={false} />
+          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={false} />
         </>
       )}
 
@@ -500,7 +617,7 @@ export default function ExpenseRecordPage({ currentUser }) {
               💵 บันทึกจ่ายเงิน
             </button>
           </div>
-          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} />
+          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} />
         </>
       )}
 
@@ -681,7 +798,7 @@ export default function ExpenseRecordPage({ currentUser }) {
   );
 }
 
-function DocsTable({ docs, loading, openEdit, handleCancel, showCheckbox, selected, toggleOne, toggleAll }) {
+function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, showCheckbox, selected, toggleOne, toggleAll }) {
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
       {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
@@ -702,7 +819,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, showCheckbox, select
             <th style={{ ...th, textAlign: "right" }}>WHT</th>
             <th style={{ ...th, textAlign: "right" }}>ยอดสุทธิ</th>
             <th style={th}>สถานะ</th>
-            <th style={{ ...th, width: 160 }}>จัดการ</th>
+            <th style={{ ...th, width: 60, textAlign: "center" }}>จัดการ</th>
           </tr>
         </thead>
         <tbody>
@@ -729,9 +846,8 @@ function DocsTable({ docs, loading, openEdit, handleCancel, showCheckbox, select
                     {status === "paid" ? "ชำระแล้ว" : status === "cancelled" ? "ยกเลิก" : "ร่าง"}
                   </span>
                 </td>
-                <td style={td}>
-                  <button onClick={() => openEdit(d)} style={{ ...btnSm, background: "#0369a1" }}>✏️ แก้</button>
-                  {status !== "cancelled" && status !== "paid" && <button onClick={() => handleCancel(d)} style={{ ...btnSm, background: "#dc2626" }}>✕</button>}
+                <td style={{ ...td, textAlign: "center" }}>
+                  <KebabMenu d={d} status={status} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} />
                 </td>
               </tr>
             );
@@ -739,6 +855,62 @@ function DocsTable({ docs, loading, openEdit, handleCancel, showCheckbox, select
         </tbody>
       </table>}
     </div>
+  );
+}
+
+function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      setPos({ top: r.bottom + 4, left: r.right - 170 });
+    }
+    setOpen(o => !o);
+  }
+  useEffect(() => {
+    if (!open) return;
+    const onDown = e => {
+      if (menuRef.current && !menuRef.current.contains(e.target) && btnRef.current && !btnRef.current.contains(e.target)) setOpen(false);
+    };
+    const onScroll = () => setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onScroll);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [open]);
+
+  const run = fn => () => { setOpen(false); fn(); };
+  const Item = ({ icon, label, onClick, color }) => (
+    <button onClick={onClick} style={{ ...menuItem, color: color || "#374151" }}
+      onMouseEnter={e => (e.currentTarget.style.background = "#f1f5f9")}
+      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
+      <span style={{ width: 18, display: "inline-block", textAlign: "center" }}>{icon}</span>{label}
+    </button>
+  );
+
+  return (
+    <>
+      <button ref={btnRef} onClick={toggle} title="เมนู"
+        style={{ width: 30, height: 28, borderRadius: 6, border: "1px solid #e5e7eb", background: open ? "#e2e8f0" : "#fff", cursor: "pointer", fontSize: 18, lineHeight: "14px", color: "#475569" }}>⋯</button>
+      {open && (
+        <div ref={menuRef} style={{ position: "fixed", top: pos.top, left: pos.left, width: 170, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", zIndex: 2000, padding: 4 }}>
+          <Item icon="✏️" label="แก้ไข" onClick={run(() => openEdit(d))} />
+          <Item icon="🖨️" label="พิมพ์" onClick={run(() => handlePrint(d))} />
+          <Item icon="📋" label="สร้างซ้ำ" onClick={run(() => openDuplicate(d))} />
+          {status !== "paid" && <div style={{ height: 1, background: "#e5e7eb", margin: "4px 6px" }} />}
+          {status !== "paid" && status !== "cancelled" && <Item icon="🚫" label="ยกเลิก" onClick={run(() => handleCancel(d))} color="#b45309" />}
+          {status !== "paid" && <Item icon="🗑️" label="ลบ" onClick={run(() => handleDelete(d))} color="#dc2626" />}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -898,3 +1070,4 @@ const th = { padding: "10px 8px", textAlign: "left", fontSize: 12, fontWeight: 7
 const td = { padding: "8px", fontSize: 13, verticalAlign: "middle" };
 const btn = (color) => ({ padding: "7px 14px", background: color, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 });
 const btnSm = { padding: "4px 10px", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600, marginRight: 4 };
+const menuItem = { display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 10px", background: "transparent", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", fontSize: 13, fontWeight: 600, textAlign: "left" };
