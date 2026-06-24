@@ -101,17 +101,21 @@ export default function HrEmployeesPage({ currentUser }) {
     }
     setSaving(true); setMessage("");
     try {
+      // UPDATE เฉพาะเมื่อแก้พนักงานเดิม (มี employee_id และชื่อไม่เปลี่ยน)
+      // ถ้าเปลี่ยน dropdown ชื่อเป็นคนใหม่ (เช่น เลือกจากบันทึกเวลาทำงาน) → INSERT ลงทะเบียนใหม่ ไม่ใช่ rename คนเดิม
+      const isUpdate = !!(editTarget && editTarget.employee_id
+        && form.employee_name.trim() === String(editTarget.employee_name || "").trim());
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: editTarget ? "update_hr_employee" : "save_hr_employee",
-          ...(editTarget ? { employee_id: editTarget.employee_id } : {}),
+          action: isUpdate ? "update_hr_employee" : "save_hr_employee",
+          ...(isUpdate ? { employee_id: editTarget.employee_id } : {}),
           ...form,
         }),
       });
       const saved = await res.json();
       // หา employee_id (edit ใช้ของเดิม, add อ่านจาก response)
-      const empId = editTarget?.employee_id
+      const empId = (isUpdate ? editTarget.employee_id : null)
         || (Array.isArray(saved) && saved[0]?.employee_id)
         || saved?.employee_id;
       if (empId) {
@@ -130,7 +134,7 @@ export default function HrEmployeesPage({ currentUser }) {
         });
       }
       setShowForm(false); setEditTarget(null); setForm(emptyForm()); setPeriods([]);
-      setMessage(`✅ ${editTarget ? "แก้ไข" : "เพิ่ม"}สำเร็จ`);
+      setMessage(`✅ ${isUpdate ? "แก้ไข" : "บันทึก/ลงทะเบียน"}สำเร็จ`);
       fetchData();
     } catch { setMessage("❌ เกิดข้อผิดพลาด"); }
     setSaving(false);
