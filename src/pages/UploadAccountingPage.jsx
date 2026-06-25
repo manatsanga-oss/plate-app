@@ -48,7 +48,7 @@ export default function UploadAccountingPage({ currentUser } = {}) {
         </div>
         <div style={{ background: "#fff", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>📒 ค่าใช้จ่ายงานบัญชี (Excel)</div>
-          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ไฟล์รายงานค่าใช้จ่าย (Excel) — ข้ามแถวที่ mark "ไม่เอา" · เลือกสังกัด (ป.เปา / สิงห์ชัย) · นำเข้าเป็น "ร่าง" ไปแสดงที่หน้าบันทึกค่าใช้จ่าย</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ไฟล์รายงานค่าใช้จ่าย (Excel) — นำเข้าทุกแถว · เลือกสังกัด (ป.เปา / สิงห์ชัย) · ใส่ F- หน้าเลขเอกสาร เก็บแยกตาราง flow_expense_documents</div>
           <AccountingExpenseUploadCard currentUser={currentUser} />
         </div>
         <div style={{ background: "#fff", borderRadius: "0 0 14px 14px", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>

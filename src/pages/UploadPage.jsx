@@ -6,7 +6,7 @@ const UPLOAD_GROUPS = [
   {
     title: "UPLOAD ข้อมูลการขาย",
     items: [
-      { key: "stock", label: "สต๊อกสินค้าคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "stock_items", url: `${BASE}/upload-stock` },
+      { key: "stock", label: "สต๊อกสินค้าคงเหลือ", desc: "เลือกไฟล์ XLSX · ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_stock", url: `${BASE}/upload-stock` },
       { key: "sales", label: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "sales_report", url: `${BASE}/upload-sales` },
       { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_deposit", url: `${BASE}/upload-deposit` },
       { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "honda_deposits", url: `${BASE}/upload-honda-deposit` },
@@ -69,6 +69,7 @@ function fmtDateTime(iso) {
 // items ที่รับ year_month override (ระบุเดือนเพื่อ upload ไฟล์ย้อนหลัง)
 const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
 const FILE_UPLOAD_KEYS = new Set([
+  "stock",                // สต๊อกสินค้าคงเหลือ — เลือกไฟล์เอง (แทนการดึงจาก OneDrive)
   "time-tracking", "yamaha-repair", "honda-repair", "honda-repair-intake",
   "yamaha-b2b-orders",
   "honda-warranty",

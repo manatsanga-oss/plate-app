@@ -532,7 +532,7 @@ export default function MotoBookingPage({ currentUser }) {
     if (filterMarketing && norm(b.marketing_name) !== norm(filterMarketing)) return false;
     // ใช้ new_model_code/new_color_name (ถ้ามี) — ตรงกับที่แสดงในตาราง — กันเคสเปลี่ยนรุ่น/สี
     if (filterModelCode && norm(b.new_model_code || b.model_code) !== norm(filterModelCode)) return false;
-    if (filterColor && norm(b.new_color_name || b.color_name) !== norm(filterColor)) return false;
+    if (filterColor && normColor(b.new_color_name || b.color_name) !== normColor(filterColor)) return false;
     return true;
   }).sort((a, b) => {
     if (filterStatus === "ขาย") {

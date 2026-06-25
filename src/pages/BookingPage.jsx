@@ -676,6 +676,8 @@ export default function BookingPage({ currentUser }) {
           setFrom={setFuelFrom}
           setTo={setFuelTo}
           isAdmin={isAdmin}
+          currentUser={currentUser}
+          onRefresh={fetchFuelExpenses}
         />
       )}
 
@@ -982,7 +984,7 @@ function OverviewTab({ data, loading, from, to, setFrom, setTo }) {
   );
 }
 
-function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin }) {
+function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin, currentUser, onRefresh }) {
   const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const fmtDate = d => d ? new Date(d).toLocaleDateString("th-TH") : "-";
   const [amountRange, setAmountRange] = useState("all");
@@ -994,9 +996,60 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin }) {
     { key: "other", label: "อื่นๆ (ไม่ใช่ 500/1000)", match: a => a !== 500 && a !== 1000 },
   ];
   const range = AMOUNT_RANGES.find(r => r.key === amountRange) || AMOUNT_RANGES[0];
+  const [onlyUnmatched, setOnlyUnmatched] = React.useState(false);
+  const [matchModal, setMatchModal] = useState(null); // รายการเบิกที่กำลังจับคู่ใบเสร็จเอง
+  const [candidates, setCandidates] = useState([]);
+  const [candLoading, setCandLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const filtered = data.filter(r => range.match(Number(r.total_amount || 0)));
+  function monthRange(dateStr) {
+    const d = new Date(dateStr);
+    const y = d.getFullYear(), m = d.getMonth();
+    const pad = n => String(n).padStart(2, "0");
+    const lastDay = new Date(y, m + 1, 0).getDate();
+    return { start: `${y}-${pad(m + 1)}-01`, end: `${y}-${pad(m + 1)}-${pad(lastDay)}` };
+  }
+  async function openMatch(row) {
+    setMatchModal({ row }); setCandidates([]); setCandLoading(true);
+    try {
+      const { start, end } = monthRange(row.payment_date);
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_fuel_receipt_candidates", amount: Number(row.total_amount || 0), from: start, to: end }),
+      });
+      const d = await res.json();
+      setCandidates((Array.isArray(d) ? d : d.rows || []).filter(x => x && x.id));
+    } catch { setCandidates([]); }
+    setCandLoading(false);
+  }
+  async function saveMatch(feId) {
+    if (!matchModal) return;
+    setSaving(true);
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_fuel_match", daily_expense_id: matchModal.row.id, flow_expense_id: feId, matched_by: currentUser?.name || currentUser?.username || "system" }),
+      });
+      setMatchModal(null); onRefresh && onRefresh();
+    } catch {}
+    setSaving(false);
+  }
+  async function clearMatch(row) {
+    setSaving(true);
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_fuel_match", daily_expense_id: row.id, flow_expense_id: 0 }),
+      });
+      setMatchModal(null); onRefresh && onRefresh();
+    } catch {}
+    setSaving(false);
+  }
+
+  const filtered = data.filter(r => !/ยกเลิก/.test(String(r.status || "")) && range.match(Number(r.total_amount || 0)) && (!onlyUnmatched || !r.receipt_no));
   const total = filtered.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+  const matchedCount = filtered.filter(r => r.receipt_no).length;
+  const unmatchedCount = filtered.length - matchedCount;
 
   return (
     <div>
@@ -1017,9 +1070,16 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin }) {
           {AMOUNT_RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
         </select>
 
+        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, color: "#b45309", fontWeight: 600, cursor: "pointer" }}>
+          <input type="checkbox" checked={onlyUnmatched} onChange={e => setOnlyUnmatched(e.target.checked)} />
+          ⚠️ เฉพาะที่ไม่มีใบเสร็จ
+        </label>
+
         <div style={{ marginLeft: "auto", fontSize: 13, color: "#374151" }}>
-          <span>จำนวน: <b>{filtered.length}</b> รายการ</span>
-          <span style={{ marginLeft: 14 }}>รวม: <b style={{ color: "#dc2626" }}>{fmt(total)}</b> บาท</span>
+          <span>จำนวน: <b>{filtered.length}</b></span>
+          <span style={{ marginLeft: 12, color: "#059669" }}>✅ จับคู่: <b>{matchedCount}</b></span>
+          <span style={{ marginLeft: 12, color: "#b45309" }}>⚠️ ไม่มีใบเสร็จ: <b>{unmatchedCount}</b></span>
+          <span style={{ marginLeft: 12 }}>รวม: <b style={{ color: "#dc2626" }}>{fmt(total)}</b> บาท</span>
         </div>
       </div>
 
@@ -1038,7 +1098,9 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin }) {
                 <th style={{ textAlign: "right" }}>โอน</th>
                 <th style={{ textAlign: "right" }}>รวม</th>
                 <th>ผู้จัดทำ</th>
+                <th>⛽ ใบเสร็จน้ำมัน (อัตโนมัติ/เลือกเอง)</th>
                 <th>สถานะ</th>
+                <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
@@ -1050,16 +1112,89 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin }) {
                   <td style={{ textAlign: "right" }}>{Number(r.transfer || 0) > 0 ? fmt(r.transfer) : "-"}</td>
                   <td style={{ textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{fmt(r.total_amount)}</td>
                   <td style={{ fontSize: 12 }}>{r.prepared_by || "-"}</td>
+                  <td style={{ fontSize: 12 }}>
+                    {r.receipt_no ? (
+                      <div>
+                        <div style={{ fontWeight: 600, color: "#065f46" }}>✅ {r.receipt_no}
+                          {r.match_type === "manual" && <span style={{ marginLeft: 6, fontSize: 10, color: "#7c3aed", background: "#f3e8ff", padding: "1px 5px", borderRadius: 6 }}>เลือกเอง</span>}
+                        </div>
+                        <div style={{ color: "#6b7280", fontSize: 11 }}>
+                          {r.receipt_vendor || "-"}
+                          {Number(r.receipt_vat) > 0 ? ` · VAT ${fmt(r.receipt_vat)}` : ""}
+                          {r.receipt_aff ? ` · ${r.receipt_aff}` : ""}
+                        </div>
+                      </div>
+                    ) : (
+                      <span style={{ color: "#b45309", fontWeight: 600 }}>⚠️ ไม่มีใบเสร็จ</span>
+                    )}
+                  </td>
                   <td>
                     <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11,
                       background: r.status === "ปกติ" ? "#d1fae5" : "#fee2e2",
                       color: r.status === "ปกติ" ? "#065f46" : "#991b1b",
                     }}>{r.status || "-"}</span>
                   </td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    <button onClick={() => openMatch(r)} title="จับคู่ใบเสร็จเอง"
+                      style={{ padding: "4px 10px", border: "1px solid #2563eb", background: "#eff6ff", color: "#1d4ed8", borderRadius: 6, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                      🔗 จับคู่
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {matchModal && (
+        <div onClick={() => setMatchModal(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 12, padding: 20, width: 540, maxWidth: "92vw", boxShadow: "0 10px 40px rgba(0,0,0,0.2)" }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>🔗 เลือกใบเสร็จน้ำมัน (จับคู่เอง)</div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+              รายการเบิก <b>{matchModal.row.payment_no}</b> · ยอด <b>{fmt(matchModal.row.total_amount)}</b> · {fmtDate(matchModal.row.payment_date)}
+              <br />กรอง: ยอดเท่ากัน · เดือนเดียวกัน · <b>ทุกประเภท</b> (เผื่อบันทึกผิดหมวด) · ใบที่ยังไม่ถูกจับคู่ · ทั้ง 2 สังกัด
+            </div>
+            {candLoading ? (
+              <div style={{ textAlign: "center", padding: 24, color: "#6b7280" }}>กำลังโหลด...</div>
+            ) : candidates.length === 0 ? (
+              <div style={{ textAlign: "center", padding: 24, color: "#9ca3af" }}>ไม่พบใบเสร็จที่ยอด+เดือนตรงกัน (ที่ยังว่าง)</div>
+            ) : (
+              <div style={{ maxHeight: 320, overflowY: "auto" }}>
+                {candidates.map(c => (
+                  <div key={c.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8, marginBottom: 6 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, color: "#065f46" }}>{c.doc_no}
+                        <span style={{ marginLeft: 6, fontSize: 11, color: "#2563eb" }}>· {c.affiliation}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        {fmtDate(c.doc_date)} · {c.vendor_name || "-"} · ยอด {fmt(c.total)}{Number(c.vat_amount) > 0 ? ` · VAT ${fmt(c.vat_amount)}` : ""}
+                      </div>
+                      {c.expense_type && <div style={{ fontSize: 10, color: "#9ca3af" }}>ประเภท: {c.expense_type}</div>}
+                    </div>
+                    <button disabled={saving} onClick={() => saveMatch(c.id)}
+                      style={{ padding: "5px 14px", border: "none", background: "#16a34a", color: "#fff", borderRadius: 6, fontSize: 12, cursor: "pointer", fontWeight: 600, whiteSpace: "nowrap" }}>
+                      เลือก
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 14 }}>
+              {matchModal.row.match_type === "manual" ? (
+                <button disabled={saving} onClick={() => clearMatch(matchModal.row)}
+                  style={{ padding: "6px 14px", border: "1px solid #dc2626", background: "#fef2f2", color: "#b91c1c", borderRadius: 6, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                  ✖ ลบจับคู่ปัจจุบัน
+                </button>
+              ) : <span />}
+              <button onClick={() => setMatchModal(null)}
+                style={{ padding: "6px 16px", border: "1px solid #d1d5db", background: "#fff", color: "#374151", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>
+                ปิด
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

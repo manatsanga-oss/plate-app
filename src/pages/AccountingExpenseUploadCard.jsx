@@ -1,13 +1,13 @@
 import React, { useState } from "react";
 
-// ฟีเจอร์: upload ไฟล์รายงานค่าใช้จ่าย (Excel) → บันทึกเข้า expense_documents
+// ฟีเจอร์: upload ไฟล์รายงานค่าใช้จ่าย (Excel) → บันทึกเข้า flow_expense_documents (ตารางแยกของ flow)
 // - parse ฝั่ง client (header อยู่แถว 5, ข้อมูลเริ่มแถว 6)
-// - ข้ามแถวที่มีคำว่า "ไม่เอา" (ผู้ใช้ mark ในคอลัมน์ Q) — ครั้งต่อไปถ้าไม่มีคำนี้จะนำเข้าทั้งหมด
-// - นำเข้าเป็นสถานะ "ร่าง" ทั้งหมด · เลือกสังกัด (ป.เปา / สิงห์ชัย) ตอน upload
+// - นำเข้า "ทุกแถว" ที่มี (ไม่ต้องเลือก/ไม่ข้าม) — รวมแถวน้ำมัน
+// - ใส่ F- หน้าเลขเอกสาร (เช่น EXP2026060035 → F-EXP2026060035) บอกว่ามาจาก flow + กันชนกับเอกสารสร้างมือ
+// - เลือกสังกัด (ป.เปา / สิงห์ชัย) ตอน upload
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/upload-accounting-expense";
 
 const AFFILIATIONS = ["ป.เปา", "สิงห์ชัย"];
-const SKIP_WORD = "ไม่เอา";
 
 function thaiDateToIso(s) {
   if (!s) return null;
@@ -30,14 +30,13 @@ function cellTxt(v) {
 export default function AccountingExpenseUploadCard({ currentUser }) {
   const [affiliation, setAffiliation] = useState("");
   const [file, setFile] = useState(null);
-  const [preview, setPreview] = useState([]);   // แถวที่จะนำเข้า
-  const [ignored, setIgnored] = useState([]);    // แถวที่ mark "ไม่เอา" (จะเก็บไว้กรองครั้งหน้า)
+  const [preview, setPreview] = useState([]);   // ทุกแถวที่จะนำเข้า (รวมน้ำมัน)
   const [parsing, setParsing] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [msg, setMsg] = useState("");
 
   async function handleParse() {
-    setMsg(""); setPreview([]); setIgnored([]);
+    setMsg(""); setPreview([]);
     if (!file) { setMsg("⚠️ เลือกไฟล์ก่อน"); return; }
     setParsing(true);
     try {
@@ -64,7 +63,6 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
       const cRef = col("เลขที่อ้างอิง");
 
       const out = [];
-      const ig = [];
       for (let i = hdrIdx + 1; i < rows.length; i++) {
         const r = rows[i];
         const docNo = cellTxt(r[cDoc]);
@@ -74,26 +72,22 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
         const subtotal = num(r[cValue]);
         const vat = num(r[cVat]);
         const total = num(r[cNet]) || (subtotal + vat);
-        const base = {
-          expense_doc_no: docNo,
+        const vatPct = subtotal > 0 && vat > 0 ? Math.round((vat / subtotal) * 100) : 0;
+        const expType = cellTxt(r[cType]);
+        // นำเข้าทุกแถว — ใส่ F- หน้าเลขเอกสาร
+        out.push({
+          expense_doc_no: "F-" + docNo,
           doc_date: thaiDateToIso(dateStr),
           vendor_name: cellTxt(r[cVendor]) || null,
-          description: cellTxt(r[cType]) || cellTxt(r[cProject]) || null,
-          total,
-        };
-        // แถวที่ mark "ไม่เอา" (คอลัมน์ Q) → เก็บไว้กรองครั้งหน้า (ไม่นำเข้า)
-        if (r.some(c => cellTxt(c).includes(SKIP_WORD))) { ig.push(base); continue; }
-        const vatPct = subtotal > 0 && vat > 0 ? Math.round((vat / subtotal) * 100) : 0;
-        out.push({
-          ...base,
           vendor_tax_id: cellTxt(r[cTax]) || null,
           reference_no: cellTxt(r[cRef]) || null,
-          subtotal, vat_pct: vatPct, vat_amount: vat,
+          expense_type: expType || null,
+          description: expType || cellTxt(r[cProject]) || null,
+          subtotal, vat_pct: vatPct, vat_amount: vat, total,
         });
       }
       setPreview(out);
-      setIgnored(ig);
-      setMsg(`✅ อ่านสำเร็จ — จะนำเข้า ${out.length} รายการ · ข้าม/จำ "${SKIP_WORD}" ${ig.length} รายการ`);
+      setMsg(`✅ อ่านสำเร็จ — นำเข้าทุกแถว ${out.length} รายการ (ใส่ F- หน้าเลขเอกสาร)`);
     } catch (e) {
       setMsg("❌ อ่านไฟล์ล้มเหลว: " + e.message);
     }
@@ -102,7 +96,7 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
 
   async function handleUpload() {
     if (!affiliation) { setMsg("⚠️ เลือกสังกัดก่อน"); return; }
-    if (preview.length === 0 && ignored.length === 0) { setMsg("⚠️ กดอ่านไฟล์ก่อน"); return; }
+    if (preview.length === 0) { setMsg("⚠️ กดอ่านไฟล์ก่อน"); return; }
     setUploading(true); setMsg("");
     try {
       const res = await fetch(API_URL, {
@@ -111,7 +105,7 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
           action: "upload_expenses",
           affiliation,
           rows: preview,
-          ignored,  // รายการ "ไม่เอา" — เก็บไว้กรองอัตโนมัติครั้งหน้า
+          source_file: file?.name || null,
           uploaded_by: currentUser?.name || currentUser?.username || "system",
         }),
       });
@@ -119,9 +113,8 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
       const ok = Array.isArray(data) ? data[0] : data;
       if (ok?.success === false) throw new Error(ok?.error || "บันทึกล้มเหลว");
       const n = ok?.upserted ?? preview.length;
-      const ig = ok?.ignored_added ?? ignored.length;
-      setMsg(`✅ นำเข้าค่าใช้จ่าย ${n} รายการ (สังกัด ${affiliation}) · จำรายการ "ไม่เอา" ${ig} รายการ — ไปดูที่หน้า "บันทึกค่าใช้จ่าย"`);
-      setPreview([]); setIgnored([]); setFile(null);
+      setMsg(`✅ นำเข้า ${n} รายการ (สังกัด ${affiliation}) → ตาราง flow_expense_documents`);
+      setPreview([]); setFile(null);
     } catch (e) {
       setMsg("❌ " + e.message);
     }
@@ -133,8 +126,8 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
   return (
     <div>
       <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12, textAlign: "center" }}>
-        ไฟล์ Excel รายงานค่าใช้จ่าย — ข้ามแถวที่ mark "ไม่เอา" · นำเข้าเป็นสถานะ "ร่าง" · UPSERT (เลขที่เอกสาร)
-        · 📦 Table: <code style={{ padding: "2px 8px", background: "#f3f4f6", borderRadius: 4, color: "#374151" }}>expense_documents</code>
+        ไฟล์ Excel รายงานค่าใช้จ่าย — นำเข้า "ทุกแถว" · ใส่ <code style={{ padding: "2px 6px", background: "#fee2e2", borderRadius: 4, color: "#991b1b", fontWeight: 600 }}>F-</code> หน้าเลขเอกสาร · UPSERT (สังกัด + เลขที่เอกสาร)
+        · 📦 <code style={{ padding: "2px 8px", background: "#f3f4f6", borderRadius: 4, color: "#374151" }}>flow_expense_documents</code> (แยกจากเอกสารสร้างมือ)
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 12, alignItems: "center", marginBottom: 12 }}>
@@ -147,7 +140,7 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
         <input type="file" accept=".xlsx,.xls"
-          onChange={e => { setFile(e.target.files?.[0] || null); setPreview([]); setIgnored([]); setMsg(""); }}
+          onChange={e => { setFile(e.target.files?.[0] || null); setPreview([]); setMsg(""); }}
           style={{ flex: "0 0 auto" }} />
         {file && <span style={{ fontSize: 11, color: "#6b7280" }}>{file.name} ({(file.size / 1024).toFixed(1)} KB)</span>}
         <div style={{ flex: 1 }} />
@@ -155,8 +148,8 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
           style={{ ...btn, background: parsing || !file ? "#9ca3af" : "#6366f1" }}>
           {parsing ? "📖 อ่าน..." : "📖 อ่านไฟล์"}
         </button>
-        <button onClick={handleUpload} disabled={uploading || (preview.length === 0 && ignored.length === 0) || !affiliation}
-          style={{ ...btn, background: uploading || (preview.length === 0 && ignored.length === 0) || !affiliation ? "#9ca3af" : "#15803d" }}>
+        <button onClick={handleUpload} disabled={uploading || preview.length === 0 || !affiliation}
+          style={{ ...btn, background: uploading || preview.length === 0 || !affiliation ? "#9ca3af" : "#15803d" }}>
           {uploading ? "💾 ..." : `💾 Upload ${preview.length || ""} รายการ`}
         </button>
       </div>
@@ -166,7 +159,7 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
       {preview.length > 0 && (
         <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
           <div style={{ fontSize: 12, fontWeight: 600, color: "#15803d", padding: "8px 10px", background: "#f0fdf4" }}>
-            🔍 พรีวิว 5 แถวแรก — รวม {preview.length} รายการ · ยอดรวม {total.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท · ข้าม/จำ "ไม่เอา" {ignored.length} รายการ
+            🔍 พรีวิว 5 แถวแรก — รวม {preview.length} รายการ · ยอดรวม {total.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท
           </div>
           <table className="data-table" style={{ fontSize: 12, width: "100%" }}>
             <thead><tr>
@@ -176,10 +169,10 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
             <tbody>
               {preview.slice(0, 5).map((r, i) => (
                 <tr key={i}>
-                  <td style={{ fontFamily: "monospace", fontWeight: 600, color: "#072d6b" }}>{r.expense_doc_no}</td>
+                  <td style={{ fontFamily: "monospace", fontWeight: 600, color: "#991b1b" }}>{r.expense_doc_no}</td>
                   <td>{r.doc_date || "-"}</td>
                   <td style={{ maxWidth: 220 }}>{r.vendor_name || "-"}</td>
-                  <td style={{ fontSize: 11, color: "#6b7280" }}>{r.description || "-"}</td>
+                  <td style={{ fontSize: 11, color: "#6b7280" }}>{r.expense_type || "-"}</td>
                   <td style={{ textAlign: "right" }}>{r.subtotal.toLocaleString()}</td>
                   <td style={{ textAlign: "right" }}>{r.vat_amount.toLocaleString()}</td>
                   <td style={{ textAlign: "right", fontWeight: 600 }}>{r.total.toLocaleString()}</td>

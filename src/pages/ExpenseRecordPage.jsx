@@ -385,6 +385,7 @@ export default function ExpenseRecordPage({ currentUser }) {
 
   const kw = search.trim().toLowerCase();
   const filtered = docs.filter(d => {
+    if (/แนะนำ|52074/.test(String(d.description || ""))) return false;  // ค่าแนะนำ → แยกไปหน้า "บันทึกค่าแนะนำ"
     if (filterAff && String(d.affiliation || "") !== filterAff) return false;
     if (!kw) return true;
     const hay = [d.expense_doc_no, d.vendor_name, d.reference_no, d.description].filter(Boolean).join(" ").toLowerCase();

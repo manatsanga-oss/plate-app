@@ -195,18 +195,20 @@ export default function TimeTrackingPage({ currentUser }) {
         const cells = [
           s.employee_name || "",
           s.total_days, s.present_days, s.absence_days,
+          s.weekly_off_days || 0,
+          s.annual_holiday_days || 0,
           s.monthly_off_days || 0,
           s.personal_leave_days || 0,
           s.vacation_days || 0,
-          s.sick_days || 0, s.sick_with_cert || 0, s.sick_no_cert || 0,
+          s.sick_days || 0, accountedDays(s), s.sick_with_cert || 0, s.sick_no_cert || 0,
           s.late_days, s.hide_clock_days || 0, s.early_leave_days,
         ].map(escapeHtml);
         return `<tr><td>${cells.join("</td><td>")}</td></tr>`;
       }).join("");
       tableHtml = `<table><thead><tr>
         <th>พนักงาน</th><th>วันรวม</th><th>มา</th><th>ขาด</th>
-        <th>วันหยุดกลางเดือน</th><th>ลากิจ</th><th>ลาพักร้อน</th>
-        <th>ลาป่วย</th><th>มีใบรับรอง</th><th>ไม่มีใบรับรอง</th>
+        <th>วันหยุดประจำสัปดาห์</th><th>วันหยุดประจำปี</th><th>วันหยุดกลางเดือน</th><th>ลากิจ</th><th>ลาพักร้อน</th>
+        <th>ลาป่วย</th><th>รวมวัน</th><th>มีใบรับรอง</th><th>ไม่มีใบรับรอง</th>
         <th>สาย</th><th>ไม่สแกนเข้างาน</th><th>กลับก่อน</th>
         </tr></thead><tbody>${rows}</tbody></table>`;
     }
@@ -272,7 +274,11 @@ export default function TimeTrackingPage({ currentUser }) {
     if (/^ขาด/.test(s)) return "ขาด";
     if (/^มา/.test(s)) return "มา";
     if (/สาย/.test(s)) return "สาย";
-    return s;
+    if (s === "วันหยุดประจำสัปดาห์") return "วันหยุดประจำสัปดาห์";
+    if (s === "วันหยุดกลางเดือน") return "วันหยุดกลางเดือน";
+    if (s === "ชดเชย" || s === "OT") return s;
+    if (s === "" || s === "-") return "ยังไม่ระบุ";   // แถวว่าง (ไม่มีเวลา/ไม่ใช่วันหยุด) เช่นวันที่เติมเข้ามา
+    return "วันหยุดประจำปี";                           // เหลือ = ชื่อวันหยุดประจำปี (วันสงกรานต์ ฯลฯ)
   }
 
   const filteredDetail = rows.filter(r => {
@@ -288,6 +294,13 @@ export default function TimeTrackingPage({ currentUser }) {
     if (affilFilter && r.affiliation !== affilFilter) return false;
     return true;
   });
+
+  // รวมวัน — ผลรวมตั้งแต่คอลัมน์ "มา" ถึง "ลาป่วย" (ไม่รวม sub-breakdown: ใบรับรอง/สาย/ไม่สแกน/กลับก่อน)
+  const accountedDays = s =>
+    Number(s.present_days || 0) + Number(s.absence_days || 0) +
+    Number(s.weekly_off_days || 0) + Number(s.annual_holiday_days || 0) +
+    Number(s.monthly_off_days || 0) + Number(s.personal_leave_days || 0) +
+    Number(s.vacation_days || 0) + Number(s.sick_days || 0);
 
   return (
     <div className="page-container">
@@ -368,6 +381,12 @@ export default function TimeTrackingPage({ currentUser }) {
             <option value="ลาพักร้อน">🌴 ลาพักร้อน</option>
             <option value="ลากิจ">📝 ลากิจ</option>
             <option value="ลาคลอดบุตร">👶 ลาคลอดบุตร</option>
+            <option value="วันหยุดประจำสัปดาห์">🟦 วันหยุดประจำสัปดาห์</option>
+            <option value="วันหยุดประจำปี">🎌 วันหยุดประจำปี</option>
+            <option value="วันหยุดกลางเดือน">🟪 วันหยุดกลางเดือน</option>
+            <option value="ชดเชย">🔁 ชดเชย</option>
+            <option value="OT">⏱️ OT (ทำงานวันหยุด)</option>
+            <option value="ยังไม่ระบุ">⚪ ยังไม่ระบุ (แถวว่าง)</option>
           </select>
         )}
 
@@ -506,10 +525,13 @@ export default function TimeTrackingPage({ currentUser }) {
                   <th style={{ ...th, textAlign: "right" }}>วันรวม</th>
                   <th style={{ ...th, textAlign: "right", color: "#86efac" }}>มา</th>
                   <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>ขาด</th>
+                  <th style={{ ...th, textAlign: "right", color: "#93c5fd" }}>วันหยุดประจำสัปดาห์</th>
+                  <th style={{ ...th, textAlign: "right", color: "#fde68a" }}>วันหยุดประจำปี</th>
                   <th style={{ ...th, textAlign: "right", color: "#c4b5fd" }}>วันหยุดกลางเดือน</th>
                   <th style={{ ...th, textAlign: "right", color: "#fcd34d" }}>ลากิจ</th>
                   <th style={{ ...th, textAlign: "right", color: "#5eead4" }}>ลาพักร้อน</th>
                   <th style={{ ...th, textAlign: "right", color: "#fbbf24" }}>ลาป่วย</th>
+                  <th style={{ ...th, textAlign: "right", color: "#fff", background: "#0a3a8a", borderLeft: "2px solid #cbd5e1", borderRight: "2px solid #cbd5e1" }}>รวมวัน</th>
                   <th style={{ ...th, textAlign: "right", color: "#86efac" }}>มีใบรับรอง</th>
                   <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>ไม่มีใบรับรอง</th>
                   <th style={{ ...th, textAlign: "right", color: "#fdba74" }}>สาย</th>
@@ -524,10 +546,13 @@ export default function TimeTrackingPage({ currentUser }) {
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{s.total_days}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#065f46", fontWeight: 600 }}>{s.present_days}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.absence_days) > 0 ? "#dc2626" : "#9ca3af", fontWeight: Number(s.absence_days) > 0 ? 600 : 400 }}>{s.absence_days}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.weekly_off_days) > 0 ? "#1e40af" : "#9ca3af", fontWeight: Number(s.weekly_off_days) > 0 ? 600 : 400 }}>{s.weekly_off_days || 0}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.annual_holiday_days) > 0 ? "#92400e" : "#9ca3af", fontWeight: Number(s.annual_holiday_days) > 0 ? 600 : 400 }}>{s.annual_holiday_days || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.monthly_off_days) > 0 ? "#5b21b6" : "#9ca3af", fontWeight: Number(s.monthly_off_days) > 0 ? 600 : 400 }}>{s.monthly_off_days || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.personal_leave_days) > 0 ? "#ca8a04" : "#9ca3af", fontWeight: Number(s.personal_leave_days) > 0 ? 600 : 400 }}>{s.personal_leave_days || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.vacation_days) > 0 ? "#0d9488" : "#9ca3af", fontWeight: Number(s.vacation_days) > 0 ? 600 : 400 }}>{s.vacation_days || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.sick_days) > 0 ? "#d97706" : "#9ca3af", fontWeight: Number(s.sick_days) > 0 ? 600 : 400 }}>{s.sick_days || 0}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0a3a8a", fontWeight: 700, background: "#eff4ff", borderLeft: "2px solid #cbd5e1", borderRight: "2px solid #cbd5e1" }}>{accountedDays(s)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.sick_with_cert) > 0 ? "#15803d" : "#9ca3af", fontWeight: Number(s.sick_with_cert) > 0 ? 600 : 400 }}>{s.sick_with_cert || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.sick_no_cert) > 0 ? "#b91c1c" : "#9ca3af", fontWeight: Number(s.sick_no_cert) > 0 ? 600 : 400 }}>{s.sick_no_cert || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.late_days) > 0 ? "#ea580c" : "#9ca3af", fontWeight: Number(s.late_days) > 0 ? 600 : 400 }}>{s.late_days}</td>
@@ -542,10 +567,13 @@ export default function TimeTrackingPage({ currentUser }) {
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{summary.reduce((s, x) => s + Number(x.total_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#065f46" }}>{summary.reduce((s, x) => s + Number(x.present_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{summary.reduce((s, x) => s + Number(x.absence_days || 0), 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#1e40af" }}>{summary.reduce((s, x) => s + Number(x.weekly_off_days || 0), 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#92400e" }}>{summary.reduce((s, x) => s + Number(x.annual_holiday_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6" }}>{summary.reduce((s, x) => s + Number(x.monthly_off_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#ca8a04" }}>{summary.reduce((s, x) => s + Number(x.personal_leave_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0d9488" }}>{summary.reduce((s, x) => s + Number(x.vacation_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#d97706" }}>{summary.reduce((s, x) => s + Number(x.sick_days || 0), 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0a3a8a", fontWeight: 800, background: "#eff4ff", borderLeft: "2px solid #cbd5e1", borderRight: "2px solid #cbd5e1" }}>{summary.reduce((s, x) => s + accountedDays(x), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d" }}>{summary.reduce((s, x) => s + Number(x.sick_with_cert || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#b91c1c" }}>{summary.reduce((s, x) => s + Number(x.sick_no_cert || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#ea580c" }}>{summary.reduce((s, x) => s + Number(x.late_days || 0), 0)}</td>
