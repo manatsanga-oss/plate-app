@@ -73,6 +73,7 @@ import ServiceExpensePage from "./pages/ServiceExpensePage";
 import GeneralExpensePage from "./pages/GeneralExpensePage";
 import IncomeCategoryPage from "./pages/IncomeCategoryPage";
 import ExpenseRecordPage from "./pages/ExpenseRecordPage";
+import FlowExpenseRecordPage from "./pages/FlowExpenseRecordPage";
 import AdvanceExpensePage from "./pages/AdvanceExpensePage";
 import IncomeRecordPage from "./pages/IncomeRecordPage";
 import TimeTrackingPage from "./pages/TimeTrackingPage";
@@ -247,7 +248,7 @@ export default function App() {
     if (page === "convert") return false;
     if (page === "subunit") return false;
     if (page === "receive") return false;              // เฉพาะ admin (รับวัสดุ)
-    if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "incomecategory" || page === "expenserecord" || page === "advanceexpense" || page === "position" || page === "motostock" || page === "giveawayrules") return false;
+    if (page === "driver" || page === "finance" || page === "supplier" || page === "motoprice" || page === "motomodel" || page === "motoexpense" || page === "serviceexpense" || page === "generalexpense" || page === "incomecategory" || page === "expenserecord" || page === "flowexpense" || page === "advanceexpense" || page === "position" || page === "motostock" || page === "giveawayrules") return false;
     if (page === "users") return true;
     if (page === "stockcheck") return true;
     const pages = parseUserPages(currentUser.pages);
@@ -441,6 +442,9 @@ export default function App() {
         )}
         {activeMenu === "expenserecord" && canAccess("expenserecord") && (
           <ExpenseRecordPage currentUser={currentUser} />
+        )}
+        {activeMenu === "flowexpense" && canAccess("flowexpense") && (
+          <FlowExpenseRecordPage currentUser={currentUser} />
         )}
         {activeMenu === "advanceexpense" && canAccess("advanceexpense") && (
           <AdvanceExpensePage currentUser={currentUser} />
@@ -748,7 +752,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="mailinbox" label="📬 บันทึกจดหมายเข้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "flowexpense", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -760,6 +764,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="bankdeposit" label="บันทึกรายการฝากเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="vehiclepayment" label="บันทึกรับชำระเงินค่ารถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expenserecord" label="บันทึกค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="flowexpense" label="บันทึกค่าใช้จ่ายจาก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="advanceexpense" label="ค่าใช้จ่ายจ่ายล่วงหน้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="goodspayment" label="บันทึกชำระค่าสินค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expensedoccheck" label="ตรวจสอบเอกสารค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
