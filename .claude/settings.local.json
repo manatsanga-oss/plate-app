@@ -618,7 +618,32 @@
       "Bash(cygpath -w /tmp/other_node.txt)",
       "Bash(awk 'NR>=150 && NR<=175 {print NR\": \"substr\\($0,1,200\\)}' \"/c/Users/manat/OneDrive/New folder/Accounting API \\(16\\).json\")",
       "Bash(rm -f /tmp/payment_node.txt /tmp/other_node.txt /tmp/decode.py)",
-      "Bash(python tools/add_flow_expense_payment_ops.py)"
+      "Bash(python tools/add_flow_expense_payment_ops.py)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('/c/Users/manat/plate-app/package.json'\\).scripts\\)\\)\")",
+      "Bash(curl -s -o /dev/null -w \"status=%{http_code}\\\\n\" \"http://localhost:61243/src/pages/UploadPage.jsx\")",
+      "Bash(curl -s \"http://localhost:61243/src/pages/UploadPage.jsx\")",
+      "Bash(grep -oE \"ดึงไฟล์ล่าสุดจากโฟลเดอร์ OneDrive|ONEDRIVE_MODE_KEYS|source.{0,3}onedrive\")",
+      "Bash(curl -s -m 8 -o /dev/null -w \"%{http_code}\\\\n\" \"http://localhost:5174/src/pages/UploadPage.jsx\")",
+      "Bash(curl -s -m 8 \"http://localhost:5174/src/pages/UploadPage.jsx\")",
+      "Bash(node build.js)",
+      "Bash(node build.cjs)",
+      "Bash(node test.cjs)",
+      "Bash(node dollarcheck.cjs)",
+      "Bash(cat .claude/launch.json)",
+      "Bash(node -e \"const p=require\\('./package.json'\\);console.log\\(JSON.stringify\\(p.scripts\\)\\)\")",
+      "Bash(node inspect.cjs)",
+      "Bash(node inspect2.cjs)",
+      "Bash(node patch_merged.cjs)",
+      "Bash(node verify.cjs)",
+      "Bash(rm -f .tmp_build/*.cjs .tmp_build/*.js)",
+      "Bash(rmdir .tmp_build)",
+      "Bash(node compare.cjs)",
+      "Bash(node joincheck.cjs)",
+      "Bash(node colorcheck.cjs)",
+      "Bash(node e2e.cjs)",
+      "Bash(node patch_booking.cjs)",
+      "Bash(rm -f .tmp_build/*.cjs .tmp_build/*.js .tmp_build/*.txt)",
+      "Bash(ls .tmp_build)"
     ]
   }
 }
