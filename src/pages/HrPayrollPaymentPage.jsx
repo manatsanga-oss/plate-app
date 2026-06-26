@@ -582,6 +582,9 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                         <td style={{ ...td, textAlign: "center" }}>
                           {status === "paid" ? (
                             <span style={{ fontSize: 11, color: "#065f46", fontFamily: "monospace" }}>{doc?.paid_doc_no || "-"}</span>
+                          ) : row.key === "tax" ? (
+                            <span title="ภงด.1 ย้ายไปจ่ายที่เมนู 'บันทึกจ่ายเงินภาษีสรรพากร' → ภ.ง.ด.1"
+                              style={{ fontSize: 11, color: "#7c3aed", fontWeight: 600 }}>→ จ่ายที่เมนูภาษีสรรพากร</span>
                           ) : (
                             <button onClick={() => openPayPopup(it, row)}
                               style={{ padding: "5px 14px", background: "#10b981", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>

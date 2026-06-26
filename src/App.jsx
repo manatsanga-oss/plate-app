@@ -74,6 +74,7 @@ import GeneralExpensePage from "./pages/GeneralExpensePage";
 import IncomeCategoryPage from "./pages/IncomeCategoryPage";
 import ExpenseRecordPage from "./pages/ExpenseRecordPage";
 import FlowExpenseRecordPage from "./pages/FlowExpenseRecordPage";
+import TaxRemittanceRecordPage from "./pages/TaxRemittanceRecordPage";
 import AdvanceExpensePage from "./pages/AdvanceExpensePage";
 import IncomeRecordPage from "./pages/IncomeRecordPage";
 import TimeTrackingPage from "./pages/TimeTrackingPage";
@@ -243,6 +244,7 @@ export default function App() {
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
+    if (page === "taxremittance") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT (บันทึกจ่ายภาษีสรรพากร)
     if (page === "financepayment") return false;
     if (page === "goodspayment") return false;        // เฉพาะ admin (บันทึกชำระค่าสินค้า)
     if (page === "convert") return false;
@@ -445,6 +447,9 @@ export default function App() {
         )}
         {activeMenu === "flowexpense" && canAccess("flowexpense") && (
           <FlowExpenseRecordPage currentUser={currentUser} />
+        )}
+        {activeMenu === "taxremittance" && canAccess("taxremittance") && (
+          <TaxRemittanceRecordPage currentUser={currentUser} />
         )}
         {activeMenu === "advanceexpense" && canAccess("advanceexpense") && (
           <AdvanceExpensePage currentUser={currentUser} />
@@ -752,7 +757,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="mailinbox" label="📬 บันทึกจดหมายเข้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "flowexpense", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "flowexpense", "taxremittance", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -765,6 +770,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="vehiclepayment" label="บันทึกรับชำระเงินค่ารถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expenserecord" label="บันทึกค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="flowexpense" label="บันทึกค่าใช้จ่ายจาก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="taxremittance" label="🧾 บันทึกจ่ายเงินภาษีสรรพากร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="advanceexpense" label="ค่าใช้จ่ายจ่ายล่วงหน้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="goodspayment" label="บันทึกชำระค่าสินค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expensedoccheck" label="ตรวจสอบเอกสารค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
