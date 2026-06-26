@@ -6,7 +6,7 @@ const UPLOAD_GROUPS = [
   {
     title: "UPLOAD ข้อมูลการขาย",
     items: [
-      { key: "stock", label: "สต๊อกสินค้าคงเหลือ", desc: "เลือกไฟล์ XLSX · ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_stock", url: `${BASE}/upload-stock` },
+      { key: "stock", label: "สต๊อกสินค้าคงเหลือ", desc: "เลือกไฟล์ XLSX หรือดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_stock", url: `${BASE}/upload-stock` },
       { key: "sales", label: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "sales_report", url: `${BASE}/upload-sales` },
       { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_deposit", url: `${BASE}/upload-deposit` },
       { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "honda_deposits", url: `${BASE}/upload-honda-deposit` },
@@ -80,16 +80,24 @@ const FILE_UPLOAD_KEYS = new Set([
   "part-price-yamaha",    // ราคาอะไหล่ YAMAHA Stock — เลือกไฟล์เอง
 ]); // รายการที่ต้องเลือกไฟล์เอง — dcs-orders, dcs-backorders, honda-loan-parts, pending-job, yamaha-b2b-backorders ย้ายไป OneDrive
 
+// รายการที่รองรับ 2 โหมด: เลือกไฟล์เอง (default) หรือวาง OneDrive File ID ให้ n8n download มาเอง
+const ONEDRIVE_MODE_KEYS = new Set(["stock"]);
+
 export default function UploadPage({ currentUser } = {}) {
   const [statuses, setStatuses] = useState({});
   const [messages, setMessages] = useState({});
   const [lastUploads, setLastUploads] = useState(loadLastUploads);
   const [yearMonths, setYearMonths] = useState({}); // {key: '6903'}
   const [files, setFiles] = useState({}); // { key: File }
+  const [uploadModes, setUploadModes] = useState({}); // { key: "file" | "onedrive" }
+
+  const modeOf = (key) => (ONEDRIVE_MODE_KEYS.has(key) ? (uploadModes[key] || "file") : "file");
 
   async function handleUpload(item) {
-    // ถ้าเป็น item ที่ต้องเลือกไฟล์ → ตรวจสอบว่ามีไฟล์
-    if (FILE_UPLOAD_KEYS.has(item.key)) {
+    const onedriveMode = modeOf(item.key) === "onedrive";
+
+    // โหมดเลือกไฟล์ → ต้องมีไฟล์ก่อน (โหมด OneDrive ดึงไฟล์ล่าสุดจากโฟลเดอร์เอง ไม่ต้องใส่อะไร)
+    if (!onedriveMode && FILE_UPLOAD_KEYS.has(item.key)) {
       const f = files[item.key];
       if (!f) {
         setMessages(prev => ({ ...prev, [item.key]: "⚠️ กรุณาเลือกไฟล์ก่อน" }));
@@ -107,7 +115,14 @@ export default function UploadPage({ currentUser } = {}) {
       }
 
       let res;
-      if (FILE_UPLOAD_KEYS.has(item.key)) {
+      if (onedriveMode) {
+        // โหมด OneDrive → บอก n8n ให้ดึงไฟล์ล่าสุดจากโฟลเดอร์ OneDrive เอง
+        res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ source: "onedrive" }),
+        });
+      } else if (FILE_UPLOAD_KEYS.has(item.key)) {
         // ส่งไฟล์เป็น multipart/form-data
         const fd = new FormData();
         fd.append("file", files[item.key]);
@@ -147,6 +162,26 @@ export default function UploadPage({ currentUser } = {}) {
             {group.items.map((item) => {
               const st = statuses[item.key] || "idle";
               const msg = messages[item.key] || "";
+              const isFileKey = FILE_UPLOAD_KEYS.has(item.key);
+              const supportsOneDrive = ONEDRIVE_MODE_KEYS.has(item.key);
+              const mode = modeOf(item.key);
+              const onedriveMode = mode === "onedrive";
+              const needsInput = onedriveMode ? false : (isFileKey && !files[item.key]);
+              const fileInputBlock = (
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
+                  <input
+                    type="file"
+                    accept=".csv,.xlsx,.xls"
+                    onChange={e => setFiles(p => ({ ...p, [item.key]: e.target.files?.[0] || null }))}
+                    style={{ fontSize: 12, maxWidth: 240 }}
+                  />
+                  {files[item.key] && (
+                    <span style={{ fontSize: 11, color: "#6b7280" }}>
+                      📄 {files[item.key].name} ({(files[item.key].size / 1024).toFixed(1)} KB)
+                    </span>
+                  )}
+                </div>
+              );
               return (
                 <div key={item.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px", borderBottom: "1px solid #f3f4f6", gap: 12, textAlign: "left" }}>
                   <div style={{ textAlign: "left" }}>
@@ -178,24 +213,30 @@ export default function UploadPage({ currentUser } = {}) {
                         style={{ width: 120, padding: "7px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6 }}
                       />
                     )}
-                    {FILE_UPLOAD_KEYS.has(item.key) && (
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 2 }}>
-                        <input
-                          type="file"
-                          accept=".csv,.xlsx,.xls"
-                          onChange={e => setFiles(p => ({ ...p, [item.key]: e.target.files?.[0] || null }))}
-                          style={{ fontSize: 12, maxWidth: 240 }}
-                        />
-                        {files[item.key] && (
-                          <span style={{ fontSize: 11, color: "#6b7280" }}>
-                            📄 {files[item.key].name} ({(files[item.key].size / 1024).toFixed(1)} KB)
+                    {supportsOneDrive ? (
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+                        <div style={{ display: "flex", gap: 12, fontSize: 12 }}>
+                          <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: !onedriveMode ? "#072d6b" : "#6b7280", fontWeight: !onedriveMode ? 700 : 400 }}>
+                            <input type="radio" name={`mode-${item.key}`} checked={!onedriveMode} onChange={() => setUploadModes(p => ({ ...p, [item.key]: "file" }))} />
+                            เลือกไฟล์
+                          </label>
+                          <label style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 4, color: onedriveMode ? "#072d6b" : "#6b7280", fontWeight: onedriveMode ? 700 : 400 }}>
+                            <input type="radio" name={`mode-${item.key}`} checked={onedriveMode} onChange={() => setUploadModes(p => ({ ...p, [item.key]: "onedrive" }))} />
+                            OneDrive (File ID)
+                          </label>
+                        </div>
+                        {onedriveMode ? (
+                          <span style={{ fontSize: 11, color: "#6b7280", maxWidth: 260, lineHeight: 1.4 }}>
+                            📁 ดึงไฟล์ล่าสุดจากโฟลเดอร์ OneDrive "สต๊อกรถจักรยานยนต์ EX" อัตโนมัติ — กด Upload ได้เลย
                           </span>
-                        )}
+                        ) : fileInputBlock}
                       </div>
+                    ) : (
+                      isFileKey && fileInputBlock
                     )}
                     <button
                       onClick={() => handleUpload(item)}
-                      disabled={st === "loading" || (FILE_UPLOAD_KEYS.has(item.key) && !files[item.key])}
+                      disabled={st === "loading" || needsInput}
                       style={{
                         padding: "8px 20px", fontSize: 13, fontWeight: 700,
                         fontFamily: "Tahoma, Arial, sans-serif",
