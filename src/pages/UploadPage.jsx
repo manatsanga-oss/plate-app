@@ -11,7 +11,7 @@ const UPLOAD_GROUPS = [
       { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_deposit", url: `${BASE}/upload-deposit` },
       { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "honda_deposits", url: `${BASE}/upload-honda-deposit` },
       { key: "other-income", label: "รายได้อื่นๆ", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "other_income", url: `${BASE}/upload-other-income` },
-      { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่าย", db: "daily_expenses", url: `${BASE}/upload-expenses` },
+      { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "เลือกสังกัด (ป.เปา/สิงห์ชัย) ของไฟล์ · นำเข้าข้อมูลค่าใช้จ่าย → daily_expenses", db: "daily_expenses", url: `${BASE}/upload-expenses` },
     ],
   },
   {
@@ -68,6 +68,7 @@ function fmtDateTime(iso) {
 
 // items ที่รับ year_month override (ระบุเดือนเพื่อ upload ไฟล์ย้อนหลัง)
 const SUPPORTS_YEAR_MONTH = new Set(["registration-receipts"]);
+const SUPPORTS_AFFILIATION = new Set(["expense"]); // เลือกสังกัด (ป.เปา/สิงห์ชัย) ตอน upload ค่าใช้จ่ายรายวัน → daily_expenses.affiliation
 const FILE_UPLOAD_KEYS = new Set([
   "stock",                // สต๊อกสินค้าคงเหลือ — เลือกไฟล์เอง (แทนการดึงจาก OneDrive)
   "time-tracking", "yamaha-repair", "honda-repair", "honda-repair-intake",
@@ -88,6 +89,7 @@ export default function UploadPage({ currentUser } = {}) {
   const [messages, setMessages] = useState({});
   const [lastUploads, setLastUploads] = useState(loadLastUploads);
   const [yearMonths, setYearMonths] = useState({}); // {key: '6903'}
+  const [affiliations, setAffiliations] = useState({}); // {key: 'ป.เปา'|'สิงห์ชัย'}
   const [files, setFiles] = useState({}); // { key: File }
   const [uploadModes, setUploadModes] = useState({}); // { key: "file" | "onedrive" }
 
@@ -105,6 +107,11 @@ export default function UploadPage({ currentUser } = {}) {
         return;
       }
     }
+    if (SUPPORTS_AFFILIATION.has(item.key) && !(affiliations[item.key] || "").trim()) {
+      setMessages(prev => ({ ...prev, [item.key]: "⚠️ กรุณาเลือกสังกัดก่อน" }));
+      setStatuses(prev => ({ ...prev, [item.key]: "error" }));
+      return;
+    }
     setStatuses(prev => ({ ...prev, [item.key]: "loading" }));
     setMessages(prev => ({ ...prev, [item.key]: "" }));
     try {
@@ -112,6 +119,10 @@ export default function UploadPage({ currentUser } = {}) {
       const ym = (yearMonths[item.key] || "").trim();
       if (ym && SUPPORTS_YEAR_MONTH.has(item.key)) {
         url += (url.includes("?") ? "&" : "?") + "year_month=" + encodeURIComponent(ym);
+      }
+      const aff = (affiliations[item.key] || "").trim();
+      if (aff && SUPPORTS_AFFILIATION.has(item.key)) {
+        url += (url.includes("?") ? "&" : "?") + "affiliation=" + encodeURIComponent(aff);
       }
 
       let res;
@@ -212,6 +223,18 @@ export default function UploadPage({ currentUser } = {}) {
                         title="เดือนที่ต้องการ upload (เว้นว่าง = เดือนปัจจุบัน) — รองรับ 6903 / 2569-03 / 03-2569"
                         style={{ width: 120, padding: "7px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6 }}
                       />
+                    )}
+                    {SUPPORTS_AFFILIATION.has(item.key) && (
+                      <select
+                        value={affiliations[item.key] || ""}
+                        onChange={e => setAffiliations(p => ({ ...p, [item.key]: e.target.value }))}
+                        title="สังกัดของไฟล์นี้ (1 ไฟล์ = 1 สังกัด)"
+                        style={{ padding: "7px 10px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6 }}
+                      >
+                        <option value="">— เลือกสังกัด —</option>
+                        <option value="ป.เปา">ป.เปา</option>
+                        <option value="สิงห์ชัย">สิงห์ชัย</option>
+                      </select>
                     )}
                     {supportsOneDrive ? (
                       <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>

@@ -6,12 +6,11 @@ import React, { useEffect, useState } from "react";
 //   • ภ.ง.ด.1 เงินเดือน (สรุปเดือน) — hr-api → จ่ายผ่าน expense_record (เจ้าหนี้ "สรรพากร")
 //   • ภ.ง.ด.3/53 ค่าแนะนำ (สรุปเดือน) — referral-fee-api → tax_remittances (direct-amount)
 //   • ภ.ง.ด.3/53 ค่าใช้จ่ายที่มีหัก ณ ที่จ่าย (รายเอกสาร) — accounting-api expense_record → tax_remittances (itemized)
-//   (FLOW ACC ยังไม่เก็บหัก ณ ที่จ่าย จึงยังไม่มีในลิสต์)
+//   (ใช้เฉพาะตารางบันทึกค่าใช้จ่าย expense_documents — ไม่ดึงจาก FLOW ACC)
 const TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/tax-remittance-api";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const HR_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 const REFERRAL_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/referral-fee-api";
-const FLOW_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/upload-accounting-expense";
 
 const TAX_TYPES = [
   { value: "ภ.พ.36", label: "ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)", ready: true },
@@ -59,6 +58,7 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
   const [taxType, setTaxType] = useState("ภ.พ.36");
   const [tab, setTab] = useState("pending"); // pending | history
   const [selected, setSelected] = useState({});
+  const [expanded, setExpanded] = useState({}); // กางดูรายละเอียดรายแถว (เช่น ภ.ง.ด.3 ค่าแนะนำ)
   const [payDialog, setPayDialog] = useState(false);
   const [payForm, setPayForm] = useState({ remit_date: todayISO(), payment_method: "โอน", from_bank_account_id: "", receipt_no: "", note: "" });
   const [saving, setSaving] = useState(false);
@@ -137,34 +137,30 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
       const aff = r.affiliation || "(ไม่ระบุสังกัด)";
       const pm = periodOf(r.payment_date);
       const key = `${tt}|${pm}|${aff}`;
-      if (!map[key]) map[key] = { source_id: `ref|${key}`, kind: "referral", pndType: tt, sourceLabel: "ค่าแนะนำ", affiliation: aff, paid_at: `${yymm(r.payment_date)}-01`, period_month: pm, amount: 0, count: 0, vendor_name: "ค่าแนะนำ" };
+      if (!map[key]) map[key] = { source_id: `ref|${key}`, kind: "referral", pndType: tt, sourceLabel: "ค่าแนะนำ", affiliation: aff, paid_at: `${yymm(r.payment_date)}-01`, period_month: pm, amount: 0, count: 0, vendor_name: "ค่าแนะนำ", details: [] };
       map[key].amount += wht; map[key].count += 1;
+      map[key].details.push({ payment_no: r.payment_no, payment_date: r.payment_date, pay_to: r.pay_to, total_amount: Number(r.total_amount || 0), withholding_tax: wht });
     });
     return Object.values(map).map(b => ({ ...b, doc_refs: `${b.pndType} ค่าแนะนำ ${b.count} ราย (หัก ณ ที่จ่าย)` }));
   }
-  // ---------- ภ.ง.ด.3/53: ค่าใช้จ่าย (รายเอกสาร) จาก accounting-api expense_record ----------
+  // ---------- ภ.ง.ด.3/53: ค่าใช้จ่าย (รายเอกสาร) ----------
+  //   ใช้เฉพาะ "ตารางบันทึกค่าใช้จ่าย" (expense_documents) ผ่าน accounting-api เท่านั้น
+  //   ไม่ดึงจาก "บันทึกค่าใช้จ่ายจาก FLOW ACC" (flow_expense_documents)
   async function loadExpenseRows() {
     const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
-    const [manualRaw, flowRaw] = await Promise.all([
-      post(ACC_URL, { action: "expense_record", op: "list", date_from: from, date_to: to }).catch(() => []),
-      post(FLOW_URL, { action: "list_expenses", date_from: from, date_to: to }).catch(() => []),
-    ]);
-    const mk = (d, st, idv, docNo) => {
+    const manualRaw = await post(ACC_URL, { action: "expense_record", op: "list", date_from: from, date_to: to }).catch(() => []);
+    const keep = d => Number(d.wht_amount || 0) > 0 && String(d.status || "") !== "cancelled";
+    return (Array.isArray(manualRaw) ? manualRaw : []).filter(keep).map(d => {
       const tt = pndTypeOfVendor(d.vendor_tax_id, d.vendor_name);
-      const flow = st === "flow_expense_documents";
       return {
-        source_id: `${flow ? "fexp" : "exp"}|${idv}`,
-        kind: "expense", pndType: tt, sourceLabel: flow ? "ค่าใช้จ่าย (FLOW)" : "ค่าใช้จ่าย",
-        source_table: st, src_id: idv, affiliation: d.affiliation || "(ไม่ระบุสังกัด)",
+        source_id: `exp|${d.expense_doc_id}`,
+        kind: "expense", pndType: tt, sourceLabel: "ค่าใช้จ่าย",
+        source_table: "expense_documents", src_id: d.expense_doc_id, affiliation: d.affiliation || "(ไม่ระบุสังกัด)",
         paid_at: d.doc_date, period_month: periodOf(d.doc_date),
         amount: Number(d.wht_amount || 0), vendor_name: d.vendor_name || "-",
-        doc_refs: `${tt} ${docNo || ""} (หัก ณ ที่จ่าย)`,
+        doc_refs: `${tt} ${d.expense_doc_no || ""} (หัก ณ ที่จ่าย)`,
       };
-    };
-    const keep = d => Number(d.wht_amount || 0) > 0 && String(d.status || "") !== "cancelled";
-    const manual = (Array.isArray(manualRaw) ? manualRaw : []).filter(keep).map(d => mk(d, "expense_documents", d.expense_doc_id, d.expense_doc_no));
-    const flow = (Array.isArray(flowRaw) ? flowRaw : []).filter(keep).map(d => mk(d, "flow_expense_documents", d.id, d.expense_doc_no));
-    return [...manual, ...flow];
+    });
   }
   async function fetchPendingWHT() {
     setLoading(true);
@@ -235,6 +231,7 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
   const selectedTypes = [...new Set(selectedRows.map(r => r.pndType).filter(Boolean))];
   const pendingTotal = pending.reduce((s, r) => s + Number(r.amount || 0), 0);
 
+  function toggleExpand(id) { setExpanded(s => ({ ...s, [id]: !s[id] })); }
   function toggleOne(id) { setSelected(s => ({ ...s, [id]: !s[id] })); }
   function toggleAll() {
     if (pending.length && pending.every(r => selected[r.source_id])) { setSelected({}); return; }
@@ -404,13 +401,24 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
                 </tr>
               </thead>
               <tbody>
-                {pending.map(r => (
-                  <tr key={r.source_id} style={{ borderTop: "1px solid #e5e7eb", background: selected[r.source_id] ? "#fef3c7" : "transparent" }}>
+                {pending.map(r => {
+                  const details = Array.isArray(r.details) ? r.details : [];
+                  const hasDetails = details.length > 0;
+                  const isOpen = !!expanded[r.source_id];
+                  return (
+                  <React.Fragment key={r.source_id}>
+                  <tr style={{ borderTop: "1px solid #e5e7eb", background: selected[r.source_id] ? "#fef3c7" : "transparent" }}>
                     <td style={{ ...td, textAlign: "center" }}>
                       <input type="checkbox" checked={!!selected[r.source_id]} onChange={() => toggleOne(r.source_id)} />
                     </td>
                     <td style={td}>{fmtDate(r.paid_at)}</td>
                     {isWHT && <td style={td}>
+                      {hasDetails && (
+                        <button onClick={() => toggleExpand(r.source_id)} title={isOpen ? "ซ่อนรายละเอียด" : "ดูรายละเอียด"}
+                          style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 11, color: "#374151", marginRight: 4, padding: 0 }}>
+                          {isOpen ? "▼" : "▶"}
+                        </button>
+                      )}
                       <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#eef2ff", color: "#3730a3" }}>{r.pndType}</span>
                       <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 6 }}>{r.sourceLabel}</span>
                     </td>}
@@ -418,10 +426,44 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
                     <td style={td}>{r.affiliation ? <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: r.affiliation === "ป.เปา" ? "#fee2e2" : "#dbeafe", color: r.affiliation === "ป.เปา" ? "#991b1b" : "#1e40af" }}>{r.affiliation}</span> : "-"}</td>
                     {!isWHT && <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#065f46" }}>{r.paid_doc_no || "-"}</td>}
                     <td style={td}>{r.vendor_name || "-"}</td>
-                    <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{r.doc_refs || "-"}</td>
+                    <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>
+                      {hasDetails
+                        ? <button onClick={() => toggleExpand(r.source_id)} style={{ border: "none", background: "transparent", color: "#0369a1", cursor: "pointer", padding: 0, fontSize: 12, textDecoration: "underline" }}>{r.doc_refs || "-"}</button>
+                        : (r.doc_refs || "-")}
+                    </td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#dc2626" }}>{fmt(r.amount)}</td>
                   </tr>
-                ))}
+                  {hasDetails && isOpen && (
+                    <tr>
+                      <td colSpan={8} style={{ padding: "0 12px 10px 48px", background: "#f9fafb", borderTop: "none" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+                          <thead style={{ background: "#f3f4f6", color: "#374151" }}>
+                            <tr>
+                              <th style={tdSub}>วันที่จ่าย</th>
+                              <th style={tdSub}>เลขที่จ่าย</th>
+                              <th style={tdSub}>ผู้รับ</th>
+                              <th style={{ ...tdSub, textAlign: "right" }}>ยอดเงิน</th>
+                              <th style={{ ...tdSub, textAlign: "right" }}>หัก ณ ที่จ่าย</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {details.map((d, i) => (
+                              <tr key={i} style={{ borderTop: "1px solid #eef2f7" }}>
+                                <td style={tdSub}>{fmtDate(d.payment_date)}</td>
+                                <td style={{ ...tdSub, fontFamily: "monospace", color: "#0369a1" }}>{d.payment_no || "-"}</td>
+                                <td style={tdSub}>{d.pay_to || "-"}</td>
+                                <td style={{ ...tdSub, textAlign: "right", fontFamily: "monospace" }}>{fmt(d.total_amount)}</td>
+                                <td style={{ ...tdSub, textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontWeight: 600 }}>{fmt(d.withholding_tax)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </td>
+                    </tr>
+                  )}
+                  </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>}
           </div>
@@ -546,6 +588,7 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
 const inp = { padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, fontFamily: "Tahoma", boxSizing: "border-box", width: "100%" };
 const th = { padding: "10px 12px", textAlign: "left", fontWeight: 600, fontSize: 13, whiteSpace: "nowrap" };
 const td = { padding: "8px 12px", verticalAlign: "top" };
+const tdSub = { padding: "6px 10px", textAlign: "left", fontSize: 12 };
 const lbl = { display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 };
 const btnSm = { padding: "4px 10px", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 };
 function btn(bg) { return { padding: "8px 16px", background: bg, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 13 }; }

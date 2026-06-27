@@ -2,6 +2,14 @@ import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 
+// POST + parse JSON อย่างปลอดภัย — n8n คืน body ว่าง (0 byte) เมื่อ query ได้ 0 แถว
+// ถ้าไม่กันไว้ res.json("") จะ throw → ขึ้น "โหลดไม่สำเร็จ" ทั้งที่จริงคือ "ไม่มีข้อมูล"
+async function postJSON(body) {
+  const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+}
+
 const PLAN_OPTS = [
   { key: "rsa",           label: "RSA (ช่วยเหลือฉุกเฉิน)",     table: "cosmos_rsa",   color: "#1565c0" },
   { key: "pa",            label: "PA (อุบัติเหตุส่วนบุคคล)",    table: "cosmos_pa",    color: "#2e7d32" },
@@ -89,11 +97,7 @@ function SubmissionsPanel({ setMessage }) {
   async function fetchBatches(planKey) {
     setLoading(true); setMessage(""); setSelectedBatch(null); setDetails([]);
     try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_cosmos_submissions", plan: planKey }),
-      });
-      const data = await res.json();
+      const data = await postJSON({ action: "list_cosmos_submissions", plan: planKey });
       setBatches(Array.isArray(data) ? data : []);
     } catch {
       setMessage("❌ โหลดไม่สำเร็จ");
@@ -105,11 +109,7 @@ function SubmissionsPanel({ setMessage }) {
   async function viewBatch(batch_no) {
     setLoading(true); setSelectedBatch(batch_no); setDetails([]);
     try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_cosmos_submissions", batch_no }),
-      });
-      const data = await res.json();
+      const data = await postJSON({ action: "list_cosmos_submissions", batch_no });
       setDetails(Array.isArray(data) ? data : []);
     } catch {
       setMessage("❌ โหลดรายละเอียดไม่สำเร็จ");
@@ -336,11 +336,7 @@ function HistoryPanel({ setMessage, currentUser }) {
   async function doSearch(kw) {
     setSearchLoading(true);
     try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "search_moto_sales", keyword: kw }),
-      });
-      const data = await res.json();
+      const data = await postJSON({ action: "search_moto_sales", keyword: kw });
       setSearchResults(Array.isArray(data) ? data : []);
     } catch {
       setSearchResults([]);
@@ -435,11 +431,7 @@ function HistoryPanel({ setMessage, currentUser }) {
   async function fetchData(planKey) {
     setLoading(true); setMessage("");
     try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_cosmos_insurance", plan: planKey }),
-      });
-      const data = await res.json();
+      const data = await postJSON({ action: "list_cosmos_insurance", plan: planKey });
       setRows(Array.isArray(data) ? data : (data?.rows || []));
     } catch {
       setMessage("❌ โหลดไม่สำเร็จ");

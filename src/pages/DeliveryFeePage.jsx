@@ -106,6 +106,8 @@ function FeeMatchTab({ cfg, currentUser }) {
       const body = { action: cfg.searchAction, search: kw.trim() };
       // ค่าแนะนำ: จำกัดผลค้นเฉพาะสังกัดเดียวกับใบจ่าย (ป.เปา/สิงห์ชัย)
       if (cfg.matchKind === "doc" && editRow?.affiliation) body.affiliation = editRow.affiliation;
+      // ค่านำพา: ซ่อนใบขายที่ถูกจับคู่กับรายการอื่นแล้ว (ห้ามจับซ้ำ) — ยกเว้นใบที่รายการนี้จับอยู่
+      if (cfg.matchKind === "sale" && editRow?.id) body.exclude_expense_id = editRow.id;
       const data = await postAPI(cfg.searchApi, body);
       setSearchResults(Array.isArray(data) ? data.filter(r => r && r.id) : []);
     } catch { setSearchResults([]); }
@@ -129,7 +131,13 @@ function FeeMatchTab({ cfg, currentUser }) {
         body.sale_invoice_no = linkTarget ? linkTarget.invoice_no : "";
         label = linkTarget ? linkTarget.invoice_no : "(ล้าง)";
       }
-      await postAPI(cfg.api, body);
+      const res = await postAPI(cfg.api, body);
+      const r0 = Array.isArray(res) ? res[0] : res;
+      // ค่านำพา: ถ้าใบขายถูกจับคู่กับรายการอื่นแล้ว backend จะไม่จับให้ (status=duplicate)
+      if (cfg.matchKind === "sale" && linkTarget && r0 && r0.status === "duplicate") {
+        setMessage(`❌ ใบขาย ${label} ถูกจับคู่กับรายการอื่นแล้ว — ห้ามจับซ้ำ`);
+        return;
+      }
       setMessage(`✅ จับคู่กับ ${label} สำเร็จ`);
       setEditRow(null); setSearch(""); setSearchResults([]);
       fetchData();
@@ -372,18 +380,19 @@ function ReferralDocTab({ currentUser }) {
   const [candLoading, setCandLoading] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  function monthRange(dateStr) {
-    const d = new Date(dateStr);
-    const y = d.getFullYear(), m = d.getMonth();
+  // ช่วงค้นหา = วันจ่าย ถึง +3 วันหลัง (ไม่ดูยอด/ชื่อ — ดูแค่ประเภทค่าแนะนำเดียวกัน)
+  function searchRange(dateStr) {
     const pad = n => String(n).padStart(2, "0");
-    const last = new Date(y, m + 1, 0).getDate();
-    return { start: `${y}-${pad(m + 1)}-01`, end: `${y}-${pad(m + 1)}-${pad(last)}` };
+    const isoOf = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const base = new Date(dateStr);
+    const end = new Date(base); end.setDate(end.getDate() + 3);
+    return { start: isoOf(base), end: isoOf(end) };
   }
   async function openMatch(row) {
     setMatchModal({ row }); setCandidates([]); setCandLoading(true);
     try {
-      const { start, end } = monthRange(row.payment_date);
-      const d = await postAPI(REFERRAL_API, { action: "get_referral_candidates", amount: Number(row.total_amount || 0), from: start, to: end, pay_to: row.pay_to || "" });
+      const { start, end } = searchRange(row.payment_date);
+      const d = await postAPI(REFERRAL_API, { action: "get_referral_candidates", from: start, to: end });
       setCandidates((Array.isArray(d) ? d : d.rows || []).filter(x => x && x.id));
     } catch { setCandidates([]); }
     setCandLoading(false);
@@ -448,6 +457,7 @@ function ReferralDocTab({ currentUser }) {
               <th style={th}>เลขที่จ่าย</th>
               <th style={th}>วันที่จ่าย</th>
               <th style={th}>ผู้รับ</th>
+              <th style={th}>สังกัด</th>
               <th style={{ ...th, textAlign: "right" }}>ยอดเงิน</th>
               <th style={{ ...th, textAlign: "right" }}>ยอดจ่ายจริง</th>
               <th style={{ ...th, textAlign: "right" }}>หัก ณ ที่จ่าย</th>
@@ -456,8 +466,8 @@ function ReferralDocTab({ currentUser }) {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+            {loading && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
             {rows.map((r, i) => {
               const isMatched = !!r.matched_doc_no;
               return (
@@ -466,6 +476,7 @@ function ReferralDocTab({ currentUser }) {
                 <td style={{ ...td, fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{r.payment_no || "-"}</td>
                 <td style={td}>{fmtDate(r.payment_date)}</td>
                 <td style={td}>{r.pay_to || "-"}</td>
+                <td style={{ ...td, fontSize: 11 }}>{r.affiliation ? <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: r.affiliation === "ป.เปา" ? "#fee2e2" : "#dbeafe", color: r.affiliation === "ป.เปา" ? "#991b1b" : "#1e40af" }}>{r.affiliation}</span> : "-"}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontWeight: 700 }}>{fmt(r.total_amount)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0f766e", fontWeight: 600 }}>{fmt(r.cash_amount)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#7c3aed" }}>{fmt(r.withholding_tax)}</td>
@@ -494,12 +505,12 @@ function ReferralDocTab({ currentUser }) {
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 4 }}>🔗 เลือกเอกสารค่าแนะนำ (จับคู่เอง)</div>
             <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
               รายการจ่าย <b>{matchModal.row.payment_no}</b> · {matchModal.row.pay_to || "-"} · ยอด <b>{fmt(matchModal.row.total_amount)}</b> · {fmtDate(matchModal.row.payment_date)}
-              <br />กรอง: ยอดเท่ากัน · เดือนเดียวกัน · ใบที่ยังไม่ถูกจับคู่ · เรียงชื่อคล้ายขึ้นก่อน
+              <br />กรอง: ประเภทค่าแนะนำเดียวกัน · ภายใน 3 วันหลังวันจ่าย · ใบที่ยังไม่ถูกจับคู่ (ไม่ดูชื่อ/ยอดเงิน)
             </div>
             {candLoading ? (
               <div style={{ textAlign: "center", padding: 24, color: "#6b7280" }}>กำลังโหลด...</div>
             ) : candidates.length === 0 ? (
-              <div style={{ textAlign: "center", padding: 24, color: "#9ca3af" }}>ไม่พบเอกสารที่ยอด+เดือนตรงกัน (ที่ยังว่าง)</div>
+              <div style={{ textAlign: "center", padding: 24, color: "#9ca3af" }}>ไม่พบเอกสารค่าแนะนำใน 3 วันหลังวันจ่าย (ที่ยังว่าง)</div>
             ) : (
               <div style={{ maxHeight: 340, overflowY: "auto" }}>
                 {candidates.map(c => (
