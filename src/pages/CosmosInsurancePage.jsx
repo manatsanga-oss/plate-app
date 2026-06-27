@@ -392,15 +392,15 @@ function HistoryPanel({ setMessage, currentUser }) {
 
   async function pickSale(sale) {
     if (!linkRow) return;
+    // backend search_moto_sales คืนคีย์ sale_id / sale_doc_no / frame_no (ไม่ใช่ id/invoice_no/chassis_no)
+    const chassis = sale.frame_no ?? sale.chassis_no ?? "";
+    if (!chassis) { setMessage("⚠️ ใบขายนี้ไม่มีเลขถัง — จับคู่ไม่ได้"); return; }
     try {
-      await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "link_cosmos_sale",
-          plan, app_no: linkRow.app_no, sale_id: sale.id, chassis_no: sale.chassis_no,
-        }),
+      await postJSON({
+        action: "link_cosmos_sale",
+        plan, app_no: linkRow.app_no, sale_id: sale.sale_id ?? sale.id, chassis_no: chassis,
       });
-      setMessage(`✅ ลิงก์ ${linkRow.app_no} → ${sale.invoice_no} แล้ว`);
+      setMessage(`✅ ลิงก์ ${linkRow.app_no} → ${sale.sale_doc_no || sale.invoice_no || ""} แล้ว`);
       setLinkRow(null);
       fetchData(plan);
     } catch {
@@ -719,11 +719,11 @@ function HistoryPanel({ setMessage, currentUser }) {
                   </thead>
                   <tbody>
                     {searchResults.map((s, i) => (
-                      <tr key={s.id} style={{ borderTop: "1px solid #e5e7eb" }}>
-                        <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{s.invoice_no}</td>
+                      <tr key={s.sale_id ?? i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                        <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{s.sale_doc_no || s.invoice_no || "-"}</td>
                         <td style={td}>{fmtDate(s.sale_date)}</td>
                         <td style={td}>{s.customer_name}</td>
-                        <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{s.chassis_no}</td>
+                        <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{s.frame_no || s.chassis_no || "-"}</td>
                         <td style={td}>{s.brand} {s.model_series}</td>
                         <td style={td}>
                           <button onClick={() => pickSale(s)}

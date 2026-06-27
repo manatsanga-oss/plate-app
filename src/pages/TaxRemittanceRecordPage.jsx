@@ -6,11 +6,15 @@ import React, { useEffect, useState } from "react";
 //   • ภ.ง.ด.1 เงินเดือน (สรุปเดือน) — hr-api → จ่ายผ่าน expense_record (เจ้าหนี้ "สรรพากร")
 //   • ภ.ง.ด.3/53 ค่าแนะนำ (สรุปเดือน) — referral-fee-api → tax_remittances (direct-amount)
 //   • ภ.ง.ด.3/53 ค่าใช้จ่ายที่มีหัก ณ ที่จ่าย (รายเอกสาร) — accounting-api expense_record → tax_remittances (itemized)
+//   • ภ.ง.ด.3/53 งานทะเบียน (วางบิล/จ่ายเงิน PAY ที่มีหัก ณ ที่จ่าย, รายใบ) — registrations-api → tax_remittances (itemized)
+//   • ภ.ง.ด.3 ค่านายหน้า (ค่าคอมปกติ ที่มีหัก ณ ที่จ่าย, รายใบ) — sales-extra-pay-api → tax_remittances (itemized)
 //   (ใช้เฉพาะตารางบันทึกค่าใช้จ่าย expense_documents — ไม่ดึงจาก FLOW ACC)
 const TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/tax-remittance-api";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const HR_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 const REFERRAL_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/referral-fee-api";
+const REG_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
+const SXP_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
 
 const TAX_TYPES = [
   { value: "ภ.พ.36", label: "ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)", ready: true },
@@ -162,13 +166,72 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
       };
     });
   }
+  // ---------- ภ.ง.ด.3/53: งานทะเบียน (จ่ายเงิน PAY ที่มีหัก ณ ที่จ่าย, รายใบ) จาก registrations-api ----------
+  //   หน้า "วางบิลงานทะเบียน" บันทึกจ่าย → registration_submissions (group by paid_doc_no, wht_amount > 0)
+  //   สังกัด: ฮอนด้า = ป.เปา, ยามาฮ่า = สิงห์ชัย (จากยี่ห้อ); แยก ภ.ง.ด.3/53 จากเลขผู้เสียภาษีผู้รับ
+  async function loadRegistrationRows() {
+    const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
+    const raw = await post(REG_URL, { action: "list_registration_wht", date_from: from, date_to: to }).catch(() => []);
+    return (Array.isArray(raw) ? raw : []).filter(d => Number(d.wht_amount || 0) > 0).map(d => {
+      const tt = pndTypeOfVendor(d.vendor_tax_id, d.paid_to_vendor);
+      return {
+        source_id: `reg|${d.source_id}`,
+        kind: "registration", pndType: tt, sourceLabel: "งานทะเบียน",
+        source_table: "registration_submissions", src_id: Number(d.source_id), affiliation: d.affiliation || "(ไม่ระบุสังกัด)",
+        paid_at: d.paid_at, period_month: periodOf(d.paid_at),
+        amount: Number(d.wht_amount || 0), vendor_name: d.paid_to_vendor || "-",
+        doc_refs: `${tt} ${d.paid_doc_no || ""} (งานทะเบียน)`,
+      };
+    });
+  }
+  // ---------- ภ.ง.ด.3: ค่านายหน้า (ค่าคอมปกติ ที่มีหัก ณ ที่จ่าย, รายใบ) จาก sales-extra-pay-api ----------
+  //   หน้า "ค่าคอมปกติ" จ่ายเป็น expense_documents (commission_normal_save_group); WHT อยู่คอลัมน์ withholding_amount
+  //   เอาเฉพาะ "ค่านายหน้า" (มี WHT) ไม่เอา "ค่าคอมมิชชั่น" (ไม่มี WHT). สังกัดเก็บใน doc แล้ว (ป.เปา/สิงห์ชัย)
+  async function loadCommissionRows() {
+    const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
+    const raw = await post(SXP_URL, { action: "commission_normal_payables", mode: "list_paid_history", date_from: from, date_to: to }).catch(() => []);
+    const docs = (Array.isArray(raw) ? raw : [])
+      .filter(d => Number(d.withholding_amount || 0) > 0 && d.commission_type !== "commission" && String(d.status || "") !== "cancelled");
+    // ดึง breakdown รายคนต่อ save_group (ว่าใครได้ค่านายหน้าเท่าไร → กระจาย WHT รายคน)
+    const groups = [...new Set(docs.map(d => d.save_group).filter(Boolean))];
+    const personMap = {};
+    await Promise.all(groups.map(async sg => {
+      const ps = await post(SXP_URL, { action: "commission_normal_payables", mode: "wht_persons", save_group: sg }).catch(() => []);
+      personMap[sg] = Array.isArray(ps) ? ps : [];
+    }));
+    return docs.map(d => {
+      const tt = pndTypeOfVendor(d.vendor_tax_id, d.vendor_name);
+      const subtotal = Number(d.subtotal || 0), wht = Number(d.withholding_amount || 0);
+      const pct = subtotal > 0 ? wht / subtotal : 0.03;          // อัตราจริงของใบนี้
+      const persons = (personMap[d.save_group] || []).filter(p => p.affiliation === d.affiliation && p.brand === d.brand_filter);
+      const details = persons.length
+        ? persons.map(p => {
+            const amt = Number(p.amount || 0);
+            return { payment_date: d.paid_at, payment_no: d.paid_doc_no || d.expense_doc_no || "-",
+              pay_to: p.employee_name || "-", total_amount: amt, withholding_tax: Math.round(amt * pct * 100) / 100 };
+          })
+        : [{ payment_date: d.paid_at, payment_no: d.paid_doc_no || d.expense_doc_no || "-",
+            pay_to: d.vendor_name || "-", total_amount: subtotal, withholding_tax: wht }];
+      return {
+        source_id: `comm|${d.expense_doc_id}`,
+        kind: "commission", pndType: tt, sourceLabel: "ค่านายหน้า",
+        source_table: "expense_documents", src_id: Number(d.expense_doc_id), affiliation: d.affiliation || "(ไม่ระบุสังกัด)",
+        paid_at: d.paid_at, period_month: periodOf(d.paid_at),
+        amount: wht, vendor_name: d.vendor_name || "-",
+        doc_refs: `${tt} ${d.expense_doc_no || ""} (ค่านายหน้า${persons.length ? ` · ${persons.length} คน` : ""})`,
+        details,
+      };
+    });
+  }
   async function fetchPendingWHT() {
     setLoading(true);
     try {
-      const [payroll, referral, expense, doneRaw] = await Promise.all([
+      const [payroll, referral, expense, registration, commission, doneRaw] = await Promise.all([
         loadPayrollRows().catch(() => []),
         loadReferralRows().catch(() => []),
         loadExpenseRows().catch(() => []),
+        loadRegistrationRows().catch(() => []),
+        loadCommissionRows().catch(() => []),
         post(TAX_URL, { action: "list_tax_remittances" }).catch(() => []),
       ]);
       const done = (Array.isArray(doneRaw) ? doneRaw : []).filter(h => h.status !== "cancelled");
@@ -178,8 +241,14 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
       const refDone = new Set(done.filter(h => itemsOf(h).some(i => i.source_table === "referral")).map(h => `${h.tax_type}|${h.period_month}|${h.affiliation}`));
       const expDone = new Set(done.flatMap(h => itemsOf(h).map(i => `${i.source_table}|${i.source_id}`)));
       const refRows = referral.filter(b => !refDone.has(`${b.pndType}|${b.period_month}|${b.affiliation}`));
-      const expRows = expense.filter(b => !expDone.has(`${b.source_table}|${b.src_id}`));
-      const rows = [...payroll, ...refRows, ...expRows]
+      // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = รายเอกสาร (itemized) — dedup นำส่งแล้ว + กันซ้ำ source เดียวกัน
+      const seenItem = new Set();
+      const itemRows = [...expense, ...registration, ...commission].filter(b => {
+        const k = `${b.source_table}|${b.src_id}`;
+        if (expDone.has(k) || seenItem.has(k)) return false;
+        seenItem.add(k); return true;
+      });
+      const rows = [...payroll, ...refRows, ...itemRows]
         .filter(r => !filterAff || r.affiliation === filterAff)
         .filter(r => inRange(r.paid_at))
         .sort((a, b) => String(b.period_month).localeCompare(String(a.period_month)) || String(a.pndType).localeCompare(String(b.pndType)));
@@ -275,7 +344,8 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
     let okAny = false;
     const payroll = selectedRows.filter(r => r.kind === "payroll");
     const referral = selectedRows.filter(r => r.kind === "referral");
-    const expense = selectedRows.filter(r => r.kind === "expense");
+    // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = บันทึกแบบ itemized (แต่ละแถวพก source_table/source_id ของตัวเอง)
+    const expense = selectedRows.filter(r => r.kind === "expense" || r.kind === "registration" || r.kind === "commission");
 
     if (payroll.length) {
       const ids = [];
@@ -380,7 +450,7 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
             <button onClick={openPayDialog} disabled={selectedKeys.length === 0}
               style={{ ...btn(selectedKeys.length === 0 ? "#9ca3af" : "#059669"), cursor: selectedKeys.length === 0 ? "not-allowed" : "pointer" }}>💵 บันทึกจ่ายภาษี</button>
           </div>
-          {isWHT && <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>รวมเงินเดือน (ภ.ง.ด.1) · ค่าแนะนำ (ภ.ง.ด.3/53, สรุปเดือน) · ค่าใช้จ่ายที่มีหัก ณ ที่จ่าย (ภ.ง.ด.3/53, รายเอกสาร) — เลือกข้ามแบบแล้วกดจ่ายพร้อมกันได้ (จ่ายทีละสังกัด)</div>}
+          {isWHT && <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>รวมเงินเดือน (ภ.ง.ด.1) · ค่าแนะนำ (ภ.ง.ด.3/53, สรุปเดือน) · ค่าใช้จ่าย/งานทะเบียน/ค่านายหน้า ที่มีหัก ณ ที่จ่าย (ภ.ง.ด.3/53, รายเอกสาร) — เลือกข้ามแบบแล้วกดจ่ายพร้อมกันได้ (จ่ายทีละสังกัด)</div>}
           <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
             {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
              pending.length === 0 ? <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีรายการภาษีรอจ่าย</div> :

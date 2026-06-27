@@ -679,7 +679,19 @@
       "Bash(node \"/c/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/316f14eb-0d90-4294-ada6-0b48c27fc9d0/scratchpad/test_cosmos_extract.cjs\")",
       "Bash(node \"/c/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/316f14eb-0d90-4294-ada6-0b48c27fc9d0/scratchpad/test2.cjs\")",
       "Bash(node \"/c/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/316f14eb-0d90-4294-ada6-0b48c27fc9d0/scratchpad/test3_fix.cjs\")",
-      "Bash(node \"/c/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/316f14eb-0d90-4294-ada6-0b48c27fc9d0/scratchpad/patch_cosmos_appno.cjs\")"
+      "Bash(node \"/c/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/316f14eb-0d90-4294-ada6-0b48c27fc9d0/scratchpad/patch_cosmos_appno.cjs\")",
+      "Bash(grep -E \"\\\\.\\(sql|json\\)$\")",
+      "Bash(python add_reg_wht.py)",
+      "Bash(node --check _reg_wht.js)",
+      "Bash(node \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/7d095fa6-ff8f-407f-8d8b-9c53749c326f/scratchpad/_render2.js\")",
+      "Bash(curl -s -m 30 -X POST \"https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api\" -H \"Content-Type: application/json\" -d '{\"action\":\"search_moto_sales\",\"keyword\":\"SCY01-SS260500440\"}')",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('rows:',len\\(d\\)\\); [print\\({k:r.get\\(k\\) for k in \\('id','invoice_no','customer_name','chassis_no','brand','model_series'\\)}\\) for r in d[:5]]\")",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('keys:', list\\(d[0].keys\\(\\)\\)\\); print\\('vals:', {k:d[0][k] for k in \\('sale_id','sale_doc_no','frame_no','customer_name'\\)}\\)\")",
+      "Bash(node \"/c/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/316f14eb-0d90-4294-ada6-0b48c27fc9d0/scratchpad/hdr.cjs\")",
+      "Bash(node \"/c/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/316f14eb-0d90-4294-ada6-0b48c27fc9d0/scratchpad/test_newmap.cjs\")",
+      "Bash(python add_wht_persons.py)",
+      "Bash(node --check _wht_persons.js)",
+      "Bash(node _wht_persons.js)"
     ]
   }
 }
