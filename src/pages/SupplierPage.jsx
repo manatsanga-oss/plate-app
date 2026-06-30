@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import ThaiAddressFields from "./ThaiAddressFields";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
@@ -30,6 +31,7 @@ const WHT_TYPES = [
 
 const emptyForm = () => ({
   vendor_name: "",
+  entity_type: "นิติบุคคล",
   tax_id: "",
   branch_type: "สำนักงานใหญ่",
   address: "",
@@ -59,6 +61,7 @@ export default function SupplierPage({ currentUser }) {
   const [editTarget, setEditTarget] = useState(null);
   const [search, setSearch] = useState("");
   const [includeInactive, setIncludeInactive] = useState(false);
+  const [filterType, setFilterType] = useState(""); // "" | บุคคลธรรมดา | นิติบุคคล
   const [message, setMessage] = useState("");
   const [detailRow, setDetailRow] = useState(null);
 
@@ -129,6 +132,7 @@ export default function SupplierPage({ currentUser }) {
   function openEdit(v) {
     setForm({
       vendor_name: v.vendor_name || "",
+      entity_type: v.entity_type || "นิติบุคคล",
       tax_id: v.tax_id || "",
       branch_type: v.branch_type || "สำนักงานใหญ่",
       address: v.address || "",
@@ -164,6 +168,12 @@ export default function SupplierPage({ currentUser }) {
     if (s.length !== 13) return t;
     return `${s.slice(0, 1)}-${s.slice(1, 5)}-${s.slice(5, 10)}-${s.slice(10, 12)}-${s.slice(12)}`;
   }
+  // ฟอร์แมตตอนพิมพ์ X-XXXX-XXXXX-XX-X (รองรับพิมพ์ไม่ครบ)
+  function formatTaxIdInput(s) {
+    const d = String(s).replace(/\D/g, "").slice(0, 13);
+    return [d.slice(0, 1), d.slice(1, 5), d.slice(5, 10), d.slice(10, 12), d.slice(12, 13)]
+      .filter(x => x !== "").join("-");
+  }
   function fmtAccount(a) {
     if (!a) return "-";
     const s = String(a).replace(/\D/g, "");
@@ -174,6 +184,7 @@ export default function SupplierPage({ currentUser }) {
   // local filter
   const kw = search.trim().toLowerCase();
   const filtered = rows.filter(r => {
+    if (filterType && (r.entity_type || "") !== filterType) return false;
     if (!kw) return true;
     const hay = [r.vendor_name, r.tax_id, r.contact_name, r.phone, r.bank_account_no, r.province]
       .filter(Boolean).join(" ").toLowerCase();
@@ -197,6 +208,11 @@ export default function SupplierPage({ currentUser }) {
         <input type="text" placeholder="🔍 ค้นหา (ชื่อ, เลขผู้เสียภาษี, ผู้ติดต่อ, เบอร์, เลขบัญชี)"
           value={search} onChange={e => setSearch(e.target.value)}
           style={{ ...inp, flex: 1, minWidth: 280 }} />
+        <select value={filterType} onChange={e => setFilterType(e.target.value)} style={inp} title="กรองตามประเภท">
+          <option value="">👤 ประเภท: ทั้งหมด</option>
+          <option value="บุคคลธรรมดา">บุคคลธรรมดา</option>
+          <option value="นิติบุคคล">นิติบุคคล</option>
+        </select>
         <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer" }}>
           <input type="checkbox" checked={includeInactive} onChange={e => setIncludeInactive(e.target.checked)} />
           แสดงที่ปิดการใช้งาน
@@ -234,7 +250,16 @@ export default function SupplierPage({ currentUser }) {
             <tbody>
               {filtered.map(r => (
                 <tr key={r.vendor_id} style={{ borderTop: "1px solid #e5e7eb", opacity: r.status === "inactive" ? 0.5 : 1 }}>
-                  <td style={{ ...td, fontWeight: 600 }}>{r.vendor_name}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>
+                    <div>{r.vendor_name}</div>
+                    {r.entity_type && (
+                      <span style={{ display: "inline-block", marginTop: 3, padding: "1px 7px", borderRadius: 4, fontSize: 10, fontWeight: 600,
+                        background: r.entity_type === "นิติบุคคล" ? "#dbeafe" : "#fef3c7",
+                        color: r.entity_type === "นิติบุคคล" ? "#1e40af" : "#92400e" }}>
+                        {r.entity_type}
+                      </span>
+                    )}
+                  </td>
                   <td style={{ ...td, fontFamily: "monospace", fontSize: 12 }}>{fmtTaxId(r.tax_id)}</td>
                   <td style={td}>{r.branch_type || "-"}</td>
                   <td style={td}>
@@ -324,12 +349,26 @@ export default function SupplierPage({ currentUser }) {
             <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>{editTarget ? "✏️ แก้ไข Supplier" : "➕ เพิ่ม Supplier ใหม่"}</h3>
 
             <Section title="ข้อมูลผู้ขาย">
-              <div style={grid2}>
+              <Field label="ประเภท">
+                <div style={{ display: "flex", gap: 8 }}>
+                  {["บุคคลธรรมดา", "นิติบุคคล"].map(t => (
+                    <label key={t} onClick={() => setForm(f => ({ ...f, entity_type: t }))}
+                      style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600,
+                        border: form.entity_type === t ? "2px solid #059669" : "1px solid #d1d5db",
+                        background: form.entity_type === t ? "#ecfdf5" : "#fff",
+                        color: form.entity_type === t ? "#065f46" : "#374151" }}>
+                      <input type="radio" name="entity_type" checked={form.entity_type === t} onChange={() => setForm(f => ({ ...f, entity_type: t }))} />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+              </Field>
+              <div style={{ ...grid2, marginTop: 8 }}>
                 <Field label="ชื่อ Supplier" required>
                   <input value={form.vendor_name} onChange={e => setForm(f => ({ ...f, vendor_name: e.target.value }))} style={inp} />
                 </Field>
                 <Field label="เลขประจำตัวผู้เสียภาษี (13 หลัก)">
-                  <input value={form.tax_id} onChange={e => setForm(f => ({ ...f, tax_id: e.target.value.replace(/[^\d]/g, "").slice(0, 13) }))} maxLength={13} style={{ ...inp, fontFamily: "monospace" }} placeholder="0000000000000" />
+                  <input value={formatTaxIdInput(form.tax_id)} onChange={e => setForm(f => ({ ...f, tax_id: e.target.value.replace(/[^\d]/g, "").slice(0, 13) }))} maxLength={17} style={{ ...inp, fontFamily: "monospace" }} placeholder="X-XXXX-XXXXX-XX-X" />
                 </Field>
                 <Field label="สำนักงาน/สาขา">
                   <select value={form.branch_type} onChange={e => setForm(f => ({ ...f, branch_type: e.target.value }))} style={inp}>
@@ -353,19 +392,10 @@ export default function SupplierPage({ currentUser }) {
               <Field label="เลขที่ / ถนน / ซอย">
                 <input value={form.address} onChange={e => setForm(f => ({ ...f, address: e.target.value }))} style={inp} />
               </Field>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginTop: 6 }}>
-                <Field label="ตำบล/แขวง">
-                  <input value={form.sub_district} onChange={e => setForm(f => ({ ...f, sub_district: e.target.value }))} style={inp} />
-                </Field>
-                <Field label="อำเภอ/เขต">
-                  <input value={form.district} onChange={e => setForm(f => ({ ...f, district: e.target.value }))} style={inp} />
-                </Field>
-                <Field label="จังหวัด">
-                  <input value={form.province} onChange={e => setForm(f => ({ ...f, province: e.target.value }))} style={inp} />
-                </Field>
-                <Field label="รหัสไปรษณีย์">
-                  <input value={form.postal_code} onChange={e => setForm(f => ({ ...f, postal_code: e.target.value.replace(/\D/g, "").slice(0, 5) }))} maxLength={5} style={inp} />
-                </Field>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 6 }}>
+                <ThaiAddressFields form={form} setForm={setForm} Field={Field} inp={inp}
+                  keys={{ province: "province", district: "district", subdistrict: "sub_district", postal: "postal_code" }}
+                  required={false} />
               </div>
             </Section>
 

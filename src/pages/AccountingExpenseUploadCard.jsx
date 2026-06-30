@@ -61,6 +61,7 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
       const cNet = col("ยอดรวมสุทธิ");
       const cType = col("ประเภทค่าใช้จ่าย");
       const cRef = col("เลขที่อ้างอิง");
+      const cStatus = col("สถานะ");
 
       const out = [];
       for (let i = hdrIdx + 1; i < rows.length; i++) {
@@ -74,6 +75,9 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
         const total = num(r[cNet]) || (subtotal + vat);
         const vatPct = subtotal > 0 && vat > 0 ? Math.round((vat / subtotal) * 100) : 0;
         const expType = cellTxt(r[cType]);
+        // อ่านสถานะจาก FlowAccount → map "ยกเลิก" เป็น cancelled (ที่เหลือ draft)
+        const statTxt = cStatus >= 0 ? cellTxt(r[cStatus]) : "";
+        const status = /ยกเลิก/.test(statTxt) ? "cancelled" : "draft";
         // นำเข้าทุกแถว — ใส่ F- หน้าเลขเอกสาร
         out.push({
           expense_doc_no: "F-" + docNo,
@@ -83,7 +87,7 @@ export default function AccountingExpenseUploadCard({ currentUser }) {
           reference_no: cellTxt(r[cRef]) || null,
           expense_type: expType || null,
           description: expType || cellTxt(r[cProject]) || null,
-          subtotal, vat_pct: vatPct, vat_amount: vat, total,
+          subtotal, vat_pct: vatPct, vat_amount: vat, total, status,
         });
       }
       setPreview(out);

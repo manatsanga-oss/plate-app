@@ -1047,6 +1047,10 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin, cur
   }
 
   const filtered = data.filter(r => !/ยกเลิก/.test(String(r.status || "")) && range.match(Number(r.total_amount || 0)) && (!onlyUnmatched || !r.receipt_no));
+  // ตรวจเลขที่อ้างอิงซ้ำ (ห้ามซ้ำ) — นับเฉพาะที่ไม่ว่าง
+  const refCounts = {};
+  filtered.forEach(r => { const k = String(r.receipt_ref || "").trim(); if (k) refCounts[k] = (refCounts[k] || 0) + 1; });
+  const dupRefCount = Object.values(refCounts).filter(c => c > 1).length;
   const total = filtered.reduce((s, r) => s + Number(r.total_amount || 0), 0);
   const matchedCount = filtered.filter(r => r.receipt_no).length;
   const unmatchedCount = filtered.length - matchedCount;
@@ -1079,6 +1083,7 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin, cur
           <span>จำนวน: <b>{filtered.length}</b></span>
           <span style={{ marginLeft: 12, color: "#059669" }}>✅ จับคู่: <b>{matchedCount}</b></span>
           <span style={{ marginLeft: 12, color: "#b45309" }}>⚠️ ไม่มีใบเสร็จ: <b>{unmatchedCount}</b></span>
+          {dupRefCount > 0 && <span style={{ marginLeft: 12, color: "#dc2626", fontWeight: 700 }}>🔁 เลขอ้างอิงซ้ำ: <b>{dupRefCount}</b></span>}
           <span style={{ marginLeft: 12 }}>รวม: <b style={{ color: "#dc2626" }}>{fmt(total)}</b> บาท</span>
         </div>
       </div>
@@ -1123,6 +1128,17 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin, cur
                           {Number(r.receipt_vat) > 0 ? ` · VAT ${fmt(r.receipt_vat)}` : ""}
                           {r.receipt_aff ? ` · ${r.receipt_aff}` : ""}
                         </div>
+                        {(() => {
+                          const ref = String(r.receipt_ref || "").trim();
+                          if (!ref) return null;
+                          const dup = refCounts[ref] > 1;
+                          return (
+                            <div style={{ fontSize: 11, marginTop: 2, color: dup ? "#991b1b" : "#1d4ed8", fontWeight: dup ? 700 : 500 }}>
+                              อ้างอิง: {ref}
+                              {dup && <span style={{ marginLeft: 6, fontSize: 10, color: "#fff", background: "#dc2626", padding: "1px 6px", borderRadius: 6 }}>⚠️ ซ้ำ</span>}
+                            </div>
+                          );
+                        })()}
                       </div>
                     ) : (
                       <span style={{ color: "#b45309", fontWeight: 600 }}>⚠️ ไม่มีใบเสร็จ</span>

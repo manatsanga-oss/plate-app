@@ -75,6 +75,9 @@ import IncomeCategoryPage from "./pages/IncomeCategoryPage";
 import ExpenseRecordPage from "./pages/ExpenseRecordPage";
 import FlowExpenseRecordPage from "./pages/FlowExpenseRecordPage";
 import TaxRemittanceRecordPage from "./pages/TaxRemittanceRecordPage";
+import TaxManageInputPage from "./pages/TaxManageInputPage";
+import TaxFormMonthlyPage from "./pages/TaxFormMonthlyPage";
+import TheftInsuranceInvoicePage from "./pages/TheftInsuranceInvoicePage";
 import AdvanceExpensePage from "./pages/AdvanceExpensePage";
 import IncomeRecordPage from "./pages/IncomeRecordPage";
 import TimeTrackingPage from "./pages/TimeTrackingPage";
@@ -245,6 +248,8 @@ export default function App() {
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
     if (page === "taxremittance") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT (บันทึกจ่ายภาษีสรรพากร)
+    if (page === "theftinsuranceinvoice") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT (บันทึกรับใบกำกับฯ ประกันรถหาย ออกแทน)
+    if (page === "taxmanageinput" || page === "taxformmonthly") return ["admin", "WARUT"].includes(currentUser.username);  // บริหารภาษีมูลค่าเพิ่ม — admin + WARUT
     if (page === "financepayment") return false;
     if (page === "goodspayment") return false;        // เฉพาะ admin (บันทึกชำระค่าสินค้า)
     if (page === "convert") return false;
@@ -450,6 +455,15 @@ export default function App() {
         )}
         {activeMenu === "taxremittance" && canAccess("taxremittance") && (
           <TaxRemittanceRecordPage currentUser={currentUser} />
+        )}
+        {activeMenu === "taxmanageinput" && canAccess("taxmanageinput") && (
+          <TaxManageInputPage currentUser={currentUser} />
+        )}
+        {activeMenu === "theftinsuranceinvoice" && canAccess("theftinsuranceinvoice") && (
+          <TheftInsuranceInvoicePage currentUser={currentUser} />
+        )}
+        {activeMenu === "taxformmonthly" && canAccess("taxformmonthly") && (
+          <TaxFormMonthlyPage currentUser={currentUser} />
         )}
         {activeMenu === "advanceexpense" && canAccess("advanceexpense") && (
           <AdvanceExpensePage currentUser={currentUser} />
@@ -757,7 +771,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="mailinbox" label="📬 บันทึกจดหมายเข้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "flowexpense", "taxremittance", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "flowexpense", "taxremittance", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment", "theftinsuranceinvoice"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -777,6 +791,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="financepayment" label="บันทึกรับชำระเงินไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="otherincome" label="บันทึกรายได้อื่น ๆ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="loaninterestpayment" label="บันทึกจ่ายดอกเบี้ยธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="theftinsuranceinvoice" label="📑 บันทึกรับใบกำกับฯ ประกันรถหาย (ออกแทน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","receiptreceive","receiptentry","searchreceiptwork","motoinsurance","cosmosinsurance","registrationbilling","receiptbilling","insurancebilling","cosmosbilling","motoinsuranceextra"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
@@ -811,6 +826,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="accbanktransfer" label="โอนเงินระหว่างบัญชี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accfinancetransfer" label="บันทึกรับเงินโอนไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accdirectorloan" label="บันทึกเงินให้กู้ยืมกรรมการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
+      <MenuGroup title="บริหารภาษีมูลค่าเพิ่ม" pages={["taxmanageinput","taxformmonthly"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="taxmanageinput" label="จัดการภาษีซื้อ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="taxformmonthly" label="เตรียมแบบภาษีรายเดือน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partstatusinquiry","partorderinquiry","partwithdrawal","partdispensereport","servicehistory","servicerate","servicerateimport","partimagelookup"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

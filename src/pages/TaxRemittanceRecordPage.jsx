@@ -33,6 +33,14 @@ function pndTypeOfVendor(taxId, name) {
   if (tid.length === 13) return tid[0] === "0" ? "ภ.ง.ด.53" : "ภ.ง.ด.3";
   return pndTypeOf(name);
 }
+// ค่านายหน้า (brokerage): สังกัด "ที่จ่าย" = เจ้าของแบรนด์ที่ขาย (ไม่ใช่สังกัดพนักงาน)
+//   HONDA → ป.เปา (ดีลเลอร์ฮอนด้า) · YAMAHA → สิงห์ชัย (ดีลเลอร์ยามาฮ่า)
+function payAffOfBrand(brand, fallback) {
+  const b = String(brand || "");
+  if (/ฮอน|honda/i.test(b)) return "ป.เปา";
+  if (/ยามา|yamaha/i.test(b)) return "สิงห์ชัย";
+  return fallback || "(ไม่ระบุสังกัด)";
+}
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -187,23 +195,27 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
   // ---------- ภ.ง.ด.3: ค่านายหน้า (ค่าคอมปกติ ที่มีหัก ณ ที่จ่าย, รายใบ) จาก sales-extra-pay-api ----------
   //   หน้า "ค่าคอมปกติ" จ่ายเป็น expense_documents (commission_normal_save_group); WHT อยู่คอลัมน์ withholding_amount
   //   เอาเฉพาะ "ค่านายหน้า" (มี WHT) ไม่เอา "ค่าคอมมิชชั่น" (ไม่มี WHT). สังกัดเก็บใน doc แล้ว (ป.เปา/สิงห์ชัย)
-  async function loadCommissionRows() {
+  //   ดึงค่านายหน้า "รายใบ" จาก action ที่ระบุ (commission_normal_payables = ค่าคอมปกติ, commission_payables = ค่าคอมพิเศษ)
+  //   ทั้งคู่ลง expense_documents (withholding_amount) โครงเหมือนกัน → รวมเป็นรายการค่านายหน้าเดียวกัน
+  async function loadCommissionRowsVia(action) {
     const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
-    const raw = await post(SXP_URL, { action: "commission_normal_payables", mode: "list_paid_history", date_from: from, date_to: to }).catch(() => []);
+    const raw = await post(SXP_URL, { action, mode: "list_paid_history", date_from: from, date_to: to }).catch(() => []);
     const docs = (Array.isArray(raw) ? raw : [])
       .filter(d => Number(d.withholding_amount || 0) > 0 && d.commission_type !== "commission" && String(d.status || "") !== "cancelled");
     // ดึง breakdown รายคนต่อ save_group (ว่าใครได้ค่านายหน้าเท่าไร → กระจาย WHT รายคน)
     const groups = [...new Set(docs.map(d => d.save_group).filter(Boolean))];
     const personMap = {};
     await Promise.all(groups.map(async sg => {
-      const ps = await post(SXP_URL, { action: "commission_normal_payables", mode: "wht_persons", save_group: sg }).catch(() => []);
+      const ps = await post(SXP_URL, { action, mode: "wht_persons", save_group: sg }).catch(() => []);
       personMap[sg] = Array.isArray(ps) ? ps : [];
     }));
     return docs.map(d => {
       const tt = pndTypeOfVendor(d.vendor_tax_id, d.vendor_name);
       const subtotal = Number(d.subtotal || 0), wht = Number(d.withholding_amount || 0);
       const pct = subtotal > 0 ? wht / subtotal : 0.03;          // อัตราจริงของใบนี้
-      const persons = (personMap[d.save_group] || []).filter(p => p.affiliation === d.affiliation && p.brand === d.brand_filter);
+      const empAff = d.affiliation;                              // สังกัดพนักงาน (ใช้ match รายคน)
+      const payAff = payAffOfBrand(d.brand_filter, d.affiliation); // สังกัด "ที่จ่าย" = เจ้าของแบรนด์ (สำหรับแสดง/ยื่นภาษี)
+      const persons = (personMap[d.save_group] || []).filter(p => p.affiliation === empAff && p.brand === d.brand_filter);
       const details = persons.length
         ? persons.map(p => {
             const amt = Number(p.amount || 0);
@@ -215,13 +227,21 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
       return {
         source_id: `comm|${d.expense_doc_id}`,
         kind: "commission", pndType: tt, sourceLabel: "ค่านายหน้า",
-        source_table: "expense_documents", src_id: Number(d.expense_doc_id), affiliation: d.affiliation || "(ไม่ระบุสังกัด)",
+        source_table: "expense_documents", src_id: Number(d.expense_doc_id), affiliation: payAff,
         paid_at: d.paid_at, period_month: periodOf(d.paid_at),
         amount: wht, vendor_name: d.vendor_name || "-",
         doc_refs: `${tt} ${d.expense_doc_no || ""} (ค่านายหน้า${persons.length ? ` · ${persons.length} คน` : ""})`,
         details,
       };
     });
+  }
+  // รวมค่านายหน้าจาก "ค่าคอมปกติ" + "ค่าคอมพิเศษ" เป็นรายการเดียวกัน
+  async function loadCommissionRows() {
+    const [normal, special] = await Promise.all([
+      loadCommissionRowsVia("commission_normal_payables").catch(() => []),
+      loadCommissionRowsVia("commission_payables").catch(() => []),
+    ]);
+    return [...normal, ...special];
   }
   async function fetchPendingWHT() {
     setLoading(true);

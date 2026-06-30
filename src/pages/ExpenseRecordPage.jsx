@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import ThaiAddressFields from "./ThaiAddressFields";
 
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
@@ -13,8 +14,14 @@ function fmtDate(v) {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`;
 }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
+function formatTaxIdInput(s) {
+  const d = String(s || "").replace(/\D/g, "").slice(0, 13);
+  return [d.slice(0, 1), d.slice(1, 5), d.slice(5, 10), d.slice(10, 12), d.slice(12, 13)]
+    .filter(x => x !== "").join("-");
+}
 
 const emptyItem = () => ({ expense_code: "", expense_name: "", description: "", qty: 1, unit_price: 0, amount: 0, wht_pct: 0 });
+const emptyVendorForm = () => ({ vendor_name: "", entity_type: "นิติบุคคล", tax_id: "", branch_type: "สำนักงานใหญ่", address: "", sub_district: "", district: "", province: "", postal_code: "", contact_name: "", phone: "", wht_rate: "" });
 const emptyForm = () => ({
   expense_doc_no: "",  // generated on save
   doc_date: todayISO(),
@@ -65,6 +72,13 @@ export default function ExpenseRecordPage({ currentUser }) {
   const [editTotalRequired, setEditTotalRequired] = useState(0);
   const [savingPay, setSavingPay] = useState(false);
   const [editPayDocNo, setEditPayDocNo] = useState(null);
+  const [vendorModal, setVendorModal] = useState(false);
+  const [vendorForm, setVendorForm] = useState(emptyVendorForm());
+  const [vendorSaving, setVendorSaving] = useState(false);
+  const [catModal, setCatModal] = useState(false);
+  const [catForm, setCatForm] = useState({ expense_code: "", expense_name: "", description: "" });
+  const [catSaving, setCatSaving] = useState(false);
+  const [catTargetIdx, setCatTargetIdx] = useState(null);
 
   useEffect(() => {
     const now = new Date();
@@ -153,6 +167,77 @@ export default function ExpenseRecordPage({ currentUser }) {
     setShowForm(true);
   }
   function closeForm() { setShowForm(false); setEditTarget(null); setForm(emptyForm()); }
+
+  // ปุ่ม + ข้าง Vendor → เปิด popup เพิ่ม Vendor ใหม่ (ไม่ออกจากหน้า)
+  function goAddVendor() { setVendorForm(emptyVendorForm()); setVendorModal(true); }
+
+  // ปุ่ม + ข้างหมวด → เปิด popup เพิ่มหมวดค่าใช้จ่าย แล้วเลือกให้แถวนั้นอัตโนมัติ
+  function openAddCategory(idx) { setCatTargetIdx(idx); setCatForm({ expense_code: "", expense_name: "", description: "" }); setCatModal(true); }
+  async function saveCategory() {
+    const code = (catForm.expense_code || "").trim();
+    const name = (catForm.expense_name || "").trim();
+    if (!code) { setMessage("❌ กรอกรหัสหมวด"); return; }
+    if (!name) { setMessage("❌ กรอกชื่อหมวด"); return; }
+    setCatSaving(true);
+    try {
+      const res = await fetch(MASTER_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "general_expense", op: "save", expense_code: code, expense_name: name, description: catForm.description, status: "active" }),
+      });
+      if (!res.ok) throw new Error("save fail");
+      // เพิ่มเข้า options ทันที (optimistic) แล้ว sync จริงภายหลัง
+      setGeneralExpenses(gs => gs.some(g => g.expense_code === code) ? gs : [...gs, { expense_id: `new_${code}`, expense_code: code, expense_name: name, description: catForm.description }]);
+      // เลือกหมวดใหม่ให้แถวที่กดเพิ่ม
+      if (catTargetIdx != null) {
+        setForm(f => {
+          const items = f.items.slice();
+          if (items[catTargetIdx]) items[catTargetIdx] = { ...items[catTargetIdx], expense_code: code, expense_name: name };
+          return { ...f, items };
+        });
+      }
+      setCatModal(false);
+      setMessage(`✅ เพิ่มหมวด "${code} — ${name}" แล้ว`);
+      fetchGeneralExpenses();
+    } catch { setMessage("❌ เพิ่มหมวดไม่สำเร็จ"); }
+    setCatSaving(false);
+  }
+
+  // บันทึก Vendor ใหม่ → เลือกให้อัตโนมัติในฟอร์มค่าใช้จ่าย
+  async function saveVendor() {
+    const name = (vendorForm.vendor_name || "").trim();
+    if (!name) { setMessage("❌ กรุณากรอกชื่อ Vendor"); return; }
+    const cleanTax = (vendorForm.tax_id || "").replace(/[\s-]/g, "");
+    if (cleanTax && !/^\d{13}$/.test(cleanTax)) { setMessage("❌ เลขผู้เสียภาษีต้องเป็นตัวเลข 13 หลัก"); return; }
+    setVendorSaving(true);
+    try {
+      const res = await fetch(MASTER_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_vendor", ...vendorForm, vendor_name: name, tax_id: cleanTax, status: "active" }),
+      });
+      const data = await res.json();
+      const row = Array.isArray(data) ? data[0] : data;
+      const newId = row?.vendor_id;
+      if (!newId) { setMessage("❌ เพิ่ม Vendor ไม่สำเร็จ"); setVendorSaving(false); return; }
+      const newVendor = {
+        vendor_id: newId, vendor_name: name, tax_id: cleanTax,
+        address: vendorForm.address, sub_district: vendorForm.sub_district, district: vendorForm.district,
+        province: vendorForm.province, postal_code: vendorForm.postal_code, wht_rate: vendorForm.wht_rate,
+      };
+      setVendors(vs => [newVendor, ...vs]);
+      // เลือก vendor ใหม่ในฟอร์มค่าใช้จ่ายทันที (ไม่รอ state vendors อัปเดต)
+      const defaultWht = Number(vendorForm.wht_rate) || 0;
+      setForm(f => ({
+        ...f,
+        vendor_id: newId, vendor_name: name, vendor_tax_id: cleanTax,
+        vendor_address: [vendorForm.address, vendorForm.sub_district, vendorForm.district, vendorForm.province, vendorForm.postal_code].filter(Boolean).join(" "),
+        wht_rate: defaultWht,
+        items: f.items.map(it => ({ ...it, wht_pct: it.wht_pct || defaultWht })),
+      }));
+      setVendorModal(false);
+      setMessage(`✅ เพิ่ม Vendor "${name}" แล้ว`);
+    } catch (e) { setMessage("❌ " + e.message); }
+    setVendorSaving(false);
+  }
 
   function onVendorChange(vendorId) {
     const v = vendors.find(x => String(x.vendor_id) === String(vendorId));
@@ -276,7 +361,7 @@ export default function ExpenseRecordPage({ currentUser }) {
       vendor_name: d.vendor_name || "",
       vendor_tax_id: d.vendor_tax_id || "",
       vendor_address: d.vendor_address || "",
-      reference_no: d.reference_no || "",
+      reference_no: "",  // สร้างซ้ำ → ล้างเลขที่อ้างอิง (กรอกใหม่)
       description: d.description || "",
       note: d.note || "",
       discount_pct: Number(d.discount_pct) || 0,
@@ -680,12 +765,24 @@ export default function ExpenseRecordPage({ currentUser }) {
       {showForm && <FormModal
         form={form} setForm={setForm} editTarget={editTarget}
         vendors={vendors} generalExpenses={generalExpenses} bankAccounts={bankAccounts}
-        onVendorChange={onVendorChange}
+        onVendorChange={onVendorChange} onAddVendor={goAddVendor} onAddCategory={openAddCategory}
         onItemChange={onItemChange} addItem={addItem} removeItem={removeItem}
         subtotal={subtotal} discountAmount={discountAmount} vatAmount={vatAmount}
         totalIncVat={totalIncVat} whtBase={whtBase} whtAmount={whtAmount} netToPay={netToPay}
         onClose={closeForm} onSave={handleSave} saving={saving}
       />}
+
+      {/* Add Vendor Modal (popup) */}
+      {vendorModal && (
+        <VendorAddModal form={vendorForm} setForm={setVendorForm}
+          onClose={() => !vendorSaving && setVendorModal(false)} onSave={saveVendor} saving={vendorSaving} />
+      )}
+
+      {/* Add Category Modal (popup) */}
+      {catModal && (
+        <CategoryAddModal form={catForm} setForm={setCatForm}
+          onClose={() => !catSaving && setCatModal(false)} onSave={saveCategory} saving={catSaving} />
+      )}
 
       {/* Payment Dialog */}
       {payDialog && (
@@ -915,7 +1012,219 @@ function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePri
   );
 }
 
-function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAccounts, onVendorChange, onItemChange, addItem, removeItem, subtotal, discountAmount, vatAmount, totalIncVat, whtBase, whtAmount, netToPay, onClose, onSave, saving }) {
+// ช่องเลือก Vendor แบบพิมพ์ค้นหาได้ + ปุ่ม + เพิ่ม Vendor ใหม่
+function VendorSelect({ vendors, value, vendorName, onSelect, onAddNew }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDown = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+  const kw = q.trim().toLowerCase();
+  const filtered = !kw ? vendors : vendors.filter(v =>
+    [v.vendor_name, v.tax_id].filter(Boolean).join(" ").toLowerCase().includes(kw));
+  const selected = vendors.find(v => String(v.vendor_id) === String(value));
+  const display = selected ? selected.vendor_name : (vendorName || "");
+  const optStyle = (active) => ({ padding: "8px 12px", fontSize: 13, textAlign: "left", cursor: "pointer", background: active ? "#eff6ff" : "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
+  return (
+    <div ref={ref} style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+      <div style={{ position: "relative", flex: 1 }}>
+        <input type="text" value={open ? q : display}
+          onChange={e => { setQ(e.target.value); if (!open) setOpen(true); }}
+          onFocus={() => { setOpen(true); setQ(""); }}
+          placeholder="-- เลือก / พิมพ์ค้นหา Vendor --" style={inp} />
+        {open && (
+          <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, maxHeight: 260, overflowY: "auto", background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", zIndex: 50 }}>
+            <div onMouseDown={() => { onSelect(""); setOpen(false); }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#f1f5f9")}
+              onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
+              style={{ ...optStyle(false), color: "#9ca3af" }}>-- ไม่เลือก --</div>
+            {filtered.length === 0 ? (
+              <div style={{ padding: "10px 12px", color: "#9ca3af", fontSize: 13, textAlign: "left" }}>ไม่พบ Vendor</div>
+            ) : filtered.map(v => (
+              <div key={v.vendor_id} onMouseDown={() => { onSelect(v.vendor_id); setOpen(false); }}
+                onMouseEnter={e => (e.currentTarget.style.background = "#f1f5f9")}
+                onMouseLeave={e => (e.currentTarget.style.background = String(v.vendor_id) === String(value) ? "#eff6ff" : "#fff")}
+                style={optStyle(String(v.vendor_id) === String(value))}>
+                {v.vendor_name}{v.tax_id ? <span style={{ color: "#9ca3af", fontSize: 11 }}> · {v.tax_id}</span> : null}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <button type="button" onClick={onAddNew} title="เพิ่ม Vendor ใหม่"
+        style={{ flex: "0 0 auto", padding: "0 16px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 20, lineHeight: 1 }}>+</button>
+    </div>
+  );
+}
+
+// เลือกหมวด (Master) แบบพิมพ์ค้นหาได้ — ใช้ในตารางรายการ
+function CategorySelect({ options, value, onSelect, onAddNew }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDown = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+  const kw = q.trim().toLowerCase();
+  const filtered = !kw ? options : options.filter(g =>
+    [g.expense_code, g.expense_name].filter(Boolean).join(" ").toLowerCase().includes(kw));
+  const sel = options.find(g => g.expense_code === value);
+  const display = sel ? `${sel.expense_code} — ${sel.expense_name}` : "";
+  const optStyle = (active) => ({ padding: "8px 12px", fontSize: 13, textAlign: "left", cursor: "pointer", background: active ? "#eff6ff" : "#fff", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" });
+  return (
+    <div ref={ref} style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+      <div style={{ position: "relative", flex: 1 }}>
+      <input type="text" value={open ? q : display}
+        onChange={e => { setQ(e.target.value); if (!open) setOpen(true); }}
+        onFocus={() => { setOpen(true); setQ(""); }}
+        placeholder="-- เลือกหมวด --" style={inp} />
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, minWidth: "100%", width: "max-content", maxWidth: 360, maxHeight: 260, overflowY: "auto", background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, boxShadow: "0 8px 24px rgba(0,0,0,0.14)", zIndex: 50 }}>
+          <div onMouseDown={() => { onSelect(""); setOpen(false); }}
+            onMouseEnter={e => (e.currentTarget.style.background = "#f1f5f9")}
+            onMouseLeave={e => (e.currentTarget.style.background = "#fff")}
+            style={{ ...optStyle(false), color: "#9ca3af" }}>-- เลือกหมวด --</div>
+          {filtered.length === 0 ? (
+            <div style={{ padding: "10px 12px", color: "#9ca3af", fontSize: 13, textAlign: "left" }}>ไม่พบหมวด</div>
+          ) : filtered.map(g => (
+            <div key={g.expense_id} onMouseDown={() => { onSelect(g.expense_code); setOpen(false); }}
+              onMouseEnter={e => (e.currentTarget.style.background = "#f1f5f9")}
+              onMouseLeave={e => (e.currentTarget.style.background = g.expense_code === value ? "#eff6ff" : "#fff")}
+              style={optStyle(g.expense_code === value)}>
+              <b>{g.expense_code}</b> — {g.expense_name}
+            </div>
+          ))}
+        </div>
+      )}
+      </div>
+      {onAddNew && (
+        <button type="button" onClick={onAddNew} title="เพิ่มหมวดใหม่"
+          style={{ flex: "0 0 auto", padding: "0 10px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 16, lineHeight: 1 }}>+</button>
+      )}
+    </div>
+  );
+}
+
+// Field helper สำหรับ ThaiAddressFields ใน popup
+function VendorField({ label, children }) {
+  return <div><label style={lbl}>{label}</label>{children}</div>;
+}
+
+// Popup เพิ่มหมวดค่าใช้จ่าย (เก็บลง master เดียวกับหน้าหมวดค่าใช้จ่าย)
+function CategoryAddModal({ form, setForm, onClose, onSave, saving }) {
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1100, padding: 20, overflowY: "auto" }}
+      onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 480, maxWidth: "96vw" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: "2px solid #e5e7eb" }}>
+          <h3 style={{ margin: 0, color: "#059669" }}>➕ เพิ่มหมวดค่าใช้จ่าย</h3>
+          <button onClick={onClose} style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 22, color: "#6b7280" }}>✕</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: 10 }}>
+          <div>
+            <label style={lbl}>รหัสหมวด *</label>
+            <input type="text" value={form.expense_code} onChange={e => set("expense_code", e.target.value)} style={inp} autoFocus />
+          </div>
+          <div>
+            <label style={lbl}>ชื่อหมวด *</label>
+            <input type="text" value={form.expense_name} onChange={e => set("expense_name", e.target.value)} style={inp} />
+          </div>
+          <div style={{ gridColumn: "1 / span 2" }}>
+            <label style={lbl}>รายละเอียด</label>
+            <input type="text" value={form.description} onChange={e => set("description", e.target.value)} style={inp} />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <button onClick={onClose} disabled={saving} style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={onSave} disabled={saving} style={{ padding: "8px 24px", background: saving ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            {saving ? "กำลังบันทึก..." : "💾 บันทึกหมวด"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Popup เพิ่ม Vendor ใหม่ (เก็บลง master เดียวกับหน้า Supplier)
+function VendorAddModal({ form, setForm, onClose, onSave, saving }) {
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1100, padding: 20, overflowY: "auto" }}
+      onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 620, maxWidth: "96vw", maxHeight: "92vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", marginBottom: 14, paddingBottom: 10, borderBottom: "2px solid #e5e7eb" }}>
+          <h3 style={{ margin: 0, color: "#059669" }}>➕ เพิ่ม Vendor ใหม่</h3>
+          <button onClick={onClose} style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 22, color: "#6b7280" }}>✕</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ gridColumn: "1 / span 2" }}>
+            <label style={lbl}>ชื่อ Vendor *</label>
+            <input type="text" value={form.vendor_name} onChange={e => set("vendor_name", e.target.value)} style={inp} autoFocus />
+          </div>
+          <div style={{ gridColumn: "1 / span 2" }}>
+            <label style={lbl}>ประเภท</label>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["บุคคลธรรมดา", "นิติบุคคล"].map(t => (
+                <label key={t} onClick={() => set("entity_type", t)}
+                  style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "9px 12px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600,
+                    border: form.entity_type === t ? "2px solid #059669" : "1px solid #d1d5db",
+                    background: form.entity_type === t ? "#ecfdf5" : "#fff",
+                    color: form.entity_type === t ? "#065f46" : "#374151" }}>
+                  <input type="radio" name="entity_type" checked={form.entity_type === t} onChange={() => set("entity_type", t)} />
+                  {t}
+                </label>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label style={lbl}>เลขประจำตัวผู้เสียภาษี (13 หลัก)</label>
+            <input type="text" value={formatTaxIdInput(form.tax_id)} onChange={e => set("tax_id", e.target.value.replace(/\D/g, "").slice(0, 13))} maxLength={17} placeholder="X-XXXX-XXXXX-XX-X" style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>สำนักงาน/สาขา</label>
+            <select value={form.branch_type} onChange={e => set("branch_type", e.target.value)} style={inp}>
+              <option value="สำนักงานใหญ่">สำนักงานใหญ่</option>
+              <option value="สาขา">สาขา</option>
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>ผู้ติดต่อ</label>
+            <input type="text" value={form.contact_name} onChange={e => set("contact_name", e.target.value)} style={inp} />
+          </div>
+          <div>
+            <label style={lbl}>เบอร์โทร</label>
+            <input type="text" value={form.phone} onChange={e => set("phone", e.target.value)} style={inp} />
+          </div>
+          <div style={{ gridColumn: "1 / span 2" }}>
+            <label style={lbl}>เลขที่ / ถนน / ซอย</label>
+            <input type="text" value={form.address} onChange={e => set("address", e.target.value)} style={inp} />
+          </div>
+          <ThaiAddressFields form={form} setForm={setForm} Field={VendorField} inp={inp}
+            keys={{ province: "province", district: "district", subdistrict: "sub_district", postal: "postal_code" }}
+            required={false} />
+          <div>
+            <label style={lbl}>หัก ณ ที่จ่าย % (ค่าเริ่มต้น)</label>
+            <input type="number" step="0.01" value={form.wht_rate} onChange={e => set("wht_rate", e.target.value)} placeholder="0" style={inp} />
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+          <button onClick={onClose} disabled={saving} style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={onSave} disabled={saving} style={{ padding: "8px 24px", background: saving ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+            {saving ? "กำลังบันทึก..." : "💾 บันทึก Vendor"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAccounts, onVendorChange, onAddVendor, onAddCategory, onItemChange, addItem, removeItem, subtotal, discountAmount, vatAmount, totalIncVat, whtBase, whtAmount, netToPay, onClose, onSave, saving }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000, padding: 20, overflowY: "auto" }}
       onClick={() => !saving && onClose()}>
@@ -945,10 +1254,8 @@ function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAc
           </div>
           <div style={{ gridColumn: "1 / span 2" }}>
             <label style={lbl}>Vendor (ผู้จำหน่าย) *</label>
-            <select value={form.vendor_id} onChange={e => onVendorChange(e.target.value)} style={inp}>
-              <option value="">-- เลือก Vendor --</option>
-              {vendors.map(v => <option key={v.vendor_id} value={v.vendor_id}>{v.vendor_name}{v.tax_id ? ` (${v.tax_id})` : ""}</option>)}
-            </select>
+            <VendorSelect vendors={vendors} value={form.vendor_id} vendorName={form.vendor_name}
+              onSelect={onVendorChange} onAddNew={onAddVendor} />
           </div>
           {form.vendor_address && (
             <div style={{ gridColumn: "1 / span 2", padding: "6px 10px", background: "#f8fafc", borderRadius: 6, fontSize: 12, color: "#6b7280" }}>
@@ -983,10 +1290,9 @@ function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAc
                 <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                   <td style={{ ...td, textAlign: "center" }}>{i + 1}</td>
                   <td style={td}>
-                    <select value={it.expense_code} onChange={e => onItemChange(i, "expense_code", e.target.value)} style={inp}>
-                      <option value="">-- เลือกหมวด --</option>
-                      {generalExpenses.map(g => <option key={g.expense_id} value={g.expense_code}>{g.expense_code} — {g.expense_name}</option>)}
-                    </select>
+                    <CategorySelect options={generalExpenses} value={it.expense_code}
+                      onSelect={val => onItemChange(i, "expense_code", val)}
+                      onAddNew={() => onAddCategory(i)} />
                   </td>
                   <td style={td}>
                     <input type="text" value={it.expense_name} onChange={e => onItemChange(i, "expense_name", e.target.value)} style={inp} />
