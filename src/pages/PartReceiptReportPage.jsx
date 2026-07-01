@@ -126,7 +126,8 @@ export default function PartReceiptReportPage() {
                 <th style={th}>#</th>
                 <th style={th}>{isHonda ? "เลขที่ใบกำกับ" : "เลขที่ใบรับ"}</th>
                 <th style={th}>วันที่</th>
-                <th style={th}>{isHonda ? "เลขผู้เสียภาษี" : "เลขที่ใบกำกับ"}</th>
+                <th style={th}>วันที่ใบกำกับ</th>
+                {!isHonda && <th style={th}>เลขที่ใบกำกับ</th>}
                 <th style={th}>ผู้ขาย</th>
                 {!isHonda && <th style={{ ...th, textAlign: "right" }}>รายการ</th>}
                 {!isHonda && <th style={{ ...th, textAlign: "right" }}>จำนวน</th>}
@@ -137,9 +138,9 @@ export default function PartReceiptReportPage() {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={isHonda ? 8 : 10} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
+                <tr><td colSpan={isHonda ? 8 : 11} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={isHonda ? 8 : 10} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
+                <tr><td colSpan={isHonda ? 8 : 11} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
               ) : filtered.map((r, i) => {
                 const isCN = r.doc_type === "credit_note";
                 return (
@@ -150,7 +151,8 @@ export default function PartReceiptReportPage() {
                     {r.doc_no}
                   </td>
                   <td style={td}>{fmtDate(r.doc_date)}</td>
-                  <td style={{ ...td, fontFamily: "monospace" }}>{r.tax_invoice_no || "-"}</td>
+                  <td style={td}>{fmtDate(r.tax_invoice_date)}</td>
+                  {!isHonda && <td style={{ ...td, fontFamily: "monospace" }}>{r.tax_invoice_no || "-"}</td>}
                   <td style={td}>{(r.vendor_name || "-").slice(0, 50)}</td>
                   {!isHonda && <td style={{ ...td, textAlign: "right" }}>{fmtInt(r.items_count)}</td>}
                   {!isHonda && <td style={{ ...td, textAlign: "right" }}>{fmt(r.total_qty, 0)}</td>}

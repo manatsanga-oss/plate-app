@@ -717,7 +717,21 @@
       "Bash(python tools/add_theft_receipt_actions.py)",
       "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\check.js\")",
       "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\check2.js\")",
-      "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\check3.js\")"
+      "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\check3.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\ypr_chk.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\it3.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\prr_chk.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\it4.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\it5.js\")",
+      "Bash(node --check \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\70b8e11b-5b41-4423-a3dd-5ac367021a1b\\\\scratchpad\\\\hr_chk.js\")",
+      "Bash(python -c \"import json,sys; d=json.load\\(open\\('Finance API.json',encoding='utf-8'\\)\\); nodes=[n for n in d['nodes'] if n.get\\('type'\\)=='n8n-nodes-base.code' and 'income_records' in json.dumps\\(n.get\\('parameters',{}\\)\\)]; print\\(len\\(nodes\\)\\); [print\\(n['name']\\) for n in nodes]\")",
+      "Bash(python tools/add_income_affiliation.py)",
+      "Bash(python tools/add_pp36_expense_source.py)",
+      "Bash(node --check \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/tax.js\")",
+      "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/gen_sql.py\")",
+      "Bash(python tools/widen_expense_pb_method.py)",
+      "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/exp.js)",
+      "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/gen_exp.py\")"
     ]
   }
 }

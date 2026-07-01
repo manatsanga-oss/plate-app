@@ -834,6 +834,7 @@ export default function ExpenseRecordPage({ currentUser }) {
                           <option value="เงินสด">เงินสด</option>
                           <option value="เช็ค">เช็ค</option>
                           <option value="ใบลดหนี้">ใบลดหนี้</option>
+                          <option value="ภาษีมูลค่าเพิ่มรอนำส่ง (ภ.พ.36)">ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)</option>
                         </select>
                         <input type="number" step="0.01" min="0" value={p.amount}
                           onChange={e => updatePayment(idx, { amount: e.target.value })}
@@ -849,6 +850,10 @@ export default function ExpenseRecordPage({ currentUser }) {
                         ) : p.method === "ใบลดหนี้" ? (
                           <div style={{ padding: "7px 10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 6, fontSize: 12, color: "#7c2d12", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             📄 จะสร้างใบลดหนี้รับ <code>CN-YYMMDD-XXX</code> ตามจำนวนนี้
+                          </div>
+                        ) : p.method === "ภาษีมูลค่าเพิ่มรอนำส่ง (ภ.พ.36)" ? (
+                          <div style={{ padding: "7px 10px", background: "#ecfeff", border: "1px solid #a5f3fc", borderRadius: 6, fontSize: 12, color: "#0e7490", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            🧾 ภาษีรอนำส่ง — ไปกดนำส่งที่เมนู <b>ภ.พ.36</b>
                           </div>
                         ) : (
                           <div style={{ padding: "7px 10px", color: "#9ca3af", fontSize: 12 }}>—</div>

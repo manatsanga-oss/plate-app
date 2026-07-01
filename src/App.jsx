@@ -247,7 +247,7 @@ export default function App() {
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
-    if (page === "taxremittance") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT (บันทึกจ่ายภาษีสรรพากร)
+    if (page === "whtremit") return ["admin", "WARUT"].includes(currentUser.username);  // ภ.ง.ด. หัก ณ ที่จ่าย — admin + WARUT (ภ.พ.36 ย้ายไปเป็นแท็บใน taxformmonthly)
     if (page === "theftinsuranceinvoice") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT (บันทึกรับใบกำกับฯ ประกันรถหาย ออกแทน)
     if (page === "taxmanageinput" || page === "taxformmonthly") return ["admin", "WARUT"].includes(currentUser.username);  // บริหารภาษีมูลค่าเพิ่ม — admin + WARUT
     if (page === "financepayment") return false;
@@ -453,8 +453,8 @@ export default function App() {
         {activeMenu === "flowexpense" && canAccess("flowexpense") && (
           <FlowExpenseRecordPage currentUser={currentUser} />
         )}
-        {activeMenu === "taxremittance" && canAccess("taxremittance") && (
-          <TaxRemittanceRecordPage currentUser={currentUser} />
+        {activeMenu === "whtremit" && canAccess("whtremit") && (
+          <TaxRemittanceRecordPage currentUser={currentUser} lockTaxType="ภ.ง.ด." />
         )}
         {activeMenu === "taxmanageinput" && canAccess("taxmanageinput") && (
           <TaxManageInputPage currentUser={currentUser} />
@@ -771,7 +771,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="mailinbox" label="📬 บันทึกจดหมายเข้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "flowexpense", "taxremittance", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment", "theftinsuranceinvoice"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "flowexpense", "advanceexpense", "expensedoccheck", "bankdeposit", "vehiclepayment", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment", "theftinsuranceinvoice"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -784,7 +784,6 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="vehiclepayment" label="บันทึกรับชำระเงินค่ารถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expenserecord" label="บันทึกค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="flowexpense" label="บันทึกค่าใช้จ่ายจาก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="taxremittance" label="🧾 บันทึกจ่ายเงินภาษีสรรพากร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="advanceexpense" label="ค่าใช้จ่ายจ่ายล่วงหน้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="goodspayment" label="บันทึกชำระค่าสินค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expensedoccheck" label="ตรวจสอบเอกสารค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -830,7 +829,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
 
       <MenuGroup title="บริหารภาษีมูลค่าเพิ่ม" pages={["taxmanageinput","taxformmonthly"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="taxmanageinput" label="จัดการภาษีซื้อ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="taxformmonthly" label="เตรียมแบบภาษีรายเดือน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="taxformmonthly" label="เตรียมแบบภาษีรายเดือน (ภ.พ.30 / ภ.พ.36)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
+      <MenuGroup title="ภาษีหัก ณ ที่จ่าย" pages={["whtremit"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="whtremit" label="🧾 บันทึกจ่ายภาษีหัก ณ ที่จ่าย (ภ.ง.ด.)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partstatusinquiry","partorderinquiry","partwithdrawal","partdispensereport","servicehistory","servicerate","servicerateimport","partimagelookup"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

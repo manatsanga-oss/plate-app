@@ -58,7 +58,7 @@ function fmtPeriod(ym) {
 }
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
-export default function TaxRemittanceRecordPage({ currentUser }) {
+export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   const [pending, setPending] = useState([]);
   const [history, setHistory] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -67,7 +67,7 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [filterAff, setFilterAff] = useState("");
-  const [taxType, setTaxType] = useState("ภ.พ.36");
+  const [taxType, setTaxType] = useState(lockTaxType || "ภ.พ.36");
   const [tab, setTab] = useState("pending"); // pending | history
   const [selected, setSelected] = useState({});
   const [expanded, setExpanded] = useState({}); // กางดูรายละเอียดรายแถว (เช่น ภ.ง.ด.3 ค่าแนะนำ)
@@ -345,6 +345,8 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
           action: "save_tax_remittance", tax_type: taxType,
           remit_date: payForm.remit_date, affiliation: selectedAffs[0] || null,
           period_month: selectedPeriods.length === 1 ? selectedPeriods[0] : (selectedPeriods.slice().sort().slice(-1)[0] || null),
+          // table-aware: ส่ง source_table ของแต่ละแถว (ภ.พ.36 มาได้ทั้ง FLOW ACC และบันทึกค่าใช้จ่าย)
+          sources: selectedRows.map(r => ({ source_table: r.source_table, source_id: Number(r.source_id) })),
           source_ids: selectedRows.map(r => Number(r.source_id)),
           payment_method: payForm.payment_method,
           from_bank_account_id: payForm.payment_method === "โอน" ? (Number(payForm.from_bank_account_id) || null) : null,
@@ -419,7 +421,7 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
   return (
     <div className="page-container">
       <div className="page-topbar">
-        <h2 className="page-title">🧾 บันทึกจ่ายเงินภาษีสรรพากร</h2>
+        <h2 className="page-title">{lockTaxType === "ภ.พ.36" ? "🧾 ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)" : lockTaxType === "ภ.ง.ด." ? "🧾 บันทึกจ่ายภาษีหัก ณ ที่จ่าย (ภ.ง.ด.)" : "🧾 บันทึกจ่ายเงินภาษีสรรพากร"}</h2>
       </div>
 
       {message && (
@@ -441,9 +443,11 @@ export default function TaxRemittanceRecordPage({ currentUser }) {
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
-        <select value={taxType} onChange={e => setTaxType(e.target.value)} style={{ ...inp, maxWidth: 340 }} title="ประเภทภาษี">
-          {TAX_TYPES.map(t => <option key={t.value} value={t.value} disabled={!t.ready}>{t.label}</option>)}
-        </select>
+        {!lockTaxType && (
+          <select value={taxType} onChange={e => setTaxType(e.target.value)} style={{ ...inp, maxWidth: 340 }} title="ประเภทภาษี">
+            {TAX_TYPES.map(t => <option key={t.value} value={t.value} disabled={!t.ready}>{t.label}</option>)}
+          </select>
+        )}
         <label>วันที่:</label>
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inp} />
         <span>ถึง</span>

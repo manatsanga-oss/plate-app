@@ -30,11 +30,14 @@ const SOURCE_META = {
   part: { label: "อะไหล่", color: "#92400e", bg: "#fef3c7" },
   expense: { label: "ค่าใช้จ่าย", color: "#065f46", bg: "#d1fae5" },
   fuel: { label: "ค่าน้ำมัน", color: "#9a3412", bg: "#ffedd5" },
+  theft: { label: "ประกันรถหาย", color: "#9d174d", bg: "#fce7f3" },
 };
 
 const DEFAULT_STATUS = "รับใบกำกับภาษีแล้ว";
+const NO_INVOICE_STATUS = "ยังไม่ได้รับใบกำกับภาษี"; // รับสินค้าแล้วแต่ยังไม่ได้ upload ใบกำกับ (มูลค่า=0)
 const STATUS_STYLE = {
   "รับใบกำกับภาษีแล้ว": { bg: "#dbeafe", color: "#1e40af" },
+  "ยังไม่ได้รับใบกำกับภาษี": { bg: "#ffedd5", color: "#9a3412" },
   "เตรียมแบบยื่น ภ.พ.30": { bg: "#d1fae5", color: "#065f46" },
   "ไม่ใช้สิทธิขอคืน": { bg: "#f3f4f6", color: "#6b7280" },
 };
@@ -72,7 +75,9 @@ export default function TaxManageInputPage({ currentUser }) {
     setLoading(false);
   }
 
-  const statusOf = (key) => statuses[key] || DEFAULT_STATUS;
+  // default: มูลค่าก่อน VAT = 0 → รับสินค้าแล้วแต่ยังไม่ได้ upload ใบกำกับ
+  const defaultStatusOf = (g) => (Number(g?.amount_before_vat || 0) === 0 ? NO_INVOICE_STATUS : DEFAULT_STATUS);
+  const statusOf = (key, g) => statuses[key] || defaultStatusOf(g);
   // จัดกลุ่มตามเลขที่เอกสารเดียวกัน (เช่น ใบกำกับ MD ใบเดียวมีหลายคัน) — ถ้าไม่มีเลข = แยกบรรทัด
   const groupKeyOf = (r, idx) => `${r.source}|${r.affiliation || ""}|${r.doc_no || ("row" + idx)}`;
 
@@ -155,6 +160,7 @@ export default function TaxManageInputPage({ currentUser }) {
           <option value="part">อะไหล่</option>
           <option value="expense">ค่าใช้จ่าย</option>
           <option value="fuel">ค่าน้ำมัน</option>
+          <option value="theft">ประกันรถหาย</option>
         </select>
         <select value={filterAff} onChange={e => setFilterAff(e.target.value)} style={inp} title="กรองตามสังกัด">
           <option value="">🏢 สังกัด: ทั้งหมด</option>
@@ -221,10 +227,10 @@ export default function TaxManageInputPage({ currentUser }) {
                       <div style={{ fontFamily: "monospace", fontSize: 12, color: "#6b7280" }}>{fmt(ef.vat_amount)}</div>
                     </td>
                     <td style={{ ...td, textAlign: "center" }}>
-                      <StatusDropdown status={statusOf(key)} onPick={a => setStatus(key, a)} />
+                      <StatusDropdown status={statusOf(key, ef)} onPick={a => setStatus(key, a)} />
                     </td>
                     <td style={{ ...td, textAlign: "center" }}>
-                      <RowKebab onEdit={() => setEditKey(key)} onPrint={() => printDoc(ef, statusOf(key))} onDownload={() => downloadDoc(ef, statusOf(key))} />
+                      <RowKebab onEdit={() => setEditKey(key)} onPrint={() => printDoc(ef, statusOf(key, ef))} onDownload={() => downloadDoc(ef, statusOf(key, ef))} />
                     </td>
                   </tr>
                 );
@@ -251,7 +257,7 @@ function StatusDropdown({ status, onPick }) {
     return () => document.removeEventListener("mousedown", onDown);
   }, []);
   const sty = STATUS_STYLE[status] || STATUS_STYLE[DEFAULT_STATUS];
-  const ACTIONS = ["เตรียมแบบยื่น ภ.พ.30", "ไม่ใช้สิทธิขอคืน", "รีเซ็ต"];
+  const ACTIONS = ["รับใบกำกับภาษีแล้ว", "ยังไม่ได้รับใบกำกับภาษี", "เตรียมแบบยื่น ภ.พ.30", "ไม่ใช้สิทธิขอคืน", "รีเซ็ต"];
   return (
     <div ref={ref} style={{ position: "relative", display: "inline-block" }}>
       <button onClick={() => setOpen(o => !o)}
