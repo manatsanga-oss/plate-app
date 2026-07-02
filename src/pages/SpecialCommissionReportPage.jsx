@@ -702,6 +702,7 @@ tr.excluded td { text-decoration: line-through; }
                               <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: d.status === "paid" ? "#d1fae5" : "#fef3c7", color: d.status === "paid" ? "#065f46" : "#92400e" }}>
                                 {d.status === "paid" ? "✓ จ่ายแล้ว" : "📝 ร่าง"}
                               </span>
+                              {d.status === "paid" && d.paid_at && <div style={{ fontSize: 10, color: "#065f46", marginTop: 2 }}>จ่าย {fmtDate(d.paid_at)}</div>}
                             </td>
                             <td style={td}>
                               {d.status === "paid" ? (

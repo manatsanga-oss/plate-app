@@ -3,6 +3,7 @@ import ThaiAddressFields from "./ThaiAddressFields";
 
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
+const TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/tax-remittance-api"; // สถานะนำส่งภาษี ภ.ง.ด.
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -87,10 +88,32 @@ export default function ExpenseRecordPage({ currentUser }) {
     fetchVendors();
     fetchGeneralExpenses();
     fetchBankAccounts();
+    fetchRemitMap();
     /* eslint-disable-next-line */
   }, []);
 
   useEffect(() => { if (dateFrom && dateTo) fetchDocs(); /* eslint-disable-next-line */ }, [dateFrom, dateTo]);
+
+  // สถานะนำส่งภาษี ภ.ง.ด. — map expense_doc_id → เลขใบนำส่ง (TRMT-...) จาก tax_remittance_items
+  const [remitMap, setRemitMap] = useState({});
+  async function fetchRemitMap() {
+    try {
+      const res = await fetch(TAX_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_tax_remittances" }),
+      });
+      const text = await res.text();
+      const hist = text ? JSON.parse(text) : [];
+      const m = {};
+      (Array.isArray(hist) ? hist : []).forEach(h => {
+        if (h?.status === "cancelled") return;
+        (Array.isArray(h.items) ? h.items : []).forEach(it => {
+          if (it?.source_table === "expense_documents" && it.source_id != null) m[Number(it.source_id)] = h.remit_doc_no;
+        });
+      });
+      setRemitMap(m);
+    } catch { setRemitMap({}); }
+  }
 
   async function fetchDocs() {
     setLoading(true);
@@ -687,7 +710,7 @@ export default function ExpenseRecordPage({ currentUser }) {
               </label>
             ))}
           </div>
-          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={false} />
+          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={false} remitMap={remitMap} />
         </>
       )}
 
@@ -703,7 +726,7 @@ export default function ExpenseRecordPage({ currentUser }) {
               💵 บันทึกจ่ายเงิน
             </button>
           </div>
-          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} />
+          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} remitMap={remitMap} />
         </>
       )}
 
@@ -901,7 +924,7 @@ export default function ExpenseRecordPage({ currentUser }) {
   );
 }
 
-function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, showCheckbox, selected, toggleOne, toggleAll }) {
+function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, showCheckbox, selected, toggleOne, toggleAll, remitMap }) {
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
       {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
@@ -922,6 +945,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
             <th style={{ ...th, textAlign: "right" }}>WHT</th>
             <th style={{ ...th, textAlign: "right" }}>ยอดสุทธิ</th>
             <th style={th}>สถานะ</th>
+            <th style={th}>นำส่งภาษี</th>
             <th style={{ ...th, width: 60, textAlign: "center" }}>จัดการ</th>
           </tr>
         </thead>
@@ -948,6 +972,18 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
                     color: status === "paid" ? "#065f46" : status === "cancelled" ? "#991b1b" : "#78350f" }}>
                     {status === "paid" ? "ชำระแล้ว" : status === "cancelled" ? "ยกเลิก" : "ร่าง"}
                   </span>
+                  {status === "paid" && d.paid_at && <div style={{ fontSize: 10, color: "#065f46", marginTop: 2 }}>จ่าย {fmtDate(d.paid_at)}</div>}
+                  {status === "paid" && d.paid_doc_no && <div style={{ fontSize: 9, color: "#6b7280", fontFamily: "monospace" }}>{d.paid_doc_no}</div>}
+                </td>
+                <td style={td}>
+                  {(() => {
+                    // สถานะนำส่ง ภ.ง.ด. — เฉพาะเอกสารที่มีหัก ณ ที่จ่าย
+                    if (!(Number(d.wht_amount) > 0) || status === "cancelled") return <span style={{ color: "#d1d5db" }}>-</span>;
+                    const remitNo = remitMap?.[Number(d.expense_doc_id)];
+                    return remitNo
+                      ? <span title={remitNo} style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#ecfeff", color: "#0e7490" }}>🧾 นำส่งแล้ว<div style={{ fontSize: 9, fontFamily: "monospace" }}>{remitNo}</div></span>
+                      : <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#fef3c7", color: "#92400e" }}>รอนำส่ง</span>;
+                  })()}
                 </td>
                 <td style={{ ...td, textAlign: "center" }}>
                   <KebabMenu d={d} status={status} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} />

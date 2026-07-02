@@ -272,16 +272,40 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       })
       .filter(r => r.amount > 0);
   }
+  // ---------- ภ.ง.ด.53: ประกัน COSMOS (WHT จากใบจ่ายวางบิล COSMOS — 1 แถวต่อใบจ่าย PAY-COSMOS) ----------
+  //   wht_amount เก็บซ้ำทุกแถวของใบจ่ายเดียวกันใน cosmos_submissions → group แล้วใช้ค่าเดียว
+  //   สังกัดเดาจากบัญชีที่โอนจ่าย (ชื่อบัญชีมี ป.เปา/สิงห์ชัย)
+  async function loadCosmosRows() {
+    const raw = await post(REG_URL, { action: "list_cosmos_paid" }).catch(() => []);
+    const g = {};
+    (Array.isArray(raw) ? raw : []).forEach(r => {
+      if (!r?.paid_doc_no || !(Number(r.wht_amount) > 0)) return;
+      const k = r.paid_doc_no;
+      if (!g[k]) g[k] = { paid_doc_no: k, paid_at: r.paid_at, vendor: r.paid_to_vendor || "COSMOS", wht: Number(r.wht_amount || 0), minId: Number(r.id) || 0, n: 0, bank: String(r.bank_account_name || "") };
+      g[k].n += 1;
+      if (Number(r.id) && Number(r.id) < g[k].minId) g[k].minId = Number(r.id);
+    });
+    return Object.values(g).map(x => ({
+      source_id: `cosmos|${x.paid_doc_no}`,
+      kind: "cosmos", pndType: "ภ.ง.ด.53", sourceLabel: "ประกัน COSMOS",
+      source_table: "cosmos_submissions", src_id: x.minId,
+      affiliation: /เปา/.test(x.bank) ? "ป.เปา" : /สิงห์ชัย/.test(x.bank) ? "สิงห์ชัย" : "(ไม่ระบุสังกัด)",
+      paid_at: x.paid_at, period_month: periodOf(x.paid_at),
+      amount: x.wht, vendor_name: x.vendor,
+      doc_refs: `ภ.ง.ด.53 ${x.paid_doc_no} (ประกัน COSMOS · ${x.n} รายการ)`,
+    }));
+  }
   async function fetchPendingWHT() {
     setLoading(true);
     try {
-      const [payroll, referral, expense, registration, commission, theft, doneRaw] = await Promise.all([
+      const [payroll, referral, expense, registration, commission, theft, cosmos, doneRaw] = await Promise.all([
         loadPayrollRows().catch(() => []),
         loadReferralRows().catch(() => []),
         loadExpenseRows().catch(() => []),
         loadRegistrationRows().catch(() => []),
         loadCommissionRows().catch(() => []),
         loadTheftInsuranceRows().catch(() => []),
+        loadCosmosRows().catch(() => []),
         post(TAX_URL, { action: "list_tax_remittances" }).catch(() => []),
       ]);
       const done = (Array.isArray(doneRaw) ? doneRaw : []).filter(h => h.status !== "cancelled");
@@ -293,7 +317,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const refRows = referral.filter(b => !refDone.has(`${b.pndType}|${b.period_month}|${b.affiliation}`));
       // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = รายเอกสาร (itemized) — dedup นำส่งแล้ว + กันซ้ำ source เดียวกัน
       const seenItem = new Set();
-      const itemRows = [...expense, ...registration, ...commission, ...theft].filter(b => {
+      const itemRows = [...expense, ...registration, ...commission, ...theft, ...cosmos].filter(b => {
         const k = `${b.source_table}|${b.src_id}`;
         if (expDone.has(k) || seenItem.has(k)) return false;
         seenItem.add(k); return true;
@@ -400,7 +424,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     const payroll = selectedRows.filter(r => r.kind === "payroll");
     const referral = selectedRows.filter(r => r.kind === "referral");
     // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = บันทึกแบบ itemized (แต่ละแถวพก source_table/source_id ของตัวเอง)
-    const expense = selectedRows.filter(r => r.kind === "expense" || r.kind === "registration" || r.kind === "commission" || r.kind === "theft");
+    const expense = selectedRows.filter(r => r.kind === "expense" || r.kind === "registration" || r.kind === "commission" || r.kind === "theft" || r.kind === "cosmos");
 
     if (payroll.length) {
       const ids = [];
