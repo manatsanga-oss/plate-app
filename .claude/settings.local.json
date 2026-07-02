@@ -731,7 +731,13 @@
       "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/gen_sql.py\")",
       "Bash(python tools/widen_expense_pb_method.py)",
       "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/exp.js)",
-      "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/gen_exp.py\")"
+      "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/gen_exp.py\")",
+      "Bash(python tools/fix_delivery_fee_matching.py)",
+      "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/dfimp.js)",
+      "Bash(node C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/dfimp.js)",
+      "Bash(python -c 'import sys; q=sys.stdin.read\\(\\); *)",
+      "Bash(node C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/dfimp2.js)",
+      "Bash(python tools/add_thanaban_to_grouplease.py)"
     ]
   }
 }

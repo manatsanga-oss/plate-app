@@ -151,6 +151,12 @@ function FeeMatchTab({ cfg, currentUser }) {
   const matched = rows.filter(r => matchedOf(r)).length;
   const unmatched = rows.length - matched;
   const manual = rows.filter(r => r.linked_manual).length;
+  // เลขที่ใบขายซ้ำ = เลขใบขายที่ถูกจับคู่กับค่านำพามากกว่า 1 แถว
+  const dupInvoices = (() => {
+    const cnt = {};
+    rows.forEach(r => { const k = matchedOf(r); if (k) cnt[k] = (cnt[k] || 0) + 1; });
+    return Object.values(cnt).filter(c => c > 1).length;
+  })();
   const colCount = cfg.showDeliveryCols ? 15 : (cfg.showAffiliation ? 12 : 11);
 
   return (
@@ -180,6 +186,7 @@ function FeeMatchTab({ cfg, currentUser }) {
         <Card label={cfg.listLabel} value={rows.length} color="#1e40af" />
         <Card label="✅ จับคู่ได้" value={`${matched}/${rows.length}`} color="#059669" />
         <Card label="⚠️ ยังไม่จับคู่" value={unmatched} color="#b91c1c" />
+        {cfg.matchKind === "sale" && <Card label="🔁 เลขที่ใบขายซ้ำ" value={dupInvoices} color={dupInvoices > 0 ? "#dc2626" : "#64748b"} />}
         <Card label="✏️ จับคู่เอง" value={manual} color="#7c3aed" />
         <Card label="💰 ยอดรวม" value={fmt(total)} color="#059669" highlight />
       </div>

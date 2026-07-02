@@ -2,6 +2,12 @@ import React, { useEffect, useState, useMemo } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/grouplease-api";
 
+// บริษัทรับฝากค่างวด — ใช้ตาราง grouplease_* ร่วมกัน แยกด้วยคอลัมน์ company
+const COMPANIES = [
+  { value: "กรุ๊ปลีส", label: "กรุ๊ปลีส", printName: "บริษัท กรุ๊ปลีส จำกัด (มหาชน)" },
+  { value: "ธนบรรณ", label: "ธนบรรณ", printName: "บริษัท ธนบรรณ จำกัด" },
+];
+
 const BRANCHES = [
   { code: "", name: "ทุกสาขา" },
   { code: "SCY01", name: "SCY01 สำนักงานใหญ่" },
@@ -24,6 +30,7 @@ function fmt(n) {
 
 export default function PayDepositPage({ currentUser }) {
   const [tab, setTab] = useState("pending");
+  const [company, setCompany] = useState("กรุ๊ปลีส"); // กรุ๊ปลีส | ธนบรรณ
 
   // ---- Tab Pending ----
   const [pendingItems, setPendingItems] = useState([]);
@@ -114,7 +121,8 @@ export default function PayDepositPage({ currentUser }) {
     if (tab === "pending") fetchPending();
     if (tab === "history") fetchPayments();
     if (tab === "report") fetchReport();
-  }, [tab]);
+    /* eslint-disable-next-line */
+  }, [tab, company]);
 
   async function fetchPending() {
     setPendingLoading(true);
@@ -123,6 +131,7 @@ export default function PayDepositPage({ currentUser }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "get_pending_grouplease",
+          company,
           date_from: dateFrom, date_to: dateTo, branch_code: branchFilter, include_paid: "false",
         }),
       });
@@ -150,7 +159,7 @@ export default function PayDepositPage({ currentUser }) {
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_glp_payments", date_from: historyFrom, date_to: historyTo }),
+        body: JSON.stringify({ action: "get_glp_payments", company, date_from: historyFrom, date_to: historyTo }),
       });
       const data = await res.json();
       const rows = Array.isArray(data) ? data : (data?.rows || data?.data || []);
@@ -163,7 +172,7 @@ export default function PayDepositPage({ currentUser }) {
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_glp_payments", date_from: reportDateFrom, date_to: reportDateTo }),
+        body: JSON.stringify({ action: "get_glp_payments", company, date_from: reportDateFrom, date_to: reportDateTo }),
       });
       const data = await res.json();
       const rows = Array.isArray(data) ? data : (data?.rows || data?.data || []);
@@ -317,6 +326,7 @@ export default function PayDepositPage({ currentUser }) {
         }));
         body = {
           action: "save_glp_payment",
+          company,
           ...transferForm,
           transfer_amount: totalSelected,
           status: "transferred",
@@ -369,6 +379,17 @@ export default function PayDepositPage({ currentUser }) {
     const thDate = `${d.getDate()} ${thMonths[d.getMonth()]} ${d.getFullYear() + 543}`;
 
     const shopName = "ป.เปา มอเตอร์เซอร์วิส";
+    // หัวเอกสารตามบริษัท (ใบเก่าไม่มี company = กรุ๊ปลีส)
+    const payCompany = payment.company || company;
+    const isThanaban = payCompany === "ธนบรรณ";
+    const companyHeader = isThanaban
+      ? `<div><b>บริษัท ธนบรรณ จำกัด</b></div>
+        <div>ธนาคารกสิกรไทย เลขที่บัญชี 7371025302 (สำหรับสัญญาธนบรรณ)</div>`
+      : `<div><b>บริษัท กรุ๊ปลีส จำกัด (มหาชน)</b></div>
+        <div>ติดต่อเบอร์ Fax 0-2580-9278 โทร. 0-2580-7555 ต่อ 4405</div>
+        <div>ธนาคารกสิกรไทย เลขที่บัญชี 7371019078 สาขาประชานิเวศน์ กระแสรายวัน</div>
+        <div>ธนาคารไทยพาณิชย์ เลขที่บัญชี 0852062096 สาขาประชานิเวศน์ 1 ออมทรัพย์</div>
+        <div>ธนาคารกรุงเทพ เลขที่บัญชี 1930380306 สาขาถนนประชาชื่น ออมทรัพย์</div>`;
 
     const rows = items.map((i, idx) => `<tr>
       <td class="c">${idx + 1}</td>
@@ -385,7 +406,7 @@ export default function PayDepositPage({ currentUser }) {
 
     const total = items.reduce((s, i) => s + (Number(i.paid_amount) || 0), 0);
 
-    const html = `<!doctype html><html><head><meta charset="utf-8"><title>ใบชำระค่างวดกรุ๊ปลีส ${payment.payment_no || ""}</title>
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>ใบชำระค่างวด${payCompany} ${payment.payment_no || ""}</title>
       <style>
         body { font-family: "Sarabun", "Tahoma", sans-serif; padding: 20px; font-size: 14px; }
         .head { margin-bottom: 12px; line-height: 1.5; }
@@ -400,11 +421,7 @@ export default function PayDepositPage({ currentUser }) {
       </style>
     </head><body>
       <div class="head">
-        <div><b>บริษัท กรุ๊ปลีส จำกัด (มหาชน)</b></div>
-        <div>ติดต่อเบอร์ Fax 0-2580-9278 โทร. 0-2580-7555 ต่อ 4405</div>
-        <div>ธนาคารกสิกรไทย เลขที่บัญชี 7371019078 สาขาประชานิเวศน์ กระแสรายวัน</div>
-        <div>ธนาคารไทยพาณิชย์ เลขที่บัญชี 0852062096 สาขาประชานิเวศน์ 1 ออมทรัพย์</div>
-        <div>ธนาคารกรุงเทพ เลขที่บัญชี 1930380306 สาขาถนนประชาชื่น ออมทรัพย์</div>
+        ${companyHeader}
         <div style="margin-top:6px">วันที่ &nbsp;&nbsp; ${thDate}</div>
         <div>ร้าน &nbsp;&nbsp;&nbsp;&nbsp; ${shopName}</div>
       </div>
@@ -463,7 +480,21 @@ export default function PayDepositPage({ currentUser }) {
   // ====== RENDER ======
   return (
     <div className="pay-deposit" style={{ padding: 20 }}>
-      <h2>ชำระเงินรับฝาก — ค่างวดกรุ๊ปลีส</h2>
+      <h2>ชำระเงินรับฝาก — ค่างวด{company}</h2>
+
+      {/* เลือกบริษัท */}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
+        <span style={{ fontWeight: "bold" }}>🏢 บริษัท:</span>
+        {COMPANIES.map(c => (
+          <button key={c.value} onClick={() => { setCompany(c.value); setSelected({}); }}
+            style={{
+              padding: "6px 18px", border: company === c.value ? "2px solid #1e40af" : "1px solid #d1d5db",
+              cursor: "pointer", borderRadius: 20, fontWeight: "bold",
+              background: company === c.value ? "#dbeafe" : "#fff",
+              color: company === c.value ? "#1e40af" : "#374151",
+            }}>{c.label}</button>
+        ))}
+      </div>
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "2px solid #ccc" }}>

@@ -15,6 +15,7 @@ const HR_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 const REFERRAL_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/referral-fee-api";
 const REG_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const SXP_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
+const THEFT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/upload-accounting-expense"; // ประกันรถหาย ออกแทน (52071)
 
 const TAX_TYPES = [
   { value: "ภ.พ.36", label: "ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)", ready: true },
@@ -67,6 +68,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [filterAff, setFilterAff] = useState("");
+  const [filterForm, setFilterForm] = useState(""); // กรองตามแบบภาษี (ภ.ง.ด.1/3/53) — เฉพาะโหมด ภ.ง.ด.
   const [taxType, setTaxType] = useState(lockTaxType || "ภ.พ.36");
   const [tab, setTab] = useState("pending"); // pending | history
   const [selected, setSelected] = useState({});
@@ -83,7 +85,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     setSelected({});
     if (tab === "pending") fetchPending(); else fetchHistory();
     /* eslint-disable-next-line */
-  }, [tab, taxType, filterAff, dateFrom, dateTo]);
+  }, [tab, taxType, filterAff, filterForm, dateFrom, dateTo]);
 
   function inRange(v) {
     const m = yymm(v);
@@ -243,15 +245,39 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     ]);
     return [...normal, ...special];
   }
+  // ---------- ภ.ง.ด.53: ค่าประกันรถหาย (ออกแทน, รายเอกสาร) หัก ณ ที่จ่าย 3% ----------
+  //   บริษัทประกัน = นิติบุคคล → ภ.ง.ด.53; WHT = มูลค่าก่อน VAT (subtotal) × 3%
+  //   ที่มา: flow_expense_documents รหัส 52071 ผ่าน list_theft_insurance (หน้าบันทึกรับใบกำกับฯ ประกันรถหายออกแทน)
+  async function loadTheftInsuranceRows() {
+    const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
+    const raw = await post(THEFT_URL, { action: "list_theft_insurance", date_from: from, date_to: to }).catch(() => []);
+    return (Array.isArray(raw) ? raw : [])
+      .filter(d => d && (d.expense_doc_no || d.id) && String(d.status || "") !== "cancelled")
+      .map(d => {
+        const base = Number(d.subtotal || 0);            // มูลค่าก่อน VAT
+        const wht = Math.round(base * 0.03 * 100) / 100; // หัก ณ ที่จ่าย 3%
+        return {
+          source_id: `theft|${d.id}`,
+          kind: "theft", pndType: "ภ.ง.ด.53", sourceLabel: "ประกันรถหาย(ออกแทน)",
+          source_table: "flow_expense_documents", src_id: Number(d.id),
+          affiliation: d.affiliation || "(ไม่ระบุสังกัด)",
+          paid_at: d.doc_date, period_month: periodOf(d.doc_date),
+          amount: wht, vendor_name: d.vendor_name || "-",
+          doc_refs: `ภ.ง.ด.53 ${d.expense_doc_no || ""} (ประกันรถหายออกแทน · หัก ณ ที่จ่าย 3%)`,
+        };
+      })
+      .filter(r => r.amount > 0);
+  }
   async function fetchPendingWHT() {
     setLoading(true);
     try {
-      const [payroll, referral, expense, registration, commission, doneRaw] = await Promise.all([
+      const [payroll, referral, expense, registration, commission, theft, doneRaw] = await Promise.all([
         loadPayrollRows().catch(() => []),
         loadReferralRows().catch(() => []),
         loadExpenseRows().catch(() => []),
         loadRegistrationRows().catch(() => []),
         loadCommissionRows().catch(() => []),
+        loadTheftInsuranceRows().catch(() => []),
         post(TAX_URL, { action: "list_tax_remittances" }).catch(() => []),
       ]);
       const done = (Array.isArray(doneRaw) ? doneRaw : []).filter(h => h.status !== "cancelled");
@@ -263,13 +289,14 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const refRows = referral.filter(b => !refDone.has(`${b.pndType}|${b.period_month}|${b.affiliation}`));
       // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = รายเอกสาร (itemized) — dedup นำส่งแล้ว + กันซ้ำ source เดียวกัน
       const seenItem = new Set();
-      const itemRows = [...expense, ...registration, ...commission].filter(b => {
+      const itemRows = [...expense, ...registration, ...commission, ...theft].filter(b => {
         const k = `${b.source_table}|${b.src_id}`;
         if (expDone.has(k) || seenItem.has(k)) return false;
         seenItem.add(k); return true;
       });
       const rows = [...payroll, ...refRows, ...itemRows]
         .filter(r => !filterAff || r.affiliation === filterAff)
+        .filter(r => !filterForm || r.pndType === filterForm)
         .filter(r => inRange(r.paid_at))
         .sort((a, b) => String(b.period_month).localeCompare(String(a.period_month)) || String(a.pndType).localeCompare(String(b.pndType)));
       setPending(rows);
@@ -286,6 +313,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const payrollHist = (Array.isArray(pays) ? pays : [])
         .filter(p => (p.payroll_creditor_type === "tax" || p.vendor_name === "สรรพากร") && p.paid_doc_no)
         .filter(p => !filterAff || p.affiliation === filterAff)
+        .filter(() => !filterForm || filterForm === "ภ.ง.ด.1")
         .filter(p => inRange(p.paid_at || p.month_year))
         .map(p => ({
           remit_doc_no: p.paid_doc_no, tax_type: "ภ.ง.ด.1", remit_date: p.paid_at,
@@ -299,6 +327,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const trmtHist = (Array.isArray(trmt) ? trmt : [])
         .filter(h => String(h.tax_type || "").startsWith("ภ.ง.ด."))
         .filter(h => !filterAff || h.affiliation === filterAff)
+        .filter(h => !filterForm || h.tax_type === filterForm)
         .filter(h => inRange(h.remit_date));
       setHistory([...payrollHist, ...trmtHist].sort((a, b) => String(b.remit_date || "").localeCompare(String(a.remit_date || ""))));
     } catch { setHistory([]); }
@@ -367,7 +396,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     const payroll = selectedRows.filter(r => r.kind === "payroll");
     const referral = selectedRows.filter(r => r.kind === "referral");
     // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = บันทึกแบบ itemized (แต่ละแถวพก source_table/source_id ของตัวเอง)
-    const expense = selectedRows.filter(r => r.kind === "expense" || r.kind === "registration" || r.kind === "commission");
+    const expense = selectedRows.filter(r => r.kind === "expense" || r.kind === "registration" || r.kind === "commission" || r.kind === "theft");
 
     if (payroll.length) {
       const ids = [];
@@ -457,6 +486,14 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
           <option value="ป.เปา">ป.เปา</option>
           <option value="สิงห์ชัย">สิงห์ชัย</option>
         </select>
+        {isWHT && (
+          <select value={filterForm} onChange={e => setFilterForm(e.target.value)} style={inp} title="กรองตามแบบภาษี">
+            <option value="">📋 แบบ: ทั้งหมด</option>
+            <option value="ภ.ง.ด.1">ภ.ง.ด.1</option>
+            <option value="ภ.ง.ด.3">ภ.ง.ด.3</option>
+            <option value="ภ.ง.ด.53">ภ.ง.ด.53</option>
+          </select>
+        )}
         <button onClick={() => { tab === "pending" ? fetchPending() : fetchHistory(); }} style={btn("#0369a1")}>🔄 รีเฟรช</button>
         <div style={{ flex: 1 }} />
         <span style={{ fontSize: 12, color: "#6b7280" }}>กรองวันที่ว่าง = แสดงทั้งหมด</span>
