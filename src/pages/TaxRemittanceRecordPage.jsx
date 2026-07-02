@@ -245,9 +245,11 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     ]);
     return [...normal, ...special];
   }
-  // ---------- ภ.ง.ด.53: ค่าประกันรถหาย (ออกแทน, รายเอกสาร) หัก ณ ที่จ่าย 3% ----------
-  //   บริษัทประกัน = นิติบุคคล → ภ.ง.ด.53; WHT = มูลค่าก่อน VAT (subtotal) × 3%
+  // ---------- ภ.ง.ด.53: ค่าประกันรถหาย (ออกแทน, รายเอกสาร) ----------
+  //   อัตราหัก ณ ที่จ่ายมาตรฐาน = 3% (ค่าบริการ เช่น SGF/วิริยะออกแทน) — ยืนยันจากการยื่นจริง
+  //   ยกเว้นรายใบ = 1% (เบี้ยประกันวินาศภัย เช่น ประกันรถ GE วิริยะ) — เพิ่มเลขเอกสารใน THEFT_WHT_1PCT
   //   ที่มา: flow_expense_documents รหัส 52071 ผ่าน list_theft_insurance (หน้าบันทึกรับใบกำกับฯ ประกันรถหายออกแทน)
+  const THEFT_WHT_1PCT = new Set(["F-EXP2026050032"]);
   async function loadTheftInsuranceRows() {
     const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
     const raw = await post(THEFT_URL, { action: "list_theft_insurance", date_from: from, date_to: to }).catch(() => []);
@@ -255,7 +257,9 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       .filter(d => d && (d.expense_doc_no || d.id) && String(d.status || "") !== "cancelled")
       .map(d => {
         const base = Number(d.subtotal || 0);            // มูลค่าก่อน VAT
-        const wht = Math.round(base * 0.03 * 100) / 100; // หัก ณ ที่จ่าย 3%
+        const is1pct = THEFT_WHT_1PCT.has(String(d.expense_doc_no || ""));
+        const rate = is1pct ? 0.01 : 0.03;
+        const wht = Math.round(base * rate * 100) / 100;
         return {
           source_id: `theft|${d.id}`,
           kind: "theft", pndType: "ภ.ง.ด.53", sourceLabel: "ประกันรถหาย(ออกแทน)",
@@ -263,7 +267,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
           affiliation: d.affiliation || "(ไม่ระบุสังกัด)",
           paid_at: d.doc_date, period_month: periodOf(d.doc_date),
           amount: wht, vendor_name: d.vendor_name || "-",
-          doc_refs: `ภ.ง.ด.53 ${d.expense_doc_no || ""} (ประกันรถหายออกแทน · หัก ณ ที่จ่าย 3%)`,
+          doc_refs: `ภ.ง.ด.53 ${d.expense_doc_no || ""} (ประกันรถหายออกแทน · หัก ณ ที่จ่าย ${is1pct ? 1 : 3}%)`,
         };
       })
       .filter(r => r.amount > 0);

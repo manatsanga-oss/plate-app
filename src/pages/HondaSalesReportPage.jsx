@@ -44,6 +44,14 @@ export default function HondaSalesReportPage() {
   const [histLabels, setHistLabels] = useState([]); // [periodล่าสุด, periodก่อนหน้า] (label)
   const [message, setMessage] = useState("");
   const fileRef = useRef(null);
+  // ===== โควต้าที่ Honda จัดให้จริง (เทียบแผน vs โควต้า) =====
+  const [quota, setQuota] = useState({});          // {key: qty}
+  const [quotaOpen, setQuotaOpen] = useState(false);
+  const [quotaSaving, setQuotaSaving] = useState(false);
+  const [quotaSearch, setQuotaSearch] = useState("");
+  const [quotaOnlyActive, setQuotaOnlyActive] = useState(true); // แสดงเฉพาะแถวที่มีแผน/โควต้า
+  const [loadedPeriod, setLoadedPeriod] = useState(null);       // รอบที่โหลด/บันทึกล่าสุด
+  const quotaPeriod = loadedPeriod || dateTo;
 
   async function loadMaster() {
     try {
@@ -142,6 +150,7 @@ export default function HondaSalesReportPage() {
         date_from: dateFrom, date_to: dateTo, rows,
       });
       const saved = (Array.isArray(res) && res[0] && res[0].saved_rows) || rows.length;
+      setLoadedPeriod(dateTo);
       await listPeriods();
       setMessage(`✅ บันทึกรอบ ${dateTo} แล้ว (${saved} แถว)`);
     } catch (err) {
@@ -173,10 +182,55 @@ export default function HondaSalesReportPage() {
       if (dFrom) setDateFrom(dFrom);
       if (dTo) setDateTo(dTo);
       setBackorder(bo); setPlan(pl); setLockedNext(lock);
+      setLoadedPeriod(period);
+      loadQuota(period);
       setMessage(`✅ โหลดรอบ ${period} แล้ว (${data.length} แถว) — กด "ดึงข้อมูล" เพื่อรีเฟรชยอดขาย/คงเหลือตามช่วงวันที่`);
     } catch (err) {
       setMessage("❌ โหลดไม่สำเร็จ: " + (err && err.message ? err.message : String(err)));
     }
+  }
+
+  // ===== โควต้าที่ได้รับ (get/save_honda_quota) =====
+  async function loadQuota(period) {
+    try {
+      const data = await post(HONDA_API, { action: "get_honda_quota", period });
+      const q = {};
+      for (const r of (Array.isArray(data) ? data : [])) {
+        if (r && r.model_code) q[norm(r.model_code) + "|" + norm(r.type) + "|" + norm(r.color_code)] = String(r.quota_qty || 0);
+      }
+      setQuota(q);
+    } catch { setQuota({}); }
+  }
+  async function openQuota() {
+    await loadQuota(quotaPeriod);
+    setQuotaSearch("");
+    setQuotaOpen(true);
+  }
+  async function saveQuota() {
+    const rows = [];
+    const seenQ = new Set();
+    for (const g of groups) for (const c of g.colors) {
+      seenQ.add(c.key);
+      const v = Number(quota[c.key]) || 0;
+      if (v > 0) rows.push({ model_code: g.code, type: g.type, color_code: c.color_code, quota_qty: v });
+    }
+    // เก็บโควต้าของรุ่นที่ไม่มีในตารางหน้าจอ (Honda จัดให้เองทั้งที่ไม่ได้ขอ) — parse กลับจาก key
+    for (const k of Object.keys(quota)) {
+      if (seenQ.has(k)) continue;
+      const v = Number(quota[k]) || 0; if (!v) continue;
+      const [mc = "", ty = "", cc = ""] = k.split("|");
+      rows.push({ model_code: mc, type: ty, color_code: cc, quota_qty: v });
+    }
+    setQuotaSaving(true);
+    try {
+      const res = await post(HONDA_API, { action: "save_honda_quota", period: quotaPeriod, rows });
+      const r0 = Array.isArray(res) ? res[0] : res;
+      setMessage(`✅ บันทึกโควต้ารอบ ${quotaPeriod} แล้ว (${r0?.saved_rows ?? rows.length} รายการ · รวม ${r0?.quota_total ?? "-"} คัน)`);
+      listPeriods();
+    } catch (err) {
+      setMessage("❌ บันทึกโควต้าไม่สำเร็จ: " + (err && err.message ? err.message : String(err)));
+    }
+    setQuotaSaving(false);
   }
 
   // เคลียร์ช่องกรอกทั้งหมด (ค้างส่ง/แผน/ล็อก/เป้า) — ยอดขาย/คงเหลือยังอยู่ตามที่ดึง
@@ -392,6 +446,7 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
           <button onClick={() => fileRef.current && fileRef.current.click()} title="อัปโหลดแผ่นการสั่งซื้อ (.xls จากระบบฮอนด้า) → เติมช่องยอดส่งรถค้างส่งอัตโนมัติ" style={{ padding: "8px 18px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>📤 อัปโหลดค้างส่ง</button>
           <button onClick={saveReport} disabled={saving} title="บันทึกรายงานรอบนี้ลงฐานข้อมูล (period = วันสิ้นรอบ)" style={{ padding: "8px 18px", background: saving ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>{saving ? "⏳ บันทึก..." : "💾 บันทึกลงฐานข้อมูล"}</button>
           <button onClick={clearForm} title="เคลียร์ช่องกรอกทั้งหมด (ค้างส่ง/แผน/ล็อก/เป้า) — ยอดขาย/คงเหลือยังอยู่" style={{ padding: "8px 18px", background: "#fff", color: "#b45309", border: "1px solid #f59e0b", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🧹 เคลียร์</button>
+          <button onClick={openQuota} title="บันทึกโควต้าที่ Honda จัดให้จริง + เทียบแผน vs โควต้า (fill rate)" style={{ padding: "8px 18px", background: "#d97706", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🎯 โควต้า/เทียบแผน</button>
           <button onClick={printReport} style={{ padding: "8px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🖨️ พิมพ์</button>
         </div>
       </div>
@@ -493,6 +548,160 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
           </tbody>
         </table>
       </div>
+
+      {/* ===== MODAL: โควต้าที่ได้รับ + เทียบแผน vs โควต้า ===== */}
+      {quotaOpen && (() => {
+        // แถวทั้งหมด = จากตารางหน้าจอ + โควต้าของรุ่นที่ไม่มีในตาราง (Honda จัดให้เอง)
+        const rows = [];
+        const seenK = new Set();
+        for (const g of groups) for (const c of g.colors) {
+          seenK.add(c.key);
+          rows.push({ key: c.key, run: g.run, code: g.code, type: g.type, color: c.color_code, colorName: c.color_name, sold: c.sold, plan1: planOf(c.key, 1) });
+        }
+        for (const k of Object.keys(quota)) {
+          if (seenK.has(k) || !(Number(quota[k]) || 0)) continue;
+          const [mc = "", ty = "", cc = ""] = k.split("|");
+          rows.push({ key: k, run: mc, code: mc, type: ty, color: cc, colorName: "", sold: 0, plan1: 0 });
+        }
+        const qOf = (k) => Number(quota[k]) || 0;
+        const kw = quotaSearch.trim().toUpperCase();
+        const visible = rows.filter((r) => {
+          if (quotaOnlyActive && !r.plan1 && !qOf(r.key)) return false;
+          if (kw && !(r.code + " " + r.type + " " + r.color + " " + r.run).toUpperCase().includes(kw)) return false;
+          return true;
+        });
+        // สรุปรายซีรีย์ (เฉพาะแถวที่มีแผนหรือโควต้า)
+        const ser = {};
+        let tp = 0, tq = 0;
+        for (const r of rows) {
+          const q = qOf(r.key);
+          if (!r.plan1 && !q) continue;
+          const s = (ser[r.run] = ser[r.run] || { plan: 0, quota: 0 });
+          s.plan += r.plan1; s.quota += q; tp += r.plan1; tq += q;
+        }
+        const serList = Object.entries(ser).sort((a, b) => b[1].quota - a[1].quota);
+        const pctTxt = (q, p) => (p > 0 ? Math.round((q * 100) / p) + "%" : q > 0 ? "+" + q : "-");
+        const pctColor = (q, p) => (p > 0 ? (q / p >= 0.8 ? "#059669" : q / p >= 0.5 ? "#d97706" : "#dc2626") : "#7c3aed");
+        const histRows = savedPeriods.filter((p) => Number(p.quota_total) > 0);
+        const qth = { border: "1px solid #d1d5db", padding: "5px 8px", fontSize: 12, background: "#f3f4f6", whiteSpace: "nowrap" };
+        const qtd = { border: "1px solid #e5e7eb", padding: "4px 8px", fontSize: 12 };
+        return (
+          <div onClick={() => setQuotaOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "30px 14px", overflowY: "auto" }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: "min(980px,100%)", padding: 18, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12, borderBottom: "2px solid #fde68a", paddingBottom: 10 }}>
+                <h3 style={{ margin: 0, color: "#92400e" }}>🎯 โควต้าที่ได้รับ — รอบ</h3>
+                <select value={savedPeriods.some((p) => p.period === quotaPeriod) ? quotaPeriod : ""}
+                  onChange={(e) => { if (e.target.value) loadSaved(e.target.value); }}
+                  style={{ padding: "6px 10px", border: "2px solid #d97706", borderRadius: 8, fontWeight: 700, color: "#92400e", background: "#fffbeb", cursor: "pointer" }}>
+                  {!savedPeriods.some((p) => p.period === quotaPeriod) && <option value="">{quotaPeriod} (ยังไม่บันทึกแผน)</option>}
+                  {savedPeriods.map((p) => <option key={p.period} value={p.period}>{p.period} · แผนสั่ง {p.plan_next_total} คัน{Number(p.quota_total) > 0 ? ` · โควต้า ${p.quota_total}` : ""}</option>)}
+                </select>
+                <span style={{ fontSize: 12, color: "#6b7280" }}>กรอกยอดจาก "แผนการจัดส่งสุทธิปัจจุบัน" ของ Honda</span>
+                <div style={{ flex: 1 }} />
+                <button onClick={saveQuota} disabled={quotaSaving} style={{ padding: "8px 18px", background: quotaSaving ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>{quotaSaving ? "⏳ ..." : "💾 บันทึกโควต้า"}</button>
+                <button onClick={() => setQuotaOpen(false)} style={{ padding: "8px 12px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>✕ ปิด</button>
+              </div>
+
+              {/* สรุปรวม */}
+              <div style={{ display: "flex", gap: 18, flexWrap: "wrap", padding: "10px 14px", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, marginBottom: 12, fontSize: 14 }}>
+                <span>แผนสั่ง (เดือนหน้า): <b style={{ color: "#7c3aed" }}>{tp}</b> คัน</span>
+                <span>โควต้าที่ได้: <b style={{ color: "#92400e" }}>{tq}</b> คัน</span>
+                <span>Fill rate: <b style={{ color: pctColor(tq, tp), fontSize: 16 }}>{pctTxt(tq, tp)}</b></span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+                {/* เทียบรายซีรีย์ */}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>📊 เทียบรายซีรีย์ (แผนเดือนหน้า vs โควต้า)</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr><th style={qth}>ซีรีย์</th><th style={{ ...qth, textAlign: "right" }}>แผน</th><th style={{ ...qth, textAlign: "right" }}>โควต้า</th><th style={{ ...qth, textAlign: "right" }}>% ได้</th></tr></thead>
+                    <tbody>
+                      {serList.length === 0 ? <tr><td colSpan={4} style={{ ...qtd, textAlign: "center", color: "#9ca3af", padding: 14 }}>ยังไม่มีข้อมูล — กรอกโควต้าด้านล่างแล้วบันทึก</td></tr>
+                        : serList.map(([s, a]) => (
+                          <tr key={s}>
+                            <td style={qtd}>{s}</td>
+                            <td style={{ ...qtd, textAlign: "right" }}>{a.plan || "-"}</td>
+                            <td style={{ ...qtd, textAlign: "right", fontWeight: 700 }}>{a.quota || "-"}</td>
+                            <td style={{ ...qtd, textAlign: "right", fontWeight: 700, color: pctColor(a.quota, a.plan) }}>{pctTxt(a.quota, a.plan)}</td>
+                          </tr>
+                        ))}
+                      {serList.length > 0 && (
+                        <tr style={{ background: "#fde68a", fontWeight: 800 }}>
+                          <td style={qtd}>รวม</td>
+                          <td style={{ ...qtd, textAlign: "right" }}>{tp}</td>
+                          <td style={{ ...qtd, textAlign: "right" }}>{tq}</td>
+                          <td style={{ ...qtd, textAlign: "right", color: pctColor(tq, tp) }}>{pctTxt(tq, tp)}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                {/* ประวัติ fill rate */}
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>📈 ประวัติ Fill rate (ทุกรอบที่บันทึกโควต้า)</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr><th style={qth}>รอบ</th><th style={{ ...qth, textAlign: "right" }}>แผนสั่ง</th><th style={{ ...qth, textAlign: "right" }}>โควต้า</th><th style={{ ...qth, textAlign: "right" }}>% ได้</th></tr></thead>
+                    <tbody>
+                      {histRows.length === 0 ? <tr><td colSpan={4} style={{ ...qtd, textAlign: "center", color: "#9ca3af", padding: 14 }}>ยังไม่มีประวัติ (บันทึกโควต้ารอบแรกก่อน)</td></tr>
+                        : histRows.map((p) => (
+                          <tr key={p.period} style={p.period === quotaPeriod ? { background: "#fffbeb" } : {}}>
+                            <td style={qtd}>{p.period}</td>
+                            <td style={{ ...qtd, textAlign: "right" }}>{p.plan_next_total}</td>
+                            <td style={{ ...qtd, textAlign: "right", fontWeight: 700 }}>{p.quota_total}</td>
+                            <td style={{ ...qtd, textAlign: "right", fontWeight: 700, color: pctColor(Number(p.quota_total), Number(p.plan_next_total)) }}>{pctTxt(Number(p.quota_total), Number(p.plan_next_total))}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 6 }}>💡 ถ้า fill rate คงที่หลายรอบ ใช้เป็นตัวคูณเผื่อในการสั่งครั้งถัดไปได้</div>
+                </div>
+              </div>
+
+              {/* กรอกรายรุ่น/สี */}
+              <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                <div style={{ fontWeight: 700, fontSize: 13 }}>✏️ กรอกโควต้ารายรุ่น/สี</div>
+                <input type="text" value={quotaSearch} onChange={(e) => setQuotaSearch(e.target.value)} placeholder="🔍 ค้นหารุ่น/สี" style={{ padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 12, minWidth: 180 }} />
+                <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                  <input type="checkbox" checked={quotaOnlyActive} onChange={(e) => setQuotaOnlyActive(e.target.checked)} /> เฉพาะแถวที่มีแผน/โควต้า
+                </label>
+                <span style={{ fontSize: 11, color: "#9ca3af" }}>({visible.length}/{rows.length} แถว)</span>
+              </div>
+              <div style={{ maxHeight: 380, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead style={{ position: "sticky", top: 0 }}>
+                    <tr><th style={qth}>รุ่น</th><th style={qth}>แบบ (Type)</th><th style={qth}>สี</th><th style={{ ...qth, textAlign: "right" }}>ขายเดือนก่อน</th><th style={{ ...qth, textAlign: "right" }}>แผนเดือนหน้า</th><th style={{ ...qth, textAlign: "right" }}>โควต้าได้ *</th><th style={{ ...qth, textAlign: "right" }}>ต่าง</th></tr>
+                  </thead>
+                  <tbody>
+                    {visible.length === 0 && (
+                      <tr><td colSpan={7} style={{ ...qtd, textAlign: "center", color: "#9ca3af", padding: 18 }}>
+                        {rows.every((r) => !r.plan1) ? "รอบนี้ยังไม่มีแผนสั่งซื้อ — เลือกรอบที่บันทึกไว้จาก dropdown ด้านบน (เช่นรอบที่ส่งแผนให้ Honda)" : "ไม่พบแถวตามเงื่อนไข — ลองติ๊กออก \"เฉพาะแถวที่มีแผน/โควต้า\" หรือแก้คำค้นหา"}
+                      </td></tr>
+                    )}
+                    {visible.map((r) => {
+                      const q = qOf(r.key);
+                      const diff = q - r.plan1;
+                      return (
+                        <tr key={r.key}>
+                          <td style={qtd}><span style={{ color: "#9ca3af", fontSize: 10 }}>{r.run}</span> <b>{r.code}</b></td>
+                          <td style={{ ...qtd, textAlign: "center" }}>{r.type}</td>
+                          <td style={qtd}>{r.color}{r.colorName ? ` (${r.colorName})` : ""}</td>
+                          <td style={{ ...qtd, textAlign: "right" }}>{r.sold || "-"}</td>
+                          <td style={{ ...qtd, textAlign: "right", color: "#7c3aed", fontWeight: 600 }}>{r.plan1 || "-"}</td>
+                          <td style={{ ...qtd, textAlign: "right" }}>
+                            <input type="number" min="0" value={quota[r.key] ?? ""} onChange={(e) => setQuota((s) => ({ ...s, [r.key]: e.target.value }))}
+                              style={{ width: 64, padding: "3px 6px", border: "1px solid #d4af37", background: "#fffbea", textAlign: "right", fontSize: 12, borderRadius: 3 }} />
+                          </td>
+                          <td style={{ ...qtd, textAlign: "right", fontWeight: 700, color: diff > 0 ? "#059669" : diff < 0 ? "#dc2626" : "#9ca3af" }}>{(r.plan1 || q) ? (diff > 0 ? "+" + diff : diff) : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

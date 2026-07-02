@@ -737,7 +737,20 @@
       "Bash(node C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/dfimp.js)",
       "Bash(python -c 'import sys; q=sys.stdin.read\\(\\); *)",
       "Bash(node C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/dfimp2.js)",
-      "Bash(python tools/add_thanaban_to_grouplease.py)"
+      "Bash(python tools/add_thanaban_to_grouplease.py)",
+      "Bash(curl -s -X POST \"https://n8n-new-project-gwf2.onrender.com/webhook/honda-report-api\" -H \"Content-Type: application/json\" -d '{\"action\":\"get_honda_report\",\"period\":\"2026-06-20\"}' -o \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/honda_plan.json\")",
+      "Bash(curl -s -X POST \"https://n8n-new-project-gwf2.onrender.com/webhook/honda-report-api\" -H \"Content-Type: application/json\" -d '{\"action\":\"list_honda_periods\"}' -o \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/honda_periods.json\")",
+      "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/compare_quota.py\")",
+      "Bash(python tools/add_honda_quota.py)",
+      "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/test_quota_wf.py\")",
+      "Bash(curl -s -X POST \"https://n8n-new-project-gwf2.onrender.com/webhook/upload-accounting-expense\" -H \"Content-Type: application/json\" -d '{\"action\":\"list_theft_insurance\",\"date_from\":\"2026-01-01\",\"date_to\":\"2026-12-31\"}' -o \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/theft_list.json\")",
+      "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/check_theft_dup.py\")",
+      "Bash(curl -s -X POST \"https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api\" -H \"Content-Type: application/json\" -d '{\"action\":\"list_cosmos_paid\"}' -o \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/cosmos_paid.json\")",
+      "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/Code_Update_Cosmos_Payment.js)",
+      "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/Code_Cancel_Cosmos_Payment.js)",
+      "Bash(python tools/add_cosmos_list_all.py)",
+      "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/listall.js)",
+      "Bash(node C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/listall.js)"
     ]
   }
 }

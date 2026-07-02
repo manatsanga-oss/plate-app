@@ -23,7 +23,7 @@ function fmtDate(v) {
 }
 
 export default function CosmosBillingPage({ currentUser }) {
-  const [mode, setMode] = useState("payment");
+  const [mode, setMode] = useState("list");
   const [message, setMessage] = useState("");
   const currentPlan = { color: "#1565c0" }; // สีหลักของหน้า (ไม่กรองตาม plan)
 
@@ -36,6 +36,7 @@ export default function CosmosBillingPage({ currentUser }) {
       {/* Tabs */}
       <div style={{ display: "flex", gap: 8, marginBottom: 16, borderBottom: "2px solid #e5e7eb" }}>
         {[
+          ["list", "📑 รายการจ่าย"],
           ["payment", "💵 บันทึกจ่ายเงิน"],
           ["history", "📋 ประวัติการจ่ายเงิน"],
         ].map(([v, label]) => (
@@ -53,8 +54,171 @@ export default function CosmosBillingPage({ currentUser }) {
           color: message.startsWith("✅") ? "#065f46" : "#991b1b" }}>{message}</div>
       )}
 
+      {mode === "list" && <ListAllPanel currentPlan={currentPlan} setMessage={setMessage} />}
       {mode === "payment" && <PaymentPanel currentPlan={currentPlan} setMessage={setMessage} currentUser={currentUser} />}
       {mode === "history" && <HistoryPanel currentPlan={currentPlan} setMessage={setMessage} />}
+    </div>
+  );
+}
+
+/* ======================== TAB: รายการจ่าย (ดูทั้งหมด แยกตามหัวข้อ กรองเดือน) ======================== */
+const PAY_STATUS = {
+  pending: { label: "รอวางบิล", bg: "#fef3c7", color: "#92400e" },
+  billed: { label: "วางบิลแล้ว", bg: "#dbeafe", color: "#1e40af" },
+  paid: { label: "จ่ายแล้ว", bg: "#dcfce7", color: "#166534" },
+};
+function curMonthDates() {
+  const n = new Date();
+  const y = n.getFullYear(), m = n.getMonth();
+  const last = new Date(y, m + 1, 0).getDate();
+  const mm = String(m + 1).padStart(2, "0");
+  return { from: `${y}-${mm}-01`, to: `${y}-${mm}-${String(last).padStart(2, "0")}` };
+}
+function ListAllPanel({ currentPlan, setMessage }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState(() => curMonthDates().from); // default = เดือนปัจจุบัน
+  const [dateTo, setDateTo] = useState(() => curMonthDates().to);
+  const [statusFilter, setStatusFilter] = useState("");
+  const [openPlans, setOpenPlans] = useState(new Set());
+  const [search, setSearch] = useState("");
+
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [dateFrom, dateTo]);
+
+  async function fetchData() {
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_cosmos_all", date_from: dateFrom, date_to: dateTo }),
+      });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : [];
+      setRows(Array.isArray(data) ? data.filter(r => r && r.id) : []);
+    } catch { setRows([]); setMessage("❌ โหลดข้อมูลไม่สำเร็จ"); }
+    setLoading(false);
+  }
+
+  const kw = search.trim().toLowerCase();
+  const filtered = rows.filter(r => {
+    if (statusFilter && r.pay_status !== statusFilter) return false;
+    if (kw && ![r.app_no, r.customer_name, r.chassis_no, r.invoice_no, r.paid_doc_no].some(v => String(v || "").toLowerCase().includes(kw))) return false;
+    return true;
+  });
+  // จัดกลุ่มตามหัวข้อ (แผน)
+  const byPlan = {};
+  filtered.forEach(r => { (byPlan[r.plan] = byPlan[r.plan] || []).push(r); });
+  const grandTotal = filtered.reduce((s, r) => s + Number(r.premium || 0), 0);
+  // สรุปสถานะการจ่ายรวม (จำนวน + ยอด)
+  const statusSum = { pending: { n: 0, amt: 0 }, billed: { n: 0, amt: 0 }, paid: { n: 0, amt: 0 } };
+  filtered.forEach(r => { const s = statusSum[r.pay_status]; if (s) { s.n += 1; s.amt += Number(r.premium || 0); } });
+  const togglePlan = (p) => setOpenPlans(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n; });
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 12, padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ fontWeight: 600 }}>📅 วันที่:</label>
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6 }} />
+        <span>ถึง</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6 }} />
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6 }}>
+          <option value="">สถานะ: ทั้งหมด</option>
+          <option value="pending">รอวางบิล</option>
+          <option value="billed">วางบิลแล้ว</option>
+          <option value="paid">จ่ายแล้ว</option>
+        </select>
+        <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 App No. / ลูกค้า / เลขถัง"
+          style={{ padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 6, minWidth: 200 }} />
+        <button onClick={fetchData} style={btn(currentPlan.color)}>🔄 รีเฟรช</button>
+        <span style={{ marginLeft: "auto" }}>📋 <strong>{filtered.length}</strong> รายการ · 💰 <strong style={{ color: currentPlan.color }}>{fmt(grandTotal)}</strong> บาท</span>
+      </div>
+
+      {/* สรุปสถานะการจ่าย */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+        {Object.entries(PAY_STATUS).map(([k, s]) => (
+          <div key={k} onClick={() => setStatusFilter(statusFilter === k ? "" : k)} title="คลิกเพื่อกรองสถานะนี้"
+            style={{ flex: 1, minWidth: 180, padding: "10px 14px", background: statusFilter === k ? s.bg : "#fff",
+              border: `2px solid ${statusFilter === k ? s.color : "#e5e7eb"}`, borderRadius: 10, cursor: "pointer", userSelect: "none" }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: s.color }}>
+              <span style={{ padding: "2px 8px", borderRadius: 10, background: s.bg, color: s.color }}>{s.label}</span>
+            </div>
+            <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontSize: 18, fontWeight: 800, color: s.color }}>{statusSum[k].n}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#374151" }}>{fmt(statusSum[k].amt)} บาท</span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
+       filtered.length === 0 ? <div style={{ padding: 30, textAlign: "center", color: "#9ca3af", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10 }}>ไม่มีรายการในช่วงวันที่ที่เลือก</div> :
+       PLAN_OPTS.filter(p => byPlan[p.key]?.length).map(p => {
+        const items = byPlan[p.key];
+        const total = items.reduce((s, r) => s + Number(r.premium || 0), 0);
+        const cnt = { pending: 0, billed: 0, paid: 0 };
+        items.forEach(r => { cnt[r.pay_status] = (cnt[r.pay_status] || 0) + 1; });
+        const isOpen = openPlans.has(p.key);
+        return (
+          <div key={p.key} style={{ marginBottom: 12, background: "#fff", border: `1px solid ${p.color}44`, borderRadius: 10, overflow: "hidden" }}>
+            <div onClick={() => togglePlan(p.key)} title="คลิกเพื่อดูรายการ"
+              style={{ padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, cursor: "pointer", userSelect: "none", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 13, width: 14, color: p.color }}>{isOpen ? "▼" : "▶"}</span>
+              <span style={{ padding: "4px 12px", borderRadius: 6, fontSize: 13, fontWeight: 700, background: p.color, color: "#fff", minWidth: 60, textAlign: "center", textTransform: "uppercase" }}>{p.key}</span>
+              <span style={{ fontSize: 13, color: "#374151" }}>{p.label}</span>
+              {Object.entries(PAY_STATUS).map(([k, s]) => cnt[k] > 0 && (
+                <span key={k} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: s.bg, color: s.color }}>{s.label} {cnt[k]}</span>
+              ))}
+              <span style={{ marginLeft: "auto", fontWeight: 700, fontSize: 15, color: p.color }}>{items.length} รายการ · {fmt(total)} บาท</span>
+            </div>
+            {isOpen && (
+              <div style={{ borderTop: `1px solid ${p.color}44`, overflow: "auto", maxHeight: 420 }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ background: p.color, color: "#fff", position: "sticky", top: 0 }}>
+                    <tr>
+                      <th style={th}>#</th>
+                      <th style={th}>App No.</th>
+                      <th style={th}>วันที่บันทึก</th>
+                      <th style={th}>ลูกค้า</th>
+                      <th style={th}>เลขถัง</th>
+                      <th style={th}>แผน</th>
+                      <th style={{ ...th, textAlign: "right" }}>เบี้ย</th>
+                      <th style={th}>สถานะ</th>
+                      <th style={th}>เลขใบจ่าย</th>
+                      <th style={th}>วันที่จ่าย</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((r, i) => {
+                      const s = PAY_STATUS[r.pay_status] || PAY_STATUS.pending;
+                      return (
+                        <tr key={r.id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                          <td style={td}>{i + 1}</td>
+                          <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: p.color }}>{r.app_no}</td>
+                          <td style={td}>{fmtDate(r.submitted_at)}</td>
+                          <td style={td}>{r.customer_name || "-"}</td>
+                          <td style={{ ...td, fontFamily: "monospace" }}>{r.chassis_no || "-"}</td>
+                          <td style={{ ...td, fontSize: 11, color: "#6b7280" }}>{r.plan_name || "-"}</td>
+                          <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{fmt(r.premium)}</td>
+                          <td style={td}><span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: s.bg, color: s.color }}>{s.label}</span></td>
+                          <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#065f46" }}>{r.paid_doc_no || "-"}</td>
+                          <td style={td}>{r.paid_at ? fmtDate(r.paid_at) : "-"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ background: "#f8fafc", fontWeight: 700 }}>
+                      <td style={td} colSpan={6}>รวม {items.length} รายการ</td>
+                      <td style={{ ...td, textAlign: "right", color: p.color }}>{fmt(total)}</td>
+                      <td style={td} colSpan={3}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -268,12 +432,31 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
 }
 
 /* ======================== TAB: ประวัติการจ่ายเงิน ======================== */
-function HistoryPanel({ currentPlan, setMessage }) {
+function HistoryPanel({ currentPlan, setMessage, currentUser }) {
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(false);
   const [openSet, setOpenSet] = useState(new Set());
+  // แก้ไขใบจ่าย (เหมือนงาน พรบ.)
+  const [vendors, setVendors] = useState([]);
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const [editPay, setEditPay] = useState(null); // group ที่กำลังแก้
+  const [payForm, setPayForm] = useState({ paid_date: "", payment_method: "โอน", paid_to_vendor: "", payment_note: "", wht_rate: 0, wht_amount: 0, wht_base: 0, from_bank_account_id: "" });
+  const [saving, setSaving] = useState(false);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); fetchVendors(); fetchBanks(); }, []);
+
+  async function fetchVendors() {
+    try {
+      const res = await fetch(MASTER_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_vendors", include_inactive: "false" }) });
+      const d = await res.json(); setVendors(Array.isArray(d) ? d : []);
+    } catch {}
+  }
+  async function fetchBanks() {
+    try {
+      const res = await fetch(ACC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }) });
+      const d = await res.json(); setBankAccounts(Array.isArray(d) ? d : []);
+    } catch {}
+  }
 
   async function fetchData() {
     setLoading(true);
@@ -291,6 +474,8 @@ function HistoryPanel({ currentPlan, setMessage }) {
           paid_doc_no: r.paid_doc_no, paid_at: r.paid_at, paid_to_vendor: r.paid_to_vendor,
           payment_method: r.payment_method, payment_note: r.payment_note,
           bank_account_name: r.bank_account_name, bank_name: r.bank_name, bank_account_no: r.bank_account_no,
+          from_bank_account_id: r.from_bank_account_id,
+          wht_rate: Number(r.wht_rate || 0), wht_base: Number(r.wht_base || 0),
           items: [], total: 0, wht: Number(r.wht_amount || 0)
         };
         g[r.paid_doc_no].items.push(r);
@@ -307,6 +492,68 @@ function HistoryPanel({ currentPlan, setMessage }) {
       if (next.has(docNo)) next.delete(docNo); else next.add(docNo);
       return next;
     });
+  }
+
+  // ===== แก้ไข/ยกเลิกใบจ่าย (เหมือนงาน พรบ.) =====
+  function openEditPayment(g) {
+    setEditPay(g);
+    setPayForm({
+      paid_date: g.paid_at ? String(g.paid_at).slice(0, 10) : new Date().toISOString().slice(0, 10),
+      payment_method: g.payment_method || "โอน",
+      paid_to_vendor: g.paid_to_vendor || "",
+      payment_note: g.payment_note || "",
+      wht_rate: g.wht_rate || 0,
+      wht_amount: g.wht || 0,
+      wht_base: g.wht_base || g.total,
+      from_bank_account_id: g.from_bank_account_id || "",
+    });
+  }
+  function onEditVendorChange(name) {
+    const v = vendors.find(x => x.vendor_name === name);
+    const rate = v ? Number(v.wht_rate || 0) : 0;
+    const base = Number(payForm.wht_base) || (editPay ? editPay.total : 0);
+    const amt = rate > 0 ? Math.round((base * rate / 100) * 100) / 100 : 0;
+    setPayForm(p => ({ ...p, paid_to_vendor: name, wht_rate: rate, wht_amount: amt }));
+  }
+  async function submitEdit() {
+    if (!editPay) return;
+    if (!payForm.paid_to_vendor) { setMessage("❌ เลือก Vendor"); return; }
+    if (!payForm.from_bank_account_id) { setMessage("❌ เลือกบัญชีโอนจาก"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_cosmos_payment",
+          paid_doc_no: editPay.paid_doc_no,
+          paid_date: payForm.paid_date,
+          payment_method: payForm.payment_method,
+          payment_note: payForm.payment_note,
+          paid_to_vendor: payForm.paid_to_vendor,
+          wht_rate: Number(payForm.wht_rate) || 0,
+          wht_amount: Number(payForm.wht_amount) || 0,
+          wht_base: Number(payForm.wht_base) || 0,
+          from_bank_account_id: Number(payForm.from_bank_account_id) || null,
+        }),
+      });
+      const data = await res.json();
+      setMessage(`✅ แก้ไขใบจ่าย ${editPay.paid_doc_no} เรียบร้อย (${data.updated_count || 0} รายการ)`);
+      setEditPay(null);
+      fetchData();
+    } catch (e) { setMessage("❌ " + e.message); }
+    setSaving(false);
+  }
+  async function cancelPayment(g) {
+    if (!window.confirm(`ยกเลิกใบจ่ายเงิน ${g.paid_doc_no}?\n\nรายการ ${g.items.length} ใบจะกลับเป็น "รอจ่าย" (ยังวางบิลอยู่)`)) return;
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel_cosmos_payment", paid_doc_no: g.paid_doc_no }),
+      });
+      const data = await res.json();
+      setMessage(`✅ ยกเลิกใบจ่าย ${g.paid_doc_no} แล้ว (${data.cancelled_count || 0} รายการ กลับไปแท็บบันทึกจ่ายเงิน)`);
+      fetchData();
+    } catch (e) { setMessage("❌ ยกเลิกไม่สำเร็จ: " + e.message); }
   }
 
   return (
@@ -333,6 +580,12 @@ function HistoryPanel({ currentPlan, setMessage }) {
             <span style={{ fontSize: 12 }}>💰 {g.payment_method || "-"}</span>
             <span style={{ marginLeft: "auto", fontWeight: 700, fontSize: 16, color: "#065f46" }}>{g.items.length} ใบ · {fmt(g.total)}</span>
             {g.wht > 0 && <span style={{ fontSize: 12, color: "#dc2626" }}>WHT: {fmt(g.wht)}</span>}
+            <button onClick={(e) => { e.stopPropagation(); toggleOpen(g.paid_doc_no); }} title="ดูรายละเอียด"
+              style={{ padding: "3px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>📋 ดู</button>
+            <button onClick={(e) => { e.stopPropagation(); openEditPayment(g); }} title="แก้ไขรายละเอียดการจ่ายเงิน (วันที่/Vendor/บัญชี/WHT)"
+              style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>✏️ แก้ไข</button>
+            <button onClick={(e) => { e.stopPropagation(); cancelPayment(g); }} title="ยกเลิกใบจ่าย — รายการกลับเป็นรอจ่าย"
+              style={{ padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>🚫 ยกเลิก</button>
           </div>
 
           {isOpen && (
@@ -389,6 +642,13 @@ function HistoryPanel({ currentPlan, setMessage }) {
         </div>
         );
       })}
+
+      {editPay && (
+        <PaymentDialog payForm={payForm} setPayForm={setPayForm} vendors={vendors} bankAccounts={bankAccounts}
+          onVendorChange={onEditVendorChange} totalSum={editPay.total} onClose={() => setEditPay(null)}
+          onSave={submitEdit} saving={saving} numDocs={editPay.items.length}
+          title={`✏️ แก้ไขใบจ่าย ${editPay.paid_doc_no}`} />
+      )}
     </div>
   );
 }
@@ -431,11 +691,11 @@ function Table({ rows, loading, selected, toggle, toggleAll, color }) {
   );
 }
 
-function PaymentDialog({ payForm, setPayForm, vendors, bankAccounts, onVendorChange, totalSum, onClose, onSave, saving, numDocs }) {
+function PaymentDialog({ payForm, setPayForm, vendors, bankAccounts, onVendorChange, totalSum, onClose, onSave, saving, numDocs, title }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 600, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}>
-        <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>💵 บันทึกจ่ายเงิน</h3>
+        <h3 style={{ margin: "0 0 14px", color: title ? "#b45309" : "#072d6b" }}>{title || "💵 บันทึกจ่ายเงิน"}</h3>
         <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13, textAlign: "center" }}>
           <div>📑 ใบวางบิล: <b>{numDocs}</b> ใบ</div>
           <div>💰 ยอดรวม: <b style={{ color: "#dc2626", fontSize: 20 }}>฿ {fmt(totalSum)}</b></div>
