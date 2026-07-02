@@ -724,6 +724,27 @@ tr.excluded td { text-decoration: line-through; }
     setPayCreating(false);
   }
 
+  // สร้างเฉพาะใบที่ขาด — กรณีสร้างรอบแรกตอนข้อมูลยังไม่ครบทุกกลุ่ม (เช่นข้อมูลอีกสังกัดตามมาทีหลัง)
+  // backend mode=create มี NOT EXISTS กันซ้ำรายกลุ่มอยู่แล้ว จึงสร้างเฉพาะกลุ่มที่ยังไม่มีเอกสาร
+  async function createMissingPayables(groupNos) {
+    if (!snapshotInfo?.save_group || !groupNos.length) return;
+    if (!window.confirm(`สร้างเอกสารที่ขาด ${groupNos.length} ใบ?\n(ใบที่มีอยู่แล้วจะไม่ถูกสร้างซ้ำ)`)) return;
+    setPayCreating(true);
+    try {
+      const ctx = await getPayablesContext();
+      await postAPI({
+        action: "commission_normal_payables", mode: "create",
+        save_group: snapshotInfo.save_group,
+        selected_groups: groupNos,
+        created_by: currentUser?.username || currentUser?.email || "",
+        ...ctx,
+      });
+      setMessage("✅ สร้างเอกสารที่ขาดเรียบร้อย");
+      await openPayables();
+    } catch { setMessage("❌ สร้างไม่สำเร็จ"); }
+    setPayCreating(false);
+  }
+
   async function cancelPayables() {
     if (!snapshotInfo?.save_group) return;
     if (!window.confirm("ยืนยันยกเลิกเอกสารจ่ายเงินทั้งหมด?\n\n⚠️ เอกสารที่จ่ายแล้วจะไม่ถูกลบ")) return;
@@ -1629,12 +1650,30 @@ tr.excluded td { text-decoration: line-through; }
                         ))}
                       </tbody>
                     </table>
-                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button onClick={cancelPayables}
-                        style={{ padding: "7px 14px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
-                        🗑 ยกเลิกเอกสาร (เฉพาะที่ยังไม่จ่าย)
-                      </button>
-                    </div>
+                    {(() => {
+                      // กลุ่มใน preview (subtotal > 0) ที่ยังไม่มีเอกสาร — เทียบด้วย สังกัด|แบรนด์|ประเภท
+                      const have = new Set(payDocs.map(d => `${d.affiliation}|${d.brand_filter || ""}|${d.commission_type}`));
+                      const missing = payPreview.filter(p => Number(p.subtotal) > 0 && !have.has(`${p.affiliation}|${p.brand}|${p.commission_type}`));
+                      return (
+                        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap" }}>
+                          {missing.length > 0 && (
+                            <>
+                              <span style={{ fontSize: 12, color: "#b45309", marginRight: "auto" }}>
+                                ⚠️ มี {missing.length} กลุ่มที่ยังไม่ได้สร้างเอกสาร: {missing.map(p => `${p.affiliation} ${p.brand}`).join(", ")}
+                              </span>
+                              <button onClick={() => createMissingPayables(missing.map(p => Number(p.group_no)))} disabled={payCreating}
+                                style={{ padding: "7px 14px", background: payCreating ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: payCreating ? "not-allowed" : "pointer", fontWeight: 600 }}>
+                                {payCreating ? "กำลังสร้าง..." : `💾 สร้างเอกสารที่ขาด (${missing.length} ใบ)`}
+                              </button>
+                            </>
+                          )}
+                          <button onClick={cancelPayables}
+                            style={{ padding: "7px 14px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+                            🗑 ยกเลิกเอกสาร (เฉพาะที่ยังไม่จ่าย)
+                          </button>
+                        </div>
+                      );
+                    })()}
                   </>
                 ) : (
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>

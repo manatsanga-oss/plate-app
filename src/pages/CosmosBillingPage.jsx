@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
+const FINANCE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api"; // รายได้อื่น ๆ (income_records) — ใช้ตัดยอดจ่าย
 
 const PLAN_OPTS = [
   { key: "rsa",           label: "RSA (ช่วยเหลือฉุกเฉิน)",     color: "#1565c0" },
@@ -39,6 +40,7 @@ export default function CosmosBillingPage({ currentUser }) {
           ["list", "📑 รายการจ่าย"],
           ["payment", "💵 บันทึกจ่ายเงิน"],
           ["history", "📋 ประวัติการจ่ายเงิน"],
+          ["overpaid", "💱 เงินชำระเกิน รอโอนคืน"],
         ].map(([v, label]) => (
           <button key={v} onClick={() => { setMode(v); setMessage(""); }}
             style={{ padding: "10px 20px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
@@ -57,6 +59,7 @@ export default function CosmosBillingPage({ currentUser }) {
       {mode === "list" && <ListAllPanel currentPlan={currentPlan} setMessage={setMessage} />}
       {mode === "payment" && <PaymentPanel currentPlan={currentPlan} setMessage={setMessage} currentUser={currentUser} />}
       {mode === "history" && <HistoryPanel currentPlan={currentPlan} setMessage={setMessage} />}
+      {mode === "overpaid" && <OverpaidPanel currentPlan={currentPlan} setMessage={setMessage} currentUser={currentUser} />}
     </div>
   );
 }
@@ -301,10 +304,27 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
   const [showPay, setShowPay] = useState(false);
   const [vendors, setVendors] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
-  const [payForm, setPayForm] = useState({ paid_date: "", payment_method: "โอน", paid_to_vendor: "", payment_note: "", wht_rate: 0, wht_amount: 0, wht_base: 0, from_bank_account_id: "" });
+  const [payForm, setPayForm] = useState({ paid_date: "", payment_method: "โอน", paid_to_vendor: "", payment_note: "", wht_rate: 0, wht_amount: 0, wht_base: 0, from_bank_account_id: "", income_doc_id: "", income_offset_doc_no: "", income_offset_amount: 0 });
   const [saving, setSaving] = useState(false);
+  const [incomeDocs, setIncomeDocs] = useState([]); // ใบรายได้อื่น ๆ (ร่าง) — ใช้ตัดยอดจ่าย
 
-  useEffect(() => { fetchData(); fetchVendors(); fetchBanks(); }, []);
+  useEffect(() => { fetchData(); fetchVendors(); fetchBanks(); fetchIncomeDocs(); }, []);
+
+  // ใบรายได้สถานะร่าง จากเมนูบันทึกรายได้อื่น ๆ (income_records) — เลือกมาหักออกจากยอดโอน
+  // กรองเฉพาะลูกค้าสยามคอสมอส (คู่ค้าของเมนูนี้)
+  async function fetchIncomeDocs() {
+    try {
+      const res = await fetch(FINANCE_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "income_record", op: "list", status: "draft" }),
+      });
+      const text = await res.text();
+      const d = text ? JSON.parse(text) : [];
+      setIncomeDocs((Array.isArray(d) ? d : []).filter(x =>
+        x && x.income_doc_no && /คอสมอส|cosmos/i.test(String(x.customer_name || ""))
+      ));
+    } catch { setIncomeDocs([]); }
+  }
 
   async function fetchData() {
     setLoading(true);
@@ -342,23 +362,52 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
 
   function toggleDoc(no) { setSelDocs(s => { const ns = new Set(s); ns.has(no) ? ns.delete(no) : ns.add(no); return ns; }); }
   const selectedTotal = bills.filter(b => selDocs.has(b.batch_no)).reduce((s, b) => s + b.total, 0);
+  // Base หัก ณ ที่จ่าย = เฉพาะประกันรถหาย (THEFT + THEFT_RENEWAL) — เบี้ยรวม VAT ต้องถอด VAT 7% ก่อน แล้วหัก 3%
+  // แผนอื่น (RSA/PA/3PLUS) ไม่หัก
+  const selectedTheftTotal = bills.filter(b => selDocs.has(b.batch_no) && ["theft", "theft_renewal"].includes(b.items[0]?.plan)).reduce((s, b) => s + b.total, 0);
+  const theftWhtBase = Math.round((selectedTheftTotal / 1.07) * 100) / 100; // ถอด VAT 7% → มูลค่าก่อน VAT
 
   function openPayDialog() {
     if (selDocs.size === 0) { setMessage("⚠️ กรุณาเลือกใบวางบิล"); return; }
-    setPayForm({ paid_date: new Date().toISOString().slice(0,10), payment_method: "โอน", paid_to_vendor: "", payment_note: "", wht_rate: 0, wht_amount: 0, wht_base: selectedTotal, from_bank_account_id: "" });
+    const rate = theftWhtBase > 0 ? 3 : 0;
+    const amt = Math.round((theftWhtBase * rate / 100) * 100) / 100;
+    setPayForm({ paid_date: new Date().toISOString().slice(0,10), payment_method: "โอน", paid_to_vendor: "", payment_note: "", wht_rate: rate, wht_amount: amt, wht_base: theftWhtBase, from_bank_account_id: "", income_doc_id: "", income_offset_doc_no: "", income_offset_amount: 0, transfer_amount: "" });
+    fetchIncomeDocs();
     setShowPay(true);
+  }
+
+  // เลือกใบรายได้มาตัดยอด — ยอดหัก = ยอดสุทธิของใบรายได้
+  function onIncomeChange(docId) {
+    const doc = incomeDocs.find(x => String(x.income_doc_id) === String(docId));
+    setPayForm(p => ({
+      ...p,
+      income_doc_id: doc ? doc.income_doc_id : "",
+      income_offset_doc_no: doc ? doc.income_doc_no : "",
+      income_offset_amount: doc ? Number(doc.net_to_pay || doc.total || 0) : 0,
+    }));
   }
 
   function onVendorChange(name) {
     const v = vendors.find(x => x.vendor_name === name);
-    const rate = v ? Number(v.wht_rate || 0) : 0;
-    const amt = rate > 0 ? Math.round((selectedTotal * rate / 100) * 100) / 100 : 0;
-    setPayForm(p => ({ ...p, paid_to_vendor: name, wht_rate: rate, wht_amount: amt, wht_base: selectedTotal }));
+    setPayForm(p => {
+      // ใช้อัตราจาก vendor ถ้าตั้งไว้ ไม่งั้นคงอัตราเดิม (default 3% เมื่อมีประกันรถหาย)
+      const rate = v && Number(v.wht_rate) > 0 ? Number(v.wht_rate) : Number(p.wht_rate) || 0;
+      const base = Number(p.wht_base) || 0;
+      const amt = rate > 0 ? Math.round((base * rate / 100) * 100) / 100 : 0;
+      return { ...p, paid_to_vendor: name, wht_rate: rate, wht_amount: amt };
+    });
   }
 
   async function submitPay() {
     if (!payForm.paid_to_vendor) { setMessage("❌ เลือก Vendor"); return; }
     if (!payForm.from_bank_account_id) { setMessage("❌ เลือกบัญชีโอนจาก"); return; }
+    const offset = Number(payForm.income_offset_amount) || 0;
+    if (offset > selectedTotal - (Number(payForm.wht_amount) || 0)) { setMessage("❌ ยอดตัดรายได้มากกว่ายอดที่ต้องโอน"); return; }
+    // ยอดที่ต้องโอน vs ยอดโอนที่คีย์เอง — โอนขาดบันทึกไม่ได้ / โอนเกิน = เงินชำระเกินรอโอนคืน
+    const required = Math.round((selectedTotal - (Number(payForm.wht_amount) || 0) - offset) * 100) / 100;
+    const keyed = payForm.transfer_amount === "" ? required : Number(payForm.transfer_amount) || 0;
+    if (keyed < required - 0.005) { setMessage(`❌ ยอดเงินโอน (${fmt(keyed)}) น้อยกว่ายอดที่ต้องจ่าย (${fmt(required)}) — บันทึกไม่ได้`); return; }
+    const overpaid = Math.round((keyed - required) * 100) / 100;
     setSaving(true);
     try {
       const res = await fetch(API_URL, {
@@ -374,14 +423,42 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
           wht_amount: Number(payForm.wht_amount) || 0,
           wht_base: Number(payForm.wht_base) || 0,
           from_bank_account_id: Number(payForm.from_bank_account_id) || null,
+          income_offset_doc_no: payForm.income_offset_doc_no || "",
+          income_offset_amount: offset,
+          transfer_amount: keyed,
+          overpaid_amount: overpaid,
           paid_by: currentUser?.username || currentUser?.name || "system",
         }),
       });
       const data = await res.json();
-      setMessage(`✅ บันทึกจ่ายเงิน ${data.paid_doc_no || ""} (${data.updated_count || 0} รายการ)`);
+      const payNo = data.paid_doc_no || "";
+      // ลงบันทึกรับชำระฝั่งรายได้อัตโนมัติ (income_records → paid, วิธี "หักกลบ")
+      let incomeMsg = "";
+      if (payForm.income_doc_id && offset > 0) {
+        try {
+          const r2 = await fetch(FINANCE_URL, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "income_record", op: "save_payment",
+              income_doc_ids: [Number(payForm.income_doc_id)],
+              paid_date: payForm.paid_date,
+              payment_method: "หักกลบ",
+              payment_note: `หักกลบใบจ่ายประกัน COSMOS ${payNo}`,
+              from_bank_account_id: null,
+              paid_by: currentUser?.username || currentUser?.name || "system",
+              payments: [{ method: "หักกลบ", amount: offset, from_bank_account_id: null, credit_note_no: null }],
+            }),
+          });
+          const d2 = await r2.json().catch(() => ({}));
+          const irc = d2?.paid_doc_no || d2?.[0]?.paid_doc_no || "";
+          incomeMsg = ` · รับชำระรายได้ ${payForm.income_offset_doc_no}${irc ? ` (${irc})` : ""} แล้ว`;
+        } catch { incomeMsg = ` · ⚠️ ตัดรายได้ ${payForm.income_offset_doc_no} ไม่สำเร็จ — ไปบันทึกรับเงินที่เมนูรายได้อื่น ๆ เอง`; }
+      }
+      setMessage(`✅ บันทึกจ่ายเงิน ${payNo} (${data.updated_count || 0} รายการ)${overpaid > 0 ? ` · 💱 ชำระเกิน ${fmt(overpaid)} → แท็บ "เงินชำระเกิน รอโอนคืน"` : ""}${incomeMsg}`);
       setShowPay(false);
       setSelDocs(new Set());
       fetchData();
+      fetchIncomeDocs();
     } catch (e) { setMessage("❌ " + e.message); }
     setSaving(false);
   }
@@ -425,7 +502,8 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
       {showPay && (
         <PaymentDialog payForm={payForm} setPayForm={setPayForm} vendors={vendors} bankAccounts={bankAccounts}
           onVendorChange={onVendorChange} totalSum={selectedTotal} onClose={() => setShowPay(false)}
-          onSave={submitPay} saving={saving} numDocs={selDocs.size} />
+          onSave={submitPay} saving={saving} numDocs={selDocs.size}
+          incomeDocs={incomeDocs} onIncomeChange={onIncomeChange} />
       )}
     </div>
   );
@@ -476,6 +554,8 @@ function HistoryPanel({ currentPlan, setMessage, currentUser }) {
           bank_account_name: r.bank_account_name, bank_name: r.bank_name, bank_account_no: r.bank_account_no,
           from_bank_account_id: r.from_bank_account_id,
           wht_rate: Number(r.wht_rate || 0), wht_base: Number(r.wht_base || 0),
+          income_offset_doc_no: r.income_offset_doc_no || "", income_offset_amount: Number(r.income_offset_amount || 0),
+          paid_transfer_amount: Number(r.paid_transfer_amount || 0), overpaid_amount: Number(r.overpaid_amount || 0),
           items: [], total: 0, wht: Number(r.wht_amount || 0)
         };
         g[r.paid_doc_no].items.push(r);
@@ -544,7 +624,8 @@ function HistoryPanel({ currentPlan, setMessage, currentUser }) {
     setSaving(false);
   }
   async function cancelPayment(g) {
-    if (!window.confirm(`ยกเลิกใบจ่ายเงิน ${g.paid_doc_no}?\n\nรายการ ${g.items.length} ใบจะกลับเป็น "รอจ่าย" (ยังวางบิลอยู่)`)) return;
+    const offsetWarn = g.income_offset_amount > 0 ? `\n\n⚠️ ใบนี้ตัดรายได้ ${g.income_offset_doc_no} (${fmt(g.income_offset_amount)}) ไว้ — ต้องไปยกเลิกใบรับเงินที่เมนู "บันทึกรายได้อื่น ๆ" เองด้วย` : "";
+    if (!window.confirm(`ยกเลิกใบจ่ายเงิน ${g.paid_doc_no}?\n\nรายการ ${g.items.length} ใบจะกลับเป็น "รอจ่าย" (ยังวางบิลอยู่)${offsetWarn}`)) return;
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -597,6 +678,9 @@ function HistoryPanel({ currentPlan, setMessage, currentUser }) {
                 <div><b>🏦 ธนาคาร:</b> {g.bank_name ? `${g.bank_name}${g.bank_account_no ? ` — ${g.bank_account_no}` : ""}` : "-"}</div>
                 <div><b>📋 บัญชี:</b> {g.bank_account_name || "-"}</div>
                 <div><b>💸 WHT:</b> {g.wht > 0 ? fmt(g.wht) : "—"}</div>
+                <div><b>➖ ตัดรายได้:</b> {g.income_offset_amount > 0 ? `${g.income_offset_doc_no || ""} (${fmt(g.income_offset_amount)})` : "—"}</div>
+                <div><b>💵 ยอดโอนจริง:</b> {fmt(g.paid_transfer_amount > 0 ? g.paid_transfer_amount : g.total - g.wht - (g.income_offset_amount || 0))}</div>
+                {g.overpaid_amount > 0 && <div><b>💱 ชำระเกิน:</b> <span style={{ color: "#dc2626", fontWeight: 700 }}>{fmt(g.overpaid_amount)}</span> (ดูแท็บ "เงินชำระเกิน รอโอนคืน")</div>}
                 {g.payment_note && <div style={{ gridColumn: "1 / -1" }}><b>📝 หมายเหตุ:</b> {g.payment_note}</div>}
               </div>
 
@@ -653,6 +737,114 @@ function HistoryPanel({ currentPlan, setMessage, currentUser }) {
   );
 }
 
+/* ======================== TAB: เงินชำระเกิน รอโอนคืน ======================== */
+function OverpaidPanel({ currentPlan, setMessage, currentUser }) {
+  const [groups, setGroups] = useState([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => { fetchData(); }, []);
+
+  async function fetchData() {
+    setLoading(true);
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_cosmos_paid" }),
+      });
+      const text = await res.text();
+      const rows = text ? JSON.parse(text) : [];
+      // group by paid_doc_no — เอาเฉพาะใบที่มีชำระเกิน
+      const g = {};
+      (Array.isArray(rows) ? rows : []).forEach(r => {
+        if (!r?.paid_doc_no || !(Number(r.overpaid_amount) > 0)) return;
+        if (!g[r.paid_doc_no]) g[r.paid_doc_no] = {
+          paid_doc_no: r.paid_doc_no, paid_at: r.paid_at, paid_to_vendor: r.paid_to_vendor,
+          overpaid_amount: Number(r.overpaid_amount || 0),
+          paid_transfer_amount: Number(r.paid_transfer_amount || 0),
+          refunded_at: r.overpaid_refunded_at, refund_note: r.overpaid_refund_note,
+          items: 0,
+        };
+        g[r.paid_doc_no].items += 1;
+      });
+      setGroups(Object.values(g).sort((a, b) => String(b.paid_at || "").localeCompare(String(a.paid_at || ""))));
+    } catch { setGroups([]); }
+    setLoading(false);
+  }
+
+  async function markRefunded(g) {
+    const today = new Date().toISOString().slice(0, 10);
+    const d = window.prompt(`ได้รับเงินคืนจาก COSMOS แล้ว?\nใบจ่าย ${g.paid_doc_no} · ยอด ${fmt(g.overpaid_amount)} บาท\n\nกรอกวันที่ได้รับเงินคืน (YYYY-MM-DD):`, today);
+    if (!d) return;
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refund_cosmos_overpaid", paid_doc_no: g.paid_doc_no, refunded_date: d, refund_note: `บันทึกโดย ${currentUser?.username || currentUser?.name || "system"}` }),
+      });
+      const data = await res.json().catch(() => ({}));
+      setMessage(`✅ บันทึกรับเงินคืน ${g.paid_doc_no} (${fmt(g.overpaid_amount)} บาท) แล้ว`);
+      fetchData();
+    } catch (e) { setMessage("❌ " + e.message); }
+  }
+
+  const pending = groups.filter(g => !g.refunded_at);
+  const done = groups.filter(g => g.refunded_at);
+  const pendingSum = pending.reduce((s, g) => s + g.overpaid_amount, 0);
+
+  const renderRow = (g) => (
+    <tr key={g.paid_doc_no} style={{ borderTop: "1px solid #e5e7eb", background: g.refunded_at ? "#f0fdf4" : "#fff" }}>
+      <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#065f46" }}>{g.paid_doc_no}</td>
+      <td style={td}>{fmtDate(g.paid_at)}</td>
+      <td style={td}>{g.paid_to_vendor || "-"}</td>
+      <td style={{ ...td, textAlign: "right" }}>{g.items}</td>
+      <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.paid_transfer_amount > 0 ? fmt(g.paid_transfer_amount) : "-"}</td>
+      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#dc2626" }}>{fmt(g.overpaid_amount)}</td>
+      <td style={td}>
+        {g.refunded_at
+          ? <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#dcfce7", color: "#166534" }}>✓ ได้รับคืนแล้ว {fmtDate(g.refunded_at)}</span>
+          : <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>รอโอนคืน</span>}
+      </td>
+      <td style={{ ...td, textAlign: "center" }}>
+        {!g.refunded_at && (
+          <button onClick={() => markRefunded(g)}
+            style={{ padding: "4px 12px", background: "#059669", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>✓ รับเงินคืนแล้ว</button>
+        )}
+      </td>
+    </tr>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 14, padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12, alignItems: "center" }}>
+        <span>💱 รอโอนคืน: <strong style={{ color: "#dc2626" }}>{pending.length}</strong> ใบ · <strong style={{ color: "#dc2626" }}>{fmt(pendingSum)}</strong> บาท</span>
+        <span style={{ color: "#166534" }}>✓ ได้รับคืนแล้ว: <strong>{done.length}</strong> ใบ</span>
+        <button onClick={fetchData} style={{ ...btn(currentPlan.color), marginLeft: "auto" }}>🔄 รีเฟรช</button>
+      </div>
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "auto" }}>
+        {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
+         groups.length === 0 ? <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีเงินชำระเกิน</div> :
+         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead style={{ background: currentPlan.color, color: "#fff" }}>
+            <tr>
+              <th style={th}>ใบจ่าย</th>
+              <th style={th}>วันที่จ่าย</th>
+              <th style={th}>จ่ายให้</th>
+              <th style={{ ...th, textAlign: "right" }}>รายการ</th>
+              <th style={{ ...th, textAlign: "right" }}>ยอดโอนจริง</th>
+              <th style={{ ...th, textAlign: "right" }}>ชำระเกิน</th>
+              <th style={th}>สถานะ</th>
+              <th style={{ ...th, textAlign: "center" }}>จัดการ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pending.map(renderRow)}
+            {done.map(renderRow)}
+          </tbody>
+        </table>}
+      </div>
+    </div>
+  );
+}
+
 /* ======================== Components ======================== */
 function Table({ rows, loading, selected, toggle, toggleAll, color }) {
   return (
@@ -691,7 +883,14 @@ function Table({ rows, loading, selected, toggle, toggleAll, color }) {
   );
 }
 
-function PaymentDialog({ payForm, setPayForm, vendors, bankAccounts, onVendorChange, totalSum, onClose, onSave, saving, numDocs, title }) {
+function PaymentDialog({ payForm, setPayForm, vendors, bankAccounts, onVendorChange, totalSum, onClose, onSave, saving, numDocs, title, incomeDocs, onIncomeChange }) {
+  const offset = Number(payForm.income_offset_amount) || 0;
+  // ยอดที่ต้องโอน vs ยอดโอนที่คีย์เอง (เฉพาะโหมดบันทึกจ่าย — โหมดแก้ไขไม่มีช่องนี้)
+  const hasTransferField = payForm.transfer_amount !== undefined;
+  const required = Math.round((totalSum - Number(payForm.wht_amount || 0) - offset) * 100) / 100;
+  const keyed = !hasTransferField || payForm.transfer_amount === "" ? required : Number(payForm.transfer_amount) || 0;
+  const diff = Math.round((keyed - required) * 100) / 100; // + = ชำระเกิน / − = โอนขาด
+  const shortPay = diff < -0.005;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 600, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" }}>
@@ -731,18 +930,64 @@ function PaymentDialog({ payForm, setPayForm, vendors, bankAccounts, onVendorCha
         <div style={{ marginTop: 12, padding: 10, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8 }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", marginBottom: 6, textAlign: "center" }}>🧾 หักณที่จ่าย</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-            <div><label style={{ fontSize: 11 }}>Base</label><input type="text" value={fmt(payForm.wht_base)} readOnly style={{ ...inp, textAlign: "right" }} /></div>
+            <div><label style={{ fontSize: 11 }}>Base (ประกันรถหาย · ถอด VAT แล้ว)</label><input type="text" value={fmt(payForm.wht_base)} readOnly style={{ ...inp, textAlign: "right" }} /></div>
             <div><label style={{ fontSize: 11 }}>อัตรา %</label><input type="number" step="0.01" value={payForm.wht_rate} onChange={e => { const r = Number(e.target.value)||0; setPayForm(p => ({ ...p, wht_rate: r, wht_amount: Math.round((p.wht_base*r/100)*100)/100 })); }} style={{ ...inp, textAlign: "right" }} /></div>
             <div><label style={{ fontSize: 11 }}>หัก ณ ที่จ่าย</label><input type="number" step="0.01" value={payForm.wht_amount} onChange={e => setPayForm(p => ({ ...p, wht_amount: Number(e.target.value)||0 }))} style={{ ...inp, textAlign: "right", fontWeight: 700, color: "#dc2626" }} /></div>
           </div>
           <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13, textAlign: "center" }}>
-            ยอดวางบิล: <b>{fmt(totalSum)}</b> − WHT: <b style={{ color: "#dc2626" }}>{fmt(payForm.wht_amount)}</b> = ยอดโอนจริง: <b style={{ color: "#059669" }}>{fmt(totalSum - Number(payForm.wht_amount || 0))}</b>
+            ยอดวางบิล: <b>{fmt(totalSum)}</b> − WHT: <b style={{ color: "#dc2626" }}>{fmt(payForm.wht_amount)}</b>{offset > 0 && <> − ตัดรายได้: <b style={{ color: "#7c3aed" }}>{fmt(offset)}</b></>} = ยอดโอนจริง: <b style={{ color: "#059669" }}>{fmt(totalSum - Number(payForm.wht_amount || 0) - offset)}</b>
           </div>
         </div>
 
+        {/* ตัดยอดด้วยรายได้อื่น ๆ (income_records ร่าง) — บันทึกรับชำระฝั่งรายได้ให้อัตโนมัติ */}
+        {incomeDocs && (
+          <div style={{ marginTop: 12, padding: 10, background: "#f5f3ff", border: "1px solid #c4b5fd", borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: "#5b21b6", marginBottom: 6, textAlign: "center" }}>➖ ตัดยอดจากรายได้อื่น ๆ (ส่วนลด/เงินคืน)</div>
+            <select value={payForm.income_doc_id || ""} onChange={e => onIncomeChange(e.target.value)} style={inp}>
+              <option value="">-- ไม่ตัดรายได้ --</option>
+              {incomeDocs.map(d => (
+                <option key={d.income_doc_id} value={d.income_doc_id}>
+                  {d.income_doc_no} · {d.customer_name || "-"} · {fmt(d.net_to_pay || d.total)} บาท
+                </option>
+              ))}
+            </select>
+            {offset > 0 && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "#5b21b6" }}>
+                ✓ จะหัก <b>{fmt(offset)}</b> ออกจากยอดโอน และบันทึกรับชำระใบ <b>{payForm.income_offset_doc_no}</b> (วิธี "หักกลบ") ให้อัตโนมัติ
+              </div>
+            )}
+            {incomeDocs.length === 0 && <div style={{ marginTop: 4, fontSize: 11, color: "#9ca3af" }}>ไม่มีใบรายได้สถานะร่าง — บันทึกก่อนที่เมนู "บันทึกรายได้อื่น ๆ"</div>}
+          </div>
+        )}
+
+        {/* ยอดเงินโอนจริง (คีย์เอง) — เกิน = ชำระเกินรอโอนคืน / ขาด = บันทึกไม่ได้ */}
+        {hasTransferField && (
+          <div style={{ marginTop: 12, padding: 10, background: shortPay ? "#fef2f2" : "#ecfdf5", border: `1px solid ${shortPay ? "#fca5a5" : "#6ee7b7"}`, borderRadius: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: shortPay ? "#991b1b" : "#065f46", marginBottom: 6, textAlign: "center" }}>💸 ยอดเงินโอน (คีย์ตามที่โอนจริง)</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, alignItems: "end" }}>
+              <div><label style={{ fontSize: 11 }}>ยอดที่ต้องจ่าย</label><input type="text" value={fmt(required)} readOnly style={{ ...inp, textAlign: "right", background: "#f8fafc" }} /></div>
+              <div><label style={{ fontSize: 11 }}>ยอดเงินโอนจริง *</label>
+                <input type="number" step="0.01" value={payForm.transfer_amount} placeholder={fmt(required)}
+                  onChange={e => setPayForm(p => ({ ...p, transfer_amount: e.target.value }))}
+                  style={{ ...inp, textAlign: "right", fontWeight: 700, color: shortPay ? "#dc2626" : "#065f46" }} />
+              </div>
+            </div>
+            <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13, textAlign: "center" }}>
+              {shortPay ? (
+                <span style={{ color: "#dc2626", fontWeight: 700 }}>❌ โอนขาด {fmt(Math.abs(diff))} — บันทึกไม่ได้ (ต้องไม่น้อยกว่ายอดที่ต้องจ่าย)</span>
+              ) : diff > 0.005 ? (
+                <span>ส่วนต่าง: <b style={{ color: "#dc2626" }}>-{fmt(diff)}</b> → 💱 <b style={{ color: "#7c3aed" }}>เงินชำระเกิน รอโอนคืน {fmt(diff)}</b></span>
+              ) : (
+                <span style={{ color: "#065f46", fontWeight: 700 }}>✓ ยอดตรงพอดี</span>
+              )}
+            </div>
+          </div>
+        )}
+
         <div style={{ marginTop: 18, textAlign: "right" }}>
           <button onClick={onClose} style={{ ...btn("#9ca3af"), marginRight: 8 }}>ยกเลิก</button>
-          <button onClick={onSave} disabled={saving} style={btn("#059669")}>{saving ? "..." : "💾 บันทึก"}</button>
+          <button onClick={onSave} disabled={saving || shortPay} title={shortPay ? "ยอดเงินโอนน้อยกว่ายอดที่ต้องจ่าย" : ""}
+            style={{ ...btn(saving || shortPay ? "#9ca3af" : "#059669"), cursor: saving || shortPay ? "not-allowed" : "pointer" }}>{saving ? "..." : "💾 บันทึก"}</button>
         </div>
       </div>
     </div>

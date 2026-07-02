@@ -750,7 +750,14 @@
       "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/Code_Cancel_Cosmos_Payment.js)",
       "Bash(python tools/add_cosmos_list_all.py)",
       "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/listall.js)",
-      "Bash(node C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/listall.js)"
+      "Bash(node C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/listall.js)",
+      "Bash(python \"C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/debug_comm.py\")",
+      "Bash(python tools/add_cosmos_income_offset.py)",
+      "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/csave.js)",
+      "Bash(node C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/csave.js)",
+      "Bash(python tools/add_cosmos_overpaid.py)",
+      "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/vv_Code_Insurance_List_SQL.js)",
+      "Bash(node --check C:/Users/manat/AppData/Local/Temp/claude/C--Users-manat-plate-app/77660be3-bbe3-4ec2-a784-77ee4778fca3/scratchpad/vv_Code_Insurance_Billing_List_SQL.js)"
     ]
   }
 }

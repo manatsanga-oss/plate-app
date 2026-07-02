@@ -1322,14 +1322,15 @@ function ClaimItemsDialog({ insurance, onClose, onSaved }) {
         });
         const data = await res.json();
         if (cancelled) return;
-        // กรองเฉพาะรายการ พรบ. ของใบรับเรื่องนี้เท่านั้น — ตัดประกันภาคสมัครใจ (คอสมอส) ออก
+        // กรองเฉพาะรายการ พรบ. ของใบรับเรื่องนี้เท่านั้น — ตัดประกันภาคสมัครใจออก
+        // (คอสมอส/สยามคอสมอส + ล็อคตั้น วางบิลผ่านช่องทางของตัวเอง ห้ามจับคู่ที่หน้า พรบ.)
         const isPrb = (l) => {
           const t = String(l.income_type || "").toLowerCase();
           const n = String(l.income_name || "").toLowerCase();
           const d = String(l.description || "").toLowerCase();
           const hasPrb = t.includes("พรบ") || t.includes("พ.ร.บ") || n.includes("พรบ") || n.includes("พ.ร.บ");
-          const isVoluntary = n.includes("คอสมอส") || d.includes("คอสมอส");
-          return hasPrb && !isVoluntary;
+          const excluded = /คอสมอส|cosmos|ล็อคตั้น|ล็อกตั้น|lockton/i.test(n + " " + d);
+          return hasPrb && !excluded;
         };
         const lines = (Array.isArray(data) ? data : [])
           .filter(l => l.receipt_no === insurance.receipt_no)
