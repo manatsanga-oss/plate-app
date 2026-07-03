@@ -627,7 +627,8 @@ export default function RetailSalePage({ currentUser }) {
   // เทียบชื่อแบบตัดคำนำหน้า (นาย/นาง/นางสาว/ด.ช./ด.ญ./MR/MRS/MISS) + ตัดช่องว่าง — มัดจำของลูกค้าคนนั้นเท่านั้น
   const autoBookingRef = React.useRef(null);
   useEffect(() => {
-    if (!editable || !vehicleModelNorm || baseMatchingBookings.length === 0) return;
+    // ⚠️ ใช้ mode ตรง ๆ ห้ามอ้าง editable ตรงนี้ — editable ประกาศทีหลัง (TDZ → crash ทั้งแอป)
+    if (mode !== "new" || !vehicleModelNorm || baseMatchingBookings.length === 0) return;
     if (form.deposit_no) return; // ดึงไว้แล้ว
     const cur = num(form.booking_deposit);
     if (cur > 0 && cur !== autoBookingRef.current) return; // user กรอกยอดเองแล้ว — ไม่ทับ
@@ -641,7 +642,7 @@ export default function RetailSalePage({ currentUser }) {
     autoBookingRef.current = Number(cand.remaining) || 0;
     pickBooking(cand);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [editable, vehicleModelNorm, baseMatchingBookings, form.customer_name, form.deposit_no]);
+  }, [mode, vehicleModelNorm, baseMatchingBookings, form.customer_name, form.deposit_no]);
 
   // auto-fill ราคารถทุกครั้งที่ finalPrice เปลี่ยน (แต่ไม่ทับค่าที่ user แก้เอง)
   const lastAutoPriceRef = React.useRef(null);
