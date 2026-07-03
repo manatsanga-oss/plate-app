@@ -949,11 +949,22 @@ ${transferSummary.length > 0 ? `
                         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                           {items.map((it, idx) => {
                             const isVariable = it.expense_type === "variable" || it.is_variable === true;
+                            // เฉพาะ LOCKTON/ล็อคตั้น: ถอด VAT 7% แสดงมูลค่าก่อนภาษี + ภาษีแยก
+                            const isLockton = /ล็อคตั้น|lockton/i.test(String(it.expense_name || ""));
+                            const amt = Number(it.amount || 0);
+                            const baseAmt = isLockton ? Math.round((amt / 1.07) * 100) / 100 : amt;
+                            const vatAmt = isLockton ? Math.round((amt - baseAmt) * 100) / 100 : 0;
+                            const amountDisplay = (
+                              <span style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                                <span style={{ fontWeight: 600 }}>{fmtNum(isLockton ? baseAmt : amt)}</span>
+                                {isLockton && <span style={{ display: "block", fontSize: 10, color: "#dc2626", fontWeight: 600 }}>VAT {fmtNum(vatAmt)}</span>}
+                              </span>
+                            );
                             return (
-                              <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
+                              <div key={idx} style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "flex-start" }}>
                                 <span style={{ flex: 1 }}>{it.expense_name}{isVariable && <span style={{ color: "#f59e0b", fontSize: 10, marginLeft: 4 }}>(ไม่คงที่)</span>}</span>
                                 {isPaid ? (
-                                  <span style={{ fontWeight: 600 }}>{fmtNum(it.amount)}</span>
+                                  amountDisplay
                                 ) : isVariable ? (
                                   <input type="number" step="0.01" min="0" value={it.amount || ""}
                                     onChange={(e) => {
@@ -968,7 +979,7 @@ ${transferSummary.length > 0 ? `
                                     }}
                                     style={{ width: 80, padding: "2px 6px", border: "1px solid #f59e0b", borderRadius: 4, fontFamily: "monospace", fontSize: 11, textAlign: "right" }} />
                                 ) : (
-                                  <span style={{ fontWeight: 600 }}>{fmtNum(it.amount)}</span>
+                                  amountDisplay
                                 )}
                               </div>
                             );

@@ -2,7 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // จัดการภาษีซื้อ — รวมเอกสารภาษีซื้อ 3 แหล่ง (รถ + อะไหล่ + ค่าใช้จ่าย)
 // อ่านจาก webhook input-tax-api (UNION vehicle_purchase_receipts_* / *_part_tax_invoices / expense_documents)
-// สถานะ + การแก้ไข: เก็บใน state ฝั่งหน้าจอ (เฟสนี้ยังไม่บันทึกลง DB)
+// สถานะ (เอาเข้า/เอาออกจากแบบยื่น): บันทึกถาวรลงตาราง input_tax_doc_status (actions list/save_input_tax_status)
+// เลือกหลายรายการด้วย checkbox แล้วกดปุ่มเอาเข้า/เอาออกได้ทีเดียว
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api";
 
 function fmt(v) {
@@ -50,29 +51,58 @@ export default function TaxManageInputPage({ currentUser }) {
   const [filterSource, setFilterSource] = useState(""); // "" | vehicle | part | expense
   const [filterAff, setFilterAff] = useState(""); // "" | ป.เปา | สิงห์ชัย
   const [message, setMessage] = useState("");
-  const [statuses, setStatuses] = useState({}); // key -> status
+  const [statuses, setStatuses] = useState({}); // key -> status (โหลดจาก DB + แก้ในหน้า)
   const [edits, setEdits] = useState({}); // key -> overridden fields
   const [editKey, setEditKey] = useState(null); // row key being edited
+  const [selected, setSelected] = useState(new Set()); // group keys ที่ติ๊กเลือก
+  const [bulkSaving, setBulkSaving] = useState(false);
 
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [month]);
+  useEffect(() => { fetchData(); setSelected(new Set()); /* eslint-disable-next-line */ }, [month]);
 
   async function fetchData() {
     setLoading(true);
     setMessage("");
     try {
       const ym = month ? month.replace("-", "") : null;
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_input_tax", year_month: ym }),
-      });
+      const [res, stRes] = await Promise.all([
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_input_tax", year_month: ym }),
+        }),
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_input_tax_status" }),
+        }).catch(() => null),
+      ]);
       const data = await res.json();
       const arr = Array.isArray(data) ? data : (data?.rows || []);
       setRows(arr);
+      // สถานะที่บันทึกไว้ใน DB
+      try {
+        const stText = stRes ? await stRes.text() : "";
+        const stData = stText ? JSON.parse(stText) : null;
+        const stRows = Array.isArray(stData) ? stData : (stData?.rows || []);
+        const m = {};
+        for (const s of stRows) if (s && s.doc_no) m[`${s.source}|${s.affiliation || ""}|${s.doc_no}`] = s.status;
+        setStatuses(m);
+      } catch { /* คงสถานะเดิม */ }
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + e.message);
       setRows([]);
     }
     setLoading(false);
+  }
+
+  // บันทึกสถานะลง DB (bulk upsert; status='รีเซ็ต' = ลบกลับ default)
+  async function persistStatuses(items) {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_input_tax_status", items, updated_by: currentUser?.username || currentUser?.name || "system" }),
+      });
+      await res.text();
+      return true;
+    } catch { return false; }
   }
 
   // default: มูลค่าก่อน VAT = 0 → รับสินค้าแล้วแต่ยังไม่ได้ upload ใบกำกับ
@@ -81,13 +111,40 @@ export default function TaxManageInputPage({ currentUser }) {
   // จัดกลุ่มตามเลขที่เอกสารเดียวกัน (เช่น ใบกำกับ MD ใบเดียวมีหลายคัน) — ถ้าไม่มีเลข = แยกบรรทัด
   const groupKeyOf = (r, idx) => `${r.source}|${r.affiliation || ""}|${r.doc_no || ("row" + idx)}`;
 
-  function setStatus(key, action) {
+  function setStatus(key, action, g) {
     setStatuses(prev => {
       const next = { ...prev };
       if (action === "รีเซ็ต") delete next[key];
       else next[key] = action;
       return next;
     });
+    // บันทึกถาวร (เฉพาะแถวที่มีเลขเอกสาร)
+    if (g?.doc_no) {
+      persistStatuses([{ source: g.source, affiliation: g.affiliation || "", doc_no: g.doc_no, status: action }])
+        .then(ok => setMessage(ok ? `✅ บันทึกสถานะ ${g.doc_no} แล้ว` : "❌ บันทึกสถานะไม่สำเร็จ"));
+    }
+  }
+
+  // ===== เลือกหลายรายการ + เอาเข้า/เอาออกจากแบบยื่นทีเดียว =====
+  function toggleSelect(key) {
+    setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; });
+  }
+  function toggleSelectAll(selectableKeys) {
+    setSelected(prev => prev.size >= selectableKeys.length ? new Set() : new Set(selectableKeys));
+  }
+  async function bulkSet(status) {
+    const gs = groups.filter(g => selected.has(g.key) && g.doc_no);
+    if (gs.length === 0) { setMessage("⚠️ ติ๊กเลือกรายการก่อน (เฉพาะแถวที่มีเลขเอกสาร)"); return; }
+    setBulkSaving(true);
+    setStatuses(prev => {
+      const next = { ...prev };
+      gs.forEach(g => { if (status === "รีเซ็ต") delete next[g.key]; else next[g.key] = status; });
+      return next;
+    });
+    const ok = await persistStatuses(gs.map(g => ({ source: g.source, affiliation: g.affiliation || "", doc_no: g.doc_no, status })));
+    setMessage(ok ? `✅ ${status === "รีเซ็ต" ? "รีเซ็ตสถานะ" : `ตั้งสถานะ "${status}"`} ${gs.length} รายการ (บันทึกแล้ว)` : "❌ บันทึกไม่สำเร็จ");
+    setSelected(new Set());
+    setBulkSaving(false);
   }
   function saveEdit(key, form) {
     setEdits(prev => ({ ...prev, [key]: { ...form } }));
@@ -181,6 +238,24 @@ export default function TaxManageInputPage({ currentUser }) {
         <span style={{ color: "#dc2626" }}>ภาษีซื้อ: <strong>{fmt(sumVat)}</strong> บาท</span>
       </div>
 
+      {/* Bulk actions — เอาเข้า/เอาออกจากเอกสารที่จะยื่น */}
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", padding: "10px 14px", background: "#fef9c3", border: "1px solid #fcd34d", borderRadius: 10, marginBottom: 12 }}>
+        <span>☑️ เลือก: <strong>{selected.size}</strong> รายการ</span>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => bulkSet("เตรียมแบบยื่น ภ.พ.30")} disabled={bulkSaving || selected.size === 0}
+          style={{ ...btn(bulkSaving || selected.size === 0 ? "#9ca3af" : "#059669"), cursor: bulkSaving || selected.size === 0 ? "not-allowed" : "pointer" }}>
+          ✅ เอาเข้ายื่น (เตรียมแบบยื่น ภ.พ.30)
+        </button>
+        <button onClick={() => bulkSet("ไม่ใช้สิทธิขอคืน")} disabled={bulkSaving || selected.size === 0}
+          style={{ ...btn(bulkSaving || selected.size === 0 ? "#9ca3af" : "#dc2626"), cursor: bulkSaving || selected.size === 0 ? "not-allowed" : "pointer" }}>
+          🚫 เอาออก (ไม่ใช้สิทธิขอคืน)
+        </button>
+        <button onClick={() => bulkSet("รีเซ็ต")} disabled={bulkSaving || selected.size === 0}
+          style={{ ...btn(bulkSaving || selected.size === 0 ? "#9ca3af" : "#6b7280"), cursor: bulkSaving || selected.size === 0 ? "not-allowed" : "pointer" }}>
+          ↺ รีเซ็ต
+        </button>
+      </div>
+
       {/* Table */}
       <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
         {loading ? (
@@ -191,6 +266,11 @@ export default function TaxManageInputPage({ currentUser }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
             <thead style={{ background: "#072d6b", color: "#fff" }}>
               <tr>
+                <th style={{ ...th, width: 40, textAlign: "center" }}>
+                  <input type="checkbox"
+                    checked={groups.filter(g => g.doc_no).length > 0 && groups.filter(g => g.doc_no).every(g => selected.has(g.key))}
+                    onChange={() => toggleSelectAll(groups.filter(g => g.doc_no).map(g => g.key))} />
+                </th>
                 <th style={th}>วันที่เอกสาร</th>
                 <th style={th}>เลขที่เอกสาร</th>
                 <th style={th}>ชื่อผู้จำหน่าย / โปรเจ็ค</th>
@@ -205,7 +285,12 @@ export default function TaxManageInputPage({ currentUser }) {
                 const ef = effGroup(g);
                 const sm = SOURCE_META[ef.source] || { label: ef.source, color: "#374151", bg: "#e5e7eb" };
                 return (
-                  <tr key={key} style={{ borderTop: "1px solid #e5e7eb" }}>
+                  <tr key={key} style={{ borderTop: "1px solid #e5e7eb", background: selected.has(key) ? "#fef3c7" : "transparent" }}>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      <input type="checkbox" checked={selected.has(key)} disabled={!g.doc_no}
+                        title={g.doc_no ? "" : "แถวไม่มีเลขเอกสาร — เลือกไม่ได้"}
+                        onChange={() => toggleSelect(key)} />
+                    </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(ef.doc_date)}</td>
                     <td style={td}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
@@ -227,7 +312,7 @@ export default function TaxManageInputPage({ currentUser }) {
                       <div style={{ fontFamily: "monospace", fontSize: 12, color: "#6b7280" }}>{fmt(ef.vat_amount)}</div>
                     </td>
                     <td style={{ ...td, textAlign: "center" }}>
-                      <StatusDropdown status={statusOf(key, ef)} onPick={a => setStatus(key, a)} />
+                      <StatusDropdown status={statusOf(key, ef)} onPick={a => setStatus(key, a, ef)} />
                     </td>
                     <td style={{ ...td, textAlign: "center" }}>
                       <RowKebab onEdit={() => setEditKey(key)} onPrint={() => printDoc(ef, statusOf(key, ef))} onDownload={() => downloadDoc(ef, statusOf(key, ef))} />

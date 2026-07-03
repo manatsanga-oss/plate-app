@@ -5,6 +5,7 @@ import DailyReceiptUploadPage from "./DailyReceiptUploadPage";
 import VehiclePurchaseReceiptUploadPage from "./VehiclePurchaseReceiptUploadPage";
 import PartTaxInvoiceUploadCard from "./PartTaxInvoiceUploadCard";
 import AccountingExpenseUploadCard from "./AccountingExpenseUploadCard";
+import FlowInputTaxUploadCard from "./FlowInputTaxUploadCard";
 
 export default function UploadAccountingPage({ currentUser } = {}) {
   return (
@@ -51,7 +52,7 @@ export default function UploadAccountingPage({ currentUser } = {}) {
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ไฟล์รายงานค่าใช้จ่าย (Excel) — นำเข้าทุกแถว · เลือกสังกัด (ป.เปา / สิงห์ชัย) · ใส่ F- หน้าเลขเอกสาร เก็บแยกตาราง flow_expense_documents</div>
           <AccountingExpenseUploadCard currentUser={currentUser} />
         </div>
-        <div style={{ background: "#fff", borderRadius: "0 0 14px 14px", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
+        <div style={{ background: "#fff", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 14, textAlign: "center" }}>🧾 ใบกำกับภาษีซื้ออะไหล่ (HONDA · YAMAHA)</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14, textAlign: "center" }}>ไฟล์รายงานใบกำกับภาษีซื้ออะไหล่ — UPSERT ที่ tax_invoice_no</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -62,6 +63,20 @@ export default function UploadAccountingPage({ currentUser } = {}) {
             <div style={{ border: "2px solid #1e40af", borderRadius: 12, padding: 16 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#1e40af", marginBottom: 10, textAlign: "center" }}>🔵 YAMAHA — อะไหล่</div>
               <PartTaxInvoiceUploadCard brand="YAMAHA" currentUser={currentUser} />
+            </div>
+          </div>
+        </div>
+        <div style={{ background: "#fff", borderRadius: "0 0 14px 14px", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 14, textAlign: "center" }}>📊 รายงานภาษีซื้อ ภ.พ.30 (FLOW ACC)</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 14, textAlign: "center" }}>ไฟล์ Excel รายงานภาษีซื้อที่ export จาก FlowAccount (sheet "InputTaxReport") — นำเข้าแบบแทนที่ทั้งรอบยื่น (เลือกไฟล์แล้วอ่านอัตโนมัติ) · เก็บตาราง <code style={{ padding: "2px 8px", background: "#f3f4f6", borderRadius: 4, color: "#374151" }}>flow_input_tax_reports</code></div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <div style={{ border: "2px solid #dc2626", borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#dc2626", marginBottom: 10, textAlign: "center" }}>🔴 ป.เปา</div>
+              <FlowInputTaxUploadCard affiliation="ป.เปา" currentUser={currentUser} />
+            </div>
+            <div style={{ border: "2px solid #1e40af", borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#1e40af", marginBottom: 10, textAlign: "center" }}>🔵 สิงห์ชัย</div>
+              <FlowInputTaxUploadCard affiliation="สิงห์ชัย" currentUser={currentUser} />
             </div>
           </div>
         </div>
