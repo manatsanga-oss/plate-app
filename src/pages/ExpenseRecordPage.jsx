@@ -4,6 +4,7 @@ import ThaiAddressFields from "./ThaiAddressFields";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/tax-remittance-api"; // สถานะนำส่งภาษี ภ.ง.ด.
+const INPUT_TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api"; // สถานะ ภ.พ.30 (input_tax_doc_status จากหน้าจัดการภาษีซื้อ)
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -89,6 +90,7 @@ export default function ExpenseRecordPage({ currentUser }) {
     fetchGeneralExpenses();
     fetchBankAccounts();
     fetchRemitMap();
+    fetchPp30Map();
     /* eslint-disable-next-line */
   }, []);
 
@@ -113,6 +115,24 @@ export default function ExpenseRecordPage({ currentUser }) {
       });
       setRemitMap(m);
     } catch { setRemitMap({}); }
+  }
+
+  // สถานะ ภ.พ.30 — map "สังกัด|เลขเอกสาร" → สถานะจากหน้าจัดการภาษีซื้อ (input_tax_doc_status, source=expense)
+  const [pp30Map, setPp30Map] = useState({});
+  async function fetchPp30Map() {
+    try {
+      const res = await fetch(INPUT_TAX_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_input_tax_status" }),
+      });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : [];
+      const m = {};
+      (Array.isArray(data) ? data : (data?.rows || [])).forEach(s => {
+        if (s?.source === "expense" && s.doc_no) m[`${s.affiliation || ""}|${s.doc_no}`] = s.status;
+      });
+      setPp30Map(m);
+    } catch { setPp30Map({}); }
   }
 
   async function fetchDocs() {
@@ -561,7 +581,11 @@ export default function ExpenseRecordPage({ currentUser }) {
     });
     // edit mode: เริ่มต้นด้วย 1 row method เดิม + amount เต็ม (ถ้า payment_method='ผสม' ใช้ 'โอน' default)
     const method = g.payment_method && g.payment_method !== "ผสม" ? g.payment_method : "โอน";
-    setPayments([{ method, amount: total, from_bank_account_id: g.from_bank_account_id || "" }]);
+    // วางบิลงาน พรบ. — ดึงเลขกรมธรรม์เดิมคืนจากหมายเหตุ (save_payment ต่อเข้า expense_documents.note รูปแบบ "[จ่าย] พรบ. กรมธรรม์ X")
+    const oldNote = String(g.items?.[0]?.note || g.items?.[0]?.pay_note || g.pay_note || "");
+    const policyMatch = oldNote.match(/พรบ\.\s*กรมธรรม์\s*(\S+)/);
+    setPayments([{ method, amount: total, from_bank_account_id: g.from_bank_account_id || "",
+      policy_no: method === "วางบิลงาน พรบ." && policyMatch ? policyMatch[1] : "" }]);
     setPayDialog(true);
   }
   // helper สำหรับ payment rows
@@ -590,6 +614,9 @@ export default function ExpenseRecordPage({ currentUser }) {
       if (p.method === "โอน" && !p.from_bank_account_id) {
         setMessage(`❌ แถวที่ ${i + 1} (โอน): เลือกบัญชี`); return;
       }
+      if (p.method === "วางบิลงาน พรบ." && !String(p.policy_no || "").trim()) {
+        setMessage(`❌ แถวที่ ${i + 1} (วางบิลงาน พรบ.): ใส่เลขที่กรมธรรม์`); return;
+      }
     }
     setSavingPay(true);
     try {
@@ -597,6 +624,11 @@ export default function ExpenseRecordPage({ currentUser }) {
       // backwards-compat: ถ้ามีวิธีเดียว ส่ง field เก่าด้วย เพื่อให้ workflow เก่ายัง work
       const single = payments.length === 1 ? payments[0] : null;
       const ccPayment = payments.find(p => p.method === "ใบลดหนี้");
+      // วางบิลงาน พรบ. — ต่อเลขที่กรมธรรม์เข้าหมายเหตุใบจ่าย (breakdown ไม่มีคอลัมน์อ้างอิง)
+      const prbNotes = payments
+        .filter(p => p.method === "วางบิลงาน พรบ." && String(p.policy_no || "").trim())
+        .map(p => `พรบ. กรมธรรม์ ${String(p.policy_no).trim()}`);
+      const noteWithPolicy = [payForm.payment_note, ...prbNotes].filter(Boolean).join(" · ");
       const body = {
         action: "expense_record",
         op: editPayDocNo ? "edit_payment" : "save_payment",
@@ -604,7 +636,7 @@ export default function ExpenseRecordPage({ currentUser }) {
         expense_doc_ids: editPayDocNo ? undefined : selectedIds,
         paid_date: payForm.paid_date,
         payment_method: single ? single.method : "ผสม",
-        payment_note: payForm.payment_note,
+        payment_note: noteWithPolicy,
         from_bank_account_id: single && single.method === "โอน" ? (Number(single.from_bank_account_id) || null) : null,
         paid_by: currentUser?.username || currentUser?.name || "system",
         // multi-method breakdown
@@ -687,7 +719,7 @@ export default function ExpenseRecordPage({ currentUser }) {
         <input type="text" value={search} onChange={e => setSearch(e.target.value)}
           placeholder="🔎 ค้นหา (เลขเอกสาร / Vendor / รายละเอียด)"
           style={{ ...inp, flex: 1, minWidth: 200 }} />
-        <button onClick={fetchDocs} style={btn("#0369a1")}>🔄 รีเฟรช</button>
+        <button onClick={() => { fetchDocs(); fetchPp30Map(); }} style={btn("#0369a1")}>🔄 รีเฟรช</button>
         {tab === "draft" && <button onClick={openCreate} style={btn("#059669")}>+ เพิ่มค่าใช้จ่าย</button>}
       </div>
 
@@ -710,7 +742,7 @@ export default function ExpenseRecordPage({ currentUser }) {
               </label>
             ))}
           </div>
-          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={false} remitMap={remitMap} />
+          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={false} remitMap={remitMap} pp30Map={pp30Map} />
         </>
       )}
 
@@ -726,7 +758,7 @@ export default function ExpenseRecordPage({ currentUser }) {
               💵 บันทึกจ่ายเงิน
             </button>
           </div>
-          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} remitMap={remitMap} />
+          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} remitMap={remitMap} pp30Map={pp30Map} />
         </>
       )}
 
@@ -858,6 +890,7 @@ export default function ExpenseRecordPage({ currentUser }) {
                           <option value="เช็ค">เช็ค</option>
                           <option value="ใบลดหนี้">ใบลดหนี้</option>
                           <option value="ภาษีมูลค่าเพิ่มรอนำส่ง (ภ.พ.36)">ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)</option>
+                          <option value="วางบิลงาน พรบ.">วางบิลงาน พรบ.</option>
                         </select>
                         <input type="number" step="0.01" min="0" value={p.amount}
                           onChange={e => updatePayment(idx, { amount: e.target.value })}
@@ -878,6 +911,11 @@ export default function ExpenseRecordPage({ currentUser }) {
                           <div style={{ padding: "7px 10px", background: "#ecfeff", border: "1px solid #a5f3fc", borderRadius: 6, fontSize: 12, color: "#0e7490", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             🧾 ภาษีรอนำส่ง — ไปกดนำส่งที่เมนู <b>ภ.พ.36</b>
                           </div>
+                        ) : p.method === "วางบิลงาน พรบ." ? (
+                          <input type="text" value={p.policy_no || ""}
+                            onChange={e => updatePayment(idx, { policy_no: e.target.value })}
+                            placeholder="เลขที่กรมธรรม์ *"
+                            style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fffbeb", fontFamily: "Tahoma", fontSize: 13 }} />
                         ) : (
                           <div style={{ padding: "7px 10px", color: "#9ca3af", fontSize: 12 }}>—</div>
                         )}
@@ -924,7 +962,15 @@ export default function ExpenseRecordPage({ currentUser }) {
   );
 }
 
-function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, showCheckbox, selected, toggleOne, toggleAll, remitMap }) {
+// สไตล์ป้ายสถานะ ภ.พ.30 (ตามหน้าจัดการภาษีซื้อ)
+const PP30_STYLE = {
+  "รับใบกำกับภาษีแล้ว": { bg: "#dbeafe", color: "#1e40af" },
+  "ยังไม่ได้รับใบกำกับภาษี": { bg: "#ffedd5", color: "#9a3412" },
+  "เตรียมแบบยื่น ภ.พ.30": { bg: "#d1fae5", color: "#065f46" },
+  "ไม่ใช้สิทธิขอคืน": { bg: "#f3f4f6", color: "#6b7280" },
+};
+
+function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, showCheckbox, selected, toggleOne, toggleAll, remitMap, pp30Map }) {
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
       {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
@@ -946,6 +992,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
             <th style={{ ...th, textAlign: "right" }}>ยอดสุทธิ</th>
             <th style={th}>สถานะ</th>
             <th style={th}>นำส่งภาษี</th>
+            <th style={th}>ภ.พ.30</th>
             <th style={{ ...th, width: 60, textAlign: "center" }}>จัดการ</th>
           </tr>
         </thead>
@@ -983,6 +1030,18 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
                     return remitNo
                       ? <span title={remitNo} style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#ecfeff", color: "#0e7490" }}>🧾 นำส่งแล้ว<div style={{ fontSize: 9, fontFamily: "monospace" }}>{remitNo}</div></span>
                       : <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#fef3c7", color: "#92400e" }}>รอนำส่ง</span>;
+                  })()}
+                </td>
+                <td style={td}>
+                  {(() => {
+                    // สถานะ ภ.พ.30 จากหน้าจัดการภาษีซื้อ (key สังกัด|เลขเอกสาร)
+                    // ไม่มีสถานะบันทึกไว้ → default เหมือนหน้าจัดการภาษีซื้อ: มี VAT = "รับใบกำกับภาษีแล้ว" / ไม่มี VAT = "-"
+                    if (status === "cancelled") return <span style={{ color: "#d1d5db" }}>-</span>;
+                    const saved = pp30Map?.[`${d.affiliation || ""}|${d.expense_doc_no}`];
+                    const pp30 = saved || (Number(d.vat_amount) > 0 ? "รับใบกำกับภาษีแล้ว" : null);
+                    if (!pp30) return <span style={{ color: "#d1d5db" }}>-</span>;
+                    const sty = PP30_STYLE[pp30] || { bg: "#f3f4f6", color: "#374151" };
+                    return <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: sty.bg, color: sty.color, whiteSpace: "nowrap" }}>{pp30}</span>;
                   })()}
                 </td>
                 <td style={{ ...td, textAlign: "center" }}>

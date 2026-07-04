@@ -78,6 +78,7 @@ import TaxRemittanceRecordPage from "./pages/TaxRemittanceRecordPage";
 import TaxManageInputPage from "./pages/TaxManageInputPage";
 import TaxFormMonthlyPage from "./pages/TaxFormMonthlyPage";
 import FlowInputTaxReportPage from "./pages/FlowInputTaxReportPage";
+import OutputTaxReportPage from "./pages/OutputTaxReportPage";
 import TheftInsuranceInvoicePage from "./pages/TheftInsuranceInvoicePage";
 import AdvanceExpensePage from "./pages/AdvanceExpensePage";
 import IncomeRecordPage from "./pages/IncomeRecordPage";
@@ -250,7 +251,7 @@ export default function App() {
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
     if (page === "whtremit") return ["admin", "WARUT"].includes(currentUser.username);  // ภ.ง.ด. หัก ณ ที่จ่าย — admin + WARUT (ภ.พ.36 ย้ายไปเป็นแท็บใน taxformmonthly)
     if (page === "theftinsuranceinvoice") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT (บันทึกรับใบกำกับฯ ประกันรถหาย ออกแทน)
-    if (page === "taxmanageinput" || page === "taxformmonthly" || page === "flowinputtaxreport") return ["admin", "WARUT"].includes(currentUser.username);  // บริหารภาษีมูลค่าเพิ่ม — admin + WARUT
+    if (page === "taxmanageinput" || page === "taxformmonthly" || page === "flowinputtaxreport" || page === "outputtaxreport") return ["admin", "WARUT"].includes(currentUser.username);  // บริหารภาษีมูลค่าเพิ่ม — admin + WARUT
     if (page === "financepayment") return false;
     if (page === "goodspayment") return false;        // เฉพาะ admin (บันทึกชำระค่าสินค้า)
     if (page === "convert") return false;
@@ -468,6 +469,9 @@ export default function App() {
         )}
         {activeMenu === "flowinputtaxreport" && canAccess("flowinputtaxreport") && (
           <FlowInputTaxReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "outputtaxreport" && canAccess("outputtaxreport") && (
+          <OutputTaxReportPage currentUser={currentUser} />
         )}
         {activeMenu === "advanceexpense" && canAccess("advanceexpense") && (
           <AdvanceExpensePage currentUser={currentUser} />
@@ -831,10 +835,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="accdirectorloan" label="บันทึกเงินให้กู้ยืมกรรมการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="บริหารภาษีมูลค่าเพิ่ม" pages={["taxmanageinput","taxformmonthly","flowinputtaxreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="บริหารภาษีมูลค่าเพิ่ม" pages={["taxmanageinput","taxformmonthly","flowinputtaxreport","outputtaxreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="taxmanageinput" label="จัดการภาษีซื้อ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxformmonthly" label="เตรียมแบบภาษีรายเดือน (ภ.พ.30 / ภ.พ.36)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="flowinputtaxreport" label="รายงานภาษีซื้อ ตาม FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="outputtaxreport" label="รายงานภาษีขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="ภาษีหัก ณ ที่จ่าย" pages={["whtremit"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

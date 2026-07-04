@@ -61,7 +61,32 @@ export default function InsuranceBillingPage({ currentUser }) {
   }
 
   useEffect(() => { fetchData(); setSelected({}); setSelectedBills({}); setSelectedBatches({}); /* eslint-disable-next-line */ }, [viewTab]);
-  useEffect(() => { fetchVendors(); fetchBankAccounts(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fetchVendors(); fetchBankAccounts(); fetchExpPolicyMap(); /* eslint-disable-next-line */ }, []);
+
+  // จับคู่เลขกรมธรรม์ ↔ เลขที่บันทึกค่าใช้จ่าย — จากใบจ่ายค่าใช้จ่ายวิธี "วางบิลงาน พรบ."
+  // (เลขกรมธรรม์เก็บใน pay_note รูปแบบ "พรบ. กรมธรรม์ X" — ปกติบันทึกค่าใช้จ่ายก่อนวางบิล)
+  const [expPolicyMap, setExpPolicyMap] = useState({}); // normalize(policy_no) → expense_doc_no
+  const normPolicy = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+  async function fetchExpPolicyMap() {
+    try {
+      const today = new Date();
+      const past = new Date(today.getFullYear(), today.getMonth() - 6, 1); // ย้อน 6 เดือน
+      const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const res = await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "expense_record", op: "list", date_from: iso(past), date_to: iso(today) }),
+      });
+      const data = await res.json();
+      const m = {};
+      (Array.isArray(data) ? data : []).forEach(d => {
+        if (String(d.status || "") !== "paid") return;
+        // save_payment ต่อหมายเหตุเข้า expense_documents.note รูปแบบ "[จ่าย] พรบ. กรมธรรม์ X"
+        const mt = String(d.note || d.pay_note || "").match(/พรบ\.\s*กรมธรรม์\s*(\S+)/);
+        if (mt) m[normPolicy(mt[1])] = d.expense_doc_no;
+      });
+      setExpPolicyMap(m);
+    } catch { setExpPolicyMap({}); }
+  }
 
   async function fetchVendors() {
     try {
@@ -831,11 +856,20 @@ export default function InsuranceBillingPage({ currentUser }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {detailRow.rows.map((r, i) => (
+                    {detailRow.rows.map((r, i) => {
+                      const expNo = expPolicyMap[normPolicy(r.policy_no)];
+                      return (
                       <tr key={r.insurance_id} style={{ borderTop: "1px solid #e5e7eb" }}>
                         <td style={{ ...td, textAlign: "center" }}>{i + 1}</td>
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(r.contract_date)}</td>
-                        <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.policy_no || "-"}</td>
+                        <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>
+                          {expNo ? (
+                            <>
+                              <div style={{ fontWeight: 700, color: "#7c3aed" }} title={`จับคู่จากบันทึกค่าใช้จ่าย (กรมธรรม์ ${r.policy_no})`}>{expNo}</div>
+                              <div style={{ fontSize: 10, color: "#9ca3af" }}>{r.policy_no}</div>
+                            </>
+                          ) : (r.policy_no || "-")}
+                        </td>
                         <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                         <td style={td}>{r.insured_name || "-"}</td>
                         <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}</td>
@@ -848,7 +882,8 @@ export default function InsuranceBillingPage({ currentUser }) {
                         </td>
                         <td style={{ ...td, color: r.receipt_no ? "#1e40af" : "#9ca3af", fontWeight: r.receipt_no ? 600 : 400 }}>{r.receipt_no || ""}</td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                   <tfoot style={{ background: "#fef9c3", fontWeight: 700 }}>
                     <tr>

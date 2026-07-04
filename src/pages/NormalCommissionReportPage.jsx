@@ -67,6 +67,8 @@ export default function NormalCommissionReportPage({ currentUser }) {
       const pos = positionByName.get(String(name || "").trim()) || "";
       return pos.includes("ช่าง");
     };
+    // แถวบริษัท ป.เปา มอเตอร์เซอร์วิส (code PMOTOR / ชื่อมี "ป.เปา") = ไม่ใช่ช่าง ไม่คิดค่าคอม
+    const isCompanyRow = (g) => String(g?.mechanic_code || "").toUpperCase() === "PMOTOR" || String(g?.mechanic_name || "").includes("ป.เปา");
 
     const map = new Map();
     // Honda
@@ -123,6 +125,7 @@ export default function NormalCommissionReportPage({ currentUser }) {
     }
 
     return list
+      .filter(g => !isCompanyRow(g))  // ตัดแถวบริษัท ป.เปา ออกจากค่าคอม (ไม่รวมคำนวณ/ยอดรวม)
       .map(g => ({
         ...g,
         yamaha_total: g.yamaha_labor + g.yamaha_check_fee,

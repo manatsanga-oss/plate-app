@@ -6,7 +6,8 @@ import React, { useEffect, useMemo, useState } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/flow-input-tax-api";
 const INPUT_TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api";
 const AFFILIATIONS = ["ป.เปา", "สิงห์ชัย"];
-const SRC_LABEL = { vehicle: "รถ", part: "อะไหล่", expense: "ค่าใช้จ่าย", fuel: "ค่าน้ำมัน", theft: "ประกันรถหาย", lockton: "ประกัน LOCKTON", theft_invoice: "ประกันรถหาย (ใบกำกับ)" };
+const SRC_LABEL = { vehicle: "รถ", part: "อะไหล่", expense: "ค่าใช้จ่าย", fuel: "ค่าน้ำมัน", theft: "ประกันรถหาย", lockton: "ประกัน LOCKTON", theft_invoice: "ประกันรถหาย (ใบกำกับ)", cosmos: "ประกัน COSMOS", material: "รับวัสดุ" };
+const COSMOS_PLAN_LABEL = { rsa: "RSA", theft: "THEFT", theft_renewal: "THEFT ปีต่อ" };
 // normalize เลขเอกสารเพื่อจับคู่: ตัดช่องว่าง + ตัวพิมพ์ใหญ่ + prefix F- (flow_expense ใช้ F-, expense_documents ไม่ใช้)
 function normDoc(s) { return String(s || "").toUpperCase().replace(/\s+/g, "").replace(/^F-/, ""); }
 // คีย์ประจำแถว FLOW สำหรับเก็บคู่ manual — คงที่แม้ re-upload รอบเดิม (id เปลี่ยนเพราะนำเข้าแบบแทนที่ทั้งรอบ)
@@ -77,6 +78,8 @@ export default function FlowInputTaxReportPage({ currentUser }) {
   const [partCN, setPartCN] = useState([]);   // ใบลดหนี้อะไหล่ HONDA (ยอดติดลบ — หลุดจาก list_input_tax) ไว้จับคู่
   const [lktRows, setLktRows] = useState([]); // ค่าประกัน LOCKTON งานรับเรื่อง (ถอด VAT — ไม่อยู่ใน list_input_tax) ไว้จับคู่
   const [theftInv, setTheftInv] = useState([]); // ใบกำกับประกันรถหาย (ออกแทน) 52071 — ไม่อยู่ใน list_input_tax ไว้จับคู่
+  const [cosmosRows, setCosmosRows] = useState([]); // เบี้ยประกัน COSMOS (rsa/theft/theft_renewal ถอด VAT) ไว้จับคู่ใบสรุปสยามคอสมอส
+  const [matRows, setMatRows] = useState([]);       // ใบชำระเงินเจ้าหนี้ หน้ารับวัสดุ (RP… มี VAT) ไว้จับคู่ใบกำกับวัสดุ
   const [manual, setManual] = useState([]);   // คู่ที่จับเอง (flow_input_tax_manual_matches)
   const [pairing, setPairing] = useState(null); // แถว FLOW ที่กำลังเลือกคู่ (เปิด popup)
   const [pairSaving, setPairSaving] = useState(false);
@@ -121,7 +124,7 @@ export default function FlowInputTaxReportPage({ currentUser }) {
     };
     const appMonths = [...new Set([ym, ymAround(-1), ymAround(1)].filter(Boolean))]; // ym ก่อน → dedup เก็บเดือนปัจจุบันเป็นหลัก
     try {
-      const [res, appData, mmRes, cnRes, lktRes, tiRes] = await Promise.all([
+      const [res, appData, mmRes, cnRes, lktRes, tiRes, cosRes, matRes] = await Promise.all([
         fetch(API_URL, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_input_tax_report", affiliation, tax_period: period }),
@@ -154,6 +157,16 @@ export default function FlowInputTaxReportPage({ currentUser }) {
         fetch(API_URL, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_theft_invoices", affiliation, tax_period: period }),
+        }).catch(() => null),
+        // เบี้ยประกัน COSMOS (แผนมี VAT) — ไว้จับคู่ใบสรุปรายเดือนของสยามคอสมอส
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_cosmos_premiums", affiliation, tax_period: period }),
+        }).catch(() => null),
+        // ใบชำระเงินเจ้าหนี้ หน้ารับวัสดุ (RP… มี VAT) — ไว้จับคู่ใบกำกับวัสดุ
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_receive_payments", affiliation, tax_period: period }),
         }).catch(() => null),
       ]);
       const data = await res.json();
@@ -224,9 +237,52 @@ export default function FlowInputTaxReportPage({ currentUser }) {
           }));
         setTheftInv(tiArr);
       } catch { setTheftInv([]); }
+      // เบี้ย COSMOS (รวม VAT) → ยุบเป็น "ยอดรวมต่อแผน" 1 แถว (ไม่แยกรายใบ — ใบกำกับสยามคอสมอสเป็นใบสรุปรายเดือน)
+      // ถอด VAT จากยอดรวมทั้งก้อน ÷1.07 (ตรงกับวิธีคิดในใบสรุป ไม่มีเศษปัดรายใบ)
+      try {
+        const cosText = cosRes ? await cosRes.text() : "";
+        const cosData = cosText ? JSON.parse(cosText) : null;
+        const byPlan = {};
+        (Array.isArray(cosData) ? cosData : (cosData?.rows || []))
+          .filter(x => x && x.app_no && Number(x.premium) > 0)
+          .forEach(x => {
+            const g = byPlan[x.plan] || (byPlan[x.plan] = { sum: 0, count: 0, lastDate: null });
+            g.sum += Number(x.premium || 0);
+            g.count += 1;
+            const d = String(x.submitted_at || "");
+            if (!g.lastDate || d > g.lastDate) g.lastDate = d;
+          });
+        const cosArr = Object.entries(byPlan).map(([plan, g]) => {
+          const base = Math.round((g.sum / 1.07) * 100) / 100;
+          return {
+            source: "cosmos", plan,
+            doc_no: `COSMOS-${String(plan).toUpperCase()}-${period}`, // คีย์คงที่ต่อแผน/รอบ ใช้เก็บคู่ manual
+            doc_date: g.lastDate,
+            vendor_name: "บริษัท สยาม คอสมอส เซอร์วิส จำกัด",
+            project: `${COSMOS_PLAN_LABEL[plan] || plan} ${periodLabel(period)} · ยอดรวม ${g.count} รายการ`,
+            amount_before_vat: base, vat_amount: Math.round((g.sum - base) * 100) / 100,
+          };
+        });
+        setCosmosRows(cosArr);
+      } catch { setCosmosRows([]); }
+      // ใบชำระเงินเจ้าหนี้รับวัสดุ → candidate (source=material) — base ก่อน VAT = ยอดบิล − ส่วนลด
+      try {
+        const matText = matRes ? await matRes.text() : "";
+        const matData = matText ? JSON.parse(matText) : null;
+        const matArr = (Array.isArray(matData) ? matData : (matData?.rows || []))
+          .filter(x => x && x.payment_no)
+          .map(x => ({
+            source: "material", doc_no: x.payment_no, doc_date: x.pay_date,
+            vendor_name: x.vendor_name,
+            project: ["รับวัสดุ", x.receive_no].filter(Boolean).join(" · "),
+            amount_before_vat: Math.round((Number(x.total_amount || 0) - Number(x.discount || 0)) * 100) / 100,
+            vat_amount: Number(x.vat || 0),
+          }));
+        setMatRows(matArr);
+      } catch { setMatRows([]); }
     } catch (e) {
       setMsg("❌ โหลดข้อมูลไม่สำเร็จ: " + e.message);
-      setRows([]); setAppRows([]); setManual([]); setPartCN([]); setLktRows([]); setTheftInv([]);
+      setRows([]); setAppRows([]); setManual([]); setPartCN([]); setLktRows([]); setTheftInv([]); setCosmosRows([]); setMatRows([]);
     }
     setLoading(false);
   }
@@ -271,10 +327,12 @@ export default function FlowInputTaxReportPage({ currentUser }) {
     const cnOnly = partCN.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
     const lktOnly = lktRows.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
     const tiOnly = theftInv.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
-    const pairCandidates = [...appOnly, ...appAround, ...cnOnly, ...lktOnly, ...tiOnly];
+    const cosOnly = cosmosRows.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
+    const matOnly = matRows.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
+    const pairCandidates = [...appOnly, ...appAround, ...cnOnly, ...lktOnly, ...tiOnly, ...cosOnly, ...matOnly];
     const matchedCount = [...flowStatus.values()].filter(v => v.matched).length;
     return { flowStatus, appOnly, pairCandidates, matchedCount };
-  }, [rows, appRows, manual, partCN, lktRows, theftInv, period]);
+  }, [rows, appRows, manual, partCN, lktRows, theftInv, cosmosRows, matRows, period]);
   const statusOf = (r, i) => match.flowStatus.get(r.id ?? ("i" + i)) || { matched: false, appRow: null };
   // แถวที่แสดงจริง (ใช้ตัวกรอง "เฉพาะไม่พบ" ทับ filtered อีกชั้น)
   const displayRows = onlyUnmatched ? filtered.filter(r => !statusOf(r).matched) : filtered;
@@ -537,8 +595,11 @@ export default function FlowInputTaxReportPage({ currentUser }) {
 // ── Popup จับคู่เอง: เรียงตามความคล้าย + ติ๊กเลือกหลายใบ (ใบสรุป = หลายใบรับ) ────
 function PairModal({ flow, candidates, saving, onPick, onClose }) {
   const [kw, setKw] = useState("");
+  const [srcFilter, setSrcFilter] = useState(""); // กรองประเภท — เช่นเลือกเฉพาะ COSMOS ให้ยอดรวมเป็นของ COSMOS ล้วน
   const [sel, setSel] = useState(() => new Set()); // key = source|doc_no
   const keyOf = a => `${a.source || ""}|${a.doc_no || ""}`;
+
+  const srcOpts = useMemo(() => [...new Set(candidates.map(a => a.source).filter(Boolean))], [candidates]);
 
   const scored = useMemo(() => {
     const list = candidates.map(a => ({
@@ -546,11 +607,13 @@ function PairModal({ flow, candidates, saving, onPick, onClose }) {
       amt: amtScore(flow, a), name: nameSim(flow.vendor_name, a.vendor_name),
     }));
     const q = kw.trim().toLowerCase();
-    const filtered = q
-      ? list.filter(({ a }) => [a.doc_no, a.vendor_name, a.project].filter(Boolean).join(" ").toLowerCase().includes(q))
-      : list;
+    const filtered = list.filter(({ a }) => {
+      if (srcFilter && a.source !== srcFilter) return false;
+      if (!q) return true;
+      return [a.doc_no, a.vendor_name, a.project].filter(Boolean).join(" ").toLowerCase().includes(q);
+    });
     return filtered.sort((x, y) => y.score - x.score);
-  }, [flow, candidates, kw]);
+  }, [flow, candidates, kw, srcFilter]);
 
   const selRows = candidates.filter(a => sel.has(keyOf(a)));
   const selBase = selRows.reduce((s, a) => s + Number(a.amount_before_vat || 0), 0);
@@ -582,6 +645,10 @@ function PairModal({ flow, candidates, saving, onPick, onClose }) {
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "10px 18px" }}>
+          <select value={srcFilter} onChange={e => { setSrcFilter(e.target.value); }} style={{ ...inp, width: 170, flex: "0 0 auto" }} title="กรองประเภท — เลือกแล้วยอดรวม/เลือกทั้งหมด จะเป็นของประเภทนั้นล้วน">
+            <option value="">📂 ประเภท: ทั้งหมด</option>
+            {srcOpts.map(s => <option key={s} value={s}>{SRC_LABEL[s] || s}</option>)}
+          </select>
           <input type="text" value={kw} onChange={e => setKw(e.target.value)} autoFocus
             placeholder="🔎 ค้นหา เลขที่เอกสาร / ผู้จำหน่าย" style={{ ...inp, flex: 1 }} />
           <button onClick={selectShown} disabled={scored.length === 0}
@@ -632,6 +699,8 @@ function PairModal({ flow, candidates, saving, onPick, onClose }) {
                         {isCN && <span style={{ ...simBadge("#fee2e2", "#991b1b"), marginLeft: 4, marginRight: 0 }}>ใบลดหนี้</span>}
                         {a.source === "lockton" && <span style={{ ...simBadge("#ede9fe", "#6d28d9"), marginLeft: 4, marginRight: 0 }}>งานรับเรื่อง</span>}
                         {a.source === "theft_invoice" && <span style={{ ...simBadge("#fce7f3", "#9d174d"), marginLeft: 4, marginRight: 0 }}>52071</span>}
+                        {a.source === "cosmos" && <span style={{ ...simBadge("#e0f2fe", "#0369a1"), marginLeft: 4, marginRight: 0 }}>{COSMOS_PLAN_LABEL[a.plan] || "COSMOS"}</span>}
+                        {a.source === "material" && <span style={{ ...simBadge("#ccfbf1", "#0f766e"), marginLeft: 4, marginRight: 0 }}>RP</span>}
                       </td>
                       <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(a.doc_date)}</td>
                       <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: isCN ? "#991b1b" : "#1d4ed8" }}>{a.doc_no || "-"}</td>

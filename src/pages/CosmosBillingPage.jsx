@@ -158,6 +158,11 @@ function ListAllPanel({ currentPlan, setMessage }) {
        PLAN_OPTS.filter(p => byPlan[p.key]?.length).map(p => {
         const items = byPlan[p.key];
         const total = items.reduce((s, r) => s + Number(r.premium || 0), 0);
+        // RSA / THEFT / THEFT_RENEWAL: เบี้ยเป็นยอดรวม VAT — ถอด 7% แสดงยอดก่อน VAT + VAT (PA ไม่มี VAT)
+        const hasVat = ["rsa", "theft", "theft_renewal"].includes(p.key);
+        const exVat = (amt) => Math.round((Number(amt || 0) / 1.07) * 100) / 100;
+        const totalBase = hasVat ? items.reduce((s, r) => s + exVat(r.premium), 0) : total;
+        const totalVat = hasVat ? Math.round((total - totalBase) * 100) / 100 : 0;
         const cnt = { pending: 0, billed: 0, paid: 0 };
         items.forEach(r => { cnt[r.pay_status] = (cnt[r.pay_status] || 0) + 1; });
         const isOpen = openPlans.has(p.key);
@@ -171,7 +176,14 @@ function ListAllPanel({ currentPlan, setMessage }) {
               {Object.entries(PAY_STATUS).map(([k, s]) => cnt[k] > 0 && (
                 <span key={k} style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: s.bg, color: s.color }}>{s.label} {cnt[k]}</span>
               ))}
-              <span style={{ marginLeft: "auto", fontWeight: 700, fontSize: 15, color: p.color }}>{items.length} รายการ · {fmt(total)} บาท</span>
+              <span style={{ marginLeft: "auto", textAlign: "right" }}>
+                <span style={{ fontWeight: 700, fontSize: 15, color: p.color }}>{items.length} รายการ · {fmt(total)} บาท</span>
+                {hasVat && (
+                  <span style={{ display: "block", fontSize: 11, fontWeight: 600, color: "#6b7280" }}>
+                    ก่อน VAT {fmt(totalBase)} · <span style={{ color: "#dc2626" }}>VAT {fmt(totalVat)}</span>
+                  </span>
+                )}
+              </span>
             </div>
             {isOpen && (
               <div style={{ borderTop: `1px solid ${p.color}44`, overflow: "auto", maxHeight: 420 }}>
@@ -201,7 +213,14 @@ function ListAllPanel({ currentPlan, setMessage }) {
                           <td style={td}>{r.customer_name || "-"}</td>
                           <td style={{ ...td, fontFamily: "monospace" }}>{r.chassis_no || "-"}</td>
                           <td style={{ ...td, fontSize: 11, color: "#6b7280" }}>{r.plan_name || "-"}</td>
-                          <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{fmt(r.premium)}</td>
+                          <td style={{ ...td, textAlign: "right", fontWeight: 600, whiteSpace: "nowrap" }}>
+                            {fmt(r.premium)}
+                            {hasVat && (
+                              <div style={{ fontSize: 10, fontWeight: 500, color: "#6b7280" }}>
+                                ก่อน VAT {fmt(exVat(r.premium))} · <span style={{ color: "#dc2626" }}>VAT {fmt(Math.round((Number(r.premium || 0) - exVat(r.premium)) * 100) / 100)}</span>
+                              </div>
+                            )}
+                          </td>
                           <td style={td}><span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: s.bg, color: s.color }}>{s.label}</span></td>
                           <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#065f46" }}>{r.paid_doc_no || "-"}</td>
                           <td style={td}>{r.paid_at ? fmtDate(r.paid_at) : "-"}</td>
@@ -212,7 +231,14 @@ function ListAllPanel({ currentPlan, setMessage }) {
                   <tfoot>
                     <tr style={{ background: "#f8fafc", fontWeight: 700 }}>
                       <td style={td} colSpan={6}>รวม {items.length} รายการ</td>
-                      <td style={{ ...td, textAlign: "right", color: p.color }}>{fmt(total)}</td>
+                      <td style={{ ...td, textAlign: "right", color: p.color, whiteSpace: "nowrap" }}>
+                        {fmt(total)}
+                        {hasVat && (
+                          <div style={{ fontSize: 10, fontWeight: 600, color: "#6b7280" }}>
+                            ก่อน VAT {fmt(totalBase)} · <span style={{ color: "#dc2626" }}>VAT {fmt(totalVat)}</span>
+                          </div>
+                        )}
+                      </td>
                       <td style={td} colSpan={3}></td>
                     </tr>
                   </tfoot>
