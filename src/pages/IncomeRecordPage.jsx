@@ -4,6 +4,7 @@ const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const CUSTOMER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-sales-get-customers";
 const ACCOUNTING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
 const MOTO_SALES_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-sales-api";
 
 function fmt(v) {
@@ -258,12 +259,14 @@ export default function IncomeRecordPage({ currentUser }) {
   async function loadMotoSales() {
     setAllocSalesLoading(true);
     try {
-      const res = await fetch(ACCOUNTING_URL, {
+      const res = await fetch(REPORT_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         // ส่ง empty string ให้ workflow template ทำงาน (COALESCE จะใช้ default 1900-9999)
         body: JSON.stringify({ action: "list_car_payment_receipts", date_from: "", date_to: "" }),
       });
-      const data = await res.json();
+      // n8n อาจตอบ body ว่างเมื่อไม่มีข้อมูล — อย่าใช้ res.json() ตรง ๆ
+      const raw = await res.text();
+      const data = raw.trim() ? JSON.parse(raw) : [];
       const arr = Array.isArray(data) ? data : (data?.rows || []);
       const getFc = s => s?.sale_finance_company || s?.finance_company || s?.finance || "";
       // แสดงทั้งหมด — ผู้ใช้ใช้ search box ค้นเอง
@@ -426,6 +429,50 @@ export default function IncomeRecordPage({ currentUser }) {
     setShowForm(true);
   }
   function closeForm() { setShowForm(false); setEditTarget(null); setForm(emptyForm()); }
+
+  // ===== เพิ่มลูกค้าใหม่ (popup ย่อ) — บันทึกเข้า customers ผ่าน moto-sales-save-customer =====
+  const [custModal, setCustModal] = useState(false);
+  const [custSaving, setCustSaving] = useState(false);
+  const [custForm, setCustForm] = useState({ title: "", first_name: "", last_name: "", id_number: "", phone: "", address: "" });
+  async function saveQuickCustomer() {
+    const name = custForm.first_name.trim();
+    if (!name) { setMessage("❌ กรอกชื่อลูกค้า/ชื่อบริษัท"); return; }
+    setCustSaving(true);
+    try {
+      // ส่งครบทุก field ตามฟอร์มหน้าบันทึกข้อมูลลูกค้า (กัน backend อ้าง key ที่ไม่มี)
+      await fetch("https://n8n-new-project-gwf2.onrender.com/webhook/moto-sales-save-customer", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customer_group: "", customer_level: "", title: custForm.title,
+          contact_date: new Date().toISOString().slice(0, 10),
+          is_finance: false, is_insurance: false,
+          first_name: name, nickname: "", show_on_wholesale: false,
+          last_name: custForm.last_name.trim(), gender: "", birth_date: "", age: "",
+          nationality: "ไทย", id_type: "", id_number: custForm.id_number.trim(),
+          id_expiry_date: "", id_issued_by: "", email: "", contact_address_type: "id_card",
+          addr_house_no: custForm.address.trim(), addr_moo: "", addr_village: "", addr_soi: "", addr_road: "",
+          addr_subdistrict: "", addr_district: "", addr_province: "", addr_postal_code: "",
+          phone: custForm.phone.trim(), fax: "", status: "active",
+        }),
+      });
+      // โหลดรายชื่อใหม่ แล้วเลือกคนที่เพิ่งเพิ่มอัตโนมัติ (หาแบบชื่อ+เลขบัตรตรง เอา id ล่าสุด)
+      const res = await fetch(CUSTOMER_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
+      const data = await res.json();
+      const arr = Array.isArray(data) ? data : [];
+      setCustomers(arr);
+      const hit = arr.filter(c => String(c.first_name || "").trim() === name &&
+          (!custForm.id_number.trim() || String(c.id_number || "").trim() === custForm.id_number.trim()))
+        .sort((a, b) => Number(b.customer_id) - Number(a.customer_id))[0];
+      if (hit) {
+        const fullName = [hit.title, hit.first_name, hit.last_name].filter(Boolean).join(" ").trim();
+        setForm(f => ({ ...f, customer_id: hit.customer_id, customer_name: fullName, customer_tax_id: hit.id_number || "", customer_address: custForm.address.trim() }));
+      }
+      setMessage(`✅ เพิ่มลูกค้า "${[custForm.title, name].filter(Boolean).join(" ")}" แล้ว`);
+      setCustModal(false);
+      setCustForm({ title: "", first_name: "", last_name: "", id_number: "", phone: "", address: "" });
+    } catch (e) { setMessage("❌ เพิ่มลูกค้าไม่สำเร็จ: " + e.message); }
+    setCustSaving(false);
+  }
 
   function onCustomerChange(customerId) {
     const v = customers.find(x => String(x.customer_id) === String(customerId));
@@ -700,21 +747,34 @@ export default function IncomeRecordPage({ currentUser }) {
   // Tab data
   const draftDocs = filtered.filter(d => (d.status || "draft") === "draft");
   const paidDocs = filtered.filter(d => d.status === "paid");
+  // ยอดที่ต้องรับ = ส่วนที่ค้างจริง (ใบที่รับบางส่วนไปแล้ว เช่นหักกลบจากหน้าค่าใช้จ่าย เหลือเท่าไหร่รับเท่านั้น)
+  const docRemaining = (d) => d.remaining_amount != null
+    ? Number(d.remaining_amount)
+    : Math.max(0, Number(d.net_to_pay || d.total || 0) - Number(d.received_amount || 0));
   // Group paid by paid_doc_no
   const paidGroups = {};
   paidDocs.forEach(d => {
     const key = d.paid_doc_no || `_${d.income_doc_id}`;
-    if (!paidGroups[key]) paidGroups[key] = { paid_doc_no: d.paid_doc_no, paid_at: d.paid_at, payment_method: d.payment_method, from_bank_account_id: d.from_bank_account_id, items: [], total: 0, net: 0, wht: 0 };
+    if (!paidGroups[key]) paidGroups[key] = {
+      paid_doc_no: d.paid_doc_no, paid_at: d.paid_at, payment_method: d.payment_method, from_bank_account_id: d.from_bank_account_id,
+      items: [], total: 0, net: 0, wht: 0, expected: 0,
+      // ยอดเงินที่รับจริงของใบรับเงินนี้ (รวมจาก income_payment_breakdowns — ใบที่หักกลบบางส่วนมาก่อน จะน้อยกว่ายอดใบ)
+      received: Number(d.paid_doc_amount || 0),
+      breakdowns: Array.isArray(d.paid_breakdowns) ? d.paid_breakdowns : [],
+    };
     paidGroups[key].items.push(d);
     paidGroups[key].total += Number(d.total || 0);
     paidGroups[key].net += Number(d.net_to_pay || d.total || 0);
     paidGroups[key].wht += Number(d.wht_amount || 0);
+    paidGroups[key].expected += docRemaining(d);
   });
   const paidGroupsList = Object.values(paidGroups);
+  // ยอดที่โชว์ต่อใบรับเงิน: ใช้ยอดรับจริงก่อน → ยอดค้าง ณ ตอนรับ → ยอดสุทธิรวม (ใบเก่าที่ไม่มี breakdown)
+  const receiptAmount = (g) => g.received > 0 ? g.received : (g.expected > 0 ? g.expected : g.net);
 
   const selectedIds = Object.keys(selected).filter(k => selected[k]).map(Number);
   const selectedRows = draftDocs.filter(d => selectedIds.includes(d.income_doc_id));
-  const selectedNet = selectedRows.reduce((s, d) => s + Number(d.net_to_pay || d.total || 0), 0);
+  const selectedNet = selectedRows.reduce((s, d) => s + docRemaining(d), 0);
 
   function toggleOne(id) { setSelected(s => ({ ...s, [id]: !s[id] })); }
   function toggleAll() {
@@ -746,15 +806,27 @@ export default function IncomeRecordPage({ currentUser }) {
   }
   function openEditPayDialog(g) {
     if (!g.paid_doc_no) return;
-    const total = Number(g.net || g.total || 0);
+    // ยอดที่ต้องรับของใบนี้ = ยอดค้างจริง ณ ตอนรับ (ใบที่หักกลบบางส่วนไปก่อน คิดเฉพาะส่วนที่เหลือ) ไม่ใช่ยอดสุทธิเต็มใบ
+    const total = g.expected > 0 ? Number(g.expected) : Number(g.net || g.total || 0);
     setEditPayDocNo(g.paid_doc_no);
     setEditTotalRequired(total);
     setPayForm({
       paid_date: g.paid_at ? String(g.paid_at).slice(0, 10) : todayISO(),
       payment_note: "",
     });
-    const method = g.payment_method && g.payment_method !== "ผสม" ? g.payment_method : "โอน";
-    setPayments([{ method, amount: total, from_bank_account_id: g.from_bank_account_id || "", credit_note_no: "" }]);
+    // prefill จาก breakdown จริงใน DB — ถ้าไม่มี (ใบเก่า) ค่อย fallback เป็นแถวเดียวเท่ายอดที่ต้องรับ
+    const bds = (g.breakdowns || []).filter(x => Number(x.amount) > 0);
+    if (bds.length > 0) {
+      setPayments(bds.map(x => ({
+        method: x.method || "โอน",
+        amount: Number(x.amount) || 0,
+        from_bank_account_id: x.from_bank_account_id || (x.method === "โอน" ? g.from_bank_account_id || "" : ""),
+        credit_note_no: x.credit_note_no || "",
+      })));
+    } else {
+      const method = g.payment_method && g.payment_method !== "ผสม" ? g.payment_method : "โอน";
+      setPayments([{ method, amount: total, from_bank_account_id: g.from_bank_account_id || "", credit_note_no: "" }]);
+    }
     setPayDialog(true);
     fetchAvailableCreditNotes();
   }
@@ -960,7 +1032,7 @@ export default function IncomeRecordPage({ currentUser }) {
         <>
           <div style={{ padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12 }}>
             <span>💵 ใบรับเงิน: <strong>{paidGroupsList.length}</strong></span>
-            <span style={{ marginLeft: 14, color: "#dc2626" }}>ยอดรวม: <strong>{fmt(paidGroupsList.reduce((s, g) => s + g.net, 0))}</strong> บาท</span>
+            <span style={{ marginLeft: 14, color: "#dc2626" }}>ยอดรวม: <strong>{fmt(paidGroupsList.reduce((s, g) => s + receiptAmount(g), 0))}</strong> บาท</span>
           </div>
           {paidGroupsList.length === 0 ? (
             <div style={{ padding: 30, textAlign: "center", color: "#9ca3af", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>ยังไม่มีประวัติ</div>
@@ -973,7 +1045,12 @@ export default function IncomeRecordPage({ currentUser }) {
                   <span style={{ fontSize: 12 }}>📅 {fmtDate(g.paid_at)}</span>
                   <span style={{ fontSize: 12 }}>💳 {g.payment_method || "-"}</span>
                   {bank && <span style={{ fontSize: 12 }}>🏦 {bank.bank_name} · {bank.account_no}</span>}
-                  <span style={{ marginLeft: "auto", fontWeight: 700, color: "#065f46" }}>{g.items.length} ใบ · {fmt(g.net)}</span>
+                  <span style={{ marginLeft: "auto", fontWeight: 700, color: "#065f46" }}>
+                    {g.items.length} ใบ · {fmt(receiptAmount(g))}
+                    {receiptAmount(g) < g.net - 0.01 && (
+                      <span style={{ fontWeight: 400, fontSize: 11, color: "#6b7280" }}> (ยอดใบรวม {fmt(g.net)} — รับบางส่วนมาก่อนแล้ว)</span>
+                    )}
+                  </span>
                   <button onClick={() => openEditPayDialog(g)} style={{ ...btnSm, background: "#0369a1" }}>✏️ แก้ไข</button>
                   <button onClick={() => cancelPaymentGroup(g)} style={{ ...btnSm, background: "#dc2626" }}>✕ ยกเลิก</button>
                 </div>
@@ -1013,12 +1090,58 @@ export default function IncomeRecordPage({ currentUser }) {
       {showForm && <FormModal
         form={form} setForm={setForm} editTarget={editTarget}
         customers={customers} incomeCategories={incomeCategories} bankAccounts={bankAccounts}
+        onAddCustomer={() => setCustModal(true)}
         onCustomerChange={onCustomerChange}
         onItemChange={onItemChange} addItem={addItem} removeItem={removeItem}
         subtotal={subtotal} discountAmount={discountAmount} vatAmount={vatAmount}
         totalIncVat={totalIncVat} whtBase={whtBase} whtAmount={whtAmount} netToPay={netToPay}
         onClose={closeForm} onSave={handleSave} saving={saving}
       />}
+
+      {/* Quick-add Customer Modal (ซ้อนบน FormModal) */}
+      {custModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1500 }}
+          onClick={() => !custSaving && setCustModal(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 20, borderRadius: 12, width: 460, maxWidth: "94vw" }}>
+            <h3 style={{ margin: "0 0 14px", color: "#15803d" }}>➕ เพิ่มลูกค้าใหม่</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>คำนำหน้า</label>
+                <select value={custForm.title} onChange={e => setCustForm(f => ({ ...f, title: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
+                  <option value="">—</option>
+                  {["นาย", "นาง", "นางสาว", "บจก.", "บมจ.", "หจก.", "บริษัท", "ร้าน", "กองทุนรวม"].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>ชื่อ / ชื่อบริษัท *</label>
+                <input value={custForm.first_name} onChange={e => setCustForm(f => ({ ...f, first_name: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} autoFocus />
+              </div>
+              <div style={{ gridColumn: "1 / span 2" }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>นามสกุล (บุคคล)</label>
+                <input value={custForm.last_name} onChange={e => setCustForm(f => ({ ...f, last_name: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ gridColumn: "1 / span 2" }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>เลขบัตร ปชช. / เลขผู้เสียภาษี</label>
+                <input value={custForm.id_number} onChange={e => setCustForm(f => ({ ...f, id_number: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ gridColumn: "1 / span 2" }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>เบอร์โทร</label>
+                <input value={custForm.phone} onChange={e => setCustForm(f => ({ ...f, phone: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ gridColumn: "1 / span 2" }}>
+                <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>ที่อยู่</label>
+                <input value={custForm.address} onChange={e => setCustForm(f => ({ ...f, address: e.target.value }))} style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} placeholder="ที่อยู่บรรทัดเดียว" />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+              <button onClick={() => setCustModal(false)} disabled={custSaving} style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={saveQuickCustomer} disabled={custSaving} style={{ padding: "8px 20px", background: custSaving ? "#9ca3af" : "#15803d", color: "#fff", border: "none", borderRadius: 8, cursor: custSaving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                {custSaving ? "💾 ..." : "💾 บันทึกลูกค้า"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Payment Dialog */}
       {payDialog && (
@@ -1082,6 +1205,9 @@ export default function IncomeRecordPage({ currentUser }) {
                           <option value="เงินสด">เงินสด</option>
                           <option value="เช็ค">เช็ค</option>
                           <option value="ใบลดหนี้">ใบลดหนี้</option>
+                          {p.method && !["โอน", "เงินสด", "เช็ค", "ใบลดหนี้"].includes(p.method) && (
+                            <option value={p.method}>{p.method}</option>
+                          )}
                         </select>
                         <input type="number" step="0.01" min="0" value={p.amount}
                           onChange={e => updatePayment(idx, { amount: e.target.value })}
@@ -1717,11 +1843,25 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
                 <td style={{ ...td, textAlign: "right", color: "#dc2626" }}>{Number(d.wht_amount) > 0 ? fmt(d.wht_amount) : "-"}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(d.net_to_pay || d.total)}</td>
                 <td style={td}>
-                  <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
-                    background: status === "paid" ? "#d1fae5" : status === "cancelled" ? "#fee2e2" : "#fef3c7",
-                    color: status === "paid" ? "#065f46" : status === "cancelled" ? "#991b1b" : "#78350f" }}>
-                    {status === "paid" ? "ชำระแล้ว" : status === "cancelled" ? "ยกเลิก" : "ร่าง"}
-                  </span>
+                  {(() => {
+                    // รับบางส่วนแล้ว (หักกลบจากหน้าค่าใช้จ่าย ฯลฯ) — โชว์ยอดรับแล้ว + ค้าง
+                    const received = Number(d.received_amount || 0);
+                    const isPartial = status !== "paid" && status !== "cancelled" && received > 0;
+                    return (
+                      <>
+                        <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
+                          background: status === "paid" ? "#d1fae5" : status === "cancelled" ? "#fee2e2" : isPartial ? "#e0e7ff" : "#fef3c7",
+                          color: status === "paid" ? "#065f46" : status === "cancelled" ? "#991b1b" : isPartial ? "#3730a3" : "#78350f" }}>
+                          {status === "paid" ? "ชำระแล้ว" : status === "cancelled" ? "ยกเลิก" : isPartial ? "รับบางส่วน" : "ร่าง"}
+                        </span>
+                        {isPartial && (
+                          <div style={{ fontSize: 10, marginTop: 2, color: "#3730a3" }}>
+                            รับแล้ว {fmt(received)}<br />ค้าง {fmt(d.remaining_amount != null ? d.remaining_amount : Math.max(0, Number(d.net_to_pay || d.total || 0) - received))}
+                          </div>
+                        )}
+                      </>
+                    );
+                  })()}
                 </td>
                 <td style={{ ...td, textAlign: "center" }}>
                   <KebabMenu d={d} status={status} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} />
@@ -1735,7 +1875,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
   );
 }
 
-function FormModal({ form, setForm, editTarget, customers, incomeCategories, bankAccounts, onCustomerChange, onItemChange, addItem, removeItem, subtotal, discountAmount, vatAmount, totalIncVat, whtBase, whtAmount, netToPay, onClose, onSave, saving }) {
+function FormModal({ form, setForm, editTarget, customers, incomeCategories, bankAccounts, onCustomerChange, onAddCustomer, onItemChange, addItem, removeItem, subtotal, discountAmount, vatAmount, totalIncVat, whtBase, whtAmount, netToPay, onClose, onSave, saving }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000, padding: 20, overflowY: "auto" }}
       onClick={() => !saving && onClose()}>
@@ -1765,13 +1905,21 @@ function FormModal({ form, setForm, editTarget, customers, incomeCategories, ban
           </div>
           <div style={{ gridColumn: "1 / span 2" }}>
             <label style={lbl}>ลูกค้า/ผู้ชำระ *</label>
-            <select value={form.customer_id} onChange={e => onCustomerChange(e.target.value)} style={inp}>
-              <option value="">-- เลือกลูกค้า --</option>
-              {customers.map(c => {
-                const name = [c.title, c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.customer_name || "(ไม่มีชื่อ)";
-                return <option key={c.customer_id} value={c.customer_id}>{name}{c.id_number ? ` (${c.id_number})` : ""}</option>;
-              })}
-            </select>
+            <div style={{ display: "flex", gap: 6 }}>
+              <select value={form.customer_id} onChange={e => onCustomerChange(e.target.value)} style={{ ...inp, flex: 1 }}>
+                <option value="">-- เลือกลูกค้า --</option>
+                {customers.map(c => {
+                  const name = [c.title, c.first_name, c.last_name].filter(Boolean).join(" ").trim() || c.customer_name || "(ไม่มีชื่อ)";
+                  return <option key={c.customer_id} value={c.customer_id}>{name}{c.id_number ? ` (${c.id_number})` : ""}</option>;
+                })}
+              </select>
+              {onAddCustomer && (
+                <button type="button" onClick={onAddCustomer} title="เพิ่มลูกค้าใหม่"
+                  style={{ padding: "0 14px", background: "#15803d", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 16, fontWeight: 700, flex: "0 0 auto" }}>
+                  +
+                </button>
+              )}
+            </div>
           </div>
           {form.customer_address && (
             <div style={{ gridColumn: "1 / span 2", padding: "6px 10px", background: "#f8fafc", borderRadius: 6, fontSize: 12, color: "#6b7280" }}>

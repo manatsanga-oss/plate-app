@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 const ACCOUNTING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
 
 function fmt(v) { return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(v) {
@@ -25,11 +26,13 @@ export default function SalesByPaymentReportPage() {
   async function fetchData() {
     setLoading(true); setMessage("");
     try {
-      const res = await fetch(ACCOUNTING_URL, {
+      const res = await fetch(REPORT_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "list_car_payment_receipts", date_from: dateFrom, date_to: dateTo }),
       });
-      const data = await res.json();
+      // n8n อาจตอบ body ว่างเมื่อไม่มีข้อมูล — อย่าใช้ res.json() ตรง ๆ
+      const raw = await res.text();
+      const data = raw.trim() ? JSON.parse(raw) : [];
       setRows(Array.isArray(data) ? data : (data?.rows || []));
     } catch (e) {
       setRows([]); setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e.message || e).slice(0, 100));

@@ -1,6 +1,9 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { statusOf, overAmount, combinedPaid } from "../utils/carPaymentStatus";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/grouplease-api";
+const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
+const ACCOUNTING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 
 // บริษัทรับฝากค่างวด — ใช้ตาราง grouplease_* ร่วมกัน แยกด้วยคอลัมน์ company
 const COMPANIES = [
@@ -117,10 +120,26 @@ export default function PayDepositPage({ currentUser }) {
   const [reportPage, setReportPage] = useState(1);
   const REPORT_PAGE_SIZE = 15;
 
+  // ---- Tab Over (ไฟแนนท์โอนเงินเกิน — รถสถานะชำระเกินจากรายงานรับชำระเงินรายคัน) ----
+  const [overItems, setOverItems] = useState([]);
+  const [overLoading, setOverLoading] = useState(false);
+  // รายการปรับปรุงค่าใช้จ่ายขายรถใหม่ ฮอนด้า/ยามาฮ่า จากใบเสร็จรับเงินรับชำระอื่นๆ (other_income)
+  const [adjItems, setAdjItems] = useState([]);
+  // สถานะเงินรับฝากรายคัน (ตาราง overpay_refund_status) — ไม่มีแถว = "รับฝาก"
+  const [overStatusMap, setOverStatusMap] = useState({}); // { tax_invoice_no: row }
+  const [refundModal, setRefundModal] = useState(null); // แถว over ที่กำลังบันทึกโอนเงิน/ยึด
+  const [refundForm, setRefundForm] = useState({ status: "จ่ายคืน", paid_date: "", payment_method: "โอน", transaction_id: "", note: "", from_bank_account_id: "" });
+  const [refundSaving, setRefundSaving] = useState(false);
+  // เริ่มที่ 1 พ.ค. 2569 (ก่อนหน้านั้น = ข้อมูลยกมา ถือว่าครบเสมอ ไม่มีทางติดสถานะชำระเกิน)
+  const [overFrom, setOverFrom] = useState("2026-05-01");
+  const [overTo, setOverTo] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`);
+  const [overSearch, setOverSearch] = useState("");
+
   useEffect(() => {
     if (tab === "pending") fetchPending();
     if (tab === "history") fetchPayments();
     if (tab === "report") fetchReport();
+    if (tab === "over") fetchOver();
     /* eslint-disable-next-line */
   }, [tab, company]);
 
@@ -196,6 +215,132 @@ export default function PayDepositPage({ currentUser }) {
       });
       setReport(flat);
     } catch { setReport([]); }
+  }
+
+  // รถที่สถานะ "ชำระเกิน" จากรายงานรับชำระเงินรายคัน (ทุกไฟแนนท์) — เงินรับฝากไว้รอโอนคืนไฟแนนท์
+  async function fetchOver() {
+    setOverLoading(true);
+    try {
+      const [recRes, mkRes, adjRes] = await Promise.all([
+        fetch(REPORT_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_car_payment_receipts", date_from: overFrom, date_to: overTo }),
+        }),
+        fetch(ACCOUNTING_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_price_markups" }),
+        }),
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_overpay_adjustments", date_from: overFrom, date_to: overTo }),
+        }),
+        fetchOverStatus(),
+      ]);
+      const recRaw = await recRes.text();
+      const recData = recRaw.trim() ? JSON.parse(recRaw) : [];
+      const rows = Array.isArray(recData) ? recData : (recData?.rows || []);
+      let markups = [];
+      try {
+        const mkRaw = await mkRes.text();
+        const mk = mkRaw.trim() ? JSON.parse(mkRaw) : [];
+        markups = (Array.isArray(mk) ? mk : []).filter(m => m.status === "active");
+      } catch { /* ไม่มี markups → statusOf ยังทำงานได้ แค่ paid_rule อาจไม่ match */ }
+      const over = rows
+        .filter(r => statusOf(r, markups) === "over")
+        .map(r => ({ ...r, over_amount: overAmount(r) }));
+      setOverItems(over);
+      try {
+        const adjRaw = await adjRes.text();
+        const adj = adjRaw.trim() ? JSON.parse(adjRaw) : [];
+        setAdjItems(Array.isArray(adj) ? adj : (adj?.rows || []));
+      } catch { setAdjItems([]); }
+    } catch { setOverItems([]); setAdjItems([]); }
+    setOverLoading(false);
+  }
+
+  // โหลดสถานะเงินรับฝากรายคัน (รับฝาก/จ่ายคืน/ยึด) จาก overpay_refund_status
+  async function fetchOverStatus() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_overpay_status" }),
+      });
+      const raw = await res.text();
+      const data = raw.trim() ? JSON.parse(raw) : [];
+      const rows = Array.isArray(data) ? data : (data?.rows || []);
+      const map = {};
+      rows.forEach(s => { if (s.tax_invoice_no) map[s.tax_invoice_no] = s; });
+      setOverStatusMap(map);
+    } catch { /* ตารางยังไม่มี/webhook ยังไม่ update → ทุกคันเป็น รับฝาก */ }
+  }
+
+  function openRefund(r) {
+    if (bankAccounts.length === 0) fetchBankAccounts();
+    setRefundForm({
+      status: "จ่ายคืน",
+      paid_date: new Date().toISOString().slice(0, 10),
+      payment_method: "โอน",
+      transaction_id: "",
+      note: "",
+      from_bank_account_id: "",
+    });
+    setRefundModal(r);
+  }
+
+  async function submitRefund() {
+    if (!refundForm.paid_date) { alert("กรอกวันที่"); return; }
+    const needBank = refundForm.status === "จ่ายคืน" && ["โอน", "หักบัญชี"].includes(refundForm.payment_method);
+    if (needBank && !refundForm.from_bank_account_id) { alert("กรุณาเลือกบัญชีโอนจาก"); return; }
+    setRefundSaving(true);
+    try {
+      const r = refundModal;
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_overpay_status",
+          tax_invoice_no: r.tax_invoice_no || "",
+          sale_invoice_no: r.sale_invoice_no || "",
+          customer_name: r.customer_name || r.sale_customer_name || "",
+          finance_company: r.sale_finance_company || "",
+          over_amount: r.over_amount || 0,
+          status: refundForm.status,
+          paid_date: refundForm.paid_date,
+          payment_method: refundForm.status === "ยึด" ? "" : refundForm.payment_method,
+          transaction_id: refundForm.status === "ยึด" ? "" : refundForm.transaction_id,
+          from_bank_account_id: refundForm.status === "ยึด" ? null : (Number(refundForm.from_bank_account_id) || null),
+          note: refundForm.note,
+          created_by: currentUser?.name || "",
+        }),
+      });
+      const raw = await res.text();
+      const data = raw.trim() ? JSON.parse(raw) : {};
+      if (data?.result === "saved") {
+        setRefundModal(null);
+        fetchOverStatus();
+      } else {
+        alert("บันทึกไม่สำเร็จ — ตรวจสอบว่า re-import workflow แล้วหรือยัง");
+      }
+    } catch (e) { alert("บันทึกไม่สำเร็จ: " + e.message); }
+    setRefundSaving(false);
+  }
+
+  async function cancelRefund(r) {
+    const st = overStatusMap[r.tax_invoice_no]?.status || "";
+    const label = r._adj ? `ใบเสร็จ ${r._receipt_no}` : `ใบกำกับ ${r.tax_invoice_no}`;
+    if (!window.confirm(`ยกเลิกสถานะ "${st}" ของ${label} กลับเป็น "รับฝาก" ?`)) return;
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "cancel_overpay_status", tax_invoice_no: r.tax_invoice_no || "" }),
+      });
+      fetchOverStatus();
+    } catch (e) { alert("ยกเลิกไม่สำเร็จ: " + e.message); }
+  }
+
+  // ชื่อย่อบัญชีธนาคารจาก account_id (ใช้แสดงใต้ป้ายสถานะ)
+  function bankShort(id) {
+    const b = bankAccounts.find(x => x.account_id === Number(id));
+    return b ? b.bank_name : "";
   }
 
   const selectedList = useMemo(() =>
@@ -502,6 +647,7 @@ export default function PayDepositPage({ currentUser }) {
           ["pending", "📥 รับฝากค้างโอน"],
           ["history", "📋 ประวัติการจ่ายเงิน"],
           ["report", "📊 รายงาน"],
+          ["over", "💸 โอนเงินเกิน (รอคืนไฟแนนท์)"],
         ].map(([k, label]) => (
           <button key={k} onClick={() => setTab(k)}
             style={{
@@ -719,6 +865,271 @@ export default function PayDepositPage({ currentUser }) {
         );
       })()}
 
+      {/* ============ TAB 4: OVER — เงินรับฝากรอโอนคืนไฟแนนท์ (รถสถานะชำระเกินจากรายงานรับชำระเงินรายคัน) ============ */}
+      {tab === "over" && (() => {
+        const BRANCH_LABEL = { PAPAO: "ป.เปา", NAKORNLUANG: "นครหลวง", SINGCHAI: "สิงห์ชัย" };
+        const kw = overSearch.trim().toLowerCase();
+        const filtered = overItems.filter(r => {
+          if (!kw) return true;
+          return [r.customer_name, r.sale_customer_name, r.sale_finance_company, r.tax_invoice_no, r.sale_invoice_no, r.chassis_no, r.engine_no, r.model_name]
+            .filter(Boolean).join(" ").toLowerCase().includes(kw);
+        });
+        // สถานะรายคัน: ไม่มีแถวในตารางสถานะ = "รับฝาก"
+        const stOf = (r) => overStatusMap[r.tax_invoice_no]?.status || "รับฝาก";
+        const pendingRows = filtered.filter(r => stOf(r) === "รับฝาก");
+        const paidRows = filtered.filter(r => stOf(r) === "จ่ายคืน");
+        const seizedRows = filtered.filter(r => stOf(r) === "ยึด");
+        const totalOver = pendingRows.reduce((s, r) => s + r.over_amount, 0);
+        // สรุปยอดรอโอนคืนแยกตามไฟแนนท์ (เฉพาะสถานะ รับฝาก)
+        const byFinance = {};
+        pendingRows.forEach(r => {
+          const fc = r.sale_finance_company || "(ไม่ทราบไฟแนนท์)";
+          if (!byFinance[fc]) byFinance[fc] = { count: 0, amount: 0 };
+          byFinance[fc].count += 1;
+          byFinance[fc].amount += r.over_amount;
+        });
+        const ST_STYLE = {
+          "รับฝาก": { background: "#fef3c7", color: "#b45309", border: "1px solid #fbbf24" },
+          "จ่ายคืน": { background: "#dcfce7", color: "#15803d", border: "1px solid #86efac" },
+          "ยึด": { background: "#fee2e2", color: "#b91c1c", border: "1px solid #fca5a5" },
+        };
+        return (
+          <div>
+            <div style={{ padding: 10, background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8, marginBottom: 10, fontSize: 13 }}>
+              💡 รถที่สถานะ <b style={{ color: "#b45309" }}>ชำระเกิน</b> จากรายงานรับชำระเงินรายคัน — ยอดส่วนเกินถือเป็น<b>เงินรับฝากไว้ รอโอนคืนไฟแนนท์</b> (ทุกไฟแนนท์)
+            </div>
+            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+              <label>วันที่ใบกำกับ: </label>
+              <input type="date" value={overFrom} onChange={e => setOverFrom(e.target.value)} />
+              <span>ถึง</span>
+              <input type="date" value={overTo} onChange={e => setOverTo(e.target.value)} />
+              <input type="text" placeholder="🔎 ค้นหาลูกค้า / ไฟแนนท์ / เลขใบกำกับ / เลขถัง"
+                value={overSearch} onChange={e => setOverSearch(e.target.value)}
+                style={{ padding: 6, minWidth: 260, border: "1px solid #ccc", borderRadius: 4 }} />
+              <button onClick={fetchOver} style={btnPrimary}>🔍 ค้นหา</button>
+              <div style={{ flex: 1 }}></div>
+              <div style={{ padding: "8px 16px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontWeight: "bold" }}>
+                💰 รวมรอโอนคืน: <span style={{ color: "#b45309" }}>{fmt(totalOver)}</span> บาท ({pendingRows.length} คัน)
+              </div>
+              {paidRows.length > 0 && (
+                <div style={{ padding: "8px 16px", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 8, fontWeight: "bold" }}>
+                  ✅ จ่ายคืนแล้ว: <span style={{ color: "#15803d" }}>{fmt(paidRows.reduce((s, r) => s + r.over_amount, 0))}</span> บาท ({paidRows.length} คัน)
+                </div>
+              )}
+              {seizedRows.length > 0 && (
+                <div style={{ padding: "8px 16px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8, fontWeight: "bold" }}>
+                  🔒 ยึด: <span style={{ color: "#b91c1c" }}>{fmt(seizedRows.reduce((s, r) => s + r.over_amount, 0))}</span> บาท ({seizedRows.length} คัน)
+                </div>
+              )}
+            </div>
+
+            {/* สรุปแยกตามไฟแนนท์ */}
+            {Object.keys(byFinance).length > 0 && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                {Object.entries(byFinance).sort((a, b) => b[1].amount - a[1].amount).map(([fc, v]) => (
+                  <div key={fc} style={{ padding: "6px 14px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 20, fontSize: 13 }}>
+                    <b>{fc}</b>: {v.count} คัน · <b style={{ color: "#c2410c" }}>{fmt(v.amount)}</b>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {overLoading ? <p>กำลังโหลด...</p> : filtered.length === 0 ? (
+              <p style={{ color: "#666" }}>ไม่มีรถสถานะชำระเกินในช่วงวันที่ที่เลือก</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={tableStyle}>
+                  <thead>
+                    <tr style={{ background: "#1e40af", color: "#fff" }}>
+                      <th>สังกัด</th>
+                      <th>เลขใบกำกับ</th>
+                      <th>วันที่</th>
+                      <th>ลูกค้า</th>
+                      <th>ไฟแนนท์</th>
+                      <th>รุ่น</th>
+                      <th>เลขถัง</th>
+                      <th style={{ textAlign: "right" }}>ยอดใบกำกับ</th>
+                      <th style={{ textAlign: "right" }}>รับชำระรวม</th>
+                      <th style={{ textAlign: "right" }}>ยอดเกิน (รอโอนคืน)</th>
+                      <th>ใบขาย</th>
+                      <th>สถานะ</th>
+                      <th>จัดการ</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((r, i) => {
+                      const st = stOf(r);
+                      const stRow = overStatusMap[r.tax_invoice_no];
+                      return (
+                        <tr key={i} style={{ background: st === "จ่ายคืน" ? "#f0fdf4" : st === "ยึด" ? "#fef2f2" : "#fffbeb" }}>
+                          <td>{BRANCH_LABEL[r.branch] || r.branch || "-"}</td>
+                          <td style={{ fontFamily: "monospace" }}>{r.tax_invoice_no}</td>
+                          <td>{r.invoice_date ? String(r.invoice_date).slice(0, 10) : "-"}</td>
+                          <td>{r.customer_name || r.sale_customer_name || "-"}</td>
+                          <td style={{ fontWeight: 600, color: "#6d28d9" }}>{r.sale_finance_company || "-"}</td>
+                          <td>{r.model_name || "-"}</td>
+                          <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.chassis_no || "-"}</td>
+                          <td style={{ textAlign: "right" }}>{fmt(r.total_amount)}</td>
+                          <td style={{ textAlign: "right" }}>{fmt(combinedPaid(r))}</td>
+                          <td style={{ textAlign: "right", fontWeight: "bold", color: "#c2410c" }}>{fmt(r.over_amount)}</td>
+                          <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.sale_invoice_no || "-"}</td>
+                          <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                            <span style={{ ...ST_STYLE[st], padding: "3px 10px", borderRadius: 12, fontSize: 12, fontWeight: 700 }}>{st}</span>
+                            {stRow?.paid_date && (
+                              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                                {String(stRow.paid_date).slice(0, 10)}{stRow.payment_method ? ` · ${stRow.payment_method}` : ""}{stRow.from_bank_account_id && bankShort(stRow.from_bank_account_id) ? ` · ${bankShort(stRow.from_bank_account_id)}` : ""}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ whiteSpace: "nowrap" }}>
+                            {st === "รับฝาก" ? (
+                              <button onClick={() => openRefund(r)}
+                                style={{ ...btnSmall, background: "#10b981", color: "#fff" }}>💸 บันทึกโอนเงิน</button>
+                            ) : (
+                              <button onClick={() => cancelRefund(r)}
+                                style={{ ...btnSmall, background: "#dc2626", color: "#fff" }}>✕ ยกเลิก</button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot style={{ background: "#fef9c3", fontWeight: 700 }}>
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: "right" }}>รวม {filtered.length} คัน</td>
+                      <td style={{ textAlign: "right" }}>{fmt(filtered.reduce((s, r) => s + Number(r.total_amount || 0), 0))}</td>
+                      <td style={{ textAlign: "right" }}>{fmt(filtered.reduce((s, r) => s + combinedPaid(r), 0))}</td>
+                      <td style={{ textAlign: "right", color: "#c2410c" }}>{fmt(filtered.reduce((s, r) => s + r.over_amount, 0))}</td>
+                      <td colSpan={3}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+
+            {/* รายการปรับปรุงค่าใช้จ่ายขายรถใหม่ ฮอนด้า/ยามาฮ่า — จากใบเสร็จรับเงินรับชำระอื่นๆ */}
+            {(() => {
+              const adjFiltered = adjItems.filter(a => {
+                if (!kw) return true;
+                return [a.customer_name, a.receipt_no, a.oc_no, a.description, a.branch_code]
+                  .filter(Boolean).join(" ").toLowerCase().includes(kw);
+              });
+              if (adjFiltered.length === 0) return null;
+              const adjAmount = (a) => Number(a.line_amount || a.total || 0);
+              // สถานะรายการปรับปรุง — ใช้ตาราง overpay_refund_status ร่วมกับตารางบน key = ADJ:เลขใบเสร็จ#บรรทัด
+              // (ไม่ใช้ item_id เพราะ upload ซ้ำจะ DELETE+INSERT ทำให้ id เปลี่ยน)
+              const adjKey = (a) => `ADJ:${a.receipt_no || ""}#${a.line_order || ""}`;
+              const adjSt = (a) => overStatusMap[adjKey(a)]?.status || "รับฝาก";
+              // แปลงเป็น pseudo-row ให้ modal/ปุ่มใช้ร่วมกับตารางชำระเกินได้
+              const adjAsRow = (a) => ({
+                tax_invoice_no: adjKey(a),
+                sale_invoice_no: a.oc_no || "",
+                customer_name: a.customer_name || "",
+                sale_finance_company: "",
+                over_amount: adjAmount(a),
+                _adj: true,
+                _receipt_no: a.receipt_no || "",
+                _description: a.description || "",
+              });
+              const adjPending = adjFiltered.filter(a => adjSt(a) === "รับฝาก");
+              const adjPaid = adjFiltered.filter(a => adjSt(a) === "จ่ายคืน");
+              const adjSeized = adjFiltered.filter(a => adjSt(a) === "ยึด");
+              const adjTotal = adjFiltered.reduce((s, a) => s + adjAmount(a), 0);
+              const hondaRows = adjPending.filter(a => (a.description || "").includes("ฮอนด้า"));
+              const yamahaRows = adjPending.filter(a => (a.description || "").includes("ยามาฮ่า"));
+              return (
+                <div style={{ marginTop: 24 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                    <h3 style={{ margin: 0, fontSize: 16 }}>🧾 ปรับปรุงค่าใช้จ่ายขายรถใหม่ (จากใบเสร็จรับเงินรับชำระอื่นๆ)</h3>
+                    <div style={{ padding: "4px 12px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 20, fontSize: 13 }}>
+                      รับฝาก: <b>{adjPending.length}</b> รายการ · <b style={{ color: "#b45309" }}>{fmt(adjPending.reduce((s, a) => s + adjAmount(a), 0))}</b> บาท
+                    </div>
+                    {adjPaid.length > 0 && (
+                      <div style={{ padding: "4px 12px", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 20, fontSize: 13 }}>
+                        ✅ จ่ายคืนแล้ว: {adjPaid.length} รายการ · <b style={{ color: "#15803d" }}>{fmt(adjPaid.reduce((s, a) => s + adjAmount(a), 0))}</b>
+                      </div>
+                    )}
+                    {adjSeized.length > 0 && (
+                      <div style={{ padding: "4px 12px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 20, fontSize: 13 }}>
+                        🔒 ยึด: {adjSeized.length} รายการ · <b style={{ color: "#b91c1c" }}>{fmt(adjSeized.reduce((s, a) => s + adjAmount(a), 0))}</b>
+                      </div>
+                    )}
+                    {hondaRows.length > 0 && (
+                      <div style={{ padding: "4px 12px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 20, fontSize: 13 }}>
+                        ฮอนด้า: {hondaRows.length} รายการ · <b>{fmt(hondaRows.reduce((s, a) => s + adjAmount(a), 0))}</b>
+                      </div>
+                    )}
+                    {yamahaRows.length > 0 && (
+                      <div style={{ padding: "4px 12px", background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 20, fontSize: 13 }}>
+                        ยามาฮ่า: {yamahaRows.length} รายการ · <b>{fmt(yamahaRows.reduce((s, a) => s + adjAmount(a), 0))}</b>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ overflowX: "auto" }}>
+                    <table style={tableStyle}>
+                      <thead>
+                        <tr style={{ background: "#047857", color: "#fff" }}>
+                          <th>วันที่</th>
+                          <th>เลขใบเสร็จ</th>
+                          <th>ใบกำกับภาษี</th>
+                          <th>สาขา</th>
+                          <th>ลูกค้า</th>
+                          <th>รายการ</th>
+                          <th style={{ textAlign: "right" }}>จำนวนเงิน</th>
+                          <th>สถานะ</th>
+                          <th>จัดการ</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {adjFiltered.map((a, i) => {
+                          const st = adjSt(a);
+                          const stRow = overStatusMap[adjKey(a)];
+                          return (
+                            <tr key={adjKey(a) || i} style={{ background: st === "จ่ายคืน" ? "#f0fdf4" : st === "ยึด" ? "#fef2f2" : "#fffbeb" }}>
+                              <td>{a.receipt_date ? String(a.receipt_date).slice(0, 10) : "-"}</td>
+                              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{a.receipt_no || "-"}</td>
+                              <td style={{ fontFamily: "monospace", fontSize: 12 }}>{a.oc_no || "-"}</td>
+                              <td>{a.branch_code || "-"}</td>
+                              <td>{a.customer_name || "-"}</td>
+                              <td style={{ maxWidth: 340 }}>{a.description || "-"}</td>
+                              <td style={{ textAlign: "right", fontWeight: "bold", color: "#047857" }}>{fmt(adjAmount(a))}</td>
+                              <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                                <span style={{ ...ST_STYLE[st], padding: "3px 10px", borderRadius: 12, fontSize: 12, fontWeight: 700 }}>{st}</span>
+                                {stRow?.paid_date && (
+                                  <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                                    {String(stRow.paid_date).slice(0, 10)}{stRow.payment_method ? ` · ${stRow.payment_method}` : ""}{stRow.from_bank_account_id && bankShort(stRow.from_bank_account_id) ? ` · ${bankShort(stRow.from_bank_account_id)}` : ""}
+                                  </div>
+                                )}
+                              </td>
+                              <td style={{ whiteSpace: "nowrap" }}>
+                                {st === "รับฝาก" ? (
+                                  <button onClick={() => openRefund(adjAsRow(a))}
+                                    style={{ ...btnSmall, background: "#10b981", color: "#fff" }}>💸 บันทึกโอนเงิน</button>
+                                ) : (
+                                  <button onClick={() => cancelRefund(adjAsRow(a))}
+                                    style={{ ...btnSmall, background: "#dc2626", color: "#fff" }}>✕ ยกเลิก</button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot style={{ background: "#d1fae5", fontWeight: 700 }}>
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: "right" }}>รวม {adjFiltered.length} รายการ</td>
+                          <td style={{ textAlign: "right", color: "#047857" }}>{fmt(adjTotal)}</td>
+                          <td colSpan={2}></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        );
+      })()}
+
       {/* ============ TRANSFER MODAL ============ */}
       {showTransfer && (
         <Modal onClose={() => { setShowTransfer(false); setEditingPaymentId(null); }}>
@@ -858,6 +1269,100 @@ export default function PayDepositPage({ currentUser }) {
             <button onClick={() => { setShowTransfer(false); setEditingPaymentId(null); }} style={{ ...btnSmall, marginRight: 8 }}>ยกเลิก</button>
             <button onClick={submitTransfer} disabled={saving} style={editingPaymentId ? { ...btnSuccess, background: "#7c3aed" } : btnSuccess}>
               {saving ? "กำลังบันทึก..." : (editingPaymentId ? "💾 บันทึกแก้ไข" : "💾 บันทึกจ่ายเงิน")}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* ============ REFUND MODAL — บันทึกโอนเงินคืน/ยึด เงินรับฝากชำระเกิน ============ */}
+      {refundModal && (
+        <Modal onClose={() => setRefundModal(null)}>
+          <h3 style={{ margin: "0 0 14px", color: "#072d6b" }}>💸 บันทึกโอนเงินคืน / ยึดเงินรับฝาก</h3>
+
+          <div style={{ background: "#f8fafc", padding: 10, borderRadius: 8, marginBottom: 12, fontSize: 13 }}>
+            <div>ลูกค้า: <b>{refundModal.customer_name || refundModal.sale_customer_name || "-"}</b></div>
+            {refundModal._adj ? (
+              <>
+                <div>เลขใบเสร็จ: <code>{refundModal._receipt_no}</code>{refundModal.sale_invoice_no ? <> · ใบกำกับภาษี: <code>{refundModal.sale_invoice_no}</code></> : null}</div>
+                {refundModal._description && <div>รายการ: {refundModal._description}</div>}
+              </>
+            ) : (
+              <>
+                <div>ไฟแนนท์: <b style={{ color: "#6d28d9" }}>{refundModal.sale_finance_company || "-"}</b></div>
+                <div>เลขใบกำกับ: <code>{refundModal.tax_invoice_no}</code>{refundModal.sale_invoice_no ? <> · ใบขาย: <code>{refundModal.sale_invoice_no}</code></> : null}</div>
+              </>
+            )}
+            <div>ยอดเกิน (รอโอนคืน): <b style={{ color: "#c2410c", fontSize: 18 }}>฿ {fmt(refundModal.over_amount)}</b></div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>สถานะ *</label>
+              <select value={refundForm.status}
+                onChange={e => setRefundForm(p => ({ ...p, status: e.target.value }))}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                <option value="จ่ายคืน">จ่ายคืน (โอนคืนไฟแนนท์)</option>
+                <option value="ยึด">ยึด</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>วันที่ *</label>
+              <input type="date" value={refundForm.paid_date}
+                onChange={e => setRefundForm(p => ({ ...p, paid_date: e.target.value }))}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} />
+            </div>
+            {refundForm.status === "จ่ายคืน" && (
+              <>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>วิธีจ่าย</label>
+                  <select value={refundForm.payment_method}
+                    onChange={e => setRefundForm(p => ({ ...p, payment_method: e.target.value }))}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                    <option value="โอน">โอน</option>
+                    <option value="เงินสด">เงินสด</option>
+                    <option value="หักบัญชี">หักบัญชี</option>
+                    <option value="อื่นๆ">อื่นๆ</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>เลขอ้างอิงการโอน</label>
+                  <input type="text" value={refundForm.transaction_id}
+                    onChange={e => setRefundForm(p => ({ ...p, transaction_id: e.target.value }))}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }} />
+                </div>
+                <div style={{ gridColumn: "1 / span 2", padding: 10, background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: "#1e40af", marginBottom: 3 }}>
+                    🏦 โอนจาก (บัญชีบริษัท){["โอน", "หักบัญชี"].includes(refundForm.payment_method) ? " *" : ""}
+                  </label>
+                  <select value={refundForm.from_bank_account_id}
+                    onChange={e => setRefundForm(p => ({ ...p, from_bank_account_id: e.target.value }))}
+                    style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" }}>
+                    <option value="">-- เลือกบัญชีโอนจาก --</option>
+                    {bankAccounts.map(b => (
+                      <option key={b.account_id} value={b.account_id}>
+                        {b.bank_name} · {b.account_no} · {b.account_name}
+                      </option>
+                    ))}
+                  </select>
+                  <div style={{ fontSize: 11, color: "#1e40af", marginTop: 3 }}>รายการจ่ายคืนจะแสดงในรายงานเคลื่อนไหวบัญชีของบัญชีที่เลือก</div>
+                  {bankAccounts.length === 0 && (
+                    <div style={{ fontSize: 11, color: "#dc2626", marginTop: 2 }}>⚠️ ยังไม่มีบัญชีธนาคาร — ไปเพิ่มที่ Accounting → บัญชีธนาคาร</div>
+                  )}
+                </div>
+              </>
+            )}
+            <div style={{ gridColumn: "1 / span 2" }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3 }}>หมายเหตุ</label>
+              <textarea value={refundForm.note} onChange={e => setRefundForm(p => ({ ...p, note: e.target.value }))} rows={2}
+                style={{ width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box", resize: "vertical" }} />
+            </div>
+          </div>
+
+          <div style={{ marginTop: 18, textAlign: "right" }}>
+            <button onClick={() => setRefundModal(null)} style={{ ...btnSmall, marginRight: 8 }}>ยกเลิก</button>
+            <button onClick={submitRefund} disabled={refundSaving}
+              style={refundForm.status === "ยึด" ? { ...btnSuccess, background: "#dc2626" } : btnSuccess}>
+              {refundSaving ? "กำลังบันทึก..." : (refundForm.status === "ยึด" ? "🔒 บันทึกยึดเงิน" : "💾 บันทึกโอนเงิน")}
             </button>
           </div>
         </Modal>

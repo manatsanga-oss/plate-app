@@ -5,6 +5,7 @@ const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-ap
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/tax-remittance-api"; // สถานะนำส่งภาษี ภ.ง.ด.
 const INPUT_TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api"; // สถานะ ภ.พ.30 (input_tax_doc_status จากหน้าจัดการภาษีซื้อ)
+const FIN_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api"; // รายได้อื่น ๆ (income_records) — วิธีจ่าย "รายได้ค้างชำระ" หักกลบ
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -91,6 +92,7 @@ export default function ExpenseRecordPage({ currentUser }) {
     fetchBankAccounts();
     fetchRemitMap();
     fetchPp30Map();
+    fetchIncomeDocs();
     /* eslint-disable-next-line */
   }, []);
 
@@ -133,6 +135,22 @@ export default function ExpenseRecordPage({ currentUser }) {
       });
       setPp30Map(m);
     } catch { setPp30Map({}); }
+  }
+
+  // ใบรายได้อื่น ๆ ที่ยังค้างชำระ (status draft, รวมที่รับบางส่วนแล้ว) — วิธีจ่าย "รายได้ค้างชำระ" ดึงมาหักกลบ
+  const [incomeDocs, setIncomeDocs] = useState([]);
+  const incomeRemaining = (d) => d.remaining_amount != null
+    ? Number(d.remaining_amount)
+    : Math.max(0, Number(d.net_to_pay || d.total || 0) - Number(d.received_amount || 0));
+  async function fetchIncomeDocs() {
+    try {
+      const res = await fetch(FIN_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "income_record", op: "list", status: "draft" }),
+      });
+      const data = await res.json();
+      setIncomeDocs((Array.isArray(data) ? data : []).filter(d => d && d.income_doc_id && incomeRemaining(d) > 0));
+    } catch { setIncomeDocs([]); }
   }
 
   async function fetchDocs() {
@@ -617,6 +635,14 @@ export default function ExpenseRecordPage({ currentUser }) {
       if (p.method === "วางบิลงาน พรบ." && !String(p.policy_no || "").trim()) {
         setMessage(`❌ แถวที่ ${i + 1} (วางบิลงาน พรบ.): ใส่เลขที่กรมธรรม์`); return;
       }
+      if (p.method === "หักกลบรายได้") {
+        if (!p.income_doc_id) { setMessage(`❌ แถวที่ ${i + 1} (รายได้ค้างชำระ): เลือกใบรายได้ที่จะหักกลบ`); return; }
+        const doc = incomeDocs.find(d => String(d.income_doc_id) === String(p.income_doc_id));
+        const remain = doc ? incomeRemaining(doc) : 0;
+        if (Number(p.amount) > remain + 0.005) {
+          setMessage(`❌ แถวที่ ${i + 1} (รายได้ค้างชำระ): ยอดหักกลบ ${fmt(p.amount)} เกินยอดค้างของ ${p.income_doc_no} (ค้าง ${fmt(remain)})`); return;
+        }
+      }
     }
     setSavingPay(true);
     try {
@@ -628,7 +654,10 @@ export default function ExpenseRecordPage({ currentUser }) {
       const prbNotes = payments
         .filter(p => p.method === "วางบิลงาน พรบ." && String(p.policy_no || "").trim())
         .map(p => `พรบ. กรมธรรม์ ${String(p.policy_no).trim()}`);
-      const noteWithPolicy = [payForm.payment_note, ...prbNotes].filter(Boolean).join(" · ");
+      // หักกลบรายได้ — ต่อเลขใบรายได้เข้าหมายเหตุ (ไว้ trace)
+      const offsetLines = payments.filter(p => p.method === "หักกลบรายได้" && p.income_doc_id);
+      const offsetNotes = offsetLines.map(p => `หักกลบรายได้ ${p.income_doc_no || p.income_doc_id}`);
+      const noteWithPolicy = [payForm.payment_note, ...prbNotes, ...offsetNotes].filter(Boolean).join(" · ");
       const body = {
         action: "expense_record",
         op: editPayDocNo ? "edit_payment" : "save_payment",
@@ -654,7 +683,39 @@ export default function ExpenseRecordPage({ currentUser }) {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      setMessage(editPayDocNo ? "✅ แก้ไขใบจ่ายเรียบร้อย" : `✅ บันทึกจ่ายเงินเรียบร้อย ${data?.paid_doc_no || data?.[0]?.paid_doc_no || ""}`);
+      const payNo = data?.paid_doc_no || data?.[0]?.paid_doc_no || "";
+      // บันทึกรับชำระฝั่งรายได้อัตโนมัติ (receive_partial — รับบางส่วนได้ ครบยอดค่อยเป็น "รับชำระแล้ว")
+      // เฉพาะตอนสร้างใบจ่ายใหม่ กันยิงซ้ำตอนแก้ไข
+      let incomeMsg = "";
+      if (!editPayDocNo && offsetLines.length > 0) {
+        for (const p of offsetLines) {
+          try {
+            const r2 = await fetch(FIN_URL, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "income_record", op: "receive_partial",
+                income_doc_id: Number(p.income_doc_id),
+                amount: Number(p.amount) || 0,
+                paid_date: payForm.paid_date,
+                payment_method: "หักกลบ",
+                payment_note: `หักกลบใบจ่ายค่าใช้จ่าย ${payNo}`,
+                paid_by: currentUser?.username || currentUser?.name || "system",
+              }),
+            });
+            const d2 = await r2.json().catch(() => ({}));
+            const row = Array.isArray(d2) ? d2[0] : d2;
+            const irc = row?.paid_doc_no || "";
+            const remaining = Number(row?.remaining || 0);
+            incomeMsg += row?.result_status === "paid"
+              ? ` · รับชำระรายได้ ${p.income_doc_no} ครบแล้ว${irc ? ` (${irc})` : ""}`
+              : ` · รับบางส่วน ${p.income_doc_no} ${fmt(p.amount)}${irc ? ` (${irc})` : ""} — ค้างอีก ${fmt(remaining)}`;
+          } catch {
+            incomeMsg += ` · ⚠️ หักกลบ ${p.income_doc_no} ไม่สำเร็จ — ไปบันทึกรับเงินที่เมนูรายได้อื่น ๆ เอง`;
+          }
+        }
+        fetchIncomeDocs();
+      }
+      setMessage(editPayDocNo ? "✅ แก้ไขใบจ่ายเรียบร้อย" : `✅ บันทึกจ่ายเงินเรียบร้อย ${payNo}${incomeMsg}`);
       setPayDialog(false);
       setEditPayDocNo(null);
       setSelected({});
@@ -664,7 +725,10 @@ export default function ExpenseRecordPage({ currentUser }) {
   }
   async function cancelPaymentGroup(g) {
     if (!g.paid_doc_no) return;
-    if (!window.confirm(`ยกเลิกใบจ่ายเงิน ${g.paid_doc_no}?\nเอกสาร ${g.items.length} ใบจะกลับเป็น "ร่าง"`)) return;
+    // ใบจ่ายที่มีหักกลบรายได้ — ฝั่งรายได้ต้องไปยกเลิกใบรับเงินเองที่เมนูรายได้อื่น ๆ
+    const hasOffset = String(g.payment_method || "").includes("หักกลบ") || g.items?.some(d => /หักกลบรายได้/.test(String(d.note || "")));
+    const offsetWarn = hasOffset ? `\n\n⚠️ ใบนี้มีหักกลบรายได้ — ต้องไปยกเลิกใบรับเงินฝั่งรายได้ที่เมนู "บันทึกรายได้อื่น ๆ" เองด้วย` : "";
+    if (!window.confirm(`ยกเลิกใบจ่ายเงิน ${g.paid_doc_no}?\nเอกสาร ${g.items.length} ใบจะกลับเป็น "ร่าง"${offsetWarn}`)) return;
     try {
       await fetch(ACC_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -891,10 +955,12 @@ export default function ExpenseRecordPage({ currentUser }) {
                           <option value="ใบลดหนี้">ใบลดหนี้</option>
                           <option value="ภาษีมูลค่าเพิ่มรอนำส่ง (ภ.พ.36)">ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)</option>
                           <option value="วางบิลงาน พรบ.">วางบิลงาน พรบ.</option>
+                          <option value="หักกลบรายได้">รายได้ค้างชำระ (หักกลบ)</option>
                         </select>
                         <input type="number" step="0.01" min="0" value={p.amount}
                           onChange={e => updatePayment(idx, { amount: e.target.value })}
                           placeholder="0.00"
+                          title={p.method === "หักกลบรายได้" ? "หักกลบบางส่วนได้ — ไม่เกินยอดค้างของใบรายได้ที่เลือก" : ""}
                           style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right" }} />
                         {p.method === "โอน" ? (
                           <select value={p.from_bank_account_id || ""}
@@ -916,6 +982,27 @@ export default function ExpenseRecordPage({ currentUser }) {
                             onChange={e => updatePayment(idx, { policy_no: e.target.value })}
                             placeholder="เลขที่กรมธรรม์ *"
                             style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fffbeb", fontFamily: "Tahoma", fontSize: 13 }} />
+                        ) : p.method === "หักกลบรายได้" ? (
+                          <select value={p.income_doc_id || ""}
+                            onChange={e => {
+                              const doc = incomeDocs.find(d => String(d.income_doc_id) === e.target.value);
+                              updatePayment(idx, {
+                                income_doc_id: e.target.value,
+                                income_doc_no: doc?.income_doc_no || "",
+                                // default = ยอดค้างของใบ (แก้เป็นบางส่วนได้ ไม่เกินยอดค้าง)
+                                amount: doc ? incomeRemaining(doc) : 0,
+                              });
+                            }}
+                            style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #c4b5fd", background: "#f5f3ff", fontFamily: "Tahoma", fontSize: 13 }}>
+                            <option value="">-- เลือกใบรายได้ค้างชำระ (หักบางส่วนได้) --</option>
+                            {incomeDocs
+                              .filter(d => String(d.income_doc_id) === String(p.income_doc_id) || !payments.some((pp, i2) => i2 !== idx && pp.method === "หักกลบรายได้" && String(pp.income_doc_id) === String(d.income_doc_id)))
+                              .map(d => (
+                                <option key={d.income_doc_id} value={d.income_doc_id}>
+                                  {d.income_doc_no} · {(d.customer_name || d.description || "").slice(0, 26)} · ค้าง {fmt(incomeRemaining(d))}{Number(d.received_amount) > 0 ? ` (รับแล้ว ${fmt(d.received_amount)})` : ""}
+                                </option>
+                              ))}
+                          </select>
                         ) : (
                           <div style={{ padding: "7px 10px", color: "#9ca3af", fontSize: 12 }}>—</div>
                         )}

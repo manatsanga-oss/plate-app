@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
 
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 function firstOfMonth() { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); }
@@ -34,7 +34,9 @@ export default function CreditNoteReportPage() {
           date_to: dateTo,
         }),
       });
-      const data = await res.json();
+      // n8n อาจตอบ body ว่างเมื่อไม่มีข้อมูล — อย่าใช้ res.json() ตรง ๆ
+      const raw = await res.text();
+      const data = raw.trim() ? JSON.parse(raw) : [];
       const arr = Array.isArray(data) ? data : (data?.rows || data?.data || []);
       setRows(arr);
     } catch (e) {

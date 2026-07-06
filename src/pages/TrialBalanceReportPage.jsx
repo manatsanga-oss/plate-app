@@ -14,6 +14,7 @@ import React, { useEffect, useMemo, useState } from "react";
 // แหล่งข้อมูล: accounting-api (list_bank_accounts / list_bank_movements / list_car_payment_receipts)
 // ============================================================================
 const ACCOUNTING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
 
 const CASH_TYPES = ["เงินสดย่อย"];
 const BANK_TYPES = ["ออมทรัพย์", "กระแสรายวัน", "ฝากประจำ"];
@@ -48,7 +49,9 @@ function fmtDateTH(iso) {
 const r2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
 
 async function postAcc(body) {
-  const res = await fetch(ACCOUNTING_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  // list_car_payment_receipts ย้ายไป workflow ใหม่ Accounting Report API
+  const url = body?.action === "list_car_payment_receipts" ? REPORT_URL : ACCOUNTING_URL;
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const raw = await res.text();
   return raw.trim() ? JSON.parse(raw) : [];

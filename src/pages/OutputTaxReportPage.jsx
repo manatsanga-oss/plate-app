@@ -4,11 +4,13 @@ import React, { useEffect, useMemo, useState } from "react";
 //   1) ใบกำกับขายรถ  — webhook list-tax-invoices (branch PAPAO/NAKORNLUANG/SINGCHAI, upload จาก DMS)
 //   2) ใบกำกับรายรับอื่น ๆ — accounting-api list_other_income_tax_invoices (NID-OTH / MIC-OTH)
 //   3) ขายอะไหล่ + ค่าบริการ — flow-input-tax-api list_part_service_sales
-//      (ป.เปา = honda_part_sales รวมต่อใบ 69SERV/69RTSL · สิงห์ชัย = yamaha_repair_invoices รวมต่อ job ถอด VAT 7/107)
+//      (ป.เปา = honda_repair_jobs ทั้ง job รวมค่าแรง (net_sale/vat, เดือนตาม close_date) + honda_part_sales เฉพาะใบขายปลีกที่ไม่ใช่ job
+//       · สิงห์ชัย = yamaha_repair_invoices รวมต่อ job ถอด VAT 7/107)
 // สังกัด: ป.เปา = PAPAO + NAKORNLUANG, สิงห์ชัย = SINGCHAI · ใบยกเลิกไม่รวมยอด (แสดงขีดฆ่า)
 const TAXINV_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-invoices";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const FLOWTAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/flow-input-tax-api";
+const INTAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api"; // เตรียมแบบภาษีรายเดือน (tax_monthly_filings)
 
 const AFF_BRANCHES = { "ป.เปา": ["PAPAO", "NAKORNLUANG"], "สิงห์ชัย": ["SINGCHAI"] };
 const BRANCH_AFF = { PAPAO: "ป.เปา", NAKORNLUANG: "ป.เปา", SINGCHAI: "สิงห์ชัย" };
@@ -16,7 +18,23 @@ const COMPANY = {
   "ป.เปา": { name: "บริษัท ป.เปามอเตอร์เซอร์วิส จำกัด", tax_id: "0145546000707" },
   "สิงห์ชัย": { name: "ห้างหุ้นส่วนจำกัด สิงห์ชัยสยามยนต์", tax_id: "0143543001310" },
 };
-const SRC_LABEL = { vehicle: "ขายรถ", other: "รายรับอื่น", part_service: "อะไหล่/บริการ" };
+const SRC_LABEL = { vehicle: "ขายรถ", other: "รายรับอื่น", part_service: "อะไหล่/บริการ", fee_insurance: "รายได้ประกัน/ค่าบริการ" };
+// สาขา/จุดขาย จากเลขเอกสาร (แหล่งข้อมูลแต่ละตัวเก็บสาขาไม่เหมือนกัน)
+const BR_LABEL = {
+  SCY01: "SCY01 ศูนย์ยามาฮ่า", SCY04: "SCY04 ตลาดสีขวา", SCY05: "SCY05 นครหลวง",
+  SCY06: "SCY06 ป.เปาวังน้อย", SCY07: "SCY07 ตลาดวังน้อย", SCY10: "SCY10 ส่งาศรีบุ๊ชเซ็นเตอร์",
+  "วังน้อย": "วังน้อย (Honda)", "นครหลวง": "นครหลวง",
+  PAPAO: "ป.เปา (ใบกำกับรถ)", NAKORNLUANG: "นครหลวง (ใบกำกับรถ)", SINGCHAI: "สิงห์ชัย (ใบกำกับรถ)",
+};
+function rowBranch(r) {
+  const doc = String(r.tax_invoice_no || "");
+  const m = doc.match(/^(SCY\d{2})[-\/]/);
+  if (m) return m[1];
+  if (doc.indexOf("· นครหลวง") >= 0) return "นครหลวง";
+  if (r.source === "vehicle" || r.source === "other") return r.branch || "-";
+  if (/^69/.test(doc)) return "วังน้อย"; // เอกสาร Honda ป.เปา (69SERV/69RTSL/69WHSL)
+  return r.branch || "-";
+}
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -50,10 +68,17 @@ export default function OutputTaxReportPage({ currentUser }) {
   const [month, setMonth] = useState(curMonth()); // YYYY-MM
   const [rows, setRows] = useState([]);           // normalized ทุกแหล่ง
   const [srcFilter, setSrcFilter] = useState(""); // "" | vehicle | other
+  const [brFilter, setBrFilter] = useState("");   // กรองสาขา/จุดขาย (จากเลขเอกสาร)
   const [search, setSearch] = useState("");
   const [showCancelled, setShowCancelled] = useState(false);
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
+  const [moves, setMoves] = useState([]); // การย้ายงวดใบกำกับ (tax_report_doc_moves) ของสังกัดนี้
+
+  const ymNum = (p) => String(p || "").replace("-", "");                 // '2026-05' → '202605'
+  const nextPeriod = (p) => { const [y, m] = String(p).split("-").map(Number); const d = new Date(y, m, 1); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`; };
+  const stripDoc = (v) => String(v || "").replace(/\s*·.*$/, "");        // ตัด tag ' · ค่าบริการ' ฯลฯ ให้เหลือเลขเอกสารจริง
+  const fmtPeriod = (p) => { const s = String(p || ""); return s.length === 6 ? `${s.slice(4)}/${Number(s.slice(0, 4)) + 543}` : s; };
 
   useEffect(() => { loadRows(); /* eslint-disable-next-line */ }, [affiliation, month]);
 
@@ -85,6 +110,12 @@ export default function OutputTaxReportPage({ currentUser }) {
           body: JSON.stringify({ action: "list_part_service_sales", affiliation, tax_period: month }),
         }).then(r => r.json()).catch(() => []),
       ]);
+      // รายการย้ายงวด (ใบที่กดเลื่อนไปงวดถัดไป / ดึงเข้ามา)
+      const movesRes = await fetch(FLOWTAX_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_tax_doc_moves", affiliation }),
+      }).then(r => r.json()).catch(() => []);
+      setMoves(Array.isArray(movesRes) ? movesRes.filter(m2 => m2 && m2.doc_no) : []);
 
       const veh = vehArrs.flat().map(x => ({
         source: "vehicle", branch: x._branch,
@@ -106,7 +137,9 @@ export default function OutputTaxReportPage({ currentUser }) {
       const partSvc = (Array.isArray(psRes) ? psRes : (psRes?.rows || []))
         .filter(x => x && x.doc_no)
         .map(x => ({
-          source: "part_service", branch: x.side === "yamaha" ? "YAMAHA" : "HONDA",
+          // ประกันรถหาย/ค่าบริการรับชำระ/ไปรษณีย์ แยกหมวดจากอะไหล่/บริการ (ดูจาก tag ท้ายเลขเอกสาร)
+          source: /· (ประกันรถหาย|ค่าบริการ)$/.test(String(x.doc_no)) ? "fee_insurance" : "part_service",
+          branch: x.side === "yamaha" ? "YAMAHA" : "HONDA",
           invoice_date: x.invoice_date, tax_invoice_no: x.doc_no,
           customer_name: x.customer_name, customer_tax_id: x.customer_tax_id,
           amount_before_vat: Number(x.amount_before_vat || 0), vat_amount: Number(x.vat_amount || 0),
@@ -125,15 +158,76 @@ export default function OutputTaxReportPage({ currentUser }) {
     setLoading(false);
   }
 
+  // เลื่อนใบออกจากงวดนี้ → ไปขึ้นงวดถัดไป (บันทึกใน tax_report_doc_moves ฝั่ง n8n)
+  async function moveDocNext(r) {
+    const doc = stripDoc(r.tax_invoice_no);
+    const toP = nextPeriod(month);
+    if (!window.confirm(`ลบ "${doc}" ออกจากงวด ${periodLabel(month)} → ไปขึ้นงวด ${fmtPeriod(toP)} ?`)) return;
+    await fetch(FLOWTAX_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save_tax_doc_move", affiliation, doc_no: doc, from_period: ymNum(month), to_period: toP, note: "", created_by: currentUser?.name || "" }),
+    }).catch(() => {});
+    loadRows();
+  }
+  async function cancelMove(docNo) {
+    if (!window.confirm(`ยกเลิกการย้ายงวดของ "${docNo}" ?`)) return;
+    await fetch(FLOWTAX_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "delete_tax_doc_move", affiliation, doc_no: docNo }),
+    }).catch(() => {});
+    loadRows();
+  }
+  // บันทึกยอดภาษีขายทั้งเดือน (ทุกแหล่ง ไม่สนตัวกรอง) เข้าหน้า "เตรียมแบบภาษีรายเดือน" ฝั่งมูลค่าภาษีขาย ภ.พ.30
+  // — ถ้ามีแบบของ เดือน+สังกัด นั้นแล้ว จะอัปเดตเฉพาะฝั่งขาย (ฝั่งภาษีซื้อ/สถานะ/ใบที่เลือกไว้ คงเดิม)
+  async function saveToTaxForm() {
+    const outSet = new Set(moves.filter(m2 => m2.from_period === ymNum(month)).map(m2 => m2.doc_no));
+    const act = rows.filter(r => !r.cancelled
+      && !((r.source === "part_service" || r.source === "fee_insurance") && outSet.has(stripDoc(r.tax_invoice_no))));
+    const baseAll = act.reduce((s2, r) => s2 + r.amount_before_vat, 0);
+    const vatAll = act.reduce((s2, r) => s2 + r.vat_amount, 0);
+    if (!act.length) { setMsg("❌ ไม่มีข้อมูลให้บันทึก"); return; }
+    if (!window.confirm(`บันทึกยอดภาษีขาย ${affiliation} งวด ${periodLabel(month)}\nมูลค่า ${fmt(baseAll)} · ภาษีขาย ${fmt(vatAll)} บาท (${act.length} ใบ)\nเข้าหน้าเตรียมแบบภาษี ภ.พ.30 ?`)) return;
+    setMsg("");
+    try {
+      const listRes = await fetch(INTAX_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_tax_filings" }) }).then(r => r.json()).catch(() => []);
+      const recs = Array.isArray(listRes) ? listRes : (listRes?.rows || []);
+      const exist = recs.find(r => r && String(r.filing_month) === month && String(r.affiliation || "") === affiliation && (r.tax_form || "ภ.พ.30") === "ภ.พ.30");
+      let keys = [];
+      if (exist && exist.selected_keys) { try { keys = Array.isArray(exist.selected_keys) ? exist.selected_keys : JSON.parse(exist.selected_keys || "[]"); } catch { keys = []; } }
+      const purchase = exist ? (Number(exist.purchase_vat) || 0) : 0;
+      const body = {
+        action: "save_tax_filing", id: exist ? exist.id : undefined,
+        filing_month: month, affiliation, tax_form: "ภ.พ.30",
+        filing_type: exist ? (exist.filing_type || "ยื่นปกติ") : "ยื่นปกติ",
+        payment_date: exist ? (exist.payment_date ? String(exist.payment_date).slice(0, 10) : null) : null,
+        sales_vat: Math.round(vatAll * 100) / 100, purchase_vat: purchase,
+        payable: Math.round((vatAll - purchase) * 100) / 100,
+        status: exist ? (exist.status || "ร่าง") : "ร่าง", selected_keys: keys,
+        note: `ยอดขายจากรายงานภาษีขาย ${act.length} ใบ มูลค่า ${fmt(baseAll)}`,
+      };
+      await fetch(INTAX_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      setMsg(`✅ บันทึกเข้าเตรียมแบบ ภ.พ.30 แล้ว (${exist ? "อัปเดตแบบเดิม" : "สร้างแบบใหม่"}: ${affiliation} ${periodLabel(month)} · ภาษีขาย ${fmt(vatAll)})`);
+    } catch (e) { setMsg("❌ บันทึกไม่สำเร็จ: " + e.message); }
+  }
+
+  const movesOut = moves.filter(m2 => m2.from_period === ymNum(month)); // ใบที่ถูกเลื่อนออกจากงวดนี้
+  const movesOutSet = new Set(movesOut.map(m2 => m2.doc_no));
+  const movedInSet = new Set(moves.filter(m2 => m2.to_period === ymNum(month)).map(m2 => m2.doc_no)); // ใบที่ถูกดึงเข้ามางวดนี้
+  const moveOf = (doc) => moves.find(m2 => m2.doc_no === doc);
+
   const filtered = useMemo(() => {
     const kw = search.trim().toLowerCase();
     return rows.filter(r => {
       if (!showCancelled && r.cancelled) return false;
       if (srcFilter && r.source !== srcFilter) return false;
+      if (brFilter && rowBranch(r) !== brFilter) return false;
+      // ซ่อนใบที่ถูกเลื่อนออกจากงวดนี้ (SQL ฝั่ง n8n ตัดให้อยู่แล้ว — เผื่อ workflow ยังไม่ update)
+      if ((r.source === "part_service" || r.source === "fee_insurance") && movesOutSet.has(stripDoc(r.tax_invoice_no))) return false;
       if (!kw) return true;
       return [r.tax_invoice_no, r.customer_name, r.customer_tax_id].filter(Boolean).join(" ").toLowerCase().includes(kw);
     });
-  }, [rows, search, srcFilter, showCancelled]);
+    /* eslint-disable-next-line */
+  }, [rows, search, srcFilter, brFilter, showCancelled, moves, month]);
 
   const active = filtered.filter(r => !r.cancelled);
   const sumBase = active.reduce((s, r) => s + r.amount_before_vat, 0);
@@ -164,6 +258,13 @@ export default function OutputTaxReportPage({ currentUser }) {
           <option value="vehicle">ขายรถ</option>
           <option value="other">รายรับอื่น</option>
           <option value="part_service">อะไหล่/บริการ</option>
+          <option value="fee_insurance">รายได้ประกัน/ค่าบริการ</option>
+        </select>
+        <select value={brFilter} onChange={e => setBrFilter(e.target.value)} style={inp} title="กรองตามสาขา/จุดขาย">
+          <option value="">🏪 สาขา: ทั้งหมด</option>
+          {[...new Set(rows.map(rowBranch))].filter(b => b && b !== "-").sort().map(b => (
+            <option key={b} value={b}>{BR_LABEL[b] || b}</option>
+          ))}
         </select>
         <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer" }}>
           <input type="checkbox" checked={showCancelled} onChange={e => setShowCancelled(e.target.checked)} />
@@ -175,6 +276,8 @@ export default function OutputTaxReportPage({ currentUser }) {
         <button onClick={loadRows} disabled={loading} style={btn("#0369a1")}>🔄 รีเฟรช</button>
         <button onClick={() => printReport({ affiliation, month, company, rows: filtered, sumBase, sumVat })}
           disabled={filtered.length === 0} style={btn("#7c3aed")}>🖨️ พิมพ์</button>
+        <button onClick={saveToTaxForm} disabled={loading || rows.length === 0} style={btn("#16a34a")}
+          title="บันทึกยอดภาษีขายทั้งเดือนเข้าหน้าเตรียมแบบภาษีรายเดือน (ภ.พ.30)">📄 บันทึกเข้าเตรียมแบบ ภ.พ.30</button>
       </div>
 
       {/* Report header */}
@@ -187,12 +290,26 @@ export default function OutputTaxReportPage({ currentUser }) {
       <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12 }}>
         <span>ใบกำกับ <strong>{active.length}</strong> ใบ{showCancelled && cancelledCount > 0 ? ` (+ยกเลิก ${filtered.length - active.length})` : ""}</span>
         <span style={{ color: "#6b7280", fontSize: 12 }}>
-          ขายรถ {active.filter(r => r.source === "vehicle").length} · รายรับอื่น {active.filter(r => r.source === "other").length} · อะไหล่/บริการ {active.filter(r => r.source === "part_service").length}
+          ขายรถ {active.filter(r => r.source === "vehicle").length} · รายรับอื่น {active.filter(r => r.source === "other").length} · อะไหล่/บริการ {active.filter(r => r.source === "part_service").length} · ประกัน/ค่าบริการ {active.filter(r => r.source === "fee_insurance").length}
         </span>
         <div style={{ flex: 1 }} />
         <span style={{ color: "#374151" }}>มูลค่ารวม: <strong>{fmt(sumBase)}</strong></span>
         <span style={{ color: "#dc2626" }}>ภาษีขายรวม: <strong>{fmt(sumVat)}</strong> บาท</span>
       </div>
+
+      {/* ใบที่ถูกเลื่อนออกจากงวดนี้ */}
+      {movesOut.length > 0 && (
+        <div style={{ padding: "8px 14px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 10, marginBottom: 12, fontSize: 12.5 }}>
+          <b style={{ color: "#c2410c" }}>📄 ใบที่ถูกลบออกจากงวดนี้ (ไปขึ้นงวดถัดไป):</b>
+          {movesOut.map(m2 => (
+            <span key={m2.doc_no} style={{ marginLeft: 10, whiteSpace: "nowrap" }}>
+              <code>{m2.doc_no}</code> → {fmtPeriod(m2.to_period)}
+              <button onClick={() => cancelMove(m2.doc_no)}
+                style={{ marginLeft: 4, padding: "0 6px", border: "1px solid #fca5a5", background: "#fff", color: "#dc2626", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>ยกเลิก</button>
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Table */}
       <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
@@ -212,6 +329,7 @@ export default function OutputTaxReportPage({ currentUser }) {
                 <th style={th}>เลขผู้เสียภาษี</th>
                 <th style={{ ...th, textAlign: "right" }}>มูลค่า</th>
                 <th style={{ ...th, textAlign: "right" }}>ภาษีมูลค่าเพิ่ม</th>
+                <th style={{ ...th, textAlign: "center", width: 60 }}>จัดการ</th>
               </tr>
             </thead>
             <tbody>
@@ -227,16 +345,32 @@ export default function OutputTaxReportPage({ currentUser }) {
                   </td>
                   <td style={td}>
                     <span style={{ padding: "1px 7px", borderRadius: 10, fontSize: 11, fontWeight: 700,
-                      background: r.source === "vehicle" ? "#dbeafe" : r.source === "part_service" ? "#fef3c7" : "#d1fae5",
-                      color: r.source === "vehicle" ? "#1e40af" : r.source === "part_service" ? "#92400e" : "#065f46" }}>
+                      background: r.source === "vehicle" ? "#dbeafe" : r.source === "part_service" ? "#fef3c7" : r.source === "fee_insurance" ? "#ede9fe" : "#d1fae5",
+                      color: r.source === "vehicle" ? "#1e40af" : r.source === "part_service" ? "#92400e" : r.source === "fee_insurance" ? "#6d28d9" : "#065f46" }}>
                       {SRC_LABEL[r.source]}
                     </span>
-                    <span style={{ marginLeft: 4, fontSize: 10, color: "#9ca3af" }}>{r.branch}</span>
+                    <span style={{ marginLeft: 4, fontSize: 10, color: "#9ca3af" }}>{rowBranch(r)}</span>
                   </td>
                   <td style={td}>{r.customer_name || "-"}</td>
                   <td style={{ ...td, fontFamily: "monospace", whiteSpace: "nowrap" }}>{r.customer_tax_id || "-"}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.amount_before_vat)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.vat_amount)}</td>
+                  <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+                    {(r.source === "part_service" || r.source === "fee_insurance") && !r.cancelled && (
+                      movedInSet.has(stripDoc(r.tax_invoice_no)) ? (
+                        <button onClick={() => cancelMove(stripDoc(r.tax_invoice_no))}
+                          title={`ย้ายเข้าจากงวด ${fmtPeriod(moveOf(stripDoc(r.tax_invoice_no))?.from_period)} — กดเพื่อยกเลิกย้าย`}
+                          style={{ padding: "2px 8px", border: "1px solid #86efac", background: "#f0fdf4", color: "#15803d", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                          ย้ายเข้า ↩
+                        </button>
+                      ) : (
+                        <button onClick={() => moveDocNext(r)} title="ลบออกจากงวดนี้ → ไปขึ้นงวดถัดไป"
+                          style={{ padding: "2px 8px", border: "1px solid #fca5a5", background: "#fff", color: "#dc2626", borderRadius: 6, cursor: "pointer", fontSize: 11 }}>
+                          ✕ งวดถัดไป
+                        </button>
+                      )
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -245,6 +379,7 @@ export default function OutputTaxReportPage({ currentUser }) {
                 <td style={td} colSpan={6}>ยอดรวมทั้งสิ้น (ไม่รวมใบยกเลิก)</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumBase)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{fmt(sumVat)}</td>
+                <td style={td}></td>
               </tr>
             </tfoot>
           </table>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 // บันทึกจ่ายเงินภาษีสรรพากร — นำรายการภาษี "รอจ่าย" มาแสดง แล้วบันทึกการนำส่ง + เก็บประวัติ
 // ภ.พ.36: จากวิธีจ่ายในหน้า FLOW ACC → tax_remittances (tax-remittance-api)
@@ -60,8 +60,8 @@ function fmtPeriod(ym) {
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
-  const [pending, setPending] = useState([]);
-  const [history, setHistory] = useState([]);
+  const [pendingRaw, setPendingRaw] = useState([]);   // ข้อมูลดิบจากทุกแหล่ง (โหมด ภ.ง.ด. กรองฝั่งจอด้วย useMemo)
+  const [historyRaw, setHistoryRaw] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -81,11 +81,19 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   const whoami = () => currentUser?.username || currentUser?.name || "system";
 
   useEffect(() => { fetchBankAccounts(); /* eslint-disable-next-line */ }, []);
+  // โหลดข้อมูลเมื่อเปลี่ยนแท็บ/ประเภทภาษีเท่านั้น — โหมด ภ.ง.ด. เปลี่ยน filter ไม่ต้องโหลดใหม่ (กรองฝั่งจอ)
   useEffect(() => {
     setSelected({});
     if (tab === "pending") fetchPending(); else fetchHistory();
     /* eslint-disable-next-line */
-  }, [tab, taxType, filterAff, filterForm, dateFrom, dateTo]);
+  }, [tab, taxType]);
+  // ภ.พ.36 กรองฝั่ง server → ต้อง refetch เมื่อ filter เปลี่ยน (ภ.ง.ด. ข้าม — useMemo จัดการ)
+  useEffect(() => {
+    setSelected({});
+    if (isWHT) return;
+    if (tab === "pending") fetchPending(); else fetchHistory();
+    /* eslint-disable-next-line */
+  }, [filterAff, filterForm, dateFrom, dateTo]);
 
   function inRange(v) {
     const m = yymm(v);
@@ -93,6 +101,23 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     if (dateTo && m > yymm(dateTo)) return false;
     return true;
   }
+  // โหมด ภ.ง.ด.: กรอง สังกัด/แบบ/ช่วงเดือน ฝั่งจอทันทีจากข้อมูลดิบ — ไม่ยิง API ใหม่ ไม่มี race ระหว่าง request
+  const pending = useMemo(() => {
+    if (!isWHT) return pendingRaw;
+    return pendingRaw
+      .filter(r => !filterAff || r.affiliation === filterAff)
+      .filter(r => !filterForm || r.pndType === filterForm)
+      .filter(r => inRange(r.paid_at));
+    /* eslint-disable-next-line */
+  }, [pendingRaw, isWHT, filterAff, filterForm, dateFrom, dateTo]);
+  const history = useMemo(() => {
+    if (!isWHT) return historyRaw;
+    return historyRaw
+      .filter(h => !filterAff || h.affiliation === filterAff)
+      .filter(h => !filterForm || h.tax_type === filterForm)
+      .filter(h => inRange(h.remit_date));
+    /* eslint-disable-next-line */
+  }, [historyRaw, isWHT, filterAff, filterForm, dateFrom, dateTo]);
   async function post(url, body) {
     const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     return r.json();
@@ -104,8 +129,8 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     setLoading(true);
     try {
       const data = await post(TAX_URL, { action: "list_pending_tax", tax_type: taxType, date_from: dateFrom || undefined, date_to: dateTo || undefined, affiliation: filterAff || undefined });
-      setPending(Array.isArray(data) ? data.filter(r => r && r.source_id) : []);
-    } catch { setPending([]); }
+      setPendingRaw(Array.isArray(data) ? data.filter(r => r && r.source_id) : []);
+    } catch { setPendingRaw([]); }
     setLoading(false);
   }
   async function fetchHistory() {
@@ -113,8 +138,8 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     setLoading(true);
     try {
       const data = await post(TAX_URL, { action: "list_tax_remittances", tax_type: taxType || undefined, date_from: dateFrom || undefined, date_to: dateTo || undefined, affiliation: filterAff || undefined });
-      setHistory(Array.isArray(data) ? data.filter(r => r && r.remit_doc_no) : []);
-    } catch { setHistory([]); }
+      setHistoryRaw(Array.isArray(data) ? data.filter(r => r && r.remit_doc_no) : []);
+    } catch { setHistoryRaw([]); }
     setLoading(false);
   }
 
@@ -322,13 +347,11 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
         if (expDone.has(k) || seenItem.has(k)) return false;
         seenItem.add(k); return true;
       });
+      // ไม่กรองที่นี่ — เก็บดิบไว้ให้ useMemo กรองฝั่งจอ (เปลี่ยน filter ไม่ต้อง refetch)
       const rows = [...payroll, ...refRows, ...itemRows]
-        .filter(r => !filterAff || r.affiliation === filterAff)
-        .filter(r => !filterForm || r.pndType === filterForm)
-        .filter(r => inRange(r.paid_at))
         .sort((a, b) => String(b.period_month).localeCompare(String(a.period_month)) || String(a.pndType).localeCompare(String(b.pndType)));
-      setPending(rows);
-    } catch { setPending([]); }
+      setPendingRaw(rows);
+    } catch { setPendingRaw([]); }
     setLoading(false);
   }
   async function fetchHistoryWHT() {
@@ -340,9 +363,6 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       ]);
       const payrollHist = (Array.isArray(pays) ? pays : [])
         .filter(p => (p.payroll_creditor_type === "tax" || p.vendor_name === "สรรพากร") && p.paid_doc_no)
-        .filter(p => !filterAff || p.affiliation === filterAff)
-        .filter(() => !filterForm || filterForm === "ภ.ง.ด.1")
-        .filter(p => inRange(p.paid_at || p.month_year))
         .map(p => ({
           remit_doc_no: p.paid_doc_no, tax_type: "ภ.ง.ด.1", remit_date: p.paid_at,
           period_month: periodOf(p.month_year), affiliation: p.affiliation,
@@ -353,12 +373,9 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
           _pnd: true,
         }));
       const trmtHist = (Array.isArray(trmt) ? trmt : [])
-        .filter(h => String(h.tax_type || "").startsWith("ภ.ง.ด."))
-        .filter(h => !filterAff || h.affiliation === filterAff)
-        .filter(h => !filterForm || h.tax_type === filterForm)
-        .filter(h => inRange(h.remit_date));
-      setHistory([...payrollHist, ...trmtHist].sort((a, b) => String(b.remit_date || "").localeCompare(String(a.remit_date || ""))));
-    } catch { setHistory([]); }
+        .filter(h => String(h.tax_type || "").startsWith("ภ.ง.ด."));
+      setHistoryRaw([...payrollHist, ...trmtHist].sort((a, b) => String(b.remit_date || "").localeCompare(String(a.remit_date || ""))));
+    } catch { setHistoryRaw([]); }
     setLoading(false);
   }
   async function fetchBankAccounts() {

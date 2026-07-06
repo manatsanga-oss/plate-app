@@ -513,13 +513,18 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                 </select>
               </Field>
               <Field label="สี">
-                {colorOpts.length > 0 ? (
-                  <select value={form.color_name} onChange={(e) => setForm({ ...form, color_name: e.target.value })} style={inp}>
-                    <option value="">-- เลือก --</option>
-                    {colorOpts.map((c) => <option key={c.color_id} value={c.color_name}>{c.color_name}{c.color_code ? ` (${c.color_code})` : ""}</option>)}
-                  </select>
-                ) : (
+                {(typeOpts.length === 0 && colorOpts.length === 0) ? (
+                  // รุ่นนี้ไม่มี Type/สีใน master → พิมพ์เอง (เคสหายาก)
                   <input value={form.color_name} onChange={(e) => setForm({ ...form, color_name: e.target.value })} style={inp} placeholder="พิมพ์สี" />
+                ) : (
+                  // เลือกจาก master เสมอ (กันพิมพ์สีผิด เช่น "ขาวตำ") — ปิดจนกว่าจะเลือก Type
+                  <select value={form.color_name} onChange={(e) => setForm({ ...form, color_name: e.target.value })} style={inp} disabled={!selectedType}>
+                    <option value="">{!selectedType ? "-- เลือก Type ก่อน --" : (colorOpts.length ? "-- เลือกสี --" : "-- ไม่มีสีใน master --")}</option>
+                    {colorOpts.map((c) => <option key={c.color_id} value={c.color_name}>{c.color_name}{c.color_code ? ` (${c.color_code})` : ""}</option>)}
+                    {form.color_name && !colorOpts.some((c) => c.color_name === form.color_name) && (
+                      <option value={form.color_name}>{form.color_name} (เดิม)</option>
+                    )}
+                  </select>
                 )}
               </Field>
             </div>
