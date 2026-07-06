@@ -41,6 +41,8 @@ export default function RegistrationSummaryReportPage() {
   const [insPaidMonth, setInsPaidMonth] = useState("");  // YYYY-MM
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  // กรอกยอดเองเมื่อคอลัมน์ว่าง (ใช้แสดง/พิมพ์เท่านั้น ไม่บันทึกลง DB) — { "branch|เลขใบกำกับ": { op: "", rc: "" } }
+  const [manualFees, setManualFees] = useState({});
 
   async function fetchData() {
     setLoading(true);
@@ -89,8 +91,14 @@ export default function RegistrationSummaryReportPage() {
     return `${months[Number(m)] || m} ${(Number(y) + 543).toString().slice(-2)}`;
   };
 
-  // ยอดจดทะเบียนรวม + ค่า พรบ. รวม
-  const totalRegFee = filtered.reduce((s, r) => s + Number(r.total_registration_fee || 0), 0);
+  // แยกยอด: ค่าดำเนินการ-จดทะเบียน / ค่าจดทะเบียนตามใบเสร็จ (ค่าจดทะเบียน+ขอใช้-ค่าจดทะเบียน)
+  // ถ้าค่าจาก DB ว่าง ใช้ค่าที่กรอกเอง (manualFees) แทน — สำหรับแสดง/พิมพ์เท่านั้น
+  const rowKey = (r) => `${r.branch}|${r.tax_invoice_no}`;
+  const effOp = (r) => { const v = Number(r.reg_fee_operation || 0); return v !== 0 ? v : Number(manualFees[rowKey(r)]?.op || 0); };
+  const effRc = (r) => { const v = Number(r.reg_fee_receipt || 0); return v > 0 ? v : Number(manualFees[rowKey(r)]?.rc || 0); };
+  const setManual = (r, field, value) => setManualFees(p => ({ ...p, [rowKey(r)]: { ...p[rowKey(r)], [field]: value } }));
+  const totalRegOperation = filtered.reduce((s, r) => s + effOp(r), 0);
+  const totalRegReceipt = filtered.reduce((s, r) => s + effRc(r), 0);
   const totalInsPremium = filtered.reduce((s, r) => s + Number(r.total_insurance_premium || 0), 0);
 
   // Summary by branch (count + reg fee + insurance)
@@ -109,7 +117,7 @@ export default function RegistrationSummaryReportPage() {
 
   function exportCSV() {
     if (filtered.length === 0) { setMessage("ไม่มีข้อมูลให้ส่งออก"); return; }
-    const header = ["#", "สาขา", "เลขที่ใบกำกับ", "วันที่", "ลูกค้า", "ไฟแนนท์", "เลขถัง", "เลขเครื่อง", "รุ่น", "ใบขาย", "วันที่ขาย", "ยอดจดทะเบียน", "ค่า พรบ."];
+    const header = ["#", "สาขา", "เลขที่ใบกำกับ", "วันที่", "ลูกค้า", "ไฟแนนท์", "เลขถัง", "เลขเครื่อง", "รุ่น", "ใบขาย", "วันที่ขาย", "ค่าดำเนินการ-จดทะเบียน", "ค่าจดทะเบียนตามใบเสร็จ", "ค่า พรบ."];
     const lines = [header.join(",")];
     filtered.forEach((r, i) => {
       const row = [
@@ -124,7 +132,8 @@ export default function RegistrationSummaryReportPage() {
         (r.model_name || "").replace(/,/g, " "),
         r.sale_invoice_no || "",
         r.sale_date ? String(r.sale_date).slice(0, 10) : "",
-        Number(r.total_registration_fee || 0).toFixed(2),
+        effOp(r).toFixed(2),
+        effRc(r).toFixed(2),
         Number(r.total_insurance_premium || 0).toFixed(2),
       ];
       lines.push(row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
@@ -136,6 +145,81 @@ export default function RegistrationSummaryReportPage() {
     a.download = `รายงานสรุปใบปะหน้า คชจ. ขายรถ_${invoiceMonth || "all"}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+  }
+
+  function printReport() {
+    if (filtered.length === 0) { setMessage("ไม่มีข้อมูลให้พิมพ์"); return; }
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const branchLabel = filtered.length && branchFilter !== "all" ? (BRANCH_LABEL[branchFilter]?.label || branchFilter) : "ทุกสาขา";
+    const body = filtered.map((r, i) => `<tr>
+        <td class="c">${i + 1}</td>
+        <td class="c">${esc(BRANCH_LABEL[r.branch]?.label || r.branch || "-")}</td>
+        <td class="m">${esc(r.tax_invoice_no || "-")}</td>
+        <td class="c">${esc(fmtDate(r.invoice_date))}</td>
+        <td>${esc(r.sale_customer_name || r.customer_name || "-")}${r.sale_finance_company ? `<div class="sub">${esc(r.sale_finance_company)}</div>` : ""}</td>
+        <td class="m">${esc(r.chassis_no || "-")}</td>
+        <td class="m">${esc(r.engine_no || "-")}</td>
+        <td>${esc(r.model_name || "-")}</td>
+        <td class="m">${esc(r.sale_invoice_no || "-")}</td>
+        <td class="c">${esc(fmtDate(r.sale_date))}</td>
+        <td class="r">${effOp(r) !== 0 ? fmt(effOp(r)) + (Number(r.reg_fee_operation || 0) === 0 ? " *" : "") : "-"}${r.reg_paid_at ? `<div class="sub">จ่าย: ${esc(fmtDate(r.reg_paid_at))}</div>` : ""}</td>
+        <td class="r">${effRc(r) > 0 ? fmt(effRc(r)) + (Number(r.reg_fee_receipt || 0) <= 0 ? " *" : "") : "-"}</td>
+        <td class="r">${Number(r.total_insurance_premium) > 0 ? fmt(r.total_insurance_premium) : "-"}${r.ins_paid_at ? `<div class="sub">จ่าย: ${esc(fmtDate(r.ins_paid_at))}</div>` : ""}</td>
+        <td class="r">${Number(r.credit_note_total) > 0 ? fmt(r.credit_note_total) : "-"}</td>
+        <td class="r">${Number(r.coupon_total) > 0 ? fmt(r.coupon_total) : "-"}</td>
+      </tr>`).join("");
+    const totalCredit = filtered.reduce((s, r) => s + Number(r.credit_note_total || 0), 0);
+    const totalCoupon = filtered.reduce((s, r) => s + Number(r.coupon_total || 0), 0);
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานสรุปใบปะหน้า คชจ. ขายรถ ${esc(invoiceMonth || "")}</title>
+      <style>
+        *{font-family:'Tahoma','Sarabun',sans-serif;box-sizing:border-box}
+        body{margin:18px;color:#111827;font-size:11px}
+        h1{font-size:16px;margin:0 0 2px}
+        .sub2{color:#374151;margin-bottom:10px;font-size:12px}
+        .totals{display:flex;gap:18px;flex-wrap:wrap;margin-bottom:8px;font-size:12px}
+        .totals b{font-family:monospace}
+        table{width:100%;border-collapse:collapse}
+        th,td{border:1px solid #cbd5e1;padding:3px 5px;vertical-align:top}
+        th{background:#e2e8f0;font-size:10px;white-space:nowrap}
+        .c{text-align:center}.r{text-align:right;font-family:monospace;white-space:nowrap}
+        .m{font-family:monospace;font-size:10px}
+        .sub{color:#6b7280;font-size:9px}
+        tfoot td{font-weight:bold;background:#f1f5f9}
+        @page{size:A4 landscape;margin:10mm}
+        @media print{body{margin:0}}
+      </style></head><body>
+      <h1>📋 รายงานสรุปใบปะหน้า คชจ. ขายรถ</h1>
+      <div class="sub2">เดือนใบกำกับ: ${esc(invoiceMonth ? fmtMonthLabel(invoiceMonth) : "ทั้งหมด")} · สาขา: ${esc(branchLabel)}${regPaidMonth ? ` · จ่ายทะเบียน: ${esc(fmtMonth(regPaidMonth))}` : ""}${insPaidMonth ? ` · จ่าย พรบ.: ${esc(fmtMonth(insPaidMonth))}` : ""}</div>
+      <div class="totals">
+        <span>จำนวน <b>${filtered.length}</b> ใบ</span>
+        <span>ค่าดำเนินการ-จดทะเบียนรวม <b>${fmt(totalRegOperation)}</b></span>
+        <span>ค่าจดทะเบียนตามใบเสร็จรวม <b>${fmt(totalRegReceipt)}</b></span>
+        <span>ค่า พรบ. รวม <b>${fmt(totalInsPremium)}</b></span>
+      </div>
+      <table>
+        <thead><tr>
+          <th>#</th><th>สาขา</th><th>เลขที่ใบกำกับ</th><th>วันที่</th><th>ลูกค้า / ไฟแนนท์</th>
+          <th>เลขถัง</th><th>เลขเครื่อง</th><th>รุ่น</th><th>ใบขาย</th><th>วันที่ขาย</th>
+          <th>ค่าดำเนินการ-จดทะเบียน</th><th>ค่าจดทะเบียนตามใบเสร็จ</th><th>ค่า พรบ.</th>
+          <th>ประกันรถหายออกแทน</th><th>ดาวน์/งวดออกแทน</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+        <tfoot><tr>
+          <td colspan="10" class="r">รวม ${filtered.length} ใบ</td>
+          <td class="r">${fmt(totalRegOperation)}</td>
+          <td class="r">${fmt(totalRegReceipt)}</td>
+          <td class="r">${fmt(totalInsPremium)}</td>
+          <td class="r">${fmt(totalCredit)}</td>
+          <td class="r">${fmt(totalCoupon)}</td>
+        </tr></tfoot>
+      </table>
+      ${filtered.some(r => (Number(r.reg_fee_operation || 0) === 0 && effOp(r) !== 0) || (Number(r.reg_fee_receipt || 0) <= 0 && effRc(r) > 0))
+        ? '<div class="sub" style="margin-top:6px;font-size:10px">* ยอดที่กรอกเองหน้ารายงาน (ไม่ได้บันทึกในระบบ)</div>' : ""}
+    </body></html>`;
+    const w = window.open("", "_blank", "width=1100,height=800");
+    if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup ถูกบล็อก)"); return; }
+    w.document.write(html + "<script>window.onload=function(){window.print();}<\/script>");
+    w.document.close();
   }
 
   const th = { padding: "10px 8px", textAlign: "left", whiteSpace: "nowrap", fontSize: 12, background: "#072d6b", color: "#fff" };
@@ -183,6 +267,10 @@ export default function RegistrationSummaryReportPage() {
           style={{ padding: "7px 14px", background: filtered.length === 0 ? "#9ca3af" : "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: filtered.length === 0 ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13 }}>
           📥 Export CSV
         </button>
+        <button onClick={printReport} disabled={filtered.length === 0}
+          style={{ padding: "7px 14px", background: filtered.length === 0 ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: filtered.length === 0 ? "not-allowed" : "pointer", fontWeight: 600, fontSize: 13 }}>
+          🖨️ พิมพ์
+        </button>
       </div>
 
       {/* Summary — count + ยอดจดทะเบียน */}
@@ -192,8 +280,12 @@ export default function RegistrationSummaryReportPage() {
           <div style={{ fontSize: 22, fontWeight: 700, color: "#1e3a8a" }}>{filtered.length} ใบ</div>
         </div>
         <div style={{ padding: "10px 18px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 10 }}>
-          <div style={{ fontSize: 12, color: "#92400e" }}>💰 ยอดจดทะเบียนรวม</div>
-          <div style={{ fontSize: 20, fontWeight: 700, color: "#92400e" }}>฿ {fmt(totalRegFee)}</div>
+          <div style={{ fontSize: 12, color: "#92400e" }}>💰 ค่าดำเนินการ-จดทะเบียนรวม</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#92400e" }}>฿ {fmt(totalRegOperation)}</div>
+        </div>
+        <div style={{ padding: "10px 18px", background: "#ede9fe", border: "1px solid #c4b5fd", borderRadius: 10 }}>
+          <div style={{ fontSize: 12, color: "#5b21b6" }}>🧾 ค่าจดทะเบียนตามใบเสร็จรวม</div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#5b21b6" }}>฿ {fmt(totalRegReceipt)}</div>
         </div>
         <div style={{ padding: "10px 18px", background: "#dcfce7", border: "1px solid #86efac", borderRadius: 10 }}>
           <div style={{ fontSize: 12, color: "#065f46" }}>🛡️ ค่า พรบ. รวม</div>
@@ -236,7 +328,8 @@ export default function RegistrationSummaryReportPage() {
                 <th style={th}>รุ่น</th>
                 <th style={th}>ใบขาย</th>
                 <th style={th}>วันที่ขาย</th>
-                <th style={{ ...th, textAlign: "right" }}>ยอดจดทะเบียน</th>
+                <th style={{ ...th, textAlign: "right" }}>ค่าดำเนินการ-จดทะเบียน</th>
+                <th style={{ ...th, textAlign: "right", background: "#4c1d95" }}>ค่าจดทะเบียนตามใบเสร็จ</th>
                 <th style={{ ...th, textAlign: "right" }}>ค่า พรบ.</th>
                 <th style={{ ...th, textAlign: "right", background: "#a16207", color: "#fff" }}>ประกันรถหายออกแทน</th>
                 <th style={{ ...th, textAlign: "right", background: "#be185d", color: "#fff" }}>ดาวน์/งวดออกแทน</th>
@@ -266,12 +359,25 @@ export default function RegistrationSummaryReportPage() {
                     <td style={{ ...td, fontSize: 12 }}>{r.model_name || "-"}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.sale_invoice_no || "-"}</td>
                     <td style={td}>{fmtDate(r.sale_date)}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.total_registration_fee) > 0 ? "#92400e" : "#9ca3af" }}>
-                      {Number(r.total_registration_fee) > 0 ? fmt(r.total_registration_fee) : "-"}
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.reg_fee_operation) > 0 ? "#92400e" : "#9ca3af" }}>
+                      {Number(r.reg_fee_operation) !== 0 ? fmt(r.reg_fee_operation) : (
+                        <input type="number" step="0.01" value={manualFees[rowKey(r)]?.op ?? ""}
+                          onChange={e => setManual(r, "op", e.target.value)}
+                          placeholder="-" title="กรอกเองสำหรับพิมพ์ (ไม่บันทึก)"
+                          style={{ width: 80, padding: "3px 5px", textAlign: "right", fontFamily: "monospace", fontSize: 12, border: "1px dashed #fbbf24", borderRadius: 4, background: "#fffbeb", color: "#92400e" }} />
+                      )}
                       {r.reg_paid_at && (
                         <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "Tahoma", fontWeight: 400 }}>
                           จ่าย: {fmtDate(r.reg_paid_at)}
                         </div>
+                      )}
+                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.reg_fee_receipt) > 0 ? "#5b21b6" : "#9ca3af" }}>
+                      {Number(r.reg_fee_receipt) > 0 ? fmt(r.reg_fee_receipt) : (
+                        <input type="number" step="0.01" value={manualFees[rowKey(r)]?.rc ?? ""}
+                          onChange={e => setManual(r, "rc", e.target.value)}
+                          placeholder="-" title="กรอกเองสำหรับพิมพ์ (ไม่บันทึก)"
+                          style={{ width: 80, padding: "3px 5px", textAlign: "right", fontFamily: "monospace", fontSize: 12, border: "1px dashed #c4b5fd", borderRadius: 4, background: "#f5f3ff", color: "#5b21b6" }} />
                       )}
                     </td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.total_insurance_premium) > 0 ? "#065f46" : "#9ca3af" }}>
@@ -295,7 +401,8 @@ export default function RegistrationSummaryReportPage() {
             <tfoot style={{ background: "#fef9c3", fontWeight: 700 }}>
               <tr>
                 <td colSpan={10} style={{ ...td, textAlign: "right" }}>รวม {filtered.length} ใบ</td>
-                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#92400e", fontSize: 14 }}>{fmt(totalRegFee)}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#92400e", fontSize: 14 }}>{fmt(totalRegOperation)}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6", fontSize: 14 }}>{fmt(totalRegReceipt)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#065f46", fontSize: 14 }}>{fmt(totalInsPremium)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#a16207", fontSize: 14 }}>
                   {fmt(filtered.reduce((s, r) => s + Number(r.credit_note_total || 0), 0))}
