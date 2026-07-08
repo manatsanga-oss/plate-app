@@ -30,8 +30,10 @@ function addDays(ymd, n) {
 }
 
 /* จับคู่ยอดเงินสดรายวัน (รับ−จ่าย) กับรายการฝากจริง ต่อสาขา
-   รอบแรก: หายอดฝากที่ตรงกัน (±1 บาท เพราะฝากปัดเศษเป็นบาทถ้วน) ภายใน 0-6 วันหลังวันรับเงิน
-   รอบสอง: วันที่เหลือจับคู่ใบฝากที่ยังว่างตามลำดับวัน (ยอดไม่ตรง → ไฮไลต์) */
+   รอบแรก: หายอดฝากใบเดียวที่ตรงกัน (±1 บาท เพราะฝากปัดเศษเป็นบาทถ้วน) ภายใน 0-6 วันหลังวันรับเงิน
+   รอบสอง: จับคู่ผลรวม 2 ใบฝาก — บางสาขา (เช่น ป.เปา) ฝากแยก 2 รอบ/2 บัญชี
+   (เงินสดย่อย + เงินฝากธนาคาร คนละวันได้) รวมกันแล้วตรงยอด
+   รอบสาม: วันที่เหลือจับคู่ใบฝากที่ยังว่างตามลำดับวัน (ยอดไม่ตรง → ไฮไลต์) */
 function buildRecon(rows, deps, showFrom, showTo) {
   const MS = 86400000;
   const dayDiff = (dep, day) => {
@@ -52,24 +54,38 @@ function buildRecon(rows, deps, showFrom, showTo) {
   for (const b of Object.keys(byBranch)) {
     const days = byBranch[b].days
       .sort((a, c) => String(a.work_date).localeCompare(String(c.work_date)))
-      .map(r => ({ ...r, branch_code: b, expected: Number(r.cash_in || 0) - Number(r.cash_out || 0), match: null }));
+      .map(r => ({ ...r, branch_code: b, expected: Number(r.cash_in || 0) - Number(r.cash_out || 0), matches: [] }));
     const dl = byBranch[b].deps
       .sort((a, c) => String(a.deposit_date).localeCompare(String(c.deposit_date)) || String(a.deposit_doc_no).localeCompare(String(c.deposit_doc_no)))
       .map(d => ({ ...d, used: false }));
+    // รอบแรก: ใบเดียวยอดตรง
     for (const day of days) {
       if (day.expected <= 0) continue;
       const hit = dl.find(d => !d.used && dayDiff(d, day) >= 0 && dayDiff(d, day) <= 6 && Math.abs(Number(d.amount || 0) - day.expected) <= 1);
-      if (hit) { hit.used = true; day.match = hit; }
+      if (hit) { hit.used = true; day.matches = [hit]; }
     }
+    // รอบสอง: 2 ใบรวมกันยอดตรง (ฝากแยกบัญชี/แยกวัน)
     for (const day of days) {
-      if (day.match || day.expected <= 0) continue;
+      if (day.matches.length || day.expected <= 0) continue;
+      const cand = dl.filter(d => !d.used && dayDiff(d, day) >= 0 && dayDiff(d, day) <= 6);
+      let found = null;
+      for (let i = 0; i < cand.length && !found; i++) {
+        for (let j = i + 1; j < cand.length; j++) {
+          if (Math.abs(Number(cand[i].amount || 0) + Number(cand[j].amount || 0) - day.expected) <= 1) { found = [cand[i], cand[j]]; break; }
+        }
+      }
+      if (found) { found.forEach(d => { d.used = true; }); day.matches = found; }
+    }
+    // รอบสาม: fallback ใบแรกที่ยังว่าง (ยอดไม่ตรง → ไฮไลต์)
+    for (const day of days) {
+      if (day.matches.length || day.expected <= 0) continue;
       const hit = dl.find(d => !d.used && dayDiff(d, day) >= 0 && dayDiff(d, day) <= 6);
-      if (hit) { hit.used = true; day.match = hit; }
+      if (hit) { hit.used = true; day.matches = [hit]; }
     }
     days.forEach(day => { if (String(day.work_date).slice(0, 10) >= showFrom) out.push(day); });
     // ใบฝากในช่วงที่เลือกที่จับคู่ไม่ได้ (เช่น ใบเสร็จยังไม่ upload หรือคีย์ยอดผิด)
     dl.filter(d => !d.used && String(d.deposit_date).slice(0, 10) >= showFrom && String(d.deposit_date).slice(0, 10) <= showTo)
-      .forEach(d => out.push({ work_date: String(d.deposit_date).slice(0, 10), branch_code: b, cash_in: 0, receipt_count: 0, cash_out: 0, expense_count: 0, expected: null, match: d, orphan: true }));
+      .forEach(d => out.push({ work_date: String(d.deposit_date).slice(0, 10), branch_code: b, cash_in: 0, receipt_count: 0, cash_out: 0, expense_count: 0, expected: null, matches: [d], orphan: true }));
   }
   return out.sort((a, c) => String(c.work_date).localeCompare(String(a.work_date)) || String(a.branch_code).localeCompare(String(c.branch_code)));
 }
@@ -93,6 +109,7 @@ export default function BankDepositPage({ currentUser }) {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [search, setSearch] = useState("");
+  const [filterBranch, setFilterBranch] = useState("");
   const [message, setMessage] = useState("");
   const [tab, setTab] = useState("list");           // list | recon
   const [reconRows, setReconRows] = useState([]);   // ยอดรับ/จ่ายเงินสดรายวันจาก daily_receipts/daily_expenses
@@ -341,7 +358,7 @@ th { background: #f0fdf4; }
 .total { font-weight: 700; background: #fef9c3; }
 </style></head><body>
 <h1>📋 รายงานบันทึกฝากเงิน</h1>
-<div class="head">ช่วงวันที่: ${dateFrom} - ${dateTo} · พิมพ์: ${printDate}</div>
+<div class="head">ช่วงวันที่: ${dateFrom} - ${dateTo}${filterBranch ? ` · สาขา: ${safe(filterBranch)}` : ""} · พิมพ์: ${printDate}</div>
 <table>
   <thead><tr><th>#</th><th>เลขที่</th><th>วันที่</th><th>ร้าน/สาขา</th><th>บัญชีรับฝาก</th><th>แหล่งที่มา</th><th>ยอด</th></tr></thead>
   <tbody>
@@ -356,7 +373,12 @@ th { background: #f0fdf4; }
     setTimeout(() => w.print(), 300);
   }
 
+  // รายชื่อสาขาจากข้อมูลที่โหลดมา (สำหรับ dropdown ตัวกรอง)
+  const branchOptions = [...new Map(deposits.filter(d => d.branch_code).map(d => [d.branch_code, d.branch_name || ""])).entries()]
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
   const filtered = deposits.filter(d => {
+    if (filterBranch && (d.branch_code || "") !== filterBranch) return false;
     if (!search.trim()) return true;
     const kw = search.trim().toLowerCase();
     return [d.deposit_doc_no, d.to_account_name, d.source, d.note].filter(Boolean).join(" ").toLowerCase().includes(kw);
@@ -378,18 +400,22 @@ th { background: #f0fdf4; }
     s.cash_in += Number(r.cash_in || 0);
     s.cash_out += Number(r.cash_out || 0);
     if (r.expected != null && r.expected > 0) s.expected += r.expected;
-    if (r.match) s.actual += Number(r.match.amount || 0);
+    s.actual += matchTotal(r);
     const st = reconStatus(r);
     if (st.key === "mismatch" || st.key === "orphan") s.problems++;
     return s;
   }, { cash_in: 0, cash_out: 0, expected: 0, actual: 0, problems: 0 });
 
+  function matchTotal(r) {
+    return (r.matches || []).reduce((s, m) => s + Number(m.amount || 0), 0);
+  }
+
   function reconStatus(r) {
     if (r.orphan) return { key: "orphan", label: "⚠️ ฝากโดยไม่พบยอดเงินสด", bg: "#fef3c7", color: "#92400e" };
     if (r.expected == null || r.expected <= 0) return { key: "none", label: "ไม่มียอดต้องฝาก", bg: "", color: "#9ca3af" };
-    if (!r.match) return { key: "pending", label: "⏳ ยังไม่พบรายการฝาก", bg: "#fef9c3", color: "#854d0e" };
-    const diff = Number(r.match.amount || 0) - r.expected;
-    if (Math.abs(diff) <= 1) return { key: "ok", label: "✅ ตรง", bg: "", color: "#059669" };
+    if (!r.matches || r.matches.length === 0) return { key: "pending", label: "⏳ ยังไม่พบรายการฝาก", bg: "#fef9c3", color: "#854d0e" };
+    const diff = matchTotal(r) - r.expected;
+    if (Math.abs(diff) <= 1) return { key: "ok", label: r.matches.length > 1 ? `✅ ตรง (${r.matches.length} ใบ)` : "✅ ตรง", bg: "", color: "#059669" };
     return { key: "mismatch", label: `⚠️ ไม่ตรง (${diff > 0 ? "+" : ""}${fmt(diff)})`, bg: "#fee2e2", color: "#b91c1c", diff };
   }
 
@@ -423,6 +449,10 @@ th { background: #f0fdf4; }
         <span>ถึง</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
         {tab === "list" && <>
+          <select value={filterBranch} onChange={e => setFilterBranch(e.target.value)} style={inp} title="กรองตามสาขา">
+            <option value="">🏬 ทุกสาขา</option>
+            {branchOptions.map(([code, name]) => <option key={code} value={code}>{code}{name ? ` ${name}` : ""}</option>)}
+          </select>
           <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 ค้นหา (เลขที่, บัญชี, แหล่งที่มา)" style={{ ...inp, flex: 1, minWidth: 220 }} />
           <button onClick={fetchData} disabled={loading} style={{ padding: "7px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
             {loading ? "..." : "🔄 รีเฟรช"}
@@ -509,12 +539,15 @@ th { background: #f0fdf4; }
                         </td>
                         <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#0369a1" }}>{r.orphan ? "-" : fmt(r.expected)}</td>
                         <td style={{ ...td, fontSize: 12 }}>
-                          {r.match ? <>
-                            <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#059669" }}>{r.match.deposit_doc_no}</span>
-                            <span style={{ color: "#6b7280" }}> · ฝาก {fmtDateShort(r.match.deposit_date)}</span>
-                          </> : <span style={{ color: "#9ca3af" }}>-</span>}
+                          {r.matches && r.matches.length > 0 ? r.matches.map((m, mi) => (
+                            <div key={mi}>
+                              <span style={{ fontFamily: "monospace", fontWeight: 600, color: "#059669" }}>{m.deposit_doc_no}</span>
+                              <span style={{ color: "#6b7280" }}> · ฝาก {fmtDateShort(m.deposit_date)}</span>
+                              {r.matches.length > 1 && <span style={{ color: "#6b7280", fontFamily: "monospace" }}> · {fmt(m.amount)}</span>}
+                            </div>
+                          )) : <span style={{ color: "#9ca3af" }}>-</span>}
                         </td>
-                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{r.match ? fmt(r.match.amount) : "-"}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{r.matches && r.matches.length > 0 ? fmt(matchTotal(r)) : "-"}</td>
                         <td style={{ ...td, fontWeight: 600, color: st.color, whiteSpace: "nowrap" }}>{st.label}</td>
                       </tr>
                     );
