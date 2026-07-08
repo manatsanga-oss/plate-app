@@ -99,6 +99,9 @@ export default function RegistrationSummaryReportPage() {
   const setManual = (r, field, value) => setManualFees(p => ({ ...p, [rowKey(r)]: { ...p[rowKey(r)], [field]: value } }));
   const totalRegOperation = filtered.reduce((s, r) => s + effOp(r), 0);
   const totalRegReceipt = filtered.reduce((s, r) => s + effRc(r), 0);
+  // รวมค่าใช้จ่ายต่อคัน = ค่าดำเนินการ + ตามใบเสร็จ + พรบ. + ประกันรถหายออกแทน + ดาวน์/งวดออกแทน
+  const rowTotal = (r) => effOp(r) + effRc(r) + Number(r.total_insurance_premium || 0) + Number(r.credit_note_total || 0) + Number(r.coupon_total || 0);
+  const totalRowSum = filtered.reduce((s, r) => s + rowTotal(r), 0);
   const totalInsPremium = filtered.reduce((s, r) => s + Number(r.total_insurance_premium || 0), 0);
 
   // Summary by branch (count + reg fee + insurance)
@@ -117,7 +120,7 @@ export default function RegistrationSummaryReportPage() {
 
   function exportCSV() {
     if (filtered.length === 0) { setMessage("ไม่มีข้อมูลให้ส่งออก"); return; }
-    const header = ["#", "สาขา", "เลขที่ใบกำกับ", "วันที่", "ลูกค้า", "ไฟแนนท์", "เลขถัง", "เลขเครื่อง", "รุ่น", "ใบขาย", "วันที่ขาย", "ค่าดำเนินการ-จดทะเบียน", "ค่าจดทะเบียนตามใบเสร็จ", "ค่า พรบ."];
+    const header = ["#", "สาขา", "เลขที่ใบกำกับ", "วันที่", "ลูกค้า", "ไฟแนนท์", "เลขถัง", "เลขเครื่อง", "รุ่น", "ใบขาย", "วันที่ขาย", "ค่าดำเนินการ-จดทะเบียน", "ค่าจดทะเบียนตามใบเสร็จ", "ค่า พรบ.", "ประกันรถหายออกแทน", "ดาวน์/งวดออกแทน", "รวมค่าใช้จ่าย"];
     const lines = [header.join(",")];
     filtered.forEach((r, i) => {
       const row = [
@@ -135,6 +138,9 @@ export default function RegistrationSummaryReportPage() {
         effOp(r).toFixed(2),
         effRc(r).toFixed(2),
         Number(r.total_insurance_premium || 0).toFixed(2),
+        Number(r.credit_note_total || 0).toFixed(2),
+        Number(r.coupon_total || 0).toFixed(2),
+        rowTotal(r).toFixed(2),
       ];
       lines.push(row.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","));
     });
@@ -167,6 +173,7 @@ export default function RegistrationSummaryReportPage() {
         <td class="r">${Number(r.total_insurance_premium) > 0 ? fmt(r.total_insurance_premium) : "-"}${r.ins_paid_at ? `<div class="sub">จ่าย: ${esc(fmtDate(r.ins_paid_at))}</div>` : ""}</td>
         <td class="r">${Number(r.credit_note_total) > 0 ? fmt(r.credit_note_total) : "-"}</td>
         <td class="r">${Number(r.coupon_total) > 0 ? fmt(r.coupon_total) : "-"}</td>
+        <td class="r"><b>${rowTotal(r) !== 0 ? fmt(rowTotal(r)) : "-"}</b></td>
       </tr>`).join("");
     const totalCredit = filtered.reduce((s, r) => s + Number(r.credit_note_total || 0), 0);
     const totalCoupon = filtered.reduce((s, r) => s + Number(r.coupon_total || 0), 0);
@@ -195,13 +202,14 @@ export default function RegistrationSummaryReportPage() {
         <span>ค่าดำเนินการ-จดทะเบียนรวม <b>${fmt(totalRegOperation)}</b></span>
         <span>ค่าจดทะเบียนตามใบเสร็จรวม <b>${fmt(totalRegReceipt)}</b></span>
         <span>ค่า พรบ. รวม <b>${fmt(totalInsPremium)}</b></span>
+        <span>รวมค่าใช้จ่ายทั้งหมด <b>${fmt(totalRowSum)}</b></span>
       </div>
       <table>
         <thead><tr>
           <th>#</th><th>สาขา</th><th>เลขที่ใบกำกับ</th><th>วันที่</th><th>ลูกค้า / ไฟแนนท์</th>
           <th>เลขถัง</th><th>เลขเครื่อง</th><th>รุ่น</th><th>ใบขาย</th><th>วันที่ขาย</th>
           <th>ค่าดำเนินการ-จดทะเบียน</th><th>ค่าจดทะเบียนตามใบเสร็จ</th><th>ค่า พรบ.</th>
-          <th>ประกันรถหายออกแทน</th><th>ดาวน์/งวดออกแทน</th>
+          <th>ประกันรถหายออกแทน</th><th>ดาวน์/งวดออกแทน</th><th>รวมค่าใช้จ่าย</th>
         </tr></thead>
         <tbody>${body}</tbody>
         <tfoot><tr>
@@ -211,6 +219,7 @@ export default function RegistrationSummaryReportPage() {
           <td class="r">${fmt(totalInsPremium)}</td>
           <td class="r">${fmt(totalCredit)}</td>
           <td class="r">${fmt(totalCoupon)}</td>
+          <td class="r">${fmt(totalRowSum)}</td>
         </tr></tfoot>
       </table>
       ${filtered.some(r => (Number(r.reg_fee_operation || 0) === 0 && effOp(r) !== 0) || (Number(r.reg_fee_receipt || 0) <= 0 && effRc(r) > 0))
@@ -333,6 +342,7 @@ export default function RegistrationSummaryReportPage() {
                 <th style={{ ...th, textAlign: "right" }}>ค่า พรบ.</th>
                 <th style={{ ...th, textAlign: "right", background: "#a16207", color: "#fff" }}>ประกันรถหายออกแทน</th>
                 <th style={{ ...th, textAlign: "right", background: "#be185d", color: "#fff" }}>ดาวน์/งวดออกแทน</th>
+                <th style={{ ...th, textAlign: "right", background: "#065f46", color: "#fff" }}>รวมค่าใช้จ่าย/คัน</th>
               </tr>
             </thead>
             <tbody>
@@ -394,6 +404,9 @@ export default function RegistrationSummaryReportPage() {
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.coupon_total) > 0 ? "#be185d" : "#9ca3af" }}>
                       {Number(r.coupon_total) > 0 ? fmt(r.coupon_total) : "-"}
                     </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: rowTotal(r) !== 0 ? "#065f46" : "#9ca3af", background: "#f0fdf4" }}>
+                      {rowTotal(r) !== 0 ? fmt(rowTotal(r)) : "-"}
+                    </td>
                   </tr>
                 );
               })}
@@ -409,6 +422,9 @@ export default function RegistrationSummaryReportPage() {
                 </td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#be185d", fontSize: 14 }}>
                   {fmt(filtered.reduce((s, r) => s + Number(r.coupon_total || 0), 0))}
+                </td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#065f46", fontSize: 14 }}>
+                  {fmt(totalRowSum)}
                 </td>
               </tr>
             </tfoot>

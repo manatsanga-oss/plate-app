@@ -43,14 +43,29 @@ function normalizeReceipt(r) {
     vat_pct: Number(r.vat_pct || 0), vat_amount: Number(r.vat_amount || 0), total: Number(r.total || 0),
   };
 }
-function statusBadge(s) {
+function statusBadge(s, row) {
   const map = {
     draft: { t: "ร่าง", c: "#92400e", bg: "#fef3c7" },
     paid: { t: "ชำระแล้ว", c: "#166534", bg: "#dcfce7" },
     cancelled: { t: "ยกเลิก", c: "#991b1b", bg: "#fee2e2" },
+    partial: { t: "รับบางส่วน", c: "#9a3412", bg: "#ffedd5" },
+    received: { t: "รับครบ", c: "#1e40af", bg: "#dbeafe" },
   };
-  const m = map[s] || map.draft;
-  return <span style={{ fontSize: 11, fontWeight: 600, color: m.c, background: m.bg, padding: "2px 8px", borderRadius: 6 }}>{m.t}</span>;
+  let key = s || "draft";
+  // สถานะรับใบกำกับฯ คิดจากยอดที่บันทึกรับ (received_total) เทียบยอดเอกสาร — เฉพาะเอกสารที่ยังไม่ชำระ/ยกเลิก
+  if (row && key !== "paid" && key !== "cancelled") {
+    const recv = Number(row.received_total || 0);
+    const total = Number(row.total || 0);
+    if (recv > 0) key = recv >= total - 0.01 ? "received" : "partial";
+  }
+  const m = map[key] || map.draft;
+  const recv = row ? Number(row.received_total || 0) : 0;
+  return (
+    <span style={{ fontSize: 11, fontWeight: 600, color: m.c, background: m.bg, padding: "2px 8px", borderRadius: 6, whiteSpace: "nowrap" }}
+      title={key === "partial" ? `รับแล้ว ${fmt(recv)} / ${fmt(row?.total)} บาท` : key === "received" ? `รับครบ ${fmt(recv)} บาท` : undefined}>
+      {m.t}{key === "partial" && <span style={{ fontWeight: 400 }}> ({fmt(recv)})</span>}
+    </span>
+  );
 }
 
 export default function TheftInsuranceInvoicePage() {
@@ -291,6 +306,7 @@ export default function TheftInsuranceInvoicePage() {
       if (ok?.error) throw new Error(ok.error);
       setPopupMsg(`✅ บันทึกรับเอกสารเข้า DB แล้ว ${receipts.length} รายการ`);
       await loadReceipts(popupDoc);
+      fetchRows();  // refresh สถานะรับบางส่วน/รับครบ ในตารางเอกสาร
     } catch (e) {
       setPopupMsg("❌ บันทึกล้มเหลว: " + e.message);
     }
@@ -426,7 +442,7 @@ export default function TheftInsuranceInvoicePage() {
                 <td style={{ textAlign: "right" }}>{fmt(r.subtotal)}</td>
                 <td style={{ textAlign: "right" }}>{r.vat_amount ? fmt(r.vat_amount) : "-"}</td>
                 <td style={{ textAlign: "right", fontWeight: 600, color: "#166534" }}>{fmt(r.total)}</td>
-                <td>{statusBadge(r.status)}</td>
+                <td>{statusBadge(r.status, r)}</td>
               </tr>
             ))}
           </tbody>

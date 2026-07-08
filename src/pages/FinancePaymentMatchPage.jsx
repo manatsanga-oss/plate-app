@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { combinedPaid, isPreCutoff } from "../utils/carPaymentStatus";
 
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-invoices";
+// รายงานรับชำระเงินรายคัน — ใช้หายอดค้างของรถที่ตัดรับชำระแล้วบางส่วน (ให้กลับมาเลือกตัดเพิ่มได้)
+const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -165,6 +168,26 @@ export default function FinancePaymentMatchPage({ currentUser }) {
       // ดึง keyword สั้นๆ — แค่ 4-5 ตัวอักษรแรก เพื่อหลีกเลี่ยงเรื่องการสะกด
       const shortKey = companyKey.replace(/^บริษัท\s*/, "").substring(0, 5);
 
+      // ยอดรับชำระต่อคันจากรายงานรับชำระเงินรายคัน — ไว้หา "รถที่ตัดรับชำระแล้วแต่ยังไม่ครบ" ให้เลือกตัดเพิ่มได้
+      // key = "BRANCH|เลขใบกำกับ" → { paid, remain }
+      const remainMap = {};
+      try {
+        const repRes = await fetch(REPORT_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_car_payment_receipts", date_from: "", date_to: "" }),
+        });
+        const repRaw = await repRes.text();
+        const repData = repRaw.trim() ? JSON.parse(repRaw) : [];
+        (Array.isArray(repData) ? repData : (repData?.rows || [])).forEach(rep => {
+          if (!rep || !rep.tax_invoice_no) return;
+          if (isPreCutoff(rep)) return; // ข้อมูลยกมา ก่อน 1 พ.ค. 2569 ถือว่าครบ
+          const total = Number(rep.total_amount || 0);
+          const paid = combinedPaid(rep);
+          const remain = Math.round((total - paid) * 100) / 100;
+          if (total > 0 && remain >= 0.99) remainMap[`${rep.branch}|${rep.tax_invoice_no}`] = { paid, remain };
+        });
+      } catch { /* โหลดรายงานไม่ได้ → แสดงเฉพาะใบที่ยังไม่เคยตัดเหมือนเดิม */ }
+
       for (const branch of branches) {
         try {
           const res = await fetch(TAX_URL, {
@@ -199,14 +222,18 @@ export default function FinancePaymentMatchPage({ currentUser }) {
             .replace(/บริษัท|จำกัด|มหาชน|\(|\)/g, "")
             .trim();
           const matched = arr.filter(r => {
-            if (r.paid_from_ft_id) return false;
+            // เคยตัดรับชำระแล้ว: เอากลับมาเฉพาะคันที่ "ยังไม่ครบ" (มียอดค้างในรายงานรับชำระเงินรายคัน)
+            if (r.paid_from_ft_id && !remainMap[`${branch}|${r.tax_invoice_no}`]) return false;
             const custN = norm(r.customer_name || r.sale_finance_company || "");
             if (!custN) return false;
             const targetN = norm(companyKey);
             const targetShortN = norm(shortKey);
             return custN.includes(targetN) || custN.includes(targetShortN) || targetN.includes(custN);
           });
-          matched.forEach(r => results.push({ ...r, branch }));
+          matched.forEach(r => {
+            const part = r.paid_from_ft_id ? remainMap[`${branch}|${r.tax_invoice_no}`] : null;
+            results.push({ ...r, branch, _paidSoFar: part ? part.paid : null, _remain: part ? part.remain : null });
+          });
         } catch (e) {
           errors.push(`${branch}: ${e.message}`);
         }
@@ -217,7 +244,8 @@ export default function FinancePaymentMatchPage({ currentUser }) {
       } else if (errors.length > 0) {
         setMessage(`⚠️ บางสาขาโหลดไม่ได้: ${errors.join(" | ")} (ได้ ${results.length} รายการ)`);
       } else {
-        setMessage(`✅ พบ ${results.length} รายการของ ${selectedCompany} ที่ยังไม่ตัดรับชำระ`);
+        const partialCount = results.filter(r => r._remain != null).length;
+        setMessage(`✅ พบ ${results.length} รายการของ ${selectedCompany} ที่ยังไม่ตัดรับชำระ${partialCount ? ` (รวมค้างชำระบางส่วน ${partialCount} คัน)` : ""}`);
       }
     } catch (e) {
       setMessage("❌ โหลดไม่สำเร็จ: " + e.message);
@@ -305,19 +333,21 @@ export default function FinancePaymentMatchPage({ currentUser }) {
     }
 
     // ถ้าเป็นไฟแนนท์ที่ออกค่าส่งเสริมรายคัน → เปิด popup
+    // default = ยอดค้าง (ถ้าเป็นคันที่ตัดรับชำระไปแล้วบางส่วน) ไม่งั้นยอดเต็ม
+    const defAmount = r._remain != null ? Number(r._remain) : Number(r.total_amount || 0);
     if (isPerUnit) {
       setBreakdownPopup({
         row: r,
         key,
-        vehicle_price: Number(r.total_amount || 0),
+        vehicle_price: defAmount,
         promotion_fee: 0,
         wht: 0, // จะถูกคำนวณอัตโนมัติเมื่อใส่ค่าส่งเสริม
       });
       return;
     }
 
-    // ปกติ (โหมดรวม): เลือกและใช้ยอดรวมเป็น default
-    setSelectedItems(prev => ({ ...prev, [key]: Number(r.total_amount || 0) }));
+    // ปกติ (โหมดรวม): เลือกและใช้ยอดค้าง/ยอดรวมเป็น default
+    setSelectedItems(prev => ({ ...prev, [key]: defAmount }));
   }
 
   function confirmBreakdown() {
@@ -613,7 +643,7 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                       if (allChecked) setSelectedItems({});
                       else {
                         const next = { ...selectedItems };
-                        displayedResults.forEach(r => { next[`${r.branch}|${r.tax_invoice_no}`] = Number(r.total_amount || 0); });
+                        displayedResults.forEach(r => { next[`${r.branch}|${r.tax_invoice_no}`] = r._remain != null ? Number(r._remain) : Number(r.total_amount || 0); });
                         setSelectedItems(next);
                       }
                     }} /></th>
@@ -662,7 +692,14 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                       <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.engine_no || "-"}</td>
                       <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                       <td style={{ ...td, fontSize: 12 }}>{r.model_name || "-"}</td>
-                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmt(r.total_amount)}</td>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>
+                        {fmt(r.total_amount)}
+                        {r._remain != null && (
+                          <div style={{ fontSize: 10, fontFamily: "Tahoma", fontWeight: 600, color: "#c2410c", whiteSpace: "nowrap" }}>
+                            รับแล้ว {fmt(r._paidSoFar)} · ค้าง {fmt(r._remain)}
+                          </div>
+                        )}
+                      </td>
                       <td style={{ ...td, textAlign: "right" }}>
                         {isChecked ? (
                           <input type="number" step="0.01" value={selectedItems[key]}
@@ -686,14 +723,17 @@ export default function FinancePaymentMatchPage({ currentUser }) {
                       )}
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>
                         {isChecked ? (() => {
-                          // คงเหลือของใบกำกับ = ยอดรวม - ยอดตัดชำระค่าสินค้า (เฉพาะค่ารถ ถ้ามี breakdown — ค่าส่งเสริมไม่นับ)
+                          // คงเหลือของใบกำกับ = ยอดค้าง (หักที่เคยตัดรับแล้ว) - ยอดตัดชำระค่าสินค้าครั้งนี้ (เฉพาะค่ารถ ถ้ามี breakdown)
                           const bd = itemBreakdowns[key];
                           const credited = bd && bd.vehicle_price != null ? Number(bd.vehicle_price) : Number(selectedItems[key] || 0);
-                          const remain = Number(r.total_amount || 0) - credited;
+                          const base = r._remain != null ? Number(r._remain) : Number(r.total_amount || 0);
+                          const remain = base - credited;
                           if (Math.abs(remain) < 0.01) return <span style={{ color: "#15803d" }}>✓ ครบ</span>;
                           if (remain > 0) return <span style={{ color: "#dc2626" }} title={bd ? `ตัดชำระเฉพาะค่ารถ ${fmt(credited)} (ไม่รวมค่าส่งเสริม)` : ""}>{fmt(remain)}</span>;
                           return <span style={{ color: "#7c3aed" }}>+{fmt(-remain)}</span>;
-                        })() : "-"}
+                        })() : r._remain != null ? (
+                          <span style={{ color: "#c2410c" }}>{fmt(r._remain)}</span>
+                        ) : "-"}
                       </td>
                     </tr>
                   );

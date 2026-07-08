@@ -114,7 +114,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     if (!isWHT) return historyRaw;
     return historyRaw
       .filter(h => !filterAff || h.affiliation === filterAff)
-      .filter(h => !filterForm || h.tax_type === filterForm)
+      .filter(h => !filterForm || String(h.tax_type || "").split(", ").includes(filterForm))
       .filter(h => inRange(h.remit_date));
     /* eslint-disable-next-line */
   }, [historyRaw, isWHT, filterAff, filterForm, dateFrom, dateTo]);
@@ -143,6 +143,12 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     setLoading(false);
   }
 
+  // สังกัดของใบจ่ายเงินเดือน: list_payments ให้ affiliation ผิดได้ (เช่นใบสิงห์ชัยขึ้น ป.เปา)
+  // → อ่านจาก description "…(สังกัด X)…" ซึ่งตรงกับเอกสารจริงเสมอ ก่อน fallback ค่า affiliation
+  function payrollAffOf(p) {
+    const m = String(p?.description || "").match(/สังกัด\s*([^)]+)\)/);
+    return m ? m[1].trim() : (p?.affiliation || "");
+  }
   // ---------- ภ.ง.ด.1: เงินเดือน (สรุปเดือน × สังกัด) จาก hr-api ----------
   async function loadPayrollRows() {
     const [buckets, pays] = await Promise.all([
@@ -151,7 +157,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     ]);
     const paidSet = new Set(pays
       .filter(p => (p.payroll_creditor_type === "tax" || p.vendor_name === "สรรพากร") && p.status !== "cancelled")
-      .map(p => `${yymm(p.month_year)}|${p.affiliation}`));
+      .map(p => `${yymm(p.month_year)}|${payrollAffOf(p)}`));
     return buckets
       .filter(b => Number(b.total_tax || 0) > 0)
       .filter(b => !paidSet.has(`${yymm(b.month_year)}|${b.affiliation}`))
@@ -361,20 +367,41 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
         hr({ action: "payroll_payables", mode: "list_payments" }),
         post(TAX_URL, { action: "list_tax_remittances" }),
       ]);
+      // ภ.ง.ด.1 ที่จ่ายแบบชุด (payment_note มี [WHT-B...]) ไปแสดงในการ์ดชุดรวมแทน — ตัดออกจาก list เดี่ยว
       const payrollHist = (Array.isArray(pays) ? pays : [])
         .filter(p => (p.payroll_creditor_type === "tax" || p.vendor_name === "สรรพากร") && p.paid_doc_no)
+        .filter(p => !String(p.payment_note || "").includes("[WHT-B"))
         .map(p => ({
           remit_doc_no: p.paid_doc_no, tax_type: "ภ.ง.ด.1", remit_date: p.paid_at,
-          period_month: periodOf(p.month_year), affiliation: p.affiliation,
+          period_month: periodOf(p.month_year), affiliation: payrollAffOf(p),
           payment_method: p.payment_method, from_bank_account_id: p.from_bank_account_id,
           receipt_no: p.expense_doc_no || "", amount_total: Number(p.total || 0), note: "",
           status: p.status === "cancelled" ? "cancelled" : "paid",
           items: [{ source_ref: p.expense_doc_no, vendor_name: p.vendor_name || "สรรพากร", doc_date: p.month_year, amount: Number(p.total || 0) }],
           _pnd: true,
         }));
-      const trmtHist = (Array.isArray(trmt) ? trmt : [])
+      const trmtAll = (Array.isArray(trmt) ? trmt : [])
         .filter(h => String(h.tax_type || "").startsWith("ภ.ง.ด."));
-      setHistoryRaw([...payrollHist, ...trmtHist].sort((a, b) => String(b.remit_date || "").localeCompare(String(a.remit_date || ""))));
+      // รวมใบที่จ่ายชุดเดียวกัน (batch_no) เป็นการ์ดเดียว — ใบเก่า/ใบเดี่ยวแสดงตามเดิม
+      const byBatch = {}; const singles = [];
+      trmtAll.forEach(h => { if (h.batch_no) { (byBatch[h.batch_no] = byBatch[h.batch_no] || []).push(h); } else singles.push(h); });
+      const itemsOfDoc = (d) => { let it = d.items; if (typeof it === "string") { try { it = JSON.parse(it); } catch { it = []; } } return Array.isArray(it) ? it : []; };
+      const batched = Object.entries(byBatch).map(([bno, docs]) => {
+        const act = docs.filter(d => d.status !== "cancelled");
+        const use = act.length ? act : docs;
+        return {
+          remit_doc_no: bno, _batch: true, _batchDocs: docs.filter(d => d.status !== "cancelled").map(d => d.remit_doc_no),
+          tax_type: [...new Set(use.map(d => d.tax_type).filter(Boolean))].join(", "),
+          remit_date: use[0].remit_date,
+          period_month: [...new Set(use.map(d => d.period_month).filter(Boolean))].join(", "),
+          affiliation: use[0].affiliation, payment_method: use[0].payment_method,
+          from_bank_account_id: use[0].from_bank_account_id, receipt_no: use[0].receipt_no,
+          amount_total: act.reduce((s, d) => s + Number(d.amount_total || 0), 0),
+          note: use[0].note, status: act.length ? "paid" : "cancelled",
+          items: use.flatMap(d => itemsOfDoc(d).map(it => ({ ...it, tax_type: it.tax_type || d.tax_type }))),
+        };
+      });
+      setHistoryRaw([...payrollHist, ...singles, ...batched].sort((a, b) => String(b.remit_date || "").localeCompare(String(a.remit_date || ""))));
     } catch { setHistoryRaw([]); }
     setLoading(false);
   }
@@ -434,9 +461,11 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     setSaving(false);
   }
 
-  // โหมดรวม: แยกจ่ายตามชนิดของแต่ละแถว (ใช้ข้อมูลการจ่ายชุดเดียวกัน)
+  // โหมดรวม: จ่ายทั้งหมดเป็น "ชุดเดียว" (batch_no เดียวกัน) — รายงานเคลื่อนไหวบัญชี/ประวัติ แสดงยอดรวมชุด
   async function saveWHT() {
     const bank = payForm.payment_method === "โอน" ? (Number(payForm.from_bank_account_id) || null) : null;
+    const now = new Date();
+    const batchNo = `WHT-B-${(now.getFullYear() + 543).toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
     let okAny = false;
     const payroll = selectedRows.filter(r => r.kind === "payroll");
     const referral = selectedRows.filter(r => r.kind === "referral");
@@ -444,45 +473,70 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     const expense = selectedRows.filter(r => r.kind === "expense" || r.kind === "registration" || r.kind === "commission" || r.kind === "theft" || r.kind === "cosmos");
 
     if (payroll.length) {
-      const ids = [];
+      const drafts = [];  // { id, doc_no, row }
       for (const r of payroll) {
         await hr({ action: "payroll_payables", mode: "create", save_group: r.save_group, doc_date: todayISO(), created_by: whoami() });
         const docs = await hr({ action: "payroll_payables", mode: "list_docs", save_group: r.save_group });
         const draft = docs.find(d => d.payroll_creditor_type === "tax" && String(d.description || "").includes(`สังกัด ${r.affiliation}`) && d.status === "draft");
-        if (draft) ids.push(draft.expense_doc_id);
+        if (draft) drafts.push({ id: draft.expense_doc_id, doc_no: draft.expense_doc_no, row: r });
       }
-      if (ids.length) {
-        const res = await post(ACC_URL, { action: "expense_record", op: "save_payment", expense_doc_ids: ids, paid_date: payForm.remit_date, payment_method: payForm.payment_method, payment_note: payForm.note, paid_by: whoami(), from_bank_account_id: bank, override_total: null });
+      if (drafts.length) {
+        // จ่ายฝั่งเอกสารเงินเดือน: ผูก batch ใน payment_note + ไม่ผูกบัญชีธนาคาร (ยอดเงินออกที่ใบภาษีชุดรวมแทน กันขึ้นซ้ำในรายงานเคลื่อนไหวบัญชี)
+        const res = await post(ACC_URL, { action: "expense_record", op: "save_payment", expense_doc_ids: drafts.map(d => d.id), paid_date: payForm.remit_date, payment_method: payForm.payment_method, payment_note: `${payForm.note ? payForm.note + " " : ""}[${batchNo}]`, paid_by: whoami(), from_bank_account_id: null, override_total: null });
         const row = Array.isArray(res) ? res[0] : res;
         if (row?.error_msg) throw new Error(row.error_msg);
-        okAny = true;
+        // ลงยอดเงินใน tax_remittances (ภ.ง.ด.1) เป็นส่วนหนึ่งของชุด — กันซ้ำด้วย source_id = expense_doc_id
+        const perPeriod = {};
+        drafts.forEach(d => { const pm = d.row.period_month || ""; (perPeriod[pm] = perPeriod[pm] || []).push(d); });
+        for (const pm of Object.keys(perPeriod)) {
+          const g = perPeriod[pm];
+          const items = g.map(d => ({ source_table: "payroll_expense_docs", source_id: d.id, amount: d.row.amount, vendor_name: `${d.doc_no || ""} ภ.ง.ด.1 ภาษีเงินเดือน`, doc_date: payForm.remit_date, affiliation: d.row.affiliation }));
+          const res2 = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: "ภ.ง.ด.1", period_month: pm || null, affiliation: g[0].row.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami(), batch_no: batchNo });
+          const row2 = Array.isArray(res2) ? res2[0] : res2;
+          if (Number(row2?.updated_count || 0) > 0) okAny = true;
+        }
       }
     }
     for (const r of referral) {
-      const res = await post(TAX_URL, { action: "save_tax_remittance", tax_type: r.pndType, period_month: r.period_month, affiliation: r.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, amount_total: r.amount, created_by: whoami(), source_ids: [] });
+      const res = await post(TAX_URL, { action: "save_tax_remittance", tax_type: r.pndType, period_month: r.period_month, affiliation: r.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, amount_total: r.amount, created_by: whoami(), source_ids: [], batch_no: batchNo });
       const row = Array.isArray(res) ? res[0] : res;
       if (Number(row?.updated_count || 0) > 0) okAny = true;
     }
-    // ค่าใช้จ่าย: จัดกลุ่ม (ประเภท|งวด|สังกัด) → itemized 1 ใบต่อกลุ่ม
+    // ค่าใช้จ่าย: จัดกลุ่ม (ประเภท|งวด|สังกัด) → itemized 1 ใบต่อกลุ่ม (batch เดียวกันทั้งหมด)
     const groups = {};
     expense.forEach(r => { const k = `${r.pndType}|${r.period_month}|${r.affiliation}`; (groups[k] = groups[k] || []).push(r); });
     for (const k of Object.keys(groups)) {
       const g = groups[k];
       const items = g.map(r => ({ source_table: r.source_table, source_id: r.src_id, amount: r.amount, vendor_name: r.vendor_name, doc_date: r.paid_at, affiliation: r.affiliation }));
-      const res = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: g[0].pndType, period_month: g[0].period_month, affiliation: g[0].affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami() });
+      const res = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: g[0].pndType, period_month: g[0].period_month, affiliation: g[0].affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami(), batch_no: batchNo });
       const row = Array.isArray(res) ? res[0] : res;
       if (Number(row?.updated_count || 0) > 0) okAny = true;
     }
     if (!okAny) throw new Error("รายการที่เลือกนำส่งไปแล้ว หรือไม่มียอด");
-    setMessage("✅ บันทึกจ่ายภาษีหัก ณ ที่จ่ายเรียบร้อย");
+    setMessage(`✅ บันทึกจ่ายภาษีหัก ณ ที่จ่ายเรียบร้อย (ชุด ${batchNo})`);
   }
 
   async function cancelRemittance(g) {
     if (!g.remit_doc_no) return;
-    if (!window.confirm(`ยกเลิกการจ่าย ${g.remit_doc_no}?\nรายการจะกลับมาเป็น "รอจ่าย"`)) return;
+    if (!window.confirm(g._batch
+      ? `ยกเลิกการจ่ายทั้งชุด ${g.remit_doc_no} (${(g._batchDocs || []).length} ใบ)?\nทุกรายการในชุดจะกลับมาเป็น "รอจ่าย"`
+      : `ยกเลิกการจ่าย ${g.remit_doc_no}?\nรายการจะกลับมาเป็น "รอจ่าย"`)) return;
     try {
       if (g._pnd) {
         await post(ACC_URL, { action: "expense_record", op: "cancel_payment", paid_doc_no: g.remit_doc_no });
+      } else if (g._batch) {
+        // ยกเลิกทุกใบภาษีในชุด
+        for (const dn of (g._batchDocs || [])) {
+          await post(TAX_URL, { action: "cancel_tax_remittance", remit_doc_no: dn, cancelled_by: whoami() });
+        }
+        // ถ้าชุดมี ภ.ง.ด.1 เงินเดือน → ยกเลิกใบจ่ายเงินเดือน (EPAY) ที่ผูก batch นี้ด้วย
+        try {
+          const pays = await hr({ action: "payroll_payables", mode: "list_payments" });
+          const linked = (Array.isArray(pays) ? pays : []).filter(p => p.status !== "cancelled" && String(p.payment_note || "").includes(`[${g.remit_doc_no}]`));
+          for (const p of [...new Set(linked.map(x => x.paid_doc_no).filter(Boolean))]) {
+            await post(ACC_URL, { action: "expense_record", op: "cancel_payment", paid_doc_no: p });
+          }
+        } catch { /* ไม่มี payroll ในชุด */ }
       } else {
         await post(TAX_URL, { action: "cancel_tax_remittance", remit_doc_no: g.remit_doc_no, cancelled_by: whoami() });
       }
@@ -664,9 +718,10 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
               <div key={g.remit_doc_no} style={{ marginBottom: 12, background: cancelled ? "#fef2f2" : "#ecfdf5", border: `1px solid ${cancelled ? "#fca5a5" : "#6ee7b7"}`, borderRadius: 10, padding: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <strong style={{ fontFamily: "monospace", color: cancelled ? "#991b1b" : "#065f46", fontSize: 15 }}>{g.remit_doc_no}</strong>
+                  {g._batch && <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "#eef2ff", color: "#4338ca" }}>📦 ชุดจ่ายรวม {(g._batchDocs || []).length} ใบ</span>}
                   <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#ecfeff", color: "#0e7490" }}>{g.tax_type}</span>
                   <span style={{ fontSize: 12 }}>📅 {fmtDate(g.remit_date)}</span>
-                  <span style={{ fontSize: 12 }}>🗓️ งวด {fmtPeriod(g.period_month)}</span>
+                  <span style={{ fontSize: 12 }}>🗓️ งวด {String(g.period_month || "").split(", ").map(fmtPeriod).join(", ")}</span>
                   {g.affiliation && <span style={{ fontSize: 12 }}>🏢 {g.affiliation}</span>}
                   <span style={{ fontSize: 12 }}>💳 {g.payment_method || "-"}</span>
                   {bank && <span style={{ fontSize: 12 }}>🏦 {bank.bank_name} · {bank.account_no}</span>}
@@ -680,6 +735,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 8, background: "#fff", borderRadius: 6, overflow: "hidden" }}>
                     <thead style={{ background: "#f3f4f6" }}>
                       <tr>
+                        <th style={th}>แบบ</th>
                         <th style={th}>เอกสารอ้างอิง</th><th style={th}>ผู้ขาย</th>
                         <th style={th}>วันที่</th><th style={{ ...th, textAlign: "right" }}>ยอดภาษี</th>
                       </tr>
@@ -687,6 +743,9 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
                     <tbody>
                       {items.map((it, i) => (
                         <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                          <td style={td}>
+                            <span style={{ padding: "1px 7px", borderRadius: 10, background: "#eef2ff", color: "#4338ca", fontSize: 11, fontWeight: 700 }}>{it.tax_type || g.tax_type}</span>
+                          </td>
                           <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{it.source_ref || "-"}</td>
                           <td style={td}>{it.vendor_name || "-"}</td>
                           <td style={td}>{fmtDate(it.doc_date)}</td>

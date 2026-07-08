@@ -93,7 +93,6 @@ export default function BankTransferPage({ currentUser }) {
   async function handleSave() {
     if (!form.from_account_id) { setMessage("❌ เลือกบัญชีต้นทาง"); return; }
     if (!form.to_account_id) { setMessage("❌ เลือกบัญชีปลายทาง"); return; }
-    if (Number(form.from_account_id) === Number(form.to_account_id)) { setMessage("❌ บัญชีต้นทางและปลายทางต้องไม่ใช่บัญชีเดียวกัน"); return; }
     if (!Number(form.amount) || Number(form.amount) <= 0) { setMessage("❌ ระบุยอดโอน"); return; }
     setSaving(true);
     try {
@@ -251,7 +250,8 @@ export default function BankTransferPage({ currentUser }) {
                 <select value={form.to_account_id}
                   onChange={e => setForm(f => ({ ...f, to_account_id: e.target.value }))} style={inp}>
                   <option value="">-- เลือกบัญชีปลายทาง --</option>
-                  {accounts.filter(a => Number(a.account_id) !== Number(form.from_account_id)).map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
+                  {/* เลือกบัญชีเดียวกับต้นทางได้ (เช่น โอนภายในบัญชี/ปรับปรุงรายการ) */}
+                  {accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
                 </select>
               </div>
               <div>
