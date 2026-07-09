@@ -68,8 +68,10 @@ export default function DirectorLoanPage({ currentUser }) {
   }, [bankAccounts]);
 
   // กรองประวัติ: เฉพาะรายการที่มีบัญชีลูกหนี้เป็น from หรือ to
+  // ตัดรายการที่ยกเลิกแล้วออก — backend op list ส่งทุกสถานะกลับมา ถ้าไม่กรองจะโชว์ + นับรวมในยอดคงเหลือ
   const directorTransfers = useMemo(() => {
     return transfers.filter((t) => {
+      if (t.status === "cancelled") return false;
       const f = accById.get(String(t.from_account_id));
       const to = accById.get(String(t.to_account_id));
       return f?.account_type === RECEIVABLE_TYPE || to?.account_type === RECEIVABLE_TYPE;

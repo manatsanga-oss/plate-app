@@ -61,6 +61,9 @@ export default function FlowExpenseRecordPage({ currentUser }) {
   const [payDialog, setPayDialog] = useState(false);
   const [payForm, setPayForm] = useState({ paid_date: todayISO(), payment_note: "" });
   const [payments, setPayments] = useState([{ method: "โอน", amount: 0, from_bank_account_id: "" }]);
+  // ค่าธรรมเนียมจ่ายเงิน (เช่น ค่าธรรมเนียมโอน) — ไม่รวมในยอดชำระเอกสาร แต่ตัดจากบัญชีโอนเพิ่ม
+  const [feeOn, setFeeOn] = useState(false);
+  const [feeAmount, setFeeAmount] = useState("");
   const [editPayDocNo, setEditPayDocNo] = useState(null);
   const [editTotalRequired, setEditTotalRequired] = useState(0);
   const [savingPay, setSavingPay] = useState(false);
@@ -346,6 +349,7 @@ export default function FlowExpenseRecordPage({ currentUser }) {
     setEditPayDocNo(null); setEditTotalRequired(0);
     setPayForm({ paid_date: todayISO(), payment_note: "" });
     setPayments([{ method: "โอน", amount: Number(selectedNet) || 0, from_bank_account_id: "" }]);
+    setFeeOn(false); setFeeAmount("");
     setPayDialog(true);
   }
   function openEditPayDialog(g) {
@@ -361,7 +365,12 @@ export default function FlowExpenseRecordPage({ currentUser }) {
     };
     setPayForm({ paid_date: toLocalISO(g.paid_at), payment_note: "" });
     // โหลด breakdown จริงที่บันทึกไว้ (โอน + ภ.พ.36 ฯลฯ) เพื่อให้แสดง/แก้แล้วไม่หาย
-    const bds = Array.isArray(g.breakdowns) ? g.breakdowns : [];
+    // แถวค่าธรรมเนียมแยกออกไปเข้า checkbox (ไม่นับรวมยอดชำระ)
+    const allBds = Array.isArray(g.breakdowns) ? g.breakdowns : [];
+    const feeBds = allBds.filter(p => p.method === "ค่าธรรมเนียม");
+    const bds = allBds.filter(p => p.method !== "ค่าธรรมเนียม");
+    const feeSum = feeBds.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    setFeeOn(feeSum > 0); setFeeAmount(feeSum > 0 ? String(feeSum) : "");
     if (bds.length) {
       setPayments(bds.map(p => ({
         method: p.method || "โอน",
@@ -390,8 +399,17 @@ export default function FlowExpenseRecordPage({ currentUser }) {
       if (Number(p.amount) <= 0) { setMessage(`❌ แถวที่ ${i + 1}: จำนวนเงินต้องมากกว่า 0`); return; }
       if (p.method === "โอน" && !p.from_bank_account_id) { setMessage(`❌ แถวที่ ${i + 1} (โอน): เลือกบัญชี`); return; }
     }
+    const fee = feeOn ? Number(String(feeAmount).replace(/,/g, "")) || 0 : 0;
+    if (feeOn && fee <= 0) { setMessage("❌ กรอกจำนวนค่าธรรมเนียมจ่ายเงิน (ต้องมากกว่า 0)"); return; }
     setSavingPay(true);
     try {
+      // ค่าธรรมเนียม = breakdown แถวพิเศษ method 'ค่าธรรมเนียม' ตัดจากบัญชีโอนแถวแรก — ไม่นับรวมยอดชำระเอกสาร
+      const firstTransferBank = payments.find(p => p.method === "โอน" && p.from_bank_account_id)?.from_bank_account_id;
+      const payload = payments.map(p => ({
+        method: p.method, amount: Number(p.amount) || 0,
+        from_bank_account_id: p.method === "โอน" ? (Number(p.from_bank_account_id) || null) : null,
+      }));
+      if (fee > 0) payload.push({ method: "ค่าธรรมเนียม", amount: fee, from_bank_account_id: Number(firstTransferBank) || null });
       const body = {
         action: editPayDocNo ? "flow_edit_payment" : "flow_save_payment",
         paid_doc_no: editPayDocNo || undefined,
@@ -399,10 +417,7 @@ export default function FlowExpenseRecordPage({ currentUser }) {
         paid_date: payForm.paid_date,
         payment_note: payForm.payment_note,
         paid_by: currentUser?.username || currentUser?.name || "system",
-        payments: payments.map(p => ({
-          method: p.method, amount: Number(p.amount) || 0,
-          from_bank_account_id: p.method === "โอน" ? (Number(p.from_bank_account_id) || null) : null,
-        })),
+        payments: payload,
       };
       const res = await fetch(FLOW_URL, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
@@ -624,11 +639,31 @@ export default function FlowExpenseRecordPage({ currentUser }) {
                       </div>
                     ))}
                   </div>
+                  {/* ค่าธรรมเนียมจ่ายเงิน — ไม่รวมในยอดชำระเอกสาร ตัดจากบัญชีโอนเพิ่ม */}
+                  <div style={{ marginTop: 10, padding: "8px 12px", background: "#fff", border: "1px dashed #cbd5e1", borderRadius: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "#0f172a", cursor: "pointer" }}>
+                      <input type="checkbox" checked={feeOn}
+                        onChange={e => { setFeeOn(e.target.checked); if (!e.target.checked) setFeeAmount(""); }}
+                        style={{ width: 16, height: 16, cursor: "pointer" }} />
+                      🏦 ค่าธรรมเนียมจ่ายเงิน
+                    </label>
+                    {feeOn && (
+                      <input type="number" step="0.01" min="0" value={feeAmount} autoFocus
+                        onChange={e => setFeeAmount(e.target.value)} placeholder="0.00"
+                        style={{ width: 140, padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right" }} />
+                    )}
+                    {feeOn && <span style={{ fontSize: 11, color: "#6b7280" }}>ไม่รวมในยอดชำระ — ตัดจากบัญชีโอนเพิ่มต่างหาก</span>}
+                  </div>
                   <div style={{ marginTop: 10, padding: "8px 12px", background: exact ? "#d1fae5" : "#fef9c3", borderRadius: 6, fontSize: 13, display: "flex", justifyContent: "space-between" }}>
                     <span>ยอดที่ต้องชำระ: <strong>฿ {fmt(totalRequired)}</strong></span>
                     <span>รวมที่ระบุ: <strong style={{ color: exact ? "#065f46" : "#dc2626" }}>฿ {fmt(sum)}</strong></span>
                     <span style={{ fontWeight: 700, color: exact ? "#065f46" : "#dc2626" }}>{exact ? "✓ ครบ" : diff > 0 ? `ขาดอีก ฿ ${fmt(diff)}` : `เกิน ฿ ${fmt(-diff)}`}</span>
                   </div>
+                  {feeOn && Number(feeAmount) > 0 && (
+                    <div style={{ marginTop: 6, padding: "6px 12px", background: "#eff6ff", borderRadius: 6, fontSize: 12, color: "#1e40af", textAlign: "right" }}>
+                      ยอดตัดบัญชีรวมค่าธรรมเนียม: <strong>฿ {fmt(sum + (Number(String(feeAmount).replace(/,/g, "")) || 0))}</strong> (ค่าธรรมเนียม ฿ {fmt(feeAmount)})
+                    </div>
+                  )}
                 </div>
               );
             })()}

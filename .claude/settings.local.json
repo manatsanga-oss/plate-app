@@ -866,7 +866,16 @@
       "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\(process.argv[1],'utf8'\\)\\); console.log\\('JSON OK'\\)\" \"C:\\\\\\\\Users\\\\\\\\manat\\\\\\\\OneDrive\\\\\\\\New folder\\\\\\\\Finance API.json\")",
       "PowerShell(git push)",
       "Bash(curl -s -X POST \"https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api\" -H \"Content-Type: application/json\" -d \"{}\")",
-      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); rows=[r for r in data if r and r.get\\('part_code'\\)=='THK3FGR64320TA']; print\\(json.dumps\\(rows, ensure_ascii=False, indent=2\\)\\)\")"
+      "Bash(python -c \"import json,sys; data=json.load\\(sys.stdin\\); rows=[r for r in data if r and r.get\\('part_code'\\)=='THK3FGR64320TA']; print\\(json.dumps\\(rows, ensure_ascii=False, indent=2\\)\\)\")",
+      "Bash(curl -s -X POST https://n8n-new-project-gwf2.onrender.com/webhook/finance-api -H \"Content-Type: application/json\" -d '{\"action\":\"income_record\",\"op\":\"list\",\"date_from\":\"2026-05-29\",\"date_to\":\"2026-05-29\"}')",
+      "Bash(node \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\672aa052-0718-448a-96b4-7cd3af10b236\\\\scratchpad\\\\test_income_code.js\")",
+      "Bash(node \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\672aa052-0718-448a-96b4-7cd3af10b236\\\\scratchpad\\\\test_clear.js\")",
+      "Bash(curl -s -X POST https://n8n-new-project-gwf2.onrender.com/webhook/finance-api -H \"Content-Type: application/json\" -d '{\"action\":\"income_record\",\"op\":\"clear_received\",\"income_doc_id\":-1}')",
+      "Bash(curl -s -X POST https://n8n-new-project-gwf2.onrender.com/webhook/finance-api -H \"Content-Type: application/json\" -d '{\"action\":\"income_record\",\"op\":\"clear_received\",\"income_doc_id\":94}')",
+      "Bash(curl -s -X POST https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api -H \"Content-Type: application/json\" -d '{\"action\":\"expense_record\",\"op\":\"list\"}')",
+      "Bash(node \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\672aa052-0718-448a-96b4-7cd3af10b236\\\\scratchpad\\\\test_movements.js\")",
+      "Bash(node \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\672aa052-0718-448a-96b4-7cd3af10b236\\\\scratchpad\\\\test_mv17.js\")",
+      "Bash(node \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\672aa052-0718-448a-96b4-7cd3af10b236\\\\scratchpad\\\\test_tf_import.js\" \"C:\\\\Users\\\\manat\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-manat-plate-app\\\\672aa052-0718-448a-96b4-7cd3af10b236\\\\scratchpad\\\\tf_import_out.sql\")"
     ]
   }
 }

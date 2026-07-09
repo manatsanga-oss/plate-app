@@ -51,6 +51,8 @@ export default function IncomeRecordPage({ currentUser }) {
   const [tfSelected, setTfSelected] = useState({});
   const [tfLoading, setTfLoading] = useState(false);
   const [tfImporting, setTfImporting] = useState(false);
+  const [tfBranchFilter, setTfBranchFilter] = useState("");
+  const [tfSearch, setTfSearch] = useState("");
   // Finance transfer import (เงินโอนจากไฟแนนท์ที่ยัง pending → ตัดชำระ income_records)
   const [ftImportOpen, setFtImportOpen] = useState(false);
   const [ftList, setFtList] = useState([]);
@@ -97,6 +99,10 @@ export default function IncomeRecordPage({ currentUser }) {
   // ใบลดหนี้ที่ยังไม่ถูกใช้ — โหลดจาก accounting-api เมื่อเปิด popup
   const [availableCreditNotes, setAvailableCreditNotes] = useState([]);
   const [loadingCreditNotes, setLoadingCreditNotes] = useState(false);
+  // ใบค่าใช้จ่ายค้างจ่าย (draft) — วิธีรับเงิน "ค่าใช้จ่ายค้างชำระ (หักกลบ)" ดึงมาหักกลบ
+  // เงื่อนไข: ชื่อผู้จำหน่ายของใบค่าใช้จ่ายต้องตรงกับชื่อลูกค้าของใบรายได้ที่เลือก
+  const [expenseDocs, setExpenseDocs] = useState([]);
+  const [payCustomerNames, setPayCustomerNames] = useState([]);
 
   // ดึงรายการ invoice_no ที่ถูกใช้แล้วในหมวดนี้ (จาก income_allocations อื่น)
   useEffect(() => {
@@ -146,6 +152,7 @@ export default function IncomeRecordPage({ currentUser }) {
   async function openTfImport() {
     setTfImportOpen(true);
     setTfLoading(true); setTfSelected({});
+    setTfBranchFilter(""); setTfSearch("");
     try {
       const res = await fetch(ACCOUNTING_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -595,6 +602,21 @@ export default function IncomeRecordPage({ currentUser }) {
     setSaving(false);
   }
 
+  // ล้างยอดรับสะสม (received_amount) — ใช้เมื่อการหักกลบ/รับบางส่วนถูกยกเลิกแล้ว ใบต้องกลับมาค้างเต็มยอด
+  async function handleClearReceived(d) {
+    const recv = Number(d.received_amount || 0);
+    const net = Number(d.net_to_pay || d.total || 0);
+    if (!window.confirm(`ล้างยอดรับสะสม ${fmt(recv)} ของ ${d.income_doc_no}?\nใบนี้จะกลับมาค้างเต็มยอด ${fmt(net)}\n\n⚠️ ใช้เฉพาะเมื่อการหักกลบ/รับบางส่วนฝั่งค่าใช้จ่ายถูกยกเลิกแล้วเท่านั้น`)) return;
+    try {
+      await fetch(ACC_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "income_record", op: "clear_received", income_doc_id: d.income_doc_id }),
+      });
+      setMessage("✅ ล้างยอดรับสะสมเรียบร้อย");
+      fetchDocs();
+    } catch { setMessage("❌ ล้างยอดรับสะสมไม่สำเร็จ"); }
+  }
+
   async function handleCancel(d) {
     if (!window.confirm(`ยกเลิกเอกสาร ${d.income_doc_no}?`)) return;
     try {
@@ -795,14 +817,47 @@ export default function IncomeRecordPage({ currentUser }) {
     } catch { setAvailableCreditNotes([]); }
     setLoadingCreditNotes(false);
   }
+  // ชื่อ normalize สำหรับจับคู่ ลูกค้า(รายได้) ↔ ผู้จำหน่าย(ค่าใช้จ่าย)
+  const normName = (s) => String(s || "").replace(/\s+/g, " ").trim();
+  // จับคู่ชื่อแบบยืดหยุ่น: ตัดคำนำหน้า/ประเภทนิติบุคคลออกก่อน แล้วเทียบเป็นรายคำ
+  // (ข้อมูลจริงสะกดไม่ตรงกันเป๊ะ เช่น "หจก. ไนซ์ เอฟเอ็ม วังน้อย" ↔ "ห้างหุ้นส่วนจำกัด ไนซ์ แอฟเอ็ม วังน้อย")
+  const ENTITY_WORDS = ["ห้างหุ้นส่วนจำกัด", "หจก", "บริษัท", "บจก", "บมจ", "จำกัด", "มหาชน", "ร้าน", "นางสาว", "นาง", "นาย", "คุณ"];
+  function nameTokens(s) {
+    let t = String(s || "").replace(/[().,/\\-]/g, " ");
+    ENTITY_WORDS.forEach(w => { t = t.split(w).join(" "); });
+    return t.split(/\s+/).filter(x => x.length > 1);
+  }
+  // ตรงกัน ≥ 2 คำ (ชื่อสั้นคำเดียวต้องตรงทั้งคำ) และพลาดได้ไม่เกิน 1 คำจากชื่อฝั่งที่สั้นกว่า
+  function namesMatch(a, b) {
+    const ta = nameTokens(a), tb = nameTokens(b);
+    if (!ta.length || !tb.length) return false;
+    const shared = ta.filter(x => tb.includes(x)).length;
+    const minLen = Math.min(ta.length, tb.length);
+    return shared >= Math.min(2, minLen) && shared >= minLen - 1;
+  }
+  const expenseNet = (d) => Number(d.net_to_pay || d.total || 0);
+  async function fetchExpenseDocs() {
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "expense_record", op: "list" }),
+      });
+      const data = await res.json();
+      // เฉพาะใบร่าง (ยังไม่จ่าย) — ฝั่งค่าใช้จ่ายไม่มีจ่ายบางส่วน จึงต้องหักกลบเต็มใบเท่านั้น
+      setExpenseDocs((Array.isArray(data) ? data : []).filter(d =>
+        d && d.expense_doc_id && (d.status || "draft") === "draft" && expenseNet(d) > 0));
+    } catch { setExpenseDocs([]); }
+  }
   function openPayDialog() {
     if (selectedIds.length === 0) { setMessage("❌ เลือกเอกสารก่อน"); return; }
     setEditPayDocNo(null);
     setEditTotalRequired(0);
     setPayForm({ paid_date: todayISO(), payment_note: "" });
     setPayments([{ method: "โอน", amount: Number(selectedNet) || 0, from_bank_account_id: "", credit_note_no: "" }]);
+    setPayCustomerNames([...new Set(selectedRows.map(d => normName(d.customer_name)).filter(Boolean))]);
     setPayDialog(true);
     fetchAvailableCreditNotes();
+    fetchExpenseDocs();
   }
   function openEditPayDialog(g) {
     if (!g.paid_doc_no) return;
@@ -827,8 +882,10 @@ export default function IncomeRecordPage({ currentUser }) {
       const method = g.payment_method && g.payment_method !== "ผสม" ? g.payment_method : "โอน";
       setPayments([{ method, amount: total, from_bank_account_id: g.from_bank_account_id || "", credit_note_no: "" }]);
     }
+    setPayCustomerNames([...new Set((g.items || []).map(d => normName(d.customer_name)).filter(Boolean))]);
     setPayDialog(true);
     fetchAvailableCreditNotes();
+    fetchExpenseDocs();
   }
   function updatePayment(idx, patch) {
     setPayments(prev => prev.map((p, i) => i === idx ? { ...p, ...patch } : p));
@@ -856,10 +913,23 @@ export default function IncomeRecordPage({ currentUser }) {
       if (p.method === "ใบลดหนี้" && !p.credit_note_no) {
         setMessage(`❌ แถวที่ ${i + 1} (ใบลดหนี้): เลือกเลขใบลดหนี้`); return;
       }
+      // โหมดแก้ไข: ใบค่าใช้จ่ายถูกหักกลบ (จ่าย) ไปแล้วตอนสร้าง — ไม่ต้องเลือกซ้ำ/ไม่ยิงจ่ายซ้ำ
+      if (p.method === "หักกลบค่าใช้จ่าย" && !editPayDocNo) {
+        if (!p.expense_doc_id) { setMessage(`❌ แถวที่ ${i + 1} (ค่าใช้จ่ายค้างชำระ): เลือกใบค่าใช้จ่ายที่จะหักกลบ`); return; }
+        const doc = expenseDocs.find(d => String(d.expense_doc_id) === String(p.expense_doc_id));
+        // ฝั่งค่าใช้จ่ายไม่มีจ่ายบางส่วน — ยอดหักกลบต้องเท่ายอดใบค่าใช้จ่ายเต็มใบ
+        if (doc && Math.abs(Number(p.amount) - expenseNet(doc)) > 0.005) {
+          setMessage(`❌ แถวที่ ${i + 1} (ค่าใช้จ่ายค้างชำระ): ยอดต้องเท่ายอดใบ ${p.expense_doc_no} เต็มใบ (${fmt(expenseNet(doc))})`); return;
+        }
+      }
     }
     setSavingPay(true);
     try {
       const single = payments.length === 1 ? payments[0] : null;
+      // หักกลบค่าใช้จ่าย — ต่อเลขใบค่าใช้จ่ายเข้าหมายเหตุ (ไว้ trace)
+      const offsetLines = payments.filter(p => p.method === "หักกลบค่าใช้จ่าย" && p.expense_doc_id);
+      const offsetNotes = offsetLines.map(p => `หักกลบค่าใช้จ่าย ${p.expense_doc_no || p.expense_doc_id}`);
+      const noteWithOffset = [payForm.payment_note, ...offsetNotes].filter(Boolean).join(" · ");
       const body = {
         action: "income_record",
         op: editPayDocNo ? "edit_payment" : "save_payment",
@@ -867,7 +937,7 @@ export default function IncomeRecordPage({ currentUser }) {
         income_doc_ids: editPayDocNo ? undefined : selectedIds,
         paid_date: payForm.paid_date,
         payment_method: single ? single.method : "ผสม",
-        payment_note: payForm.payment_note,
+        payment_note: noteWithOffset,
         from_bank_account_id: single && single.method === "โอน" ? (Number(single.from_bank_account_id) || null) : null,
         paid_by: currentUser?.username || currentUser?.name || "system",
         // multi-method breakdown
@@ -883,7 +953,36 @@ export default function IncomeRecordPage({ currentUser }) {
         body: JSON.stringify(body),
       });
       const data = await res.json();
-      setMessage(editPayDocNo ? "✅ แก้ไขใบจ่ายเรียบร้อย" : `✅ บันทึกรับเงินเรียบร้อย ${data?.paid_doc_no || data?.[0]?.paid_doc_no || ""}`);
+      const ircNo = data?.paid_doc_no || data?.[0]?.paid_doc_no || "";
+      // บันทึกจ่ายฝั่งค่าใช้จ่ายอัตโนมัติ (mark ใบค่าใช้จ่ายเป็นจ่ายแล้ว วิธี "หักกลบรายได้")
+      // เฉพาะตอนสร้างใบรับเงินใหม่ กันยิงซ้ำตอนแก้ไข
+      let expMsg = "";
+      if (!editPayDocNo && offsetLines.length > 0) {
+        for (const p of offsetLines) {
+          try {
+            const r2 = await fetch(ACCOUNTING_URL, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "expense_record", op: "save_payment",
+                expense_doc_ids: [Number(p.expense_doc_id)],
+                paid_date: payForm.paid_date,
+                payment_method: "หักกลบรายได้",
+                payment_note: `หักกลบใบรับเงินรายได้ ${ircNo}`,
+                from_bank_account_id: null,
+                paid_by: currentUser?.username || currentUser?.name || "system",
+                payments: [{ method: "หักกลบรายได้", amount: Number(p.amount) || 0, from_bank_account_id: null }],
+              }),
+            });
+            const d2 = await r2.json().catch(() => ({}));
+            const row = Array.isArray(d2) ? d2[0] : d2;
+            const expPayNo = row?.paid_doc_no || "";
+            expMsg += ` · จ่ายค่าใช้จ่าย ${p.expense_doc_no} แล้ว${expPayNo ? ` (${expPayNo})` : ""}`;
+          } catch {
+            expMsg += ` · ⚠️ หักกลบ ${p.expense_doc_no} ไม่สำเร็จ — ไปบันทึกจ่ายที่เมนูค่าใช้จ่ายเอง`;
+          }
+        }
+      }
+      setMessage(editPayDocNo ? "✅ แก้ไขใบจ่ายเรียบร้อย" : `✅ บันทึกรับเงินเรียบร้อย ${ircNo}${expMsg}`);
       setPayDialog(false);
       setEditPayDocNo(null);
       setSelected({});
@@ -961,7 +1060,7 @@ export default function IncomeRecordPage({ currentUser }) {
             <span>📑 เอกสาร: <strong>{filtered.length}</strong></span>
             <span style={{ color: "#dc2626" }}>💰 ยอดรวม: <strong>{fmt(totalAll)}</strong> บาท</span>
           </div>
-          <DocsTable docs={filtered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={false} />
+          <DocsTable docs={filtered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} handleClearReceived={handleClearReceived} showCheckbox={false} />
         </>
       )}
 
@@ -980,7 +1079,7 @@ export default function IncomeRecordPage({ currentUser }) {
               💵 บันทึกรับเงิน
             </button>
           </div>
-          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} />
+          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} handleClearReceived={handleClearReceived} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} />
         </>
       )}
 
@@ -1196,25 +1295,36 @@ export default function IncomeRecordPage({ currentUser }) {
                       };
                       // exclude credit notes ที่ถูกเลือกในแถวอื่นแล้ว
                       const usedCnInOtherRows = payments.filter((_, i) => i !== idx).map(x => x.credit_note_no).filter(Boolean);
+                      // ใบค่าใช้จ่ายค้างจ่ายที่ชื่อผู้จำหน่ายตรงกับลูกค้าของใบรายได้ที่เลือก — exclude ที่ถูกเลือกในแถวอื่น
+                      const usedExpInOtherRows = payments.filter((_, i) => i !== idx).map(x => String(x.expense_doc_id || "")).filter(Boolean);
+                      const matchedExpenseDocs = expenseDocs.filter(d =>
+                        payCustomerNames.some(n => namesMatch(n, d.vendor_name)) && !usedExpInOtherRows.includes(String(d.expense_doc_id)));
+                      const onExpSelect = (val) => {
+                        const doc = expenseDocs.find(d => String(d.expense_doc_id) === val);
+                        updatePayment(idx, { expense_doc_id: val, expense_doc_no: doc?.expense_doc_no || "", amount: doc ? expenseNet(doc) : 0 });
+                      };
+                      const lockAmount = p.method === "ใบลดหนี้" || p.method === "หักกลบค่าใช้จ่าย";
                       return (
                       <div key={idx} style={{ display: "grid", gridTemplateColumns: "110px 110px minmax(0, 1fr) 30px", gap: 8, alignItems: "center", minWidth: 0 }}>
                         <select value={p.method}
-                          onChange={e => updatePayment(idx, { method: e.target.value, from_bank_account_id: e.target.value === "โอน" ? p.from_bank_account_id : "", credit_note_no: e.target.value === "ใบลดหนี้" ? p.credit_note_no : "" })}
+                          onChange={e => updatePayment(idx, { method: e.target.value, from_bank_account_id: e.target.value === "โอน" ? p.from_bank_account_id : "", credit_note_no: e.target.value === "ใบลดหนี้" ? p.credit_note_no : "", expense_doc_id: e.target.value === "หักกลบค่าใช้จ่าย" ? p.expense_doc_id : "", expense_doc_no: e.target.value === "หักกลบค่าใช้จ่าย" ? p.expense_doc_no : "" })}
                           style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
                           <option value="โอน">เงินโอน</option>
                           <option value="เงินสด">เงินสด</option>
                           <option value="เช็ค">เช็ค</option>
                           <option value="ใบลดหนี้">ใบลดหนี้</option>
-                          {p.method && !["โอน", "เงินสด", "เช็ค", "ใบลดหนี้"].includes(p.method) && (
+                          <option value="หักกลบค่าใช้จ่าย">ค่าใช้จ่ายค้างชำระ (หักกลบ)</option>
+                          <option value="ค่าธรรมเนียมรับโอน">ค่าธรรมเนียมรับโอนเงิน</option>
+                          {p.method && !["โอน", "เงินสด", "เช็ค", "ใบลดหนี้", "หักกลบค่าใช้จ่าย", "ค่าธรรมเนียมรับโอน"].includes(p.method) && (
                             <option value={p.method}>{p.method}</option>
                           )}
                         </select>
                         <input type="number" step="0.01" min="0" value={p.amount}
                           onChange={e => updatePayment(idx, { amount: e.target.value })}
                           placeholder="0.00"
-                          readOnly={p.method === "ใบลดหนี้"}
-                          title={p.method === "ใบลดหนี้" ? "จำนวนเงินจะถูกตั้งจากใบลดหนี้ที่เลือก" : ""}
-                          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", background: p.method === "ใบลดหนี้" ? "#f3f4f6" : "#fff" }} />
+                          readOnly={lockAmount}
+                          title={p.method === "ใบลดหนี้" ? "จำนวนเงินจะถูกตั้งจากใบลดหนี้ที่เลือก" : p.method === "หักกลบค่าใช้จ่าย" ? "จำนวนเงิน = ยอดใบค่าใช้จ่ายเต็มใบ (ฝั่งค่าใช้จ่ายไม่มีจ่ายบางส่วน)" : ""}
+                          style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", background: lockAmount ? "#f3f4f6" : "#fff" }} />
                         {p.method === "โอน" ? (
                           <select value={p.from_bank_account_id || ""}
                             onChange={e => updatePayment(idx, { from_bank_account_id: e.target.value })}
@@ -1236,6 +1346,24 @@ export default function IncomeRecordPage({ currentUser }) {
                                 </option>
                               ))}
                           </select>
+                        ) : p.method === "หักกลบค่าใช้จ่าย" ? (
+                          editPayDocNo ? (
+                            <div style={{ padding: "7px 10px", fontSize: 12, color: "#0369a1", background: "#f0f9ff", border: "1px dashed #38bdf8", borderRadius: 6 }}>
+                              🔗 หักกลบใบค่าใช้จ่ายไปแล้วตอนสร้างใบรับเงิน — แก้ไขไม่กระทบฝั่งค่าใช้จ่าย
+                            </div>
+                          ) : (
+                          <select value={p.expense_doc_id || ""}
+                            onChange={e => onExpSelect(e.target.value)}
+                            style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #38bdf8", fontFamily: "Tahoma", fontSize: 13, background: "#f0f9ff", minWidth: 0 }}>
+                            <option value="">{matchedExpenseDocs.length === 0 ? "ไม่มีใบค่าใช้จ่ายค้างจ่ายที่ชื่อตรงกัน" : "-- เลือกใบค่าใช้จ่ายที่จะหักกลบ --"}</option>
+                            {matchedExpenseDocs.map(d => (
+                              <option key={d.expense_doc_id} value={d.expense_doc_id}
+                                title={`${d.expense_doc_no} | ${d.vendor_name || "-"} | ฿${fmt(expenseNet(d))} | ${fmtDate(d.doc_date)}`}>
+                                {d.expense_doc_no} · {d.vendor_name || "-"} · ฿{fmt(expenseNet(d))} · {fmtDate(d.doc_date)}
+                              </option>
+                            ))}
+                          </select>
+                          )
                         ) : (
                           <div style={{ padding: "7px 10px", color: "#9ca3af", fontSize: 12 }}>—</div>
                         )}
@@ -1293,17 +1421,41 @@ export default function IncomeRecordPage({ currentUser }) {
               <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
             ) : tfList.length === 0 ? (
               <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>ไม่มีใบกำกับที่ยังไม่ถูกนำเข้า</div>
-            ) : (
+            ) : (() => {
+              // กรองสาขา + ค้นหา (ชื่อลูกค้า / เลขใบกำกับ / Tax ID)
+              const kw = tfSearch.trim().toLowerCase();
+              const tfShown = tfList.filter(t =>
+                (!tfBranchFilter || String(t.branch || "") === tfBranchFilter) &&
+                (!kw || [t.customer_name, t.tax_invoice_no, t.customer_tax_id].filter(Boolean).join(" ").toLowerCase().includes(kw)));
+              const tfBranches = [...new Set(tfList.map(t => String(t.branch || "")).filter(Boolean))].sort();
+              return (
               <>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8, padding: "8px 10px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8 }}>
+                  <span style={{ fontSize: 13 }}>สาขา:</span>
+                  <select value={tfBranchFilter} onChange={e => setTfBranchFilter(e.target.value)}
+                    style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
+                    <option value="">ทั้งหมด</option>
+                    {tfBranches.map(b2 => <option key={b2} value={b2}>{b2}</option>)}
+                  </select>
+                  <input type="text" value={tfSearch} onChange={e => setTfSearch(e.target.value)}
+                    placeholder="🔍 ค้นหา: ชื่อลูกค้า, เลขใบกำกับ, Tax ID"
+                    style={{ flex: 1, minWidth: 200, padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }} />
+                  {(tfBranchFilter || kw) && (
+                    <span style={{ fontSize: 12, color: "#92400e" }}>แสดง {tfShown.length} / {tfList.length} รายการ</span>
+                  )}
+                </div>
                 <div style={{ marginBottom: 8, fontSize: 13 }}>
                   <label style={{ cursor: "pointer", fontWeight: 600 }}>
                     <input type="checkbox"
-                      checked={tfList.length > 0 && tfList.every(t => tfSelected[t.tax_invoice_no])}
+                      checked={tfShown.length > 0 && tfShown.every(t => tfSelected[t.tax_invoice_no])}
                       onChange={e => {
-                        const all = {};
-                        if (e.target.checked) tfList.forEach(t => { all[t.tax_invoice_no] = true; });
-                        setTfSelected(all);
-                      }} /> เลือกทั้งหมด ({tfList.length} รายการ)
+                        // เลือกทั้งหมด = เฉพาะรายการที่ผ่านตัวกรอง (คงการเลือกเดิมของรายการนอกตัวกรองไว้)
+                        setTfSelected(prev => {
+                          const next = { ...prev };
+                          tfShown.forEach(t => { next[t.tax_invoice_no] = e.target.checked; });
+                          return next;
+                        });
+                      }} /> เลือกทั้งหมด ({tfShown.length} รายการ)
                   </label>
                   <span style={{ marginLeft: 12, color: "#6b7280" }}>
                     เลือกแล้ว: <strong>{Object.values(tfSelected).filter(Boolean).length}</strong>
@@ -1325,7 +1477,8 @@ export default function IncomeRecordPage({ currentUser }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {tfList.map((t, i) => (
+                      {tfShown.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่พบรายการตามตัวกรอง</td></tr>}
+                      {tfShown.map((t, i) => (
                         <tr key={t.tax_invoice_no} style={{ borderTop: "1px solid #f3f4f6", background: tfSelected[t.tax_invoice_no] ? "#fffbeb" : (i % 2 === 0 ? "#fff" : "#f9fafb") }}>
                           <td style={{ ...td, textAlign: "center" }}>
                             <input type="checkbox" checked={!!tfSelected[t.tax_invoice_no]} onChange={e => setTfSelected(prev => ({ ...prev, [t.tax_invoice_no]: e.target.checked }))} />
@@ -1344,7 +1497,8 @@ export default function IncomeRecordPage({ currentUser }) {
                   </table>
                 </div>
               </>
-            )}
+              );
+            })()}
 
             <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
               <button onClick={() => setTfImportOpen(false)} disabled={tfImporting} style={btn("#6b7280")}>ยกเลิก</button>
@@ -1745,7 +1899,7 @@ export default function IncomeRecordPage({ currentUser }) {
   );
 }
 
-function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete }) {
+function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, handleClearReceived }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const btnRef = useRef(null);
@@ -1793,6 +1947,7 @@ function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePri
           <Item icon="🖨️" label="พิมพ์" onClick={run(() => handlePrint(d))} />
           <Item icon="📋" label="สร้างซ้ำ" onClick={run(() => openDuplicate(d))} />
           {status !== "paid" && <div style={{ height: 1, background: "#e5e7eb", margin: "4px 6px" }} />}
+          {status !== "paid" && status !== "cancelled" && Number(d.received_amount || 0) > 0 && <Item icon="🧹" label="ล้างยอดรับสะสม" onClick={run(() => handleClearReceived(d))} color="#0369a1" />}
           {status !== "paid" && status !== "cancelled" && <Item icon="🚫" label="ยกเลิก" onClick={run(() => handleCancel(d))} color="#b45309" />}
           {status !== "paid" && <Item icon="🗑️" label="ลบ" onClick={run(() => handleDelete(d))} color="#dc2626" />}
         </div>
@@ -1801,7 +1956,7 @@ function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePri
   );
 }
 
-function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, showCheckbox, selected, toggleOne, toggleAll }) {
+function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, handleClearReceived, showCheckbox, selected, toggleOne, toggleAll }) {
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
       {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
@@ -1864,7 +2019,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
                   })()}
                 </td>
                 <td style={{ ...td, textAlign: "center" }}>
-                  <KebabMenu d={d} status={status} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} />
+                  <KebabMenu d={d} status={status} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} handleClearReceived={handleClearReceived} />
                 </td>
               </tr>
             );

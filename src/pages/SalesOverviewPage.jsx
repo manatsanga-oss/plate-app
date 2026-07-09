@@ -50,6 +50,26 @@ function normalizeBranchName(s) {
     .trim();
 }
 
+// เป้าลงทะเบียน 50%: ถ้าเดือนก่อน (ในกรอบ 3 เดือนที่แสดง) ยอดจริงไม่ถึงเป้า ให้ทบยอดมาเดือนถัดไป —
+// ลงทะเบียน = ลงเดือนก่อน + เดือนนี้, ขาย = ขายเดือนก่อน + เดือนนี้ แล้วค่อยคิด %
+// เช็ค "ถึงเป้าหรือไม่" จาก % ยอดจริงของเดือนก่อนเอง (ไม่ใช่ % ที่ทบแล้ว) — ถ้ายอดจริงเดือนก่อนถึง 50% เดือนนี้คิดปกติ
+// (ทบยอดจริงของเดือนก่อนแค่เดือนเดียว ไม่ทบสะสมย้อนหลายเดือน)
+// เริ่มใช้เงื่อนไขทบตั้งแต่ มิ.ย. 2569 — เดือนที่พลาดเป้าก่อนหน้านั้น (เช่น พ.ค. 2569) ไม่ถูกนำมาทบ
+const CARRY_RULE_START = "2026-06"; // เดือนแรกที่การพลาดเป้าจะถูกทบไปเดือนถัดไป (YYYY-MM เทียบ string ได้)
+function applyCarryOver(monthData) {
+  const out = [];
+  monthData.forEach((d, i) => {
+    const prev = out[i - 1];
+    const prevRawPct = prev && prev.honda > 0 ? (prev.reg / prev.honda) * 100 : null;
+    const carried = prevRawPct != null && prevRawPct < 50 && prev.month >= CARRY_RULE_START;
+    const effReg = (d.reg || 0) + (carried ? (prev.reg || 0) : 0);
+    const effHonda = (d.honda || 0) + (carried ? (prev.honda || 0) : 0);
+    const pct = effHonda > 0 ? (effReg / effHonda) * 100 : null;
+    out.push({ ...d, effReg, effHonda, pct, carried });
+  });
+  return out;
+}
+
 // Fuzzy key: ตัด Thai combining marks (วรรณยุกต์ + สระบน/ล่าง + การันต์) สำหรับ group ชื่อสะกดต่างเข้าด้วยกัน
 // เช่น "สีขวา", "สี่ขวา", "สิีขวา" → ทุกตัวจะ fuzzy = "สขวา"
 function fuzzyBranchKey(s) {
@@ -133,15 +153,15 @@ export default function SalesOverviewPage({ currentUser }) {
   const allCounts = data ? branchNames.flatMap(n => months3.map(m => data.byBranch[n][m]?.reg || 0)) : [];
   const maxCount = Math.max(1, ...allCounts);
 
-  // Total per month (รวมทุกร้าน)
-  const monthTotals = months3.map(m => {
+  // Total per month (รวมทุกร้าน) — คิด % แบบทบยอดเมื่อเดือนก่อนไม่ถึงเป้า 50%
+  const monthTotals = applyCarryOver(months3.map(m => {
     let totalReg = 0, totalHonda = 0;
     branchNames.forEach(n => {
       totalReg += data.byBranch[n][m]?.reg || 0;
       totalHonda += data.byBranch[n][m]?.honda || 0;
     });
-    return { month: m, total: totalReg, honda: totalHonda };
-  });
+    return { month: m, total: totalReg, reg: totalReg, honda: totalHonda };
+  }));
   const grandTotal = monthTotals.reduce((s, x) => s + x.total, 0);
 
   const BAR_MAX_H = 150;
@@ -212,7 +232,7 @@ export default function SalesOverviewPage({ currentUser }) {
                   {monthTotals.map((mt, mi) => {
                     const totalMax = Math.max(1, ...monthTotals.map(x => x.total));
                     const h = Math.max((mt.total / totalMax) * BAR_MAX_H, mt.total > 0 ? 4 : 1);
-                    const pct = mt.honda > 0 ? (mt.total / mt.honda) * 100 : null;
+                    const pct = mt.pct;
                     const barColor = pct == null ? "#9e9e9e" : pct >= 50 ? "#1565c0" : "#c62828";
                     return (
                       <div key={mi} style={{ flex: 1, textAlign: "center" }}>
@@ -233,6 +253,11 @@ export default function SalesOverviewPage({ currentUser }) {
                         <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
                           ลง <strong>{mt.total}</strong> / ขาย <strong>{mt.honda}</strong>
                         </div>
+                        {mt.carried && (
+                          <div style={{ fontSize: 11, color: "#e65100", marginTop: 2 }}>
+                            ทบเดือนก่อน: ลง <strong>{mt.effReg}</strong> / ขาย <strong>{mt.effHonda}</strong>
+                          </div>
+                        )}
                       </div>
                     );
                   })}
@@ -250,12 +275,15 @@ export default function SalesOverviewPage({ currentUser }) {
                 </span>
               ))}
               <span style={{ marginLeft: "auto", fontSize: 11, color: "#888" }}>เรียงตามยอดรวม 3 เดือน (มาก→น้อย)</span>
+              <span style={{ width: "100%", fontSize: 11, color: "#e65100" }}>
+                * เป้า 50% (เริ่มใช้ มิ.ย. 2569) — เดือนไหนยอดจริงไม่ถึงเป้า เดือนถัดไปจะทบยอดเดือนก่อนแค่เดือนเดียว: % = (ลงทะเบียนเดือนก่อน + เดือนนี้) ÷ (ขายเดือนก่อน + เดือนนี้)
+              </span>
             </div>
 
             {/* Per-branch cards — 1 ร้าน / 1 แถว */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
               {branchNames.map((name, bi) => {
-                const monthData = months3.map(m => data.byBranch[name][m] || { reg: 0, honda: 0 });
+                const monthData = applyCarryOver(months3.map(m => ({ month: m, ...(data.byBranch[name][m] || { reg: 0, honda: 0 }) })));
                 const total = monthData.reduce((s, x) => s + x.reg, 0);
                 return (
                   <div key={bi} style={{ ...S.card, marginBottom: 0 }}>
@@ -266,8 +294,7 @@ export default function SalesOverviewPage({ currentUser }) {
                     <div style={S.cardBody}>
                       <div style={{ display: "flex", alignItems: "flex-end", gap: 14, paddingTop: 8, paddingBottom: 4 }}>
                         {months3.map((m, mi) => {
-                          const { reg, honda } = monthData[mi];
-                          const pct = honda > 0 ? (reg / honda) * 100 : null;
+                          const { reg, honda, pct, carried, effReg, effHonda } = monthData[mi];
                           const barColor = pct == null ? "#9e9e9e" : pct >= 50 ? "#1565c0" : "#c62828";
                           const h = Math.max((reg / maxCount) * BAR_MAX_H, reg > 0 ? 4 : 1);
                           return (
@@ -289,6 +316,11 @@ export default function SalesOverviewPage({ currentUser }) {
                               <div style={{ fontSize: 11, color: "#666", marginTop: 4 }}>
                                 ลง <strong>{reg}</strong> / ขาย <strong>{honda}</strong>
                               </div>
+                              {carried && (
+                                <div style={{ fontSize: 10, color: "#e65100", marginTop: 2 }}>
+                                  ทบเดือนก่อน: ลง <strong>{effReg}</strong> / ขาย <strong>{effHonda}</strong>
+                                </div>
+                              )}
                             </div>
                           );
                         })}

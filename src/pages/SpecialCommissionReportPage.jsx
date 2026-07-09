@@ -70,6 +70,108 @@ export default function SpecialCommissionReportPage({ currentUser }) {
     } catch { setSnapshotInfo(null); }
   }
 
+  // ===== แก้ไขยอดรายคน (คลิกที่ตัวเลข ค่าคอมมิชชั่น/ค่านายหน้า) =====
+  const [adjustments, setAdjustments] = useState([]); // รายการปรับยอดของ snapshot ปัจจุบัน
+  const [editCell, setEditCell] = useState(null); // { employee_id, col }
+  const [editValue, setEditValue] = useState("");
+  const [adjSaving, setAdjSaving] = useState(false);
+
+  async function fetchAdjustments(saveGroup) {
+    if (!saveGroup) { setAdjustments([]); return; }
+    try {
+      const data = await postAPI({ action: "commission_payables", mode: "list_adjustments", save_group: saveGroup });
+      setAdjustments(Array.isArray(data) ? data.filter(a => a && a.adjustment_id) : []);
+    } catch { setAdjustments([]); }
+  }
+  useEffect(() => { fetchAdjustments(snapshotInfo?.save_group); /* eslint-disable-next-line */ }, [snapshotInfo?.save_group]);
+
+  // แผนที่กลุ่มเอกสารจ่าย (ต้องตรง MAP ใน workflow commission_payables)
+  const ADJ_GROUP_NO = { "ป.เปา|ฮอนด้า": 1, "ป.เปา|ยามาฮ่า": 2, "สิงห์ชัย|ฮอนด้า": 3, "สิงห์ชัย|ยามาฮ่า": 4 };
+  const ADJ_BRANCH_AFF = { SCY01: "สิงห์ชัย", SCY04: "สิงห์ชัย", SCY07: "สิงห์ชัย", SCY05: "ป.เปา", SCY06: "ป.เปา" };
+  const ADJ_OWN_BRAND = { "ป.เปา": "ฮอนด้า", "สิงห์ชัย": "ยามาฮ่า" };
+
+  function resolveAdjTarget(r, colKey) {
+    const affiliation = ADJ_BRANCH_AFF[r.branch_code];
+    if (!affiliation) return null;
+    const own = ADJ_OWN_BRAND[affiliation];
+    const brand = colKey === "commission" ? own : (own === "ฮอนด้า" ? "ยามาฮ่า" : "ฮอนด้า");
+    return { affiliation, brand, group_no: ADJ_GROUP_NO[`${affiliation}|${brand}`] };
+  }
+
+  // overlay ปรับยอดลงบนแถว (key = employee_name เหมือน backend)
+  const adjByEmp = {};
+  for (const a of adjustments) (adjByEmp[a.employee_name] = adjByEmp[a.employee_name] || {})[a.col_key] = a;
+  const effOf = (r, colKey) => {
+    const a = adjByEmp[r.employee_name]?.[colKey];
+    const base = Number(colKey === "commission" ? r.commission_amount : r.brokerage_amount) || 0;
+    return a ? Number(a.new_amount) : base;
+  };
+
+  async function saveAdjustment(r, colKey) {
+    if (!snapshotInfo?.save_group) { alert("ต้องกด 💾 บันทึก (snapshot) ก่อน ถึงจะแก้ไขยอดได้"); return; }
+    const base = Number(colKey === "commission" ? r.commission_amount : r.brokerage_amount) || 0;
+    const raw = String(editValue).replace(/,/g, "").trim();
+    const newAmt = raw === "" ? base : Number(raw);
+    if (!isFinite(newAmt) || newAmt < 0) { alert("กรุณากรอกตัวเลขให้ถูกต้อง"); return; }
+    const target = resolveAdjTarget(r, colKey);
+    if (!target) { alert("ไม่ทราบสังกัดของสาขานี้ — แก้ไขยอดไม่ได้"); return; }
+    setAdjSaving(true);
+    try {
+      const data = await postAPI({
+        action: "commission_payables", mode: "save_adjustment",
+        save_group: snapshotInfo.save_group,
+        employee_name: r.employee_name, employee_id: r.employee_id || null,
+        col_key: colKey, ...target,
+        original_amount: base, new_amount: newAmt,
+        adjusted_by: currentUser?.username || currentUser?.name || "",
+      });
+      const result = Array.isArray(data) ? data[0] : data;
+      if (result?.error) throw new Error(result.error);
+      if (!result?.result) throw new Error("workflow ยังไม่รองรับ save_adjustment — ต้อง re-import Sales Extra Pay API ใน n8n ก่อน");
+      setEditCell(null);
+      setMessage(Math.abs(newAmt - base) < 0.005
+        ? "✅ รีเซ็ตยอดกลับเป็นค่าคำนวณแล้ว"
+        : `✅ แก้ไขยอดของ ${r.employee_name} แล้ว — ⚠️ ถ้าสร้างเอกสารจ่ายไว้ก่อนหน้านี้ ให้ยกเลิกเอกสารแล้วสร้างใหม่เพื่อให้ยอดตรง`);
+      await fetchAdjustments(snapshotInfo.save_group);
+    } catch (e) { alert("❌ บันทึกการแก้ไขยอดไม่สำเร็จ: " + e.message); }
+    setAdjSaving(false);
+  }
+
+  function renderAdjCell(r, colKey, color) {
+    const a = adjByEmp[r.employee_name]?.[colKey];
+    const base = Number(colKey === "commission" ? r.commission_amount : r.brokerage_amount) || 0;
+    const val = a ? Number(a.new_amount) : base;
+    const editing = editCell && editCell.employee_id === r.employee_id && editCell.col === colKey;
+    if (editing) {
+      return (
+        <td style={{ ...td, textAlign: "right" }}>
+          <input autoFocus value={editValue} disabled={adjSaving}
+            onChange={e => setEditValue(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter") saveAdjustment(r, colKey);
+              if (e.key === "Escape") setEditCell(null);
+            }}
+            onBlur={() => { if (!adjSaving) setEditCell(null); }}
+            style={{ width: 90, padding: "3px 6px", border: "2px solid #f59e0b", borderRadius: 4, textAlign: "right", fontFamily: "monospace", fontSize: 12 }} />
+          <div style={{ fontSize: 9, color: "#92400e", whiteSpace: "nowrap" }}>Enter=บันทึก · Esc=ยกเลิก</div>
+        </td>
+      );
+    }
+    const stale = a && Math.abs(Number(a.original_amount) - base) > 0.005;
+    return (
+      <td title={snapshotInfo?.save_group ? "คลิกเพื่อแก้ไขยอด" : "ต้องกด 💾 บันทึก (snapshot) ก่อน ถึงจะแก้ไขยอดได้"}
+        onClick={() => {
+          if (!snapshotInfo?.save_group) { alert("ต้องกด 💾 บันทึก (snapshot) ก่อน ถึงจะแก้ไขยอดได้"); return; }
+          setEditCell({ employee_id: r.employee_id, col: colKey }); setEditValue(val ? String(val) : "");
+        }}
+        style={{ ...td, textAlign: "right", fontFamily: "monospace", cursor: "pointer", color, ...(a ? { background: "#fff7ed", color: "#c2410c", fontWeight: 700 } : {}) }}>
+        {val ? fmt(val) : "-"}{a ? " ✏️" : ""}
+        {a && <div style={{ fontSize: 10, color: "#9ca3af", textDecoration: "line-through", fontWeight: 400 }}>{fmt(a.original_amount)}</div>}
+        {stale && <div style={{ fontSize: 9, color: "#dc2626", fontWeight: 400 }}>⚠️ ยอดคำนวณเปลี่ยนเป็น {fmt(base)}</div>}
+      </td>
+    );
+  }
+
   async function fetchData() {
     setLoading(true); setMessage("");
     try {
@@ -319,8 +421,14 @@ export default function SpecialCommissionReportPage({ currentUser }) {
     return false;
   })();
 
-  const total = rows.reduce((s, r) => s + Number(r.total_commission || 0), 0);
   const totalSales = rows.reduce((s, r) => s + Number(r.sales_count || 0), 0);
+  // workflow เก่าที่ยังไม่ส่ง 2 คอลัมน์แยก → ซ่อนคอลัมน์แยกไว้ก่อน
+  const hasSplit = rows.some(r => r.commission_amount !== undefined && r.commission_amount !== null);
+  // แยก ค่าคอม (แบรนด์ตรงสังกัดสาขา) / ค่านายหน้า (แบรนด์ต่างสังกัด) — รวมยอดที่แก้ไขเอง (adjustments) แล้ว
+  const totalComm = rows.reduce((s, r) => s + effOf(r, "commission"), 0);
+  const totalBrok = rows.reduce((s, r) => s + effOf(r, "brokerage"), 0);
+  const rowTotal = (r) => (hasSplit ? effOf(r, "commission") + effOf(r, "brokerage") : Number(r.total_commission || 0));
+  const total = hasSplit ? totalComm + totalBrok : rows.reduce((s, r) => s + Number(r.total_commission || 0), 0);
   const branches = [...new Set(rows.map(r => r.branch_code).filter(Boolean))];
 
   function printDetail() {
@@ -450,8 +558,16 @@ tr.excluded td { text-decoration: line-through; }
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 10, marginBottom: 12 }}>
         <Card label="👥 จำนวนพนักงาน" value={rows.length} color="#1e40af" />
         <Card label="🚗 ใบขายที่จ่ายค่าคอม" value={totalSales} color="#0369a1" />
+        {hasSplit && <Card label="💵 ค่าคอมมิชชั่น" value={fmt(totalComm)} color="#0d9488" />}
+        {hasSplit && <Card label="🤝 ค่านายหน้า" value={fmt(totalBrok)} color="#b45309" />}
         <Card label="💰 ยอดค่าคอมรวม" value={fmt(total)} color="#059669" highlight />
       </div>
+
+      {hasSplit && (
+        <div style={{ fontSize: 12, color: "#b45309", marginBottom: 6 }}>
+          ✏️ คลิกที่ตัวเลข ค่าคอมมิชชั่น/ค่านายหน้า เพื่อแก้ไขยอดได้ — ยอดที่แก้จะถูกใช้ในเอกสารจ่ายเงิน (กรอกเท่ายอดเดิมเพื่อรีเซ็ต){!snapshotInfo?.save_group && " · ต้องกด 💾 บันทึก (snapshot) ก่อน"}
+        </div>
+      )}
 
       <div style={{ overflowX: "auto", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -461,20 +577,24 @@ tr.excluded td { text-decoration: line-through; }
               <th style={th}>พนักงาน</th>
               <th style={th}>สาขา</th>
               <th style={{ ...th, textAlign: "right" }}>จำนวนใบขาย</th>
+              {hasSplit && <th style={{ ...th, textAlign: "right" }}>ค่าคอมมิชชั่น</th>}
+              {hasSplit && <th style={{ ...th, textAlign: "right" }}>ค่านายหน้า</th>}
               <th style={{ ...th, textAlign: "right" }}>ยอดค่าคอมรวม</th>
               <th style={th}></th>
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={6} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={6} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+            {loading && <tr><td colSpan={hasSplit ? 8 : 6} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+            {!loading && rows.length === 0 && <tr><td colSpan={hasSplit ? 8 : 6} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
             {rows.map((r, i) => (
               <tr key={r.employee_id} style={{ borderTop: "1px solid #e5e7eb" }}>
                 <td style={td}>{i + 1}</td>
                 <td style={{ ...td, fontWeight: 600 }}>{r.employee_name}</td>
                 <td style={{ ...td, fontFamily: "monospace" }}>{r.branch_code || "-"}</td>
                 <td style={{ ...td, textAlign: "right" }}>{r.sales_count}</td>
-                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(r.total_commission)}</td>
+                {hasSplit && renderAdjCell(r, "commission", "#0d9488")}
+                {hasSplit && renderAdjCell(r, "brokerage", "#b45309")}
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(rowTotal(r))}</td>
                 <td style={td}><button onClick={() => openDetail(r)} style={btnSmBlue}>📋 รายละเอียด</button></td>
               </tr>
             ))}
@@ -482,6 +602,8 @@ tr.excluded td { text-decoration: line-through; }
               <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                 <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม</td>
                 <td style={{ ...td, textAlign: "right" }}>{totalSales}</td>
+                {hasSplit && <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0d9488" }}>{fmt(totalComm)}</td>}
+                {hasSplit && <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#b45309" }}>{fmt(totalBrok)}</td>}
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(total)}</td>
                 <td style={td}></td>
               </tr>

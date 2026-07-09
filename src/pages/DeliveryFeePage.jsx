@@ -386,6 +386,7 @@ function ReferralDocTab({ currentUser }) {
   const [candidates, setCandidates] = useState([]);
   const [candLoading, setCandLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [affFilter, setAffFilter] = useState("");
 
   // ช่วงค้นหา = วันจ่าย ถึง +3 วันหลัง (ไม่ดูยอด/ชื่อ — ดูแค่ประเภทค่าแนะนำเดียวกัน)
   function searchRange(dateStr) {
@@ -432,9 +433,13 @@ function ReferralDocTab({ currentUser }) {
   }
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
 
-  const total = rows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
-  const matched = rows.filter(r => r.matched_doc_no).length;
-  const unmatched = rows.length - matched;
+  // ตัวเลือกสังกัดจากข้อมูลที่โหลดมา (ปกติ = ป.เปา / สิงห์ชัย)
+  const affOptions = [...new Set(rows.map(r => r.affiliation).filter(Boolean))].sort();
+  const shownRows = affFilter ? rows.filter(r => (r.affiliation || "") === affFilter) : rows;
+
+  const total = shownRows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+  const matched = shownRows.filter(r => r.matched_doc_no).length;
+  const unmatched = shownRows.length - matched;
 
   return (
     <>
@@ -443,6 +448,11 @@ function ReferralDocTab({ currentUser }) {
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inp} />
         <span>ถึง:</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
+        <span>สังกัด:</span>
+        <select value={affFilter} onChange={e => setAffFilter(e.target.value)} style={inp}>
+          <option value="">ทั้งหมด</option>
+          {affOptions.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
         <button onClick={fetchData} disabled={loading} style={btnBlue}>{loading ? "..." : "🔄 รีเฟรช"}</button>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#6b7280" }}>📄 daily_expenses → จับคู่ expense_documents (วันที่+ผู้รับ+จำนวนเงิน)</span>
       </div>
@@ -450,8 +460,8 @@ function ReferralDocTab({ currentUser }) {
       {message && <div style={{ padding: 10, marginBottom: 10, color: message.startsWith("✅") ? "#15803d" : "#b91c1c", background: message.startsWith("✅") ? "#dcfce7" : "#fef2f2", borderRadius: 6 }}>{message}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 10, marginBottom: 12 }}>
-        <Card label="📋 รายการค่านำพา" value={rows.length} color="#1e40af" />
-        <Card label="✅ จับคู่ได้" value={`${matched}/${rows.length}`} color="#059669" />
+        <Card label="📋 รายการค่านำพา" value={shownRows.length} color="#1e40af" />
+        <Card label="✅ จับคู่ได้" value={`${matched}/${shownRows.length}`} color="#059669" />
         <Card label="⚠️ ยังไม่จับคู่" value={unmatched} color="#b91c1c" />
         <Card label="💰 ยอดรวม" value={fmt(total)} color="#059669" highlight />
       </div>
@@ -474,8 +484,8 @@ function ReferralDocTab({ currentUser }) {
           </thead>
           <tbody>
             {loading && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
-            {rows.map((r, i) => {
+            {!loading && shownRows.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+            {shownRows.map((r, i) => {
               const isMatched = !!r.matched_doc_no;
               return (
               <tr key={r.id} style={{ borderTop: "1px solid #e5e7eb", background: isMatched ? "#ecfdf5" : "#fef2f2" }}>

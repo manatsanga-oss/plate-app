@@ -576,11 +576,12 @@ tr.excluded td { text-decoration: line-through; }
       const year = dt.getFullYear();
       const month = dt.getMonth() + 1;
       const monthDate = `${year}-${String(month).padStart(2, "0")}-01`;
-      // ดึงข้อมูล 3 sources พร้อมกัน — ใช้ detail_sales เพื่อให้รู้ brand แต่ละใบ
-      const [salesSalesData, svcCheck, partsRows] = await Promise.all([
+      // ดึงข้อมูล 3 sources พร้อมกัน — ใช้ detail_sales เพื่อให้รู้ brand แต่ละใบ + รายการปรับยอด (แก้ไขเอง)
+      const [salesSalesData, svcCheck, partsRows, adjRows] = await Promise.all([
         postAPI({ action: "commission_normal_snapshot", mode: "detail_sales", save_group: snapshotInfo.save_group }),
         postAPI({ action: "commission_service_snapshot", mode: "check", year, month }),
         postAPI({ action: "commission_parts_manual", mode: "list", month_year: monthDate }),
+        postAPI({ action: "commission_normal_payables", mode: "list_adjustments", save_group: snapshotInfo.save_group }),
       ]);
       const salesArr = Array.isArray(salesSalesData) ? salesSalesData.filter(r => r && r.sale_id) : [];
       const partsArr = Array.isArray(partsRows) ? partsRows.filter(r => r && r.id) : [];
@@ -606,8 +607,9 @@ tr.excluded td { text-decoration: line-through; }
       // ใช้ comm_total (ไม่ใช่ per_emp_amount) — เป็น field ใน commission_normal_snapshot_sales
       for (const r of salesArr) {
         const key = r.employee_name;
-        if (!map.has(key)) map.set(key, { name: r.employee_name, branch_code: r.employee_branch_code, sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, total: 0 });
+        if (!map.has(key)) map.set(key, { name: r.employee_name, branch_code: r.employee_branch_code, sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, service_honda: 0, service_yamaha: 0, total: 0 });
         const g = map.get(key);
+        if (!g.employee_id && r.employee_id) g.employee_id = r.employee_id;
         const amt = Number(r.comm_total || 0);
         if (isCommission(r.employee_branch_code || r.branch_code, r.brand)) g.sales_commission += amt;
         else g.sales_brokerage += amt;
@@ -615,24 +617,129 @@ tr.excluded td { text-decoration: line-through; }
       // Service (mechanic_name)
       for (const r of svcArr) {
         const key = r.mechanic_name;
-        if (!map.has(key)) map.set(key, { name: r.mechanic_name, branch_code: "(ช่างซ่อม)", sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, total: 0 });
+        if (!map.has(key)) map.set(key, { name: r.mechanic_name, branch_code: "(ช่างซ่อม)", sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, service_honda: 0, service_yamaha: 0, total: 0 });
         const g = map.get(key);
         g.service += Number(r.total_commission || 0);
+        g.service_honda = (g.service_honda || 0) + Number(r.honda_commission || 0);
+        g.service_yamaha = (g.service_yamaha || 0) + Number(r.yamaha_commission || 0);
       }
       // Parts
       for (const r of partsArr) {
         const key = r.employee_name;
-        if (!map.has(key)) map.set(key, { name: r.employee_name, branch_code: "(อะไหล่)", sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, total: 0 });
+        if (!map.has(key)) map.set(key, { name: r.employee_name, branch_code: "(อะไหล่)", sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, service_honda: 0, service_yamaha: 0, total: 0 });
         const g = map.get(key);
         g.parts += Number(r.amount || 0);
       }
-      const list = [...map.values()].map(g => ({ ...g, total: g.sales_commission + g.sales_brokerage + g.service + g.parts }));
+      // ปรับยอดที่เคยแก้ไขเอง — overlay ลงบนยอดคำนวณ (ยอดคำนวณเดิมเก็บไว้โชว์ขีดฆ่า)
+      const adjArr = Array.isArray(adjRows) ? adjRows.filter(r => r && r.adjustment_id) : [];
+      for (const a of adjArr) {
+        if (!map.has(a.employee_name)) map.set(a.employee_name, { name: a.employee_name, branch_code: "", sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, service_honda: 0, service_yamaha: 0, total: 0 });
+      }
+      const adjByEmp = {};
+      for (const a of adjArr) {
+        (adjByEmp[a.employee_name] = adjByEmp[a.employee_name] || {})[a.col_key] = a;
+      }
+      const list = [...map.values()].map(g => {
+        const adj = adjByEmp[g.name] || {};
+        const eff = k => (adj[k] ? Number(adj[k].new_amount) : Number(g[k] || 0));
+        return { ...g, adj, total: eff("sales_commission") + eff("sales_brokerage") + eff("service") + eff("parts") };
+      });
       list.sort((a, b) => b.total - a.total);
       setCombinedEmployees(list);
     } catch { setCombinedEmployees([]); }
     setCombinedLoading(false);
   }
   useEffect(() => { if (tab === "pay" && snapshotInfo?.save_group) fetchCombinedEmployees(); /* eslint-disable-next-line */ }, [tab, snapshotInfo?.save_group]);
+
+  // ===== แก้ไขยอดรายคน (คลิกที่ตัวเลขในตาราง) =====
+  const [editCell, setEditCell] = useState(null); // { name, col }
+  const [editValue, setEditValue] = useState("");
+  const [adjSaving, setAdjSaving] = useState(false);
+
+  // แผนที่ กลุ่มเอกสารจ่าย 1-4 (ต้องตรงกับ MAP ใน workflow commission_normal_payables)
+  const ADJ_GROUP_NO = { "ป.เปา|ฮอนด้า": 1, "ป.เปา|ยามาฮ่า": 2, "สิงห์ชัย|ฮอนด้า": 3, "สิงห์ชัย|ยามาฮ่า": 4 };
+  const ADJ_BRANCH_AFF = { SCY01: "สิงห์ชัย", SCY04: "สิงห์ชัย", SCY07: "สิงห์ชัย", SCY05: "ป.เปา", SCY06: "ป.เปา" };
+  const ADJ_OWN_BRAND = { "ป.เปา": "ฮอนด้า", "สิงห์ชัย": "ยามาฮ่า" };
+
+  // หา (สังกัด, แบรนด์, group_no) ที่ delta ของ cell นี้ต้องไปบวกในเอกสารจ่าย
+  function resolveAdjTarget(g, colKey) {
+    if (colKey === "parts") return { affiliation: "ป.เปา", brand: "ฮอนด้า", group_no: 1 }; // ค่าคอมอะไหล่รวมในใบ ป.เปา HONDA
+    if (colKey === "service") {
+      // ค่าคอมงานบริการแยกเข้าใบตามแบรนด์ — delta ตามฝั่งที่ช่างมียอดมากกว่า
+      const brand = Number(g.service_yamaha || 0) > Number(g.service_honda || 0) ? "ยามาฮ่า" : "ฮอนด้า";
+      const affiliation = brand === "ฮอนด้า" ? "ป.เปา" : "สิงห์ชัย";
+      return { affiliation, brand, group_no: ADJ_GROUP_NO[`${affiliation}|${brand}`] };
+    }
+    const affiliation = ADJ_BRANCH_AFF[g.branch_code];
+    if (!affiliation) return null;
+    const own = ADJ_OWN_BRAND[affiliation];
+    const brand = colKey === "sales_commission" ? own : (own === "ฮอนด้า" ? "ยามาฮ่า" : "ฮอนด้า");
+    return { affiliation, brand, group_no: ADJ_GROUP_NO[`${affiliation}|${brand}`] };
+  }
+
+  async function saveAdjustment(g, colKey) {
+    const base = Number(g[colKey] || 0);
+    const raw = String(editValue).replace(/,/g, "").trim();
+    const newAmt = raw === "" ? base : Number(raw);
+    if (!isFinite(newAmt) || newAmt < 0) { alert("กรุณากรอกตัวเลขให้ถูกต้อง"); return; }
+    const target = resolveAdjTarget(g, colKey);
+    if (!target) { alert("ไม่ทราบสังกัดของพนักงานคนนี้ — แก้ไขยอดไม่ได้"); return; }
+    setAdjSaving(true);
+    try {
+      const data = await postAPI({
+        action: "commission_normal_payables", mode: "save_adjustment",
+        save_group: snapshotInfo.save_group,
+        employee_name: g.name, employee_id: g.employee_id || null,
+        col_key: colKey, ...target,
+        original_amount: base, new_amount: newAmt,
+        adjusted_by: currentUser?.username || currentUser?.name || "",
+      });
+      const result = Array.isArray(data) ? data[0] : data;
+      if (result?.error) throw new Error(result.error);
+      if (!result?.result) throw new Error("workflow ยังไม่รองรับ save_adjustment — ต้อง re-import Sales Extra Pay API ใน n8n ก่อน");
+      setEditCell(null);
+      setMessage(Math.abs(newAmt - base) < 0.005
+        ? "✅ รีเซ็ตยอดกลับเป็นค่าคำนวณแล้ว"
+        : `✅ แก้ไขยอดของ ${g.name} แล้ว — ⚠️ ถ้าสร้างเอกสารจ่ายไว้ก่อนหน้านี้ ให้ยกเลิกเอกสารแล้วสร้างใหม่เพื่อให้ยอดตรง`);
+      await fetchCombinedEmployees();
+    } catch (e) { alert("❌ บันทึกการแก้ไขยอดไม่สำเร็จ: " + e.message); }
+    setAdjSaving(false);
+  }
+
+  // ยอดที่ใช้จริงของ cell (ถ้าแก้ไขไว้ใช้ยอดใหม่ ไม่งั้นใช้ยอดคำนวณ)
+  const effVal = (g, k) => (g.adj && g.adj[k] ? Number(g.adj[k].new_amount) : Number(g[k] || 0));
+
+  function renderAdjCell(g, col) {
+    const a = g.adj?.[col];
+    const base = Number(g[col] || 0);
+    const val = a ? Number(a.new_amount) : base;
+    const editing = editCell && editCell.name === g.name && editCell.col === col;
+    if (editing) {
+      return (
+        <td key={col} style={{ ...td, textAlign: "right" }}>
+          <input autoFocus value={editValue} disabled={adjSaving}
+            onChange={e => setEditValue(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter") saveAdjustment(g, col);
+              if (e.key === "Escape") setEditCell(null);
+            }}
+            onBlur={() => { if (!adjSaving) setEditCell(null); }}
+            style={{ width: 90, padding: "3px 6px", border: "2px solid #f59e0b", borderRadius: 4, textAlign: "right", fontFamily: "monospace", fontSize: 12 }} />
+          <div style={{ fontSize: 9, color: "#92400e", whiteSpace: "nowrap" }}>Enter=บันทึก · Esc=ยกเลิก</div>
+        </td>
+      );
+    }
+    const stale = a && Math.abs(Number(a.original_amount) - base) > 0.005;
+    return (
+      <td key={col} title="คลิกเพื่อแก้ไขยอด"
+        onClick={() => { setEditCell({ name: g.name, col }); setEditValue(val ? String(val) : ""); }}
+        style={{ ...td, textAlign: "right", fontFamily: "monospace", cursor: "pointer", ...(a ? { background: "#fff7ed", color: "#c2410c", fontWeight: 700 } : {}) }}>
+        {val ? fmt(val) : "-"}{a ? " ✏️" : ""}
+        {a && <div style={{ fontSize: 10, color: "#9ca3af", textDecoration: "line-through", fontWeight: 400 }}>{fmt(a.original_amount)}</div>}
+        {stale && <div style={{ fontSize: 9, color: "#dc2626", fontWeight: 400 }}>⚠️ ยอดคำนวณเปลี่ยนเป็น {fmt(base)}</div>}
+      </td>
+    );
+  }
 
   // ===== Pay history tab =====
   const [payHistoryRows, setPayHistoryRows] = useState([]);
@@ -860,7 +967,10 @@ tr.excluded td { text-decoration: line-through; }
       {tab === "pay" && snapshotInfo?.save_group && (
         <div style={{ marginTop: 14, background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <h4 style={{ margin: 0, color: "#072d6b" }}>👥 รายชื่อพนักงานที่ได้รับค่าคอม ({combinedEmployees.length} คน)</h4>
+            <div>
+              <h4 style={{ margin: 0, color: "#072d6b" }}>👥 รายชื่อพนักงานที่ได้รับค่าคอม ({combinedEmployees.length} คน)</h4>
+              <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>✏️ คลิกที่ตัวเลขเพื่อแก้ไขยอดได้ — ยอดที่แก้จะถูกใช้ในเอกสารจ่ายเงิน (กรอกเท่ายอดเดิมเพื่อรีเซ็ต)</div>
+            </div>
             <button onClick={fetchCombinedEmployees} disabled={combinedLoading}
               style={{ padding: "5px 12px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12 }}>
               {combinedLoading ? "..." : "🔄 รีเฟรช"}
@@ -888,18 +998,18 @@ tr.excluded td { text-decoration: line-through; }
                     <td style={td}>{i + 1}</td>
                     <td style={{ ...td, fontWeight: 600 }}>{g.name}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#6b7280" }}>{g.branch_code}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.sales_commission ? fmt(g.sales_commission) : "-"}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.sales_brokerage ? fmt(g.sales_brokerage) : "-"}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.service ? fmt(g.service) : "-"}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.parts ? fmt(g.parts) : "-"}</td>
+                    {renderAdjCell(g, "sales_commission")}
+                    {renderAdjCell(g, "sales_brokerage")}
+                    {renderAdjCell(g, "service")}
+                    {renderAdjCell(g, "parts")}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(g.total)}</td>
                   </tr>
                 ))}
                 {combinedEmployees.length > 0 && (() => {
-                  const sumComm = combinedEmployees.reduce((s, g) => s + g.sales_commission, 0);
-                  const sumBrok = combinedEmployees.reduce((s, g) => s + g.sales_brokerage, 0);
-                  const sumService = combinedEmployees.reduce((s, g) => s + g.service, 0);
-                  const sumParts = combinedEmployees.reduce((s, g) => s + g.parts, 0);
+                  const sumComm = combinedEmployees.reduce((s, g) => s + effVal(g, "sales_commission"), 0);
+                  const sumBrok = combinedEmployees.reduce((s, g) => s + effVal(g, "sales_brokerage"), 0);
+                  const sumService = combinedEmployees.reduce((s, g) => s + effVal(g, "service"), 0);
+                  const sumParts = combinedEmployees.reduce((s, g) => s + effVal(g, "parts"), 0);
                   const sumTotal = sumComm + sumBrok + sumService + sumParts;
                   return (
                     <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
