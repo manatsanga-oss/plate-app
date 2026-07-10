@@ -75,6 +75,9 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   const [expanded, setExpanded] = useState({}); // กางดูรายละเอียดรายแถว (เช่น ภ.ง.ด.3 ค่าแนะนำ)
   const [payDialog, setPayDialog] = useState(false);
   const [payForm, setPayForm] = useState({ remit_date: todayISO(), payment_method: "โอน", from_bank_account_id: "", receipt_no: "", note: "" });
+  // ค่าธรรมเนียมจ่ายเงิน (เช่น ค่าธรรมเนียมโอน) — ไม่รวมในยอดภาษี แต่ตัดจากบัญชีเพิ่ม (เก็บครั้งเดียวต่อชุดจ่าย)
+  const [feeOn, setFeeOn] = useState(false);
+  const [feeAmount, setFeeAmount] = useState("");
   const [saving, setSaving] = useState(false);
 
   const isWHT = taxType === "ภ.ง.ด.";           // โหมดรวมภาษีหัก ณ ที่จ่าย
@@ -280,7 +283,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   //   อัตราหัก ณ ที่จ่ายมาตรฐาน = 3% (ค่าบริการ เช่น SGF/วิริยะออกแทน) — ยืนยันจากการยื่นจริง
   //   ยกเว้นรายใบ = 1% (เบี้ยประกันวินาศภัย เช่น ประกันรถ GE วิริยะ) — เพิ่มเลขเอกสารใน THEFT_WHT_1PCT
   //   ที่มา: flow_expense_documents รหัส 52071 ผ่าน list_theft_insurance (หน้าบันทึกรับใบกำกับฯ ประกันรถหายออกแทน)
-  const THEFT_WHT_1PCT = new Set(["F-EXP2026050032"]);
+  const THEFT_WHT_1PCT = new Set(["F-EXP2026050032", "F-EXP2026040023"]);
   async function loadTheftInsuranceRows() {
     const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
     const raw = await post(THEFT_URL, { action: "list_theft_insurance", date_from: from, date_to: to }).catch(() => []);
@@ -432,15 +435,18 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     if (selectedKeys.length === 0) { setMessage("❌ เลือกรายการภาษีก่อน"); return; }
     if (selectedAffs.length > 1) { setMessage("❌ เลือกได้ทีละสังกัด (ป.เปา/สิงห์ชัย ยื่นแยกบริษัท)"); return; }
     setPayForm({ remit_date: todayISO(), payment_method: "โอน", from_bank_account_id: "", receipt_no: "", note: "" });
+    setFeeOn(false); setFeeAmount("");
     setPayDialog(true);
   }
 
   async function savePayment() {
     if (payForm.payment_method === "โอน" && !payForm.from_bank_account_id) { setMessage("❌ วิธีจ่าย 'โอน' ต้องเลือกบัญชี"); return; }
+    const fee = feeOn ? Number(String(feeAmount).replace(/,/g, "")) || 0 : 0;
+    if (feeOn && fee <= 0) { setMessage("❌ กรอกจำนวนค่าธรรมเนียมจ่ายเงิน (ต้องมากกว่า 0)"); return; }
     setSaving(true);
     try {
       if (isWHT) {
-        await saveWHT();
+        await saveWHT(fee);
       } else {
         const data = await post(TAX_URL, {
           action: "save_tax_remittance", tax_type: taxType,
@@ -452,6 +458,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
           payment_method: payForm.payment_method,
           from_bank_account_id: payForm.payment_method === "โอน" ? (Number(payForm.from_bank_account_id) || null) : null,
           receipt_no: payForm.receipt_no, note: payForm.note, created_by: whoami(),
+          fee_amount: fee,
         });
         const doc = data?.remit_doc_no || data?.[0]?.remit_doc_no || "";
         setMessage(`✅ บันทึกจ่ายภาษีเรียบร้อย ${doc}`);
@@ -462,7 +469,9 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   }
 
   // โหมดรวม: จ่ายทั้งหมดเป็น "ชุดเดียว" (batch_no เดียวกัน) — รายงานเคลื่อนไหวบัญชี/ประวัติ แสดงยอดรวมชุด
-  async function saveWHT() {
+  async function saveWHT(fee = 0) {
+    // ค่าธรรมเนียมเก็บครั้งเดียวต่อชุด — ผูกกับใบแรกที่บันทึกสำเร็จ (ใบถัดไปส่ง 0)
+    let feePending = Number(fee) || 0;
     const bank = payForm.payment_method === "โอน" ? (Number(payForm.from_bank_account_id) || null) : null;
     const now = new Date();
     const batchNo = `WHT-B-${(now.getFullYear() + 543).toString().slice(-2)}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}${String(now.getSeconds()).padStart(2, "0")}`;
@@ -491,16 +500,16 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
         for (const pm of Object.keys(perPeriod)) {
           const g = perPeriod[pm];
           const items = g.map(d => ({ source_table: "payroll_expense_docs", source_id: d.id, amount: d.row.amount, vendor_name: `${d.doc_no || ""} ภ.ง.ด.1 ภาษีเงินเดือน`, doc_date: payForm.remit_date, affiliation: d.row.affiliation }));
-          const res2 = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: "ภ.ง.ด.1", period_month: pm || null, affiliation: g[0].row.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami(), batch_no: batchNo });
+          const res2 = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: "ภ.ง.ด.1", period_month: pm || null, affiliation: g[0].row.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami(), batch_no: batchNo, fee_amount: feePending });
           const row2 = Array.isArray(res2) ? res2[0] : res2;
-          if (Number(row2?.updated_count || 0) > 0) okAny = true;
+          if (Number(row2?.updated_count || 0) > 0) { okAny = true; feePending = 0; }
         }
       }
     }
     for (const r of referral) {
-      const res = await post(TAX_URL, { action: "save_tax_remittance", tax_type: r.pndType, period_month: r.period_month, affiliation: r.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, amount_total: r.amount, created_by: whoami(), source_ids: [], batch_no: batchNo });
+      const res = await post(TAX_URL, { action: "save_tax_remittance", tax_type: r.pndType, period_month: r.period_month, affiliation: r.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, amount_total: r.amount, created_by: whoami(), source_ids: [], batch_no: batchNo, fee_amount: feePending });
       const row = Array.isArray(res) ? res[0] : res;
-      if (Number(row?.updated_count || 0) > 0) okAny = true;
+      if (Number(row?.updated_count || 0) > 0) { okAny = true; feePending = 0; }
     }
     // ค่าใช้จ่าย: จัดกลุ่ม (ประเภท|งวด|สังกัด) → itemized 1 ใบต่อกลุ่ม (batch เดียวกันทั้งหมด)
     const groups = {};
@@ -508,9 +517,9 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     for (const k of Object.keys(groups)) {
       const g = groups[k];
       const items = g.map(r => ({ source_table: r.source_table, source_id: r.src_id, amount: r.amount, vendor_name: r.vendor_name, doc_date: r.paid_at, affiliation: r.affiliation }));
-      const res = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: g[0].pndType, period_month: g[0].period_month, affiliation: g[0].affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami(), batch_no: batchNo });
+      const res = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: g[0].pndType, period_month: g[0].period_month, affiliation: g[0].affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami(), batch_no: batchNo, fee_amount: feePending });
       const row = Array.isArray(res) ? res[0] : res;
-      if (Number(row?.updated_count || 0) > 0) okAny = true;
+      if (Number(row?.updated_count || 0) > 0) { okAny = true; feePending = 0; }
     }
     if (!okAny) throw new Error("รายการที่เลือกนำส่งไปแล้ว หรือไม่มียอด");
     setMessage(`✅ บันทึกจ่ายภาษีหัก ณ ที่จ่ายเรียบร้อย (ชุด ${batchNo})`);
@@ -795,6 +804,26 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
                   </select>
                 </div>
               )}
+              {/* ค่าธรรมเนียมจ่ายเงิน — ไม่รวมในยอดภาษี ตัดจากบัญชีเพิ่มต่างหาก */}
+              <div style={{ gridColumn: "1 / span 2", padding: "8px 12px", background: "#fff", border: "1px dashed #cbd5e1", borderRadius: 6, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "#0f172a", cursor: "pointer" }}>
+                  <input type="checkbox" checked={feeOn}
+                    onChange={e => { setFeeOn(e.target.checked); if (!e.target.checked) setFeeAmount(""); }}
+                    style={{ width: 16, height: 16, cursor: "pointer" }} />
+                  🏦 ค่าธรรมเนียมจ่ายเงิน
+                </label>
+                {feeOn && (
+                  <input type="number" step="0.01" min="0" value={feeAmount} autoFocus
+                    onChange={e => setFeeAmount(e.target.value)} placeholder="0.00"
+                    style={{ width: 140, padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right" }} />
+                )}
+                {feeOn && <span style={{ fontSize: 11, color: "#6b7280" }}>ไม่รวมในยอดภาษี — ตัดจากบัญชีเพิ่มต่างหาก</span>}
+                {feeOn && Number(String(feeAmount).replace(/,/g, "")) > 0 && (
+                  <span style={{ fontSize: 12, color: "#1e40af", marginLeft: "auto" }}>
+                    ยอดตัดบัญชีรวม: <b style={{ fontFamily: "monospace" }}>฿ {fmt(Number(selectedSum) + (Number(String(feeAmount).replace(/,/g, "")) || 0))}</b>
+                  </span>
+                )}
+              </div>
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label style={lbl}>เลขที่ใบเสร็จ / อ้างอิงสรรพากร</label>
                 <input type="text" value={payForm.receipt_no} onChange={e => setPayForm(p => ({ ...p, receipt_no: e.target.value }))} style={inp} placeholder="เช่น เลขอ้างอิงการยื่น/ใบเสร็จ" />

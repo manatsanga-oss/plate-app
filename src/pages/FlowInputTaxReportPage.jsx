@@ -7,7 +7,7 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/flow-input-ta
 const INPUT_TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api";
 const AFFILIATIONS = ["ป.เปา", "สิงห์ชัย"];
 const SRC_LABEL = { vehicle: "รถ", part: "อะไหล่", expense: "ค่าใช้จ่าย", fuel: "ค่าน้ำมัน", theft: "ประกันรถหาย", lockton: "ประกัน LOCKTON", theft_invoice: "ประกันรถหาย (ใบกำกับ)", cosmos: "ประกัน COSMOS", material: "รับวัสดุ" };
-const COSMOS_PLAN_LABEL = { rsa: "RSA", theft: "THEFT", theft_renewal: "THEFT ปีต่อ" };
+const COSMOS_PLAN_LABEL = { rsa: "RSA", theft: "THEFT", theft_renewal: "THEFT ปีต่อ", "3plus": "3PLUS" };
 // normalize เลขเอกสารเพื่อจับคู่: ตัดช่องว่าง + ตัวพิมพ์ใหญ่ + prefix F- (flow_expense ใช้ F-, expense_documents ไม่ใช้)
 function normDoc(s) { return String(s || "").toUpperCase().replace(/\s+/g, "").replace(/^F-/, ""); }
 // คีย์ประจำแถว FLOW สำหรับเก็บคู่ manual — คงที่แม้ re-upload รอบเดิม (id เปลี่ยนเพราะนำเข้าแบบแทนที่ทั้งรอบ)
@@ -81,6 +81,7 @@ export default function FlowInputTaxReportPage({ currentUser }) {
   const [cosmosRows, setCosmosRows] = useState([]); // เบี้ยประกัน COSMOS (rsa/theft/theft_renewal ถอด VAT) ไว้จับคู่ใบสรุปสยามคอสมอส
   const [matRows, setMatRows] = useState([]);       // ใบชำระเงินเจ้าหนี้ หน้ารับวัสดุ (RP… มี VAT) ไว้จับคู่ใบกำกับวัสดุ
   const [manual, setManual] = useState([]);   // คู่ที่จับเอง (flow_input_tax_manual_matches)
+  const [manualOther, setManualOther] = useState([]); // คู่ที่จับไว้ในรอบก่อน/ถัดไป — ไว้กันเสนอเอกสารซ้ำ
   const [pairing, setPairing] = useState(null); // แถว FLOW ที่กำลังเลือกคู่ (เปิด popup)
   const [pairSaving, setPairSaving] = useState(false);
   const [search, setSearch] = useState("");
@@ -123,6 +124,12 @@ export default function FlowInputTaxReportPage({ currentUser }) {
       return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`;
     };
     const appMonths = [...new Set([ym, ymAround(-1), ymAround(1)].filter(Boolean))]; // ym ก่อน → dedup เก็บเดือนปัจจุบันเป็นหลัก
+    const periodAround = (delta) => {
+      if (!period) return "";
+      const [y, m] = period.split("-").map(Number);
+      const d = new Date(y, m - 1 + delta, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    };
     try {
       const [res, appData, mmRes, cnRes, lktRes, tiRes, cosRes, matRes] = await Promise.all([
         fetch(API_URL, {
@@ -136,11 +143,13 @@ export default function FlowInputTaxReportPage({ currentUser }) {
             body: JSON.stringify({ action: "list_input_tax", year_month: m }),
           }).then(r => r.json()).then(rows => (Array.isArray(rows) ? rows : (rows?.rows || [])).map(x => ({ ...x, _ym: m }))).catch(() => [])
         )).then(a => a.flat()).catch(() => []),
-        // คู่ที่เคยจับเองในรอบนี้
-        fetch(API_URL, {
-          method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_manual_matches", affiliation, tax_period: period }),
-        }).catch(() => null),
+        // คู่ที่เคยจับเอง — รอบนี้ (แสดงสถานะ) + รอบก่อน/ถัดไป (กันเสนอเอกสารที่ถูกใช้ในรอบอื่นแล้วให้จับซ้ำ)
+        Promise.all([period, periodAround(-1), periodAround(1)].filter(Boolean).map(p =>
+          fetch(API_URL, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "list_manual_matches", affiliation, tax_period: p }),
+          }).then(r => r.text()).then(t => ({ p, arr: t ? JSON.parse(t) : [] })).catch(() => ({ p, arr: [] }))
+        )).catch(() => []),
         // ใบลดหนี้อะไหล่ HONDA (เฉพาะ ป.เปา = ฮอนด้า) — ดึงตรง honda_part_tax_invoices ไว้เป็นตัวเลือกจับคู่
         affiliation === "ป.เปา"
           ? fetch(API_URL, {
@@ -185,13 +194,16 @@ export default function FlowInputTaxReportPage({ currentUser }) {
           });
       } catch { appArr = []; }
       setAppRows(appArr);
-      // คู่ manual
+      // คู่ manual — แยกของรอบนี้ (แสดงสถานะ) กับรอบข้างเคียง (กันจับซ้ำ)
       try {
-        const mmText = mmRes ? await mmRes.text() : "";
-        const mmData = mmText ? JSON.parse(mmText) : null;
-        const mmArr = (Array.isArray(mmData) ? mmData : (mmData?.rows || [])).filter(m => m && m.flow_key);
-        setManual(mmArr);
-      } catch { setManual([]); }
+        const packs = Array.isArray(mmRes) ? mmRes : [];
+        const cur = [], other = [];
+        for (const pk of packs) {
+          const arr = (Array.isArray(pk.arr) ? pk.arr : (pk.arr?.rows || [])).filter(m => m && m.flow_key);
+          if (pk.p === period) cur.push(...arr); else other.push(...arr);
+        }
+        setManual(cur); setManualOther(other);
+      } catch { setManual([]); setManualOther([]); }
       // ใบลดหนี้อะไหล่ HONDA → รูปแบบเดียวกับ appRows (source=part, ยอดติดลบ)
       try {
         const cnText = cnRes ? await cnRes.text() : "";
@@ -282,7 +294,7 @@ export default function FlowInputTaxReportPage({ currentUser }) {
       } catch { setMatRows([]); }
     } catch (e) {
       setMsg("❌ โหลดข้อมูลไม่สำเร็จ: " + e.message);
-      setRows([]); setAppRows([]); setManual([]); setPartCN([]); setLktRows([]); setTheftInv([]); setCosmosRows([]); setMatRows([]);
+      setRows([]); setAppRows([]); setManual([]); setManualOther([]); setPartCN([]); setLktRows([]); setTheftInv([]); setCosmosRows([]); setMatRows([]);
     }
     setLoading(false);
   }
@@ -301,6 +313,8 @@ export default function FlowInputTaxReportPage({ currentUser }) {
     const manualByFlow = new Map(); // flow_key -> manual row
     const usedAppKeys = new Set();  // เลขฝั่งแอปที่ถูกคู่ manual ใช้แล้ว (รวมทุกใบในกลุ่ม)
     for (const m of manual) { manualByFlow.set(m.flow_key, m); docsOf(m).forEach(d => usedAppKeys.add(normDoc(d.doc_no))); }
+    // เอกสารที่ถูกจับคู่ไว้ในรอบก่อน/ถัดไปแล้ว — ตัดออกจากตัวเลือก ไม่ให้จับซ้ำข้ามรอบ
+    for (const m of manualOther) { docsOf(m).forEach(d => usedAppKeys.add(normDoc(d.doc_no))); }
     const flowKeys = new Set();      // เลขทุกตัวฝั่ง FLOW (ไว้หา app-only)
     const flowStatus = new Map();    // key(flow row) -> { matched, manual, appRow }
     rows.forEach((r, i) => {
@@ -332,7 +346,7 @@ export default function FlowInputTaxReportPage({ currentUser }) {
     const pairCandidates = [...appOnly, ...appAround, ...cnOnly, ...lktOnly, ...tiOnly, ...cosOnly, ...matOnly];
     const matchedCount = [...flowStatus.values()].filter(v => v.matched).length;
     return { flowStatus, appOnly, pairCandidates, matchedCount };
-  }, [rows, appRows, manual, partCN, lktRows, theftInv, cosmosRows, matRows, period]);
+  }, [rows, appRows, manual, manualOther, partCN, lktRows, theftInv, cosmosRows, matRows, period]);
   const statusOf = (r, i) => match.flowStatus.get(r.id ?? ("i" + i)) || { matched: false, appRow: null };
   // แถวที่แสดงจริง (ใช้ตัวกรอง "เฉพาะไม่พบ" ทับ filtered อีกชั้น)
   const displayRows = onlyUnmatched ? filtered.filter(r => !statusOf(r).matched) : filtered;
@@ -440,6 +454,28 @@ export default function FlowInputTaxReportPage({ currentUser }) {
           <div style={{ color: "#6b7280" }}>สำหรับงวดภาษี {periodLabel(period)}</div>
         </div>
       )}
+
+      {/* หมายเหตุ: แหล่งข้อมูลฝั่งแอปมาจาก upload ตัวไหน — ใบไหนขึ้น "ไม่พบ" ให้ไล่เช็คตามนี้ */}
+      <details style={{ marginBottom: 12, fontSize: 12.5, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "8px 14px" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 700, color: "#92400e" }}>📌 หมายเหตุ: ใบขึ้น "ไม่พบ" ต้อง upload อะไรบ้าง (คลิกดู)</summary>
+        <table style={{ marginTop: 8, borderCollapse: "collapse", width: "100%" }}>
+          <tbody>
+            {[
+              ["🛵 รถ HONDA / YAMAHA", 'การ์ด "รับรถเข้าจากการซื้อ" (หน้า Upload ข้อมูลทางบัญชี) — HONDA ป.เปา / YAMAHA สิงห์ชัย'],
+              ["🔩 อะไหล่ HONDA", 'ต้องครบ 2 ไฟล์: "รายงานรับอะไหล่ HONDA" (หน้า Upload ข้อมูล — กำหนดงวดตามใบรับ PD) + "ใบกำกับภาษีซื้ออะไหล่ HONDA" (หน้า Upload บัญชี — เป็นตัวยอดเงิน/เลขผู้เสียภาษี) ขาดตัวใดตัวหนึ่ง = ใบหาย/ยอดเป็น 0'],
+              ["🔧 อะไหล่ YAMAHA", '"รายงานรับอะไหล่ YAMAHA" (หน้า Upload ข้อมูล) — งวดตามวันที่ใบรับสินค้า ใบกำกับที่ยังไม่มีใบรับจะไปขึ้นงวดที่รับของ'],
+              ["📒 ค่าใช้จ่าย / น้ำมัน / ใบกำกับประกันรถหาย", 'การ์ด "ค่าใช้จ่ายงานบัญชี (Excel)" (หน้า Upload บัญชี) — flow_expense_documents'],
+              ["📊 ฝั่งรายงาน FLOW (ตารางนี้)", 'การ์ด "รายงานภาษีซื้อ ภ.พ.30 (FLOW ACC)" — ไฟล์ต้องมีเลขใบกำกับจริงของผู้ขาย (ถ้าเลขขึ้นต้น RI/PI/EXP ทั้งงวด = สำนักงานบัญชีคีย์ไม่ครบ จับคู่ไม่ได้ ให้ขอ export ใหม่)'],
+            ].map(([k, v]) => (
+              <tr key={k}>
+                <td style={{ padding: "3px 8px 3px 0", whiteSpace: "nowrap", verticalAlign: "top", fontWeight: 600, color: "#78350f" }}>{k}</td>
+                <td style={{ padding: "3px 0", color: "#57534e" }}>{v}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ marginTop: 6, color: "#b45309", fontWeight: 600 }}>⚠️ ไฟล์ DMS ทุกตัวต้อง export หลังสิ้นเดือน (เต็มเดือน 1 – สิ้นเดือน) — export กลางเดือนแล้วไม่อัปซ้ำ = ใบท้ายเดือนหายทั้งชุด</div>
+      </details>
 
       {/* Summary */}
       <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12 }}>

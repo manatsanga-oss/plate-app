@@ -1,7 +1,10 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { expectedByRule, markupSum, deliveryFeeBonus } from "../utils/carPaymentStatus";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-invoices";
 const LIST_RECEIPTS_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-daily-receipts";
+const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
 
 const BRANCH_OPTS = [
   { value: "ALL", label: "ทั้งหมด", table: "ทุกสาขา" },
@@ -24,7 +27,11 @@ function fmtN(n) {
 
 export default function TaxInvoiceReportPage({ currentUser }) {
   const [branch, setBranch] = useState("ALL");
-  const [yearMonth, setYearMonth] = useState(""); // 256904
+  // ค่าเริ่มต้น = เดือนปัจจุบัน (ปี พ.ศ.+เดือน เช่น 256907) — ลดเวลาโหลดครั้งแรก เลือก "ทั้งหมด" ได้จาก dropdown
+  const [yearMonth, setYearMonth] = useState(() => {
+    const n = new Date();
+    return `${n.getFullYear() + 543}${String(n.getMonth() + 1).padStart(2, "0")}`;
+  });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(""); // active / cancelled
   const [paymentFilter, setPaymentFilter] = useState(""); // paid_full / paid_partial / unpaid
@@ -35,6 +42,48 @@ export default function TaxInvoiceReportPage({ currentUser }) {
   const [detailRow, setDetailRow] = useState(null);  // tax invoice row
   const [detailReceipts, setDetailReceipts] = useState([]);
   const [detailLoading, setDetailLoading] = useState(false);
+
+  // ===== สถานะราคาขาย vs ยอดตามกฎ (ประกาศ ณ วันขาย + บวกเพิ่ม + นำพา) — logic เดียวกับหน้ารับชำระเงินค่ารถ =====
+  const [markups, setMarkups] = useState([]);          // กฎรายการบวกเพิ่ม (sale_price_markups)
+  const [cpMap, setCpMap] = useState({});              // sale_invoice_no → แถวจาก list_car_payment_receipts (มี sale_price/price_date/นำพา/is_booking)
+  useEffect(() => {
+    fetch(ACC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_price_markups" }) })
+      .then(r => r.json())
+      .then(d => setMarkups((Array.isArray(d) ? d : (d?.rows || [])).filter(x => x && x.status === "active")))
+      .catch(() => setMarkups([]));
+  }, []);
+  useEffect(() => {
+    if (!yearMonth) { setCpMap({}); return; }          // ดู "ทั้งหมด" ไม่คำนวณ (ช่วงกว้างเกิน)
+    const y = parseInt(yearMonth.slice(0, 4), 10) - 543;
+    const m = parseInt(yearMonth.slice(4, 6), 10);
+    // ขยายช่วง ±7 วัน กันใบกำกับ/วันขายคร่อมเดือน
+    const from = new Date(y, m - 1, 1); from.setDate(from.getDate() - 7);
+    const to = new Date(y, m, 0); to.setDate(to.getDate() + 7);
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    let alive = true;
+    fetch(REPORT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_car_payment_receipts", date_from: iso(from), date_to: iso(to) }) })
+      .then(r => r.json())
+      .then(d => {
+        if (!alive) return;
+        const arr = Array.isArray(d) ? d : (d?.rows || []);
+        const map = {};
+        arr.forEach(x => { const k = String(x?.sale_invoice_no || "").toUpperCase().trim(); if (k && !map[k]) map[k] = x; });
+        setCpMap(map);
+      })
+      .catch(() => { if (alive) setCpMap({}); });
+    return () => { alive = false; };
+  }, [yearMonth]);
+
+  // คำนวณสถานะราคาต่อใบ: null = ไม่มีข้อมูลเทียบ
+  function priceStatusOf(r) {
+    if (r.status === "cancelled" || !r.sale_invoice_no) return null;
+    const cp = cpMap[String(r.sale_invoice_no).toUpperCase().trim()];
+    if (!cp || !(Number(cp.sale_price) > 0)) return null;
+    const expected = expectedByRule(cp, markups);
+    const diff = Math.round((Number(r.total_amount || 0) - expected) * 100) / 100;
+    const isBooking = cp.is_booking === true || cp.is_booking === "true" || cp.is_booking === "t";
+    return { expected, diff, isBooking, cp };
+  }
 
   async function openReceiptDetail(r) {
     setDetailRow(r);
@@ -90,7 +139,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
   useEffect(() => {
     fetchData();
     // eslint-disable-next-line
-  }, [branch]);
+  }, [branch, yearMonth]); // เปลี่ยนสาขา/เดือน → ดึงข้อมูลใหม่จาก server (ไม่ใช่แค่กรองฝั่งจอ)
 
   const kw = search.trim().toLowerCase();
   const filtered = useMemo(() => {
@@ -107,12 +156,16 @@ export default function TaxInvoiceReportPage({ currentUser }) {
     });
   }, [rows, kw, statusFilter, paymentFilter, yearMonth]);
 
-  // Year-month options derived from data
+  // Year-month options: ย้อนหลัง 24 เดือนจากเดือนปัจจุบัน (สร้างเอง — ไม่อิงข้อมูลที่โหลด เพราะโหลดทีละเดือน)
   const ymOpts = useMemo(() => {
-    const set = new Set();
-    rows.forEach(r => { if (r.invoice_year_month) set.add(r.invoice_year_month); });
-    return [...set].sort().reverse();
-  }, [rows]);
+    const out = [];
+    const n = new Date();
+    for (let i = 0; i < 24; i++) {
+      const d = new Date(n.getFullYear(), n.getMonth() - i, 1);
+      out.push(`${d.getFullYear() + 543}${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
+    return out;
+  }, []);
 
   const totals = filtered.reduce((s, r) => {
     if (r.status === "cancelled") return s;
@@ -146,7 +199,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
             <label style={lbl}>📅 เดือน-ปี</label>
             <select value={yearMonth} onChange={e => setYearMonth(e.target.value)} style={{ ...inp, minWidth: 130, fontFamily: "monospace" }}>
               <option value="">ทั้งหมด</option>
-              {ymOpts.map(ym => <option key={ym} value={ym}>{ym}</option>)}
+              {ymOpts.map(ym => <option key={ym} value={ym}>{ym.slice(4)}/{ym.slice(0, 4)}</option>)}
             </select>
           </div>
           <div>
@@ -176,7 +229,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
             <label style={lbl}>&nbsp;</label>
             <button onClick={fetchData} disabled={loading}
               style={{ padding: "8px 16px", background: loading ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: loading ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600 }}>
-              🔄 {loading ? "โหลด..." : "Refresh"}
+              🔄 {loading ? "กำลังโหลด..." : "รีเฟรช"}
             </button>
           </div>
         </div>
@@ -214,12 +267,13 @@ export default function TaxInvoiceReportPage({ currentUser }) {
                 <th style={{ textAlign: "right" }}>รวม</th>
                 <th style={{ textAlign: "right" }}>รับชำระ</th>
                 <th>สถานะจ่าย</th>
+                <th title="เทียบยอดใบกำกับกับยอดตามกฎ = ราคาประกาศ ณ วันขาย + รายการบวกเพิ่ม + บวกเพิ่มค่านำพา">ราคาขาย</th>
                 <th>สถานะ</th>
               </tr>
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={12} style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>
+                <tr><td colSpan={13} style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>
                   {loading ? "กำลังโหลด..." : "ไม่มีข้อมูล"}
                 </td></tr>
               ) : filtered.map((r, i) => (
@@ -285,6 +339,21 @@ export default function TaxInvoiceReportPage({ currentUser }) {
                     })()}
                   </td>
                   <td>
+                    {(() => {
+                      const ps = priceStatusOf(r);
+                      if (!ps) return <span style={{ color: "#9ca3af" }}>-</span>;
+                      const tip = `ยอดตามกฎ ${fmtN(ps.expected)} = ประกาศ ${fmtN(ps.cp.sale_price)}${ps.cp.price_date ? ` (${fmtDate(ps.cp.price_date)})` : ""} + บวกเพิ่ม ${fmtN(markupSum(ps.cp, markups))} + นำพา ${fmtN(deliveryFeeBonus(ps.cp))}${ps.isBooking ? " · มีใบจอง (อาจจองก่อนปรับราคา)" : ""}`;
+                      if (Math.abs(ps.diff) < 1)
+                        return <span title={tip} style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#dcfce7", color: "#065f46", cursor: "help" }}>✅ ถูกต้อง</span>;
+                      return (
+                        <span title={tip} style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, cursor: "help",
+                          background: ps.diff < 0 ? "#fee2e2" : "#dbeafe", color: ps.diff < 0 ? "#991b1b" : "#1e40af" }}>
+                          {ps.diff < 0 ? `▼ ต่ำกว่ากฎ ${fmtN(-ps.diff)}` : `▲ เกินกฎ ${fmtN(ps.diff)}`}{ps.isBooking ? " · จอง" : ""}
+                        </span>
+                      );
+                    })()}
+                  </td>
+                  <td>
                     <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
                       background: r.status === "cancelled" ? "#fee2e2" : "#dcfce7",
                       color: r.status === "cancelled" ? "#991b1b" : "#065f46" }}>
@@ -304,7 +373,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
                   <td></td>
                   <td style={{ textAlign: "right", color: "#15803d" }}>{fmtN(totals.profit)}</td>
                   <td style={{ textAlign: "right", color: "#0369a1" }}>{fmtN(filtered.filter(r => r.status === "active").reduce((s, r) => s + Number(r.total_paid || 0), 0))}</td>
-                  <td colSpan={2}></td>
+                  <td colSpan={3}></td>
                 </tr>
               </tfoot>
             )}
@@ -336,8 +405,31 @@ export default function TaxInvoiceReportPage({ currentUser }) {
               <div><span style={{ color: "#6b7280" }}>ทะเบียน:</span> <strong>{detailRow.plate_number || "-"}</strong></div>
               <div><span style={{ color: "#6b7280" }}>ยอดรวม:</span> <strong style={{ color: "#dc2626" }}>{fmtN(detailRow.total_amount)}</strong></div>
               <div><span style={{ color: "#6b7280" }}>รับชำระ:</span> <strong style={{ color: "#0369a1" }}>{fmtN(detailRow.total_paid)}</strong></div>
-              <div><span style={{ color: "#6b7280" }}>คงเหลือ:</span> <strong style={{ color: (detailRow.total_amount - detailRow.total_paid) > 0.01 ? "#dc2626" : "#15803d" }}>{fmtN(Math.max(0, Number(detailRow.total_amount || 0) - Number(detailRow.total_paid || 0)))}</strong></div>
+              <div><span style={{ color: "#6b7280" }}>คงเหลือ:</span> <strong style={{ color: (detailRow.total_amount - detailRow.total_paid) >= 1 ? "#dc2626" : "#15803d" }}>{fmtN(Math.max(0, Number(detailRow.total_amount || 0) - Number(detailRow.total_paid || 0)))}</strong></div>
               <div><span style={{ color: "#6b7280" }}>สถานะ:</span> <strong>{detailRow.payment_status === "paid_full" ? "✅ ครบ" : detailRow.payment_status === "paid_partial" ? "⚠️ บางส่วน" : "❌ ยังไม่ชำระ"}</strong></div>
+              {(() => {
+                const ps = priceStatusOf(detailRow);
+                if (!ps) return null;
+                return (
+                  <>
+                    <div>
+                      <span style={{ color: "#6b7280" }}>ราคาประกาศ:</span> <strong style={{ color: "#047857" }}>{fmtN(ps.cp.sale_price)}</strong>
+                      {ps.cp.price_date && <span style={{ fontSize: 10, color: "#6b7280", marginLeft: 6 }}>(ประกาศ {fmtDate(ps.cp.price_date)})</span>}
+                    </div>
+                    <div>
+                      <span style={{ color: "#6b7280" }}>ยอดตามกฎ (ประกาศ+บวกเพิ่ม+นำพา):</span> <strong>{fmtN(ps.expected)}</strong>
+                      {markupSum(ps.cp, markups) > 0 && <span style={{ fontSize: 10, color: "#16a34a", marginLeft: 6 }}>บวกเพิ่ม +{fmtN(markupSum(ps.cp, markups))}</span>}
+                      {deliveryFeeBonus(ps.cp) > 0 && <span style={{ fontSize: 10, color: "#7c3aed", marginLeft: 6 }}>นำพา +{fmtN(deliveryFeeBonus(ps.cp))}</span>}
+                    </div>
+                    <div>
+                      <span style={{ color: "#6b7280" }}>ราคาขาย:</span>{" "}
+                      {Math.abs(ps.diff) < 1
+                        ? <strong style={{ color: "#15803d" }}>✅ ถูกต้องตามประกาศ</strong>
+                        : <strong style={{ color: ps.diff < 0 ? "#dc2626" : "#1e40af" }}>{ps.diff < 0 ? `▼ ต่ำกว่ากฎ ${fmtN(-ps.diff)}` : `▲ เกินกฎ ${fmtN(ps.diff)}`}{ps.isBooking ? " · มีใบจอง" : ""}</strong>}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
 
             {/* Receipts table */}

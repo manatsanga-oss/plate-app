@@ -6,6 +6,7 @@ import VehiclePurchaseReceiptUploadPage from "./VehiclePurchaseReceiptUploadPage
 import PartTaxInvoiceUploadCard from "./PartTaxInvoiceUploadCard";
 import AccountingExpenseUploadCard from "./AccountingExpenseUploadCard";
 import FlowInputTaxUploadCard from "./FlowInputTaxUploadCard";
+import VehicleDebitNoteUploadCard from "./VehicleDebitNoteUploadCard";
 
 export default function UploadAccountingPage({ currentUser } = {}) {
   return (
@@ -22,6 +23,11 @@ export default function UploadAccountingPage({ currentUser } = {}) {
           <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>📄 ใบกำกับ HONDA (รถจักรยานยนต์)</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>เลือกสาขา + เดือน + ไฟล์ใบกำกับภาษี & กำไรขั้นต้น (CSV TIS-620) — UPSERT</div>
           <TaxInvoiceUploadPage currentUser={currentUser} embeddable />
+        </div>
+        <div style={{ background: "#fff", borderRadius: 0, boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>➕ ใบเพิ่มหนี้ขายรถ (Debit Note)</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ไฟล์ XLS รายงานการออกใบเพิ่มหนี้ จาก DMS (MCR06130) — เลือกสาขาแล้วเลือกไฟล์ อ่านอัตโนมัติ · UPSERT (สาขา + เลขที่ใบเพิ่มหนี้) · ยอดเข้ารายงานภาษีขายเป็นแหล่ง "ใบเพิ่มหนี้" · เก็บตาราง <code style={{ padding: "2px 8px", background: "#f3f4f6", borderRadius: 4, color: "#374151" }}>vehicle_debit_notes</code></div>
+          <VehicleDebitNoteUploadCard currentUser={currentUser} />
         </div>
         <div style={{ background: "#fff", borderRadius: 0, boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 14, textAlign: "center" }}>💰 ใบกำกับรายรับอื่นๆ (ป.เปา + สิงห์ชัย)</div>

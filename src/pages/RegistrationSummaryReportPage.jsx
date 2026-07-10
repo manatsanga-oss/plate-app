@@ -43,6 +43,8 @@ export default function RegistrationSummaryReportPage() {
   const [message, setMessage] = useState("");
   // กรอกยอดเองเมื่อคอลัมน์ว่าง (ใช้แสดง/พิมพ์เท่านั้น ไม่บันทึกลง DB) — { "branch|เลขใบกำกับ": { op: "", rc: "" } }
   const [manualFees, setManualFees] = useState({});
+  // ตัดยอด "ประกันรถหายออกแทน" ออกเป็นรายแถว — เฉพาะแสดง/พิมพ์/CSV ไม่บันทึกในระบบ
+  const [removedTheft, setRemovedTheft] = useState({});
 
   async function fetchData() {
     setLoading(true);
@@ -97,10 +99,13 @@ export default function RegistrationSummaryReportPage() {
   const effOp = (r) => { const v = Number(r.reg_fee_operation || 0); return v !== 0 ? v : Number(manualFees[rowKey(r)]?.op || 0); };
   const effRc = (r) => { const v = Number(r.reg_fee_receipt || 0); return v > 0 ? v : Number(manualFees[rowKey(r)]?.rc || 0); };
   const setManual = (r, field, value) => setManualFees(p => ({ ...p, [rowKey(r)]: { ...p[rowKey(r)], [field]: value } }));
+  // ประกันรถหายออกแทน: แถวที่กดตัดออก → คิดเป็น 0 (แสดง/พิมพ์/CSV เท่านั้น ไม่บันทึก)
+  const effCn = (r) => (removedTheft[rowKey(r)] ? 0 : Number(r.credit_note_total || 0));
+  const toggleTheft = (r) => setRemovedTheft(p => ({ ...p, [rowKey(r)]: !p[rowKey(r)] }));
   const totalRegOperation = filtered.reduce((s, r) => s + effOp(r), 0);
   const totalRegReceipt = filtered.reduce((s, r) => s + effRc(r), 0);
   // รวมค่าใช้จ่ายต่อคัน = ค่าดำเนินการ + ตามใบเสร็จ + พรบ. + ประกันรถหายออกแทน + ดาวน์/งวดออกแทน
-  const rowTotal = (r) => effOp(r) + effRc(r) + Number(r.total_insurance_premium || 0) + Number(r.credit_note_total || 0) + Number(r.coupon_total || 0);
+  const rowTotal = (r) => effOp(r) + effRc(r) + Number(r.total_insurance_premium || 0) + effCn(r) + Number(r.coupon_total || 0);
   const totalRowSum = filtered.reduce((s, r) => s + rowTotal(r), 0);
   const totalInsPremium = filtered.reduce((s, r) => s + Number(r.total_insurance_premium || 0), 0);
 
@@ -138,7 +143,7 @@ export default function RegistrationSummaryReportPage() {
         effOp(r).toFixed(2),
         effRc(r).toFixed(2),
         Number(r.total_insurance_premium || 0).toFixed(2),
-        Number(r.credit_note_total || 0).toFixed(2),
+        effCn(r).toFixed(2),
         Number(r.coupon_total || 0).toFixed(2),
         rowTotal(r).toFixed(2),
       ];
@@ -171,11 +176,11 @@ export default function RegistrationSummaryReportPage() {
         <td class="r">${effOp(r) !== 0 ? fmt(effOp(r)) + (Number(r.reg_fee_operation || 0) === 0 ? " *" : "") : "-"}${r.reg_paid_at ? `<div class="sub">จ่าย: ${esc(fmtDate(r.reg_paid_at))}</div>` : ""}</td>
         <td class="r">${effRc(r) > 0 ? fmt(effRc(r)) + (Number(r.reg_fee_receipt || 0) <= 0 ? " *" : "") : "-"}</td>
         <td class="r">${Number(r.total_insurance_premium) > 0 ? fmt(r.total_insurance_premium) : "-"}${r.ins_paid_at ? `<div class="sub">จ่าย: ${esc(fmtDate(r.ins_paid_at))}</div>` : ""}</td>
-        <td class="r">${Number(r.credit_note_total) > 0 ? fmt(r.credit_note_total) : "-"}</td>
+        <td class="r">${effCn(r) > 0 ? fmt(effCn(r)) : "-"}</td>
         <td class="r">${Number(r.coupon_total) > 0 ? fmt(r.coupon_total) : "-"}</td>
         <td class="r"><b>${rowTotal(r) !== 0 ? fmt(rowTotal(r)) : "-"}</b></td>
       </tr>`).join("");
-    const totalCredit = filtered.reduce((s, r) => s + Number(r.credit_note_total || 0), 0);
+    const totalCredit = filtered.reduce((s, r) => s + effCn(r), 0);
     const totalCoupon = filtered.reduce((s, r) => s + Number(r.coupon_total || 0), 0);
     const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานสรุปใบปะหน้า คชจ. ขายรถ ${esc(invoiceMonth || "")}</title>
       <style>
@@ -224,6 +229,8 @@ export default function RegistrationSummaryReportPage() {
       </table>
       ${filtered.some(r => (Number(r.reg_fee_operation || 0) === 0 && effOp(r) !== 0) || (Number(r.reg_fee_receipt || 0) <= 0 && effRc(r) > 0))
         ? '<div class="sub" style="margin-top:6px;font-size:10px">* ยอดที่กรอกเองหน้ารายงาน (ไม่ได้บันทึกในระบบ)</div>' : ""}
+      ${filtered.some(r => removedTheft[rowKey(r)] && Number(r.credit_note_total || 0) > 0)
+        ? '<div class="sub" style="margin-top:4px;font-size:10px">* มีการตัดยอดประกันรถหายออกแทนออกบางแถว (เฉพาะรายงานนี้ ไม่ได้บันทึกในระบบ)</div>' : ""}
     </body></html>`;
     const w = window.open("", "_blank", "width=1100,height=800");
     if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup ถูกบล็อก)"); return; }
@@ -398,8 +405,22 @@ export default function RegistrationSummaryReportPage() {
                         </div>
                       )}
                     </td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.credit_note_total) > 0 ? "#a16207" : "#9ca3af" }}>
-                      {Number(r.credit_note_total) > 0 ? fmt(r.credit_note_total) : "-"}
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: effCn(r) > 0 ? "#a16207" : "#9ca3af" }}>
+                      {Number(r.credit_note_total) > 0 ? (
+                        removedTheft[rowKey(r)] ? (
+                          <span style={{ whiteSpace: "nowrap" }}>
+                            <span style={{ textDecoration: "line-through", color: "#9ca3af" }}>{fmt(r.credit_note_total)}</span>
+                            <button type="button" onClick={() => toggleTheft(r)} title="คืนยอดกลับ"
+                              style={{ marginLeft: 6, padding: "1px 7px", background: "#d1fae5", color: "#065f46", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>↩</button>
+                          </span>
+                        ) : (
+                          <span style={{ whiteSpace: "nowrap" }}>
+                            {fmt(r.credit_note_total)}
+                            <button type="button" onClick={() => toggleTheft(r)} title="ตัดยอดนี้ออกจากรายงาน (ไม่บันทึก — มีผลตอนพิมพ์/CSV ด้วย)"
+                              style={{ marginLeft: 6, padding: "1px 7px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✕</button>
+                          </span>
+                        )
+                      ) : "-"}
                     </td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.coupon_total) > 0 ? "#be185d" : "#9ca3af" }}>
                       {Number(r.coupon_total) > 0 ? fmt(r.coupon_total) : "-"}
@@ -418,7 +439,7 @@ export default function RegistrationSummaryReportPage() {
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6", fontSize: 14 }}>{fmt(totalRegReceipt)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#065f46", fontSize: 14 }}>{fmt(totalInsPremium)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#a16207", fontSize: 14 }}>
-                  {fmt(filtered.reduce((s, r) => s + Number(r.credit_note_total || 0), 0))}
+                  {fmt(filtered.reduce((s, r) => s + effCn(r), 0))}
                 </td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#be185d", fontSize: 14 }}>
                   {fmt(filtered.reduce((s, r) => s + Number(r.coupon_total || 0), 0))}

@@ -18,7 +18,7 @@ const COMPANY = {
   "ป.เปา": { name: "บริษัท ป.เปามอเตอร์เซอร์วิส จำกัด", tax_id: "0145546000707" },
   "สิงห์ชัย": { name: "ห้างหุ้นส่วนจำกัด สิงห์ชัยสยามยนต์", tax_id: "0143543001310" },
 };
-const SRC_LABEL = { vehicle: "ขายรถ", other: "รายรับอื่น", part_service: "อะไหล่/บริการ", fee_insurance: "รายได้ประกัน/ค่าบริการ" };
+const SRC_LABEL = { vehicle: "ขายรถ", other: "รายรับอื่น", part_service: "อะไหล่/บริการ", fee_insurance: "รายได้ประกัน/ค่าบริการ", debit_note: "ใบเพิ่มหนี้" };
 // สาขา/จุดขาย จากเลขเอกสาร (แหล่งข้อมูลแต่ละตัวเก็บสาขาไม่เหมือนกัน)
 const BR_LABEL = {
   SCY01: "SCY01 ศูนย์ยามาฮ่า", SCY04: "SCY04 ตลาดสีขวา", SCY05: "SCY05 นครหลวง",
@@ -31,7 +31,7 @@ function rowBranch(r) {
   const m = doc.match(/^(SCY\d{2})[-\/]/);
   if (m) return m[1];
   if (doc.indexOf("· นครหลวง") >= 0) return "นครหลวง";
-  if (r.source === "vehicle" || r.source === "other") return r.branch || "-";
+  if (r.source === "vehicle" || r.source === "other" || r.source === "debit_note") return r.branch || "-";
   if (/^69/.test(doc)) return "วังน้อย"; // เอกสาร Honda ป.เปา (69SERV/69RTSL/69WHSL)
   return r.branch || "-";
 }
@@ -110,6 +110,11 @@ export default function OutputTaxReportPage({ currentUser }) {
           body: JSON.stringify({ action: "list_part_service_sales", affiliation, tax_period: month }),
         }).then(r => r.json()).catch(() => []),
       ]);
+      // ใบเพิ่มหนี้ขายรถ (debit note จาก DMS) — งวดตาม invoice_year_month (ปี พ.ศ.) กรองสาขาตามสังกัด
+      const dnRes = await fetch(FLOWTAX_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_debit_notes", year_month: ym }),
+      }).then(r => r.json()).catch(() => []);
       // รายการย้ายงวด (ใบที่กดเลื่อนไปงวดถัดไป / ดึงเข้ามา)
       const movesRes = await fetch(FLOWTAX_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -145,8 +150,18 @@ export default function OutputTaxReportPage({ currentUser }) {
           amount_before_vat: Number(x.amount_before_vat || 0), vat_amount: Number(x.vat_amount || 0),
           total_amount: Number(x.total_amount || 0), cancelled: false,
         }));
+      const debitNotes = (Array.isArray(dnRes) ? dnRes : (dnRes?.rows || []))
+        .filter(x => x && x.debit_note_no && branches.includes(x.branch))
+        .map(x => ({
+          source: "debit_note", branch: x.branch,
+          invoice_date: x.debit_note_date, tax_invoice_no: x.debit_note_no,
+          customer_name: (x.customer_name || "") + (x.ref_tax_invoice_no ? ` (อ้างถึง ${x.ref_tax_invoice_no})` : ""),
+          customer_tax_id: null,
+          amount_before_vat: Number(x.amount_before_vat || 0), vat_amount: Number(x.vat_amount || 0),
+          total_amount: Number(x.difference_amount || 0), cancelled: false,
+        }));
       // เรียงตามวันที่ + เลขใบกำกับ
-      const all = [...veh, ...others, ...partSvc].sort((a, b) =>
+      const all = [...veh, ...others, ...partSvc, ...debitNotes].sort((a, b) =>
         String(a.invoice_date || "").localeCompare(String(b.invoice_date || "")) ||
         String(a.tax_invoice_no || "").localeCompare(String(b.tax_invoice_no || "")));
       setRows(all);
@@ -259,6 +274,7 @@ export default function OutputTaxReportPage({ currentUser }) {
           <option value="other">รายรับอื่น</option>
           <option value="part_service">อะไหล่/บริการ</option>
           <option value="fee_insurance">รายได้ประกัน/ค่าบริการ</option>
+          <option value="debit_note">ใบเพิ่มหนี้</option>
         </select>
         <select value={brFilter} onChange={e => setBrFilter(e.target.value)} style={inp} title="กรองตามสาขา/จุดขาย">
           <option value="">🏪 สาขา: ทั้งหมด</option>
@@ -290,7 +306,7 @@ export default function OutputTaxReportPage({ currentUser }) {
       <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", padding: "10px 14px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12 }}>
         <span>ใบกำกับ <strong>{active.length}</strong> ใบ{showCancelled && cancelledCount > 0 ? ` (+ยกเลิก ${filtered.length - active.length})` : ""}</span>
         <span style={{ color: "#6b7280", fontSize: 12 }}>
-          ขายรถ {active.filter(r => r.source === "vehicle").length} · รายรับอื่น {active.filter(r => r.source === "other").length} · อะไหล่/บริการ {active.filter(r => r.source === "part_service").length} · ประกัน/ค่าบริการ {active.filter(r => r.source === "fee_insurance").length}
+          ขายรถ {active.filter(r => r.source === "vehicle").length} · รายรับอื่น {active.filter(r => r.source === "other").length} · อะไหล่/บริการ {active.filter(r => r.source === "part_service").length} · ประกัน/ค่าบริการ {active.filter(r => r.source === "fee_insurance").length}{active.some(r => r.source === "debit_note") ? ` · ใบเพิ่มหนี้ ${active.filter(r => r.source === "debit_note").length}` : ""}
         </span>
         <div style={{ flex: 1 }} />
         <span style={{ color: "#374151" }}>มูลค่ารวม: <strong>{fmt(sumBase)}</strong></span>
@@ -345,8 +361,8 @@ export default function OutputTaxReportPage({ currentUser }) {
                   </td>
                   <td style={td}>
                     <span style={{ padding: "1px 7px", borderRadius: 10, fontSize: 11, fontWeight: 700,
-                      background: r.source === "vehicle" ? "#dbeafe" : r.source === "part_service" ? "#fef3c7" : r.source === "fee_insurance" ? "#ede9fe" : "#d1fae5",
-                      color: r.source === "vehicle" ? "#1e40af" : r.source === "part_service" ? "#92400e" : r.source === "fee_insurance" ? "#6d28d9" : "#065f46" }}>
+                      background: r.source === "vehicle" ? "#dbeafe" : r.source === "part_service" ? "#fef3c7" : r.source === "fee_insurance" ? "#ede9fe" : r.source === "debit_note" ? "#fce7f3" : "#d1fae5",
+                      color: r.source === "vehicle" ? "#1e40af" : r.source === "part_service" ? "#92400e" : r.source === "fee_insurance" ? "#6d28d9" : r.source === "debit_note" ? "#9d174d" : "#065f46" }}>
                       {SRC_LABEL[r.source]}
                     </span>
                     <span style={{ marginLeft: 4, fontSize: 10, color: "#9ca3af" }}>{rowBranch(r)}</span>
