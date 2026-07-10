@@ -35,6 +35,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState(""); // active / cancelled
   const [paymentFilter, setPaymentFilter] = useState(""); // paid_full / paid_partial / unpaid
+  const [priceFilter, setPriceFilter] = useState("");     // "" / ok / low / high — สถานะราคาขายเทียบยอดตามกฎ
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
@@ -147,6 +148,14 @@ export default function TaxInvoiceReportPage({ currentUser }) {
       if (statusFilter && r.status !== statusFilter) return false;
       if (paymentFilter && (r.payment_status || "unpaid") !== paymentFilter) return false;
       if (yearMonth && String(r.invoice_year_month || "") !== yearMonth) return false;
+      if (priceFilter) {
+        const ps = priceStatusOf(r);
+        if (priceFilter === "none") { if (ps) return false; }
+        else if (!ps) return false;
+        else if (priceFilter === "ok" && !(Math.abs(ps.diff) < 1)) return false;
+        else if (priceFilter === "low" && !(ps.diff <= -1)) return false;
+        else if (priceFilter === "high" && !(ps.diff >= 1)) return false;
+      }
       if (!kw) return true;
       const hay = [
         r.tax_invoice_no, r.customer_name, r.sale_customer_name, r.sale_finance_company,
@@ -154,7 +163,8 @@ export default function TaxInvoiceReportPage({ currentUser }) {
       ].filter(Boolean).join(" ").toLowerCase();
       return hay.includes(kw);
     });
-  }, [rows, kw, statusFilter, paymentFilter, yearMonth]);
+    // eslint-disable-next-line
+  }, [rows, kw, statusFilter, paymentFilter, yearMonth, priceFilter, cpMap, markups]);
 
   // Year-month options: ย้อนหลัง 24 เดือนจากเดือนปัจจุบัน (สร้างเอง — ไม่อิงข้อมูลที่โหลด เพราะโหลดทีละเดือน)
   const ymOpts = useMemo(() => {
@@ -217,6 +227,16 @@ export default function TaxInvoiceReportPage({ currentUser }) {
               <option value="paid_full">✅ ชำระครบ</option>
               <option value="paid_partial">⚠️ บางส่วน</option>
               <option value="unpaid">❌ ยังไม่ชำระ</option>
+            </select>
+          </div>
+          <div>
+            <label style={lbl} title="เทียบยอดใบกำกับกับยอดตามกฎ (ประกาศ ณ วันขาย + บวกเพิ่ม + นำพา) — คำนวณเฉพาะตอนเลือกเดือน">สถานะราคา</label>
+            <select value={priceFilter} onChange={e => setPriceFilter(e.target.value)} style={{ ...inp, minWidth: 130 }}>
+              <option value="">ทั้งหมด</option>
+              <option value="ok">✅ ถูกต้อง</option>
+              <option value="low">▼ ต่ำกว่ากฎ</option>
+              <option value="high">▲ เกินกฎ</option>
+              <option value="none">– ไม่มีข้อมูลเทียบ</option>
             </select>
           </div>
           <div style={{ flex: 1, minWidth: 220 }}>
