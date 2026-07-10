@@ -76,12 +76,18 @@ export default function TaxInvoiceReportPage({ currentUser }) {
   }, [yearMonth]);
 
   // คำนวณสถานะราคาต่อใบ: null = ไม่มีข้อมูลเทียบ
+  // ฐานเทียบ = max(ยอดใบกำกับ, รับชำระรวม) — ขายไฟแนนซ์แบบแยกใบ (เช่น SGF: ค่ารถถึงไฟแนนซ์ + เงินดาวน์ออกใบ TF แยก)
+  // ยอดใบกำกับจะต่ำกว่าราคารถจริง แต่ใบเสร็จรับครบทั้งก้อน → ใช้รับชำระเป็นฐานแทน
   function priceStatusOf(r) {
     if (r.status === "cancelled" || !r.sale_invoice_no) return null;
     const cp = cpMap[String(r.sale_invoice_no).toUpperCase().trim()];
     if (!cp || !(Number(cp.sale_price) > 0)) return null;
+    // ขายส่ง (ขายให้ดีลเลอร์) — ราคาตกลงกันเอง ไม่เทียบราคาประกาศขายปลีก
+    if (String(cp.sale_invoice_type || "").trim() === "ขายส่ง") return { wholesale: true, cp };
     const expected = expectedByRule(cp, markups);
-    const diff = Math.round((Number(r.total_amount || 0) - expected) * 100) / 100;
+    // total_paid ของหน้านี้ = ใบเสร็จรายวันทั้งหมดของใบขาย (รวมมัดจำจากไฟแนนซ์แล้ว) — ห้ามบวก FT ซ้ำ
+    const actual = Math.max(Number(r.total_amount || 0), Number(r.total_paid || 0));
+    const diff = Math.round((actual - expected) * 100) / 100;
     const isBooking = cp.is_booking === true || cp.is_booking === "true" || cp.is_booking === "t";
     return { expected, diff, isBooking, cp };
   }
@@ -151,7 +157,8 @@ export default function TaxInvoiceReportPage({ currentUser }) {
       if (priceFilter) {
         const ps = priceStatusOf(r);
         if (priceFilter === "none") { if (ps) return false; }
-        else if (!ps) return false;
+        else if (priceFilter === "wholesale") { if (!(ps && ps.wholesale)) return false; }
+        else if (!ps || ps.wholesale) return false;
         else if (priceFilter === "ok" && !(Math.abs(ps.diff) < 1)) return false;
         else if (priceFilter === "low" && !(ps.diff <= -1)) return false;
         else if (priceFilter === "high" && !(ps.diff >= 1)) return false;
@@ -236,6 +243,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
               <option value="ok">✅ ถูกต้อง</option>
               <option value="low">▼ ต่ำกว่ากฎ</option>
               <option value="high">▲ เกินกฎ</option>
+              <option value="wholesale">🏷️ ขายส่ง</option>
               <option value="none">– ไม่มีข้อมูลเทียบ</option>
             </select>
           </div>
@@ -362,6 +370,8 @@ export default function TaxInvoiceReportPage({ currentUser }) {
                     {(() => {
                       const ps = priceStatusOf(r);
                       if (!ps) return <span style={{ color: "#9ca3af" }}>-</span>;
+                      if (ps.wholesale)
+                        return <span title="ใบขายประเภทขายส่ง (ขายให้ดีลเลอร์) — ราคาตกลงกันเอง ไม่เทียบราคาประกาศขายปลีก" style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#f3f4f6", color: "#374151", cursor: "help" }}>🏷️ ขายส่ง</span>;
                       const tip = `ยอดตามกฎ ${fmtN(ps.expected)} = ประกาศ ${fmtN(ps.cp.sale_price)}${ps.cp.price_date ? ` (${fmtDate(ps.cp.price_date)})` : ""} + บวกเพิ่ม ${fmtN(markupSum(ps.cp, markups))} + นำพา ${fmtN(deliveryFeeBonus(ps.cp))}${ps.isBooking ? " · มีใบจอง (อาจจองก่อนปรับราคา)" : ""}`;
                       if (Math.abs(ps.diff) < 1)
                         return <span title={tip} style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#dcfce7", color: "#065f46", cursor: "help" }}>✅ ถูกต้อง</span>;
@@ -430,6 +440,15 @@ export default function TaxInvoiceReportPage({ currentUser }) {
               {(() => {
                 const ps = priceStatusOf(detailRow);
                 if (!ps) return null;
+                if (ps.wholesale) {
+                  return (
+                    <div>
+                      <span style={{ color: "#6b7280" }}>ราคาขาย:</span>{" "}
+                      <strong style={{ color: "#374151" }}>🏷️ ขายส่ง — ไม่เทียบราคาประกาศ</strong>
+                      <span style={{ fontSize: 10, color: "#6b7280", marginLeft: 6 }}>(ราคาประกาศขายปลีกอ้างอิง {fmtN(ps.cp.sale_price)})</span>
+                    </div>
+                  );
+                }
                 return (
                   <>
                     <div>
