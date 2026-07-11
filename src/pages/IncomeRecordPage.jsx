@@ -743,6 +743,74 @@ export default function IncomeRecordPage({ currentUser }) {
     w.document.close();
   }
 
+  // พิมพ์รายละเอียดการรับชำระ (allocation) — หัวเอกสาร + ตารางรายคัน + สรุปยอด
+  function handlePrintAllocation() {
+    if (!allocDoc) return;
+    const w = window.open("", "_blank", "width=980,height=960");
+    if (!w) { alert("เปิดหน้าต่างพิมพ์ไม่ได้ (ป๊อปอัพถูกบล็อก)"); return; }
+    const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const catName = incomeCategories.find(g => String(g.income_code) === String(allocCategory))?.income_name || "";
+    const saleOf = (l) => allocSales.find(s => s.invoice_no === l.invoice_no || (l.sale_id && s.id === l.sale_id)) || {};
+    const rows = allocLines.map((l, i) => {
+      const s = saleOf(l);
+      return `<tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td style="font-family:monospace">${esc(l.invoice_no)}</td>
+        <td style="text-align:center;white-space:nowrap">${s.sale_date ? fmtDate(s.sale_date) : "-"}</td>
+        <td>${esc(l.model || s.model_series || "-")}</td>
+        <td style="font-family:monospace;font-size:11px">${esc(s.engine_no || "-")}</td>
+        <td style="font-family:monospace;font-size:11px">${esc(s.chassis_no || "-")}</td>
+        <td>${esc(s.sale_customer_name || l.customer_name || "-")}</td>
+        <td style="text-align:right">${fmt(l.amount)}</td>
+        <td>${esc(l.note || "")}</td>
+      </tr>`;
+    }).join("");
+    const sum = allocLines.reduce((s, l) => s + Number(l.amount || 0), 0);
+    const target = Number(allocDoc.total || allocDoc.net_to_pay || 0);
+    const diff = Math.round((sum - target) * 100) / 100;
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายละเอียดการรับชำระ ${esc(allocDoc.income_doc_no)}</title>
+      <style>
+        *{font-family:'Tahoma','Sarabun',sans-serif;box-sizing:border-box}
+        body{margin:20px;color:#111827;font-size:12px}
+        h1{font-size:18px;margin:0 0 4px}
+        .muted{color:#6b7280}
+        .row{display:flex;justify-content:space-between;gap:16px;margin-bottom:10px}
+        table{width:100%;border-collapse:collapse;margin-top:8px}
+        th,td{border:1px solid #d1d5db;padding:4px 6px;vertical-align:top}
+        th{background:#f3f4f6;text-align:left;font-size:11px;white-space:nowrap}
+        tfoot td{font-weight:bold;background:#f8fafc}
+        @media print{body{margin:0}@page{size:landscape;margin:10mm}}
+      </style></head><body>
+      <div class="row">
+        <div>
+          <h1>รายละเอียดการรับชำระรายได้อื่น ๆ</h1>
+          <div class="muted">เอกสาร <b>${esc(allocDoc.income_doc_no)}</b> · วันที่ ${fmtDate(allocDoc.doc_date)}${allocDoc.reference_no ? ` · อ้างอิง ${esc(allocDoc.reference_no)}` : ""}</div>
+          <div class="muted">ประเภท: ${esc(allocCategory)} — ${esc(catName)}</div>
+        </div>
+        <div style="text-align:right">
+          <div><b>${esc(allocDoc.customer_name)}</b></div>
+          <div class="muted">ยอดรวม VAT: <b>${fmt(allocDoc.total)}</b> · ยอดสุทธิ: ${fmt(allocDoc.net_to_pay || allocDoc.total)}</div>
+        </div>
+      </div>
+      <table>
+        <thead><tr>
+          <th style="width:30px;text-align:center">#</th><th>เลขที่ใบกำกับ/ใบขาย</th><th style="text-align:center">วันที่ขาย</th>
+          <th>รุ่น</th><th>เลขเครื่อง</th><th>เลขตัวถัง</th><th>ชื่อลูกค้า (ใบขาย)</th>
+          <th style="text-align:right;width:90px">จำนวนรับ</th><th style="width:110px">หมายเหตุ</th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="9" style="text-align:center;color:#9ca3af">ไม่มีรายการ</td></tr>`}</tbody>
+        <tfoot><tr>
+          <td colspan="7" style="text-align:right">รวมที่กระจาย ${allocLines.length} คัน</td>
+          <td style="text-align:right">${fmt(sum)}</td>
+          <td>${Math.abs(diff) < 0.01 ? "✓ ตรงเป้าหมาย" : `ต่างจากเป้าหมาย ${fmt(diff)}`}</td>
+        </tr></tfoot>
+      </table>
+      <script>window.onload=function(){window.print();}<\/script>
+      </body></html>`;
+    w.document.write(html);
+    w.document.close();
+  }
+
   // ลบ — ลบถาวร (เฉพาะเอกสารที่ยังไม่ชำระ)
   async function handleDelete(d) {
     if (!window.confirm(`ลบเอกสาร ${d.income_doc_no}?\n⚠️ ลบถาวร กู้คืนไม่ได้`)) return;
@@ -1880,6 +1948,11 @@ export default function IncomeRecordPage({ currentUser }) {
             )}
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+              <button onClick={handlePrintAllocation} disabled={allocSaving || allocLines.length === 0}
+                style={{ ...btn(allocLines.length === 0 ? "#9ca3af" : "#0369a1"), cursor: allocLines.length === 0 ? "not-allowed" : "pointer", marginRight: "auto" }}
+                title="พิมพ์รายละเอียดการรับชำระ (รายการที่เลือกอยู่ตอนนี้)">
+                🖨️ พิมพ์
+              </button>
               <button onClick={() => setAllocOpen(false)} disabled={allocSaving} style={btn("#6b7280")}>ยกเลิก</button>
               <button onClick={() => saveAllocation(true)} disabled={allocSaving || allocLines.length === 0}
                 style={{ ...btn(allocSaving || allocLines.length === 0 ? "#9ca3af" : "#0891b2"), cursor: (allocSaving || allocLines.length === 0) ? "not-allowed" : "pointer" }}
