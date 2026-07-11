@@ -1016,6 +1016,7 @@ table.bx>tbody>tr>td{border:1px solid #c2185b;padding:5px 8px;font-size:12px;ver
     <tr><td class="lbl">ส่วนลด</td><td class="r">${dash(s.discount)}</td></tr>
     <tr><td class="lbl">ราคารถสุทธิ</td><td class="r val">${money(s.net_car_price || s.car_price)}</td></tr>
     <tr><td class="lbl">เงินจอง</td><td class="r">${dash(s.booking_deposit)}</td></tr>
+    ${Number(s.theft_insurance_amount) > 0 ? `<tr><td class="lbl">ประกันรถหาย</td><td class="r val">${money(s.theft_insurance_amount)}</td></tr>` : ""}
   </table></td>
 </tr></table>
 
