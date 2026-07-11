@@ -9,6 +9,8 @@ import React, { useEffect, useMemo, useState } from "react";
 //   1) รายได้จากการขายรถ  — ใบกำกับภาษีขายรถ (list_tax_invoices × 3 บริษัท, ยอดก่อน VAT)
 //      → ระบุสาขาจาก branch_codes (SCY0x จาก moto_sales) fallback = prefix ของ sale_invoice_no
 //      → นครหลวงทั้งตาราง = SCY05 · ใบกำกับข้ามบริษัทจับสาขาหน้าร้านจริงได้ (เทียบ FLOW ตรง)
+//      → รวมใบกำกับเงินดาวน์ SGF (TF ชื่อบุคคล) ที่จับคู่ใบขาย SGF ได้ (ชื่อผู้ซื้อ+วันใกล้สุด)
+//        FLOW ก็นับเป็นขายรถ — สาขาตาม prefix เลขใบขาย
 //   2) รายได้อะไหล่+งานซ่อม — list_part_service_sales (flow-input-tax-api, ชุดเดียวกับ
 //      รายงานภาษีขาย ภ.พ.30) เรียก 2 สังกัด: สิงห์ชัย doc ขึ้นต้น SCYxx → สาขานั้นตรง ๆ,
 //      ป.เปา doc 69xxx = วังน้อย (SCY06) / แท็ก "นครหลวง" = SCY05
@@ -229,8 +231,6 @@ export default function ProfitLossReportPage() {
           .then(asArray).catch(() => []),
       ]);
 
-      setVehicleRows(taxByBranch.flat());
-
       // แยกอะไหล่+งานซ่อมจริง / ประกันรถหาย (คอสมอส/ล็อคตั้น)
       // แถว kind="fee" (· ค่าบริการ) ทิ้ง — ใช้รายบรรทัดจาก list_other_income_receipts แทน
       const psAll = partSvcByAff.flat();
@@ -294,6 +294,9 @@ export default function ProfitLossReportPage() {
           };
         }));
 
+      const oiAll = otherInv.filter((r) => r && r.tax_invoice_no);
+      const hasPersonTF = oiAll.some((r) => /^(นาย|นาง|นางสาว)/.test(String(r.customer_name || "").trim()));
+
       // ★ แตกยอดรายละเอียดการรับชำระ (income_allocations) — กระจายรายได้เข้าสาขาตามรถที่ขาย
       const validDocs = incomeDocs.filter((d) => d && d.income_doc_no && !isCancelled(d.status));
       const allocPairs = (await Promise.all(validDocs.slice(0, 100).map(async (d) => {
@@ -308,14 +311,16 @@ export default function ProfitLossReportPage() {
         allocById[doc.income_doc_id] = lines;
         if (doc.reference_no) allocByRef[String(doc.reference_no)] = lines;
       });
-      // map เลขใบกำกับรถ → SCY จากใบขาย (ย้อนหลัง 6 เดือนถึงสิ้นเดือนรายงาน)
+      // ใบขายย้อนหลัง 6 เดือนถึงสิ้นเดือนรายงาน — ใช้ทั้ง map เลขใบกำกับ→SCY (กระจาย allocation)
+      // และจับคู่ใบกำกับเงินดาวน์ SGF (TF ชื่อบุคคล) → ใบขาย SGF
       const scyByInvoice = {};
-      if (allocPairs.length) {
+      let salesHist = [];
+      if (allocPairs.length || hasPersonTF) {
         try {
           const d0 = new Date(adYear, adMonth - 1 - 5, 1);
           const histFrom = `${d0.getFullYear()}-${String(d0.getMonth() + 1).padStart(2, "0")}-01`;
-          const sales = asArray(await post(REPORT_URL, { action: "list_car_payment_receipts", date_from: histFrom, date_to: end }));
-          sales.forEach((s) => {
+          salesHist = asArray(await post(REPORT_URL, { action: "list_car_payment_receipts", date_from: histFrom, date_to: end }));
+          salesHist.forEach((s) => {
             if (!s || !s.tax_invoice_no) return;
             const m = String(s.sale_invoice_no || "").match(/^SCY\d{2}/);
             scyByInvoice[String(s.tax_invoice_no)] = m ? m[0] : (String(s.branch || "").toUpperCase() === "NAKORNLUANG" ? "SCY05" : "");
@@ -323,10 +328,25 @@ export default function ProfitLossReportPage() {
         } catch { /* หา map ไม่ได้ → กระจายไม่ออก ตกช่องรายได้รวมตามเดิม */ }
       }
 
-      const oiAll = otherInv.filter((r) => r && r.tax_invoice_no);
+      // จับคู่ใบกำกับ TF ชื่อบุคคล = ใบเงินดาวน์ SGF (ขายผ่าน SGF ออก 2 ใบ: MC ค่ารถส่วนไฟแนนซ์
+      // ชื่อ SGF + TF เงินดาวน์ชื่อผู้ซื้อ) → นับเป็นรายได้ขายรถ สาขาตามใบขาย
+      const zap = (v) => String(v || "").replace(/\s+/g, "");
+      const sgfSales = salesHist.filter((s) => s && /เอสจีเอฟ|SGF/i.test(zap(s.sale_finance_company)));
+      const sgfDownSaleOf = (r) => {
+        if (!/^(นาย|นาง|นางสาว)/.test(String(r.customer_name || "").trim())) return null;
+        const nm = zap(r.customer_name);
+        const cands = sgfSales.filter((s) => zap(s.sale_customer_name) === nm);
+        if (!cands.length) return null;
+        const t = new Date(String(r.invoice_date || "").slice(0, 10)).getTime() || 0;
+        cands.sort((a, b) =>
+          Math.abs((new Date(String(a.sale_date || a.invoice_date || "").slice(0, 10)).getTime() || 0) - t) -
+          Math.abs((new Date(String(b.sale_date || b.invoice_date || "").slice(0, 10)).getTime() || 0) - t));
+        return cands[0];
+      };
+
       // ระดับบริษัทระบุสาขาไม่ได้ → รายได้รวม เว้นแต่มี allocation รายคัน (ของ income_record คู่แฝด)
       // แยกใบ "ค่าส่งเสริมจากไฟแนนซ์" (ลูกค้าเป็นไฟแนนซ์ หรือแตกยอดประเภท 003) ออกจากรายได้อื่น
-      const promoAcc = [], otherAcc = [];
+      const promoAcc = [], otherAcc = [], sgfDownAcc = [];
       oiAll.filter((r) => !isCancelled(r.status)).forEach((r) => {
         const base = {
           branch: "",
@@ -338,10 +358,21 @@ export default function ProfitLossReportPage() {
           vat: r2(r.vat_amount),
           total: r2(r.total_amount),
         };
+        const sgfSale = sgfDownSaleOf(r);
+        if (sgfSale) {
+          const m = String(sgfSale.sale_invoice_no || "").match(/^SCY\d{2}/);
+          sgfDownAcc.push({
+            ...base,
+            branch: m ? m[0] : (String(sgfSale.branch || "").toUpperCase() === "NAKORNLUANG" ? "SCY05" : ""),
+            detail: `เงินดาวน์ SGF · ${sgfSale.sale_invoice_no || "-"}`,
+          });
+          return;
+        }
         const lines = allocByRef[String(r.tax_invoice_no)];
         const isPromo = FINANCE_KW.test(String(r.customer_name || "")) || (lines || []).some((l) => String(l.category) === "003");
         (isPromo ? promoAcc : otherAcc).push(...(lines ? distributeByAlloc(base, lines, scyByInvoice) : [base]));
       });
+      setVehicleRows(taxByBranch.flat().concat(sgfDownAcc));
       setPromoRows(promoAcc);
       setOtherInvRows(otherAcc);
 
@@ -410,7 +441,7 @@ export default function ProfitLossReportPage() {
   const manualAgg = useMemo(() => sumByBranch(manualRows), [manualRows]);
 
   const lines = [
-    { key: "vehicle", label: "รายได้จากการขายรถ", sub: "ใบกำกับภาษีขายรถ", color: "#1e40af", count: vehicleRows.length, agg: vehicleAgg },
+    { key: "vehicle", label: "รายได้จากการขายรถ", sub: "ใบกำกับภาษีขายรถ + ใบเงินดาวน์ SGF (จับคู่ใบขาย)", color: "#1e40af", count: vehicleRows.length, agg: vehicleAgg },
     { key: "partsvc", label: "รายได้อะไหล่+งานซ่อม", sub: "งานซ่อม+ขายอะไหล่จริง (ปรับงานซ่อมนครหลวงตามระบบซ่อม Honda)", color: "#0e7490", count: partSvcRows.length, agg: partSvcAgg },
     { key: "fee", label: "รายได้ค่าบริการรับฝากชำระ", sub: "ค่าบริการรับฝากค่างวดไฟแนนซ์", color: "#7c3aed", count: feeRows.length, agg: feeAgg },
     { key: "post", label: "รายได้ค่าไปรษณีย์", sub: "ค่าบริการส่งไปรษณีย์", color: "#4d7c0f", count: postRows.length, agg: postAgg },
