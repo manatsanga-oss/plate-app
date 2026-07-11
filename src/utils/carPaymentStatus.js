@@ -72,7 +72,7 @@ export function getMarkups(r, markups) {
     if (m.markup_type === "finance") return finMatch(m);
     if (m.markup_type === "finance_cc") {
       if (!finMatch(m)) return false;
-      if (m.branch_group && m.branch_group !== branchCode) return false;
+      if (m.branch_group && m.branch_group !== "all" && m.branch_group !== branchCode) return false;
       if (saleCC !== null) {
         if (m.cc_min && saleCC < Number(m.cc_min)) return false;
         if (m.cc_max && saleCC > Number(m.cc_max)) return false;
