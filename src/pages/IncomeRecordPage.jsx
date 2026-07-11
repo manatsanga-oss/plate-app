@@ -1726,14 +1726,19 @@ export default function IncomeRecordPage({ currentUser }) {
                           const isSel = allocLines.some(l => l.invoice_no === s.invoice_no || (s.id && l.sale_id === s.id));
                           if (allocUsedInvoices.has(s.invoice_no) && !isSel) return false;
                           // กรองเฉพาะที่ตรงกับลูกค้า/ไฟแนนซ์ของใบรับชำระ (เว้นรายการที่เลือกไว้แล้ว ให้คงอยู่)
-                          // ตัดสระ/วรรณยุกต์ไทย + ช่องว่าง ก่อนเทียบ — กันสะกดต่าง เช่น "กรุ๊ปลีส" vs "กรุ๊ปลิส"
-                          const nz = v => String(v == null ? "" : v).replace(/[ัิ-ฺ็-๎\s]/g, "").toLowerCase();
+                          // ตัดคำนำหน้า/ท้ายนิติบุคคลก่อน (บริษัท/บจก./บมจ./หจก./จำกัด/มหาชน) — เอกสารใช้ชื่อย่อ
+                          // "บจก. ธนบรรณ" แต่ใบกำกับใช้ชื่อเต็ม "บริษัท ธนบรรณ จำกัด" ต้อง match กัน
+                          // แล้วตัดสระ/วรรณยุกต์ไทย + ช่องว่าง — กันสะกดต่าง เช่น "กรุ๊ปลีส" vs "กรุ๊ปลิส"
+                          const nz = v => String(v == null ? "" : v)
+                            .replace(/บริษัท|บจก\.?|บมจ\.?|หจก\.?|ห้างหุ้นส่วนจำกัด|จำกัด|\(มหาชน\)|มหาชน/g, " ")
+                            .replace(/[ัิ-ฺ็-๎\s]/g, "").toLowerCase();
                           const docCust = nz(allocDoc?.customer_name);
                           if (docCust && !isSel) {
-                            // เทียบเฉพาะชื่อในใบกำกับ (customer_name = คนที่ถูกเรียกเก็บ) — ไม่ใช้ finance_company (ค้าง/ผิดได้) หรือชื่อผู้ซื้อ
-                            // ขายเงินสด → ใบกำกับเป็นชื่อผู้ซื้อ → ไม่ match บริษัทไฟแนนซ์ → ซ่อน
+                            // เทียบชื่อในใบกำกับ (customer_name = คนที่ถูกเรียกเก็บ) เป็นหลัก — ขายเงินสด
+                            // ใบกำกับเป็นชื่อผู้ซื้อ → ไม่ match บริษัทไฟแนนซ์ → ซ่อน (ตามเดิม)
+                            // ถ้าใบกำกับภาษียังไม่อัปโหลด (ไม่มีชื่อ) → เทียบบริษัทไฟแนนซ์ของใบขายแทน
                             const eqCust = a => { const x = nz(a); return x && (x === docCust || x.includes(docCust) || docCust.includes(x)); };
-                            if (!eqCust(s.customer_name)) return false;
+                            if (!(eqCust(s.customer_name) || (!s.customer_name && eqCust(s.finance_company)))) return false;
                           }
                           if (allocShowSelectedOnly && !isSel) return false;
                           if (!allocSearch.trim()) return true;
