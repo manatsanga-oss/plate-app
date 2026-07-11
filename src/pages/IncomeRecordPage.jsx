@@ -285,6 +285,8 @@ export default function IncomeRecordPage({ currentUser }) {
           invoice_no: s.tax_invoice_no || s.sale_invoice_no || s.invoice_no || s.sale_doc_no || s.doc_no || "",
           sale_date: s.invoice_date || s.sale_date || s.doc_date,
           customer_name: s.customer_name || s.sale_customer_name || s.customer || "",
+          // ชื่อลูกค้าตามใบกำกับดิบ (ไม่ fallback เป็นชื่อผู้ซื้อ) — ใช้กรองให้ตรงเอกสารรับชำระ
+          invoice_customer: s.customer_name || "",
           model_series: s.model_name || s.sale_model_code || s.model_series || s.model || "",
           engine_no: s.engine_no || "",
           chassis_no: s.chassis_no || s.frame_no || "",
@@ -1734,11 +1736,12 @@ export default function IncomeRecordPage({ currentUser }) {
                             .replace(/[ัิ-ฺ็-๎\s]/g, "").toLowerCase();
                           const docCust = nz(allocDoc?.customer_name);
                           if (docCust && !isSel) {
-                            // เทียบชื่อในใบกำกับ (customer_name = คนที่ถูกเรียกเก็บ) เป็นหลัก — ขายเงินสด
+                            // เทียบชื่อตามใบกำกับดิบ (invoice_customer = คนที่ถูกเรียกเก็บ) เป็นหลัก — ขายเงินสด
                             // ใบกำกับเป็นชื่อผู้ซื้อ → ไม่ match บริษัทไฟแนนซ์ → ซ่อน (ตามเดิม)
-                            // ถ้าใบกำกับภาษียังไม่อัปโหลด (ไม่มีชื่อ) → เทียบบริษัทไฟแนนซ์ของใบขายแทน
+                            // ถ้าใบกำกับไม่มีชื่อ/ยังไม่อัปโหลด → เทียบบริษัทไฟแนนซ์ของใบขายแทน
+                            // (ห้ามใช้ s.customer_name เพราะถูก fallback เป็นชื่อผู้ซื้อตอนโหลด)
                             const eqCust = a => { const x = nz(a); return x && (x === docCust || x.includes(docCust) || docCust.includes(x)); };
-                            if (!(eqCust(s.customer_name) || (!s.customer_name && eqCust(s.finance_company)))) return false;
+                            if (!(eqCust(s.invoice_customer) || (!s.invoice_customer && eqCust(s.finance_company)))) return false;
                           }
                           if (allocShowSelectedOnly && !isSel) return false;
                           if (!allocSearch.trim()) return true;
