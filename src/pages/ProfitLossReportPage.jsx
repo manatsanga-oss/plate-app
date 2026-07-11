@@ -11,6 +11,8 @@ import React, { useEffect, useMemo, useState } from "react";
 //      → นครหลวงทั้งตาราง = SCY05 · ใบกำกับข้ามบริษัทจับสาขาหน้าร้านจริงได้ (เทียบ FLOW ตรง)
 //      → รวมใบกำกับเงินดาวน์ SGF (TF ชื่อบุคคล) ที่จับคู่ใบขาย SGF ได้ (ชื่อผู้ซื้อ+วันใกล้สุด)
 //        FLOW ก็นับเป็นขายรถ — สาขาตาม prefix เลขใบขาย
+//      → ต้นทุนรายคันจาก cost_price ของใบกำกับ (ไฟล์กำไรขั้นต้นที่อัปโหลด — ครบทุกใบ)
+//        แสดงแถว "หัก ต้นทุนขายรถ" + "กำไรขั้นต้นขายรถ" ท้ายตาราง (ใบเงินดาวน์ SGF ไม่มีต้นทุน)
 //   2) รายได้อะไหล่+งานซ่อม — list_part_service_sales (flow-input-tax-api, ชุดเดียวกับ
 //      รายงานภาษีขาย ภ.พ.30) เรียก 2 สังกัด: สิงห์ชัย doc ขึ้นต้น SCYxx → สาขานั้นตรง ๆ,
 //      ป.เปา doc 69xxx = วังน้อย (SCY06) / แท็ก "นครหลวง" = SCY05
@@ -191,6 +193,7 @@ export default function ProfitLossReportPage() {
             beforeVat: r2(r.amount_before_vat),
             vat: r2(r.vat_amount),
             total: r2(r.total_amount),
+            cost: r2(r.cost_price),
           }));
         })),
         // 2) อะไหล่+งานซ่อม + ค่าบริการรับฝากชำระ/ประกัน — ชุดเดียวกับรายงานภาษีขาย เรียกทีละสังกัด
@@ -431,6 +434,18 @@ export default function ProfitLossReportPage() {
     return o;
   };
   const vehicleAgg = useMemo(() => sumByBranch(vehicleRows), [vehicleRows]);
+  // ต้นทุนขายรถต่อสาขา (cost_price รายใบ) + กำไรขั้นต้น = รายได้ขายรถ − ต้นทุน
+  const vehicleCostAgg = useMemo(() => {
+    const o = { unassigned: 0 };
+    DEFAULT_BRANCHES.forEach((b) => { o[b.key] = 0; });
+    vehicleRows.forEach((r) => {
+      const v = Number(r.cost || 0);
+      if (o[r.branch] !== undefined) o[r.branch] = r2(o[r.branch] + v);
+      else o.unassigned = r2(o.unassigned + v);
+    });
+    o.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + o[b.key], o.unassigned));
+    return o;
+  }, [vehicleRows]);
   const partSvcAgg = useMemo(() => sumByBranch(partSvcRows), [partSvcRows]);
   const feeAgg = useMemo(() => sumByBranch(feeRows), [feeRows]);
   const postAgg = useMemo(() => sumByBranch(postRows), [postRows]);
@@ -501,7 +516,7 @@ export default function ProfitLossReportPage() {
       <div style={{ background: "#fff", borderRadius: 12, padding: 18, boxShadow: "0 2px 12px rgba(7,45,107,0.10)" }}>
         <div style={{ textAlign: "center", marginBottom: 12 }}>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#072d6b" }}>งบกำไรขาดทุน</div>
-          <div style={{ fontSize: 13, color: "#374151" }}>ส่วนรายได้ — แยกตามสาขา</div>
+          <div style={{ fontSize: 13, color: "#374151" }}>ส่วนรายได้ + ต้นทุนขายรถ — แยกตามสาขา</div>
           <div style={{ fontSize: 13, color: "#6b7280" }}>ประจำเดือน {ymLabelTH(loadedYm || ym)}</div>
         </div>
 
@@ -555,13 +570,79 @@ export default function ProfitLossReportPage() {
                   ))}
                   <td style={{ ...tdNum, fontSize: 13 }}>{fmtN(tot.total)}</td>
                 </tr>
+                <tr style={{ background: "#fff7f7", color: "#991b1b" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>หัก ต้นทุนขายรถ (ตามใบกำกับ)</td>
+                  {branches.map((b) => (
+                    <td key={b.key} style={tdNum}>{vehicleCostAgg[b.key] ? `(${fmtN(vehicleCostAgg[b.key])})` : "-"}</td>
+                  ))}
+                  <td style={{ ...tdNum, fontWeight: 700 }}>{vehicleCostAgg.total ? `(${fmtN(vehicleCostAgg.total)})` : "-"}</td>
+                </tr>
+              </tfoot>
+            </table>
+
+            {/* ---------- กำไรขั้นต้นแยกตามหมวดรายได้ ---------- */}
+            <div style={{ textAlign: "center", marginTop: 26, marginBottom: 8 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: "#065f46" }}>กำไรขั้นต้นแยกตามหมวดรายได้</div>
+              <div style={{ fontSize: 11, color: "#9ca3af" }}>ขายรถ = รายได้ − ต้นทุนตามใบกำกับ · หมวดอื่นยังไม่มีข้อมูลต้นทุน (กำไร = รายได้)</div>
+            </div>
+            <table className="pnl" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ background: "#065f46", color: "#fff" }}>
+                  <th style={{ ...th, width: 34 }}>#</th>
+                  <th style={{ ...th, textAlign: "left" }}>กำไร</th>
+                  {branches.map((b) => (
+                    <th key={b.key} style={{ ...th, borderLeft: "1px solid #10b981" }}>
+                      {b.key}
+                      <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85 }}>{b.label}</div>
+                    </th>
+                  ))}
+                  <th style={{ ...th, borderLeft: "1px solid #10b981", background: "#047857" }}>กำไรรวม</th>
+                </tr>
+              </thead>
+              <tbody>
+                {lines.map((l, i) => {
+                  const cost = l.key === "vehicle" ? vehicleCostAgg : null;
+                  const gp = (k) => r2(l.agg[k] - (cost ? cost[k] : 0));
+                  const gpTotal = r2(l.agg.total - (cost ? cost.total : 0));
+                  return (
+                    <tr key={l.key}
+                      onClick={() => l.count > 0 && setPopup(l.key)}
+                      title={l.count > 0 ? "คลิกดูรายละเอียด" : ""}
+                      style={{ borderBottom: "1px solid #e5e7eb", cursor: l.count > 0 ? "pointer" : "default" }}
+                      onMouseEnter={(e) => l.count > 0 && (e.currentTarget.style.background = "#f0fdf4")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+                      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                      <td style={{ ...td, fontWeight: 700 }}>
+                        <span style={{ color: l.color }}>กำไร{l.key === "vehicle" ? "ขั้นต้น" : ""} — {l.label.replace(/^รายได้/, "")}</span>
+                        {cost && (
+                          <div style={{ fontSize: 11, fontWeight: 400, color: "#9ca3af" }}>
+                            รายได้ {fmtN(l.agg.total)} − ต้นทุน {fmtN(cost.total)}
+                          </div>
+                        )}
+                      </td>
+                      {branches.map((b) => (
+                        <td key={b.key} style={{ ...tdNum, color: gp(b.key) < 0 ? "#dc2626" : undefined }}>{fmtN(gp(b.key))}</td>
+                      ))}
+                      <td style={{ ...tdNum, fontWeight: 700, background: "#f8fafc" }}>{fmtN(gpTotal)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr style={{ background: "#ecfdf5", fontWeight: 700, color: "#065f46", borderTop: "2px solid #065f46", borderBottom: "2px solid #065f46" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>กำไรรวมทั้งสิ้น</td>
+                  {branches.map((b) => (
+                    <td key={b.key} style={tdNum}>{fmtN(r2(tot[b.key] - vehicleCostAgg[b.key]))}</td>
+                  ))}
+                  <td style={{ ...tdNum, fontSize: 13 }}>{fmtN(r2(tot.total - vehicleCostAgg.total))}</td>
+                </tr>
               </tfoot>
             </table>
           </div>
         )}
 
         <div className="no-print" style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
-          * ยอดรายได้ = มูลค่าก่อน VAT ไม่นับเอกสารยกเลิก · ขายรถระบุสาขาจากรหัส SCY ของใบขาย (ขายข้ามหน้าร้านนับตามสาขาที่ขายจริง) · อะไหล่+งานซ่อมใช้ชุดข้อมูลรายงานภาษีขาย เฉพาะงานซ่อม/ขายอะไหล่จริง (งานซ่อมนครหลวงปรับด้วยยอดจริงจากระบบซ่อม Honda) · ค่าบริการรับฝากชำระ / ค่าไปรษณีย์ / ประกันรถหาย (ป.เปา=คอสมอส, สิงห์ชัย=ล็อคตั้น สาขาตามใบรับเรื่อง) แยกหมวดกัน · รับเรื่องงานทะเบียน (พรบ/ต่อภาษี) ไม่มี VAT ใช้ยอดเต็มจากใบรับเรื่อง · รายได้อื่น/บันทึกรายได้: เอกสารที่ "แตกยอดรายละเอียดการรับชำระ" รายคันไว้จะกระจายเข้าสาขาตามรถที่ขาย ที่ยังไม่แตกยอดแสดงเฉพาะช่องรายได้รวม (ตัดรายการซ้ำจากการนำเข้าใบกำกับแล้ว) — ส่วนต้นทุน/ค่าใช้จ่ายจะทยอยเพิ่มภายหลัง
+          * ยอดรายได้ = มูลค่าก่อน VAT ไม่นับเอกสารยกเลิก · ขายรถระบุสาขาจากรหัส SCY ของใบขาย (ขายข้ามหน้าร้านนับตามสาขาที่ขายจริง) · อะไหล่+งานซ่อมใช้ชุดข้อมูลรายงานภาษีขาย เฉพาะงานซ่อม/ขายอะไหล่จริง (งานซ่อมนครหลวงปรับด้วยยอดจริงจากระบบซ่อม Honda) · ค่าบริการรับฝากชำระ / ค่าไปรษณีย์ / ประกันรถหาย (ป.เปา=คอสมอส, สิงห์ชัย=ล็อคตั้น สาขาตามใบรับเรื่อง) แยกหมวดกัน · รับเรื่องงานทะเบียน (พรบ/ต่อภาษี) ไม่มี VAT ใช้ยอดเต็มจากใบรับเรื่อง · รายได้อื่น/บันทึกรายได้: เอกสารที่ "แตกยอดรายละเอียดการรับชำระ" รายคันไว้จะกระจายเข้าสาขาตามรถที่ขาย ที่ยังไม่แตกยอดแสดงเฉพาะช่องรายได้รวม (ตัดรายการซ้ำจากการนำเข้าใบกำกับแล้ว) · ต้นทุนขายรถ = cost_price รายใบจากไฟล์กำไรขั้นต้น (ใบเงินดาวน์ SGF ไม่มีต้นทุน) — ต้นทุนอะไหล่/ค่าใช้จ่ายอื่นจะทยอยเพิ่มภายหลัง
         </div>
       </div>
 
@@ -590,7 +671,12 @@ function DetailModal({ popup, ym, rows, branches, onClose }) {
     : popup === "otherinv" ? "🧾 รายได้อื่น (มีใบกำกับ)"
     : "📝 รายได้อื่น (บันทึกรายได้ — ไม่ระบุสาขา)";
   const brLabel = (k) => branches.find((b) => b.key === k)?.label || k;
-  const sum = rows.reduce((o, r) => ({ beforeVat: r2(o.beforeVat + r.beforeVat), vat: r2(o.vat + r.vat), total: r2(o.total + r.total) }), { beforeVat: 0, vat: 0, total: 0 });
+  // แถวใบกำกับขายรถมีต้นทุนรายคัน → แสดงคอลัมน์ ต้นทุน + กำไรขั้นต้น เพิ่ม
+  const hasCost = rows.some((r) => typeof r.cost === "number");
+  const sum = rows.reduce((o, r) => ({
+    beforeVat: r2(o.beforeVat + r.beforeVat), vat: r2(o.vat + r.vat), total: r2(o.total + r.total),
+    cost: r2(o.cost + Number(r.cost || 0)),
+  }), { beforeVat: 0, vat: 0, total: 0, cost: 0 });
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 20 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: "min(960px, 97vw)", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
@@ -611,6 +697,8 @@ function DetailModal({ popup, ym, rows, branches, onClose }) {
                 <th style={{ ...th, textAlign: "right" }}>ก่อน VAT</th>
                 <th style={{ ...th, textAlign: "right" }}>VAT</th>
                 <th style={{ ...th, textAlign: "right" }}>รวม</th>
+                {hasCost && <th style={{ ...th, textAlign: "right" }}>ต้นทุน</th>}
+                {hasCost && <th style={{ ...th, textAlign: "right" }}>กำไรขั้นต้น</th>}
               </tr>
             </thead>
             <tbody>
@@ -630,6 +718,8 @@ function DetailModal({ popup, ym, rows, branches, onClose }) {
                   <td style={tdNum}>{fmtN(r.beforeVat)}</td>
                   <td style={{ ...tdNum, color: "#6b7280" }}>{fmtN(r.vat)}</td>
                   <td style={{ ...tdNum, fontWeight: 600 }}>{fmtN(r.total)}</td>
+                  {hasCost && <td style={{ ...tdNum, color: "#991b1b" }}>{typeof r.cost === "number" ? fmtN(r.cost) : "-"}</td>}
+                  {hasCost && <td style={{ ...tdNum, color: "#065f46" }}>{fmtN(r2(r.beforeVat - Number(r.cost || 0)))}</td>}
                 </tr>
               ))}
             </tbody>
@@ -639,6 +729,8 @@ function DetailModal({ popup, ym, rows, branches, onClose }) {
                 <td style={tdNum}>{fmtN(sum.beforeVat)}</td>
                 <td style={tdNum}>{fmtN(sum.vat)}</td>
                 <td style={tdNum}>{fmtN(sum.total)}</td>
+                {hasCost && <td style={{ ...tdNum, color: "#991b1b" }}>{fmtN(sum.cost)}</td>}
+                {hasCost && <td style={{ ...tdNum, color: "#065f46" }}>{fmtN(r2(sum.beforeVat - sum.cost))}</td>}
               </tr>
             </tfoot>
           </table>
