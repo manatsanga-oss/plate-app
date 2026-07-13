@@ -140,6 +140,7 @@ import BookingQueueStatusPage from "./pages/BookingQueueStatusPage";
 import PartImageLookupPage from "./pages/PartImageLookupPage";
 import QuoteViewPage from "./pages/QuoteViewPage";
 import MailInboxPage from "./pages/MailInboxPage";
+import HrYtdReportPage from "./pages/HrYtdReportPage";
 
 export default function App() {
   // หน้าดูใบประเมินราคา (เปิดจากลิงก์ใน LINE) — public ไม่ต้อง login
@@ -193,7 +194,7 @@ export default function App() {
   function canAccess(page) {
     if (!currentUser) return false;
     // เมนู HR — เห็นเฉพาะ admin + WARUT เท่านั้น (ตัด SUKANYA ออก)
-    const HR_PAGES = ["hremployees", "hrholidays", "hrmonthlyextras", "hrpayroll", "hrpayrollpayment", "hrpayrollaccounts", "hrtimetracking", "hrspecialcommission", "hrnormalcommission", "hrsalesrecord"];
+    const HR_PAGES = ["hremployees", "hrholidays", "hrmonthlyextras", "hrpayroll", "hrpayrollpayment", "hrpayrollaccounts", "hrtimetracking", "hrspecialcommission", "hrnormalcommission", "hrsalesrecord", "hrytdreport"];
     const HR_USERS = ["admin", "WARUT"];
     if (HR_PAGES.includes(page)) {
       return HR_USERS.includes(currentUser.username);
@@ -214,7 +215,7 @@ export default function App() {
     const explicitPages = getExplicitUserPages(currentUser.pages);
     if (explicitPages) return explicitPages.includes(page);
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "mymotoreport" || page === "mymotoregister" || page === "expensedoccheck" || page === "deliveryfee" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "partgiveawayreport" || page === "hrspecialcommission" || page === "receiptentry") return true;
+    if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "mymotoreport" || page === "mymotoregister" || page === "expensedoccheck" || page === "deliveryfee" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "partgiveawayreport" || page === "receiptentry") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
     if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "motoinsuranceextra" || page === "cosmosinsurance" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrtimetracking" || page === "hremployees" || page === "vehiclepayment") return false;
     // upload, master data, convert เฉพาะ admin
@@ -625,6 +626,9 @@ export default function App() {
         {activeMenu === "hrpayrollaccounts" && canAccess("hrpayrollaccounts") && (
           <HrPayrollAccountsPage currentUser={currentUser} />
         )}
+        {activeMenu === "hrytdreport" && canAccess("hrytdreport") && (
+          <HrYtdReportPage currentUser={currentUser} />
+        )}
       </main>
     </div>
   );
@@ -707,14 +711,13 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
     <aside className="sidebar">
       <div className="sidebar-header">Management</div>
 
-      <MenuGroup title="Report" pages={["salesoverview","stockonhand","mymotoreport","mymotoregister","partgiveawayreport","giveawayreceipt","hrspecialcommission"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report" pages={["salesoverview","stockonhand","mymotoreport","mymotoregister","partgiveawayreport","giveawayreceipt"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="salesoverview" label="สรุปภาพรวม" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="stockonhand" label="สินค้าคงเหลือ (รถใหม่)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="mymotoreport" label="รายงานลงทะเบียน MyMoto" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="mymotoregister" label="บันทึกลงทะเบียน MyMoto" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="partgiveawayreport" label="รายงานของแถม" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 90 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
-        <MenuItem page="hrspecialcommission" label="รายงานค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
       <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","profitloss"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
@@ -863,7 +866,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="servicerateimport" label="📤 นำเข้า FRT (Admin)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrnormalcommission","hrsalesrecord","hrtimetracking"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="HR" pages={["hremployees","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrnormalcommission","hrspecialcommission","hrsalesrecord","hrtimetracking","hrytdreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="hremployees" label="ข้อมูลพนักงาน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrholidays" label="ปฏิทินวันหยุด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrtimetracking" label="บันทึกเวลาทำงาน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -872,6 +875,8 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hrpayrollpayment" label="สรุปรายการเงินเดือน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrpayrollaccounts" label="ตั้งค่าบัญชีจ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrnormalcommission" label="รายงานค่าคอมปกติ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hrspecialcommission" label="รายงานค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hrytdreport" label="รายงานเงินเดือน/ค่าจ้างสะสม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Upload" pages={uploadPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

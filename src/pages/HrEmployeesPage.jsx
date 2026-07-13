@@ -4,12 +4,19 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
+const DEPARTMENTS = ["แผนกขาย", "แผนกบริการ", "แผนกอะไหล่", "การเงิน", "Back office"];
+
 const emptyForm = () => ({
   employee_name: "",
+  employee_code: "",
   team_name: "",
   branch_code: "",
   position: "",
+  office_type: "",
+  department: "",
   affiliation: "",
+  email: "",
+  line_id: "",
   weekly_day_off: "Sunday",
   monthly_day_off: "",
   laundry_allowance: 0,
@@ -29,6 +36,10 @@ const emptyForm = () => ({
   is_executive: false,
   status: "active",
   start_date: "",
+  income_bf: 0,
+  wht_bf: 0,
+  sso_bf: 0,
+  pvd_bf: 0,
 });
 
 export default function HrEmployeesPage({ currentUser }) {
@@ -156,10 +167,15 @@ export default function HrEmployeesPage({ currentUser }) {
   function openEdit(r) {
     setForm({
       employee_name: r.employee_name || "",
+      employee_code: r.employee_code || "",
       team_name: r.team_name || "",
       branch_code: r.branch_code || "",
       position: r.position || "",
+      office_type: r.office_type || "",
+      department: r.department || "",
       affiliation: r.affiliation || "",
+      email: r.email || "",
+      line_id: r.line_id || "",
       weekly_day_off: r.weekly_day_off || "Sunday",
       monthly_day_off: r.monthly_day_off || "",
       laundry_allowance: r.laundry_allowance || 0,
@@ -179,6 +195,10 @@ export default function HrEmployeesPage({ currentUser }) {
       is_executive: r.is_executive === true,
       status: r.status || "active",
       start_date: r.start_date ? String(r.start_date).slice(0, 10) : "",
+      income_bf: r.income_bf || 0,
+      wht_bf: r.wht_bf || 0,
+      sso_bf: r.sso_bf || 0,
+      pvd_bf: r.pvd_bf || 0,
     });
     setEditTarget(r);
     setShowForm(true);
@@ -269,7 +289,14 @@ export default function HrEmployeesPage({ currentUser }) {
                   </td>
                   <td style={td}>{r.team_name || "-"}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.branch_code || "-"}</td>
-                  <td style={td}>{r.position || "-"}</td>
+                  <td style={td}>
+                    {r.position || "-"}
+                    {r.office_type && (
+                      <span style={{ marginLeft: 5, padding: "1px 6px", fontSize: 10, borderRadius: 3, background: r.office_type === "FRONT OFFICE" ? "#dbeafe" : "#ede9fe", color: r.office_type === "FRONT OFFICE" ? "#1e40af" : "#5b21b6" }}>
+                        {r.office_type === "FRONT OFFICE" ? "FRONT" : "BACK"}
+                      </span>
+                    )}
+                  </td>
                   <td style={td}>{r.affiliation || "-"}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{fmtNum(r.salary_per_period)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{r.meal_allowance || 0}</td>
@@ -325,11 +352,31 @@ export default function HrEmployeesPage({ currentUser }) {
                     📋 รายชื่อจากบันทึกเวลาทำงาน ({ttNames.length} คน)
                   </div>
                 </Field>
+                <Field label="รหัสพนักงาน">
+                  <input value={form.employee_code} onChange={e => setForm(f => ({ ...f, employee_code: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} placeholder="เช่น 01-1001" />
+                </Field>
                 <Field label="ทีม">
                   <input value={form.team_name} onChange={e => setForm(f => ({ ...f, team_name: e.target.value }))} style={inp} />
                 </Field>
                 <Field label="ตำแหน่ง">
                   <input value={form.position} onChange={e => setForm(f => ({ ...f, position: e.target.value }))} style={inp} />
+                </Field>
+                <Field label="สถานะตำแหน่ง (Front/Back Office)">
+                  <select value={form.office_type} onChange={e => setForm(f => ({ ...f, office_type: e.target.value }))} style={inp}>
+                    <option value="">-- ไม่ระบุ --</option>
+                    <option value="FRONT OFFICE">FRONT OFFICE</option>
+                    <option value="BACK OFFICE">BACK OFFICE</option>
+                  </select>
+                </Field>
+                <Field label="แผนก">
+                  <select value={form.department} onChange={e => setForm(f => ({ ...f, department: e.target.value }))} style={inp}>
+                    <option value="">-- ไม่ระบุ --</option>
+                    {/* แสดงค่าปัจจุบันถ้าไม่อยู่ใน list มาตรฐาน */}
+                    {form.department && !DEPARTMENTS.includes(form.department) && (
+                      <option value={form.department}>{form.department}</option>
+                    )}
+                    {DEPARTMENTS.map(dep => <option key={dep} value={dep}>{dep}</option>)}
+                  </select>
                 </Field>
                 <Field label="รหัสร้าน">
                   <select value={form.branch_code} onChange={e => setForm(f => ({ ...f, branch_code: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }}>
@@ -353,6 +400,12 @@ export default function HrEmployeesPage({ currentUser }) {
                     <option value="active">ใช้งาน</option>
                     <option value="inactive">ปิด</option>
                   </select>
+                </Field>
+                <Field label="📧 E-MAIL">
+                  <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} style={inp} placeholder="เช่น somchai@gmail.com" />
+                </Field>
+                <Field label="💬 LINE-ID">
+                  <input value={form.line_id} onChange={e => setForm(f => ({ ...f, line_id: e.target.value }))} style={inp} />
                 </Field>
               </div>
               <div style={{ ...grid2, marginTop: 8 }}>
@@ -387,22 +440,22 @@ export default function HrEmployeesPage({ currentUser }) {
             <Section title="💰 เงินเดือนและ Allowance">
               <div style={grid3}>
                 <Field label="เงินเดือน/ครั้ง">
-                  <input type="number" step="0.01" value={form.salary_per_period} onChange={e => setForm(f => ({ ...f, salary_per_period: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <MoneyInput value={form.salary_per_period} onChange={v => setForm(f => ({ ...f, salary_per_period: v }))} />
                 </Field>
                 <Field label="เงินเพิ่มพิเศษ">
-                  <input type="number" step="0.01" value={form.extra_bonus} onChange={e => setForm(f => ({ ...f, extra_bonus: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <MoneyInput value={form.extra_bonus} onChange={v => setForm(f => ({ ...f, extra_bonus: v }))} />
                 </Field>
                 <Field label="OT-วันทำงาน">
-                  <input type="number" step="0.01" value={form.ot_workday} onChange={e => setForm(f => ({ ...f, ot_workday: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <MoneyInput value={form.ot_workday} onChange={v => setForm(f => ({ ...f, ot_workday: v }))} />
                 </Field>
                 <Field label="ค่าข้าว">
-                  <input type="number" value={form.meal_allowance} onChange={e => setForm(f => ({ ...f, meal_allowance: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <MoneyInput value={form.meal_allowance} onChange={v => setForm(f => ({ ...f, meal_allowance: v }))} />
                 </Field>
                 <Field label="ค่าซักเสื้อ">
-                  <input type="number" value={form.laundry_allowance} onChange={e => setForm(f => ({ ...f, laundry_allowance: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <MoneyInput value={form.laundry_allowance} onChange={v => setForm(f => ({ ...f, laundry_allowance: v }))} />
                 </Field>
                 <Field label="ค่าเบี้ยขยัน">
-                  <input type="number" value={form.diligence_allowance} onChange={e => setForm(f => ({ ...f, diligence_allowance: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <MoneyInput value={form.diligence_allowance} onChange={v => setForm(f => ({ ...f, diligence_allowance: v }))} />
                 </Field>
               </div>
             </Section>
@@ -416,10 +469,10 @@ export default function HrEmployeesPage({ currentUser }) {
                   <input type="number" step="0.0001" value={form.provident_fund_rate} onChange={e => setForm(f => ({ ...f, provident_fund_rate: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
                 </Field>
                 <Field label="ก.ย.ศ (จำนวนเงิน)">
-                  <input type="number" step="0.01" value={form.kosor} onChange={e => setForm(f => ({ ...f, kosor: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <MoneyInput value={form.kosor} onChange={v => setForm(f => ({ ...f, kosor: v }))} />
                 </Field>
                 <Field label="ภงด.1 / ภาษี (จำนวนเงิน)">
-                  <input type="number" step="0.01" value={form.monthly_tax || 0} onChange={e => setForm(f => ({ ...f, monthly_tax: e.target.value }))} style={{ ...inp, fontFamily: "monospace" }} />
+                  <MoneyInput value={form.monthly_tax || 0} onChange={v => setForm(f => ({ ...f, monthly_tax: v }))} />
                 </Field>
               </div>
             </Section>
@@ -444,6 +497,25 @@ export default function HrEmployeesPage({ currentUser }) {
                 </Field>
               </div>
             </Section>
+
+            {editTarget && (
+              <Section title="📊 ยอดสะสมยกมา (เฉพาะพนักงานเก่า — ยอดจากระบบเดิมก่อนเริ่มใช้ระบบนี้)">
+                <div style={grid2}>
+                  <Field label="รายได้สะสมยกมา">
+                    <MoneyInput value={form.income_bf} onChange={v => setForm(f => ({ ...f, income_bf: v }))} />
+                  </Field>
+                  <Field label="ภาษีหัก ณ ที่จ่ายสะสมยกมา">
+                    <MoneyInput value={form.wht_bf} onChange={v => setForm(f => ({ ...f, wht_bf: v }))} />
+                  </Field>
+                  <Field label="เงินประกันสังคมสะสมยกมา">
+                    <MoneyInput value={form.sso_bf} onChange={v => setForm(f => ({ ...f, sso_bf: v }))} />
+                  </Field>
+                  <Field label="กองทุนสำรองเลี้ยงชีพสะสมยกมา">
+                    <MoneyInput value={form.pvd_bf} onChange={v => setForm(f => ({ ...f, pvd_bf: v }))} />
+                  </Field>
+                </div>
+              </Section>
+            )}
 
             <Section title="💳 บัญชีธนาคาร">
               <div style={grid2}>
@@ -543,6 +615,24 @@ function PeriodList({ label, offType, periods, setPeriods }) {
         </table>
       )}
     </div>
+  );
+}
+
+// ช่องจำนวนเงิน: แสดงมีคอมมา (90,000.00) ตอนไม่ได้พิมพ์ / เป็นเลขดิบตอนคลิกแก้
+function MoneyInput({ value, onChange }) {
+  const [focused, setFocused] = useState(false);
+  const n = Number(value);
+  const shown = focused
+    ? (value ?? "")
+    : (value === "" || value == null || !isFinite(n)
+      ? (value ?? "")
+      : n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+  return (
+    <input type="text" inputMode="decimal" value={shown}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      onChange={e => onChange(e.target.value.replace(/[^0-9.\-]/g, ""))}
+      style={{ ...inp, fontFamily: "monospace" }} />
   );
 }
 

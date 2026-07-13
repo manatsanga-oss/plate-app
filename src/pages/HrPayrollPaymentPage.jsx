@@ -1,15 +1,80 @@
 import React, { useEffect, useState } from "react";
+import { TH_MONTHS, SLIP_COMPANY, slipDateLabel, printSlips } from "../lib/payslip";
 
 const HR_API = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const SALES_EXTRA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
 
 function fmtN(v) { return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function monthDisplay(d) {
   if (!d) return "-";
   const dt = new Date(d);
   if (isNaN(dt)) return String(d).slice(0, 7);
-  const months = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
-  return `${months[dt.getMonth()]} ${dt.getFullYear() + 543}`;
+  return `${TH_MONTHS[dt.getMonth()]} ${dt.getFullYear() + 543}`;
+}
+
+// ---------- สลิปเงินเดือน ----------
+const normName = s => String(s || "").trim().replace(/\s+/g, " ");
+
+// รอบเงินเดือน 21 เดือนก่อน - 20 เดือนที่จ่าย (ทั้ง 2 บริษัท)
+function slipPeriodLabel(monthYear) {
+  const dt = new Date(monthYear);
+  if (isNaN(dt)) return "-";
+  const prev = new Date(dt.getFullYear(), dt.getMonth() - 1, 1);
+  return `21 ${TH_MONTHS[prev.getMonth()]} - 20 ${TH_MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+}
+
+// แปลงข้อมูล 1 คน → spec สลิปสำหรับ printSlips (lib/payslip)
+function salarySlipSpec(row, item, paidAt) {
+  const e = row.snap, hr = row.hr || {};
+  const ot = Number(e.ot_workday || 0) + Number(e.ot_holiday || 0);
+  const allowance = Number(e.meal_allowance || 0) + Number(e.laundry_allowance || 0) + Number(e.diligence_allowance || 0);
+  const bonus = Number(e.bonus || 0);
+  const otherIncome = Number(e.other_income || 0) + Number(e.extra_bonus || 0); // "พิเศษ" (เงินเพิ่มพิเศษ) นับเป็นเงินได้อื่นๆ ไม่ใช่โบนัส
+  const otherDeduct = Number(e.other_expense || 0) + Number(e.admin_expense || 0) + Number(e.lost_items || 0);
+  const dept = hr.department || e.position || "-";
+  const pos = e.position || hr.position || "-";
+  return {
+    company: SLIP_COMPANY[item.affiliation] || item.affiliation,
+    name: e.employee_name,
+    code: hr.employee_code || "",
+    position: `${dept}/${pos}`,
+    periodLabel: slipPeriodLabel(item.month_year),
+    paidLabel: slipDateLabel(paidAt),
+    bankAccount: e.bank_account_no || hr.bank_account_no || "-",
+    year: new Date(item.month_year).getFullYear(),
+    earnings: [
+      ["เงินเดือน/ค่าจ้าง", "Salary/Wage", e.salary],
+      ["ค่าล่วงเวลา", "Overtime", ot],
+      ["ค่าเบี้ยเลี้ยง/ค่าครองชีพ", "Allowances/Cost of livings", allowance],
+      ["โบนัส", "Bonus", bonus],
+      ["เงินได้อื่นๆ", "Others", otherIncome],
+    ],
+    deductions: [
+      ["ประกันสังคม", "Social Security Fund", e.sso_amount],
+      ["ภาษีหัก ณ ที่จ่าย", "Withholding tax", e.tax],
+      ["กองทุนสำรองเลี้ยงชีพ", "Provident Fund", e.pf_amount],
+      ["เงินกู้ยืม กยศ./กรอ.", "Student Loan Fund", e.study_loan],
+      ["เงินประกัน", "Deposit", 0],
+      ["ขาด/ลา/มาสาย", "Absent/Leave/Late", e.absence_late],
+      ["รายการหักอื่นๆ", "Others", otherDeduct],
+    ],
+    ytd: [
+      ["เงินได้สะสม", "YTD earnings", row.ytdIncome],
+      ["ภาษีหัก ณ ที่จ่ายสะสม", "YTD Withholding tax", row.ytdTax],
+      ["เงินประกันสังคมสะสม", "Accumulated SSF", row.ytdSso],
+    ],
+    totals: [
+      ["รวมเงินได้", "Total earnings", e.total_income],
+      ["รวมรายการหัก", "Total deductions", e.total_expense],
+      ["เงินได้สุทธิ", "Net pay", e.net_income],
+    ],
+  };
+}
+
+function printSalarySlips(rows, item, paidAt) {
+  printSlips(rows.map(r => salarySlipSpec(r, item, paidAt)),
+    `สลิปเงินเดือน ${monthDisplay(item.month_year)} ${item.affiliation}`);
 }
 
 export default function HrPayrollPaymentPage({ currentUser }) {
@@ -28,6 +93,9 @@ export default function HrPayrollPaymentPage({ currentUser }) {
   const [savingEdits, setSavingEdits] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [editingValue, setEditingValue] = useState("");
+
+  // payslip popup
+  const [slipPopup, setSlipPopup] = useState(null); // { item, loading, rows, paidAt, error }
 
   // pay popup
   const [payPopup, setPayPopup] = useState(null); // { item, row, doc, loading, error }
@@ -240,6 +308,93 @@ export default function HrPayrollPaymentPage({ currentUser }) {
       } catch { /* ignore */ }
     } catch (e) { alert("❌ บันทึกแก้ไขไม่สำเร็จ: " + e.message); }
     setSavingEdits(false);
+  }
+
+  // เปิด popup สลิปเงินเดือนของรอบนี้ (item = แถวเดือน+สังกัด)
+  async function openSlipPopup(item) {
+    setSlipPopup({ item, loading: true, rows: [] });
+    try {
+      const post = body => fetch(HR_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+
+      // 1) snapshot รอบนี้ (รายคน)
+      const snaps = await post({ action: "payroll_snapshot", mode: "detail", save_group: item.save_group });
+      const mine = (Array.isArray(snaps) ? snaps : []).filter(e => (e.affiliation || "-") === item.affiliation);
+
+      // 2) ข้อมูลพนักงาน: email, รหัส, แผนก, ยอดยกมา (BF)
+      const hrArr = await post({ action: "list_hr_employees", include_inactive: "true" });
+      const hrMap = {};
+      (Array.isArray(hrArr) ? hrArr : []).forEach(h => { hrMap[normName(h.employee_name)] = h; });
+
+      // 3) ยอดสะสมปีนี้จาก snapshot เดือนอื่น
+      //    ปี 2026: ยอดยกมา (BF) ครอบคลุมถึง มิ.ย. แล้ว → นับ snapshot เฉพาะ ก.ค. 2026 เป็นต้นไป
+      //    ปีถัดไป: นับ snapshot ตั้งแต่ ม.ค. ของปีนั้น (ไม่บวก BF)
+      const target = new Date(item.month_year);
+      const year = target.getFullYear();
+      const startMonth = year === 2026 ? 6 : 0; // 6 = ก.ค.
+      const inYtdRange = d => d.getFullYear() === year && d.getMonth() >= startMonth;
+      const ytd = {}; // ชื่อ → { income, tax, sso }
+      const addYtd = arr => (Array.isArray(arr) ? arr : []).forEach(e => {
+        if ((e.affiliation || "-") !== item.affiliation) return;
+        const k = normName(e.employee_name);
+        if (!ytd[k]) ytd[k] = { income: 0, tax: 0, sso: 0 };
+        ytd[k].income += Number(e.total_income || 0);
+        ytd[k].tax += Number(e.tax || 0);
+        ytd[k].sso += Number(e.sso_amount || 0);
+      });
+      if (inYtdRange(target)) addYtd(mine); // เดือนนี้นับรวมใน YTD เฉพาะเมื่อพ้นช่วง BF แล้ว
+      const allGroups = await post({ action: "payroll_payables", mode: "list_by_affiliation" });
+      const others = (Array.isArray(allGroups) ? allGroups : []).filter(g => {
+        if (g.affiliation !== item.affiliation || g.save_group === item.save_group) return false;
+        const d = new Date(g.month_year);
+        return !isNaN(d) && inYtdRange(d) && d < target;
+      });
+      for (const g of others) {
+        addYtd(await post({ action: "payroll_snapshot", mode: "detail", save_group: g.save_group }));
+      }
+
+      // 3.5) ค่าคอมมิชั่นสะสม (ไม่รวมค่านายหน้า) — นับงวดค่าคอมถึง "เดือนก่อนหน้า"
+      //      เพราะค่าคอมของเดือน M จ่ายต้นเดือน M+1 (หลังเงินเดือนที่จ่าย 25/M)
+      //      ปี 2026: BF รวมค่าคอมงวด มิ.ย. (จ่าย 03-07) แล้ว → เริ่มนับงวด ก.ค. เป็นต้นไป
+      const commYtd = {};
+      const prevMonth = new Date(target.getFullYear(), target.getMonth() - 1, 1);
+      const commFrom = `${year}-${String(startMonth + 1).padStart(2, "0")}-01`;
+      const commTo = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, "0")}-01`;
+      if (prevMonth.getFullYear() === year && prevMonth.getMonth() >= startMonth) {
+        try {
+          const c = await fetch(SALES_EXTRA_API, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "commission_normal_payables", mode: "ytd_commission", date_from: commFrom, date_to: commTo }),
+          }).then(r => r.json());
+          (Array.isArray(c) ? c : []).forEach(r => {
+            if (r && r.employee_name) commYtd[normName(r.employee_name)] = Number(r.commission_ytd || 0);
+          });
+        } catch { /* workflow ยังไม่มี mode นี้ → ค่าคอมสะสม = 0 ไปก่อน */ }
+      }
+
+      // 4) วันที่จ่ายจริงจากเอกสารเงินเดือนที่จ่ายแล้ว
+      const { doc } = getDocStatus(item.save_group, item.affiliation, "salary");
+      const paidAt = doc?.paid_at || doc?.paid_date || null;
+
+      const useBf = year === 2026;
+      const rows = mine.map(e => {
+        const k = normName(e.employee_name);
+        const hr = hrMap[k] || {};
+        const y = ytd[k] || { income: 0, tax: 0, sso: 0 };
+        return {
+          snap: e, hr,
+          ytdIncome: (useBf ? Number(hr.income_bf || 0) : 0) + y.income + (commYtd[k] || 0),
+          ytdTax:    (useBf ? Number(hr.wht_bf || 0) : 0) + y.tax,
+          ytdSso:    (useBf ? Number(hr.sso_bf || 0) : 0) + y.sso,
+        };
+      }).sort((a, b) => String(a.hr.employee_code || "๙๙").localeCompare(String(b.hr.employee_code || "๙๙"), "th"));
+
+      setSlipPopup({ item, loading: false, rows, paidAt });
+    } catch (e) {
+      setSlipPopup({ item, loading: false, rows: [], error: e.message });
+    }
   }
 
   async function findDocs(save_group, affiliation, creditorType) {
@@ -581,7 +736,17 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                         </td>
                         <td style={{ ...td, textAlign: "center" }}>
                           {status === "paid" ? (
-                            <span style={{ fontSize: 11, color: "#065f46", fontFamily: "monospace" }}>{doc?.paid_doc_no || "-"}</span>
+                            row.key === "salary" ? (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
+                                <span style={{ fontSize: 11, color: "#065f46", fontFamily: "monospace" }}>{doc?.paid_doc_no || "-"}</span>
+                                <button onClick={() => openSlipPopup(it)}
+                                  style={{ padding: "4px 12px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                                  🧾 สลิปเงินเดือน
+                                </button>
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: 11, color: "#065f46", fontFamily: "monospace" }}>{doc?.paid_doc_no || "-"}</span>
+                            )
                           ) : row.key === "tax" ? (
                             <span title="ภงด.1 ย้ายไปจ่ายที่เมนู 'บันทึกจ่ายเงินภาษีสรรพากร' → ภ.ง.ด.1"
                               style={{ fontSize: 11, color: "#7c3aed", fontWeight: 600 }}>→ จ่ายที่เมนูภาษีสรรพากร</span>
@@ -775,6 +940,81 @@ export default function HrPayrollPaymentPage({ currentUser }) {
               </tfoot>
             </table>
           )}
+        </div>
+      )}
+
+      {/* PAYSLIP POPUP */}
+      {slipPopup && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+          onClick={() => setSlipPopup(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 780, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>🧾 สลิปเงินเดือน — {monthDisplay(slipPopup.item.month_year)} · {slipPopup.item.affiliation}</h3>
+              <button onClick={() => setSlipPopup(null)} style={{ padding: "5px 12px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer" }}>ปิด</button>
+            </div>
+            <div style={{ marginBottom: 12, fontSize: 12, color: "#6b7280" }}>
+              รอบ {slipPeriodLabel(slipPopup.item.month_year)} · วันที่ชำระ {slipDateLabel(slipPopup.paidAt)}
+              <span style={{ marginLeft: 10, padding: "2px 8px", background: "#fef3c7", color: "#92400e", borderRadius: 4, fontSize: 11 }}>
+                📧 ส่งอีเมลอัตโนมัติจะเปิดใช้เมื่อตั้งค่า Gmail บริษัทแล้ว — ตอนนี้พิมพ์/บันทึกเป็น PDF ได้จากปุ่มพิมพ์
+              </span>
+            </div>
+
+            {slipPopup.loading ? <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังโหลดข้อมูลสลิป (รวมยอดสะสม)...</div>
+            : slipPopup.error ? <div style={{ padding: 12, background: "#fef2f2", color: "#991b1b", borderRadius: 6 }}>❌ {slipPopup.error}</div>
+            : slipPopup.rows.length === 0 ? <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่พบข้อมูลพนักงานในรอบนี้</div>
+            : (
+              <>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                  <button onClick={() => printSalarySlips(slipPopup.rows, slipPopup.item, slipPopup.paidAt)}
+                    style={{ padding: "8px 18px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                    🖨️ พิมพ์สลิปทั้งหมด ({slipPopup.rows.length} คน)
+                  </button>
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ background: "#072d6b", color: "#fff" }}>
+                    <tr>
+                      <th style={{ ...th, width: 34 }}>#</th>
+                      <th style={th}>รหัส</th>
+                      <th style={th}>พนักงาน</th>
+                      <th style={th}>อีเมล</th>
+                      <th style={{ ...th, textAlign: "right" }}>สุทธิ</th>
+                      <th style={{ ...th, textAlign: "right" }}>เงินได้สะสม</th>
+                      <th style={{ ...th, textAlign: "center", width: 90 }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {slipPopup.rows.map((r, i) => (
+                      <tr key={r.snap.snapshot_id || i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                        <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                        <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.hr.employee_code || "-"}</td>
+                        <td style={{ ...td, fontWeight: 600 }}>{r.snap.employee_name}</td>
+                        <td style={{ ...td, fontSize: 11 }}>
+                          {r.hr.email
+                            ? <span style={{ color: "#0369a1" }}>{r.hr.email}</span>
+                            : <span style={{ color: "#dc2626" }}>— ไม่มีอีเมล —</span>}
+                        </td>
+                        <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#1e40af" }}>{fmtN(r.snap.net_income)}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmtN(r.ytdIncome)}</td>
+                        <td style={{ ...td, textAlign: "center" }}>
+                          <button onClick={() => printSalarySlips([r], slipPopup.item, slipPopup.paidAt)}
+                            style={{ padding: "4px 12px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                            🖨️ สลิป
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot style={{ background: "#f3f4f6", fontWeight: 700 }}>
+                    <tr>
+                      <td colSpan={4} style={{ ...td, textAlign: "right" }}>รวม {slipPopup.rows.length} คน</td>
+                      <td style={{ ...td, textAlign: "right", color: "#1e40af" }}>{fmtN(slipPopup.rows.reduce((s, r) => s + Number(r.snap.net_income || 0), 0))}</td>
+                      <td colSpan={2}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </>
+            )}
+          </div>
         </div>
       )}
 

@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
+import { TH_MONTHS, SLIP_COMPANY, slipDateLabel, printSlips } from "../lib/payslip";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -651,6 +652,154 @@ tr.excluded td { text-decoration: line-through; }
   }
   useEffect(() => { if (tab === "pay" && snapshotInfo?.save_group) fetchCombinedEmployees(); /* eslint-disable-next-line */ }, [tab, snapshotInfo?.save_group]);
 
+  // ===== สลิปค่าคอมมิชั่น =====
+  const [commSlip, setCommSlip] = useState(null); // { loading, rows, paidAt, periodLabel, error }
+  const slipNorm = s => String(s || "").trim().replace(/\s+/g, " ");
+
+  // ป้ายช่วงงวด เช่น "01-31 พ.ค. 2026" หรือ "21 มิ.ย. - 20 ก.ค. 2026"
+  function commPeriodLabel(from, to) {
+    const f = new Date(from), t = new Date(to);
+    if (isNaN(f) || isNaN(t)) return `${from || "-"} - ${to || "-"}`;
+    const dd = d => String(d.getDate()).padStart(2, "0");
+    if (f.getMonth() === t.getMonth() && f.getFullYear() === t.getFullYear()) {
+      return `${dd(f)}-${dd(t)} ${TH_MONTHS[t.getMonth()]} ${t.getFullYear()}`;
+    }
+    return `${dd(f)} ${TH_MONTHS[f.getMonth()]} - ${dd(t)} ${TH_MONTHS[t.getMonth()]} ${t.getFullYear()}`;
+  }
+
+  async function openCommSlipPopup() {
+    if (!snapshotInfo?.save_group) return;
+    setCommSlip({ loading: true, rows: [] });
+    try {
+      const postHR = body => fetch(HR_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).then(r => r.json());
+
+      const periodFrom = snapshotInfo.period_from || dateFrom;
+      const periodTo = snapshotInfo.period_to || dateTo;
+      const target = new Date(periodFrom);
+      const year = target.getFullYear();
+      const startMonth = year === 2026 ? 6 : 0; // ปี 2026 เริ่มนับหลังยอดยกมา (ก.ค.); ปีอื่นนับจาก ม.ค.
+      const periodMonthFirst = new Date(year, target.getMonth(), 1);
+      const ytdFrom = `${year}-${String(startMonth + 1).padStart(2, "0")}-01`;
+      const ytdTo = `${year}-${String(target.getMonth() + 1).padStart(2, "0")}-01`;
+
+      // 1) รายชื่อ + ยอดค่าคอมรอบนี้ (เฉพาะค่าคอมมิชั่น ไม่รวมค่านายหน้า)
+      const rowsBase = combinedEmployees
+        .map(g => ({ g, commission: effVal(g, "sales_commission") + effVal(g, "service") + effVal(g, "parts") }))
+        .filter(r => r.commission > 0);
+
+      // 2) ข้อมูลพนักงาน (email, รหัส, แผนก, บัญชี, ยอดยกมา)
+      const hrArr = await postHR({ action: "list_hr_employees", include_inactive: "true" });
+      const hrMap = {};
+      (Array.isArray(hrArr) ? hrArr : []).forEach(h => { hrMap[slipNorm(h.employee_name)] = h; });
+
+      // 3) เงินเดือนสะสมปีนี้ (snapshot เงินเดือนเดือน >= จุดเริ่ม YTD ถึงเดือนงวดนี้)
+      const salYtd = {}; // ชื่อ → { income, tax, sso }
+      const addSal = arr => (Array.isArray(arr) ? arr : []).forEach(e => {
+        const k = slipNorm(e.employee_name);
+        if (!salYtd[k]) salYtd[k] = { income: 0, tax: 0, sso: 0 };
+        salYtd[k].income += Number(e.total_income || 0);
+        salYtd[k].tax += Number(e.tax || 0);
+        salYtd[k].sso += Number(e.sso_amount || 0);
+      });
+      const payrollGroups = await postHR({ action: "payroll_payables", mode: "list_by_affiliation" });
+      const inRange = (Array.isArray(payrollGroups) ? payrollGroups : []).filter(g2 => {
+        const d = new Date(g2.month_year);
+        return !isNaN(d) && d.getFullYear() === year && d.getMonth() >= startMonth && d <= periodMonthFirst;
+      });
+      for (const g2 of inRange) {
+        addSal(await postHR({ action: "payroll_snapshot", mode: "detail", save_group: g2.save_group }));
+      }
+
+      // 4) ค่าคอมสะสมปีนี้ (รวมงวดนี้ด้วย) จาก action ytd_commission
+      const commYtd = {};
+      try {
+        const c = await postAPI({ action: "commission_normal_payables", mode: "ytd_commission", date_from: ytdFrom, date_to: ytdTo });
+        (Array.isArray(c) ? c : []).forEach(r => {
+          if (r && r.employee_name) commYtd[slipNorm(r.employee_name)] = Number(r.commission_ytd || 0);
+        });
+      } catch { /* workflow ยังไม่ re-import → 0 */ }
+
+      // 5) วันที่จ่าย: เอกสารค่าคอมมิชั่น (group 1/4) ที่จ่ายแล้ว
+      let paidAt = null;
+      try {
+        const docs = await postAPI({ action: "commission_normal_payables", mode: "list_docs", save_group: snapshotInfo.save_group });
+        (Array.isArray(docs) ? docs : []).forEach(d => {
+          if (d?.commission_type === "commission" && d.status === "paid" && d.paid_at) {
+            if (!paidAt || new Date(d.paid_at) > new Date(paidAt)) paidAt = d.paid_at;
+          }
+        });
+      } catch { /* ignore */ }
+
+      const useBf = year === 2026;
+      const rows = rowsBase.map(({ g, commission }) => {
+        const k = slipNorm(g.name);
+        const hr = hrMap[k] || {};
+        const sal = salYtd[k] || { income: 0, tax: 0, sso: 0 };
+        return {
+          g, hr, commission,
+          ytdIncome: (useBf ? Number(hr.income_bf || 0) : 0) + sal.income + (commYtd[k] || 0),
+          ytdTax:    (useBf ? Number(hr.wht_bf || 0) : 0) + sal.tax,
+          ytdSso:    (useBf ? Number(hr.sso_bf || 0) : 0) + sal.sso,
+        };
+      }).sort((a, b) => String(a.hr.employee_code || "๙๙").localeCompare(String(b.hr.employee_code || "๙๙"), "th"));
+
+      setCommSlip({ loading: false, rows, paidAt, periodLabel: commPeriodLabel(periodFrom, periodTo), year });
+    } catch (e) {
+      setCommSlip({ loading: false, rows: [], error: e.message });
+    }
+  }
+
+  // spec สลิปค่าคอม 1 คน — ทุกช่องเป็น 0 ยกเว้นบรรทัด "ค่านายหน้า/Commission"
+  function commSlipSpec(r, meta) {
+    const hr = r.hr || {};
+    const aff = ({ SCY01: "สิงห์ชัย", SCY04: "สิงห์ชัย", SCY07: "สิงห์ชัย", SCY05: "ป.เปา", SCY06: "ป.เปา" })[r.g.branch_code] || hr.affiliation || "";
+    const dept = hr.department || "-";
+    const pos = hr.position || "-";
+    return {
+      company: SLIP_COMPANY[aff] || aff || "-",
+      name: r.g.name,
+      code: hr.employee_code || "",
+      position: `${dept}/${pos}`,
+      periodLabel: meta.periodLabel,
+      paidLabel: slipDateLabel(meta.paidAt),
+      bankAccount: hr.bank_account_no || "-",
+      year: meta.year,
+      earnings: [
+        ["เงินเดือน/ค่าจ้าง", "Salary/Wage", 0],
+        ["ค่าล่วงเวลา", "Overtime", 0],
+        ["ค่านายหน้า", "Commission", r.commission],
+        ["ค่าเบี้ยเลี้ยง/ค่าครองชีพ", "Allowances/Cost of livings", 0],
+        ["โบนัส", "Bonus", 0],
+        ["เงินได้อื่นๆ", "Others", 0],
+      ],
+      deductions: [
+        ["ประกันสังคม", "Social Security Fund", 0],
+        ["ภาษีหัก ณ ที่จ่าย", "Withholding tax", 0],
+        ["เงินกู้ยืม กยศ./กรอ.", "Student Loan Fund", 0],
+        ["เงินประกัน", "Deposit", 0],
+        ["ขาด/ลา/มาสาย", "Absent/Leave/Late", 0],
+        ["รายการหักอื่นๆ", "Others", 0],
+      ],
+      ytd: [
+        ["เงินได้สะสม", "YTD earnings", r.ytdIncome],
+        ["ภาษีหัก ณ ที่จ่ายสะสม", "YTD Withholding tax", r.ytdTax],
+        ["เงินประกันสังคมสะสม", "Accumulated SSF", r.ytdSso],
+      ],
+      totals: [
+        ["รวมเงินได้", "Total earnings", r.commission],
+        ["รวมรายการหัก", "Total deductions", 0],
+        ["เงินได้สุทธิ", "Net pay", r.commission],
+      ],
+    };
+  }
+
+  function printCommSlips(rows, meta) {
+    printSlips(rows.map(r => commSlipSpec(r, meta)), `สลิปค่าคอมมิชั่น ${meta.periodLabel}`);
+  }
+
   // ===== แก้ไขยอดรายคน (คลิกที่ตัวเลขในตาราง) =====
   const [editCell, setEditCell] = useState(null); // { name, col }
   const [editValue, setEditValue] = useState("");
@@ -971,10 +1120,16 @@ tr.excluded td { text-decoration: line-through; }
               <h4 style={{ margin: 0, color: "#072d6b" }}>👥 รายชื่อพนักงานที่ได้รับค่าคอม ({combinedEmployees.length} คน)</h4>
               <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>✏️ คลิกที่ตัวเลขเพื่อแก้ไขยอดได้ — ยอดที่แก้จะถูกใช้ในเอกสารจ่ายเงิน (กรอกเท่ายอดเดิมเพื่อรีเซ็ต)</div>
             </div>
-            <button onClick={fetchCombinedEmployees} disabled={combinedLoading}
-              style={{ padding: "5px 12px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12 }}>
-              {combinedLoading ? "..." : "🔄 รีเฟรช"}
-            </button>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={openCommSlipPopup} disabled={combinedLoading || combinedEmployees.length === 0}
+                style={{ padding: "5px 14px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                🧾 สลิปค่าคอม
+              </button>
+              <button onClick={fetchCombinedEmployees} disabled={combinedLoading}
+                style={{ padding: "5px 12px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12 }}>
+                {combinedLoading ? "..." : "🔄 รีเฟรช"}
+              </button>
+            </div>
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -1024,6 +1179,77 @@ tr.excluded td { text-decoration: line-through; }
                 })()}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* COMMISSION SLIP POPUP */}
+      {commSlip && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+          onClick={() => setCommSlip(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 780, maxWidth: "94vw", maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>🧾 สลิปค่าคอมมิชั่น — งวด {commSlip.periodLabel || ""}</h3>
+              <button onClick={() => setCommSlip(null)} style={{ padding: "5px 12px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer" }}>ปิด</button>
+            </div>
+            <div style={{ marginBottom: 12, fontSize: 12, color: "#6b7280" }}>
+              เฉพาะค่าคอมมิชั่นของพนักงาน (ขาย+บริการ+อะไหล่) — ไม่รวมค่านายหน้า · วันที่ชำระ {slipDateLabel(commSlip.paidAt)}
+            </div>
+            {commSlip.loading ? <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังโหลด (รวมยอดสะสมเงินเดือน+ค่าคอม)...</div>
+            : commSlip.error ? <div style={{ padding: 12, background: "#fef2f2", color: "#991b1b", borderRadius: 6 }}>❌ {commSlip.error}</div>
+            : commSlip.rows.length === 0 ? <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีพนักงานที่ได้ค่าคอมมิชั่นในงวดนี้</div>
+            : (
+              <>
+                <div style={{ marginBottom: 10 }}>
+                  <button onClick={() => printCommSlips(commSlip.rows, commSlip)}
+                    style={{ padding: "8px 18px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                    🖨️ พิมพ์สลิปทั้งหมด ({commSlip.rows.length} คน)
+                  </button>
+                </div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead style={{ background: "#072d6b", color: "#fff" }}>
+                    <tr>
+                      <th style={{ ...th, width: 34, color: "#fff" }}>#</th>
+                      <th style={{ ...th, color: "#fff" }}>รหัส</th>
+                      <th style={{ ...th, color: "#fff" }}>พนักงาน</th>
+                      <th style={{ ...th, color: "#fff" }}>อีเมล</th>
+                      <th style={{ ...th, textAlign: "right", color: "#fff" }}>ค่าคอมงวดนี้</th>
+                      <th style={{ ...th, textAlign: "right", color: "#fff" }}>เงินได้สะสม</th>
+                      <th style={{ ...th, width: 90, color: "#fff" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {commSlip.rows.map((r, i) => (
+                      <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                        <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                        <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.hr.employee_code || "-"}</td>
+                        <td style={{ ...td, fontWeight: 600 }}>{r.g.name}</td>
+                        <td style={{ ...td, fontSize: 11 }}>
+                          {r.hr.email
+                            ? <span style={{ color: "#0369a1" }}>{r.hr.email}</span>
+                            : <span style={{ color: "#dc2626" }}>— ไม่มีอีเมล —</span>}
+                        </td>
+                        <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#059669", fontFamily: "monospace" }}>{fmt(r.commission)}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.ytdIncome)}</td>
+                        <td style={{ ...td, textAlign: "center" }}>
+                          <button onClick={() => printCommSlips([r], commSlip)}
+                            style={{ padding: "4px 12px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                            🖨️ สลิป
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot style={{ background: "#f3f4f6", fontWeight: 700 }}>
+                    <tr>
+                      <td colSpan={4} style={{ ...td, textAlign: "right" }}>รวม {commSlip.rows.length} คน</td>
+                      <td style={{ ...td, textAlign: "right", color: "#059669", fontFamily: "monospace" }}>{fmt(commSlip.rows.reduce((s, r) => s + r.commission, 0))}</td>
+                      <td colSpan={2}></td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </>
+            )}
           </div>
         </div>
       )}
