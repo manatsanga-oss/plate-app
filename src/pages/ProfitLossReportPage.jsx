@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+﻿import React, { useEffect, useMemo, useState } from "react";
 
 // ============================================================================
 // หน้า "งบกำไรขาดทุน" (รายเดือน) — เฟสแรก: ส่วนรายได้ แยกตามสาขา SCY01–SCY07
@@ -52,6 +52,7 @@ const FLOWTAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/flow-inpu
 const SERVICE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/service-api";
 const REG_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
+const SALES_EXTRA_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
 
 // ตารางใบกำกับขายรถแยกตามบริษัทผู้ออกใบกำกับ (ขายข้ามหน้าร้านได้ — สาขาจริงดูจาก branch_codes)
 const TAX_COMPANIES = ["PAPAO", "NAKORNLUANG", "SINGCHAI"];
@@ -65,6 +66,13 @@ const DEFAULT_BRANCHES = [
   { key: "SCY07", label: "สิงห์ชัยตลาด" },
 ];
 
+// agg ว่าง (ทุกสาขา = 0) — ใช้เป็นค่าตั้งต้น/รีเซ็ตของยอดต้นทุน
+const zeroAgg = () => {
+  const o = { unassigned: 0, total: 0 };
+  DEFAULT_BRANCHES.forEach((b) => { o[b.key] = 0; });
+  return o;
+};
+
 // หา SCY0x ของใบกำกับขายรถ: branch_codes ก่อน → prefix เลขใบขาย → "" (ไม่ระบุ)
 function scyOf(r) {
   const m = String(r.branch_codes || "").match(/SCY\d{2}/);
@@ -75,6 +83,8 @@ function scyOf(r) {
 
 // ลูกค้าเป็นบริษัทไฟแนนซ์ → ใบกำกับ TF ใบนั้นถือเป็นรายได้ค่าส่งเสริมจากไฟแนนซ์
 const FINANCE_KW = /ธนบรรณ|คาเธ่ย์|เน็คซ|แคปปิตอล|เอสจีเอฟ|SGF|กรุ๊ปลิ|กรุ๊ปลี|ลีสซิ่ง|ลิสซิ่ง|สมหวัง/i;
+// รายการประกันรถหาย (ล็อคตั้น/คอสมอส) — ใช้แยกออกจากงานทะเบียนทั้งฝั่งรายได้และวางบิล
+const THEFT_KW = /ล็อคตั้น|LOCKTON|ประกันรถหาย|คอสมอส|COSMOS/i;
 
 // กระจายแถวรายได้ตาม allocation รายคัน (สัดส่วนของยอดรวม VAT ที่แตกไว้ต่อเอกสาร)
 // เศษปัดทศนิยม ≤ 1 บาท ปรับเข้าบรรทัดสุดท้าย · ส่วนที่แตกยอดไม่ครบ → แถว "รายได้รวม"
@@ -172,6 +182,32 @@ export default function ProfitLossReportPage() {
   const [otherInvRows, setOtherInvRows] = useState([]); // ใบกำกับรายได้อื่น
   const [manualRows, setManualRows] = useState([]);     // บันทึกรายได้เอง (ไม่ระบุสาขา)
   const [popup, setPopup] = useState(null); // null | "vehicle" | "partsvc" | "fee" | "regwork" | "otherinv" | "manual"
+  const [popupBranch, setPopupBranch] = useState(null); // กรอง popup เฉพาะสาขา (คลิกที่เซลล์สาขา)
+  const openPopup = (key, br = null) => { setPopup(key); setPopupBranch(br); };
+  // ต้นทุนสินค้า (อะไหล่) ต่อสาขา — ค่าแรงถือเป็นกำไร (action part_service_cost ใน flow-input-tax-api)
+  const [partsCostAgg, setPartsCostAgg] = useState(zeroAgg);
+  // ต้นทุนประกันรถหาย = เบี้ยนำส่ง (วางบิลคอสมอส + บรรทัดล็อคตั้นในวางบิลรับเรื่อง)
+  const [theftCostAgg, setTheftCostAgg] = useState(zeroAgg);
+  // ต้นทุนรับเรื่องงานทะเบียน = ยอดวางบิลรับเรื่อง (ไม่รวมบรรทัดประกันรถหาย)
+  const [regCostAgg, setRegCostAgg] = useState(zeroAgg);
+  // รายละเอียดรายใบของต้นทุนวางบิล (สำหรับ popup — คลิกที่แถวต้นทุน)
+  const [theftCostRows, setTheftCostRows] = useState([]);
+  const [regCostRows, setRegCostRows] = useState([]);
+  // ค่าใช้จ่ายขายรถรายคัน (ใบปะหน้า คชจ.ขายรถ): ค่าดำเนินการจด + ค่าจดตามใบเสร็จ + พรบ + ออกแทน
+  const [saleExpAgg, setSaleExpAgg] = useState(zeroAgg);
+  const [saleExpRows, setSaleExpRows] = useState([]);
+  // ค่านำพา — จับคู่ใบขายรายคัน (list_delivery_fees) อิงเดือน/สาขาจากเลขใบขาย SS<YYMM>
+  const [delivFeeAgg, setDelivFeeAgg] = useState(zeroAgg);
+  const [delivFeeRows, setDelivFeeRows] = useState([]);
+  // เบี้ยประกันคอสมอสนำส่ง (วางบิลคอสมอส) — กรมธรรม์อ้างใบขาย SS รายคัน
+  const [cosmosExpAgg, setCosmosExpAgg] = useState(zeroAgg);
+  const [cosmosExpRows, setCosmosExpRows] = useState([]);
+  // ค่าคอมพิเศษ (commission_split_detail) — ยอดต่อคันจากรายงานค่าคอมพิเศษ อ้างใบขาย SS
+  const [specCommAgg, setSpecCommAgg] = useState(zeroAgg);
+  const [specCommRows, setSpecCommRows] = useState([]);
+  // ต้นทุนของแถม (giveaway_cost) — Yamaha จ่ายเพื่อแถมอ้างใบขาย / Honda บรรทัดยอด 0 มีต้นทุน
+  const [giveCostAgg, setGiveCostAgg] = useState(zeroAgg);
+  const [giveCostRows, setGiveCostRows] = useState([]);
 
   async function loadReport(targetYm = ym) {
     setLoading(true);
@@ -179,7 +215,7 @@ export default function ProfitLossReportPage() {
     const { start, end, thYm } = monthRange(targetYm);
     const [adYear, adMonth] = String(targetYm).split("-").map(Number);
     try {
-      const [taxByBranch, partSvcByAff, hondaJobs, regLines, feeLines, otherInv, incomeDocs] = await Promise.all([
+      const [taxByBranch, partSvcByAff, hondaJobs, partsCostRows, regLines, feeLines, billLines, insBillRows, regSumRows, delivRows, cosmosRows, specCommDetail, giveCostData, otherInv, incomeDocs] = await Promise.all([
         // 1) ใบกำกับขายรถ — เรียกทีละบริษัท (workflow แยกตารางตาม branch)
         //    สาขาจริงดูจาก branch_codes ของใบขาย (นครหลวงไม่มี code → SCY05 ทั้งตาราง)
         Promise.all(TAX_COMPANIES.map(async (co) => {
@@ -220,11 +256,53 @@ export default function ProfitLossReportPage() {
         // 2.1) งานซ่อม Honda รายสาขาจริง ('000'=วังน้อย, 'Z01'=นครหลวง) — ใช้ปรับยอด SERV นครหลวง
         post(SERVICE_URL, { action: "list_honda_repair_jobs", year: adYear, month: adMonth })
           .then(asArray).catch(() => []),
+        // 2.2) ต้นทุนสินค้า (อะไหล่) ต่อสาขา — honda_part_sales.cost + yamaha_part_dispense.total_cost
+        post(FLOWTAX_URL, { action: "part_service_cost", tax_period: targetYm })
+          .then(asArray).catch(() => []),
         // 3) ใบรับเรื่องงานทะเบียน (พรบ/ต่อภาษี — ไม่มี VAT) รายบรรทัด มีสาขาจริง
         post(REG_URL, { action: "get_receipt_lines", date_from: start, date_to: end, include_submitted: true, bypass_insurance_filter: true })
           .then(asArray).catch(() => []),
         // 3b) ใบเสร็จรับชำระอื่นๆ รายบรรทัด (other_income_items มี description) — ค่าบริการ/ไปรษณีย์
         post(REG_URL, { action: "list_other_income_receipts", date_from: start, date_to: end })
+          .then(asArray).catch(() => []),
+        // 3c) วางบิลรับเรื่องงานทะเบียน (อ้างอิงเลขใบรับเรื่อง มี branch_code + bill_amount + bill_items)
+        //     — ต้นทุนของทั้งหมวดทะเบียนและหมวดประกันรถหาย (ไม่ใช้เลขกรมธรรม์ — user กำหนด)
+        //     ดึงช่วงกว้าง (เดือนรายงาน → +6 เดือน เพราะวางบิลตามหลังใบรับเรื่อง) แล้วค่อยกรอง
+        //     ด้วย "เดือนของใบรับเรื่อง" จากเลขที่ใบ — ต้นทุนอิงเดือนใบรับเรื่อง ไม่ใช่เดือนที่จ่าย
+        (() => {
+          const dTo = new Date(adYear, adMonth - 1 + 7, 0);
+          const histTo = `${dTo.getFullYear()}-${String(dTo.getMonth() + 1).padStart(2, "0")}-${String(dTo.getDate()).padStart(2, "0")}`;
+          return post(REG_URL, { action: "get_receipt_billing_data", date_from: start, date_to: histTo, only_unbilled: false })
+            .then(asArray).catch(() => []);
+        })(),
+        // 3c2) วางบิลงานพรบ. — เบี้ยพรบนำส่ง: กติกาอ้างอิงเอกสาร SS = ของขายรถ / CA = ของรับเรื่อง
+        //      ดึงทั้งหมดแล้วกรองด้วยเลข CA ของเดือน (ไม่กรอง contract_date — ข้อมูลปีเพี้ยนบางส่วน)
+        post(REG_URL, { action: "get_insurance_billing_data", only_unbilled: false })
+          .then(asArray).catch(() => []),
+        // 3e) ใบปะหน้า คชจ.ขายรถ รายคัน (list_registration_summary) — ค่าใช้จ่ายขายรถอีกก้อน
+        post(ACCOUNTING_URL, { action: "list_registration_summary", date_from: start, date_to: end })
+          .then(asArray).catch(() => []),
+        // 3f) ค่านำพา (list_delivery_fees) — จ่ายตามหลังการขายได้ จึงดึงช่วงกว้างแล้วกรอง
+        //     ด้วยเดือนของใบขายที่จับคู่ (SS<YYMM>) — รายการที่ยังไม่จับคู่ใบขายไม่นับ
+        (() => {
+          const dTo = new Date(adYear, adMonth - 1 + 7, 0);
+          const histTo = `${dTo.getFullYear()}-${String(dTo.getMonth() + 1).padStart(2, "0")}-${String(dTo.getDate()).padStart(2, "0")}`;
+          return post(ACCOUNTING_URL, { action: "list_delivery_fees", date_from: start, date_to: histTo })
+            .then(asArray).catch(() => []);
+        })(),
+        // 3g) กรมธรรม์คอสมอส (วางบิลคอสมอส) — อ้างใบขาย SS รายคัน (บันทึกยื่นตามหลังขายได้)
+        //     กติกา SS = ค่าใช้จ่ายหมวดขายรถ · กรองด้วยเดือนของใบขายภายหลัง
+        (() => {
+          const dTo = new Date(adYear, adMonth - 1 + 7, 0);
+          const histTo = `${dTo.getFullYear()}-${String(dTo.getMonth() + 1).padStart(2, "0")}-${String(dTo.getDate()).padStart(2, "0")}`;
+          return post(REG_URL, { action: "list_cosmos_all", date_from: start, date_to: histTo })
+            .then(asArray).catch(() => []);
+        })(),
+        // 3h) ค่าคอมพิเศษรายคัน (commission_split_detail — กรองด้วยวันที่ขาย)
+        post(SALES_EXTRA_URL, { action: "commission_split_detail", date_from: start, date_to: end, branch_code: "", brand: "" })
+          .then(asArray).catch(() => []),
+        // 3i) ต้นทุนของแถมรายคัน (action ใหม่ใน flow-input-tax-api — ต้อง re-import ก่อนถึงจะมีข้อมูล)
+        post(FLOWTAX_URL, { action: "giveaway_cost", tax_period: targetYm })
           .then(asArray).catch(() => []),
         // 3) ใบกำกับรายได้อื่น (ป.เปา/สิงห์ชัย)
         post(ACCOUNTING_URL, { action: "list_other_income_tax_invoices", date_from: start, date_to: end, branch: "" })
@@ -277,11 +355,224 @@ export default function ProfitLossReportPage() {
       }
       setPartSvcRows(ps);
 
+      // ต้นทุนสินค้า (อะไหล่) ต่อสาขา — ถ้า workflow ยังไม่มี action นี้ (ยังไม่ re-import) จะได้ [] = 0
+      const pc = zeroAgg();
+      partsCostRows.forEach((r) => {
+        if (!r || r.error || !r.branch) return;
+        const v = Number(r.total_cost || 0);
+        if (pc[r.branch] !== undefined) pc[r.branch] = r2(pc[r.branch] + v);
+        else pc.unassigned = r2(pc.unassigned + v);
+      });
+      pc.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + pc[b.key], pc.unassigned));
+      setPartsCostAgg(pc);
+
+      // ต้นทุนจากวางบิลรับเรื่อง (อ้างอิงเลขใบรับเรื่อง): บรรทัดประกันรถหาย (คอสมอส/ล็อคตั้น)
+      // แยกไปเป็นต้นทุนหมวดประกันรถหาย ที่เหลือ = ต้นทุนหมวดทะเบียน
+      const rc = zeroAgg();
+      const tc = zeroAgg();
+      const tcRows = [], rcRows = [];
+      billLines.filter((r) => r && r.receipt_no).forEach((r) => {
+        // ต้นทุนอิง "เดือนของใบรับเรื่อง" จากเลขที่ใบ (SCYxx-CA<YY><MM>xxxxx, YY = ค.ศ. 2 หลัก)
+        // ให้ตรงใบเดียวกับฝั่งรายได้ — ไม่สนเดือนที่วางบิล/จ่ายเงิน
+        const rm = String(r.receipt_no).match(/-[A-Z]+(\d{2})(\d{2})/);
+        if (!rm || Number("20" + rm[1]) !== adYear || Number(rm[2]) !== adMonth) return;
+        const bc0 = String(r.branch_code || "").trim();
+        const k = bc0 === "00000" ? "SCY01" : DEFAULT_BRANCHES.some((b) => b.key === bc0) ? bc0 : "";
+        const key = k || "unassigned";
+        const billDate = r.billed_at || r.submission_date;
+        const billRef = [r.billing_doc_no, r.batch_code].filter(Boolean).join(" · ");
+        if (THEFT_KW.test(`${r.income_type || ""} ${r.income_name || ""}`)) {
+          // เบี้ยนำส่งประกันรถหาย (รวม VAT → ถอด /1.07)
+          (Array.isArray(r.bill_items) ? r.bill_items : []).forEach((it) => {
+            if (!THEFT_KW.test(String(it.expense_name || ""))) return;
+            const incl = Number(it.amount || 0);
+            tc[key] = r2(tc[key] + incl / 1.07);
+            tcRows.push({
+              branch: k, doc: r.receipt_no, date: billDate,
+              customer: r.customer_name || "-",
+              detail: [it.expense_name, billRef].filter(Boolean).join(" · "),
+              beforeVat: r2(incl / 1.07), vat: r2(incl - incl / 1.07), total: r2(incl),
+            });
+          });
+          return;
+        }
+        const amt = r2(r.bill_amount);
+        rc[key] = r2(rc[key] + amt);
+        rcRows.push({
+          branch: k, doc: r.receipt_no, date: billDate,
+          customer: r.vendor || r.customer_name || "-",
+          detail: [r.income_name, billRef].filter(Boolean).join(" · "),
+          beforeVat: amt, vat: 0, total: amt,
+        });
+      });
+      // เบี้ยพรบนำส่ง (วางบิลงานพรบ.) — เฉพาะแถวที่อ้างอิงใบรับเรื่อง (CA) ของเดือนรายงาน
+      // กติกา: อ้างอิง SS (ใบขาย) = ต้นทุนฝั่งขายรถ ไม่นับหมวดนี้ / อ้างอิง CA = หมวดรับเรื่อง
+      const yymm = `${String(adYear % 100).padStart(2, "0")}${String(adMonth).padStart(2, "0")}`;
+      insBillRows.filter((r) => r && r.receipt_no).forEach((r) => {
+        const m = String(r.receipt_no).match(/^(SCY\d{2})-CA(\d{4})/);
+        if (!m || m[2] !== yymm) return;
+        const k = DEFAULT_BRANCHES.some((b) => b.key === m[1]) ? m[1] : "";
+        const key = k || "unassigned";
+        const remit = r2(Number(r.premium_remit ?? r.total_premium ?? 0));
+        if (!remit) return;
+        rc[key] = r2(rc[key] + remit);
+        rcRows.push({
+          branch: k, doc: r.receipt_no, date: r.billed_at || r.contract_date,
+          customer: r.insured_name || r.customer_name || "-",
+          detail: ["เบี้ยพรบนำส่ง", r.policy_no, r.billing_doc_no].filter(Boolean).join(" · "),
+          beforeVat: remit, vat: 0, total: remit,
+        });
+      });
+      rc.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + rc[b.key], rc.unassigned));
+      tc.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + tc[b.key], tc.unassigned));
+      setRegCostAgg(rc);
+      setTheftCostAgg(tc);
+      setTheftCostRows(tcRows);
+      setRegCostRows(rcRows);
+
+      // ค่าใช้จ่ายขายรถรายคัน (ใบปะหน้า คชจ.ขายรถ) — สูตรเดียวกับหน้ารายงานสรุปใบปะหน้า:
+      // ค่าดำเนินการ-จดทะเบียน + ค่าจดตามใบเสร็จ + พรบ + ประกันรถหายออกแทน + เงินดาวน์/ค่างวดออกแทน
+      const se = zeroAgg();
+      const seRows = [];
+      regSumRows.filter((r) => r && (r.tax_invoice_no || r.sale_invoice_no)).forEach((r) => {
+        const parts = [
+          ["ค่าดำเนินการ-จดทะเบียน", r2(r.reg_fee_operation)],
+          ["ค่าจดทะเบียนตามใบเสร็จ", r2(r.reg_fee_receipt)],
+          ["พรบ", r2(r.total_insurance_premium)],
+          ["ประกันรถหายออกแทน", r2(r.credit_note_total)],
+          ["เงินดาวน์/ค่างวดออกแทน", r2(r.coupon_total)],
+        ].filter(([, v]) => v);
+        const sum = r2(parts.reduce((s, [, v]) => s + v, 0));
+        if (!sum) return;
+        const m = String(r.sale_invoice_no || "").match(/^SCY\d{2}/);
+        const k = m && DEFAULT_BRANCHES.some((b) => b.key === m[0]) ? m[0]
+          : (String(r.branch || "").toUpperCase() === "NAKORNLUANG" ? "SCY05" : "");
+        const key = k || "unassigned";
+        se[key] = r2(se[key] + sum);
+        seRows.push({
+          branch: k,
+          doc: r.tax_invoice_no || r.sale_invoice_no,
+          date: r.invoice_date || r.sale_date,
+          customer: r.sale_customer_name || r.customer_name || "-",
+          detail: parts.map(([nm, v]) => `${nm} ${fmtN(v)}`).join(" · "),
+          beforeVat: sum, vat: 0, total: sum,
+        });
+      });
+      se.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + se[b.key], se.unassigned));
+      setSaleExpAgg(se);
+      setSaleExpRows(seRows);
+
+      // ค่านำพา — เฉพาะรายการที่จับคู่ใบขายแล้ว อิงเดือน/สาขาจากเลขใบขาย (SS<YYMM>)
+      const df = zeroAgg();
+      const dfRows = [];
+      delivRows.filter((r) => r && r.matched_invoice_no).forEach((r) => {
+        const m = String(r.matched_invoice_no).match(/^(SCY\d{2})-[A-Z]+(\d{4})/);
+        if (!m || m[2] !== yymm) return;
+        const k = DEFAULT_BRANCHES.some((b) => b.key === m[1]) ? m[1] : "";
+        const key = k || "unassigned";
+        const amt = r2(r.total_amount);
+        if (!amt) return;
+        df[key] = r2(df[key] + amt);
+        dfRows.push({
+          branch: k,
+          doc: r.matched_invoice_no,
+          date: r.matched_sale_date || r.payment_date,
+          customer: r.matched_customer || r.pay_to || "-",
+          detail: ["ค่านำพา", r.payment_no, r.pay_to ? `จ่าย ${r.pay_to}` : ""].filter(Boolean).join(" · "),
+          beforeVat: amt, vat: 0, total: amt,
+        });
+      });
+      df.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + df[b.key], df.unassigned));
+      setDelivFeeAgg(df);
+      setDelivFeeRows(dfRows);
+
+      // เบี้ยประกันคอสมอสนำส่ง — เฉพาะกรมธรรม์ที่อ้างใบขาย (SS) ของเดือนรายงาน (รวม VAT → /1.07)
+      // กติกา: SS = ค่าใช้จ่ายหมวดขายรถ / CA = หมวดประกันรถหาย (นับผ่านวางบิลรับเรื่องแล้ว)
+      const cx = zeroAgg();
+      const cxRows = [];
+      cosmosRows.filter((r) => r && r.app_no).forEach((r) => {
+        const m = String(r.invoice_no || "").match(/^(SCY\d{2})-SS(\d{4})/);
+        if (!m || m[2] !== yymm) return;
+        const k = DEFAULT_BRANCHES.some((b) => b.key === m[1]) ? m[1] : "";
+        const key = k || "unassigned";
+        const incl = Number(r.premium || 0);
+        if (!incl) return;
+        cx[key] = r2(cx[key] + incl / 1.07);
+        cxRows.push({
+          branch: k,
+          doc: r.invoice_no,
+          date: r.submitted_at,
+          customer: r.customer_name || "-",
+          detail: ["เบี้ยคอสมอส", r.plan, r.app_no, r.paid_doc_no ? `จ่ายแล้ว ${r.paid_doc_no}` : (r.billing_doc_no ? "วางบิลแล้ว" : "รอวางบิล")].filter(Boolean).join(" · "),
+          beforeVat: r2(incl / 1.07), vat: r2(incl - incl / 1.07), total: r2(incl),
+        });
+      });
+      cx.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + cx[b.key], cx.unassigned));
+      setCosmosExpAgg(cx);
+      setCosmosExpRows(cxRows);
+
+      // ค่าคอมพิเศษ — comm_amount ต่อคัน (แถวซ้ำตามพนักงานที่แบ่งคอม → dedupe ด้วย sale_id)
+      const sc = zeroAgg();
+      const scRows = [];
+      const seenSale = new Set();
+      specCommDetail.filter((r) => r && r.sale_id && !r.is_excluded).forEach((r) => {
+        if (seenSale.has(r.sale_id)) return;
+        seenSale.add(r.sale_id);
+        const m = String(r.invoice_no || "").match(/^(SCY\d{2})-[A-Z]+(\d{4})/);
+        if (!m || m[2] !== yymm) return;
+        const k = DEFAULT_BRANCHES.some((b) => b.key === m[1]) ? m[1] : "";
+        const key = k || "unassigned";
+        const amt = r2(r.comm_amount);
+        if (!amt) return;
+        sc[key] = r2(sc[key] + amt);
+        scRows.push({
+          branch: k,
+          doc: r.invoice_no,
+          date: r.sale_date,
+          customer: r.customer_name || "-",
+          detail: ["ค่าคอมพิเศษ", r.model_series, r.split_count > 1 ? `แบ่ง ${r.split_count} คน` : ""].filter(Boolean).join(" · "),
+          beforeVat: amt, vat: 0, total: amt,
+        });
+      });
+      sc.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + sc[b.key], sc.unassigned));
+      setSpecCommAgg(sc);
+      setSpecCommRows(scRows);
+
+      // ต้นทุนของแถม — Yamaha: สาขา/เดือนจากเลขใบขาย (ref_doc_no SS) · Honda: branch_code '000'/'Z01'
+      const gv = zeroAgg();
+      const gvRows = [];
+      giveCostData.filter((r) => r && !r.error && Number(r.total_cost) > 0).forEach((r) => {
+        let k = "";
+        const inv = String(r.sale_invoice_no || "");
+        const m = inv.match(/^(SCY\d{2})-[A-Z]+(\d{4})/);
+        if (r.side === "yamaha") {
+          if (!m || m[2] !== yymm) return; // เอาเฉพาะใบขายของเดือนรายงาน
+          k = DEFAULT_BRANCHES.some((b) => b.key === m[1]) ? m[1] : "";
+        } else {
+          // Honda กรองเดือนที่ SQL แล้ว (sale_date) — สาขาจาก branch_code
+          k = String(r.branch_code || "").trim() === "Z01" ? "SCY05" : "SCY06";
+        }
+        const amt = r2(r.total_cost);
+        const key = k || "unassigned";
+        gv[key] = r2(gv[key] + amt);
+        gvRows.push({
+          branch: k,
+          doc: inv,
+          date: r.ref_date,
+          customer: "-",
+          detail: `ต้นทุนของแถม ${r.line_count} รายการ (${r.side === "yamaha" ? "ยามาฮ่า" : "ฮอนด้า"})`,
+          beforeVat: amt, vat: 0, total: amt,
+        });
+      });
+      gv.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + gv[b.key], gv.unassigned));
+      setGiveCostAgg(gv);
+      setGiveCostRows(gvRows);
+
       // รับเรื่องงานทะเบียน: ตัดบรรทัดประกันรถหาย (อยู่หมวดค่าบริการ/ประกันแล้ว กันซ้ำ)
       // branch "00000" = ศูนย์ยามาฮ่า → SCY01 · ยอดไม่มี VAT (ก่อน VAT = ยอดเต็ม)
       setRegRows(regLines
         .filter((r) => r && r.receipt_no)
-        .filter((r) => !/ล็อคตั้น|LOCKTON|ประกันรถหาย|คอสมอส|COSMOS/i.test(`${r.income_type || ""} ${r.income_name || ""}`))
+        .filter((r) => !THEFT_KW.test(`${r.income_type || ""} ${r.income_name || ""}`))
         .map((r) => {
           const bc = String(r.branch_code || "").trim();
           const branch = bc === "00000" ? "SCY01" : DEFAULT_BRANCHES.some((b) => b.key === bc) ? bc : "";
@@ -403,7 +694,7 @@ export default function ProfitLossReportPage() {
       setLoadedYm(targetYm);
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + (e.message || e));
-      setVehicleRows([]); setPartSvcRows([]); setFeeRows([]); setPostRows([]); setTheftRows([]); setRegRows([]); setPromoRows([]); setOtherInvRows([]); setManualRows([]);
+      setVehicleRows([]); setPartSvcRows([]); setFeeRows([]); setPostRows([]); setTheftRows([]); setRegRows([]); setPromoRows([]); setOtherInvRows([]); setManualRows([]); setPartsCostAgg(zeroAgg()); setTheftCostAgg(zeroAgg()); setRegCostAgg(zeroAgg()); setTheftCostRows([]); setRegCostRows([]); setSaleExpAgg(zeroAgg()); setSaleExpRows([]); setDelivFeeAgg(zeroAgg()); setDelivFeeRows([]); setCosmosExpAgg(zeroAgg()); setCosmosExpRows([]); setSpecCommAgg(zeroAgg()); setSpecCommRows([]); setGiveCostAgg(zeroAgg()); setGiveCostRows([]);
     }
     setLoading(false);
   }
@@ -542,107 +833,155 @@ export default function ProfitLossReportPage() {
               </thead>
               <tbody>
                 {lines.map((l, i) => (
-                  <tr key={l.key}
-                    onClick={() => l.count > 0 && setPopup(l.key)}
-                    title={l.count > 0 ? "คลิกดูรายละเอียด" : ""}
-                    style={{ borderBottom: "1px solid #e5e7eb", cursor: l.count > 0 ? "pointer" : "default" }}
-                    onMouseEnter={(e) => l.count > 0 && (e.currentTarget.style.background = "#f8fafc")}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
-                    <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
-                    <td style={{ ...td, fontWeight: 700 }}>
-                      <span style={{ color: l.color }}>{l.label}</span>
-                      <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>({l.count})</span>
-                      {l.count > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍</span>}
-                      {l.sub && <div style={{ fontSize: 11, fontWeight: 400, color: "#9ca3af" }}>{l.sub}</div>}
-                    </td>
-                    {branches.map((b) => (
-                      <td key={b.key} style={tdNum}>{fmtN(l.agg[b.key])}</td>
-                    ))}
-                    <td style={{ ...tdNum, fontWeight: 700, background: "#f8fafc" }}>{fmtN(l.agg.total)}</td>
-                  </tr>
+                  <React.Fragment key={l.key}>
+                    <tr
+                      onClick={() => l.count > 0 && openPopup(l.key)}
+                      title={l.count > 0 ? "คลิกดูรายละเอียด" : ""}
+                      style={{ borderBottom: "1px solid #e5e7eb", cursor: l.count > 0 ? "pointer" : "default" }}
+                      onMouseEnter={(e) => l.count > 0 && (e.currentTarget.style.background = "#f8fafc")}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
+                      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
+                      <td style={{ ...td, fontWeight: 700 }}>
+                        <span style={{ color: l.color }}>{l.label}</span>
+                        <span style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#6b7280" }}>({l.count})</span>
+                        {l.count > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍</span>}
+                        {l.sub && <div style={{ fontSize: 11, fontWeight: 400, color: "#9ca3af" }}>{l.sub}</div>}
+                      </td>
+                      {branches.map((b) => (
+                        <td key={b.key} style={tdNum}
+                          title={l.count > 0 && l.agg[b.key] ? `ดูรายละเอียดเฉพาะ ${b.key}` : ""}
+                          onClick={(e) => { if (l.count > 0 && l.agg[b.key]) { e.stopPropagation(); openPopup(l.key, b.key); } }}>
+                          {fmtN(l.agg[b.key])}
+                        </td>
+                      ))}
+                      <td style={{ ...tdNum, fontWeight: 700, background: "#f8fafc" }}>{fmtN(l.agg.total)}</td>
+                    </tr>
+                    {/* หมวดที่มีต้นทุน: ตามด้วยแถวต้นทุน + กำไร
+                        ขายรถ = cost_price รายใบ · อะไหล่ = ต้นทุนสินค้า (ค่าแรงถือเป็นกำไร)
+                        ประกันรถหาย = เบี้ยนำส่ง (วางบิลคอสมอส/ล็อคตั้น) · ทะเบียน = ยอดวางบิลรับเรื่อง */}
+                    {(() => {
+                      const COST_MAP = { vehicle: vehicleCostAgg, partsvc: partsCostAgg, theft: theftCostAgg, regwork: regCostAgg };
+                      const lc = COST_MAP[l.key];
+                      if (!lc || (l.key !== "vehicle" && !(lc.total > 0))) return null;
+                      const costLabel = {
+                        vehicle: "หัก ต้นทุนขายรถ (ตามใบกำกับ)",
+                        partsvc: "หัก ต้นทุนอะไหล่ (สินค้า — ค่าแรงถือเป็นกำไร)",
+                        theft: "หัก เบี้ยนำส่ง (วางบิลอ้างอิงใบรับเรื่อง)",
+                        regwork: "หัก ต้นทุนวางบิล (ค่าดำเนินการรับเรื่อง + เบี้ยพรบนำส่ง)",
+                      }[l.key];
+                      const profitLabel = {
+                        vehicle: "กำไรจากการขายรถ",
+                        partsvc: "กำไรอะไหล่+งานซ่อม",
+                        theft: "กำไรประกันรถหาย",
+                        regwork: "กำไรรับเรื่องงานทะเบียน",
+                      }[l.key];
+                      // แถวต้นทุนจากวางบิล คลิกดูรายละเอียดรายใบได้ (เหมือนแถวรายได้)
+                      const costRowsCount = l.key === "theft" ? theftCostRows.length : l.key === "regwork" ? regCostRows.length : 0;
+                      const costPopup = l.key === "theft" ? "theftcost" : l.key === "regwork" ? "regcost" : null;
+                      // ขายรถมีต้นทุนเพิ่มรายคัน: ใบปะหน้า คชจ. / ค่านำพา / เบี้ยคอสมอส / ค่าคอมพิเศษ
+                      const vehExtras = (l.key === "vehicle" ? [
+                        { agg: saleExpAgg, rows: saleExpRows, popupKey: "salexp", label: "หัก ค่าใช้จ่ายขายรถ (ใบปะหน้า: จดทะเบียน + พรบ + ออกแทน)" },
+                        { agg: delivFeeAgg, rows: delivFeeRows, popupKey: "delivfee", label: "หัก ค่านำพา (จับคู่ใบขายรายคัน)" },
+                        { agg: cosmosExpAgg, rows: cosmosExpRows, popupKey: "cosmosexp", label: "หัก เบี้ยประกันคอสมอส (จับคู่ใบขายรายคัน)" },
+                        { agg: specCommAgg, rows: specCommRows, popupKey: "speccomm", label: "หัก ค่าคอมพิเศษ (จับคู่ใบขายรายคัน)" },
+                        { agg: giveCostAgg, rows: giveCostRows, popupKey: "givecost", label: "หัก ต้นทุนของแถม (จับคู่ใบขายรายคัน)" },
+                      ] : []).filter((x) => x.agg.total > 0);
+                      return (
+                        <>
+                          <tr
+                            onClick={() => costRowsCount > 0 && openPopup(costPopup)}
+                            title={costRowsCount > 0 ? "คลิกดูรายละเอียดใบวางบิล" : ""}
+                            style={{ borderBottom: "1px solid #e5e7eb", background: "#fff7f7", color: "#991b1b", cursor: costRowsCount > 0 ? "pointer" : "default" }}
+                            onMouseEnter={(e) => costRowsCount > 0 && (e.currentTarget.style.background = "#ffecec")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "#fff7f7")}>
+                            <td style={td} />
+                            <td style={{ ...td, fontWeight: 600 }}>
+                              {costLabel}
+                              {costRowsCount > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({costRowsCount})</span>}
+                            </td>
+                            {branches.map((b) => (
+                              <td key={b.key} style={tdNum}
+                                title={costRowsCount > 0 && lc[b.key] ? `ดูรายละเอียดเฉพาะ ${b.key}` : ""}
+                                onClick={(e) => { if (costRowsCount > 0 && lc[b.key]) { e.stopPropagation(); openPopup(costPopup, b.key); } }}>
+                                {lc[b.key] ? `(${fmtN(lc[b.key])})` : "-"}
+                              </td>
+                            ))}
+                            <td style={{ ...tdNum, fontWeight: 700 }}>{lc.total ? `(${fmtN(lc.total)})` : "-"}</td>
+                          </tr>
+                          {vehExtras.map((x) => (
+                            <tr key={x.popupKey}
+                              onClick={() => x.rows.length > 0 && openPopup(x.popupKey)}
+                              title={x.rows.length > 0 ? "คลิกดูรายละเอียดรายคัน" : ""}
+                              style={{ borderBottom: "1px solid #e5e7eb", background: "#fff7f7", color: "#991b1b", cursor: x.rows.length > 0 ? "pointer" : "default" }}
+                              onMouseEnter={(e) => x.rows.length > 0 && (e.currentTarget.style.background = "#ffecec")}
+                              onMouseLeave={(e) => (e.currentTarget.style.background = "#fff7f7")}>
+                              <td style={td} />
+                              <td style={{ ...td, fontWeight: 600 }}>
+                                {x.label}
+                                {x.rows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({x.rows.length})</span>}
+                              </td>
+                              {branches.map((b) => (
+                                <td key={b.key} style={tdNum}
+                                  title={x.rows.length > 0 && x.agg[b.key] ? `ดูรายละเอียดเฉพาะ ${b.key}` : ""}
+                                  onClick={(e) => { if (x.rows.length > 0 && x.agg[b.key]) { e.stopPropagation(); openPopup(x.popupKey, b.key); } }}>
+                                  {x.agg[b.key] ? `(${fmtN(x.agg[b.key])})` : "-"}
+                                </td>
+                              ))}
+                              <td style={{ ...tdNum, fontWeight: 700 }}>{x.agg.total ? `(${fmtN(x.agg.total)})` : "-"}</td>
+                            </tr>
+                          ))}
+                          <tr style={{ borderBottom: "1px solid #e5e7eb", background: "#f0fdf4", color: "#065f46", fontWeight: 700 }}>
+                            <td style={td} />
+                            <td style={td}>{profitLabel}</td>
+                            {branches.map((b) => {
+                              const v = r2(l.agg[b.key] - lc[b.key] - vehExtras.reduce((s, x) => s + x.agg[b.key], 0));
+                              return <td key={b.key} style={{ ...tdNum, color: v < 0 ? "#dc2626" : undefined }}>{fmtN(v)}</td>;
+                            })}
+                            {(() => {
+                              const v = r2(l.agg.total - lc.total - vehExtras.reduce((s, x) => s + x.agg.total, 0));
+                              return <td style={{ ...tdNum, background: "#ecfdf5", color: v < 0 ? "#dc2626" : undefined }}>{fmtN(v)}</td>;
+                            })()}
+                          </tr>
+                        </>
+                      );
+                    })()}
+                  </React.Fragment>
                 ))}
               </tbody>
               <tfoot>
                 <tr style={{ background: "#f1f5f9", fontWeight: 700, color: "#072d6b", borderTop: "2px solid #072d6b" }}>
-                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>รวมรายได้</td>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>รายได้รวม</td>
                   {branches.map((b) => (
                     <td key={b.key} style={tdNum}>{fmtN(tot[b.key])}</td>
                   ))}
                   <td style={{ ...tdNum, fontSize: 13 }}>{fmtN(tot.total)}</td>
                 </tr>
-                <tr style={{ background: "#fff7f7", color: "#991b1b" }}>
-                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>หัก ต้นทุนขายรถ (ตามใบกำกับ)</td>
+                <tr style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>ต้นทุนรวม (รถ + คชจ.ขายรถ + ค่านำพา + คอสมอส + ค่าคอมพิเศษ + ของแถม + อะไหล่ + เบี้ยประกัน + วางบิลทะเบียน)</td>
+                  {branches.map((b) => {
+                    const c = r2(vehicleCostAgg[b.key] + saleExpAgg[b.key] + delivFeeAgg[b.key] + cosmosExpAgg[b.key] + specCommAgg[b.key] + giveCostAgg[b.key] + partsCostAgg[b.key] + theftCostAgg[b.key] + regCostAgg[b.key]);
+                    return <td key={b.key} style={tdNum}>{c ? `(${fmtN(c)})` : "-"}</td>;
+                  })}
+                  {(() => {
+                    const ct = r2(vehicleCostAgg.total + saleExpAgg.total + delivFeeAgg.total + cosmosExpAgg.total + specCommAgg.total + giveCostAgg.total + partsCostAgg.total + theftCostAgg.total + regCostAgg.total);
+                    return <td style={{ ...tdNum, fontSize: 13 }}>{ct ? `(${fmtN(ct)})` : "-"}</td>;
+                  })()}
+                </tr>
+                <tr style={{ background: "#ecfdf5", fontWeight: 700, color: "#065f46", borderTop: "1px solid #065f46", borderBottom: "2px solid #065f46" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>กำไรรวม</td>
                   {branches.map((b) => (
-                    <td key={b.key} style={tdNum}>{vehicleCostAgg[b.key] ? `(${fmtN(vehicleCostAgg[b.key])})` : "-"}</td>
+                    <td key={b.key} style={tdNum}>{fmtN(r2(tot[b.key] - vehicleCostAgg[b.key] - saleExpAgg[b.key] - delivFeeAgg[b.key] - cosmosExpAgg[b.key] - specCommAgg[b.key] - giveCostAgg[b.key] - partsCostAgg[b.key] - theftCostAgg[b.key] - regCostAgg[b.key]))}</td>
                   ))}
-                  <td style={{ ...tdNum, fontWeight: 700 }}>{vehicleCostAgg.total ? `(${fmtN(vehicleCostAgg.total)})` : "-"}</td>
+                  <td style={{ ...tdNum, fontSize: 13 }}>{fmtN(r2(tot.total - vehicleCostAgg.total - saleExpAgg.total - delivFeeAgg.total - cosmosExpAgg.total - specCommAgg.total - giveCostAgg.total - partsCostAgg.total - theftCostAgg.total - regCostAgg.total))}</td>
                 </tr>
               </tfoot>
             </table>
 
-            {/* ---------- กำไรขั้นต้นแยกตามหมวดรายได้ ---------- */}
-            <div style={{ textAlign: "center", marginTop: 26, marginBottom: 8 }}>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "#065f46" }}>กำไรขั้นต้นแยกตามหมวดรายได้</div>
-              <div style={{ fontSize: 11, color: "#9ca3af" }}>ขายรถ = รายได้ − ต้นทุนตามใบกำกับ · หมวดอื่นยังไม่มีข้อมูลต้นทุน (กำไร = รายได้)</div>
-            </div>
-            <table className="pnl" style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-              <thead>
-                <tr style={{ background: "#065f46", color: "#fff" }}>
-                  <th style={{ ...th, width: 34 }}>#</th>
-                  <th style={{ ...th, textAlign: "left" }}>กำไร</th>
-                  {branches.map((b) => (
-                    <th key={b.key} style={{ ...th, borderLeft: "1px solid #10b981" }}>
-                      {b.key}
-                      <div style={{ fontSize: 10, fontWeight: 400, opacity: 0.85 }}>{b.label}</div>
-                    </th>
-                  ))}
-                  <th style={{ ...th, borderLeft: "1px solid #10b981", background: "#047857" }}>กำไรรวม</th>
-                </tr>
-              </thead>
-              <tbody>
-                {lines.map((l, i) => {
-                  const cost = l.key === "vehicle" ? vehicleCostAgg : null;
-                  const gp = (k) => r2(l.agg[k] - (cost ? cost[k] : 0));
-                  const gpTotal = r2(l.agg.total - (cost ? cost.total : 0));
-                  return (
-                    <tr key={l.key}
-                      onClick={() => l.count > 0 && setPopup(l.key)}
-                      title={l.count > 0 ? "คลิกดูรายละเอียด" : ""}
-                      style={{ borderBottom: "1px solid #e5e7eb", cursor: l.count > 0 ? "pointer" : "default" }}
-                      onMouseEnter={(e) => l.count > 0 && (e.currentTarget.style.background = "#f0fdf4")}
-                      onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
-                      <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
-                      <td style={{ ...td, fontWeight: 700 }}>
-                        <span style={{ color: l.color }}>กำไร{l.key === "vehicle" ? "ขั้นต้น" : ""} — {l.label.replace(/^รายได้/, "")}</span>
-                        {cost && (
-                          <div style={{ fontSize: 11, fontWeight: 400, color: "#9ca3af" }}>
-                            รายได้ {fmtN(l.agg.total)} − ต้นทุน {fmtN(cost.total)}
-                          </div>
-                        )}
-                      </td>
-                      {branches.map((b) => (
-                        <td key={b.key} style={{ ...tdNum, color: gp(b.key) < 0 ? "#dc2626" : undefined }}>{fmtN(gp(b.key))}</td>
-                      ))}
-                      <td style={{ ...tdNum, fontWeight: 700, background: "#f8fafc" }}>{fmtN(gpTotal)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                <tr style={{ background: "#ecfdf5", fontWeight: 700, color: "#065f46", borderTop: "2px solid #065f46", borderBottom: "2px solid #065f46" }}>
-                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>กำไรรวมทั้งสิ้น</td>
-                  {branches.map((b) => (
-                    <td key={b.key} style={tdNum}>{fmtN(r2(tot[b.key] - vehicleCostAgg[b.key]))}</td>
-                  ))}
-                  <td style={{ ...tdNum, fontSize: 13 }}>{fmtN(r2(tot.total - vehicleCostAgg.total))}</td>
-                </tr>
-              </tfoot>
-            </table>
           </div>
         )}
 
         <div className="no-print" style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
-          * ยอดรายได้ = มูลค่าก่อน VAT ไม่นับเอกสารยกเลิก · ขายรถระบุสาขาจากรหัส SCY ของใบขาย (ขายข้ามหน้าร้านนับตามสาขาที่ขายจริง) · อะไหล่+งานซ่อมใช้ชุดข้อมูลรายงานภาษีขาย เฉพาะงานซ่อม/ขายอะไหล่จริง (งานซ่อมนครหลวงปรับด้วยยอดจริงจากระบบซ่อม Honda) · ค่าบริการรับฝากชำระ / ค่าไปรษณีย์ / ประกันรถหาย (ป.เปา=คอสมอส, สิงห์ชัย=ล็อคตั้น สาขาตามใบรับเรื่อง) แยกหมวดกัน · รับเรื่องงานทะเบียน (พรบ/ต่อภาษี) ไม่มี VAT ใช้ยอดเต็มจากใบรับเรื่อง · รายได้อื่น/บันทึกรายได้: เอกสารที่ "แตกยอดรายละเอียดการรับชำระ" รายคันไว้จะกระจายเข้าสาขาตามรถที่ขาย ที่ยังไม่แตกยอดแสดงเฉพาะช่องรายได้รวม (ตัดรายการซ้ำจากการนำเข้าใบกำกับแล้ว) · ต้นทุนขายรถ = cost_price รายใบจากไฟล์กำไรขั้นต้น (ใบเงินดาวน์ SGF ไม่มีต้นทุน) — ต้นทุนอะไหล่/ค่าใช้จ่ายอื่นจะทยอยเพิ่มภายหลัง
+          * ยอดรายได้ = มูลค่าก่อน VAT ไม่นับเอกสารยกเลิก · ขายรถระบุสาขาจากรหัส SCY ของใบขาย (ขายข้ามหน้าร้านนับตามสาขาที่ขายจริง) · อะไหล่+งานซ่อมใช้ชุดข้อมูลรายงานภาษีขาย เฉพาะงานซ่อม/ขายอะไหล่จริง (งานซ่อมนครหลวงปรับด้วยยอดจริงจากระบบซ่อม Honda) · ค่าบริการรับฝากชำระ / ค่าไปรษณีย์ / ประกันรถหาย (ป.เปา=คอสมอส, สิงห์ชัย=ล็อคตั้น สาขาตามใบรับเรื่อง) แยกหมวดกัน · รับเรื่องงานทะเบียน (พรบ/ต่อภาษี) ไม่มี VAT ใช้ยอดเต็มจากใบรับเรื่อง · รายได้อื่น/บันทึกรายได้: เอกสารที่ "แตกยอดรายละเอียดการรับชำระ" รายคันไว้จะกระจายเข้าสาขาตามรถที่ขาย ที่ยังไม่แตกยอดแสดงเฉพาะช่องรายได้รวม (ตัดรายการซ้ำจากการนำเข้าใบกำกับแล้ว) · ต้นทุนขายรถ = cost_price รายใบจากไฟล์กำไรขั้นต้น (ใบเงินดาวน์ SGF ไม่มีต้นทุน) · ค่าใช้จ่ายขายรถ = ใบปะหน้า คชจ.ขายรถ รายคัน (ค่าดำเนินการ-จดทะเบียน + ค่าจดตามใบเสร็จ + พรบ + ประกันรถหายออกแทน + เงินดาวน์/ค่างวดออกแทน) · ค่านำพา = รายการที่จับคู่ใบขายแล้ว อิงเดือนของใบขาย (ยังไม่จับคู่ไม่นับ) · เบี้ยคอสมอส = กรมธรรม์ที่อ้างใบขาย (SS) อิงเดือนของใบขาย ถอด VAT /1.07 (กรมธรรม์ที่ยังไม่บันทึกยื่นจะยังไม่มีต้นทุน) · ค่าคอมพิเศษ = ยอดต่อคันจากรายงานค่าคอมพิเศษ (ตามกฎแคมเปญ ก่อนการปรับรายคน) · ต้นทุนของแถม = ยามาฮ่าจ่ายเพื่อแถมอ้างใบขาย + ฮอนด้าบรรทัดขายยอด 0 ที่มีต้นทุน · ต้นทุนอะไหล่ = ต้นทุนสินค้าที่ขาย/เบิกใช้ (Honda cost + Yamaha total_cost) ค่าแรงงานซ่อมถือเป็นกำไร · ต้นทุนประกันรถหาย + ต้นทุนทะเบียน = จากใบวางบิลที่อ้างอิงเลขใบรับเรื่อง (วางบิลรับเรื่อง + เบี้ยพรบนำส่งจากวางบิลงานพรบ.) **อิงเดือนของใบรับเรื่อง** — กติกา: เอกสารอ้างอิง SS = ฝั่งขายรถ / CA = ฝั่งรับเรื่อง (ใบที่ยังไม่ถูกวางบิลจะยังไม่มีต้นทุน รีเฟรชภายหลังจะเข้ามาเอง) — ค่าใช้จ่ายอื่นจะทยอยเพิ่มภายหลัง
         </div>
       </div>
 
@@ -650,9 +989,10 @@ export default function ProfitLossReportPage() {
         <DetailModal
           popup={popup}
           ym={ymLabelTH(loadedYm || ym)}
-          rows={popup === "vehicle" ? vehicleRows : popup === "partsvc" ? partSvcRows : popup === "fee" ? feeRows : popup === "post" ? postRows : popup === "theft" ? theftRows : popup === "regwork" ? regRows : popup === "promo" ? promoRows : popup === "otherinv" ? otherInvRows : manualRows}
+          rows={popup === "vehicle" ? vehicleRows : popup === "salexp" ? saleExpRows : popup === "delivfee" ? delivFeeRows : popup === "cosmosexp" ? cosmosExpRows : popup === "speccomm" ? specCommRows : popup === "givecost" ? giveCostRows : popup === "partsvc" ? partSvcRows : popup === "fee" ? feeRows : popup === "post" ? postRows : popup === "theft" ? theftRows : popup === "theftcost" ? theftCostRows : popup === "regwork" ? regRows : popup === "regcost" ? regCostRows : popup === "promo" ? promoRows : popup === "otherinv" ? otherInvRows : manualRows}
           branches={branches}
-          onClose={() => setPopup(null)}
+          branchFilter={popupBranch}
+          onClose={() => { setPopup(null); setPopupBranch(null); }}
         />
       )}
     </div>
@@ -660,13 +1000,22 @@ export default function ProfitLossReportPage() {
 }
 
 // ===================== Popup รายละเอียดรายใบ =====================
-function DetailModal({ popup, ym, rows, branches, onClose }) {
+function DetailModal({ popup, ym, rows: allRows, branches, branchFilter, onClose }) {
+  // คลิกจากเซลล์สาขา → แสดงเฉพาะรายการของสาขานั้น
+  const rows = branchFilter ? allRows.filter((r) => r.branch === branchFilter) : allRows;
   const title = popup === "vehicle" ? "🏍️ รายได้จากการขายรถ (ใบกำกับภาษี)"
+    : popup === "salexp" ? "💸 ค่าใช้จ่ายขายรถรายคัน (ใบปะหน้า คชจ.ขายรถ)"
+    : popup === "delivfee" ? "🚚 ค่านำพา (จับคู่ใบขายรายคัน)"
+    : popup === "cosmosexp" ? "🛡️ เบี้ยประกันคอสมอส (จับคู่ใบขายรายคัน)"
+    : popup === "speccomm" ? "🎖️ ค่าคอมพิเศษ (จับคู่ใบขายรายคัน)"
+    : popup === "givecost" ? "🎁 ต้นทุนของแถม (จับคู่ใบขายรายคัน)"
     : popup === "partsvc" ? "🔧 รายได้อะไหล่+งานซ่อม"
     : popup === "fee" ? "🧰 รายได้ค่าบริการรับฝากชำระ"
     : popup === "post" ? "📮 รายได้ค่าไปรษณีย์"
     : popup === "theft" ? "🛡️ รายได้ประกันรถหาย (คอสมอส/ล็อคตั้น)"
+    : popup === "theftcost" ? "💸 เบี้ยนำส่งประกันรถหาย (วางบิลอ้างอิงใบรับเรื่อง)"
     : popup === "regwork" ? "📋 รายได้รับเรื่องงานทะเบียน (พรบ/ต่อภาษี)"
+    : popup === "regcost" ? "💸 ต้นทุนวางบิลรับเรื่อง (งานทะเบียน)"
     : popup === "promo" ? "🤝 รายได้ค่าส่งเสริมจากไฟแนนซ์"
     : popup === "otherinv" ? "🧾 รายได้อื่น (มีใบกำกับ)"
     : "📝 รายได้อื่น (บันทึกรายได้ — ไม่ระบุสาขา)";
@@ -684,7 +1033,14 @@ function DetailModal({ popup, ym, rows, branches, onClose }) {
           <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b" }}>{title}</div>
           <button onClick={onClose} style={{ background: "transparent", border: "none", fontSize: 22, cursor: "pointer", color: "#6b7280", lineHeight: 1 }}>×</button>
         </div>
-        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>ประจำเดือน {ym} · {rows.length} รายการ</div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+          ประจำเดือน {ym} · {rows.length} รายการ
+          {branchFilter && (
+            <span style={{ marginLeft: 8, padding: "1px 8px", borderRadius: 4, background: "#e0e7ff", color: "#3730a3", fontSize: 11, fontWeight: 600 }}>
+              เฉพาะสาขา {branchFilter} {brLabel(branchFilter)}
+            </span>
+          )}
+        </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
             <thead>
