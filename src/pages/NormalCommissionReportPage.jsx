@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useMemo } from "react";
-import { TH_MONTHS, SLIP_COMPANY, slipDateLabel, printSlips } from "../lib/payslip";
+import { TH_MONTHS, SLIP_COMPANY, slipDateLabel, printSlips, sendSlipEmail, fetchSlipSendLog } from "../lib/payslip";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -653,7 +653,8 @@ tr.excluded td { text-decoration: line-through; }
   useEffect(() => { if (tab === "pay" && snapshotInfo?.save_group) fetchCombinedEmployees(); /* eslint-disable-next-line */ }, [tab, snapshotInfo?.save_group]);
 
   // ===== สลิปค่าคอมมิชั่น =====
-  const [commSlip, setCommSlip] = useState(null); // { loading, rows, paidAt, periodLabel, error }
+  const [commSlip, setCommSlip] = useState(null); // { loading, rows, paidAt, periodLabel, sentLog, error }
+  const [slipSending, setSlipSending] = useState({}); // ชื่อ → 'sending' | 'sent' | 'error:...'
   const slipNorm = s => String(s || "").trim().replace(/\s+/g, " ");
 
   // ป้ายช่วงงวด เช่น "01-31 พ.ค. 2026" หรือ "21 มิ.ย. - 20 ก.ค. 2026"
@@ -746,9 +747,43 @@ tr.excluded td { text-decoration: line-through; }
         };
       }).sort((a, b) => String(a.hr.employee_code || "๙๙").localeCompare(String(b.hr.employee_code || "๙๙"), "th"));
 
-      setCommSlip({ loading: false, rows, paidAt, periodLabel: commPeriodLabel(periodFrom, periodTo), year });
+      // ประวัติการส่งอีเมลของงวดนี้
+      const periodLabel = commPeriodLabel(periodFrom, periodTo);
+      const log = await fetchSlipSendLog("commission_normal", periodLabel);
+      const sentLog = {};
+      log.forEach(l => { if (l.status === "sent") sentLog[slipNorm(l.employee_name)] = l; });
+
+      setSlipSending({});
+      setCommSlip({ loading: false, rows, paidAt, periodLabel, year, sentLog });
     } catch (e) {
       setCommSlip({ loading: false, rows: [], error: e.message });
+    }
+  }
+
+  async function sendCommSlipOne(r) {
+    if (!r.hr.email || !commSlip) return;
+    const key = slipNorm(r.g.name);
+    setSlipSending(p => ({ ...p, [key]: "sending" }));
+    try {
+      await sendSlipEmail({
+        spec: commSlipSpec(r, commSlip),
+        email: r.hr.email,
+        slipType: "commission_normal",
+        periodLabel: commSlip.periodLabel,
+        saveGroup: snapshotInfo?.save_group || "",
+        sentBy: currentUser?.username || currentUser?.name || "",
+        docLabel: "สลิปค่าคอมมิชชั่น",
+      });
+      setSlipSending(p => ({ ...p, [key]: "sent" }));
+    } catch (e) {
+      setSlipSending(p => ({ ...p, [key]: "error:" + e.message }));
+    }
+  }
+
+  async function sendCommSlipAll() {
+    if (!commSlip) return;
+    for (const r of commSlip.rows) {
+      if (r.hr.email) await sendCommSlipOne(r); // ส่งทีละคน
     }
   }
 
@@ -1200,10 +1235,15 @@ tr.excluded td { text-decoration: line-through; }
             : commSlip.rows.length === 0 ? <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีพนักงานที่ได้ค่าคอมมิชั่นในงวดนี้</div>
             : (
               <>
-                <div style={{ marginBottom: 10 }}>
+                <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
                   <button onClick={() => printCommSlips(commSlip.rows, commSlip)}
                     style={{ padding: "8px 18px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
                     🖨️ พิมพ์สลิปทั้งหมด ({commSlip.rows.length} คน)
+                  </button>
+                  <button onClick={sendCommSlipAll}
+                    disabled={Object.values(slipSending).some(v => v === "sending")}
+                    style={{ padding: "8px 18px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                    📧 ส่งอีเมลทั้งหมด ({commSlip.rows.filter(r => r.hr.email).length} คนที่มีอีเมล)
                   </button>
                 </div>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -1231,11 +1271,32 @@ tr.excluded td { text-decoration: line-through; }
                         </td>
                         <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#059669", fontFamily: "monospace" }}>{fmt(r.commission)}</td>
                         <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.ytdIncome)}</td>
-                        <td style={{ ...td, textAlign: "center" }}>
+                        <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
                           <button onClick={() => printCommSlips([r], commSlip)}
-                            style={{ padding: "4px 12px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
-                            🖨️ สลิป
+                            style={{ padding: "4px 10px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600, marginRight: 4 }}>
+                            🖨️
                           </button>
+                          {(() => {
+                            const key = slipNorm(r.g.name);
+                            const st = slipSending[key];
+                            const prev = commSlip.sentLog?.[key];
+                            return st === "sending" ? <span style={{ fontSize: 11, color: "#92400e" }}>⏳ กำลังส่ง...</span>
+                              : st === "sent" ? <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}>✅ ส่งแล้ว</span>
+                              : st && st.startsWith("error:") ? (
+                                <button onClick={() => sendCommSlipOne(r)} title={st.slice(6)}
+                                  style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                                  ❌ ส่งซ้ำ
+                                </button>
+                              ) : r.hr.email ? (
+                                <>
+                                  <button onClick={() => sendCommSlipOne(r)}
+                                    style={{ padding: "4px 10px", background: "#059669", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                                    📧 ส่ง
+                                  </button>
+                                  {prev && <div style={{ fontSize: 9, color: "#059669" }}>เคยส่ง {new Date(prev.sent_at).toLocaleDateString("th-TH")}</div>}
+                                </>
+                              ) : <span style={{ fontSize: 11, color: "#9ca3af" }}>—</span>;
+                          })()}
                         </td>
                       </tr>
                     ))}

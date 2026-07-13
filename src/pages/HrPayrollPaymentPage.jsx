@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { TH_MONTHS, SLIP_COMPANY, slipDateLabel, printSlips } from "../lib/payslip";
+import { TH_MONTHS, SLIP_COMPANY, slipDateLabel, printSlips, sendSlipEmail, fetchSlipSendLog } from "../lib/payslip";
 
 const HR_API = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -95,7 +95,8 @@ export default function HrPayrollPaymentPage({ currentUser }) {
   const [editingValue, setEditingValue] = useState("");
 
   // payslip popup
-  const [slipPopup, setSlipPopup] = useState(null); // { item, loading, rows, paidAt, error }
+  const [slipPopup, setSlipPopup] = useState(null); // { item, loading, rows, paidAt, sentLog, error }
+  const [slipSending, setSlipSending] = useState({}); // ชื่อ → 'sending' | 'sent' | 'error:...'
 
   // pay popup
   const [payPopup, setPayPopup] = useState(null); // { item, row, doc, loading, error }
@@ -313,6 +314,7 @@ export default function HrPayrollPaymentPage({ currentUser }) {
   // เปิด popup สลิปเงินเดือนของรอบนี้ (item = แถวเดือน+สังกัด)
   async function openSlipPopup(item) {
     setSlipPopup({ item, loading: true, rows: [] });
+    setSlipSending({});
     try {
       const post = body => fetch(HR_API, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -391,9 +393,41 @@ export default function HrPayrollPaymentPage({ currentUser }) {
         };
       }).sort((a, b) => String(a.hr.employee_code || "๙๙").localeCompare(String(b.hr.employee_code || "๙๙"), "th"));
 
-      setSlipPopup({ item, loading: false, rows, paidAt });
+      // ประวัติการส่งอีเมลของงวดนี้ (โชว์ ✅ เคยส่งแล้ว)
+      const log = await fetchSlipSendLog("salary", slipPeriodLabel(item.month_year));
+      const sentLog = {};
+      log.forEach(l => { if (l.status === "sent") sentLog[normName(l.employee_name)] = l; });
+
+      setSlipPopup({ item, loading: false, rows, paidAt, sentLog });
     } catch (e) {
       setSlipPopup({ item, loading: false, rows: [], error: e.message });
+    }
+  }
+
+  async function sendSalarySlipOne(r) {
+    if (!r.hr.email || !slipPopup) return;
+    const key = normName(r.snap.employee_name);
+    setSlipSending(p => ({ ...p, [key]: "sending" }));
+    try {
+      await sendSlipEmail({
+        spec: salarySlipSpec(r, slipPopup.item, slipPopup.paidAt),
+        email: r.hr.email,
+        slipType: "salary",
+        periodLabel: slipPeriodLabel(slipPopup.item.month_year),
+        saveGroup: slipPopup.item.save_group,
+        sentBy: currentUser?.username || currentUser?.name || "",
+        docLabel: "สลิปเงินเดือน",
+      });
+      setSlipSending(p => ({ ...p, [key]: "sent" }));
+    } catch (e) {
+      setSlipSending(p => ({ ...p, [key]: "error:" + e.message }));
+    }
+  }
+
+  async function sendSalarySlipAll() {
+    if (!slipPopup) return;
+    for (const r of slipPopup.rows) {
+      if (r.hr.email) await sendSalarySlipOne(r); // ส่งทีละคน กัน n8n/Gmail โดน rate limit
     }
   }
 
@@ -954,9 +988,6 @@ export default function HrPayrollPaymentPage({ currentUser }) {
             </div>
             <div style={{ marginBottom: 12, fontSize: 12, color: "#6b7280" }}>
               รอบ {slipPeriodLabel(slipPopup.item.month_year)} · วันที่ชำระ {slipDateLabel(slipPopup.paidAt)}
-              <span style={{ marginLeft: 10, padding: "2px 8px", background: "#fef3c7", color: "#92400e", borderRadius: 4, fontSize: 11 }}>
-                📧 ส่งอีเมลอัตโนมัติจะเปิดใช้เมื่อตั้งค่า Gmail บริษัทแล้ว — ตอนนี้พิมพ์/บันทึกเป็น PDF ได้จากปุ่มพิมพ์
-              </span>
             </div>
 
             {slipPopup.loading ? <div style={{ padding: 30, textAlign: "center", color: "#6b7280" }}>กำลังโหลดข้อมูลสลิป (รวมยอดสะสม)...</div>
@@ -969,6 +1000,11 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                     style={{ padding: "8px 18px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
                     🖨️ พิมพ์สลิปทั้งหมด ({slipPopup.rows.length} คน)
                   </button>
+                  <button onClick={sendSalarySlipAll}
+                    disabled={Object.values(slipSending).some(v => v === "sending")}
+                    style={{ padding: "8px 18px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                    📧 ส่งอีเมลทั้งหมด ({slipPopup.rows.filter(r => r.hr.email).length} คนที่มีอีเมล)
+                  </button>
                 </div>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead style={{ background: "#072d6b", color: "#fff" }}>
@@ -979,11 +1015,15 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                       <th style={th}>อีเมล</th>
                       <th style={{ ...th, textAlign: "right" }}>สุทธิ</th>
                       <th style={{ ...th, textAlign: "right" }}>เงินได้สะสม</th>
-                      <th style={{ ...th, textAlign: "center", width: 90 }}></th>
+                      <th style={{ ...th, textAlign: "center", width: 170 }}></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {slipPopup.rows.map((r, i) => (
+                    {slipPopup.rows.map((r, i) => {
+                      const key = normName(r.snap.employee_name);
+                      const st = slipSending[key];
+                      const prev = slipPopup.sentLog?.[key];
+                      return (
                       <tr key={r.snap.snapshot_id || i} style={{ borderTop: "1px solid #e5e7eb" }}>
                         <td style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{i + 1}</td>
                         <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.hr.employee_code || "-"}</td>
@@ -997,12 +1037,33 @@ export default function HrPayrollPaymentPage({ currentUser }) {
                         <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmtN(r.ytdIncome)}</td>
                         <td style={{ ...td, textAlign: "center" }}>
                           <button onClick={() => printSalarySlips([r], slipPopup.item, slipPopup.paidAt)}
-                            style={{ padding: "4px 12px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
-                            🖨️ สลิป
+                            style={{ padding: "4px 10px", background: "#0891b2", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600, marginRight: 4 }}>
+                            🖨️
                           </button>
+                          {st === "sending" ? (
+                            <span style={{ fontSize: 11, color: "#92400e" }}>⏳ กำลังส่ง...</span>
+                          ) : st === "sent" ? (
+                            <span style={{ fontSize: 11, color: "#059669", fontWeight: 700 }}>✅ ส่งแล้ว</span>
+                          ) : st && st.startsWith("error:") ? (
+                            <button onClick={() => sendSalarySlipOne(r)} title={st.slice(6)}
+                              style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                              ❌ ส่งซ้ำ
+                            </button>
+                          ) : r.hr.email ? (
+                            <button onClick={() => sendSalarySlipOne(r)}
+                              style={{ padding: "4px 10px", background: "#059669", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                              📧 ส่ง
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: 11, color: "#9ca3af" }}>—</span>
+                          )}
+                          {prev && !st && (
+                            <div style={{ fontSize: 9, color: "#059669" }}>เคยส่ง {new Date(prev.sent_at).toLocaleDateString("th-TH")}</div>
+                          )}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                   <tfoot style={{ background: "#f3f4f6", fontWeight: 700 }}>
                     <tr>

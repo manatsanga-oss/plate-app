@@ -1,5 +1,10 @@
 // สลิปเงินเดือน/ค่าคอม — ตัวสร้าง HTML สลิปแบบฟอร์มมาตรฐาน 3 คอลัมน์ (ใช้ร่วมกันหลายหน้า)
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
+
 export const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+
+const HR_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 
 export const SLIP_COMPANY = {
   "ป.เปา": "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด",
@@ -99,6 +104,72 @@ export const SLIP_CSS = `
   .conf { margin-top: 8mm; padding-top: 3mm; border-top: 1px solid #ccc; text-align: center; font-size: 9px; color: #555; }
   @media print { .slip { width: auto; } }
 `;
+
+// สร้าง PDF สลิป 1 คน (A4 แนวนอน) → คืน base64 (ไม่มี data: prefix)
+export async function slipPdfBase64(spec) {
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;left:-11000px;top:0;width:1100px;background:#fff;z-index:-1;";
+  host.innerHTML = `<style>${SLIP_CSS.replace(/body \{/, ".slip-pdf-root {")}</style><div class="slip-pdf-root" style="font-family:'Sarabun',Tahoma,sans-serif;color:#111;">${buildSlipHtml(spec)}</div>`;
+  // ปรับความกว้างสลิปให้พอดี container ตอน render เป็นภาพ
+  document.body.appendChild(host);
+  const slipEl = host.querySelector(".slip");
+  slipEl.style.width = "1060px";
+  slipEl.style.padding = "24px 28px";
+  slipEl.style.pageBreakAfter = "auto";
+  try {
+    const canvas = await html2canvas(slipEl, { scale: 2, backgroundColor: "#ffffff" });
+    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+    const pageW = 297, pageH = 210, margin = 8;
+    const maxW = pageW - margin * 2, maxH = pageH - margin * 2;
+    let w = maxW;
+    let h = (canvas.height / canvas.width) * w;
+    if (h > maxH) { h = maxH; w = (canvas.width / canvas.height) * h; }
+    pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", margin, margin, w, h);
+    return pdf.output("datauristring").split(",")[1];
+  } finally {
+    document.body.removeChild(host);
+  }
+}
+
+// สร้าง PDF + ส่งอีเมลผ่าน n8n (action send_payslip) — คืน result จาก backend
+export async function sendSlipEmail({ spec, email, slipType, periodLabel, saveGroup, sentBy, docLabel = "สลิปเงินเดือน" }) {
+  const pdfBase64 = await slipPdfBase64(spec);
+  const safeName = String(spec.name || "slip").replace(/[\\/:*?"<>|\s]+/g, "_");
+  const res = await fetch(HR_API_URL, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "send_payslip",
+      to_email: email,
+      employee_name: spec.name,
+      subject: `${docLabel} ${periodLabel} — ${spec.company}`,
+      body_text: `เรียน คุณ${spec.name}\n\nแนบ${docLabel}งวด ${periodLabel} ของ ${spec.company} มาพร้อมอีเมลนี้\n\nเอกสารนี้เป็นข้อมูลส่วนบุคคล กรุณาอย่าเปิดเผยต่อผู้อื่น`,
+      file_name: `slip_${safeName}_${String(periodLabel).replace(/\s+/g, "_")}.pdf`,
+      pdf_base64: pdfBase64,
+      slip_type: slipType,
+      period_label: periodLabel,
+      save_group: saveGroup || "",
+      sent_by: sentBy || "",
+    }),
+  });
+  const data = await res.json();
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result || result.error || result.status === "error") {
+    throw new Error(result?.error || result?.error_msg || "ส่งไม่สำเร็จ");
+  }
+  return result;
+}
+
+// ดึงประวัติการส่งของงวด (action payslip_send_log)
+export async function fetchSlipSendLog(slipType, periodLabel) {
+  try {
+    const res = await fetch(HR_API_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "payslip_send_log", slip_type: slipType, period_label: periodLabel }),
+    });
+    const data = await res.json();
+    return Array.isArray(data) ? data.filter(r => r && r.employee_name) : [];
+  } catch { return []; }
+}
 
 // specs = array ของ spec ข้างบน — เปิดหน้าต่างพิมพ์ (Save as PDF ได้)
 export function printSlips(specs, title) {
