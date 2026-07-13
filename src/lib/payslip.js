@@ -80,28 +80,28 @@ export function buildSlipHtml(s) {
 export const SLIP_CSS = `
   * { box-sizing: border-box; }
   body { font-family: 'Sarabun', Tahoma, sans-serif; margin: 0; padding: 0; color: #111; }
-  .slip { width: 270mm; padding: 10mm 12mm; page-break-after: always; }
-  .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6mm; }
-  .co { font-size: 17px; font-weight: 700; }
-  .title { font-size: 20px; font-weight: 600; }
-  .en { font-size: 9px; color: #555; font-weight: 400; }
-  .meta { width: 100%; border-collapse: collapse; margin-bottom: 5mm; font-size: 13px; }
+  .slip { width: 270mm; padding: 8mm 10mm; page-break-after: always; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5mm; }
+  .co { font-size: 22px; font-weight: 700; }
+  .title { font-size: 24px; font-weight: 600; }
+  .en { font-size: 11px; color: #555; font-weight: 400; }
+  .meta { width: 100%; border-collapse: collapse; margin-bottom: 4mm; font-size: 16px; }
   .meta td { padding: 2px 6px; vertical-align: top; }
   .meta td.lb { width: 16%; }
-  .body { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .body { width: 100%; border-collapse: collapse; font-size: 16px; }
   .body > tbody > tr > td { border: 1px solid #444; vertical-align: top; width: 33.33%; padding: 0; }
-  .colhead td { text-align: center !important; padding: 3px !important; font-weight: 600; }
+  .colhead td { text-align: center !important; padding: 4px !important; font-weight: 600; }
   .inner { width: 100%; border-collapse: collapse; }
-  .inner td { padding: 4px 8px; }
+  .inner td { padding: 6px 10px; }
   .inner td.lb { text-align: left; }
   .inner td.amt { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .inner tr.sep td { border-top: 1px solid #444; padding: 0; height: 2px; }
   .lb { font-weight: 600; }
-  .foot { width: 100%; margin-top: 6mm; font-size: 13px; }
+  .foot { width: 100%; margin-top: 5mm; font-size: 16px; }
   .foot td { vertical-align: top; padding: 2px 6px; }
   .sign { text-align: right; }
   .sign .line { display: inline-block; width: 60mm; border-bottom: 1px solid #333; }
-  .conf { margin-top: 8mm; padding-top: 3mm; border-top: 1px solid #ccc; text-align: center; font-size: 9px; color: #555; }
+  .conf { margin-top: 6mm; padding-top: 3mm; border-top: 1px solid #ccc; text-align: center; font-size: 11px; color: #555; }
   @media print { .slip { width: auto; } }
 `;
 
@@ -118,8 +118,9 @@ export async function slipPdfBase64(spec) {
   slipEl.style.pageBreakAfter = "auto";
   try {
     const canvas = await html2canvas(slipEl, { scale: 2, backgroundColor: "#ffffff" });
-    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-    const pageW = 297, pageH = 210, margin = 8;
+    // ครึ่ง A4 = A5 แนวนอน (210 x 148 มม.)
+    const pdf = new jsPDF({ orientation: "landscape", unit: "mm", format: "a5" });
+    const pageW = 210, pageH = 148, margin = 6;
     const maxW = pageW - margin * 2, maxH = pageH - margin * 2;
     let w = maxW;
     let h = (canvas.height / canvas.width) * w;
@@ -171,10 +172,27 @@ export async function fetchSlipSendLog(slipType, periodLabel) {
   } catch { return []; }
 }
 
-// specs = array ของ spec ข้างบน — เปิดหน้าต่างพิมพ์ (Save as PDF ได้)
+// CSS เพิ่มเฉพาะตอนพิมพ์: หน้ากระดาษครึ่ง A4 (A5 แนวนอน) + ย่อฟอนต์ให้พอดีหน้า
+const PRINT_A5_CSS = `
+  @page { size: 210mm 148mm; margin: 0; }
+  .slip { width: 210mm; min-height: 148mm; padding: 6mm 8mm; font-size: 11px; }
+  .head { margin-bottom: 3mm; }
+  .co { font-size: 15px; }
+  .title { font-size: 16px; }
+  .en { font-size: 7.5px; }
+  .meta { font-size: 11px; margin-bottom: 3mm; }
+  .body { font-size: 11px; }
+  .colhead td { padding: 2px !important; }
+  .inner td { padding: 3px 7px; }
+  .foot { font-size: 11px; margin-top: 3mm; }
+  .sign .line { width: 45mm; }
+  .conf { font-size: 7.5px; margin-top: 4mm; padding-top: 2mm; }
+`;
+
+// specs = array ของ spec ข้างบน — เปิดหน้าต่างพิมพ์ (Save as PDF ได้) ขนาดครึ่ง A4/ใบ
 export function printSlips(specs, title) {
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title>
-    <style>${SLIP_CSS}</style></head><body>
+    <style>${SLIP_CSS}${PRINT_A5_CSS}</style></head><body>
     ${specs.map(buildSlipHtml).join("\n")}
     <script>window.onload = function(){ setTimeout(function(){ window.print(); }, 300); };<\/script>
     </body></html>`;

@@ -220,7 +220,7 @@ export default function ProfitLossReportPage() {
     const { start, end, thYm } = monthRange(targetYm);
     const [adYear, adMonth] = String(targetYm).split("-").map(Number);
     try {
-      const [taxByBranch, partSvcByAff, hondaJobs, partsCostRows, regLines, feeLines, billLines, insBillRows, regSumRows, delivRows, cosmosRows, specCommDetail, giveCostData, payrollCalc, hrEmployees, otherInv, incomeDocs] = await Promise.all([
+      const [taxByBranch, partSvcByAff, hondaJobs, partsCostRows, regLines, feeLines, billLines, insBillRows, regSumRows, delivRows, cosmosRows, specCommDetail, giveCostData, payrollCalc, hrEmployees, otherInv, incomeDocs, commNormalMonth] = await Promise.all([
         // 1) ใบกำกับขายรถ — เรียกทีละบริษัท (workflow แยกตารางตาม branch)
         //    สาขาจริงดูจาก branch_codes ของใบขาย (นครหลวงไม่มี code → SCY05 ทั้งตาราง)
         Promise.all(TAX_COMPANIES.map(async (co) => {
@@ -319,6 +319,9 @@ export default function ProfitLossReportPage() {
           .then(asArray).catch(() => []),
         // 3) บันทึกรายได้เอง
         post(FINANCE_URL, { action: "income_record", op: "list", date_from: start, date_to: end })
+          .then(asArray).catch(() => []),
+        // 3k) ค่าคอมปกติรายคนของงวดเดือนนี้ (ไม่รวมค่าคอมพิเศษ — นับแยกที่ 3h แล้ว) รวมเข้าแถวเงินเดือน
+        post(SALES_EXTRA_URL, { action: "commission_normal_payables", mode: "ytd_commission", date_from: `${targetYm}-01`, date_to: `${targetYm}-01`, include_special: false })
           .then(asArray).catch(() => []),
       ]);
 
@@ -607,6 +610,32 @@ export default function ProfitLossReportPage() {
           beforeVat: gross, vat: 0, total: gross,
         });
       });
+      // ค่าคอมปกติรายคนของงวดเดือนนี้ — รวมเข้าแถวเดียวกับเงินเดือน (กติกา Front/Back เดียวกัน)
+      // หมายเหตุ: ค่าคอมพิเศษไม่รวมที่นี่ (นับแยกเป็นค่าใช้จ่ายขายรถรายคันแล้ว กันซ้ำ)
+      const empByName = {};
+      hrEmployees.forEach((e) => {
+        if (e && e.employee_name) empByName[String(e.employee_name).trim().replace(/\s+/g, " ")] = e;
+      });
+      commNormalMonth.filter((c) => c && c.employee_name).forEach((c) => {
+        const amt = r2(c.commission_ytd);
+        if (!amt) return;
+        const emp = empByName[String(c.employee_name).trim().replace(/\s+/g, " ")] || {};
+        const off = String(emp.office_type || "").toUpperCase();
+        const isFront = off.includes("FRONT");
+        const bc = String(emp.branch_code || "").trim();
+        const k = isFront && DEFAULT_BRANCHES.some((b) => b.key === bc) ? bc : "";
+        const key = k || "unassigned";
+        py[key] = r2(py[key] + amt);
+        pyRows.push({
+          branch: k,
+          doc: c.employee_name,
+          date: `${targetYm}-01`,
+          customer: emp.position || "-",
+          detail: ["ค่าคอมปกติ", isFront ? "FRONT OFFICE" : (off || "BACK OFFICE"), emp.affiliation].filter(Boolean).join(" · "),
+          beforeVat: amt, vat: 0, total: amt,
+        });
+      });
+
       py.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + py[b.key], py.unassigned));
       setPayrollAgg(py);
       setPayrollRows(pyRows);
@@ -1015,7 +1044,7 @@ export default function ProfitLossReportPage() {
                   title={payrollRows.length > 0 ? "คลิกดูเงินเดือนรายคน" : ""}
                   style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b", cursor: payrollRows.length > 0 ? "pointer" : "default" }}>
                   <td colSpan={2} style={{ ...td, textAlign: "right" }}>
-                    หัก เงินเดือน (Front ตามร้าน · Back รวม — ยอดก่อนหักรายการหัก)
+                    หัก เงินเดือน+ค่าคอมปกติ (Front ตามร้าน · Back รวม — ยอดก่อนหักรายการหัก)
                     {payrollRows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({payrollRows.length} คน)</span>}
                   </td>
                   {branches.map((b) => (
@@ -1045,7 +1074,7 @@ export default function ProfitLossReportPage() {
         )}
 
         <div className="no-print" style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
-          * ยอดรายได้ = มูลค่าก่อน VAT ไม่นับเอกสารยกเลิก · ขายรถระบุสาขาจากรหัส SCY ของใบขาย (ขายข้ามหน้าร้านนับตามสาขาที่ขายจริง) · อะไหล่+งานซ่อมใช้ชุดข้อมูลรายงานภาษีขาย เฉพาะงานซ่อม/ขายอะไหล่จริง (งานซ่อมนครหลวงปรับด้วยยอดจริงจากระบบซ่อม Honda) · ค่าบริการรับฝากชำระ / ค่าไปรษณีย์ / ประกันรถหาย (ป.เปา=คอสมอส, สิงห์ชัย=ล็อคตั้น สาขาตามใบรับเรื่อง) แยกหมวดกัน · รับเรื่องงานทะเบียน (พรบ/ต่อภาษี) ไม่มี VAT ใช้ยอดเต็มจากใบรับเรื่อง · รายได้อื่น/บันทึกรายได้: เอกสารที่ "แตกยอดรายละเอียดการรับชำระ" รายคันไว้จะกระจายเข้าสาขาตามรถที่ขาย ที่ยังไม่แตกยอดแสดงเฉพาะช่องรายได้รวม (ตัดรายการซ้ำจากการนำเข้าใบกำกับแล้ว) · ต้นทุนขายรถ = cost_price รายใบจากไฟล์กำไรขั้นต้น (ใบเงินดาวน์ SGF ไม่มีต้นทุน) · ค่าใช้จ่ายขายรถ = ใบปะหน้า คชจ.ขายรถ รายคัน (ค่าดำเนินการ-จดทะเบียน + ค่าจดตามใบเสร็จ + พรบ + ประกันรถหายออกแทน + เงินดาวน์/ค่างวดออกแทน) · ค่านำพา = รายการที่จับคู่ใบขายแล้ว อิงเดือนของใบขาย (ยังไม่จับคู่ไม่นับ) · เบี้ยคอสมอส = กรมธรรม์ที่อ้างใบขาย (SS) อิงเดือนของใบขาย ถอด VAT /1.07 (กรมธรรม์ที่ยังไม่บันทึกยื่นจะยังไม่มีต้นทุน) · ค่าคอมพิเศษ = ยอดต่อคันจากรายงานค่าคอมพิเศษ (ตามกฎแคมเปญ ก่อนการปรับรายคน) · ต้นทุนของแถม = ยามาฮ่าจ่ายเพื่อแถมอ้างใบขาย + ฮอนด้าบรรทัดขายยอด 0 ที่มีต้นทุน · เงินเดือน = ยอดรายได้ก่อนหักรายการหัก (รอบ 21→20): FRONT OFFICE ลงร้านตามรหัสร้านพนักงาน, BACK OFFICE ลงช่องรายได้รวม · ต้นทุนอะไหล่ = ต้นทุนสินค้าที่ขาย/เบิกใช้ (Honda cost + Yamaha total_cost) ค่าแรงงานซ่อมถือเป็นกำไร · ต้นทุนประกันรถหาย + ต้นทุนทะเบียน = จากใบวางบิลที่อ้างอิงเลขใบรับเรื่อง (วางบิลรับเรื่อง + เบี้ยพรบนำส่งจากวางบิลงานพรบ.) **อิงเดือนของใบรับเรื่อง** — กติกา: เอกสารอ้างอิง SS = ฝั่งขายรถ / CA = ฝั่งรับเรื่อง (ใบที่ยังไม่ถูกวางบิลจะยังไม่มีต้นทุน รีเฟรชภายหลังจะเข้ามาเอง) — ค่าใช้จ่ายอื่นจะทยอยเพิ่มภายหลัง
+          * ยอดรายได้ = มูลค่าก่อน VAT ไม่นับเอกสารยกเลิก · ขายรถระบุสาขาจากรหัส SCY ของใบขาย (ขายข้ามหน้าร้านนับตามสาขาที่ขายจริง) · อะไหล่+งานซ่อมใช้ชุดข้อมูลรายงานภาษีขาย เฉพาะงานซ่อม/ขายอะไหล่จริง (งานซ่อมนครหลวงปรับด้วยยอดจริงจากระบบซ่อม Honda) · ค่าบริการรับฝากชำระ / ค่าไปรษณีย์ / ประกันรถหาย (ป.เปา=คอสมอส, สิงห์ชัย=ล็อคตั้น สาขาตามใบรับเรื่อง) แยกหมวดกัน · รับเรื่องงานทะเบียน (พรบ/ต่อภาษี) ไม่มี VAT ใช้ยอดเต็มจากใบรับเรื่อง · รายได้อื่น/บันทึกรายได้: เอกสารที่ "แตกยอดรายละเอียดการรับชำระ" รายคันไว้จะกระจายเข้าสาขาตามรถที่ขาย ที่ยังไม่แตกยอดแสดงเฉพาะช่องรายได้รวม (ตัดรายการซ้ำจากการนำเข้าใบกำกับแล้ว) · ต้นทุนขายรถ = cost_price รายใบจากไฟล์กำไรขั้นต้น (ใบเงินดาวน์ SGF ไม่มีต้นทุน) · ค่าใช้จ่ายขายรถ = ใบปะหน้า คชจ.ขายรถ รายคัน (ค่าดำเนินการ-จดทะเบียน + ค่าจดตามใบเสร็จ + พรบ + ประกันรถหายออกแทน + เงินดาวน์/ค่างวดออกแทน) · ค่านำพา = รายการที่จับคู่ใบขายแล้ว อิงเดือนของใบขาย (ยังไม่จับคู่ไม่นับ) · เบี้ยคอสมอส = กรมธรรม์ที่อ้างใบขาย (SS) อิงเดือนของใบขาย ถอด VAT /1.07 (กรมธรรม์ที่ยังไม่บันทึกยื่นจะยังไม่มีต้นทุน) · ค่าคอมพิเศษ = ยอดต่อคันจากรายงานค่าคอมพิเศษ (ตามกฎแคมเปญ ก่อนการปรับรายคน) · ต้นทุนของแถม = ยามาฮ่าจ่ายเพื่อแถมอ้างใบขาย + ฮอนด้าบรรทัดขายยอด 0 ที่มีต้นทุน · เงินเดือน = ยอดรายได้ก่อนหักรายการหัก (รอบ 21→20) + ค่าคอมปกติของงวดเดือนนั้น (ไม่รวมค่าคอมพิเศษ ซึ่งนับแยกรายคันแล้ว): FRONT OFFICE ลงร้านตามรหัสร้านพนักงาน, BACK OFFICE ลงช่องรายได้รวม · ต้นทุนอะไหล่ = ต้นทุนสินค้าที่ขาย/เบิกใช้ (Honda cost + Yamaha total_cost) ค่าแรงงานซ่อมถือเป็นกำไร · ต้นทุนประกันรถหาย + ต้นทุนทะเบียน = จากใบวางบิลที่อ้างอิงเลขใบรับเรื่อง (วางบิลรับเรื่อง + เบี้ยพรบนำส่งจากวางบิลงานพรบ.) **อิงเดือนของใบรับเรื่อง** — กติกา: เอกสารอ้างอิง SS = ฝั่งขายรถ / CA = ฝั่งรับเรื่อง (ใบที่ยังไม่ถูกวางบิลจะยังไม่มีต้นทุน รีเฟรชภายหลังจะเข้ามาเอง) — ค่าใช้จ่ายอื่นจะทยอยเพิ่มภายหลัง
         </div>
       </div>
 
