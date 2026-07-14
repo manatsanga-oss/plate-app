@@ -309,18 +309,28 @@ export default function FlowInputTaxReportPage({ currentUser }) {
   // ===== จับคู่กับจัดการภาษีซื้อ (แอป): อัตโนมัติด้วยเลขเอกสาร (ใบกำกับ + อ้างอิง) + คู่ที่จับเอง =====
   const match = useMemo(() => {
     const appByKey = new Map(); // normDoc(doc_no) -> appRow
-    for (const a of appRows) { const k = normDoc(a.doc_no); if (k && !appByKey.has(k)) appByKey.set(k, a); }
+    // เลขชนกันหลังตัด F- (F-EXPxxx ฝั่ง FLOW vs EXPxxx สร้างในแอป — คนละใบ): เลขอ้างอิงในรายงาน FLOW
+    // คือเลขเอกสารของ FlowAccount เอง → ให้ใบที่มี F- ชนะ auto-match ใบฝั่งแอปคงเป็นตัวเลือกจับเองต่อไป
+    const isFlowDoc = (a) => /^F-/i.test(String(a?.doc_no || "").trim());
+    for (const a of appRows) {
+      const k = normDoc(a.doc_no); if (!k) continue;
+      const cur = appByKey.get(k);
+      if (!cur || (isFlowDoc(a) && !isFlowDoc(cur))) appByKey.set(k, a);
+    }
     const manualByFlow = new Map(); // flow_key -> manual row
-    const usedAppKeys = new Set();  // เลขฝั่งแอปที่ถูกคู่ manual ใช้แล้ว (รวมทุกใบในกลุ่ม)
-    for (const m of manual) { manualByFlow.set(m.flow_key, m); docsOf(m).forEach(d => usedAppKeys.add(normDoc(d.doc_no))); }
+    // เลขฝั่งแอปที่ถูกคู่ manual ใช้แล้ว — แยกตาม source กันเลขชนข้ามแหล่ง
+    // (normDoc ตัด F- ทำให้ F-EXPxxx ค่าน้ำมัน กับ EXPxxx ค่าใช้จ่ายแอป เป็นเลขเดียวกันทั้งที่คนละใบ)
+    const usedAppKeys = new Set();  // "source|เลข"
+    const usedAppBare = new Set();  // คู่ manual เก่าที่ไม่ได้เก็บ source — ตัดทุก source แบบเดิม
+    const addUsed = (d) => { const k = normDoc(d.doc_no); if (!k) return; if (d.source) usedAppKeys.add(d.source + "|" + k); else usedAppBare.add(k); };
+    for (const m of manual) { manualByFlow.set(m.flow_key, m); docsOf(m).forEach(addUsed); }
     // เอกสารที่ถูกจับคู่ไว้ในรอบก่อน/ถัดไปแล้ว — ตัดออกจากตัวเลือก ไม่ให้จับซ้ำข้ามรอบ
-    for (const m of manualOther) { docsOf(m).forEach(d => usedAppKeys.add(normDoc(d.doc_no))); }
-    const flowKeys = new Set();      // เลขทุกตัวฝั่ง FLOW (ไว้หา app-only)
+    for (const m of manualOther) { docsOf(m).forEach(addUsed); }
+    const usedByManual = (a) => { const k = normDoc(a.doc_no); return !k || usedAppKeys.has((a.source || "") + "|" + k) || usedAppBare.has(k); };
     const flowStatus = new Map();    // key(flow row) -> { matched, manual, appRow }
+    const usedAuto = new Set();      // แถวแอปที่ auto-match ใช้ไปแล้ว — ตัดเป็นรายใบ ไม่ตัดทั้งเลข (เลขชนกันได้)
     rows.forEach((r, i) => {
       const k1 = normDoc(r.tax_invoice_no), k2 = normDoc(r.reference_no);
-      if (k1) flowKeys.add(k1);
-      if (k2) flowKeys.add(k2);
       const mm = manualByFlow.get(flowKeyOf(r));
       if (mm) {
         const appDocs = docsOf(mm);
@@ -328,21 +338,26 @@ export default function FlowInputTaxReportPage({ currentUser }) {
         flowStatus.set(r.id ?? ("i" + i), { matched: true, manual: true, appRow, appDocs, appDocNo: mm.app_doc_no, appSource: mm.app_source });
       } else {
         const hit = (k1 && appByKey.get(k1)) || (k2 && appByKey.get(k2)) || null;
-        flowStatus.set(r.id ?? ("i" + i), { matched: !!hit, manual: false, appRow: hit });
+        // เลขอ้างอิง EXP ใน FLOW คือเลขเอกสารของ FlowAccount เอง — ตรงกับเลขใบ expense ของแอปได้โดยบังเอิญ
+        // (คนละใบ เช่น อ้าง EXP2026060071 = ใบประปาฝั่ง FLOW แต่แอปคือฟูจิฟิล์ม) → ใบ source=expense
+        // ต้องมียอด VAT ใกล้ (≤5%) หรือชื่อผู้ขายคล้ายด้วย ถึงนับ auto-match ไม่งั้นปล่อยไว้ให้จับเอง
+        const okHit = hit && (hit.source !== "expense" || amtScore(r, hit) >= 0.7 || nameSim(r.vendor_name, hit.vendor_name) >= 0.45) ? hit : null;
+        if (okHit) usedAuto.add(okHit);
+        flowStatus.set(r.id ?? ("i" + i), { matched: !!okHit, manual: false, appRow: okHit });
       }
     });
     const curYm = period ? period.replace("-", "") : "";
-    const appUnmatched = appRows.filter(a => { const k = normDoc(a.doc_no); return k && !flowKeys.has(k) && !usedAppKeys.has(k); });
+    const appUnmatched = appRows.filter(a => normDoc(a.doc_no) && !usedAuto.has(a) && !usedByManual(a));
     // เตือน "มีในจัดการภาษีซื้อ แต่ไม่มีใน FLOW" = เฉพาะเดือนของรอบนี้ (เดือนข้างเคียงไม่นับว่าขาด — คนละรอบยื่น)
     const appOnly = appUnmatched.filter(a => !curYm || !a._ym || a._ym === curYm);
     // เดือนข้างเคียง (ใบข้ามรอบ) → เข้าเฉพาะ pool จับคู่
     const appAround = appUnmatched.filter(a => curYm && a._ym && a._ym !== curYm);
     // ใบลดหนี้อะไหล่ (ยอดติดลบ) + LOCKTON + ใบกำกับ 52071 — ตัวเลือกจับคู่เพิ่ม (ไม่อยู่ใน list_input_tax) ตัดที่ถูกจับคู่ไปแล้วออก
-    const cnOnly = partCN.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
-    const lktOnly = lktRows.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
-    const tiOnly = theftInv.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
-    const cosOnly = cosmosRows.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
-    const matOnly = matRows.filter(c => { const k = normDoc(c.doc_no); return k && !usedAppKeys.has(k); });
+    const cnOnly = partCN.filter(c => !usedByManual(c));
+    const lktOnly = lktRows.filter(c => !usedByManual(c));
+    const tiOnly = theftInv.filter(c => !usedByManual(c));
+    const cosOnly = cosmosRows.filter(c => !usedByManual(c));
+    const matOnly = matRows.filter(c => !usedByManual(c));
     const pairCandidates = [...appOnly, ...appAround, ...cnOnly, ...lktOnly, ...tiOnly, ...cosOnly, ...matOnly];
     const matchedCount = [...flowStatus.values()].filter(v => v.matched).length;
     return { flowStatus, appOnly, pairCandidates, matchedCount };

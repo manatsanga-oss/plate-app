@@ -45,12 +45,14 @@ const emptyForm = () => ({
   from_bank_account_id: "",
   status: "draft",  // draft | paid | cancelled
   affiliation: "",  // สังกัด: ป.เปา | สิงห์ชัย
+  usage_branch: "",  // สาขาที่ใช้ (branch_code) — "" = ไม่ระบุ
   items: [emptyItem()],
 });
 
 export default function ExpenseRecordPage({ currentUser }) {
   const [docs, setDocs] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [branches, setBranches] = useState([]); // สาขาจาก branch_master (dropdown สาขาที่ใช้)
   const [generalExpenses, setGeneralExpenses] = useState([]); // หมวดจาก master
   const [bankAccounts, setBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -93,13 +95,14 @@ export default function ExpenseRecordPage({ currentUser }) {
     fetchVendors();
     fetchGeneralExpenses();
     fetchBankAccounts();
+    fetchBranches();
     fetchRemitMap();
     fetchPp30Map();
     fetchIncomeDocs();
     /* eslint-disable-next-line */
   }, []);
 
-  useEffect(() => { if (dateFrom && dateTo) fetchDocs(); /* eslint-disable-next-line */ }, [dateFrom, dateTo]);
+  useEffect(() => { if (dateFrom && dateTo) fetchDocs(); /* eslint-disable-next-line */ }, [dateFrom, dateTo, tab]);
 
   // สถานะนำส่งภาษี ภ.ง.ด. — map expense_doc_id → เลขใบนำส่ง (TRMT-...) จาก tax_remittance_items
   const [remitMap, setRemitMap] = useState({});
@@ -159,9 +162,17 @@ export default function ExpenseRecordPage({ currentUser }) {
   async function fetchDocs() {
     setLoading(true);
     try {
+      // แท็บประวัติ: กรองด้วย "วันที่จ่ายจริง" — แต่ op=list กรองด้วยวันที่เอกสาร
+      // จึงดึงเอกสารย้อนหลังเพิ่ม 120 วันมาเผื่อ (ใบที่ลงวันที่ก่อนหน้าแต่เพิ่งจ่ายในช่วงที่เลือก)
+      let fetchFrom = dateFrom;
+      if (tab === "history" && dateFrom) {
+        const d = new Date(dateFrom);
+        d.setDate(d.getDate() - 120);
+        fetchFrom = d.toISOString().slice(0, 10);
+      }
       const res = await fetch(ACC_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "expense_record", op: "list", date_from: dateFrom, date_to: dateTo }),
+        body: JSON.stringify({ action: "expense_record", op: "list", date_from: fetchFrom, date_to: dateTo }),
       });
       const data = await res.json();
       setDocs(Array.isArray(data) ? data : []);
@@ -198,6 +209,16 @@ export default function ExpenseRecordPage({ currentUser }) {
       setBankAccounts(Array.isArray(data) ? data : []);
     } catch { setBankAccounts([]); }
   }
+  async function fetchBranches() {
+    try {
+      const res = await fetch(MASTER_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_branches", include_inactive: "true" }),
+      });
+      const data = await res.json();
+      setBranches((Array.isArray(data) ? data : []).filter(b => b && b.branch_code));
+    } catch { setBranches([]); }
+  }
 
   function openCreate() {
     setEditTarget(null);
@@ -226,6 +247,7 @@ export default function ExpenseRecordPage({ currentUser }) {
       from_bank_account_id: d.from_bank_account_id || "",
       status: d.status || "draft",
       affiliation: d.affiliation || "",
+      usage_branch: d.usage_branch || "",
       items: Array.isArray(d.items) && d.items.length ? d.items : [emptyItem()],
     });
     setShowForm(true);
@@ -384,6 +406,7 @@ export default function ExpenseRecordPage({ currentUser }) {
         net_to_pay: netToPay,
         status: form.status,
         affiliation: form.affiliation || null,
+        usage_branch: form.usage_branch || null,
         items: form.items.filter(it => it.expense_name || Number(it.amount) > 0),
         created_by: currentUser?.username || currentUser?.name || "system",
       };
@@ -438,6 +461,7 @@ export default function ExpenseRecordPage({ currentUser }) {
       from_bank_account_id: "",
       status: "draft",
       affiliation: d.affiliation || "",
+      usage_branch: d.usage_branch || "",  // สร้างซ้ำ → ติดสาขาที่ใช้ของใบเดิมมาด้วย
       items: Array.isArray(d.items) && d.items.length
         ? d.items.map(it => ({
             expense_code: it.expense_code || "",
@@ -489,6 +513,7 @@ export default function ExpenseRecordPage({ currentUser }) {
           <h1>ใบบันทึกค่าใช้จ่าย</h1>
           <div class="muted">เลขที่ <b>${esc(d.expense_doc_no)}</b> · วันที่ ${fmtDate(d.doc_date)}</div>
           ${d.affiliation ? `<div class="muted">สังกัด: ${esc(d.affiliation)}</div>` : ""}
+          ${d.usage_branch ? `<div class="muted">สาขาที่ใช้: ${esc(d.usage_branch)}</div>` : ""}
         </div>
         <div style="text-align:right">
           <div><b>${esc(d.vendor_name)}</b></div>
@@ -537,7 +562,7 @@ export default function ExpenseRecordPage({ currentUser }) {
     if (/แนะนำ|52074/.test(String(d.description || ""))) return false;  // ค่าแนะนำ → แยกไปหน้า "บันทึกค่าแนะนำ"
     if (filterAff && String(d.affiliation || "") !== filterAff) return false;
     if (!kw) return true;
-    const hay = [d.expense_doc_no, d.vendor_name, d.reference_no, d.description].filter(Boolean).join(" ").toLowerCase();
+    const hay = [d.expense_doc_no, d.vendor_name, d.reference_no, d.description, d.paid_doc_no].filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
 
@@ -561,7 +586,20 @@ export default function ExpenseRecordPage({ currentUser }) {
     paidGroups[key].net += Number(d.net_to_pay || d.total || 0);
     paidGroups[key].wht += Number(d.wht_amount || 0);
   });
-  const paidGroupsList = Object.values(paidGroups);
+  // แท็บประวัติ: กรองกลุ่มใบจ่ายด้วย "วันที่จ่ายจริง" ให้ตรงช่วงที่เลือก (ตรงกับรายงานเคลื่อนไหวบัญชี)
+  const localDateStr = (v) => {
+    if (!v) return "";
+    const d = new Date(v);
+    if (isNaN(d)) return String(v).slice(0, 10);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const paidGroupsList = Object.values(paidGroups).filter(g => {
+    const pd = localDateStr(g.paid_at);
+    if (!pd) return true;
+    if (dateFrom && pd < dateFrom) return false;
+    if (dateTo && pd > dateTo) return false;
+    return true;
+  });
 
   const selectedIds = Object.keys(selected).filter(k => selected[k]).map(Number);
   const selectedRows = draftDocs.filter(d => selectedIds.includes(d.expense_doc_id));
@@ -897,7 +935,7 @@ export default function ExpenseRecordPage({ currentUser }) {
       {/* Form Modal */}
       {showForm && <FormModal
         form={form} setForm={setForm} editTarget={editTarget}
-        vendors={vendors} generalExpenses={generalExpenses} bankAccounts={bankAccounts}
+        vendors={vendors} branches={branches} generalExpenses={generalExpenses} bankAccounts={bankAccounts}
         onVendorChange={onVendorChange} onAddVendor={goAddVendor} onAddCategory={openAddCategory}
         onItemChange={onItemChange} addItem={addItem} removeItem={removeItem}
         subtotal={subtotal} discountAmount={discountAmount} vatAmount={vatAmount}
@@ -1445,7 +1483,7 @@ function VendorAddModal({ form, setForm, onClose, onSave, saving }) {
   );
 }
 
-function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAccounts, onVendorChange, onAddVendor, onAddCategory, onItemChange, addItem, removeItem, subtotal, discountAmount, vatAmount, totalIncVat, whtBase, whtAmount, netToPay, onClose, onSave, saving }) {
+function FormModal({ form, setForm, editTarget, vendors, branches, generalExpenses, bankAccounts, onVendorChange, onAddVendor, onAddCategory, onItemChange, addItem, removeItem, subtotal, discountAmount, vatAmount, totalIncVat, whtBase, whtAmount, netToPay, onClose, onSave, saving }) {
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 1000, padding: 20, overflowY: "auto" }}
       onClick={() => !saving && onClose()}>
@@ -1471,6 +1509,15 @@ function FormModal({ form, setForm, editTarget, vendors, generalExpenses, bankAc
               <option value="">-- ไม่ระบุ --</option>
               <option value="ป.เปา">ป.เปา</option>
               <option value="สิงห์ชัย">สิงห์ชัย</option>
+            </select>
+          </div>
+          <div>
+            <label style={lbl}>🏬 สาขาที่ใช้</label>
+            <select value={form.usage_branch} onChange={e => setForm(f => ({ ...f, usage_branch: e.target.value }))} style={inp}>
+              <option value="">-- ไม่ระบุ --</option>
+              {branches.map(b => (
+                <option key={b.branch_code} value={b.branch_code}>{b.branch_code} {b.branch_name || ""}</option>
+              ))}
             </select>
           </div>
           <div style={{ gridColumn: "1 / span 2" }}>

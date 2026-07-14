@@ -7,6 +7,15 @@ const YAMAHA_SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yama
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+// สถานะเงินมัดจำ เทียบยอดคงเหลือกับยอดมัดจำ: เต็ม / บางส่วน / หมด
+function depositStatus(dep) {
+  const total = Number(dep?.deposit_amount || dep?.amount || 0);
+  const remaining = dep?.remaining_amount == null ? null : Number(dep.remaining_amount);
+  if (remaining == null || !total) return { label: "-", color: "#9ca3af", remaining };
+  if (remaining <= 0) return { label: "หมด", color: "#dc2626", remaining };
+  if (remaining >= total) return { label: "เต็ม", color: "#16a34a", remaining };
+  return { label: "บางส่วน", color: "#f59e0b", remaining };
+}
 function fmtDate(v) {
   if (!v) return "-";
   const d = new Date(v);
@@ -245,6 +254,67 @@ export default function DepositSeizePage({ currentUser } = {}) {
     }
   }
 
+  function printList() {
+    if (!filtered.length) { alert("ไม่มีรายการให้พิมพ์"); return; }
+    const filterLabel = [
+      filterBrand !== "all" ? `ยี่ห้อ: ${filterBrand}` : "",
+      filterStatus !== "all" ? `สถานะ: ${filterStatus}` : "",
+      filterSeized === "seized" ? "เฉพาะที่ยึดเงินมัดจำแล้ว" : "",
+      search.trim() ? `ค้นหา: "${search.trim()}"` : "",
+    ].filter(Boolean).join(" · ") || "ทั้งหมด";
+    const w = window.open("", "_blank");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>รายการยึดเงินมัดจำ</title>
+<style>
+  body { font-family: 'Tahoma', sans-serif; padding: 16px; font-size: 11px; }
+  h2 { margin: 0 0 4px; font-size: 16px; }
+  .sub { color: #6b7280; margin-bottom: 10px; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; font-size: 10px; }
+  th { background: #072d6b; color: #fff; padding: 5px 4px; text-align: left; white-space: nowrap; }
+  td { padding: 4px; border-bottom: 1px solid #e5e7eb; vertical-align: middle; }
+  .r { text-align: right; }
+  .c { text-align: center; }
+  .mono { font-family: monospace; }
+  tfoot td { background: #f3f4f6; font-weight: 700; border-top: 2px solid #072d6b; }
+  @media print { @page { size: A4 landscape; margin: 10mm; } }
+</style></head><body>
+<h2>🔒 รายการยึดเงินมัดจำ</h2>
+<div class="sub">ตัวกรอง: ${filterLabel} · พบ ${filtered.length} รายการ · พิมพ์เมื่อ ${new Date().toLocaleString("th-TH")}</div>
+<table>
+  <thead>
+    <tr><th>#</th><th>ยี่ห้อ</th><th>ประเภท</th><th>วันที่มัดจำ</th><th>เลขที่มัดจำ</th><th>ลูกค้า</th><th>ช่าง</th><th>รุ่นรถ</th><th>ทะเบียน</th><th>สถานะจอด</th><th>สถานะ</th><th class="c">สถานะมัดจำ</th><th class="c">ยึดแล้ว</th><th class="r">ยอดมัดจำ</th></tr>
+  </thead>
+  <tbody>
+    ${filtered.map((o, i) => {
+      const dep = deposits[`${o.brand}:${o.deposit_doc_no}`];
+      const seized = seizureMap[`${o.brand}:${o.deposit_doc_no}`];
+      const depSt = depositStatus(dep);
+      return `<tr>
+      <td class="c">${i + 1}</td>
+      <td>${o.brand}</td>
+      <td>${o.order_type || "-"}</td>
+      <td>${fmtDate(dep?.deposit_date)}</td>
+      <td class="mono"><b>${o.deposit_doc_no}</b></td>
+      <td>${o.customer_name || dep?.customer_name || "-"}</td>
+      <td>${(o.technician || "").split(" ")[0] || "-"}</td>
+      <td>${o.model_name || "-"}</td>
+      <td>${o.license_plate || "-"}</td>
+      <td>${o.parking_status || "-"}</td>
+      <td>${o.status || "-"}</td>
+      <td class="c">${depSt.label}${depSt.label === "บางส่วน" ? ` (เหลือ ${fmt(depSt.remaining)})` : ""}</td>
+      <td class="c">${seized ? "✓" : ""}</td>
+      <td class="r mono"><b>${fmt(dep?.deposit_amount || dep?.amount || 0)}</b></td>
+    </tr>`;
+    }).join("")}
+  </tbody>
+  <tfoot>
+    <tr><td colspan="13" class="r">ยอดมัดจำรวมทั้งสิ้น:</td><td class="r mono">${fmt(totalAmount)}</td></tr>
+  </tfoot>
+</table>
+<script>window.onload = () => { window.print(); };</script>
+</body></html>`);
+    w.document.close();
+  }
+
   function printOrderItems() {
     if (!orderPopup) return;
     const o = orderPopup.order;
@@ -343,6 +413,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
           placeholder="🔎 ค้นหา (เลขที่มัดจำ / ลูกค้า / ช่าง / ทะเบียน / รุ่น)"
           style={{ ...inp, flex: 1, minWidth: 250 }} />
         <button onClick={fetchData} disabled={loading} style={btn("#0369a1")}>🔄 รีเฟรช</button>
+        <button onClick={printList} disabled={loading || !filtered.length} style={btn(loading || !filtered.length ? "#9ca3af" : "#16a34a")}>🖨️ พิมพ์</button>
       </div>
 
       {/* Brand tabs */}
@@ -387,6 +458,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
                <th style={th}>ทะเบียน</th>
                <th style={th}>สถานะจอด</th>
                <th style={th}>สถานะ</th>
+               <th style={{ ...th, textAlign: "center" }}>สถานะมัดจำ</th>
                <th style={{ ...th, textAlign: "right" }}>ยอดมัดจำ</th>
                <th style={{ ...th, textAlign: "center" }}>จัดการ</th>
              </tr>
@@ -395,6 +467,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
              {filtered.map((o, i) => {
                const dep = deposits[`${o.brand}:${o.deposit_doc_no}`];
                const statusColor = STATUS_COLOR[o.status] || "#6b7280";
+               const depSt = depositStatus(dep);
                return (
                <tr key={`${o.brand}-${o.order_id || o.deposit_doc_no}-${i}`} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                  <td style={{ ...td, textAlign: "center", color: "#6b7280" }}>{i + 1}</td>
@@ -418,6 +491,13 @@ export default function DepositSeizePage({ currentUser } = {}) {
                  <td style={td}>
                    <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
                      background: statusColor + "33", color: statusColor }}>{o.status || "-"}</span>
+                 </td>
+                 <td style={{ ...td, textAlign: "center" }}>
+                   <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                     background: depSt.color + "22", color: depSt.color }}>{depSt.label}</span>
+                   {depSt.label === "บางส่วน" && (
+                     <div style={{ fontSize: 10, color: "#92400e", marginTop: 2 }}>เหลือ {fmt(depSt.remaining)}</div>
+                   )}
                  </td>
                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#dc2626" }}>
                    {fmt(dep?.deposit_amount || dep?.amount || 0)}

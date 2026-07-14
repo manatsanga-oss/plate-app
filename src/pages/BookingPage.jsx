@@ -640,6 +640,7 @@ export default function BookingPage({ currentUser }) {
           { key: "overview", label: "📊 ภาพรวม" },
           { key: "booking", label: "🚗 การจองคนขับรถ" },
           { key: "fuel", label: "⛽ รายงานการเบิกค่าน้ำมัน" },
+          { key: "fuelsummary", label: "📅 สรุปค่าน้ำมันรายเดือน" },
         ].map(t => (
           <button
             key={t.key}
@@ -680,6 +681,8 @@ export default function BookingPage({ currentUser }) {
           onRefresh={fetchFuelExpenses}
         />
       )}
+
+      {activeTab === "fuelsummary" && <FuelSummaryTab />}
 
       {activeTab === "booking" && (<>
       {/* Booking filters */}
@@ -980,6 +983,167 @@ function OverviewTab({ data, loading, from, to, setFrom, setTo }) {
           </table>
         </div>
       )}
+    </div>
+  );
+}
+
+// สรุปค่าน้ำมันรายเดือน — ปันส่วนยอดเบิกค่าน้ำมันของเดือน เข้าแต่ละร้านตามสัดส่วน
+// จำนวนครั้งที่จองคนขับรถ (get_booking_overview) ของร้านนั้นในเดือนเดียวกัน
+function FuelSummaryTab() {
+  const pad = n => String(n).padStart(2, "0");
+  const now = new Date();
+  const [fromM, setFromM] = useState(`${now.getFullYear()}-01`);
+  const [toM, setToM] = useState(`${now.getFullYear()}-${pad(now.getMonth() + 1)}`);
+  const [months, setMonths] = useState([]); // [{ ym, fuelTotal, fuelCount, counts: {branch: n}, totalCount }]
+  const [loading, setLoading] = useState(false);
+  const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtI = v => Number(v || 0).toLocaleString("th-TH");
+  const TH_M = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  const ymLabel = ym => { const [y, m] = ym.split("-").map(Number); return `${TH_M[m - 1]} ${y + 543}`; };
+
+  // รายชื่อเดือนในช่วง (จำกัด 24 เดือนกันยิงเยอะเกิน)
+  const monthList = (a, b) => {
+    const out = [];
+    let [y, m] = a.split("-").map(Number);
+    const [y2, m2] = b.split("-").map(Number);
+    while ((y < y2 || (y === y2 && m <= m2)) && out.length < 24) {
+      out.push(`${y}-${pad(m)}`);
+      m += 1; if (m > 12) { m = 1; y += 1; }
+    }
+    return out;
+  };
+
+  async function load() {
+    if (!fromM || !toM || fromM > toM) return;
+    setLoading(true);
+    try {
+      const data = await Promise.all(monthList(fromM, toM).map(async (ym) => {
+        const [y, m] = ym.split("-").map(Number);
+        const start = `${ym}-01`;
+        const end = `${ym}-${pad(new Date(y, m, 0).getDate())}`;
+        const call = (body) => fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }).then(r => r.json()).then(d => (Array.isArray(d) ? d : d.rows || [])).catch(() => []);
+        const [fuel, ov] = await Promise.all([
+          call({ action: "get_fuel_expenses", from: start, to: end }),
+          call({ action: "get_booking_overview", from: start, to: end }),
+        ]);
+        const ok = fuel.filter(r => r && !/ยกเลิก/.test(String(r.status || "")));
+        const fuelTotal = ok.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+        const counts = {};
+        let totalCount = 0;
+        ov.forEach(r => {
+          const n = Number(r.count || 0);
+          if (!r || !n) return;
+          const br = r.branch || "-";
+          counts[br] = (counts[br] || 0) + n;
+          totalCount += n;
+        });
+        return { ym, fuelTotal, fuelCount: ok.length, counts, totalCount };
+      }));
+      setMonths(data);
+    } catch {
+      setMonths([]);
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [fromM, toM]);
+
+  // ร้านทั้งหมดที่พบ เรียงตามจำนวนครั้งจองรวมมาก→น้อย
+  const branchTotals = {};
+  months.forEach(mo => Object.entries(mo.counts).forEach(([br, n]) => { branchTotals[br] = (branchTotals[br] || 0) + n; }));
+  const branchKeys = Object.keys(branchTotals).sort((a, b) => branchTotals[b] - branchTotals[a]);
+  const alloc = (mo, br) => (mo.totalCount > 0 ? (mo.fuelTotal * (mo.counts[br] || 0)) / mo.totalCount : 0);
+  const grandFuel = months.reduce((s, mo) => s + mo.fuelTotal, 0);
+  const grandCount = months.reduce((s, mo) => s + mo.totalCount, 0);
+  const hasRows = months.some(mo => mo.fuelTotal > 0 || mo.totalCount > 0);
+
+  return (
+    <div>
+      {/* Filter */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: 8 }}>
+        <span style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>ตั้งแต่เดือน</span>
+        <input type="month" value={fromM} onChange={e => setFromM(e.target.value)}
+          style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+        <span style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>ถึงเดือน</span>
+        <input type="month" value={toM} onChange={e => setToM(e.target.value)}
+          style={{ padding: "5px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }} />
+        <div style={{ marginLeft: "auto", fontSize: 13, color: "#374151" }}>
+          <span>ค่าน้ำมันรวม: <b style={{ color: "#dc2626" }}>{fmt(grandFuel)}</b> บาท</span>
+          <span style={{ marginLeft: 14 }}>จองรวม: <b style={{ color: "#1565C0" }}>{fmtI(grandCount)}</b> ครั้ง</span>
+          {grandCount > 0 && <span style={{ marginLeft: 14 }}>เฉลี่ย: <b style={{ color: "#059669" }}>{fmt(grandFuel / grandCount)}</b> บาท/ครั้ง</span>}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 10, padding: "8px 14px", background: "#1565C0", color: "#fff", borderRadius: 8, fontWeight: 700 }}>
+        📅 สรุปค่าน้ำมันรายเดือน — ปันส่วนตามจำนวนครั้งที่จองคนขับรถของแต่ละร้าน
+      </div>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+      ) : !hasRows ? (
+        <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>ไม่มีข้อมูลในช่วงเดือนที่เลือก</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th style={{ whiteSpace: "nowrap" }}>เดือน</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>ค่าน้ำมันรวม</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>จอง (ครั้ง)</th>
+                <th style={{ textAlign: "right", whiteSpace: "nowrap" }}>เฉลี่ย/ครั้ง</th>
+                {branchKeys.map(br => (
+                  <th key={br} style={{ textAlign: "right", whiteSpace: "nowrap" }}>{br}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {months.map(mo => (
+                <tr key={mo.ym}>
+                  <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{ymLabel(mo.ym)}</td>
+                  <td style={{ textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{mo.fuelTotal ? fmt(mo.fuelTotal) : "-"}</td>
+                  <td style={{ textAlign: "right", color: "#1565C0", fontWeight: 600 }}>{mo.totalCount ? fmtI(mo.totalCount) : "-"}</td>
+                  <td style={{ textAlign: "right", color: "#059669" }}>{mo.totalCount > 0 && mo.fuelTotal ? fmt(mo.fuelTotal / mo.totalCount) : "-"}</td>
+                  {mo.fuelTotal > 0 && mo.totalCount === 0 ? (
+                    <td colSpan={branchKeys.length || 1} style={{ fontSize: 11, color: "#b45309" }}>⚠️ เดือนนี้ไม่มีการจอง — ปันส่วนไม่ได้</td>
+                  ) : (
+                    branchKeys.map(br => (
+                      <td key={br} style={{ textAlign: "right" }}>
+                        {mo.counts[br] ? (
+                          <>
+                            <div style={{ fontWeight: 600 }}>{fmt(alloc(mo, br))}</div>
+                            <div style={{ fontSize: 10, color: "#9ca3af" }}>{fmtI(mo.counts[br])} ครั้ง</div>
+                          </>
+                        ) : "-"}
+                      </td>
+                    ))
+                  )}
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr style={{ background: "#e3f2fd", fontWeight: 700 }}>
+                <td>รวม</td>
+                <td style={{ textAlign: "right", color: "#dc2626" }}>{fmt(grandFuel)}</td>
+                <td style={{ textAlign: "right", color: "#1565C0" }}>{fmtI(grandCount)}</td>
+                <td style={{ textAlign: "right", color: "#059669" }}>{grandCount > 0 ? fmt(grandFuel / grandCount) : "-"}</td>
+                {branchKeys.map(br => (
+                  <td key={br} style={{ textAlign: "right" }}>
+                    <div>{fmt(months.reduce((s, mo) => s + alloc(mo, br), 0))}</div>
+                    <div style={{ fontSize: 10, color: "#64748b", fontWeight: 400 }}>{fmtI(branchTotals[br])} ครั้ง</div>
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+
+      <div style={{ marginTop: 10, fontSize: 11, color: "#9ca3af" }}>
+        * ค่าน้ำมันรวม = ยอดเบิกค่าน้ำมันของเดือน (ไม่นับรายการยกเลิก) · ปันส่วนเข้าร้าน = ค่าน้ำมันรวม × จำนวนครั้งที่จองของร้าน ÷ จำนวนครั้งที่จองทั้งหมดของเดือน (ชุดเดียวกับแท็บภาพรวม) — เดือนที่ไม่มีการจองจะปันส่วนไม่ได้
+      </div>
     </div>
   );
 }
