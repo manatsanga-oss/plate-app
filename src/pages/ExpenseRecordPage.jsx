@@ -6,6 +6,7 @@ const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-dat
 const TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/tax-remittance-api"; // สถานะนำส่งภาษี ภ.ง.ด.
 const INPUT_TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api"; // สถานะ ภ.พ.30 (input_tax_doc_status จากหน้าจัดการภาษีซื้อ)
 const FIN_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api"; // รายได้อื่น ๆ (income_records) — วิธีจ่าย "รายได้ค้างชำระ" หักกลบ
+const ASSET_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/asset-api"; // แปลงค่าใช้จ่ายเป็นสินทรัพย์ (save_asset + list_asset_categories)
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -87,6 +88,13 @@ export default function ExpenseRecordPage({ currentUser }) {
   const [catForm, setCatForm] = useState({ expense_code: "", expense_name: "", description: "" });
   const [catSaving, setCatSaving] = useState(false);
   const [catTargetIdx, setCatTargetIdx] = useState(null);
+  // แปลงค่าใช้จ่ายเป็นสินทรัพย์
+  const [assetModalDoc, setAssetModalDoc] = useState(null); // เอกสารที่กำลังแปลง (null = ปิด modal)
+  const [assetCats, setAssetCats] = useState([]);           // หมวดสินทรัพย์จาก asset-api
+  const [assetRows, setAssetRows] = useState([]);           // รายการย่อยที่จะแปลง (1 แถว = 1 สินทรัพย์)
+  const [assetStartDate, setAssetStartDate] = useState("");
+  const [assetAff, setAssetAff] = useState("");
+  const [assetSaving, setAssetSaving] = useState(false);
 
   useEffect(() => {
     const now = new Date();
@@ -478,6 +486,85 @@ export default function ExpenseRecordPage({ currentUser }) {
     setMessage("📋 สร้างซ้ำจาก " + (d.expense_doc_no || "") + " — ตรวจสอบแล้วกดบันทึก");
   }
 
+  // แปลงค่าใช้จ่ายเป็นสินทรัพย์ — 1 รายการย่อย = สินทรัพย์ 1 ตัว, จับคู่หมวดสินทรัพย์อัตโนมัติ
+  // จาก asset_categories.expense_codes (mapping หมวดค่าใช้จ่าย → หมวดสินทรัพย์ ที่ตั้งในหน้าตั้งค่าหมวดหมู่สินทรัพย์)
+  const parseAssetCodes = v => String(v || "").split(",").map(s => s.trim()).filter(Boolean);
+  async function openConvertAsset(d) {
+    let cats = assetCats;
+    if (!cats.length) {
+      try {
+        const res = await fetch(ASSET_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_asset_categories" }),
+        });
+        const data = await res.json();
+        cats = (Array.isArray(data) ? data : []).filter(c => c && c.category_id);
+        setAssetCats(cats);
+      } catch { cats = []; }
+    }
+    const items = (Array.isArray(d.items) ? d.items : []).filter(it => it.expense_name || Number(it.amount) > 0);
+    if (!items.length) { setMessage("❌ เอกสารนี้ไม่มีรายการย่อยให้แปลงเป็นสินทรัพย์"); return; }
+    setAssetRows(items.map(it => {
+      const cat = cats.find(c => parseAssetCodes(c.expense_codes).includes(String(it.expense_code || "")));
+      return {
+        checked: true,
+        asset_name: it.expense_name || "",
+        description: it.description || "",
+        category_id: cat ? String(cat.category_id) : "",
+        quantity: Number(it.qty) || 1,
+        purchase_price: Number(it.amount) || 0,
+      };
+    }));
+    setAssetStartDate(String(d.doc_date || "").slice(0, 10) || todayISO());
+    setAssetAff(d.affiliation || "");
+    setAssetModalDoc(d);
+  }
+  async function handleConvertAsset() {
+    const d = assetModalDoc;
+    const rows = assetRows.filter(r => r.checked);
+    if (!rows.length) { setMessage("❌ เลือกรายการที่จะแปลงอย่างน้อย 1 รายการ"); return; }
+    if (!assetAff) { setMessage("❌ กรุณาเลือกสังกัดของสินทรัพย์ (ป.เปา / สิงห์ชัย)"); return; }
+    if (rows.some(r => !String(r.asset_name).trim())) { setMessage("❌ กรุณากรอกชื่อสินทรัพย์ให้ครบทุกรายการที่เลือก"); return; }
+    setAssetSaving(true); setMessage("");
+    let ok = 0, fail = 0;
+    for (const r of rows) {
+      const cat = assetCats.find(c => String(c.category_id) === String(r.category_id));
+      try {
+        const res = await fetch(ASSET_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "save_asset",
+            asset_name: String(r.asset_name).trim(),
+            description: r.description || "",
+            reference_no: d.expense_doc_no || "",
+            category_id: r.category_id || "",
+            quantity: Number(r.quantity) || 1,
+            purchase_date: String(d.doc_date || "").slice(0, 10),
+            vendor_name: d.vendor_name || "",
+            acquisition_type: "new",
+            start_use_date: assetStartDate,
+            purchase_price: Number(r.purchase_price) || 0,
+            enable_depreciation: cat ? Number(cat.useful_life_years) > 0 : true,
+            salvage_value: 1,
+            useful_life_years: cat ? (Number(cat.useful_life_years) || "") : "",
+            affiliation: assetAff,
+            status: "active",
+            note: `แปลงจากค่าใช้จ่าย ${d.expense_doc_no || ""}`,
+            created_by: currentUser?.username || currentUser?.name || "system",
+          }),
+        });
+        const data = await res.json();
+        if (data?.asset_id || data?.[0]?.asset_id) ok++; else fail++;
+      } catch { fail++; }
+    }
+    setAssetSaving(false);
+    if (fail) { setMessage(`⚠️ แปลงเป็นสินทรัพย์สำเร็จ ${ok} รายการ, ไม่สำเร็จ ${fail} รายการ`); }
+    else {
+      setMessage(`✅ แปลงเป็นสินทรัพย์แล้ว ${ok} รายการ (อ้างอิง ${d.expense_doc_no || ""}) — ดูได้ที่เมนู "รายการสินทรัพย์"`);
+      setAssetModalDoc(null);
+    }
+  }
+
   // พิมพ์ — เปิดหน้าต่างใหม่แล้วสั่งพิมพ์ใบค่าใช้จ่าย
   function handlePrint(d) {
     const w = window.open("", "_blank", "width=820,height=960");
@@ -858,7 +945,7 @@ export default function ExpenseRecordPage({ currentUser }) {
               </label>
             ))}
           </div>
-          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={false} remitMap={remitMap} pp30Map={pp30Map} />
+          <DocsTable docs={statusFiltered} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} openConvertAsset={openConvertAsset} showCheckbox={false} remitMap={remitMap} pp30Map={pp30Map} />
         </>
       )}
 
@@ -874,7 +961,7 @@ export default function ExpenseRecordPage({ currentUser }) {
               💵 บันทึกจ่ายเงิน
             </button>
           </div>
-          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} remitMap={remitMap} pp30Map={pp30Map} />
+          <DocsTable docs={draftDocs} loading={loading} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} openConvertAsset={openConvertAsset} showCheckbox={true} selected={selected} toggleOne={toggleOne} toggleAll={toggleAll} remitMap={remitMap} pp30Map={pp30Map} />
         </>
       )}
 
@@ -953,6 +1040,101 @@ export default function ExpenseRecordPage({ currentUser }) {
       {catModal && (
         <CategoryAddModal form={catForm} setForm={setCatForm}
           onClose={() => !catSaving && setCatModal(false)} onSave={saveCategory} saving={catSaving} />
+      )}
+
+      {/* แปลงค่าใช้จ่ายเป็นสินทรัพย์ Modal */}
+      {assetModalDoc && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => !assetSaving && setAssetModalDoc(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 860, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto" }}>
+            <h3 style={{ margin: "0 0 4px", color: "#072d6b" }}>🏢 แปลงค่าใช้จ่ายเป็นสินทรัพย์</h3>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>
+              จากเอกสาร <b style={{ color: "#374151" }}>{assetModalDoc.expense_doc_no}</b> · {fmtDate(assetModalDoc.doc_date)} · {assetModalDoc.vendor_name || "-"} — 1 รายการย่อย = สินทรัพย์ 1 ตัว (หมวดสินทรัพย์เติมอัตโนมัติจากหมวดค่าใช้จ่ายที่ผูกไว้ในหน้าตั้งค่าหมวดหมู่สินทรัพย์)
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+              <div>
+                <label style={lbl}>สังกัดสินทรัพย์ *</label>
+                <select value={assetAff} onChange={e => setAssetAff(e.target.value)} style={{ ...inp, width: 150 }}>
+                  <option value="">-- เลือกสังกัด --</option>
+                  <option value="ป.เปา">ป.เปา</option>
+                  <option value="สิงห์ชัย">สิงห์ชัย</option>
+                </select>
+              </div>
+              <div>
+                <label style={lbl}>วันที่เริ่มต้นใช้งาน (เริ่มคิดค่าเสื่อม) *</label>
+                <input type="date" value={assetStartDate} onChange={e => setAssetStartDate(e.target.value)} style={{ ...inp, width: 170 }} />
+              </div>
+            </div>
+
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, minWidth: 700 }}>
+                <thead style={{ background: "#072d6b", color: "#fff" }}>
+                  <tr>
+                    <th style={{ ...th, width: 36, textAlign: "center" }}>
+                      <input type="checkbox"
+                        checked={assetRows.length > 0 && assetRows.every(r => r.checked)}
+                        onChange={e => setAssetRows(rs => rs.map(r => ({ ...r, checked: e.target.checked })))} />
+                    </th>
+                    <th style={th}>ชื่อสินทรัพย์ *</th>
+                    <th style={th}>หมวดสินทรัพย์</th>
+                    <th style={{ ...th, textAlign: "right", width: 70 }}>จำนวน</th>
+                    <th style={{ ...th, textAlign: "right", width: 120 }}>ราคาซื้อ (บาท)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assetRows.map((r, i) => (
+                    <tr key={i} style={{ borderTop: "1px solid #e5e7eb", opacity: r.checked ? 1 : 0.45 }}>
+                      <td style={{ ...td, textAlign: "center" }}>
+                        <input type="checkbox" checked={r.checked}
+                          onChange={e => setAssetRows(rs => rs.map((x, j) => j === i ? { ...x, checked: e.target.checked } : x))} />
+                      </td>
+                      <td style={td}>
+                        <input value={r.asset_name}
+                          onChange={e => setAssetRows(rs => rs.map((x, j) => j === i ? { ...x, asset_name: e.target.value } : x))}
+                          style={{ ...inp, width: "100%" }} />
+                        {r.description && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>{r.description}</div>}
+                      </td>
+                      <td style={td}>
+                        <select value={r.category_id}
+                          onChange={e => setAssetRows(rs => rs.map((x, j) => j === i ? { ...x, category_id: e.target.value } : x))}
+                          style={{ ...inp, width: "100%" }}>
+                          <option value="">-- ไม่ระบุหมวด --</option>
+                          {assetCats.filter(c => c.status !== "inactive").map(c => (
+                            <option key={c.category_id} value={c.category_id}>{c.category_name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td style={{ ...td, textAlign: "right" }}>
+                        <input type="number" min="1" value={r.quantity}
+                          onChange={e => setAssetRows(rs => rs.map((x, j) => j === i ? { ...x, quantity: e.target.value } : x))}
+                          style={{ ...inp, width: 65, textAlign: "right" }} />
+                      </td>
+                      <td style={{ ...td, textAlign: "right" }}>
+                        <input type="number" min="0" step="0.01" value={r.purchase_price}
+                          onChange={e => setAssetRows(rs => rs.map((x, j) => j === i ? { ...x, purchase_price: e.target.value } : x))}
+                          style={{ ...inp, width: 110, textAlign: "right" }} />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
+              * เลขที่อ้างอิงของสินทรัพย์ = เลขเอกสารค่าใช้จ่าย ({assetModalDoc.expense_doc_no}) · อายุการใช้งาน/การคิดค่าเสื่อมติดมาจากหมวดสินทรัพย์ที่เลือก (มูลค่าซาก 1 บาท) — แก้รายตัวภายหลังได้ที่เมนู "รายการสินทรัพย์"
+            </div>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>
+              <button onClick={() => setAssetModalDoc(null)} disabled={assetSaving}
+                style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={handleConvertAsset} disabled={assetSaving || assetRows.every(r => !r.checked)}
+                style={{ padding: "8px 20px", background: assetSaving ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: assetSaving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                {assetSaving ? "กำลังบันทึก..." : `🏢 แปลงเป็นสินทรัพย์ (${assetRows.filter(r => r.checked).length} รายการ)`}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Payment Dialog */}
@@ -1129,7 +1311,7 @@ const PP30_STYLE = {
   "ไม่ใช้สิทธิขอคืน": { bg: "#f3f4f6", color: "#6b7280" },
 };
 
-function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, showCheckbox, selected, toggleOne, toggleAll, remitMap, pp30Map }) {
+function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, openConvertAsset, showCheckbox, selected, toggleOne, toggleAll, remitMap, pp30Map }) {
   return (
     <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", overflowX: "auto" }}>
       {loading ? <div style={{ padding: 30, textAlign: "center" }}>กำลังโหลด...</div> :
@@ -1204,7 +1386,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
                   })()}
                 </td>
                 <td style={{ ...td, textAlign: "center" }}>
-                  <KebabMenu d={d} status={status} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} />
+                  <KebabMenu d={d} status={status} openEdit={openEdit} handleCancel={handleCancel} openDuplicate={openDuplicate} handlePrint={handlePrint} handleDelete={handleDelete} openConvertAsset={openConvertAsset} />
                 </td>
               </tr>
             );
@@ -1215,7 +1397,7 @@ function DocsTable({ docs, loading, openEdit, handleCancel, openDuplicate, handl
   );
 }
 
-function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete }) {
+function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePrint, handleDelete, openConvertAsset }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const btnRef = useRef(null);
@@ -1262,6 +1444,7 @@ function KebabMenu({ d, status, openEdit, handleCancel, openDuplicate, handlePri
           <Item icon="✏️" label="แก้ไข" onClick={run(() => openEdit(d))} />
           <Item icon="🖨️" label="พิมพ์" onClick={run(() => handlePrint(d))} />
           <Item icon="📋" label="สร้างซ้ำ" onClick={run(() => openDuplicate(d))} />
+          {status !== "cancelled" && <Item icon="🏢" label="แปลงเป็นสินทรัพย์" onClick={run(() => openConvertAsset(d))} />}
           {status !== "paid" && <div style={{ height: 1, background: "#e5e7eb", margin: "4px 6px" }} />}
           {status !== "paid" && status !== "cancelled" && <Item icon="🚫" label="ยกเลิก" onClick={run(() => handleCancel(d))} color="#b45309" />}
           {status !== "paid" && <Item icon="🗑️" label="ลบ" onClick={run(() => handleDelete(d))} color="#dc2626" />}

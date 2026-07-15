@@ -283,7 +283,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   //   อัตราหัก ณ ที่จ่ายมาตรฐาน = 3% (ค่าบริการ เช่น SGF/วิริยะออกแทน) — ยืนยันจากการยื่นจริง
   //   ยกเว้นรายใบ = 1% (เบี้ยประกันวินาศภัย เช่น ประกันรถ GE วิริยะ) — เพิ่มเลขเอกสารใน THEFT_WHT_1PCT
   //   ที่มา: flow_expense_documents รหัส 52071 ผ่าน list_theft_insurance (หน้าบันทึกรับใบกำกับฯ ประกันรถหายออกแทน)
-  const THEFT_WHT_1PCT = new Set(["F-EXP2026050032", "F-EXP2026040023", "F-EXP2026060017"]);
+  const THEFT_WHT_1PCT = new Set(["F-EXP2026050032", "F-EXP2026040023", "F-EXP2026060017", "F-EXP2026060022"]);
   async function loadTheftInsuranceRows() {
     const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
     const raw = await post(THEFT_URL, { action: "list_theft_insurance", date_from: from, date_to: to }).catch(() => []);

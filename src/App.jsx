@@ -11,6 +11,9 @@ import CustomerPage from "./pages/CustomerPage";
 import UploadPage from "./pages/UploadPage";
 import UploadAccountingPage from "./pages/UploadAccountingPage";
 import DirectorLoanPage from "./pages/DirectorLoanPage";
+import AssetCategoryPage from "./pages/AssetCategoryPage";
+import AssetListPage from "./pages/AssetListPage";
+import AssetDepreciationPage from "./pages/AssetDepreciationPage";
 import PartWithdrawalPage from "./pages/PartWithdrawalPage";
 import VehiclePurchaseReportPage from "./pages/VehiclePurchaseReportPage";
 import HondaSalesReportPage from "./pages/HondaSalesReportPage";
@@ -611,6 +614,15 @@ export default function App() {
         {activeMenu === "accdirectorloan" && canAccess("accdirectorloan") && (
           <DirectorLoanPage currentUser={currentUser} />
         )}
+        {activeMenu === "accassetcategory" && canAccess("accassetcategory") && (
+          <AssetCategoryPage currentUser={currentUser} />
+        )}
+        {activeMenu === "accassetlist" && canAccess("accassetlist") && (
+          <AssetListPage currentUser={currentUser} />
+        )}
+        {activeMenu === "accassetdepreciation" && canAccess("accassetdepreciation") && (
+          <AssetDepreciationPage currentUser={currentUser} />
+        )}
         {activeMenu === "financepayment" && canAccess("financepayment") && (
           <FinancePaymentMatchPage currentUser={currentUser} />
         )}
@@ -834,13 +846,18 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="searchreceiptwork" label="ค้นหางานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan","accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="accbankaccounts" label="บัญชีธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accloanaccounts" label="บัญชีเงินกู้ยืม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbankmovements" label="รายงานการเคลื่อนไหว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbanktransfer" label="โอนเงินระหว่างบัญชี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accfinancetransfer" label="บันทึกรับเงินโอนไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accdirectorloan" label="บันทึกเงินให้กู้ยืมกรรมการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuSubGroup title="จัดการทรัพย์สิน" pages={["accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} canAccess={canAccess}>
+          <MenuItem page="accassetlist" label="รายการสินทรัพย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="accassetdepreciation" label="บันทึกค่าเสื่อมราคา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="accassetcategory" label="ตั้งค่าหมวดหมู่สินทรัพย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        </MenuSubGroup>
       </MenuGroup>
 
       <MenuGroup title="บริหารภาษี" pages={["taxmanageinput","taxformmonthly","flowinputtaxreport","outputtaxreport","whtremit","incometaxfiling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
