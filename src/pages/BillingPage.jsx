@@ -45,6 +45,7 @@ export default function BillingPage({ currentUser }) {
   // แก้ไขที่อยู่ลูกค้า (moto_sales ผ่าน submission_id) — เปิดจาก popup รายละเอียด
   const [addrEdit, setAddrEdit] = useState(null); // {submission_id, address, sub_district, district, province, postal_code}
   const [addrSaving, setAddrSaving] = useState(false);
+  const [addrMsg, setAddrMsg] = useState(""); // ข้อความ error/validation ใน modal (message หลักถูก modal บัง)
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -87,27 +88,34 @@ export default function BillingPage({ currentUser }) {
   // dropdown เก็บชื่อเปล่า → เติมคำนำหน้า จังหวัด/อำเภอ/ตำบล (กทม. = เขต/แขวง) ให้ตรงรูปแบบข้อมูลเดิมใน moto_sales
   async function saveAddress() {
     if (!addrEdit?.submission_id) return;
-    if (!String(addrEdit.address || "").trim()) { setMessage("❌ กรุณากรอกที่อยู่ (บ้านเลขที่ หมู่ ถนน)"); return; }
+    if (!String(addrEdit.address || "").trim()) { setAddrMsg("❌ กรุณากรอกที่อยู่ (บ้านเลขที่ หมู่ ถนน)"); return; }
     if (!addrEdit.province || !addrEdit.district || !addrEdit.sub_district || !addrEdit.postal_code) {
-      setMessage("❌ กรุณาเลือก จังหวัด / อำเภอ / ตำบล ให้ครบ (รหัสไปรษณีย์เติมอัตโนมัติ)"); return;
+      setAddrMsg("❌ กรุณาเลือก จังหวัด / อำเภอ / ตำบล ให้ครบ (รหัสไปรษณีย์เติมอัตโนมัติ)"); return;
     }
+    setAddrMsg("");
     const isBkk = addrEdit.province === "กรุงเทพมหานคร";
     const provinceFull = isBkk ? addrEdit.province : `จังหวัด${addrEdit.province}`;
     const districtFull = `${isBkk ? "เขต" : "อำเภอ"}${addrEdit.district}`;
     const subFull = `${isBkk ? "แขวง" : "ตำบล"}${addrEdit.sub_district}`;
     setAddrSaving(true);
     try {
-      const data = await post({
-        action: "update_sale_address",
-        submission_id: addrEdit.submission_id,
-        address: String(addrEdit.address).trim(),
-        sub_district: subFull,
-        district: districtFull,
-        province: provinceFull,
-        postal_code: addrEdit.postal_code || "",
+      // ไม่ใช้ post() เพราะ response ว่าง (workflow error/ยังไม่ re-import) จะทำ res.json() พังก่อนถึงตัวเช็ค
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_sale_address",
+          submission_id: addrEdit.submission_id,
+          address: String(addrEdit.address).trim(),
+          sub_district: subFull,
+          district: districtFull,
+          province: provinceFull,
+          postal_code: addrEdit.postal_code || "",
+        }),
       });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : null;
       const ok = data && (data.id || data?.[0]?.id);
-      if (!ok) throw new Error("no id returned — n8n ยังไม่มี action update_sale_address (ต้อง re-import Registrations API)");
+      if (!ok) throw new Error("n8n ยังไม่ได้ re-import Registrations API (18) เวอร์ชันล่าสุด — บันทึกยังไม่ติด");
       const patch = {
         address: String(addrEdit.address).trim(),
         sub_district: subFull,
@@ -120,7 +128,8 @@ export default function BillingPage({ currentUser }) {
       setAddrEdit(null);
       setMessage("✅ บันทึกที่อยู่ลูกค้าแล้ว — จังหวัดใหม่จะถูกใช้คิดค่าใช้จ่ายจดทะเบียนเมื่อรีเฟรชรายการ");
     } catch (e) {
-      setMessage("❌ บันทึกที่อยู่ไม่สำเร็จ: " + String(e.message || e).slice(0, 120));
+      // แสดงในตัว modal — ข้อความหัวหน้าเว็บถูก modal บังมองไม่เห็น
+      setAddrMsg("❌ บันทึกที่อยู่ไม่สำเร็จ: " + String(e.message || e).slice(0, 140));
     }
     setAddrSaving(false);
   }
@@ -1142,10 +1151,13 @@ export default function BillingPage({ currentUser }) {
             </div>
 
             <div style={{ position: "relative" }}>
-              <button onClick={() => setAddrEdit({
-                submission_id: detailRow.submission_id,
-                address: "", sub_district: "", district: "", province: "", postal_code: "",
-              })}
+              <button onClick={() => {
+                setAddrMsg("");
+                setAddrEdit({
+                  submission_id: detailRow.submission_id,
+                  address: "", sub_district: "", district: "", province: "", postal_code: "",
+                });
+              }}
                 title="แก้ไขที่อยู่ลูกค้า (บันทึกลงใบขาย)"
                 style={{ position: "absolute", right: 0, top: 0, padding: "3px 12px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
                 ✏️ แก้ไขที่อยู่
@@ -1313,6 +1325,11 @@ export default function BillingPage({ currentUser }) {
                 keys={{ province: "province", district: "district", subdistrict: "sub_district", postal: "postal_code" }}
               />
             </div>
+            {addrMsg && (
+              <div style={{ marginTop: 10, padding: "8px 12px", background: "#fee2e2", borderRadius: 8, fontSize: 12.5, color: "#991b1b" }}>
+                {addrMsg}
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
               <button onClick={() => setAddrEdit(null)} disabled={addrSaving}
                 style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
