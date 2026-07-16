@@ -25,6 +25,11 @@ export default function PettyCashOfferingPage({ currentUser }) {
   // สาขาที่สร้างใบ — default = สาขาของ user ที่ login, เลือกเปลี่ยนได้
   const [branchSel, setBranchSel] = useState(currentUser?.branch || "");
   const [branchOptions, setBranchOptions] = useState([]);
+  // แก้ไขสาขาที่หัวใบ — เฉพาะ ADMIN
+  const isAdmin = currentUser?.username === "admin" || String(currentUser?.role || "").toLowerCase() === "admin";
+  const [editBranchDoc, setEditBranchDoc] = useState(null);
+  const [editBranchVal, setEditBranchVal] = useState("");
+  const [editBranchSaving, setEditBranchSaving] = useState(false);
 
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
@@ -71,6 +76,34 @@ export default function PettyCashOfferingPage({ currentUser }) {
       if (result.length > 100) break;
     }
     return result;
+  }
+
+  // เปิด modal แก้สาขาหัวใบ (เฉพาะ ADMIN) — preselect จาก branch_name/branch_code เดิม
+  function openEditBranch(d) {
+    const code = String(d.branch_code || d.branch_name || "").match(/SCY\d{2}/)?.[0] || "";
+    const cur = branchOptions.find(b => b.branch_code === code);
+    setEditBranchVal(cur ? `${cur.branch_code} ${cur.branch_name || ""}`.trim() : "");
+    setEditBranchDoc(d);
+  }
+  async function saveEditBranch() {
+    if (!editBranchDoc) return;
+    if (!editBranchVal) { setMessage("กรุณาเลือกสาขา"); return; }
+    setEditBranchSaving(true);
+    try {
+      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_offering_doc_branch", id: editBranchDoc.id, branch_code: editBranchVal.split(" ")[0], branch_name: editBranchVal }) });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : null;
+      // ตอบกลับว่าง = n8n ยังไม่มี action นี้ (workflow ยังไม่ re-import) — อย่ารายงานว่าสำเร็จ
+      if (data && (data.success === true || data.id || data?.[0]?.success === true || data?.[0]?.id)) {
+        setEditBranchDoc(null);
+        setMessage(`บันทึกสาขาของ ${editBranchDoc.doc_no} แล้ว`);
+        fetchDocs();
+      } else {
+        setMessage("❌ บันทึกไม่สำเร็จ — n8n ยังไม่มี action update_offering_doc_branch (ต้อง re-import Petty_Cash_API)");
+      }
+    } catch { setMessage("บันทึกสาขาไม่สำเร็จ"); }
+    setEditBranchSaving(false);
   }
 
   function openCreate() {
@@ -379,10 +412,10 @@ export default function PettyCashOfferingPage({ currentUser }) {
                   setSelectedDocs(n);
                 }} />
             </th>
-            <th>#</th><th>เลขที่</th><th>วันที่</th><th>บริษัท</th><th>ผู้เบิก</th><th>ตั้งแต่</th><th>ถึง</th><th>ยอดรวม</th><th>สถานะ</th><th>จัดการ</th>
+            <th>#</th><th>เลขที่</th><th>วันที่</th><th>บริษัท</th><th>สาขา</th><th>ผู้เบิก</th><th>ตั้งแต่</th><th>ถึง</th><th>ยอดรวม</th><th>สถานะ</th><th>จัดการ</th>
           </tr></thead>
           <tbody>
-            {docs.length === 0 ? <tr><td colSpan={11} style={{ textAlign: "center", padding: 20 }}>ยังไม่มีใบสรุป</td></tr> :
+            {docs.length === 0 ? <tr><td colSpan={12} style={{ textAlign: "center", padding: 20 }}>ยังไม่มีใบสรุป</td></tr> :
               docs.map((d, i) => (
                 <tr key={d.id} style={{ background: selectedDocs.has(d.id) ? "#fef3c7" : undefined }}>
                   <td>
@@ -401,6 +434,7 @@ export default function PettyCashOfferingPage({ currentUser }) {
                   <td style={{ fontWeight: 600 }}>{d.doc_no}</td>
                   <td>{d.doc_date ? new Date(d.doc_date).toLocaleDateString("th-TH") : "-"}</td>
                   <td>{d.company_name}</td>
+                  <td style={{ fontSize: 12, color: "#0369a1", fontWeight: 600 }}>{d.branch_name || "-"}</td>
                   <td>{d.created_by}</td>
                   <td>{d.period_from ? new Date(d.period_from).toLocaleDateString("th-TH") : "-"}</td>
                   <td>{d.period_to ? new Date(d.period_to).toLocaleDateString("th-TH") : "-"}</td>
@@ -414,6 +448,10 @@ export default function PettyCashOfferingPage({ currentUser }) {
                   </td>
                   <td style={{ whiteSpace: "nowrap" }}>
                     <button onClick={() => printDoc(d)} style={{ padding: "3px 10px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🖨 พิมพ์</button>
+                    {isAdmin && (
+                      <button onClick={() => openEditBranch(d)} title="แก้ไขสาขาที่หัวใบ (เฉพาะ ADMIN)"
+                        style={{ padding: "3px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, marginRight: 4 }}>✏️ สาขา</button>
+                    )}
                     {d.status !== "approved" && (
                       <>
                         <button onClick={() => openEdit(d)} style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, marginRight: 4 }}>แก้ไข</button>
@@ -426,6 +464,36 @@ export default function PettyCashOfferingPage({ currentUser }) {
           </tbody>
         </table>
       </div>
+
+      {/* Modal แก้ไขสาขาที่หัวใบ (เฉพาะ ADMIN) */}
+      {editBranchDoc && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}
+          onClick={() => !editBranchSaving && setEditBranchDoc(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 420, maxWidth: "95vw" }}>
+            <h3 style={{ margin: "0 0 4px", color: "#072d6b" }}>✏️ แก้ไขสาขาของใบสรุป</h3>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 14 }}>
+              {editBranchDoc.doc_no} · {editBranchDoc.company_name} · ผู้เบิก {editBranchDoc.created_by || "-"}
+            </div>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4, color: "#374151" }}>สาขา *</label>
+            <select value={editBranchVal} onChange={e => setEditBranchVal(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}>
+              <option value="">-- เลือกสาขา --</option>
+              {branchOptions.map(b => { const v = `${b.branch_code} ${b.branch_name || ""}`.trim(); return <option key={v} value={v}>{v}</option>; })}
+            </select>
+            <div style={{ marginTop: 8, fontSize: 11, color: "#9ca3af" }}>
+              * แก้เฉพาะสาขาที่หัวใบ (ใช้แยกสาขาในงบกำไรขาดทุน) — บริษัท/รายการไม่เปลี่ยน
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+              <button onClick={() => setEditBranchDoc(null)} disabled={editBranchSaving}
+                style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={saveEditBranch} disabled={editBranchSaving || !editBranchVal}
+                style={{ padding: "8px 20px", background: (editBranchSaving || !editBranchVal) ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: (editBranchSaving || !editBranchVal) ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                {editBranchSaving ? "กำลังบันทึก..." : "💾 บันทึก"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
