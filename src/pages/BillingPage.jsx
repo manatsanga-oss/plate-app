@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import ThaiAddressFields from "./ThaiAddressFields";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 
@@ -41,6 +42,9 @@ export default function BillingPage({ currentUser }) {
   const [editingPayDocNo, setEditingPayDocNo] = useState(null); // paid_doc_no ที่กำลัง edit (null = new payment mode)
   const [receiptSelectedKeys, setReceiptSelectedKeys] = useState(new Set()); // checkbox ใน popup
   const [receiptSaving, setReceiptSaving] = useState(false);
+  // แก้ไขที่อยู่ลูกค้า (moto_sales ผ่าน submission_id) — เปิดจาก popup รายละเอียด
+  const [addrEdit, setAddrEdit] = useState(null); // {submission_id, address, sub_district, district, province, postal_code}
+  const [addrSaving, setAddrSaving] = useState(false);
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -78,6 +82,48 @@ export default function BillingPage({ currentUser }) {
 
   useEffect(() => { fetchCategories(); }, []);
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [brand, category, showBilled]);
+
+  // บันทึกแก้ไขที่อยู่ลูกค้า → UPDATE moto_sales (ผ่าน submission_id) แล้วอัปเดตแถวในหน้าโดยไม่ refetch (คง selection เดิม)
+  // dropdown เก็บชื่อเปล่า → เติมคำนำหน้า จังหวัด/อำเภอ/ตำบล (กทม. = เขต/แขวง) ให้ตรงรูปแบบข้อมูลเดิมใน moto_sales
+  async function saveAddress() {
+    if (!addrEdit?.submission_id) return;
+    if (!String(addrEdit.address || "").trim()) { setMessage("❌ กรุณากรอกที่อยู่ (บ้านเลขที่ หมู่ ถนน)"); return; }
+    if (!addrEdit.province || !addrEdit.district || !addrEdit.sub_district || !addrEdit.postal_code) {
+      setMessage("❌ กรุณาเลือก จังหวัด / อำเภอ / ตำบล ให้ครบ (รหัสไปรษณีย์เติมอัตโนมัติ)"); return;
+    }
+    const isBkk = addrEdit.province === "กรุงเทพมหานคร";
+    const provinceFull = isBkk ? addrEdit.province : `จังหวัด${addrEdit.province}`;
+    const districtFull = `${isBkk ? "เขต" : "อำเภอ"}${addrEdit.district}`;
+    const subFull = `${isBkk ? "แขวง" : "ตำบล"}${addrEdit.sub_district}`;
+    setAddrSaving(true);
+    try {
+      const data = await post({
+        action: "update_sale_address",
+        submission_id: addrEdit.submission_id,
+        address: String(addrEdit.address).trim(),
+        sub_district: subFull,
+        district: districtFull,
+        province: provinceFull,
+        postal_code: addrEdit.postal_code || "",
+      });
+      const ok = data && (data.id || data?.[0]?.id);
+      if (!ok) throw new Error("no id returned — n8n ยังไม่มี action update_sale_address (ต้อง re-import Registrations API)");
+      const patch = {
+        address: String(addrEdit.address).trim(),
+        sub_district: subFull,
+        district: districtFull,
+        customer_province: provinceFull,
+        postal_code: addrEdit.postal_code || "",
+      };
+      setRows(prev => prev.map(r => r.submission_id === addrEdit.submission_id ? { ...r, ...patch } : r));
+      setDetailRow(prev => prev && prev.submission_id === addrEdit.submission_id ? { ...prev, ...patch } : prev);
+      setAddrEdit(null);
+      setMessage("✅ บันทึกที่อยู่ลูกค้าแล้ว — จังหวัดใหม่จะถูกใช้คิดค่าใช้จ่ายจดทะเบียนเมื่อรีเฟรชรายการ");
+    } catch (e) {
+      setMessage("❌ บันทึกที่อยู่ไม่สำเร็จ: " + String(e.message || e).slice(0, 120));
+    }
+    setAddrSaving(false);
+  }
   useEffect(() => { fetchReceiptGroupedPayments(); }, []);
 
   async function fetchReceiptGroupedPayments() {
@@ -1095,6 +1141,16 @@ export default function BillingPage({ currentUser }) {
                 style={{ marginLeft: "auto", padding: "4px 10px", background: "transparent", border: "none", cursor: "pointer", fontSize: 22, color: "#6b7280" }}>✕</button>
             </div>
 
+            <div style={{ position: "relative" }}>
+              <button onClick={() => setAddrEdit({
+                submission_id: detailRow.submission_id,
+                address: "", sub_district: "", district: "", province: "", postal_code: "",
+              })}
+                title="แก้ไขที่อยู่ลูกค้า (บันทึกลงใบขาย)"
+                style={{ position: "absolute", right: 0, top: 0, padding: "3px 12px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>
+                ✏️ แก้ไขที่อยู่
+              </button>
+            </div>
             <DetailSection title="ข้อมูลลูกค้า" items={[
               ["ชื่อลูกค้า", detailRow.customer_name],
               ["เบอร์โทร", detailRow.customer_phone, "mono"],
@@ -1223,6 +1279,47 @@ export default function BillingPage({ currentUser }) {
             <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
               <button onClick={() => setDetailRow(null)}
                 style={{ padding: "8px 24px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 600 }}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal แก้ไขที่อยู่ลูกค้า — บันทึกลงใบขาย (moto_sales) */}
+      {addrEdit && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+          onClick={() => !addrSaving && setAddrEdit(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 22, width: 480, maxWidth: "95vw" }}>
+            <h3 style={{ margin: "0 0 4px", color: "#072d6b" }}>✏️ แก้ไขที่อยู่ลูกค้า</h3>
+            <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 10 }}>
+              {detailRow?.customer_name || "-"} · ใบขาย {detailRow?.invoice_no || "-"} — บันทึกลงใบขาย มีผลกับเอกสารที่ดึงที่อยู่จากใบขายนี้
+            </div>
+            {(detailRow?.address || detailRow?.customer_province) && (
+              <div style={{ padding: "6px 10px", background: "#f3f4f6", borderRadius: 6, fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+                ที่อยู่เดิม: {[detailRow.address, detailRow.sub_district, detailRow.district, detailRow.customer_province, detailRow.postal_code].filter(Boolean).join(" ") || "-"}
+              </div>
+            )}
+            <div style={{ padding: "8px 12px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 8, fontSize: 12, color: "#92400e", marginBottom: 12 }}>
+              ⚠️ การเปลี่ยน "จังหวัด" มีผลกับค่าใช้จ่ายในการจดทะเบียน (คิดตามจังหวัดของลูกค้า) — ยอดในรายการวางบิลจะเปลี่ยนตามหลังรีเฟรช
+            </div>
+            <label style={addrLbl}>ที่อยู่ (บ้านเลขที่ หมู่ ถนน) *</label>
+            <input value={addrEdit.address} onChange={e => setAddrEdit(p => ({ ...p, address: e.target.value }))}
+              placeholder="เช่น 8/3 ม.1" style={{ ...addrInp, marginBottom: 8 }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <ThaiAddressFields
+                form={addrEdit}
+                setForm={setAddrEdit}
+                Field={AddrField}
+                inp={addrInp}
+                keys={{ province: "province", district: "district", subdistrict: "sub_district", postal: "postal_code" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 12 }}>
+              <button onClick={() => setAddrEdit(null)} disabled={addrSaving}
+                style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={saveAddress} disabled={addrSaving}
+                style={{ padding: "8px 20px", background: addrSaving ? "#9ca3af" : "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: addrSaving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                {addrSaving ? "กำลังบันทึก..." : "💾 บันทึกที่อยู่"}
+              </button>
             </div>
           </div>
         </div>
@@ -1825,6 +1922,13 @@ th { background: #f0f4f9; }
   <div class="sign-box"><div style="height:35px"></div><div class="sign-line">ลงชื่อ ........................................................<br/>ผู้รับเงิน (Vendor)</div></div>
 </div>
 </body></html>`;
+}
+
+const addrLbl = { display: "block", fontSize: 12, fontWeight: 600, marginBottom: 3, color: "#374151" };
+const addrInp = { width: "100%", padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13, boxSizing: "border-box" };
+// Field wrapper สำหรับ ThaiAddressFields ใน modal แก้ที่อยู่
+function AddrField({ label, children }) {
+  return <div><label style={addrLbl}>{label}</label>{children}</div>;
 }
 
 function DetailSection({ title, items }) {
