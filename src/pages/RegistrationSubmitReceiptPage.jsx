@@ -4,6 +4,10 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const REFUND_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-refund-api";
 
+// ตัวกรองพิเศษ: แสดงบรรทัดรายได้ประกันภัย/พรบ เฉพาะงานประกันบริษัทล็อคตั้น
+// (ปกติบรรทัดประกัน/พรบถูกซ่อนทั้งหมดเพราะเป็น flow วางบิลประกัน — ตัวกรองนี้เปิดดูเฉพาะล็อคตั้น)
+const LOCKTON_FILTER = "__LOCKTON__";
+
 export default function RegistrationSubmitReceiptPage({ currentUser }) {
   const [tab, setTab] = useState("pending");  // 'pending' | 'history'
   const [rows, setRows] = useState([]);
@@ -43,7 +47,8 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
         body: JSON.stringify({
           action: "get_receipt_lines",
           date_from: dateFrom, date_to: dateTo,
-          branch_code: branchFilter, income_type: incomeTypeFilter,
+          // ตัวกรองล็อคตั้นเป็นค่าพิเศษฝั่งหน้าเว็บ — ส่ง income_type ว่างให้ API แล้วกรองเองด้านล่าง
+          branch_code: branchFilter, income_type: incomeTypeFilter === LOCKTON_FILTER ? "" : incomeTypeFilter,
           keyword: search.trim(),
         }),
       });
@@ -68,9 +73,11 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
       const SUBMIT_CUTOFF_ISO = "2026-05-01";
       const KEEP_RECEIPTS = new Set(["SCY01-CA260400033", "SCY01-CA260400031"]);
       const isInsuranceLine = r => /ประกัน|พรบ/.test(String(r.income_type || ""));
+      // โหมดล็อคตั้น: แสดงเฉพาะบรรทัดประกัน/พรบ ที่ชื่อรายได้/รายละเอียดมี "ล็อคตั้น" — โหมดปกติซ่อนบรรทัดประกันทั้งหมดเหมือนเดิม
+      const isLocktonLine = r => isInsuranceLine(r) && /ล็อคตั้น|LOCKTON/i.test(`${r.income_name || ""} ${r.description || ""}`);
       const visible = arr.filter(r =>
         r.receive_status !== "ยกเลิก" &&
-        !isInsuranceLine(r) &&
+        (incomeTypeFilter === LOCKTON_FILTER ? isLocktonLine(r) : !isInsuranceLine(r)) &&
         !refunded.has(String(r.receipt_no || "").trim()) &&
         (KEEP_RECEIPTS.has(String(r.receipt_no || "").trim()) ||
           !r.receive_date || String(r.receive_date).slice(0, 10) >= SUBMIT_CUTOFF_ISO)
@@ -397,6 +404,7 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
 
         <select value={incomeTypeFilter} onChange={e => setIncomeTypeFilter(e.target.value)} style={inputStyle}>
           <option value="">ทุกประเภทรายได้</option>
+          <option value={LOCKTON_FILTER}>รายได้ประกันภัย/พรบ (เฉพาะล็อคตั้น)</option>
           {incomeTypeOpts.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
 

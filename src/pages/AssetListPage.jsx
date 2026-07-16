@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/asset-api";
+const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api"; // สาขา (branch_master) — dropdown ที่ตั้งสินทรัพย์
 
 // สถานะสินทรัพย์ตามแบบ FlowAccount
 const STATUS = [
@@ -78,8 +79,20 @@ export default function AssetListPage({ currentUser }) {
   const [filterAff, setFilterAff] = useState("");
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
+  const [branches, setBranches] = useState([]); // สาขาจาก branch_master — dropdown ที่ตั้งสินทรัพย์
 
-  useEffect(() => { fetchData(); fetchCategories(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fetchData(); fetchCategories(); fetchBranches(); /* eslint-disable-next-line */ }, []);
+
+  async function fetchBranches() {
+    try {
+      const res = await fetch(MASTER_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_branches", include_inactive: "true" }),
+      });
+      const data = await res.json();
+      setBranches((Array.isArray(data) ? data : []).filter(b => b && b.branch_code));
+    } catch { setBranches([]); }
+  }
 
   async function post(body) {
     const res = await fetch(API_URL, {
@@ -442,7 +455,19 @@ export default function AssetListPage({ currentUser }) {
                   <div style={fRow}><label style={fLbl}>วันหมดอายุประกัน:</label>
                     <input type="date" value={form.warranty_expire_date} onChange={e => setForm(f => ({ ...f, warranty_expire_date: e.target.value }))} style={inp} /></div>
                   <div style={fRow}><label style={fLbl}>ที่ตั้งสินทรัพย์:</label>
-                    <input value={form.location} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} style={inp} placeholder="เช่น สาขาวังน้อย ชั้น 2" /></div>
+                    {(() => {
+                      // dropdown สาขา (รูปแบบ "SCY06 ป.เปา วังน้อย" — ใช้แยกสาขาในงบกำไรขาดทุน)
+                      // ค่าที่ไม่ตรงสาขา (ข้อความอิสระของเดิม) แสดงเป็นตัวเลือกของตัวเอง ไม่หายตอนแก้ไข
+                      const opts = branches.map(b => `${b.branch_code} ${b.branch_name || ""}`.trim());
+                      const cur = String(form.location || "").trim();
+                      return (
+                        <select value={cur} onChange={e => setForm(f => ({ ...f, location: e.target.value }))} style={inp}>
+                          <option value="">-- ไม่ระบุ --</option>
+                          {cur && !opts.includes(cur) && <option value={cur}>{cur} (ค่าเดิม)</option>}
+                          {opts.map(o => <option key={o} value={o}>{o}</option>)}
+                        </select>
+                      );
+                    })()}</div>
                   <div style={fRow}><label style={fLbl}>ผู้ใช้งาน:</label>
                     <input value={form.assigned_to} onChange={e => setForm(f => ({ ...f, assigned_to: e.target.value }))} style={inp} /></div>
                 </div>

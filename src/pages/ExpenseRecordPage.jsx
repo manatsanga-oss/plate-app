@@ -94,6 +94,7 @@ export default function ExpenseRecordPage({ currentUser }) {
   const [assetRows, setAssetRows] = useState([]);           // รายการย่อยที่จะแปลง (1 แถว = 1 สินทรัพย์)
   const [assetStartDate, setAssetStartDate] = useState("");
   const [assetAff, setAssetAff] = useState("");
+  const [assetLocation, setAssetLocation] = useState(""); // ที่ตั้งสินทรัพย์ — prefill จากสาขาที่ใช้ของใบค่าใช้จ่าย
   const [assetSaving, setAssetSaving] = useState(false);
 
   useEffect(() => {
@@ -517,6 +518,9 @@ export default function ExpenseRecordPage({ currentUser }) {
     }));
     setAssetStartDate(String(d.doc_date || "").slice(0, 10) || todayISO());
     setAssetAff(d.affiliation || "");
+    // ที่ตั้งสินทรัพย์ = สาขาที่ใช้ของใบค่าใช้จ่าย (รหัส + ชื่อสาขาจาก branch_master)
+    const ub = branches.find(x => x.branch_code === d.usage_branch);
+    setAssetLocation(d.usage_branch ? `${d.usage_branch} ${ub?.branch_name || ""}`.trim() : "");
     setAssetModalDoc(d);
   }
   async function handleConvertAsset() {
@@ -541,6 +545,7 @@ export default function ExpenseRecordPage({ currentUser }) {
             quantity: Number(r.quantity) || 1,
             purchase_date: String(d.doc_date || "").slice(0, 10),
             vendor_name: d.vendor_name || "",
+            location: assetLocation || "",
             acquisition_type: "new",
             start_use_date: assetStartDate,
             purchase_price: Number(r.purchase_price) || 0,
@@ -1064,6 +1069,11 @@ export default function ExpenseRecordPage({ currentUser }) {
               <div>
                 <label style={lbl}>วันที่เริ่มต้นใช้งาน (เริ่มคิดค่าเสื่อม) *</label>
                 <input type="date" value={assetStartDate} onChange={e => setAssetStartDate(e.target.value)} style={{ ...inp, width: 170 }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 220 }}>
+                <label style={lbl}>ที่ตั้งสินทรัพย์ <span style={{ fontWeight: 400, color: "#9ca3af" }}>(เติมจากสาขาที่ใช้ของใบ — แก้ได้)</span></label>
+                <input value={assetLocation} onChange={e => setAssetLocation(e.target.value)}
+                  placeholder="เช่น SCY06 ป.เปา วังน้อย" style={inp} />
               </div>
             </div>
 

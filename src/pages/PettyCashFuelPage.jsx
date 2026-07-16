@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api";
+const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api"; // สาขา — dropdown สาขาที่สร้างใบ
 
 const COMPANIES = [
   { label: "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด", brand: "ฮอนด้า" },
@@ -16,6 +17,17 @@ export default function PettyCashFuelPage({ currentUser }) {
   const [mode, setMode] = useState("list"); // list | create
   const [message, setMessage] = useState("");
   const [selCompany, setSelCompany] = useState(COMPANIES[0]);
+  // สาขาที่สร้างใบ — default = สาขาของ user ที่ login, เลือกเปลี่ยนได้ (เก็บลง branch_code)
+  const [branchSel, setBranchSel] = useState(currentUser?.branch || "");
+  const [branchOptions, setBranchOptions] = useState([]);
+  useEffect(() => {
+    fetch(MASTER_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "get_branches", include_inactive: "true" }),
+    }).then(r => r.json())
+      .then(d => setBranchOptions((Array.isArray(d) ? d : []).filter(b => b && b.branch_code)))
+      .catch(() => setBranchOptions([]));
+  }, []);
   // default: 25 เดือนก่อน ถึง 24 เดือนปัจจุบัน
   const now = new Date();
   const pad = n => String(n).padStart(2, "0");
@@ -68,7 +80,7 @@ export default function PettyCashFuelPage({ currentUser }) {
     try {
       await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "save_fuel_doc", doc_no: docNo, branch_code: currentUser?.branch_code || "",
+          action: "save_fuel_doc", doc_no: docNo, branch_code: (branchSel || "").split(" ")[0],
           branch_name: selCompany.label, created_by: currentUser?.name || "",
           position: currentUser?.position || "", period_from: items[0]?.sale_date, period_to: items[items.length - 1]?.sale_date,
           items,
@@ -170,6 +182,12 @@ export default function PettyCashFuelPage({ currentUser }) {
           <select value={selCompany.label} onChange={e => { const c = COMPANIES.find(x => x.label === e.target.value); setSelCompany(c); setSelected(new Set()); fetchSales(c.brand, dateFrom, dateTo); }}
             style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #072d6b", borderRadius: 8, fontWeight: 600, color: "#072d6b" }}>
             {COMPANIES.map(c => <option key={c.label} value={c.label}>{c.label} ({c.brand})</option>)}
+          </select>
+          <select value={branchSel} onChange={e => setBranchSel(e.target.value)} title="สาขาที่สร้างใบ"
+            style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #0369a1", borderRadius: 8, fontWeight: 600, color: "#0369a1" }}>
+            <option value="">-- สาขาที่สร้างใบ --</option>
+            {branchSel && !branchOptions.some(b => `${b.branch_code} ${b.branch_name || ""}`.trim() === branchSel) && <option value={branchSel}>{branchSel}</option>}
+            {branchOptions.map(b => { const v = `${b.branch_code} ${b.branch_name || ""}`.trim(); return <option key={v} value={v}>{v}</option>; })}
           </select>
           <span style={{ fontSize: 12, color: "#6b7280" }}>ขายตั้งแต่</span>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)}

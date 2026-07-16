@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api";
 const OCR_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/ocr-pdf-spare-parts";
+const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api"; // สาขา — dropdown สาขาที่สร้างใบ
 const COMPANIES = [
   { label: "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด", match: "ป.เปา" },
   { label: "หจก สิงห์ชัยสยามยนต์", match: "สิงห์ชัย" },
@@ -31,7 +32,19 @@ export default function PettyCashGeneralPage({ currentUser }) {
   const prevM = m === 1 ? 12 : m - 1;
   const prevY = m === 1 ? now.getFullYear() - 1 : now.getFullYear();
 
+  // สาขาที่สร้างใบ — default = สาขาของ user ที่ login, เลือกเปลี่ยนได้
+  const [branchSel, setBranchSel] = useState(currentUser?.branch || "");
+  const [branchOptions, setBranchOptions] = useState([]);
+
   useEffect(() => { fetchDocs(); }, []);
+  useEffect(() => {
+    fetch(MASTER_URL, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "get_branches", include_inactive: "true" }),
+    }).then(r => r.json())
+      .then(d => setBranchOptions((Array.isArray(d) ? d : []).filter(b => b && b.branch_code)))
+      .catch(() => setBranchOptions([]));
+  }, []);
 
   async function fetchDocs() {
     try {
@@ -52,6 +65,7 @@ export default function PettyCashGeneralPage({ currentUser }) {
   function openCreate() {
     setMode("create"); setEditDoc(null); setItems([emptyItem()]);
     setCompany(COMPANIES[0].label);
+    setBranchSel(currentUser?.branch || "");
     setPeriodFrom(`${prevY}-${pad(prevM)}-25`);
     setPeriodTo(`${now.getFullYear()}-${pad(m)}-24`);
     setMessage("");
@@ -60,6 +74,7 @@ export default function PettyCashGeneralPage({ currentUser }) {
   function openEdit(doc) {
     setMode("create"); setEditDoc(doc);
     setCompany(doc.company_name || COMPANIES[0].label);
+    setBranchSel(doc.branch_name || currentUser?.branch || "");
     setPeriodFrom(doc.period_from ? doc.period_from.slice(0, 10) : "");
     setPeriodTo(doc.period_to ? doc.period_to.slice(0, 10) : "");
     const its = Array.isArray(doc.items) ? doc.items.map(i => ({ ...i, expense_date: i.expense_date ? i.expense_date.slice(0, 10) : "" })) : [emptyItem()];
@@ -120,7 +135,7 @@ export default function PettyCashGeneralPage({ currentUser }) {
         const docNo = `GEN${String(now.getFullYear() + 543).slice(-2)}${pad(m)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}`;
         const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "save_general_doc", doc_no: docNo, doc_date: now.toISOString().split("T")[0],
-            branch_code: (currentUser?.branch || "").split(" ")[0], branch_name: currentUser?.branch || "",
+            branch_code: (branchSel || "").split(" ")[0], branch_name: branchSel || "",
             company_name: company, created_by: currentUser?.name || "", position: currentUser?.position || "",
             period_from: periodFrom, period_to: periodTo }) });
         const data = await res.json();
@@ -206,6 +221,12 @@ export default function PettyCashGeneralPage({ currentUser }) {
           <select value={company} onChange={e => setCompany(e.target.value)} disabled={editDoc?.viewOnly}
             style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #072d6b", borderRadius: 8, fontWeight: 600, color: "#072d6b" }}>
             {COMPANIES.map(c => <option key={c.label} value={c.label}>{c.label}</option>)}
+          </select>
+          <select value={branchSel} onChange={e => setBranchSel(e.target.value)} disabled={editDoc?.viewOnly} title="สาขาที่สร้างใบ"
+            style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #0369a1", borderRadius: 8, fontWeight: 600, color: "#0369a1" }}>
+            <option value="">-- สาขาที่สร้างใบ --</option>
+            {branchSel && !branchOptions.some(b => `${b.branch_code} ${b.branch_name || ""}`.trim() === branchSel) && <option value={branchSel}>{branchSel}</option>}
+            {branchOptions.map(b => { const v = `${b.branch_code} ${b.branch_name || ""}`.trim(); return <option key={v} value={v}>{v}</option>; })}
           </select>
           <span style={{ fontSize: 12, color: "#6b7280" }}>ตั้งแต่</span>
           <input type="date" value={periodFrom} onChange={e => setPeriodFrom(e.target.value)} disabled={editDoc?.viewOnly} style={{ padding: "6px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }} />

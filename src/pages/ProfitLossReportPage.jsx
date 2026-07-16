@@ -55,6 +55,16 @@ const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting
 const SALES_EXTRA_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
 const HR_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 const BOOKING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-api";
+const ASSET_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/asset-api"; // หักค่าใช้จ่ายที่แปลงเป็นสินทรัพย์ออกจากค่าใช้จ่ายทั่วไป
+const PETTY_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api"; // เงินสดย่อย 4 ชนิด → ค่าใช้จ่ายเบ็ดเตล็ด
+
+// เอกสารเงินสดย่อย 4 ชนิด (เมนูเงินสดย่อย) — วันที่ของรายการย่อยใช้กรองเดือน, สาขาจาก branch_name ของใบ
+const PETTY_TYPES = [
+  { action: "get_fuel_docs", label: "ค่าน้ำมันรถใหม่", dateField: "sale_date" },
+  { action: "get_postage_docs", label: "ค่าไปรษณีย์", dateField: "post_date" },
+  { action: "get_general_docs", label: "ค่าใช้จ่ายทั่วไป (เงินสดย่อย)", dateField: "expense_date" },
+  { action: "get_offering_docs", label: "ค่าของไหว้", dateField: "offering_date" },
+];
 
 // ตารางใบกำกับขายรถแยกตามบริษัทผู้ออกใบกำกับ (ขายข้ามหน้าร้านได้ — สาขาจริงดูจาก branch_codes)
 const TAX_COMPANIES = ["PAPAO", "NAKORNLUANG", "SINGCHAI"];
@@ -166,6 +176,29 @@ function fmtDateTH(iso) {
 }
 const r2 = (n) => Math.round((Number(n || 0) + Number.EPSILON) * 100) / 100;
 
+// ค่าเสื่อมสะสม ณ สิ้นวันใด ๆ ของสินทรัพย์ 1 ตัว — ตรรกะเดียวกับหน้าบันทึกค่าเสื่อมราคา (AssetDepreciationPage):
+// เส้นตรง (ราคา−ซาก)/ปี ปันตามวันจริง ÷365 นับรวมวันแรก · ต่อยอดจากยอดยกมา · หยุดที่วันเลิกใช้ · null = ไม่คิดค่าเสื่อม
+function accumFnOf(a) {
+  const price = r2(a.purchase_price);
+  const salvage = r2(a.salvage_value);
+  const years = Number(a.useful_life_years) || 0;
+  const enabled = !(a.enable_depreciation === false || String(a.enable_depreciation) === "false");
+  const depBase = Math.max(0, r2(price - salvage));
+  const start = a.start_use_date ? new Date(String(a.start_use_date).slice(0, 10)) : null;
+  const bfAmt = r2(a.accum_bf_amount);
+  const bfDate = a.accum_bf_date ? new Date(String(a.accum_bf_date).slice(0, 10)) : null;
+  if (!enabled || !(years > 0) || !start) return null;
+  const annual = depBase / years;
+  const base = (bfAmt > 0 && bfDate) ? bfDate : start;
+  const retired = (a.status === "retired" && a.retired_date) ? new Date(String(a.retired_date).slice(0, 10)) : null;
+  return (d) => {
+    const dd = (retired && retired < d) ? retired : d;
+    const days = Math.floor((dd - base) / 86400000) + 1;
+    if (days <= 0) return Math.min(bfAmt, depBase);
+    return Math.min(depBase, r2(bfAmt + annual * days / 365));
+  };
+}
+
 async function post(url, body) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -230,6 +263,14 @@ export default function ProfitLossReportPage() {
   // ค่าน้ำมัน — ยอดเบิกค่าน้ำมันของเดือน (get_fuel_expenses ชุดเดียวกับรายงานเบิกค่าน้ำมัน
   // หน้าจองคนขับรถ) ไม่ปันส่วนสาขา (user กำหนด) → ลงช่อง "รายได้รวม" ทั้งก้อน
   const [fuelExpAgg, setFuelExpAgg] = useState(zeroAgg);
+  // ค่าเสื่อมราคาของเดือน (คำนวณจากทะเบียนสินทรัพย์): สาขาจากรหัส SCY ในช่อง "ที่ตั้งสินทรัพย์" · ไม่ระบุ → ช่องรายได้รวม
+  const [deprecAgg, setDeprecAgg] = useState(zeroAgg);
+  const [deprecRows, setDeprecRows] = useState([]);
+  // ปันส่วนค่าน้ำมันตามการจอง "ส่งรถ": {totalBk: จองทั้งหมด, delivBk: ส่งรถ (ไม่รวมส่งรถระหว่างสาขา)}
+  const [fuelAllocInfo, setFuelAllocInfo] = useState(null);
+  // ค่าใช้จ่ายเบ็ดเตล็ด (เงินสดย่อย 4 ชนิด) — สาขาตามใบเบิก
+  const [pettyAgg, setPettyAgg] = useState(zeroAgg);
+  const [pettyRows, setPettyRows] = useState([]);
   const [fuelExpRows, setFuelExpRows] = useState([]);
 
   async function loadReport(targetYm = ym) {
@@ -238,7 +279,7 @@ export default function ProfitLossReportPage() {
     const { start, end, thYm } = monthRange(targetYm);
     const [adYear, adMonth] = String(targetYm).split("-").map(Number);
     try {
-      const [taxByBranch, partSvcByAff, hondaJobs, partsCostRows, regLines, feeLines, billLines, insBillRows, regSumRows, delivRows, cosmosRows, specCommDetail, giveCostData, payrollCalc, hrEmployees, otherInv, incomeDocs, commNormalMonth, flowExpDocs, fuelPayRows] = await Promise.all([
+      const [taxByBranch, partSvcByAff, hondaJobs, partsCostRows, regLines, feeLines, billLines, insBillRows, regSumRows, delivRows, cosmosRows, specCommDetail, giveCostData, payrollCalc, hrEmployees, otherInv, incomeDocs, commNormalMonth, flowExpDocs, fuelPayRows, assetList, bookingRows, pettyDocsByType] = await Promise.all([
         // 1) ใบกำกับขายรถ — เรียกทีละบริษัท (workflow แยกตารางตาม branch)
         //    สาขาจริงดูจาก branch_codes ของใบขาย (นครหลวงไม่มี code → SCY05 ทั้งตาราง)
         Promise.all(TAX_COMPANIES.map(async (co) => {
@@ -349,6 +390,17 @@ export default function ProfitLossReportPage() {
         // 3m) ค่าน้ำมัน — รายการเบิกค่าน้ำมันของเดือน (booking-api ชุดเดียวกับรายงานเบิกค่าน้ำมัน)
         post(BOOKING_URL, { action: "get_fuel_expenses", from: start, to: end })
           .then(asArray).catch(() => []),
+        // 3n) รายการสินทรัพย์ — ใช้หักค่าใช้จ่ายที่ถูกแปลงเป็นสินทรัพย์ออกจากค่าใช้จ่ายทั่วไป
+        //     (เฉพาะที่แปลงจากเมนูบันทึกค่าใช้จ่าย — note "แปลงจากค่าใช้จ่าย" กันชนกับสินทรัพย์นำเข้าที่ reference_no เป็นเลข EXP ของ FLOW)
+        post(ASSET_URL, { action: "list_assets" })
+          .then(asArray).catch(() => []),
+        // 3o) การจองคนขับรถทั้งหมด — ใช้ปันส่วนค่าน้ำมันเข้าสาขาตามครั้งที่จอง "ส่งรถ"
+        post(BOOKING_URL, { action: "get_bookings" })
+          .then(asArray).catch(() => []),
+        // 3p) เงินสดย่อย 4 ชนิด → แถวค่าใช้จ่ายเบ็ดเตล็ด (สาขาตามใบเบิก, เดือนตามวันที่ของรายการย่อย)
+        Promise.all(PETTY_TYPES.map((t) =>
+          post(PETTY_URL, { action: t.action }).then(asArray).catch(() => [])
+        )),
       ]);
 
       // แยกอะไหล่+งานซ่อมจริง / ประกันรถหาย (คอสมอส/ล็อคตั้น)
@@ -669,6 +721,13 @@ export default function ProfitLossReportPage() {
       // ค่าใช้จ่ายทั่วไป — เอกสารบันทึกค่าใช้จ่าย ยอดก่อน VAT (subtotal): สาขาตามช่อง
       // "สาขาที่ใช้" (usage_branch) ใบที่ไม่ระบุ → ช่องรายได้รวม · ตัดหมวดที่นับเป็นต้นทุน
       // ในงบแล้ว (GENEXP_EXCLUDE — ดูรวมถึงหมวด master ในรายการ items) กันซ้ำ
+      // ยอดที่ถูกแปลงเป็นสินทรัพย์ต่อใบค่าใช้จ่าย (เฉพาะสินทรัพย์จากเมนู "แปลงเป็นสินทรัพย์" —
+      // note ขึ้นต้น "แปลงจากค่าใช้จ่าย" · reference_no = เลขเอกสาร EXP) → ไม่นับเป็นค่าใช้จ่ายในงบนี้
+      const capByDoc = {};
+      assetList.filter((a) => a && a.reference_no && /แปลงจากค่าใช้จ่าย/.test(String(a.note || ""))).forEach((a) => {
+        const ref = String(a.reference_no).trim();
+        capByDoc[ref] = r2((capByDoc[ref] || 0) + r2(a.purchase_price));
+      });
       const ge = zeroAgg();
       const geRows = [];
       flowExpDocs.filter((r) => r && r.expense_doc_no && !isCancelled(r.status)).forEach((r) => {
@@ -676,7 +735,9 @@ export default function ProfitLossReportPage() {
         const hay = [r.description, r.note, r.vendor_name, ...items.map((it) => `${it.expense_code || ""} ${it.expense_name || ""} ${it.description || ""}`)].join(" ");
         // ใบ CSR/จัดกิจกรรม (52076) ติดคำ "ส่งเสริมการขาย" แต่ไม่ได้นับซ้ำที่ไหน → นับปกติ
         if (GENEXP_EXCLUDE.test(hay) && !/CSR|จัดกิจกรรม/i.test(hay)) return;
-        const amt = r2(r.subtotal);
+        // หักส่วนที่แปลงเป็นสินทรัพย์ (แปลงทั้งใบ → ตัดทั้งแถว, แปลงบางรายการ → เหลือเฉพาะส่วนที่เป็นค่าใช้จ่าย)
+        const cap = Math.min(r2(capByDoc[String(r.expense_doc_no).trim()] || 0), r2(r.subtotal));
+        const amt = r2(r2(r.subtotal) - cap);
         if (!amt) return;
         const ub = String(r.usage_branch || "").trim();
         const k = DEFAULT_BRANCHES.some((b) => b.key === ub) ? ub : "";
@@ -686,8 +747,8 @@ export default function ProfitLossReportPage() {
           doc: r.expense_doc_no,
           date: r.doc_date,
           customer: r.vendor_name || "-",
-          detail: [[...new Set(items.map((it) => it.expense_name).filter(Boolean))].join(", "), r.affiliation ? `สังกัด ${r.affiliation}` : "", r.description].filter(Boolean).join(" · "),
-          beforeVat: amt, vat: r2(r.vat_amount), total: r2(r.total),
+          detail: [[...new Set(items.map((it) => it.expense_name).filter(Boolean))].join(", "), r.affiliation ? `สังกัด ${r.affiliation}` : "", r.description, cap > 0 ? `หักแปลงเป็นสินทรัพย์ ${fmtN(cap)}` : ""].filter(Boolean).join(" · "),
+          beforeVat: amt, vat: r2(r.vat_amount), total: r2(r2(r.total) - cap),
         });
       });
       ge.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + ge[b.key], ge.unassigned));
@@ -710,9 +771,94 @@ export default function ProfitLossReportPage() {
           beforeVat: amt, vat: 0, total: amt,
         });
       });
-      fu.total = fu.unassigned;
+      // ปันส่วนค่าน้ำมันเข้าสาขา: ส่วนของ "ส่งรถ" = น้ำมันรวม × (ครั้งส่งรถ ÷ จองทั้งหมดของเดือน)
+      // แล้วแยกสาขาตามครั้งที่ส่งของแต่ละร้าน — เช่น ส่งรถ 4/จอง 10 น้ำมัน 10,000 → ส่วนส่งรถ 4,000 แบ่งตามร้านที่ส่ง
+      // "ส่งรถระหว่างสาขา"/ทำสัญญา/อื่น ๆ ไม่นับเป็นส่งรถ → ส่วนที่เหลือ (รวมส่งรถที่ไม่รู้สาขา) ลงช่องรายได้รวม
+      const fuelTotal = fu.unassigned;
+      const bkMonth = (Array.isArray(bookingRows) ? bookingRows : []).filter((b) => {
+        const d = String(b?.booking_date || "").slice(0, 10);
+        return d >= start && d <= end && !/ยกเลิก/.test(String(b?.status || ""));
+      });
+      const delivCnt = {};
+      let delivBk = 0;
+      bkMonth.filter((b) => String(b.delivery_type || "").trim() === "ส่งรถ").forEach((b) => {
+        delivBk += 1;
+        const m = String(b.branch || "").match(/SCY\d{2}/);
+        const k = m && DEFAULT_BRANCHES.some((x) => x.key === m[0]) ? m[0] : "";
+        if (k) delivCnt[k] = (delivCnt[k] || 0) + 1;
+      });
+      if (bkMonth.length > 0 && fuelTotal > 0) {
+        const perBooking = fuelTotal / bkMonth.length;
+        let allocated = 0;
+        DEFAULT_BRANCHES.forEach((b) => {
+          const v = r2(perBooking * (delivCnt[b.key] || 0));
+          fu[b.key] = v;
+          allocated = r2(allocated + v);
+        });
+        fu.unassigned = r2(fuelTotal - allocated);
+      }
+      fu.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + fu[b.key], fu.unassigned));
+      setFuelAllocInfo({ totalBk: bkMonth.length, delivBk });
       setFuelExpAgg(fu);
       setFuelExpRows(fuRows);
+
+      // ค่าใช้จ่ายเบ็ดเตล็ด — เงินสดย่อย 4 ชนิด: กรองรายการย่อยตามวันที่ในเดือน, สาขาจากรหัส SCY ใน branch_name ของใบเบิก
+      // ยอดก่อน VAT (รายการทั่วไปที่มีใบกำกับหัก vat_amount ออก) · ตรวจแล้วไม่ซ้ำกับเอกสารบันทึกค่าใช้จ่าย (EXP)
+      const py2 = zeroAgg();
+      const pyRows2 = [];
+      PETTY_TYPES.forEach((t, ti) => {
+        (pettyDocsByType[ti] || []).filter((d) => d && d.doc_no).forEach((d) => {
+          // สาขาจาก branch_code ก่อน (ใบค่าน้ำมันรถใหม่เก็บบริษัทใน branch_name — สาขาจริงอยู่ branch_code) แล้วค่อย branch_name
+          const m = String(`${d.branch_code || ""} ${d.branch_name || ""}`).match(/SCY\d{2}/);
+          const k = m && DEFAULT_BRANCHES.some((b) => b.key === m[0]) ? m[0] : "";
+          (Array.isArray(d.items) ? d.items : []).forEach((it) => {
+            const dt = String(it?.[t.dateField] || "").slice(0, 10);
+            if (dt < start || dt > end) return;
+            const vat = r2(it.vat_amount);
+            const amt = r2(r2(it.amount) - vat);
+            if (!amt) return;
+            py2[k || "unassigned"] = r2(py2[k || "unassigned"] + amt);
+            pyRows2.push({
+              branch: k,
+              doc: d.doc_no,
+              date: dt,
+              customer: it.vendor_name || it.recipient_name || it.customer_name || d.created_by || "-",
+              detail: [t.label, it.description || it.model_series || "", d.status === "draft" ? "(ยังไม่อนุมัติ)" : ""].filter(Boolean).join(" · "),
+              beforeVat: amt, vat, total: r2(it.amount),
+            });
+          });
+        });
+      });
+      py2.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + py2[b.key], py2.unassigned));
+      setPettyAgg(py2);
+      setPettyRows(pyRows2.sort((x, y) => String(x.date).localeCompare(String(y.date))));
+
+      // ค่าเสื่อมราคาของเดือน = ค่าเสื่อมสะสม ณ สิ้นเดือน − ณ สิ้นเดือนก่อน (รายสินทรัพย์ จากทะเบียนสินทรัพย์)
+      // สาขา: รหัส SCY0x ในช่อง "ที่ตั้งสินทรัพย์" (location) → ลงสาขานั้น · ไม่มี/ไม่รู้จัก → ช่องรายได้รวม
+      const monthEnd = new Date(adYear, adMonth, 0);
+      const prevMonthEnd = new Date(adYear, adMonth - 1, 0);
+      const dp = zeroAgg();
+      const dpRows = [];
+      assetList.filter((a) => a && a.asset_id).forEach((a) => {
+        const fn = accumFnOf(a);
+        if (!fn) return;
+        const dep = r2(fn(monthEnd) - fn(prevMonthEnd));
+        if (dep <= 0) return;
+        const m = String(a.location || "").match(/SCY\d{2}/);
+        const k = m && DEFAULT_BRANCHES.some((b) => b.key === m[0]) ? m[0] : "";
+        dp[k || "unassigned"] = r2(dp[k || "unassigned"] + dep);
+        dpRows.push({
+          branch: k,
+          doc: a.asset_code || `#${a.asset_id}`,
+          date: String(a.start_use_date || "").slice(0, 10),
+          customer: a.category_name || "-",
+          detail: [a.asset_name, a.affiliation ? `สังกัด ${a.affiliation}` : "", a.location].filter(Boolean).join(" · "),
+          beforeVat: dep, vat: 0, total: dep,
+        });
+      });
+      dp.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + dp[b.key], dp.unassigned));
+      setDeprecAgg(dp);
+      setDeprecRows(dpRows.sort((x, y) => y.beforeVat - x.beforeVat));
 
       // รับเรื่องงานทะเบียน: ตัดบรรทัดประกันรถหาย (อยู่หมวดค่าบริการ/ประกันแล้ว กันซ้ำ)
       // branch "00000" = ศูนย์ยามาฮ่า → SCY01 · ยอดไม่มี VAT (ก่อน VAT = ยอดเต็ม)
@@ -1152,7 +1298,8 @@ export default function ProfitLossReportPage() {
                   title={fuelExpRows.length > 0 ? "คลิกดูรายการเบิกรายใบ" : ""}
                   style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b", cursor: fuelExpRows.length > 0 ? "pointer" : "default" }}>
                   <td colSpan={2} style={{ ...td, textAlign: "right" }}>
-                    หัก ค่าน้ำมัน (เบิกค่าน้ำมัน — ไม่ปันส่วน ลงช่องรวม)
+                    หัก ค่าน้ำมัน (เบิกค่าน้ำมัน — ปันส่วนสาขาเฉพาะส่วนจอง "ส่งรถ" · ที่เหลือลงช่องรวม)
+                    {fuelAllocInfo && fuelAllocInfo.totalBk > 0 && <span style={{ display: "block", fontSize: 10.5, fontWeight: 400, color: "#9ca3af" }}>ส่งรถ {fuelAllocInfo.delivBk} จากจองทั้งหมด {fuelAllocInfo.totalBk} ครั้ง (ไม่นับส่งรถระหว่างสาขา)</span>}
                     {fuelExpRows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({fuelExpRows.length} รายการ)</span>}
                   </td>
                   {branches.map((b) => (
@@ -1160,14 +1307,48 @@ export default function ProfitLossReportPage() {
                   ))}
                   <td style={{ ...tdNum, fontSize: 13 }}>{fuelExpAgg.total ? `(${fmtN(fuelExpAgg.total)})` : "-"}</td>
                 </tr>
+                <tr
+                  onClick={() => pettyRows.length > 0 && openPopup("pettycash")}
+                  title={pettyRows.length > 0 ? "คลิกดูรายละเอียดรายรายการ" : ""}
+                  style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b", cursor: pettyRows.length > 0 ? "pointer" : "default" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>
+                    หัก ค่าใช้จ่ายเบ็ดเตล็ด (เงินสดย่อย: น้ำมันรถใหม่/ไปรษณีย์/ทั่วไป/ของไหว้ — สาขาตามใบเบิก)
+                    {pettyRows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({pettyRows.length} รายการ)</span>}
+                  </td>
+                  {branches.map((b) => (
+                    <td key={b.key} style={tdNum}
+                      title={pettyRows.length > 0 && pettyAgg[b.key] ? `ดูเฉพาะ ${b.key}` : ""}
+                      onClick={(e) => { if (pettyRows.length > 0 && pettyAgg[b.key]) { e.stopPropagation(); openPopup("pettycash", b.key); } }}>
+                      {pettyAgg[b.key] ? `(${fmtN(pettyAgg[b.key])})` : "-"}
+                    </td>
+                  ))}
+                  <td style={{ ...tdNum, fontSize: 13 }}>{pettyAgg.total ? `(${fmtN(pettyAgg.total)})` : "-"}</td>
+                </tr>
+                <tr
+                  onClick={() => deprecRows.length > 0 && openPopup("deprec")}
+                  title={deprecRows.length > 0 ? "คลิกดูรายละเอียดรายสินทรัพย์" : ""}
+                  style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b", cursor: deprecRows.length > 0 ? "pointer" : "default" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>
+                    หัก ค่าเสื่อมราคา (ทะเบียนสินทรัพย์ — สาขาตามที่ตั้งสินทรัพย์ · ไม่ระบุลงช่องรวม)
+                    {deprecRows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({deprecRows.length} รายการ)</span>}
+                  </td>
+                  {branches.map((b) => (
+                    <td key={b.key} style={tdNum}
+                      title={deprecRows.length > 0 && deprecAgg[b.key] ? `ดูเฉพาะ ${b.key}` : ""}
+                      onClick={(e) => { if (deprecRows.length > 0 && deprecAgg[b.key]) { e.stopPropagation(); openPopup("deprec", b.key); } }}>
+                      {deprecAgg[b.key] ? `(${fmtN(deprecAgg[b.key])})` : "-"}
+                    </td>
+                  ))}
+                  <td style={{ ...tdNum, fontSize: 13 }}>{deprecAgg.total ? `(${fmtN(deprecAgg.total)})` : "-"}</td>
+                </tr>
                 <tr style={{ background: "#ecfdf5", fontWeight: 700, color: "#065f46", borderTop: "1px solid #065f46", borderBottom: "2px solid #065f46" }}>
-                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>กำไรสุทธิ (หลังหักเงินเดือน + ค่าใช้จ่ายทั่วไป + ค่าน้ำมัน)</td>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>กำไรสุทธิ (หลังหักเงินเดือน + ค่าใช้จ่ายทั่วไป + ค่าน้ำมัน + เบ็ดเตล็ด + ค่าเสื่อมราคา)</td>
                   {branches.map((b) => {
-                    const v = r2(tot[b.key] - vehicleCostAgg[b.key] - saleExpAgg[b.key] - delivFeeAgg[b.key] - cosmosExpAgg[b.key] - specCommAgg[b.key] - giveCostAgg[b.key] - partsCostAgg[b.key] - theftCostAgg[b.key] - regCostAgg[b.key] - payrollAgg[b.key] - genExpAgg[b.key] - fuelExpAgg[b.key]);
+                    const v = r2(tot[b.key] - vehicleCostAgg[b.key] - saleExpAgg[b.key] - delivFeeAgg[b.key] - cosmosExpAgg[b.key] - specCommAgg[b.key] - giveCostAgg[b.key] - partsCostAgg[b.key] - theftCostAgg[b.key] - regCostAgg[b.key] - payrollAgg[b.key] - genExpAgg[b.key] - fuelExpAgg[b.key] - pettyAgg[b.key] - deprecAgg[b.key]);
                     return <td key={b.key} style={{ ...tdNum, color: v < 0 ? "#dc2626" : undefined }}>{fmtN(v)}</td>;
                   })}
                   {(() => {
-                    const v = r2(tot.total - vehicleCostAgg.total - saleExpAgg.total - delivFeeAgg.total - cosmosExpAgg.total - specCommAgg.total - giveCostAgg.total - partsCostAgg.total - theftCostAgg.total - regCostAgg.total - payrollAgg.total - genExpAgg.total - fuelExpAgg.total);
+                    const v = r2(tot.total - vehicleCostAgg.total - saleExpAgg.total - delivFeeAgg.total - cosmosExpAgg.total - specCommAgg.total - giveCostAgg.total - partsCostAgg.total - theftCostAgg.total - regCostAgg.total - payrollAgg.total - genExpAgg.total - fuelExpAgg.total - pettyAgg.total - deprecAgg.total);
                     return <td style={{ ...tdNum, fontSize: 13, color: v < 0 ? "#dc2626" : undefined }}>{fmtN(v)}</td>;
                   })()}
                 </tr>
@@ -1178,7 +1359,7 @@ export default function ProfitLossReportPage() {
         )}
 
         <div className="no-print" style={{ marginTop: 12, fontSize: 11, color: "#9ca3af" }}>
-          * ยอดรายได้ = มูลค่าก่อน VAT ไม่นับเอกสารยกเลิก · ขายรถระบุสาขาจากรหัส SCY ของใบขาย (ขายข้ามหน้าร้านนับตามสาขาที่ขายจริง) · อะไหล่+งานซ่อมใช้ชุดข้อมูลรายงานภาษีขาย เฉพาะงานซ่อม/ขายอะไหล่จริง (งานซ่อมนครหลวงปรับด้วยยอดจริงจากระบบซ่อม Honda) · ค่าบริการรับฝากชำระ / ค่าไปรษณีย์ / ประกันรถหาย (ป.เปา=คอสมอส, สิงห์ชัย=ล็อคตั้น สาขาตามใบรับเรื่อง) แยกหมวดกัน · รับเรื่องงานทะเบียน (พรบ/ต่อภาษี) ไม่มี VAT ใช้ยอดเต็มจากใบรับเรื่อง · รายได้อื่น/บันทึกรายได้: เอกสารที่ "แตกยอดรายละเอียดการรับชำระ" รายคันไว้จะกระจายเข้าสาขาตามรถที่ขาย ที่ยังไม่แตกยอดแสดงเฉพาะช่องรายได้รวม (ตัดรายการซ้ำจากการนำเข้าใบกำกับแล้ว) · ต้นทุนขายรถ = cost_price รายใบจากไฟล์กำไรขั้นต้น (ใบเงินดาวน์ SGF ไม่มีต้นทุน) · ค่าใช้จ่ายขายรถ = ใบปะหน้า คชจ.ขายรถ รายคัน (ค่าดำเนินการ-จดทะเบียน + ค่าจดตามใบเสร็จ + พรบ + ประกันรถหายออกแทน + เงินดาวน์/ค่างวดออกแทน) · ค่านำพา = รายการที่จับคู่ใบขายแล้ว อิงเดือนของใบขาย (ยังไม่จับคู่ไม่นับ) · เบี้ยคอสมอส = กรมธรรม์ที่อ้างใบขาย (SS) อิงเดือนของใบขาย ถอด VAT /1.07 (กรมธรรม์ที่ยังไม่บันทึกยื่นจะยังไม่มีต้นทุน) · ค่าคอมพิเศษ = ยอดต่อคันจากรายงานค่าคอมพิเศษ (ตามกฎแคมเปญ ก่อนการปรับรายคน) · ต้นทุนของแถม = ยามาฮ่าจ่ายเพื่อแถมอ้างใบขาย + ฮอนด้าบรรทัดขายยอด 0 ที่มีต้นทุน · เงินเดือน = ยอดรายได้ก่อนหักรายการหัก (รอบ 21→20) + ค่าคอมปกติของงวดเดือนนั้น (ไม่รวมค่าคอมพิเศษ ซึ่งนับแยกรายคันแล้ว): FRONT OFFICE ลงร้านตามรหัสร้านพนักงาน, BACK OFFICE ลงช่องรายได้รวม · ต้นทุนอะไหล่ = ต้นทุนสินค้าที่ขาย/เบิกใช้ (Honda cost + Yamaha total_cost) ค่าแรงงานซ่อมถือเป็นกำไร · ต้นทุนประกันรถหาย + ต้นทุนทะเบียน = จากใบวางบิลที่อ้างอิงเลขใบรับเรื่อง (วางบิลรับเรื่อง + เบี้ยพรบนำส่งจากวางบิลงานพรบ.) **อิงเดือนของใบรับเรื่อง** — กติกา: เอกสารอ้างอิง SS = ฝั่งขายรถ / CA = ฝั่งรับเรื่อง (ใบที่ยังไม่ถูกวางบิลจะยังไม่มีต้นทุน รีเฟรชภายหลังจะเข้ามาเอง) · ค่าใช้จ่ายทั่วไป = เอกสารบันทึกค่าใช้จ่าย (EXP) ยอดก่อน VAT — แยกสาขาตามช่อง "สาขาที่ใช้" ของเอกสาร (ใบที่ไม่ระบุ/ใบเก่าก่อนมีช่องนี้ ลงช่องรายได้รวม) — ตัดหมวดที่นับในงบแล้วกันซ้ำ (ดูทั้งหมวดในรายการ): ส่งเสริมการขาย / ค่าคอม-นายหน้า / ค่านำพา-ค่าแนะนำลูกค้า (ค่าใช้จ่ายเดียวกับค่านำพา) / ประกันรถหาย / เงินเดือน-เงินสมทบ-ประกันสังคม-กยศ-กองทุนสำรอง / น้ำมัน (มีแถวของตัวเอง) / ภาษีเงินได้นิติบุคคล (เมนูบริหารภาษี) — ดอกเบี้ยจ่าย-ค่าเสื่อมราคา ไม่มีเอกสารในระบบจึงไม่รวม · ค่าน้ำมัน = ยอดเบิกค่าน้ำมันจริงของเดือน (รายงานเบิกค่าน้ำมัน หน้าจองคนขับรถ ไม่นับยกเลิก) ไม่ปันส่วนสาขา ลงช่องรายได้รวม
+          * ยอดรายได้ = มูลค่าก่อน VAT ไม่นับเอกสารยกเลิก · ขายรถระบุสาขาจากรหัส SCY ของใบขาย (ขายข้ามหน้าร้านนับตามสาขาที่ขายจริง) · อะไหล่+งานซ่อมใช้ชุดข้อมูลรายงานภาษีขาย เฉพาะงานซ่อม/ขายอะไหล่จริง (งานซ่อมนครหลวงปรับด้วยยอดจริงจากระบบซ่อม Honda) · ค่าบริการรับฝากชำระ / ค่าไปรษณีย์ / ประกันรถหาย (ป.เปา=คอสมอส, สิงห์ชัย=ล็อคตั้น สาขาตามใบรับเรื่อง) แยกหมวดกัน · รับเรื่องงานทะเบียน (พรบ/ต่อภาษี) ไม่มี VAT ใช้ยอดเต็มจากใบรับเรื่อง · รายได้อื่น/บันทึกรายได้: เอกสารที่ "แตกยอดรายละเอียดการรับชำระ" รายคันไว้จะกระจายเข้าสาขาตามรถที่ขาย ที่ยังไม่แตกยอดแสดงเฉพาะช่องรายได้รวม (ตัดรายการซ้ำจากการนำเข้าใบกำกับแล้ว) · ต้นทุนขายรถ = cost_price รายใบจากไฟล์กำไรขั้นต้น (ใบเงินดาวน์ SGF ไม่มีต้นทุน) · ค่าใช้จ่ายขายรถ = ใบปะหน้า คชจ.ขายรถ รายคัน (ค่าดำเนินการ-จดทะเบียน + ค่าจดตามใบเสร็จ + พรบ + ประกันรถหายออกแทน + เงินดาวน์/ค่างวดออกแทน) · ค่านำพา = รายการที่จับคู่ใบขายแล้ว อิงเดือนของใบขาย (ยังไม่จับคู่ไม่นับ) · เบี้ยคอสมอส = กรมธรรม์ที่อ้างใบขาย (SS) อิงเดือนของใบขาย ถอด VAT /1.07 (กรมธรรม์ที่ยังไม่บันทึกยื่นจะยังไม่มีต้นทุน) · ค่าคอมพิเศษ = ยอดต่อคันจากรายงานค่าคอมพิเศษ (ตามกฎแคมเปญ ก่อนการปรับรายคน) · ต้นทุนของแถม = ยามาฮ่าจ่ายเพื่อแถมอ้างใบขาย + ฮอนด้าบรรทัดขายยอด 0 ที่มีต้นทุน · เงินเดือน = ยอดรายได้ก่อนหักรายการหัก (รอบ 21→20) + ค่าคอมปกติของงวดเดือนนั้น (ไม่รวมค่าคอมพิเศษ ซึ่งนับแยกรายคันแล้ว): FRONT OFFICE ลงร้านตามรหัสร้านพนักงาน, BACK OFFICE ลงช่องรายได้รวม · ต้นทุนอะไหล่ = ต้นทุนสินค้าที่ขาย/เบิกใช้ (Honda cost + Yamaha total_cost) ค่าแรงงานซ่อมถือเป็นกำไร · ต้นทุนประกันรถหาย + ต้นทุนทะเบียน = จากใบวางบิลที่อ้างอิงเลขใบรับเรื่อง (วางบิลรับเรื่อง + เบี้ยพรบนำส่งจากวางบิลงานพรบ.) **อิงเดือนของใบรับเรื่อง** — กติกา: เอกสารอ้างอิง SS = ฝั่งขายรถ / CA = ฝั่งรับเรื่อง (ใบที่ยังไม่ถูกวางบิลจะยังไม่มีต้นทุน รีเฟรชภายหลังจะเข้ามาเอง) · ค่าใช้จ่ายทั่วไป = เอกสารบันทึกค่าใช้จ่าย (EXP) ยอดก่อน VAT — แยกสาขาตามช่อง "สาขาที่ใช้" ของเอกสาร (ใบที่ไม่ระบุ/ใบเก่าก่อนมีช่องนี้ ลงช่องรายได้รวม) — ตัดหมวดที่นับในงบแล้วกันซ้ำ (ดูทั้งหมวดในรายการ): ส่งเสริมการขาย / ค่าคอม-นายหน้า / ค่านำพา-ค่าแนะนำลูกค้า (ค่าใช้จ่ายเดียวกับค่านำพา) / ประกันรถหาย / เงินเดือน-เงินสมทบ-ประกันสังคม-กยศ-กองทุนสำรอง / น้ำมัน (มีแถวของตัวเอง) / ภาษีเงินได้นิติบุคคล (เมนูบริหารภาษี) — ดอกเบี้ยจ่ายไม่มีเอกสารในระบบจึงไม่รวม · ใบที่กด "แปลงเป็นสินทรัพย์" แล้วจะถูกหักส่วนที่แปลงออกจากค่าใช้จ่ายทั่วไป (ไปลงเป็นค่าเสื่อมแทน) · ค่าน้ำมัน = ยอดเบิกค่าน้ำมันจริงของเดือน (รายงานเบิกค่าน้ำมัน หน้าจองคนขับรถ ไม่นับยกเลิก) — ปันส่วนเข้าสาขาเฉพาะส่วนของการจอง "ส่งรถ": ค่าน้ำมัน × (ครั้งส่งรถ ÷ จองทั้งหมดของเดือน) แบ่งตามร้านที่จองส่ง (ส่งรถระหว่างสาขา/ทำสัญญา/อื่น ๆ ไม่นับเป็นส่งรถ) ส่วนที่เหลือลงช่องรายได้รวม · ค่าใช้จ่ายเบ็ดเตล็ด = ใบเบิกเงินสดย่อย 4 ชนิด (ค่าน้ำมันรถใหม่ / ค่าไปรษณีย์ / ค่าใช้จ่ายทั่วไป / ค่าของไหว้) นับตามวันที่ของรายการย่อยในเดือน ยอดก่อน VAT — สาขาตามใบเบิก (รวมใบที่ยังไม่อนุมัติ มีระบุในรายละเอียด) · ค่าเสื่อมราคา = คำนวณจากทะเบียนสินทรัพย์ (เส้นตรง ปันตามวันจริง เหมือนเมนูบันทึกค่าเสื่อมราคา): ค่าเสื่อมสะสม ณ สิ้นเดือน − สิ้นเดือนก่อน — สาขาจากรหัส SCY ในช่อง "ที่ตั้งสินทรัพย์" ของสินทรัพย์ ไม่ระบุลงช่องรายได้รวม
         </div>
       </div>
 
@@ -1186,7 +1367,7 @@ export default function ProfitLossReportPage() {
         <DetailModal
           popup={popup}
           ym={ymLabelTH(loadedYm || ym)}
-          rows={popup === "vehicle" ? vehicleRows : popup === "salexp" ? saleExpRows : popup === "delivfee" ? delivFeeRows : popup === "cosmosexp" ? cosmosExpRows : popup === "speccomm" ? specCommRows : popup === "givecost" ? giveCostRows : popup === "payroll" ? payrollRows : popup === "genexp" ? genExpRows : popup === "fuelexp" ? fuelExpRows : popup === "partsvc" ? partSvcRows : popup === "fee" ? feeRows : popup === "post" ? postRows : popup === "theft" ? theftRows : popup === "theftcost" ? theftCostRows : popup === "regwork" ? regRows : popup === "regcost" ? regCostRows : popup === "promo" ? promoRows : popup === "otherinv" ? otherInvRows : manualRows}
+          rows={popup === "vehicle" ? vehicleRows : popup === "salexp" ? saleExpRows : popup === "delivfee" ? delivFeeRows : popup === "cosmosexp" ? cosmosExpRows : popup === "speccomm" ? specCommRows : popup === "givecost" ? giveCostRows : popup === "payroll" ? payrollRows : popup === "genexp" ? genExpRows : popup === "fuelexp" ? fuelExpRows : popup === "pettycash" ? pettyRows : popup === "deprec" ? deprecRows : popup === "partsvc" ? partSvcRows : popup === "fee" ? feeRows : popup === "post" ? postRows : popup === "theft" ? theftRows : popup === "theftcost" ? theftCostRows : popup === "regwork" ? regRows : popup === "regcost" ? regCostRows : popup === "promo" ? promoRows : popup === "otherinv" ? otherInvRows : manualRows}
           branches={branches}
           branchFilter={popupBranch}
           onClose={() => { setPopup(null); setPopupBranch(null); }}
@@ -1209,6 +1390,8 @@ function DetailModal({ popup, ym, rows: allRows, branches, branchFilter, onClose
     : popup === "payroll" ? "👥 เงินเดือนรายคน (ยอดก่อนหักรายการหัก)"
     : popup === "genexp" ? "🧾 ค่าใช้จ่ายทั่วไป (บันทึกค่าใช้จ่าย — สาขาตามช่องสาขาที่ใช้)"
     : popup === "fuelexp" ? "⛽ ค่าน้ำมัน (รายการเบิกค่าน้ำมัน)"
+    : popup === "pettycash" ? "🪙 ค่าใช้จ่ายเบ็ดเตล็ด (เงินสดย่อย — น้ำมันรถใหม่/ไปรษณีย์/ทั่วไป/ของไหว้)"
+    : popup === "deprec" ? "📉 ค่าเสื่อมราคาของเดือน (รายสินทรัพย์ — จากทะเบียนสินทรัพย์)"
     : popup === "partsvc" ? "🔧 รายได้อะไหล่+งานซ่อม"
     : popup === "fee" ? "🧰 รายได้ค่าบริการรับฝากชำระ"
     : popup === "post" ? "📮 รายได้ค่าไปรษณีย์"
