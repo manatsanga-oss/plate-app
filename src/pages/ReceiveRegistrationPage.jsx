@@ -1092,6 +1092,9 @@ function NotifyPanel({ setMessage, currentUser }) {
   const [sentDate, setSentDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [savingSent, setSavingSent] = useState(false);
   const [viewMode, setViewMode] = useState("pending"); // pending | sent | all
+  const [lineOnly, setLineOnly] = useState(false);     // กรองเฉพาะลูกค้าที่มี LINE
+  const [notifying, setNotifying] = useState(null);    // submission_id ที่กำลังส่งแจ้ง LINE
+  const [notifyingAll, setNotifyingAll] = useState(false); // กำลังส่งแจ้งแบบทั้งหมด
 
   async function fetchReceived() {
     setLoading(true);
@@ -1115,6 +1118,7 @@ function NotifyPanel({ setMessage, currentUser }) {
 
   const kw = search.trim().toLowerCase();
   const filtered = pendingRows.filter(r => {
+    if (lineOnly && !r.customer_line_user_id) return false;
     if (branchFilter && fmtBranch(r.branch_code) !== branchFilter) return false;
     if (runFilter && r.run_code !== runFilter) return false;
     if (brandFilter && r.brand !== brandFilter) return false;
@@ -1133,7 +1137,7 @@ function NotifyPanel({ setMessage, currentUser }) {
   const brandOpts = [...new Set(pendingRows.map(r => r.brand).filter(Boolean))].sort();
   const receiveDateOpts = [...new Set(pendingRows.map(r => r.received_at ? String(r.received_at).slice(0, 10) : "").filter(Boolean))].sort().reverse();
 
-  function clearFilters() { setSearch(""); setBranchFilter(""); setRunFilter(""); setReceiveDateFilter(""); setBrandFilter(""); }
+  function clearFilters() { setSearch(""); setBranchFilter(""); setRunFilter(""); setReceiveDateFilter(""); setBrandFilter(""); setLineOnly(false); }
   const selectedRows = filtered.filter(r => selected[r.submission_id]);
   const selCount = selectedRows.length;
 
@@ -1181,6 +1185,62 @@ function NotifyPanel({ setMessage, currentUser }) {
       setMessage("❌ บันทึกไม่สำเร็จ");
     }
     setSavingSent(false);
+  }
+
+  // ส่งแจ้ง LINE 1 ราย — คืน true/false; ถ้าสำเร็จอัพเดทสถานะในตารางทันที
+  async function sendNotifyOne(r) {
+    const notifiedBy = currentUser?.username || currentUser?.user_id || "";
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "notify_plate_customer",
+          submission_id: r.submission_id,
+          line_user_id: r.customer_line_user_id,
+          customer_name: r.customer_name,
+          plate_category: r.plate_category, plate_number: r.plate_number, plate_province: r.plate_province,
+          car: [r.brand, r.model_series, r.color_name].filter(Boolean).join(" "),
+          branch_code: r.branch_code,
+          line_branch_code: r.line_branch_code, // สาขาที่ลูกค้าสแกน QR ผูก LINE — ใช้เลือก OA สิงห์ชัย/ป.เปา ให้ตรงกับที่ลูกค้าแอดเพื่อน
+          notified_by: notifiedBy,
+        }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setRows(prev => prev.map(x => x.submission_id === r.submission_id
+        ? { ...x, plate_notified_at: new Date().toISOString(), plate_notified_by: notifiedBy } : x));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function notifyCustomer(r) {
+    if (!r.customer_line_user_id) return;
+    const plate = [r.plate_category, r.plate_number, r.plate_province].filter(Boolean).join(" ");
+    const again = r.plate_notified_at ? `\n\n⚠️ เคยแจ้งแล้วเมื่อ ${fmtDate(r.plate_notified_at)} — จะส่งซ้ำอีกครั้ง` : "";
+    if (!window.confirm(`ส่งแจ้งเตือนทาง LINE ถึงลูกค้า?\n${r.customer_name || "-"}\nทะเบียน ${plate || "-"}${again}`)) return;
+    setNotifying(r.submission_id);
+    const ok = await sendNotifyOne(r);
+    setMessage(ok ? `✅ ส่งแจ้งเตือน LINE ถึง ${r.customer_name || "ลูกค้า"} แล้ว`
+      : "❌ ส่งแจ้งเตือน LINE ไม่สำเร็จ — ลูกค้าอาจยังไม่ได้เพิ่มเพื่อน OA หรือบล็อกไปแล้ว");
+    setNotifying(null);
+  }
+
+  // ส่งแจ้งทั้งหมดในมุมมองปัจจุบัน — เฉพาะรายที่มี LINE และยังไม่เคยแจ้ง (ทีละรายกันยิงถี่)
+  async function notifyAllCustomers() {
+    const targets = filtered.filter(r => r.customer_line_user_id && !r.plate_notified_at);
+    if (targets.length === 0) { setMessage("⚠️ ไม่มีรายการที่ต้องแจ้ง (ต้องมี LINE และยังไม่เคยแจ้ง)"); return; }
+    if (!window.confirm(`ส่งแจ้งเตือน LINE ถึงลูกค้าทั้งหมด ${targets.length} ราย?\n\n(เฉพาะรายที่มี LINE และยังไม่เคยแจ้ง — รายที่แจ้งแล้วจะไม่ส่งซ้ำ)`)) return;
+    setNotifyingAll(true);
+    let ok = 0, fail = 0;
+    for (const r of targets) {
+      setMessage(`⏳ กำลังส่ง ${ok + fail + 1}/${targets.length} — ${r.customer_name || ""}`);
+      (await sendNotifyOne(r)) ? ok++ : fail++;
+    }
+    setMessage(fail === 0
+      ? `✅ ส่งแจ้งเตือน LINE สำเร็จทั้งหมด ${ok} ราย`
+      : `⚠️ ส่งสำเร็จ ${ok} ราย · ไม่สำเร็จ ${fail} ราย (ลูกค้าอาจยังไม่ได้เพิ่มเพื่อน OA หรือบล็อก)`);
+    setNotifyingAll(false);
   }
 
   async function markReturned(id, runCode) {
@@ -1232,7 +1292,12 @@ function NotifyPanel({ setMessage, currentUser }) {
           <option value="">ร้านที่ขาย (ทั้งหมด)</option>
           {branchOpts.map(b => <option key={b} value={b}>{b}</option>)}
         </select>
-        {(search || branchFilter || runFilter || receiveDateFilter || brandFilter) && (
+        <button onClick={() => setLineOnly(v => !v)}
+          title="กรองเฉพาะลูกค้าที่มี LINE ID ในระบบ (จาก QR/LIFF)"
+          style={{ padding: "7px 12px", borderRadius: 6, border: "1px solid " + (lineOnly ? "#047857" : "#d1d5db"), background: lineOnly ? "#047857" : "#fff", color: lineOnly ? "#fff" : "#374151", cursor: "pointer", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+          💬 มี LINE ({pendingRows.filter(r => r.customer_line_user_id).length})
+        </button>
+        {(search || branchFilter || runFilter || receiveDateFilter || brandFilter || lineOnly) && (
           <button onClick={clearFilters}
             style={{ padding: "6px 12px", background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
             ✕ ล้าง
@@ -1246,6 +1311,16 @@ function NotifyPanel({ setMessage, currentUser }) {
           style={{ padding: "8px 16px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
           🖨️ พิมพ์ใบนำส่งป้าย {selCount > 0 ? `(${selCount})` : "ทั้งหมด"}
         </button>
+        {(() => {
+          const nTarget = filtered.filter(r => r.customer_line_user_id && !r.plate_notified_at).length;
+          return (
+            <button onClick={notifyAllCustomers} disabled={notifyingAll || nTarget === 0}
+              title="ส่งแจ้งเตือน LINE ถึงลูกค้าทุกรายในมุมมองนี้ที่มี LINE และยังไม่เคยแจ้ง"
+              style={{ padding: "8px 16px", background: "#047857", color: "#fff", border: "none", borderRadius: 8, cursor: (notifyingAll || nTarget === 0) ? "not-allowed" : "pointer", opacity: (notifyingAll || nTarget === 0) ? 0.5 : 1, fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+              💬 {notifyingAll ? "กำลังส่ง..." : `แจ้งลูกค้าทั้งหมด (${nTarget})`}
+            </button>
+          );
+        })()}
         <button onClick={fetchReceived}
           style={{ padding: "8px 14px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔄</button>
       </div>
@@ -1279,12 +1354,14 @@ function NotifyPanel({ setMessage, currentUser }) {
                 <th style={{ width: 40 }}>#</th>
                 <th>ลูกค้า</th>
                 <th>เบอร์โทร</th>
+                <th style={{ width: 60 }}>LINE</th>
                 <th>เลขเครื่อง</th>
                 <th>หมวด</th>
                 <th>เลขทะเบียน</th>
                 <th>run</th>
                 <th>สาขา</th>
                 <th>วันส่งสาขา</th>
+                <th style={{ width: 120 }}>แจ้งลูกค้า</th>
                 <th style={{ width: 110 }}>จัดการ</th>
               </tr>
             </thead>
@@ -1298,6 +1375,14 @@ function NotifyPanel({ setMessage, currentUser }) {
                   <td style={{ textAlign: "center" }}>{i + 1}</td>
                   <td>{r.customer_name || "-"}</td>
                   <td style={{ fontFamily: "monospace" }}>{r.customer_phone || "-"}</td>
+                  <td style={{ textAlign: "center" }}>
+                    {r.customer_line_user_id ? (
+                      <span title={`มี LINE ID (ที่มา: ${r.line_source || "-"})`}
+                        style={{ display: "inline-block", padding: "2px 8px", borderRadius: 10, background: "#d1fae5", color: "#047857", fontSize: 11, fontWeight: 700 }}>✓ LINE</span>
+                    ) : (
+                      <span style={{ color: "#d1d5db" }}>—</span>
+                    )}
+                  </td>
                   <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.engine_no || "-"}</td>
                   <td>{r.plate_category || "-"}</td>
                   <td style={{ fontWeight: 600 }}>{r.plate_number || "-"}</td>
@@ -1305,6 +1390,25 @@ function NotifyPanel({ setMessage, currentUser }) {
                   <td>{fmtBranch(r.branch_code)}</td>
                   <td style={{ fontSize: 12, color: r.sent_to_branch_at ? "#065f46" : "#9ca3af", fontWeight: r.sent_to_branch_at ? 600 : 400 }}>
                     {r.sent_to_branch_at ? fmtDate(r.sent_to_branch_at) : "—"}
+                  </td>
+                  <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                    {!r.customer_line_user_id ? (
+                      <span style={{ color: "#d1d5db", fontSize: 11 }}>—</span>
+                    ) : r.plate_notified_at ? (
+                      <div style={{ fontSize: 11, color: "#047857", fontWeight: 600 }} title={r.plate_notified_by ? `แจ้งโดย ${r.plate_notified_by}` : ""}>
+                        ✅ แจ้งแล้ว {fmtDate(r.plate_notified_at)}
+                        <button onClick={() => notifyCustomer(r)} disabled={notifying === r.submission_id}
+                          title="ส่งแจ้งเตือนซ้ำ"
+                          style={{ marginLeft: 4, padding: "1px 6px", background: "transparent", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", fontSize: 10 }}>
+                          ↻
+                        </button>
+                      </div>
+                    ) : (
+                      <button onClick={() => notifyCustomer(r)} disabled={notifying === r.submission_id}
+                        style={{ padding: "4px 10px", background: "#059669", color: "#fff", border: "none", borderRadius: 4, cursor: notifying === r.submission_id ? "wait" : "pointer", opacity: notifying === r.submission_id ? 0.6 : 1, fontSize: 11, fontWeight: 600 }}>
+                        {notifying === r.submission_id ? "กำลังส่ง..." : "💬 แจ้งลูกค้า"}
+                      </button>
+                    )}
                   </td>
                   <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
                     <button onClick={() => markReturned(r.submission_id, r.run_code)}
