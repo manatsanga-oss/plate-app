@@ -92,7 +92,7 @@ export default function GiveawayReceiptPrintPage() {
   .btn{padding:10px 22px;background:#1d4ed8;color:#fff;border:none;border-radius:8px;font-size:15px;cursor:pointer}
 </style></head><body>
   <div class="head"><div class="title">ใบรับของแถม</div></div>
-  <div class="sub">(กรณีรับของแถมเกิน 90 วัน นับจากวันที่ขาย)</div>
+  <div class="sub">(กรณีรับของแถมเกิน 45 วัน นับจากวันที่ขาย)</div>
   <div class="meta"><div><b>เลขที่เอกสาร:</b> ${esc(docNo)}</div><div><b>วันที่พิมพ์:</b> ${today}</div></div>
   <table>
     <tr><td class="lbl">ชื่อลูกค้า</td><td>${esc(v.customer_name) || "-"}</td></tr>
@@ -128,7 +128,7 @@ export default function GiveawayReceiptPrintPage() {
   return (
     <div className="page-container">
       <div className="page-topbar">
-        <h2 className="page-title">🎁 พิมพ์ใบรับของแถม (เกิน 90 วัน)</h2>
+        <h2 className="page-title">🎁 พิมพ์ใบรับของแถม (เกิน 45 วัน)</h2>
       </div>
 
       {/* SEARCH (moto_sales) */}
@@ -163,7 +163,7 @@ export default function GiveawayReceiptPrintPage() {
                   return (
                     <tr key={`${v.frame_no}-${i}`} style={{ background: selected && selected === v ? "#eff6ff" : "transparent" }}>
                       <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{text(v.sale_doc_no || v.invoice_no) || "-"}</td>
-                      <td style={td}>{fmtDate(v.sale_date)}{days != null && <span style={{ color: days > 90 ? "#b91c1c" : "#64748b", fontSize: 11 }}> ({days}ว.)</span>}</td>
+                      <td style={td}>{fmtDate(v.sale_date)}{days != null && <span style={{ color: days > 45 ? "#b91c1c" : "#64748b", fontSize: 11 }}> ({days}ว.)</span>}</td>
                       <td style={td}>{text(v.customer_name) || "-"}</td>
                       <td style={td}>{text(v.model)} {text(v.color)}</td>
                       <td style={{ ...td, fontFamily: "monospace" }}>{text(v.engine_no) || "-"}</td>
