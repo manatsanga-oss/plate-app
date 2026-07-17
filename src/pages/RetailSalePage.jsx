@@ -15,6 +15,7 @@ const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sal
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const LINE_LOG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-line-log";
+const BOOKING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api";
 const LINE_AUTO_SEND_DELAY = 10; // วินาทีก่อนส่ง LINE อัตโนมัติ
 
 // หัวกระดาษใบขาย (fallback เมื่อยังโหลด branch_master ไม่ได้) — ปกติหัวกระดาษจริง
@@ -268,8 +269,8 @@ export default function RetailSalePage({ currentUser }) {
     (async () => {
       try {
         const [bks, deps] = await Promise.all([
-          fetch("https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_moto_bookings" }) }).then((r) => r.json()).catch(() => []),
-          fetch("https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_all_deposits" }) }).then((r) => r.json()).catch(() => []),
+          fetch(BOOKING_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_moto_bookings" }) }).then((r) => r.json()).catch(() => []),
+          fetch(BOOKING_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_all_deposits" }) }).then((r) => r.json()).catch(() => []),
         ]);
         if (!alive) return;
         setBookings(Array.isArray(bks) ? bks : []);
@@ -658,7 +659,7 @@ export default function RetailSalePage({ currentUser }) {
     const cur = num(form.booking_deposit);
     if (cur > 0 && cur !== autoBookingRef.current) return; // user กรอกยอดเองแล้ว — ไม่ทับ
     const normName = (s) => String(s || "")
-      .replace(/^(นางสาว|นาง|นาย|ด\.ช\.|ด\.ญ\.|เด็กชาย|เด็กหญิง|MR\.?|MRS\.?|MISS|MS\.?)\s*/i, "")
+      .replace(/^(นางสาว|น\.ส\.|นาง|นาย|ด\.ช\.|ด\.ญ\.|เด็กชาย|เด็กหญิง|MR\.?|MRS\.?|MISS|MS\.?)\s*/i, "")
       .replace(/\s+/g, "").toUpperCase();
     const custName = normName(form.customer_name);
     if (!custName) return;
@@ -864,7 +865,22 @@ export default function RetailSalePage({ currentUser }) {
       if (!sale || !sale.sale_no) throw new Error(row?.error || row?.__error || "บันทึกไม่สำเร็จ");
       setVehicle((v) => ({ ...v, sale, sold_at: sale.sale_date, sold_invoice_no: sale.sale_no }));
       setMode("view");
-      setMessage("✅ บันทึกใบขายเรียบร้อย เลขที่ " + sale.sale_no + " (ตัดออกจากสต๊อกแล้ว)");
+      let msg = "✅ บันทึกใบขายเรียบร้อย เลขที่ " + sale.sale_no + " (ตัดออกจากสต๊อกแล้ว)";
+      // ตัดใบจองเป็น "ขาย" อัตโนมัติ เมื่อใบขายผูกเงินจองจากใบจอง (deposit_no) — action เดียวกับปุ่ม "ขาย" ในหน้าระบบจอง
+      if (selectedBooking?.booking_id && selectedBooking.status === "จอง") {
+        try {
+          const r = await fetch(BOOKING_API, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "sell_moto_booking", booking_id: selectedBooking.booking_id, invoice_no: sale.sale_no }),
+          });
+          if (!r.ok) throw new Error();
+          setBookings((prev) => prev.map((b) => b.booking_id === selectedBooking.booking_id ? { ...b, status: "ขาย", invoice_no: sale.sale_no } : b));
+          msg += " · ตัดใบจองเป็น \"ขาย\" แล้ว";
+        } catch {
+          msg += " — ⚠️ ตัดใบจองอัตโนมัติไม่สำเร็จ กรุณากดปุ่ม \"ขาย\" ในหน้าระบบจองเอง";
+        }
+      }
+      setMessage(msg);
       // ===== Auto-schedule ส่งใบขาย LINE หลัง 10 วินาที (ถ้ามี line_user_id) =====
       const hasLineUser = sale.line_user_id || form.customer_line_user_id;
       if (hasLineUser) {
