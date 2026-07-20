@@ -13,6 +13,7 @@ const QUOTE_LINE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/part-q
 */
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/part-price-api";
+const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api"; // ค้นรถ+ข้อมูลการขายด้วยเลขเครื่อง/เลขตัวถัง
 const NO_BAEB = "(ไม่ระบุแบบ)";
 
 const fmtMoney = (v) =>
@@ -48,11 +49,13 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   const [picked, setPicked] = useState([]); // [{model, code, color, name, price, loading}]
   const [searchQ, setSearchQ] = useState("");
   const [searchMsg, setSearchMsg] = useState("");
+  const [vehInfo, setVehInfo] = useState(null);     // ข้อมูลรถ+การขายจาก get_vehicle (ค้นด้วยเลขเครื่อง/เลขตัวถัง)
+  const [vehLoading, setVehLoading] = useState(false);
 
-  // ค้นด้วยรหัสรุ่น/แบบจากเอกสาร เช่น "AFS110MCFS 3TH" → เด้งไป รุ่น/แบบ/type ที่ตรง
-  const runSearch = (raw) => {
+  // จับคู่รหัสรุ่น/แบบ → เด้ง cascade รุ่น/แบบ/type (+สี ถ้าส่ง colorCode มา) · คืน true เมื่อพบ
+  const matchModel = (raw, colorCode) => {
     const q = (raw || "").trim().toUpperCase();
-    if (!q) { setSearchMsg(""); return; }
+    if (!q) return false;
     const codePart = q.replace(/\s+/g, "");
     const typeTokens = q.match(/\d?TH/g) || [];
     const typeTok = typeTokens.find((t) => /\d/.test(t)) || typeTokens[0] || null;
@@ -68,7 +71,7 @@ export default function PartImageLookupPage({ currentUser } = {}) {
       if (ser && codePart.includes(ser) && ser.length > bestLen) { bi = i; bestLen = ser.length; }
       if (m.model.toUpperCase() === q) bi = i;
     });
-    if (bi < 0) { setSearchMsg(`ไม่พบรุ่นที่ตรงกับ "${raw}"`); return; }
+    if (bi < 0) return false;
 
     const m = catalog[bi];
     const cols = m.colors || [];
@@ -83,8 +86,52 @@ export default function PartImageLookupPage({ currentUser } = {}) {
     if (typeTok) { const hit = types.find((t) => t.toUpperCase().includes(typeTok)); if (hit) bt = hit; }
 
     setSelBrand(m.brand || "HONDA"); setModelIdx(bi); setSelBaeb(bb); setSelType(bt); setColorPage(null);
+    // 4) เลือก "สี" ตามรหัสสีของรถ (จากข้อมูลการขาย เช่น GBR)
+    let colorNote = "";
+    if (colorCode) {
+      const cc = String(colorCode).toUpperCase();
+      const hit = cols.filter((c) => (c.model_code || NO_BAEB) === bb && (c.type || "-") === bt)
+        .find((c) => String(c.color_code || "").toUpperCase() === cc);
+      if (hit) { setColorPage(String(hit.page)); colorNote = ` · สี${hit.name}`; }
+    }
     const typeNote = typeTok && !types.some((t) => t.toUpperCase().includes(typeTok)) ? ` (ไม่มี type ${typeTok} ใช้ ${bt} แทน)` : "";
-    setSearchMsg(`พบ: ${m.model} · ${bb} · ${bt}${typeNote}`);
+    setSearchMsg(`พบ: ${m.model} · ${bb} · ${bt}${colorNote}${typeNote}`);
+    return true;
+  };
+
+  // ค้นรถ + ข้อมูลการขายจากเลขเครื่อง/เลขตัวถัง (retail-sale-api get_vehicle) → แสดงการ์ด + เด้งรุ่น/สีให้
+  const runVehicleSearch = async (kw) => {
+    setVehLoading(true);
+    setSearchMsg("🔎 กำลังค้นหารถจากเลขเครื่อง/เลขตัวถัง...");
+    try {
+      const res = await fetch(RETAIL_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "get_vehicle", keyword: kw }),
+      });
+      const data = await res.json().catch(() => null);
+      const v = Array.isArray(data) ? data[0] : data;
+      if (!v || (!v.engine_no && !v.chassis_no)) { setVehInfo(null); setSearchMsg(`ไม่พบรถที่ตรงกับ "${kw}" ในระบบ`); return; }
+      setVehInfo(v);
+      const matched = matchModel(`${v.model_code || v.model_name || ""} ${v.model_type || ""}`.trim(), v.model_color);
+      if (!matched) setSearchMsg(`พบข้อมูลรถ ${v.model_code || v.model_name || ""} — แต่ยังไม่มีสมุดภาพของรุ่นนี้`);
+    } catch {
+      setSearchMsg("❌ ค้นหาไม่สำเร็จ — ลองใหม่อีกครั้ง");
+    } finally { setVehLoading(false); }
+  };
+
+  // ค้นหา: เลขตัวถัง (17 หลัก) / เลขเครื่อง (มีขีด เช่น JK16E-2477581) → ค้นข้อมูลการขาย · อื่น ๆ → รหัสรุ่น/แบบ
+  const runSearch = async (raw) => {
+    const q = (raw || "").trim().toUpperCase();
+    setVehInfo(null);
+    if (!q) { setSearchMsg(""); return; }
+    const s = q.replace(/\s+/g, "");
+    const isVin = /^[A-Z0-9]{17}$/.test(s) && /\d/.test(s);
+    const isEngine = /^[A-Z0-9]{3,8}-\d{4,}$/.test(s);
+    if (isVin || isEngine) { await runVehicleSearch(s); return; }
+    if (matchModel(q)) return;
+    // เผื่อเลขเครื่องพิมพ์ไม่มีขีด — ลองค้นรถก่อนสรุปว่าไม่พบ
+    if (/^[A-Z0-9]{10,}$/.test(s)) { await runVehicleSearch(s); return; }
+    setSearchMsg(`ไม่พบรุ่นที่ตรงกับ "${raw}"`);
   };
 
   // ตัวกรองยี่ห้อ → กรองรุ่น
@@ -312,27 +359,83 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
         </button>
       </div>
 
-      {/* ค้นด้วยรหัสรุ่น/แบบจากเอกสาร */}
+      {/* ค้นด้วยรหัสรุ่น/แบบ หรือเลขเครื่อง/เลขตัวถัง (ดึงข้อมูลการขาย) */}
       <div className="form-card">
-        <label style={lbl}>ค้นหาด้วยรหัสรุ่น/แบบ (จากเอกสารรถ)</label>
+        <label style={lbl}>ค้นหาด้วยรหัสรุ่น/แบบ · หรือวางเลขเครื่อง/เลขตัวถัง (ดึงข้อมูลการขาย)</label>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <input
             value={searchQ}
             onChange={(e) => setSearchQ(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && runSearch(searchQ)}
-            placeholder="เช่น AFS110MCFS 3TH, AFS125CSBT 2TH, ADV160AT 7TH"
+            placeholder="เช่น ADV160AT 7TH · JK16E-2477581 · MLHJK1626T5477579"
             style={{ ...selStyle, flex: "1 1 260px" }}
           />
-          <button className="btn-primary" onClick={() => runSearch(searchQ)} style={{ whiteSpace: "nowrap" }}>
-            🔍 ค้นหา
+          <button className="btn-primary" onClick={() => runSearch(searchQ)} disabled={vehLoading} style={{ whiteSpace: "nowrap" }}>
+            {vehLoading ? "⏳ กำลังค้นหา..." : "🔍 ค้นหา"}
           </button>
         </div>
         {searchMsg && (
-          <div style={{ fontSize: 13, marginTop: 8, color: searchMsg.startsWith("ไม่พบ") ? "#b91c1c" : "#15803d" }}>
+          <div style={{ fontSize: 13, marginTop: 8, color: searchMsg.startsWith("ไม่พบ") || searchMsg.startsWith("❌") ? "#b91c1c" : "#15803d" }}>
             {searchMsg}
           </div>
         )}
       </div>
+
+      {/* การ์ดข้อมูลรถ / การขาย (จากเลขเครื่อง/เลขตัวถัง) */}
+      {vehInfo && (() => {
+        const v = vehInfo, s = v.sale;
+        const d = (iso) => {
+          if (!iso) return "—";
+          const dt = new Date(iso);
+          return isNaN(dt) ? String(iso).slice(0, 10) : dt.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
+        };
+        const money = (n) => (n == null || n === "" ? "—" : Number(n).toLocaleString("th-TH"));
+        const sold = !!(s && s.sale_no) || !!v.sold_at;
+        const isFin = s && s.finance_type && s.finance_type !== "none";
+        const item = (l, val) => (
+          <div style={{ fontSize: 13 }}>
+            <span style={{ color: "#64748b" }}>{l}: </span>
+            <strong>{val || "—"}</strong>
+          </div>
+        );
+        return (
+          <div className="form-card" style={{ borderLeft: sold ? "4px solid #16a34a" : "4px solid #f59e0b" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontWeight: 700 }}>
+                🏍️ ข้อมูลรถ / การขาย
+                <span style={{ marginLeft: 8, fontSize: 12, fontWeight: 700, padding: "2px 10px", borderRadius: 10, background: sold ? "#dcfce7" : "#fef3c7", color: sold ? "#166534" : "#92400e" }}>
+                  {sold ? "ขายแล้ว" : "ยังอยู่ในสต๊อก"}
+                </span>
+              </div>
+              <button onClick={() => setVehInfo(null)} title="ปิด" style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#64748b" }}>×</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 6 }}>
+              {item("ยี่ห้อ/รุ่น", `${v.brand || ""} ${v.model_code || v.model_name || ""}${v.model_type ? " " + v.model_type : ""}`.trim())}
+              {item("สี", `${v.color_name || ""}${v.model_color ? " (" + v.model_color + ")" : ""}`.trim())}
+              {item("เลขเครื่อง", v.engine_no)}
+              {item("เลขตัวถัง", v.chassis_no)}
+              {item("วันที่รับเข้า", d(v.received_date))}
+            </div>
+            {s && s.sale_no ? (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #e2e8f0", display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 6 }}>
+                {item("เลขที่ใบขาย", s.sale_no)}
+                {item("วันที่ขาย", d(s.sale_date))}
+                {item("ลูกค้า", `${s.customer_name || ""}${s.customer_code ? " (" + s.customer_code + ")" : ""}`.trim())}
+                {item("เบอร์โทร", s.customer_phone)}
+                {item("ผู้ขาย", s.seller)}
+                {item("สาขา", s.branch_name || s.branch_code)}
+                {item("ราคารถ", money(s.car_price) + " บาท")}
+                {item("ประเภทการขาย", isFin ? `ผ่อนไฟแนนท์ · ${s.finance_company_name || ""}` : "เงินสด")}
+                {item("สถานะชำระ", s.payment_status === "paid" ? `ชำระแล้ว${s.receipt_no ? " · ใบเสร็จ " + s.receipt_no : ""}` : "ยังไม่ชำระเงิน")}
+              </div>
+            ) : sold ? (
+              <div style={{ marginTop: 8, fontSize: 13, color: "#475569" }}>
+                ขายแล้ว · เลขที่ใบขาย {v.sold_invoice_no || "—"} (ไม่พบรายละเอียดใบขายในระบบ)
+              </div>
+            ) : null}
+          </div>
+        );
+      })()}
 
       {/* cascade: ยี่ห้อ → รุ่น → แบบ → type → สี */}
       <div className="form-card">
