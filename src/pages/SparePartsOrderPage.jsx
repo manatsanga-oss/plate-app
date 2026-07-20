@@ -681,6 +681,8 @@ export default function SparePartsOrderPage({ currentUser }) {
   <div><b>วันที่:</b> ${fmtDate(order.created_at)}</div>
   <div><b>ลูกค้า:</b> ${order.customer_code || ''} - ${order.customer_name || ''}</div>
   <div><b>ยอดมัดจำ:</b> ${fmt(order.deposit_amount)}</div>
+  <div><b>เบอร์โทร:</b> ${order.customer_phone || '-'}</div>
+  <div><b>ทะเบียนรถ:</b> ${order.license_plate || '-'}</div>
   <div><b>VIN:</b> ${order.vin || '-'}</div>
   <div><b>รุ่นรถ:</b> ${order.model_name || '-'}</div>
   <div><b>ช่าง:</b> ${order.technician || '-'}</div>
