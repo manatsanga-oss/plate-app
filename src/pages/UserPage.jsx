@@ -29,6 +29,7 @@ const PAGE_OPTIONS = [
   { key: "receiptqr",  label: "🔳 พิมพ์ QR ออกใบเสร็จ" },
   { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
   { key: "salewizard", label: "🛒 บันทึกขาย NEW" },
+  { key: "salemoneyreport", label: "💰 รายงานการเงินขายรถ" },
   { key: "retailsale", label: "🛒 บันทึกขายปลีก" },
   { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
   // ── Spare Parts ──
