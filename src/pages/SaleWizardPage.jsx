@@ -134,6 +134,7 @@ export default function SaleWizardPage({ currentUser }) {
   // การ์ดบันทึกชำระเงิน (หลังบันทึกขาย — ข้ามได้ถ้ายังไม่รับชำระ)
   const [bankAccounts, setBankAccounts] = useState([]);
   const [branchMaster, setBranchMaster] = useState([]); // ข้อมูลสาขา (ชื่อ/ที่อยู่/เบอร์/เลขภาษี) สำหรับหัวเอกสาร
+  const [markups, setMarkups] = useState([]);           // เมนู "ราคาขายบวกเพิ่ม" (ตามไฟแนนท์/CC/กำหนดเอง)
   const [payMethod, setPayMethod] = useState(null);   // 'cash' | 'transfer'
   const [payAccountId, setPayAccountId] = useState("");
   const [paySending, setPaySending] = useState(false);
@@ -146,6 +147,9 @@ export default function SaleWizardPage({ currentUser }) {
       .catch(() => {});
     post(MASTER_API, { action: "get_branches" })
       .then(d => { if (alive) setBranchMaster(asArray(d)); })
+      .catch(() => {});
+    post(ACC_API, { action: "list_price_markups" })
+      .then(d => { if (alive) setMarkups(asArray(d).filter(x => x && x.status === "active")); })
       .catch(() => {});
     return () => { alive = false; };
   }, []);
@@ -745,7 +749,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (saving || savedSale || !selUnit) return;
     const isFin = saleType === "finance";
     const base = announcedPrice(saleType);
-    const carPrice = base == null ? null : base + adjustmentsTotal;
+    const carPrice = base == null ? null : base + markupsTotal + adjustmentsTotal;
     if (carPrice == null) { setMessage("❌ ไม่พบราคาขายของรถคันนี้ — ตรวจสอบเมนูราคารถก่อน"); return; }
     if (!text(cust.customer_name)) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
     const netCar = Math.max(carPrice - downSubTotal, 0); // หักส่วนลด "เงินดาวน์ออกแทน"
@@ -1050,6 +1054,44 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // เงินดาวน์/ค่างวดออกแทน: input × 1.07 ปัดขึ้นหลักร้อย
   const downPayoutCalc = adjOpen && useDownPayout ? Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100 : 0;
   const adjustmentsTotal = deliveryBonus + downPayoutCalc;
+
+  // บวกเพิ่มอัตโนมัติจากเมนู "ราคาขายบวกเพิ่ม" (ตามไฟแนนท์/ไฟแนนท์+CC/กำหนดเอง) — logic เดียวกับหน้าบันทึกขายปลีก
+  const applicableMarkups = useMemo(() => {
+    if (saleType !== "finance" || !financeCo || !selUnit || !selColor) return [];
+    const masterRow = findMasterRow(selUnit, selColor);
+    const norm = (s) => String(s || "").toLowerCase().replace(/[\s()[\].\-_]/g, "").trim();
+    const finN = norm(financeCo.company_name);
+    const brand = String(masterRow?.brand_name || selBrand?.brand_name || "").toLowerCase();
+    const modelCode = String(masterRow?.model_code || selUnit.model || "").toLowerCase();
+    const cc = selSeries && selSeries.engine_cc != null ? Number(selSeries.engine_cc) : null;
+    const branchCodeUp = text(currentUser?.branch_code || currentUser?.branch).substring(0, 5);
+    const branchG = ["SCY05", "SCY06"].includes(branchCodeUp) ? "papao" : "singchai";
+    const finMatch = (m) => {
+      if (!finN || !m.finance_company) return false;
+      const mN = norm(m.finance_company);
+      return mN === finN || mN.includes(finN) || finN.includes(mN);
+    };
+    return markups.filter((m) => {
+      if (m.markup_type === "finance") return finMatch(m);
+      if (m.markup_type === "finance_cc") {
+        if (!finMatch(m)) return false;
+        if (m.branch_group && m.branch_group !== "all" && m.branch_group !== branchCodeUp && m.branch_group !== branchG) return false;
+        if (cc !== null && isFinite(cc)) {
+          if (m.cc_min && cc < Number(m.cc_min)) return false;
+          if (m.cc_max && cc > Number(m.cc_max)) return false;
+        }
+        return true;
+      }
+      if (m.markup_type === "custom") {
+        if (m.brand && m.brand.toLowerCase() !== brand) return false;
+        if (m.model_code && m.model_code.toLowerCase() !== modelCode) return false;
+        if (m.branch_group && m.branch_group !== "all" && m.branch_group !== branchCodeUp && m.branch_group !== branchG) return false;
+        return true;
+      }
+      return false;
+    });
+  }, [saleType, financeCo, selUnit, selColor, selBrand, selSeries, markups, currentUser]); // eslint-disable-line
+  const markupsTotal = applicableMarkups.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
 
   function resetAdjustments() {
     setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0);
@@ -1366,11 +1408,23 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       <div style={{ padding: "14px 16px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10 }}>
                         <div style={{ fontSize: 13, color: "#166534" }}>{saleType === "cash" ? "ราคาขายเงินสด" : "ราคาขายผ่อนไฟแนนท์"}</div>
                         <div style={{ fontSize: 28, fontWeight: 700, color: "#166534", marginTop: 4 }}>
-                          {fmtBaht(price == null ? null : price + adjustmentsTotal)}
+                          {fmtBaht(price == null ? null : price + markupsTotal + adjustmentsTotal)}
                         </div>
-                        {price != null && adjustmentsTotal > 0 && (
+                        {price != null && (markupsTotal > 0 || adjustmentsTotal > 0) && (
                           <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
-                            ราคาประกาศ {fmtBaht(price)} + บวกเพิ่ม {fmtBaht(adjustmentsTotal)}
+                            ราคาประกาศ {fmtBaht(price)}
+                            {markupsTotal > 0 ? ` + บวกเพิ่ม ${Number(markupsTotal).toLocaleString("th-TH")}` : ""}
+                            {adjustmentsTotal > 0 ? ` + ปรับแต่ง ${Number(adjustmentsTotal).toLocaleString("th-TH")}` : ""}
+                          </div>
+                        )}
+                        {applicableMarkups.length > 0 && (
+                          <div style={{ fontSize: 12, color: "#7c3aed", marginTop: 4, textAlign: "left" }}>
+                            {applicableMarkups.map((m, i) => {
+                              const label = m.markup_type === "finance" ? `ตามไฟแนนท์: ${m.finance_company || "-"}`
+                                : m.markup_type === "finance_cc" ? `ตามไฟแนนท์+CC: ${m.finance_company || "-"} (${m.cc_min || "0"}-${m.cc_max || "∞"} cc)`
+                                : m.markup_type === "custom" ? `กำหนดเอง: ${m.brand || ""} ${m.model_code || ""}` : m.markup_type;
+                              return <div key={i}>• {label}: <strong>+{Number(m.markup_amount).toLocaleString("th-TH")}</strong></div>;
+                            })}
                           </div>
                         )}
                         {price == null && <div style={{ fontSize: 12, color: "#991b1b", marginTop: 4 }}>ไม่พบราคาประกาศของแบบ/type นี้ในเมนูราคารถ</div>}
@@ -1606,7 +1660,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (() => {
                   const isFin = saleType === "finance";
                   const base = announcedPrice(saleType);
-                  const carPrice = base == null ? null : base + adjustmentsTotal;
+                  const carPrice = base == null ? null : base + markupsTotal + adjustmentsTotal;
                   const netCar = carPrice == null ? null : Math.max(carPrice - downSubTotal, 0);
                   const fc = financeCalc(netCar || 0);
                   const dep = depositAmt;
