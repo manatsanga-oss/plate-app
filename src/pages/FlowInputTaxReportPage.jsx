@@ -346,6 +346,30 @@ export default function FlowInputTaxReportPage({ currentUser }) {
         flowStatus.set(r.id ?? ("i" + i), { matched: !!okHit, manual: false, appRow: okHit });
       }
     });
+    // ===== จับคู่แบบบิลรวม: FLOW หลายใบของผู้ขายเดียวกัน รวมยอด = เอกสารแอปใบเดียว =====
+    // เช่น ค่าไฟฟ้า FLOW แยกใบตามสาขา (วังน้อย/นครหลวง) แต่แอปบันทึกรวมเป็นใบเดียว
+    const unGroups = new Map(); // ผู้ขาย (เลขผู้เสียภาษี หรือชื่อ normalize) -> [{r, k}]
+    rows.forEach((r, i) => {
+      const k = r.id ?? ("i" + i);
+      if (flowStatus.get(k)?.matched) return;
+      const g = String(r.vendor_tax_id || "").trim() || normName(r.vendor_name);
+      if (!g) return;
+      if (!unGroups.has(g)) unGroups.set(g, []);
+      unGroups.get(g).push({ r, k });
+    });
+    for (const grp of unGroups.values()) {
+      if (grp.length < 2) continue; // ใบเดียวใช้ auto-match ปกติพอ (กันยอดบังเอิญตรง)
+      const sumV = grp.reduce((s, u) => s + Number(u.r.vat_amount || 0), 0);
+      const sumB = grp.reduce((s, u) => s + Number(u.r.amount_before_vat || 0), 0);
+      if (sumV <= 0) continue;
+      const hit = appRows.find(a => normDoc(a.doc_no) && !usedAuto.has(a) && !usedByManual(a)
+        && Math.abs(Number(a.vat_amount || 0) - sumV) <= 1
+        && Math.abs(Number(a.amount_before_vat || 0) - sumB) <= 2
+        && nameSim(grp[0].r.vendor_name, a.vendor_name) >= 0.45);
+      if (!hit) continue;
+      usedAuto.add(hit);
+      for (const u of grp) flowStatus.set(u.k, { matched: true, manual: false, appRow: hit, split: grp.length });
+    }
     const curYm = period ? period.replace("-", "") : "";
     const appUnmatched = appRows.filter(a => normDoc(a.doc_no) && !usedAuto.has(a) && !usedByManual(a));
     // เตือน "มีในจัดการภาษีซื้อ แต่ไม่มีใน FLOW" = เฉพาะเดือนของรอบนี้ (เดือนข้างเคียงไม่นับว่าขาด — คนละรอบยื่น)
@@ -358,7 +382,11 @@ export default function FlowInputTaxReportPage({ currentUser }) {
     const tiOnly = theftInv.filter(c => !usedByManual(c));
     const cosOnly = cosmosRows.filter(c => !usedByManual(c));
     const matOnly = matRows.filter(c => !usedByManual(c));
-    const pairCandidates = [...appOnly, ...appAround, ...cnOnly, ...lktOnly, ...tiOnly, ...cosOnly, ...matOnly];
+    // ใบแอปที่ถูกจับคู่ไปแล้ว (manual/auto) — ยังให้เลือกซ้ำได้แบบติดป้ายเตือน สำหรับบิลรวมที่ยอดไม่ลงตัวพอดี
+    // (แอป 1 ใบ = FLOW หลายใบ เช่น ค่าไฟรวมสาขา) — จับซ้ำแล้วไม่เขียนเลขใบกำกับทับเอกสารเดิม
+    const sharedDocs = appRows.filter(a => normDoc(a.doc_no) && (usedAuto.has(a) || usedByManual(a)))
+      .map(a => ({ ...a, _shared: true }));
+    const pairCandidates = [...appOnly, ...appAround, ...cnOnly, ...lktOnly, ...tiOnly, ...cosOnly, ...matOnly, ...sharedDocs];
     const matchedCount = [...flowStatus.values()].filter(v => v.matched).length;
     return { flowStatus, appOnly, pairCandidates, matchedCount };
   }, [rows, appRows, manual, manualOther, partCN, lktRows, theftInv, cosmosRows, matRows, period]);
@@ -382,7 +410,8 @@ export default function FlowInputTaxReportPage({ currentUser }) {
         matched_by: currentUser?.name || currentUser?.username || "system",
       };
       // ใบในกลุ่มที่เป็นค่าใช้จ่าย/ค่าน้ำมัน → เขียนเลขใบกำกับจาก FLOW เข้าเอกสารค่าใช้จ่ายด้วย
-      const writesInv = flowRow.tax_invoice_no && picked.some(a => a.source === "expense" || a.source === "fuel");
+      // (_shared = เอกสารที่ใบ FLOW อื่นจับไปแล้ว — ไม่เขียนทับ เลขใบกำกับของใบแรกจะได้ไม่หาย)
+      const writesInv = flowRow.tax_invoice_no && picked.some(a => (a.source === "expense" || a.source === "fuel") && !a._shared);
       if (writesInv) {
         body.tax_invoice_no = flowRow.tax_invoice_no;
         body.tax_invoice_date = flowRow.tax_invoice_date || null;
@@ -577,9 +606,9 @@ export default function FlowInputTaxReportPage({ currentUser }) {
                         );
                       }
                       return (
-                        <span title={st.appRow ? `${SRC_LABEL[st.appRow.source] || st.appRow.source} · ${st.appRow.doc_no || ""}` : ""}
+                        <span title={st.appRow ? `${SRC_LABEL[st.appRow.source] || st.appRow.source} · ${st.appRow.doc_no || ""}${st.split ? ` · บิลรวม (FLOW ${st.split} ใบ = แอป 1 ใบ)` : ""}` : ""}
                           style={{ padding: "2px 8px", borderRadius: 10, background: "#d1fae5", color: "#065f46", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
-                          ✓ {st.appRow ? (SRC_LABEL[st.appRow.source] || "") : ""}
+                          ✓ {st.appRow ? (SRC_LABEL[st.appRow.source] || "") : ""}{st.split ? " · บิลรวม" : ""}
                         </span>
                       );
                     })()}
@@ -743,7 +772,8 @@ function PairModal({ flow, candidates, saving, onPick, onClose }) {
                         {amt >= 1 && <span style={simBadge("#d1fae5", "#065f46")}>💰 ยอดตรง</span>}
                         {amt >= 0.4 && amt < 1 && <span style={simBadge("#fef3c7", "#92400e")}>💰 ยอดใกล้</span>}
                         {name >= 0.45 && <span style={simBadge("#dbeafe", "#1e40af")}>🏷 ชื่อคล้าย</span>}
-                        {amt < 0.4 && name < 0.45 && <span style={{ color: "#d1d5db", fontSize: 11 }}>—</span>}
+                        {a._shared && <span style={simBadge("#fef2f2", "#b91c1c")} title="เอกสารนี้ถูกจับคู่กับใบ FLOW อื่นแล้ว — เลือกซ้ำได้กรณีบิลรวม (แอป 1 ใบ = FLOW หลายใบ)">⚠ จับคู่แล้ว</span>}
+                        {amt < 0.4 && name < 0.45 && !a._shared && <span style={{ color: "#d1d5db", fontSize: 11 }}>—</span>}
                       </td>
                       <td style={td}>
                         {SRC_LABEL[a.source] || a.source}
