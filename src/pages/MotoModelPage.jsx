@@ -44,6 +44,7 @@ export default function MotoModelPage({ currentUser }) {
   const [filterSeries, setFilterSeries] = useState("");
   const [filterModel, setFilterModel] = useState("");
   const [filterType, setFilterType] = useState("");
+  const [imgModal, setImgModal] = useState(null); // { row, loading, image_data, saving, msg }
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -126,6 +127,72 @@ export default function MotoModelPage({ currentUser }) {
     }
     setShowForm(true);
     setMessage("");
+  }
+
+  // ---- รูปภาพสีรถ ----
+  async function openImageModal(row) {
+    setImgModal({ row, loading: !!row.has_image, image_data: null, saving: false, msg: "" });
+    if (row.has_image) {
+      try {
+        const res = await post({ action: "get_color_image", color_id: row.color_id });
+        const rec = Array.isArray(res) ? res[0] : res;
+        setImgModal(m => (m && m.row.color_id === row.color_id)
+          ? { ...m, loading: false, image_data: rec?.image_data || null, msg: rec?.image_data ? "" : "ไม่พบรูปในระบบ" }
+          : m);
+      } catch {
+        setImgModal(m => (m && m.row.color_id === row.color_id) ? { ...m, loading: false, msg: "โหลดรูปไม่สำเร็จ" } : m);
+      }
+    }
+  }
+
+  function readAndShrinkImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("read fail"));
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        if (file.size <= 400 * 1024) { resolve({ dataUrl, mime: file.type || "image/png" }); return; }
+        const img = new Image();
+        img.onerror = () => reject(new Error("decode fail"));
+        img.onload = () => {
+          const maxW = 900;
+          const scale = Math.min(1, maxW / img.width);
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.85), mime: "image/jpeg" });
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleImageUpload(file) {
+    if (!file || !imgModal) return;
+    setImgModal(m => ({ ...m, saving: true, msg: "" }));
+    try {
+      const { dataUrl, mime } = await readAndShrinkImage(file);
+      await post({ action: "save_color_image", color_id: imgModal.row.color_id, image_data: dataUrl, mime_type: mime });
+      setImgModal(m => m ? { ...m, saving: false, image_data: dataUrl } : m);
+      setColors(prev => prev.map(c => c.color_id === imgModal.row.color_id ? { ...c, has_image: true } : c));
+    } catch {
+      setImgModal(m => m ? { ...m, saving: false, msg: "บันทึกรูปไม่สำเร็จ" } : m);
+    }
+  }
+
+  async function handleImageDelete() {
+    if (!imgModal) return;
+    if (!window.confirm("ลบรูปของสีนี้?")) return;
+    setImgModal(m => ({ ...m, saving: true, msg: "" }));
+    try {
+      await post({ action: "delete_color_image", color_id: imgModal.row.color_id });
+      setColors(prev => prev.map(c => c.color_id === imgModal.row.color_id ? { ...c, has_image: false } : c));
+      setImgModal(null);
+    } catch {
+      setImgModal(m => m ? { ...m, saving: false, msg: "ลบรูปไม่สำเร็จ" } : m);
+    }
   }
 
   // Computed filters
@@ -247,7 +314,7 @@ export default function MotoModelPage({ currentUser }) {
                   {tab === "series" && <><th>ชื่อรุ่น</th><th>ชื่อทางการตลาด</th><th>ชื่อภาษาไทยทางการตลาด</th><th>ประเภทรถ</th><th>ซีซีรถ</th></>}
                   {tab === "models" && <><th>รุ่น</th><th>แบบ</th></>}
                   {tab === "types" && <><th>รุ่น</th><th>แบบ</th><th>type</th><th>รายละเอียดรุ่น</th></>}
-                  {tab === "colors" && <><th>รุ่น</th><th>แบบ</th><th>type</th><th>รหัสสี</th><th>สี</th></>}
+                  {tab === "colors" && <><th>รุ่น</th><th>แบบ</th><th>type</th><th>รหัสสี</th><th>สี</th><th style={{ width: 80 }}>รูป</th></>}
                   <th>สถานะ</th>
                   <th style={{ width: 80 }}>จัดการ</th>
                 </tr>
@@ -264,7 +331,13 @@ export default function MotoModelPage({ currentUser }) {
                     {tab === "series" && (<><td style={{ fontWeight: 600 }}>{row.series_name}</td><td>{row.marketing_name || "-"}</td><td>{row.thai_name || "-"}</td><td>{(vehicleTypes.find(v => v.vehicle_type_id === row.vehicle_type_id) || {}).vehicle_type_name || "-"}</td><td>{row.engine_cc || "-"}</td></>)}
                     {tab === "models" && (<><td>{row.series_name || "-"}</td><td style={{ fontWeight: 600 }}>{row.model_code}</td></>)}
                     {tab === "types" && (<><td>{row.series_name || "-"}</td><td>{row.model_code || "-"}</td><td style={{ fontWeight: 600 }}>{row.type_name}</td><td>{row.model_detail || "-"}</td></>)}
-                    {tab === "colors" && (<><td>{row.series_name || "-"}</td><td>{row.model_code || "-"}</td><td>{row.type_name || "-"}</td><td style={{ fontWeight: 600 }}>{row.color_code}</td><td>{row.color_name || "-"}</td></>)}
+                    {tab === "colors" && (<><td>{row.series_name || "-"}</td><td>{row.model_code || "-"}</td><td>{row.type_name || "-"}</td><td style={{ fontWeight: 600 }}>{row.color_code}</td><td>{row.color_name || "-"}</td>
+                      <td>
+                        <button onClick={() => openImageModal(row)}
+                          style={{ padding: "3px 10px", background: row.has_image ? "#2563eb" : "#f3f4f6", color: row.has_image ? "#fff" : "#6b7280", border: row.has_image ? "none" : "1px dashed #d1d5db", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}>
+                          {row.has_image ? "ดูรูป" : "เพิ่มรูป"}
+                        </button>
+                      </td></>)}
                     <td><StatusBadge status={row.status || "active"} /></td>
                     <td>
                       <button onClick={() => openEdit(row)}
@@ -371,6 +444,53 @@ export default function MotoModelPage({ currentUser }) {
               </button>
               <button onClick={() => { setShowForm(false); setMessage(""); }}
                 style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ปิด
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Modal */}
+      {imgModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}
+          onClick={() => !imgModal.saving && setImgModal(null)}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 24, width: 480, maxWidth: "92vw", maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}
+            onClick={e => e.stopPropagation()}>
+            <h3 style={{ marginTop: 0, marginBottom: 4 }}>
+              รูปสีรถ: {imgModal.row.color_code} {imgModal.row.color_name || ""}
+            </h3>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 12 }}>
+              {imgModal.row.series_name} / {imgModal.row.model_code} / type {imgModal.row.type_name}
+            </div>
+
+            {imgModal.loading ? (
+              <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลดรูป...</div>
+            ) : imgModal.image_data ? (
+              <img src={imgModal.image_data} alt={imgModal.row.color_name || imgModal.row.color_code}
+                style={{ width: "100%", borderRadius: 8, border: "1px solid #e5e7eb", background: "#fafafa" }} />
+            ) : (
+              <div style={{ textAlign: "center", padding: 40, color: "#9ca3af", border: "1.5px dashed #d1d5db", borderRadius: 8 }}>
+                ยังไม่มีรูปสำหรับสีนี้
+              </div>
+            )}
+
+            {imgModal.msg && <div style={{ color: "#ef4444", marginTop: 10, fontSize: 13 }}>{imgModal.msg}</div>}
+
+            <div style={{ display: "flex", gap: 10, marginTop: 16, flexWrap: "wrap" }}>
+              <label style={{ flex: 1, minWidth: 120, textAlign: "center", padding: "9px 0", background: "#072d6b", color: "#fff", borderRadius: 8, cursor: imgModal.saving ? "wait" : "pointer", fontFamily: "Tahoma", fontSize: 14 }}>
+                {imgModal.saving ? "กำลังบันทึก..." : imgModal.image_data ? "เปลี่ยนรูป" : "อัปโหลดรูป"}
+                <input type="file" accept="image/*" style={{ display: "none" }} disabled={imgModal.saving}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; handleImageUpload(f); }} />
+              </label>
+              {imgModal.image_data && (
+                <button onClick={handleImageDelete} disabled={imgModal.saving}
+                  style={{ flex: 1, minWidth: 100, padding: "9px 0", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 14 }}>
+                  ลบรูป
+                </button>
+              )}
+              <button onClick={() => setImgModal(null)} disabled={imgModal.saving}
+                style={{ flex: 1, minWidth: 100, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 14 }}>
                 ปิด
               </button>
             </div>
