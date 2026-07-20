@@ -28,6 +28,7 @@ const PAGE_OPTIONS = [
   { key: "pricemarkup", label: "➕ ราคาขายบวกเพิ่ม" },
   { key: "receiptqr",  label: "🔳 พิมพ์ QR ออกใบเสร็จ" },
   { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
+  { key: "salewizard", label: "🛒 บันทึกขาย NEW" },
   { key: "retailsale", label: "🛒 บันทึกขายปลีก" },
   { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
   // ── Spare Parts ──
