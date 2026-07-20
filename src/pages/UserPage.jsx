@@ -36,6 +36,7 @@ const PAGE_OPTIONS = [
   { key: "spareorder", label: "🛠️ สั่งซื้ออะไหล่ HONDA" },
   { key: "yamahaorder", label: "🛠️ สั่งซื้ออะไหล่ YAMAHA" },
   { key: "outsideorder", label: "🛠️ สั่งซื้ออะไหล่นอกเงินมัดจำ" },
+  { key: "partdeposit", label: "🪙 ระบบมัดจำอะไหล่" },
   { key: "fastmoving", label: "⚡ รายงานอะไหล่หมุนเร็ว" },
   { key: "claim",      label: "🔧 ระบบการเคลม" },
   // ── Office Supplies (วัสดุสำนักงาน) ──

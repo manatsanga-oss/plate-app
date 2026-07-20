@@ -35,6 +35,7 @@ import MotoPricePage from "./pages/MotoPricePage";
 import MotoModelPage from "./pages/MotoModelPage";
 import SaleWizardPage from "./pages/SaleWizardPage";
 import SaleMoneyReportPage from "./pages/SaleMoneyReportPage";
+import PartDepositPage from "./pages/PartDepositPage";
 import GiveawayRulesPage from "./pages/GiveawayRulesPage";
 import MotoPriceCheckPage from "./pages/MotoPriceCheckPage";
 import MotoPriceQuotePage from "./pages/MotoPriceQuotePage";
@@ -247,6 +248,7 @@ export default function App() {
     if (page === "hondarepairreport") return true;
     if (page === "partstatusinquiry") return false;           // เฉพาะ admin (สอบถามสถานะอะไหล่)
     if (page === "partwithdrawal") return true;               // บันทึกการเบิกอะไหล่ — เปิดให้ทุก user
+    if (page === "partdeposit") return true;                  // ระบบมัดจำอะไหล่ (บันทึกรับเงินมัดจำ) — เปิดให้ทุก user
     if (page === "partorderinquiry") return false;            // เฉพาะ admin (สอบถามรายการอะไหล่สั่งซื้อ)
     if (page === "partdispensereport") return false;          // เฉพาะ admin (รายงานการจ่ายอะไหล่รายตัว)
     if (page === "servicehistory") return true;                // ค้นหาประวัติงานบริการ — เปิดให้ทุก user
@@ -428,6 +430,9 @@ export default function App() {
         )}
         {activeMenu === "salemoneyreport" && canAccess("salemoneyreport") && (
           <SaleMoneyReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "partdeposit" && canAccess("partdeposit") && (
+          <PartDepositPage currentUser={currentUser} />
         )}
         {activeMenu === "giveawayrules" && canAccess("giveawayrules") && (
           <GiveawayRulesPage currentUser={currentUser} />
@@ -727,7 +732,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "deliveryfee", "pricemarkup", "receiptqr", "receiptissue", "retailsale", "bookingdeposit"];
-  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "partstatusinquiry", "partorderinquiry", "partwithdrawal", "partmodelusage"];
+  const sparePages = ["spareorder", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "partdeposit", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "productgroup", "partstatusinquiry", "partorderinquiry", "partwithdrawal", "partmodelusage"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust", "mailinbox"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "giveawayrules", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
   const uploadPages = ["upload", "uploadaccounting"];
@@ -786,10 +791,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
       </MenuGroup>
 
       <MenuGroup title="Spare Parts" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
-        <MenuSubGroup title="Order System" pages={["spareorder", "yamahaorder", "repairdeposit", "outsideorder", "depositseize"]} activeMenu={activeMenu}>
+        <MenuSubGroup title="Order System" pages={["spareorder", "yamahaorder", "repairdeposit", "outsideorder", "depositseize", "partdeposit"]} activeMenu={activeMenu}>
           <MenuItem page="spareorder" label="ระบบสั่งซื้ออะไหล่ HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="yamahaorder" label="ระบบสั่งซื้ออะไหล่ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="outsideorder" label="ระบบสั่งซื้ออะไหล่นอกเงินมัดจำ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="partdeposit" label="ระบบมัดจำอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="depositseize" label="ยึดเงินมัดจำ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="Spare Inventory" pages={["fastmoving", "fastmovingstock"]} activeMenu={activeMenu}>
