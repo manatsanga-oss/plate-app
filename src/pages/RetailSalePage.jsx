@@ -416,7 +416,7 @@ export default function RetailSalePage({ currentUser }) {
       const mN = norm(m.finance_company);
       return mN === finN || mN.includes(finN) || finN.includes(mN);
     };
-    return markups.filter((m) => {
+    const matched = markups.filter((m) => {
       if (m.markup_type === "finance") return finMatch(m);
       if (m.markup_type === "finance_cc") {
         if (!finMatch(m)) return false;
@@ -435,6 +435,17 @@ export default function RetailSalePage({ currentUser }) {
       }
       return false;
     });
+    // กฎ finance_cc ซ้อนช่วง cc กัน (เช่น 110-125 กับ 110-160) → เลือกกฎที่เฉพาะเจาะจงสุด (ช่วงแคบสุด) ตัวเดียว ไม่บวกซ้ำ
+    const ccWidth = (m) => Number(m.cc_max || 9999) - Number(m.cc_min || 0);
+    const bestCc = new Map();
+    const out = [];
+    for (const m of matched) {
+      if (m.markup_type !== "finance_cc") { out.push(m); continue; }
+      const k = norm(m.finance_company);
+      const cur = bestCc.get(k);
+      if (!cur || ccWidth(m) < ccWidth(cur)) bestCc.set(k, m);
+    }
+    return [...out, ...bestCc.values()];
   }, [selectedTypeId, motoTypes, markups, financeCompanies, form.finance_type, form.finance_company_code, selectedSeriesCC, branchCode]);
   const markupsTotal = applicableMarkups.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
 
