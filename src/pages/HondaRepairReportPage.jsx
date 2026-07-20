@@ -25,6 +25,22 @@ export default function HondaRepairReportPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [serviceDetail, setServiceDetail] = useState(null);
+  const [partsDetail, setPartsDetail] = useState(null);
+
+  // popup สรุปมูลค่าสินค้า + ค่าบริการ รายใบแจ้งซ่อม — mechanicName = null คือทั้งหมด
+  // ค่าบริการคิดกฎเดียวกับตารางสรุป: PDI = 50/ใบ (ป.เปา ไม่คิด PDI)
+  function laborOf(r) {
+    const isPDI = r.service_type && r.service_type.toUpperCase().includes("PDI");
+    if (!isPDI) return Number(r.labor_amount || 0);
+    const isPMotor = String(r.mechanic_code || "").toUpperCase() === "PMOTOR" || String(r.mechanic_name || "").includes("ป.เปา");
+    return isPMotor ? 0 : 50;
+  }
+  function openPartsDetail(mechanicName) {
+    const list = rows
+      .filter(r => (Number(r.parts_value || 0) > 0 || laborOf(r) > 0) && (!mechanicName || (r.mechanic_name || "(ไม่ระบุ)") === mechanicName))
+      .sort((a, b) => Number(b.parts_value || 0) - Number(a.parts_value || 0));
+    setPartsDetail({ title: mechanicName || "ทุกช่าง", rows: list });
+  }
 
   async function fetchData() {
     setLoading(true); setMessage("");
@@ -113,7 +129,7 @@ export default function HondaRepairReportPage() {
         <Card label="🛠️ ค่าบริการรวม (รวม PDI×50)" value={fmt(mechanicPivot.data.reduce((s, g) => s + g.total_labor, 0))} color="#0369a1" />
         <Card label="💰 ขายสุทธิรวม" value={fmt(totalNet)} color="#059669" />
         <Card label="💵 ค่าคอมมิชชั่นรวม (65%)" value={fmt(mechanicPivot.data.reduce((s, g) => s + g.total_labor, 0) * 0.65)} color="#15803d" highlight />
-        <Card label="📦 มูลค่าสินค้า (จาก honda_part_sales)" value={fmt(totalPartsValue)} color="#0891b2" />
+        <Card label="📦 มูลค่าสินค้า (จาก honda_part_sales) — คลิกดูรายใบ" value={fmt(totalPartsValue)} color="#0891b2" onClick={() => openPartsDetail(null)} />
       </div>
 
       {/* Pivot: ช่างซ่อม × ประเภทบริการ */}
@@ -158,7 +174,13 @@ export default function HondaRepairReportPage() {
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3" }}>{g.total_jobs}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3", color: "#059669" }}>{fmt(g.total_labor)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#dcfce7", color: "#15803d" }}>{fmt(g.total_labor * 0.65)}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#cffafe", color: "#0891b2" }}>{fmt(g.total_parts_value)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#cffafe" }}>
+                      {g.total_parts_value > 0 ? (
+                        <span style={{ color: "#0891b2", cursor: "pointer", textDecoration: "underline" }} onClick={() => openPartsDetail(g.mechanic_name)}>{fmt(g.total_parts_value)}</span>
+                      ) : (
+                        <span style={{ color: "#0891b2" }}>{fmt(g.total_parts_value)}</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -213,6 +235,48 @@ export default function HondaRepairReportPage() {
         </div>
       )}
 
+      {/* Parts value popup — มูลค่าสินค้ารายใบแจ้งซ่อม */}
+      {partsDetail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
+             onClick={() => setPartsDetail(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 900, width: "95%", maxHeight: "90vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>📦 มูลค่าสินค้ารายใบแจ้งซ่อม — {partsDetail.title} ({partsDetail.rows.length} ใบ)</h3>
+              <button onClick={() => setPartsDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>มูลค่าสินค้าจาก honda_part_sales จับคู่เลขที่ JOB · ค่าบริการคิดกฎเดียวกับตารางสรุป (PDI = 50/ใบ, ป.เปา ไม่คิด PDI) · แสดงเฉพาะใบที่มียอด</div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead style={{ background: "#f0f4f9", position: "sticky", top: 0 }}>
+                <tr>
+                  <th style={th}>#</th><th style={th}>เลขที่ JOB</th>
+                  <th style={th}>วันที่ปิด</th><th style={th}>ช่างซ่อม</th><th style={th}>ประเภทบริการ</th>
+                  <th style={{ ...th, textAlign: "right", background: "#fef9c3" }}>ค่าบริการ</th>
+                  <th style={{ ...th, textAlign: "right", background: "#cffafe" }}>มูลค่าสินค้า</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partsDetail.rows.map((r, i) => (
+                  <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                    <td style={td}>{i + 1}</td>
+                    <td style={{ ...td, fontFamily: "monospace" }}>{r.job_no}</td>
+                    <td style={td}>{fmtDate(r.close_date)}</td>
+                    <td style={td}>{r.mechanic_name}</td>
+                    <td style={td}>{r.service_type || "-"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669", fontWeight: 600 }}>{fmt(laborOf(r))}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0891b2", fontWeight: 600 }}>{fmt(r.parts_value)}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
+                  <td colSpan={5} style={{ ...td, textAlign: "right" }}>รวม</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(partsDetail.rows.reduce((s, r) => s + laborOf(r), 0))}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0891b2", background: "#cffafe" }}>{fmt(partsDetail.rows.reduce((s, r) => s + Number(r.parts_value || 0), 0))}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Detail popup */}
       {serviceDetail && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
@@ -258,9 +322,9 @@ export default function HondaRepairReportPage() {
   );
 }
 
-function Card({ label, value, color, highlight }) {
+function Card({ label, value, color, highlight, onClick }) {
   return (
-    <div style={{ padding: "12px 14px", background: "#fff", borderRadius: 10, border: highlight ? `2px solid ${color}` : "1px solid #e5e7eb" }}>
+    <div onClick={onClick} style={{ padding: "12px 14px", background: "#fff", borderRadius: 10, border: highlight ? `2px solid ${color}` : "1px solid #e5e7eb", cursor: onClick ? "pointer" : "default" }}>
       <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: highlight ? 22 : 18, fontWeight: 700, color, fontFamily: "monospace" }}>{value}</div>
     </div>

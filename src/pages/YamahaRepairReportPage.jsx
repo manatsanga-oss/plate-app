@@ -27,6 +27,7 @@ export default function YamahaRepairReportPage() {
   const [message, setMessage] = useState("");
   const [detail, setDetail] = useState(null);
   const [itemTypeDetail, setItemTypeDetail] = useState(null); // { item_type, rows }
+  const [partsDetail, setPartsDetail] = useState(null); // { title, jobs } — มูลค่าสินค้า+ค่าแรง รายใบแจ้งซ่อม
   const [employees, setEmployees] = useState([]);
   const [checkFees, setCheckFees] = useState([]); // [{id, year, month, mechanic_name, amount, note}]
   const [checkFeeModal, setCheckFeeModal] = useState(null); // { mechanic_name }
@@ -99,6 +100,11 @@ export default function YamahaRepairReportPage() {
     return pos.includes("ช่าง");
   };
   const TRANSFER_TO = "ชัยณรงค์ เกิดทรัพย์"; // ผู้รับยอด labor+coupon ของคนที่ไม่ใช่ช่าง
+  // ตารางสรุปช่าง + popup รายใบ + การ์ดมูลค่าสินค้า นับเฉพาะ SCY01 (ห้าห้อง)
+  // ใบสาขาอื่น (เช่น SCY07) ไม่นับ — เช็คจาก branch_code หรือเลขใบแจ้งขึ้นต้น SCY01 (กันเคส branch_code = 00000)
+  const isOwnBranch = (r) =>
+    String(r.branch_code || "").toUpperCase() === "SCY01" ||
+    String(r.job_no || "").toUpperCase().startsWith("SCY01");
 
   // group by job_no for summary
   const byJob = useMemo(() => {
@@ -125,6 +131,7 @@ export default function YamahaRepairReportPage() {
     const map = new Map();
     const partsCountedJobs = new Set();  // กัน parts_value ถูกบวกซ้ำหลายบรรทัดของ job เดียวกัน
     for (const r of rows) {
+      if (!isOwnBranch(r)) continue; // ใบสาขาอื่นไม่นับในตารางสรุปช่าง
       const name = r.mechanic_name || "(ไม่ระบุ)";
       if (!map.has(name)) map.set(name, {
         mechanic_name: name,
@@ -185,17 +192,53 @@ export default function YamahaRepairReportPage() {
     return finalList.sort((a, b) => b.total - a.total);
   }, [rows, positionByName, checkFees]);
 
-  // total parts value (unique per job_no)
+  // total parts value (unique per job_no) — เฉพาะ SCY01
   const totalPartsValue = useMemo(() => {
     const seen = new Set();
     let sum = 0;
     for (const r of rows) {
+      if (!isOwnBranch(r)) continue;
       if (seen.has(r.job_no)) continue;
       seen.add(r.job_no);
       sum += Number(r.parts_value || 0);
     }
     return sum;
   }, [rows]);
+
+  // popup สรุปมูลค่าสินค้า + ค่าแรง รายใบแจ้งซ่อม — mechanicName = null คือทุกช่าง
+  // กฎเดียวกับตารางสรุป: ยอดของคนที่ไม่ใช่ช่างถูกโอนไปรวมที่ TRANSFER_TO
+  function openPartsDetail(mechanicName) {
+    const inScope = (r) => {
+      if (!isOwnBranch(r)) return false; // ใบสาขาอื่นไม่แสดงใน popup
+      if (!mechanicName) return true;
+      const name = r.mechanic_name || "(ไม่ระบุ)";
+      if (name === mechanicName) return true;
+      // ยอดของคนไม่ใช่ช่าง นับรวมในแถวของ TRANSFER_TO
+      if (mechanicName === TRANSFER_TO && positionByName.size > 0 && !isMechanic(name)) return true;
+      return false;
+    };
+    const map = new Map();
+    for (const r of rows) {
+      if (!inScope(r)) continue;
+      const k = r.job_no;
+      if (!map.has(k)) map.set(k, {
+        job_no: k, branch_code: r.branch_code,
+        repair_day: r.repair_day, repair_month: r.repair_month, repair_year: r.repair_year,
+        customer: r.customer, license_plate: r.license_plate,
+        mechanic_name: r.mechanic_name || "(ไม่ระบุ)",
+        labor: 0, coupon_count: 0, invoice: 0, parts_value: Number(r.parts_value || 0),
+      });
+      const g = map.get(k);
+      const it = r.item_type || "";
+      if (it === "รายการค่าแรง") g.labor += Number(r.labor_total || 0);
+      else if (it === "ใบแจ้งซ่อม") g.invoice += Number(r.net_revenue || 0);
+      else if (it === "คูปอง") g.coupon_count += 1;
+    }
+    const jobs = [...map.values()]
+      .filter(g => g.labor > 0 || g.coupon_count > 0 || g.invoice > 0 || g.parts_value > 0)
+      .sort((a, b) => b.parts_value - a.parts_value);
+    setPartsDetail({ title: mechanicName || "ทุกช่าง", jobs });
+  }
 
   // สรุปต่อประเภทรายการ (item_type) — ใบแจ้งซ่อม / รายการค่าแรง / คูปอง
   const byItemType = useMemo(() => {
@@ -247,7 +290,7 @@ export default function YamahaRepairReportPage() {
         <Card label="📋 ใบแจ้งซ่อม" value={byJob.length} color="#1e40af" />
         <Card label="📌 รายการ (lines)" value={rows.length} color="#0369a1" />
         <Card label="💰 รายได้สุทธิรวม" value={fmt(totalRevenue)} color="#059669" highlight />
-        <Card label="📦 มูลค่าสินค้า (จาก yamaha_part_dispense)" value={fmt(totalPartsValue)} color="#0891b2" />
+        <Card label="📦 มูลค่าสินค้า (จาก yamaha_part_dispense) — คลิกดูรายใบ" value={fmt(totalPartsValue)} color="#0891b2" onClick={() => openPartsDetail(null)} />
       </div>
 
       {/* Pivot: ช่างซ่อม × ประเภทรายการ (ยอดเงิน) */}
@@ -295,7 +338,13 @@ export default function YamahaRepairReportPage() {
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#dcfce7", color: "#15803d" }}>{laborTotal ? fmt(laborTotal * 0.65) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{g.invoice_amount ? fmt(g.invoice_amount) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#fef9c3" }}>{fmt(g.total)}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#cffafe", color: "#0891b2" }}>{g.parts_value ? fmt(g.parts_value) : "-"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#cffafe" }}>
+                      {g.parts_value ? (
+                        <span style={{ color: "#0891b2", cursor: "pointer", textDecoration: "underline" }} onClick={() => openPartsDetail(g.mechanic_name)}>{fmt(g.parts_value)}</span>
+                      ) : (
+                        <span style={{ color: "#0891b2" }}>-</span>
+                      )}
+                    </td>
                   </tr>
                 )})}
                 {(() => {
@@ -370,6 +419,58 @@ export default function YamahaRepairReportPage() {
         </div>
       )}
 
+
+      {/* Parts value popup — มูลค่าสินค้า + ค่าแรง รายใบแจ้งซ่อม */}
+      {partsDetail && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 1000 }}
+             onClick={() => setPartsDetail(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, maxWidth: 1100, width: "95%", maxHeight: "90vh", overflow: "auto", padding: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, color: "#072d6b" }}>📦 มูลค่าสินค้า/ค่าแรง รายใบแจ้งซ่อม — {partsDetail.title} ({partsDetail.jobs.length} ใบ)</h3>
+              <button onClick={() => setPartsDetail(null)} style={{ padding: "5px 12px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>✕ ปิด</button>
+            </div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>มูลค่าสินค้าจาก yamaha_part_dispense จับคู่เลขใบแจ้ง · เฉพาะใบสาขา SCY01 · ยอดคนที่ไม่ใช่ช่างนับรวมที่ {TRANSFER_TO} ตามกฎตารางสรุป · แสดงเฉพาะใบที่มียอด</div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+              <thead style={{ background: "#f0f4f9", position: "sticky", top: 0 }}>
+                <tr>
+                  <th style={th}>#</th><th style={th}>สาขา</th><th style={th}>เลขใบแจ้ง</th>
+                  <th style={th}>วันที่</th><th style={th}>ลูกค้า</th><th style={th}>ทะเบียน</th><th style={th}>ช่างซ่อม</th>
+                  <th style={{ ...th, textAlign: "right" }}>ค่าแรง</th>
+                  <th style={{ ...th, textAlign: "right" }}>คูปอง (×40)</th>
+                  <th style={{ ...th, textAlign: "right" }}>ใบแจ้งซ่อม</th>
+                  <th style={{ ...th, textAlign: "right", background: "#cffafe" }}>มูลค่าสินค้า</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partsDetail.jobs.map((g, i) => (
+                  <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                    <td style={td}>{i + 1}</td>
+                    <td style={{ ...td, fontFamily: "monospace" }}>{g.branch_code}</td>
+                    <td style={{ ...td, fontFamily: "monospace" }}>{g.job_no}</td>
+                    <td style={td}>{g.repair_day}/{g.repair_month}/{g.repair_year}</td>
+                    <td style={td}>{g.customer || "-"}</td>
+                    <td style={{ ...td, fontFamily: "monospace" }}>{g.license_plate || "-"}</td>
+                    <td style={td}>{g.mechanic_name}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.labor ? fmt(g.labor) : "-"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#f59e0b", fontWeight: 600 }}>
+                      {g.coupon_count > 0 ? <>{fmt(g.coupon_count * 40)}<span style={{ fontSize: 10, color: "#6b7280", fontWeight: 400, marginLeft: 4 }}>({g.coupon_count})</span></> : "-"}
+                    </td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{g.invoice ? fmt(g.invoice) : "-"}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0891b2", fontWeight: 600 }}>{g.parts_value ? fmt(g.parts_value) : "-"}</td>
+                  </tr>
+                ))}
+                <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
+                  <td colSpan={7} style={{ ...td, textAlign: "right" }}>รวม</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(partsDetail.jobs.reduce((s, g) => s + g.labor, 0))}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#f59e0b" }}>{fmt(partsDetail.jobs.reduce((s, g) => s + g.coupon_count * 40, 0))}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(partsDetail.jobs.reduce((s, g) => s + g.invoice, 0))}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0891b2", background: "#cffafe" }}>{fmt(partsDetail.jobs.reduce((s, g) => s + g.parts_value, 0))}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* Item type detail popup */}
       {itemTypeDetail && (
@@ -562,9 +663,9 @@ export default function YamahaRepairReportPage() {
   );
 }
 
-function Card({ label, value, color, highlight }) {
+function Card({ label, value, color, highlight, onClick }) {
   return (
-    <div style={{ padding: "12px 14px", background: "#fff", borderRadius: 10, border: highlight ? `2px solid ${color}` : "1px solid #e5e7eb" }}>
+    <div onClick={onClick} style={{ padding: "12px 14px", background: "#fff", borderRadius: 10, border: highlight ? `2px solid ${color}` : "1px solid #e5e7eb", cursor: onClick ? "pointer" : "default" }}>
       <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: highlight ? 22 : 18, fontWeight: 700, color, fontFamily: "monospace" }}>{value}</div>
     </div>
