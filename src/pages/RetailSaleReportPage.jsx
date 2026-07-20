@@ -43,6 +43,10 @@ export default function RetailSaleReportPage({ currentUser }) {
   // unique branches
   const branchOpts = [...new Set(rows.map((r) => r.branch_code).filter(Boolean))].sort();
 
+  // สถานะชำระ: ชำระแล้ว หรือ ไม่มียอดต้องชำระ (เช่น จัดไฟแนนท์เต็ม total_payment = 0) = "ชำระ"
+  // มียอดต้องชำระแต่ยังไม่บันทึกรับชำระ = "ค้าง" (แถวเก่าที่ workflow ยังไม่ส่ง total_payment มา ใช้ payment_status ตามเดิม)
+  const isPaidLike = (r) => r.payment_status === "paid" || (r.total_payment != null && Number(r.total_payment) <= 0);
+
   // summary
   const totalCarPrice = rows.reduce((s, r) => s + Number(r.net_car_price || r.car_price || 0), 0);
   const cntCash = rows.filter((r) => r.finance_type === "none" || !r.finance_type).length;
@@ -58,7 +62,7 @@ export default function RetailSaleReportPage({ currentUser }) {
       r.car_price, r.net_car_price,
       FINANCE_LABEL[r.finance_type] || r.finance_type || "",
       r.finance_company_name || "",
-      r.payment_status === "paid" ? "ชำระแล้ว" : "ค้างชำระ",
+      isPaidLike(r) ? (r.payment_status === "paid" ? "ชำระแล้ว" : "ไม่มียอดชำระ") : "ค้างชำระ",
       r.tax_invoice_status === "issued" ? "ออกแล้ว" : "ยังไม่ออก",
       r.seller || "",
     ].map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
@@ -168,8 +172,9 @@ export default function RetailSaleReportPage({ currentUser }) {
                     </td>
                     <td style={{ ...td, textAlign: "center" }}>
                       <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
-                        <span style={{ padding: "1px 7px", borderRadius: 3, fontSize: 10, fontWeight: 700, background: r.payment_status === "paid" ? "#dcfce7" : "#fef3c7", color: r.payment_status === "paid" ? "#15803d" : "#a16207" }}>
-                          {r.payment_status === "paid" ? "✓ ชำระ" : "⏳ ค้าง"}
+                        <span style={{ padding: "1px 7px", borderRadius: 3, fontSize: 10, fontWeight: 700, background: isPaidLike(r) ? "#dcfce7" : "#fef3c7", color: isPaidLike(r) ? "#15803d" : "#a16207" }}
+                          title={isPaidLike(r) && r.payment_status !== "paid" ? "ไม่มียอดต้องชำระ (รวมยอดชำระ 0)" : ""}>
+                          {isPaidLike(r) ? "✓ ชำระ" : "⏳ ค้าง"}
                         </span>
                         <span style={{ padding: "1px 7px", borderRadius: 3, fontSize: 10, fontWeight: 700, background: r.tax_invoice_status === "issued" ? "#dbeafe" : "#f3f4f6", color: r.tax_invoice_status === "issued" ? "#1e40af" : "#6b7280" }}>
                           {r.tax_invoice_status === "issued" ? "📄 ออกใบกำกับ" : "ยังไม่ออก"}
