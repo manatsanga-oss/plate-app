@@ -607,6 +607,19 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   }
   // เงินมัดจำที่ใช้หัก = มัดจำคงเหลือของใบจองที่เลือก (ไม่จอง = 0)
   const depositAmt = bookingAsk === "booked" && selBooking ? Number(selBooking.remaining || 0) : 0;
+
+  // ===== ราคาประกาศ ณ วันจอง — ลูกค้าจองไว้ก่อนปรับราคา ต้องคิดราคาวันที่จอง ไม่ใช่ราคาปัจจุบัน (เหมือนหน้าขายปลีก) =====
+  const bookingDateISO = bookingAsk === "booked" && selBooking?.booking_date ? String(selBooking.booking_date).slice(0, 10) : "";
+  const [bookingPrices, setBookingPrices] = useState(null); // ตารางราคา ณ วันจอง (null = ใช้ราคาปัจจุบัน)
+  useEffect(() => {
+    if (!bookingDateISO) { setBookingPrices(null); return; }
+    let alive = true;
+    post(MASTER_API, { action: "get_moto_prices", as_of: bookingDateISO })
+      .then((d) => { if (alive) setBookingPrices(Array.isArray(d) && d.length ? d : null); })
+      .catch(() => { if (alive) setBookingPrices(null); });
+    return () => { alive = false; };
+  }, [bookingDateISO]);
+  const usingBookingPrice = !!(bookingDateISO && bookingPrices);
   // LINE ของลูกค้า: จาก customer master (เลือก/เพิ่ม) หรือจากใบจอง (จองผ่าน QR/LINE)
   // ⚠️ ต้องอยู่หลังบรรทัดประกาศ selBooking เท่านั้น (TDZ → จอขาวทั้งแอป)
   const custLineUserId = text(cust.customer_line_user_id) || text(selBooking?.line_user_id);
@@ -1038,7 +1051,9 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     });
     if (!pt) return null;
     const ptId = pt.price_type_id || pt.type_id;
-    const row = prices.find(x => String(x.type_id) === String(masterRow.type_id) && String(x.price_type_id) === String(ptId));
+    // ลูกค้าจอง → ใช้ตารางราคา ณ วันจอง (เหมือนหน้าขายปลีก) ไม่ใช่ราคาปัจจุบัน
+    const priceRows = usingBookingPrice ? bookingPrices : prices;
+    const row = priceRows.find(x => String(x.type_id) === String(masterRow.type_id) && String(x.price_type_id) === String(ptId));
     return row ? Number(row.amount || 0) : null;
   }
   const fmtBaht = (n) => n == null ? "-" : Number(n).toLocaleString("th-TH") + " บาท";
@@ -1436,6 +1451,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                                 : m.markup_type === "custom" ? `กำหนดเอง: ${m.brand || ""} ${m.model_code || ""}` : m.markup_type;
                               return <div key={i}>• {label}: <strong>+{Number(m.markup_amount).toLocaleString("th-TH")}</strong></div>;
                             })}
+                          </div>
+                        )}
+                        {usingBookingPrice && (
+                          <div style={{ marginTop: 6 }}>
+                            <span title="ลูกค้าจองไว้ก่อนปรับราคา — ใช้ราคาประกาศที่มีผล ณ วันจอง (ไม่ใช่ราคาปัจจุบัน)"
+                              style={{ padding: "2px 10px", borderRadius: 10, background: "#fef3c7", color: "#92400e", fontSize: 12, fontWeight: 700, cursor: "help" }}>
+                              🔖 ราคา ณ วันจอง {thaiDate(bookingDateISO)}
+                            </span>
                           </div>
                         )}
                         {price == null && <div style={{ fontSize: 12, color: "#991b1b", marginTop: 4 }}>ไม่พบราคาประกาศของแบบ/type นี้ในเมนูราคารถ</div>}
