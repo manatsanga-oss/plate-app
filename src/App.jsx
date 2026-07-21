@@ -784,7 +784,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="receiptissue" label="ออกใบเสร็จจาก QR" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuSubGroup title="ขายรถ" pages={["retailsale", "bookingdeposit", "salewizard", "salemoneyreport"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="salewizard" label="บันทึกขาย NEW" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-          <MenuItem page="retailsale" label="บันทึกขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="retailsale" label="ค้นหาใบขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="bookingdeposit" label="มัดจำจองรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="salemoneyreport" label="รายงานการเงินขายรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>

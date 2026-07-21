@@ -30,7 +30,7 @@ const PAGE_OPTIONS = [
   { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
   { key: "salewizard", label: "🛒 บันทึกขาย NEW" },
   { key: "salemoneyreport", label: "💰 รายงานการเงินขายรถ" },
-  { key: "retailsale", label: "🛒 บันทึกขายปลีก" },
+  { key: "retailsale", label: "🔎 ค้นหาใบขาย (ขายปลีกเดิม)" },
   { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
   // ── Spare Parts ──
   { key: "spareorder", label: "🛠️ สั่งซื้ออะไหล่ HONDA" },
