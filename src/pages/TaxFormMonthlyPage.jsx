@@ -6,8 +6,8 @@ import TaxRemittanceRecordPage from "./TaxRemittanceRecordPage";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api";
 // คอลัมน์มูลค่าภาษีซื้อใน list: โชว์ยอดตาม "รายงานภาษีซื้อ ตาม FLOW ACC" (flow_input_tax_reports รายรอบ+สังกัด)
 const FLOW_TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/flow-input-tax-api";
-// ภาษีซื้อ ภ.พ.36 (ยื่นเอง) — จาก tax_remittances เอาไว้โชว์ใน popup รายละเอียด
 // ปุ่มชำระเงิน: บันทึกจ่าย ภ.พ.30 ลง tax_remittances (mode ระบุยอดตรง amount_total เหมือนค่าแนะนำ)
+// หมายเหตุ: ภาษีซื้อ ภ.พ.36 รวมอยู่ในรายงานภาษีซื้อ FLOW (ภ.พ.30) แล้ว — ไม่หักซ้ำ/ไม่แสดงแยกใน popup
 const TAXREMIT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/tax-remittance-api";
 // บัญชีธนาคาร (จ่ายแบบโอน)
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -67,7 +67,6 @@ export default function TaxFormMonthlyPage({ currentUser }) {
   const [filterAff, setFilterAff] = useState(""); // ตัวกรองสังกัด (list)
   const [recMsg, setRecMsg] = useState("");
   const [flowVatMap, setFlowVatMap] = useState({}); // { "สังกัด|YYYY-MM": { base, vat } } จากรายงานภาษีซื้อ FLOW ACC
-  const [vat36Map, setVat36Map] = useState({});     // { "สังกัด|YYYY-MM": ยอด ภ.พ.36 } จากบันทึกจ่ายสรรพากร
   const [detailRow, setDetailRow] = useState(null); // แถวที่กดดูรายละเอียด (popup)
   // ---- ชำระเงิน ----
   const [payRow, setPayRow] = useState(null);       // แถวที่กำลังบันทึกชำระเงิน
@@ -117,30 +116,13 @@ export default function TaxFormMonthlyPage({ currentUser }) {
       });
       setFlowVatMap(map);
     } catch { setFlowVatMap({}); }
-    // ภ.พ.36 ที่บันทึกจ่ายไว้ (ไม่รวมที่ยกเลิก) — รวมราย สังกัด+งวด
-    // หมายเหตุ: action นี้ถ้าส่ง filter ไปจะตอบ success:true แทนรายการ → ดึงทั้งหมดแล้วกรองเอง
-    // period_month ในตารางเป็นรูปแบบ "202607" (YYYYMM)
-    try {
-      const res36 = await fetch(TAXREMIT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_tax_remittances" }) });
-      const raw36 = await res36.text();
-      const d36 = raw36.trim() ? JSON.parse(raw36) : [];
-      const m36 = {};
-      (Array.isArray(d36) ? d36 : (d36?.rows || [])).forEach(g => {
-        if (!g || !g.period_month || g.status === "cancelled" || g.tax_type !== "ภ.พ.36") return;
-        const key = `${g.affiliation || ""}|${String(g.period_month).replace("-", "")}`;
-        m36[key] = (m36[key] || 0) + Number(g.amount_total || 0);
-      });
-      setVat36Map(m36);
-    } catch { setVat36Map({}); }
   }
-  // key สำหรับ vat36Map: "สังกัด|YYYYMM"
-  const vat36Of = (r) => vat36Map[`${r.affiliation || ""}|${String(r.filing_month || "").replace("-", "")}`] || 0;
-  // ภาษีที่ต้องชำระของแบบ (ตาม popup): ภาษีขาย − ภาษีซื้อ FLOW ภ.พ.30 − ภ.พ.36 − ยกมา
+  // ภาษีที่ต้องชำระของแบบ (ตาม popup): ภาษีขาย − ภาษีซื้อ FLOW ภ.พ.30 − ยกมา (ภ.พ.36 รวมใน FLOW แล้ว ไม่หักซ้ำ)
   function payableOf(r) {
     const flow = flowVatMap[`${r.affiliation || ""}|${r.filing_month || ""}`];
     const vat30 = flow ? flow.vat : Number(r.purchase_vat || 0);
     const carry = carryMapOf(records)[r.id] || 0;
-    return Math.round((Number(r.sales_vat || 0) - vat30 - vat36Of(r) - carry) * 100) / 100;
+    return Math.round((Number(r.sales_vat || 0) - vat30 - carry) * 100) / 100;
   }
 
   // ---- ชำระเงิน (บันทึกจ่าย ภ.พ.30 → tax_remittances + อัปเดตสถานะแบบ) ----
@@ -229,7 +211,7 @@ export default function TaxFormMonthlyPage({ currentUser }) {
         map[r.id] = carry;
         const flow = flowVatMap[`${r.affiliation || ""}|${r.filing_month}`];
         const vat30 = flow ? flow.vat : Number(r.purchase_vat || 0);
-        const net = Number(r.sales_vat || 0) - vat30 - vat36Of(r) - carry;
+        const net = Number(r.sales_vat || 0) - vat30 - carry;
         carry = net < 0 ? -net : 0;
         prevMonth = r.filing_month;
       });
@@ -428,9 +410,8 @@ export default function TaxFormMonthlyPage({ currentUser }) {
           const key = `${r.affiliation || ""}|${r.filing_month || ""}`;
           const flow = flowVatMap[key];
           const vat30 = flow ? flow.vat : Number(r.purchase_vat || 0);
-          const vat36 = vat36Of(r);
           const carry = carryMapOf(records)[r.id] || 0;
-          const net = Number(r.sales_vat || 0) - vat30 - vat36 - carry;
+          const net = Number(r.sales_vat || 0) - vat30 - carry;
           // ยอดขายในเดือนนี้ — บันทึกไว้ใน note ตอนกด "บันทึกเข้าเตรียมแบบ" จากรายงานภาษีขาย
           const mBase = String(r.note || "").match(/มูลค่า\s*([\d,]+(?:\.\d+)?)/);
           const salesBase = mBase ? Number(mBase[1].replace(/,/g, "")) : null;
@@ -466,7 +447,6 @@ export default function TaxFormMonthlyPage({ currentUser }) {
                   {divider}
                   {line("ยอดซื้อที่ใช้สิทธิในเดือนนี้", flow ? fmt(flow.base) : "-")}
                   {line("ภาษีซื้อตามรายงานภาษีซื้อ ภ.พ.30", fmt(vat30))}
-                  {line("ภาษีซื้อตามรายงานภาษีซื้อ ภ.พ.36", fmt(vat36))}
                   {divider}
                   {line("ภาษีซื้อที่ยกมา", fmt(carry))}
                   {divider}
