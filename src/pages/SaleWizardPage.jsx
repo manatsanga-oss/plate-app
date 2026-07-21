@@ -662,7 +662,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     const rowCC = selSeries ? Number(selSeries.engine_cc) || null : null;
     const fin = saleType === "finance";
     const finId = fin ? (financeCo?.company_id ?? "") : "";
+    // โปรต้องมีผล ณ วันอ้างอิง: ลูกค้าจอง = วันจอง (เหมือนราคา ณ วันจอง), ไม่จอง = วันนี้
+    const refDate = bookingDateISO || todayStr();
     return saleExpenses.filter((e) => {
+      const eff = e.effective_date ? String(e.effective_date).slice(0, 10) : "";
+      const end = e.end_date ? String(e.end_date).slice(0, 10) : "";
+      if ((eff && eff > refDate) || (end && end < refDate)) return false;
       if (e.group_by === "brand" && String(e.brand_id) === String(sel.brand_id)) return true;
       if (e.group_by === "type" && String(e.type_id) === String(sel.type_id)) {
         const cond = String(e.note || "all").trim().toLowerCase();
@@ -721,7 +726,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       const name = String(e.expense_name || "").toLowerCase().replace(/\s+/g, "");
       return !(name.includes("ค่าคอมพิเศษ") || name.includes("commission") || name.includes("คอมพิเศษ"));
     });
-  }, [masterRow, saleType, financeCo, saleExpenses, selSeries, cust.customer_name, cust.customer_province, financeCos]);
+  }, [masterRow, saleType, financeCo, saleExpenses, selSeries, cust.customer_name, cust.customer_province, financeCos, bookingDateISO]);
 
   // default: ติ๊กรายการที่เข้าเงื่อนไขไว้ก่อน (รายการใหม่ → ติ๊กอัตโนมัติ, ที่ผู้ใช้เอาออกเองคงไว้)
   useEffect(() => {
@@ -1327,11 +1332,15 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           </tr>
                         </thead>
                         <tbody>
+                          {/* คลิกที่แถว (เลขเครื่อง/เลขถัง) เลือกคันได้เลย — ไม่ต้องเลื่อนไปกดปุ่มขวาสุด */}
                           {units.map((u, i) => (
-                            <tr key={u.engine_no}>
+                            <tr key={u.engine_no} onClick={() => pickUnit(u)} title="คลิกเพื่อเลือกคันนี้"
+                              style={{ cursor: "pointer" }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = "#eff6ff"; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = ""; }}>
                               <td>{i + 1}</td>
-                              <td style={{ fontWeight: 600 }}>{u.engine_no}</td>
-                              <td>{u.chassis_no || "-"}</td>
+                              <td style={{ fontWeight: 600, color: "#1d4ed8" }}>{u.engine_no}</td>
+                              <td style={{ color: "#1d4ed8" }}>{u.chassis_no || "-"}</td>
                               <td>{u.model}{u.model_type ? ` / ${u.model_type}` : ""}</td>
                               <td>{text(u.received_date).slice(0, 10)}</td>
                               <td style={{ textAlign: "center" }}>{u.age_days}</td>
