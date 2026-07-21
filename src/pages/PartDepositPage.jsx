@@ -44,6 +44,7 @@ export default function PartDepositPage({ currentUser }) {
   // แท็บบริการ (แบบ NID): ใบรับ/ใบคืนมัดจำ + step ชำระโดย
   const [docKind, setDocKind] = useState("receive");      // receive = ใบรับมัดจำ | refund = ใบคืนมัดจำ
   const [payOpen, setPayOpen] = useState(false);          // ส่วน "ชำระโดย" หลังกดเพิ่มข้อมูล
+  const [payConfirmed, setPayConfirmed] = useState(false); // กด "ตกลง" ยืนยันยอดแล้ว → รอกดบันทึกอีกที
   const [payMethod, setPayMethod] = useState("เงินสด");
   const [payAmount, setPayAmount] = useState("");
   const [savedDocNo, setSavedDocNo] = useState("");       // เลขที่ใบรับมัดจำที่เพิ่งบันทึก
@@ -67,15 +68,26 @@ export default function PartDepositPage({ currentUser }) {
   useEffect(() => { load(); }, []);
 
   function switchTab(t) {
-    setTab(t); setMessage(""); setPayOpen(false); setSavedDocNo(""); setRefundDoc(""); setDocKind("receive"); setPayAmount("");
+    setTab(t); setMessage(""); setPayOpen(false); setPayConfirmed(false); setSavedDocNo(""); setRefundDoc(""); setDocKind("receive"); setPayAmount("");
     setView("form"); setSelDoc(null); setSearchQ("");
   }
   function switchKind(k) {
-    setDocKind(k); setMessage(""); setPayOpen(false); setSavedDocNo(""); setRefundDoc(""); setPayAmount("");
+    setDocKind(k); setMessage(""); setPayOpen(false); setPayConfirmed(false); setSavedDocNo(""); setRefundDoc(""); setPayAmount("");
   }
   function resetServiceForm() {
     setForm({ ...FORM0, deposit_date: todayStr() });
-    setPayOpen(false); setPayAmount(""); setRefundDoc("");
+    setPayOpen(false); setPayConfirmed(false); setPayAmount(""); setRefundDoc("");
+  }
+
+  // กด "ตกลง" ในส่วนชำระโดย = ยืนยันยอด (ยังไม่บันทึก DB — รอกดปุ่มบันทึกอีกที)
+  function confirmPay() {
+    const amt = num(payAmount);
+    if (!(amt > 0)) { setMessage("❌ กรอกจำนวนเงินให้ถูกต้อง"); return; }
+    if (isRefund && refundSel && amt > num(refundSel.remaining_amount)) {
+      setMessage(`❌ ยอดคืนเกินมัดจำคงเหลือ (${fmt(refundSel.remaining_amount)} บาท)`); return;
+    }
+    setMessage("");
+    setPayConfirmed(true);
   }
 
   // ใบรับมัดจำ (บริการ) ที่ยังมีเงินคงเหลือ — สำหรับ dropdown ใบคืนมัดจำ
@@ -347,10 +359,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   </div>
                   <div style={{ flex: "1 1 170px" }}>
                     <label style={lbl}>เบอร์โทร</label>
-                    <div style={{ display: "flex", gap: 6 }}>
-                      <input value={form.customer_phone} onChange={(e) => setF("customer_phone", e.target.value)} placeholder="08x-xxxxxxx" style={{ ...inp, flex: 1 }} />
-                      <button onClick={() => setSearchPop({ mode: "phone", q: form.customer_phone })} title="ค้นหาลูกค้าจากเบอร์โทร" style={magBtn}>🔎</button>
-                    </div>
+                    <input value={form.customer_phone} onChange={(e) => setF("customer_phone", e.target.value)} placeholder="08x-xxxxxxx" style={inp} />
                   </div>
                 </div>
               </>
@@ -376,16 +385,19 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
               <input value={form.remark} onChange={(e) => setF("remark", e.target.value)} placeholder="เช่น เงื่อนไขการคืนเงิน, รายการอะไหล่" style={inp} />
             </div>
 
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
-              <div style={{ flex: "0 1 220px" }}>
-                <label style={lbl}>รวม ยอดเงินมัดจำ (บาท)</label>
-                <input value={isRefund ? (refundSel ? fmt(refundSel.deposit_amount) : "") : (payAmount ? fmt(payAmount) : "")} readOnly style={{ ...roInp, textAlign: "right", fontWeight: 700 }} />
+            {/* แถวยอดเงินมัดจำ — โผล่หลังกด "เพิ่มข้อมูล" แล้วเท่านั้น */}
+            {payOpen && (
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+                <div style={{ flex: "0 1 220px" }}>
+                  <label style={lbl}>รวม ยอดเงินมัดจำ (บาท)</label>
+                  <input value={isRefund ? (refundSel ? fmt(refundSel.deposit_amount) : "") : (payAmount ? fmt(payAmount) : "")} readOnly style={{ ...roInp, textAlign: "right", fontWeight: 700 }} />
+                </div>
+                <div style={{ flex: "0 1 220px" }}>
+                  <label style={lbl}>ยอดมัดจำ คงเหลือ (บาท)</label>
+                  <input value={isRefund ? (refundSel ? fmt(refundSel.remaining_amount) : "") : (payAmount ? fmt(payAmount) : "")} readOnly style={{ ...roInp, textAlign: "right", fontWeight: 700, color: "#15803d" }} />
+                </div>
               </div>
-              <div style={{ flex: "0 1 220px" }}>
-                <label style={lbl}>ยอดมัดจำ คงเหลือ (บาท)</label>
-                <input value={isRefund ? (refundSel ? fmt(refundSel.remaining_amount) : "") : (payAmount ? fmt(payAmount) : "")} readOnly style={{ ...roInp, textAlign: "right", fontWeight: 700, color: "#15803d" }} />
-              </div>
-            </div>
+            )}
 
             <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
               <button onClick={openPay} disabled={payOpen}
@@ -408,26 +420,55 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 <div style={{ background: "#eef2f3", padding: "8px 14px", fontWeight: 700, fontSize: 14, color: "#334155" }}>
                   ☰ {isRefund ? "คืนเงินโดย" : "ชำระโดย"}
                 </div>
-                <div style={{ padding: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                  <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={{ ...inp, width: 190 }}>
-                    <option value="เงินสด">1 - เงินสด</option>
-                    <option value="เงินโอน">2 - เงินโอน</option>
-                  </select>
-                  <input type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus
-                    placeholder="0.00" style={{ ...inp, width: 170, textAlign: "right", fontWeight: 700 }} />
-                  <span style={{ fontSize: 14 }}>บาท</span>
-                  {isRefund && refundSel && <span style={{ fontSize: 12.5, color: "#64748b" }}>(คงเหลือคืนได้ {fmt(refundSel.remaining_amount)} บาท)</span>}
-                </div>
-                <div style={{ padding: "0 14px 14px", display: "flex", gap: 8, justifyContent: "center" }}>
-                  <button onClick={isRefund ? okRefund : okReceive} disabled={saving}
-                    style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: saving ? "#cbd5e1" : "#16a34a", color: "#fff", fontWeight: 700, cursor: saving ? "wait" : "pointer", fontSize: 14 }}>
-                    {saving ? "⏳ กำลังบันทึก..." : "✔ ตกลง"}
-                  </button>
-                  <button onClick={() => setPayOpen(false)}
-                    style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#7fb6bd", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
-                    ↩ ปิด
-                  </button>
-                </div>
+                {!payConfirmed ? (
+                  <>
+                    {/* ขั้นที่ 1: ใส่จำนวนเงิน แล้วกด "ตกลง" (ยังไม่บันทึก) */}
+                    <div style={{ padding: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={{ ...inp, width: 190 }}>
+                        <option value="เงินสด">1 - เงินสด</option>
+                        <option value="เงินโอน">2 - เงินโอน</option>
+                      </select>
+                      <input type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus
+                        onKeyDown={(e) => e.key === "Enter" && confirmPay()}
+                        placeholder="0.00" style={{ ...inp, width: 170, textAlign: "right", fontWeight: 700 }} />
+                      <span style={{ fontSize: 14 }}>บาท</span>
+                      {isRefund && refundSel && <span style={{ fontSize: 12.5, color: "#64748b" }}>(คงเหลือคืนได้ {fmt(refundSel.remaining_amount)} บาท)</span>}
+                    </div>
+                    <div style={{ padding: "0 14px 14px", display: "flex", gap: 8, justifyContent: "center" }}>
+                      <button onClick={confirmPay}
+                        style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#16a34a", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                        ✔ ตกลง
+                      </button>
+                      <button onClick={() => { setPayOpen(false); setPayConfirmed(false); }}
+                        style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#7fb6bd", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                        ↩ ปิด
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* ขั้นที่ 2: ยืนยันยอดแล้ว — ตรวจสอบอีกครั้ง แล้วกดบันทึกจริง */}
+                    <div style={{ padding: 14 }}>
+                      <div style={{ border: "1px solid #9fc9d0", borderRadius: 4, padding: "12px 16px", textAlign: "center", fontSize: 15 }}>
+                        {payMethod} : <b>{fmt(payAmount)} บาท</b>
+                        <button onClick={() => setPayConfirmed(false)} title="แก้ไขยอด/วิธีชำระ"
+                          style={{ marginLeft: 12, padding: "2px 12px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: "pointer", fontSize: 12.5 }}>
+                          ✏️ แก้ไข
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ padding: "0 14px 14px", display: "flex", gap: 8, justifyContent: "center" }}>
+                      <button onClick={isRefund ? okRefund : okReceive} disabled={saving}
+                        style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: saving ? "#cbd5e1" : "#16a34a", color: "#fff", fontWeight: 700, cursor: saving ? "wait" : "pointer", fontSize: 14 }}>
+                        {saving ? "⏳ กำลังบันทึก..." : isRefund ? "💾 บันทึกคืนเงินมัดจำ" : "💾 บันทึกรับเงินมัดจำ"}
+                      </button>
+                      <button onClick={() => { setPayOpen(false); setPayConfirmed(false); }}
+                        style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#7fb6bd", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                        ↩ ปิด
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -461,31 +502,38 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
             {searchCards.length === 0 ? (
               <div style={{ textAlign: "center", color: "#94a3b8", padding: 24 }}>⚠️ ไม่พบข้อมูล</div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(560px, 100%), 1fr))", gap: 14 }}>
                 {searchCards.map((c, i) => {
                   const r = c.r;
-                  const line = (l, v, extra) => (
-                    <div style={{ display: "flex", gap: 6, fontSize: 13, marginBottom: 3 }}>
-                      <span style={{ color: "#475569", minWidth: 96, textAlign: "right" }}>{l} :</span>
-                      <span style={{ fontWeight: 600, ...(extra || {}) }}>{v}</span>
+                  // บรรทัดแบบ NID: ป้ายชิดขวาความกว้างคงที่ + " : " + ค่าสีน้ำเงิน
+                  const line = (l, v) => (
+                    <div style={{ display: "flex", fontSize: 13.5, marginBottom: 6 }}>
+                      <span style={{ color: "#334155", width: 108, textAlign: "right", whiteSpace: "nowrap", flexShrink: 0 }}>{l}</span>
+                      <span style={{ color: "#334155", margin: "0 7px", flexShrink: 0 }}>:</span>
+                      <span style={{ fontWeight: 600, color: "#1d6fa5", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
                     </div>
                   );
+                  // วันที่แบบ NID: DD/MM/ปี พ.ศ.
+                  const dmyBE = (iso) => {
+                    const d = new Date(iso);
+                    return isNaN(d) ? String(iso || "—").slice(0, 10)
+                      : `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`;
+                  };
                   return (
                     <div key={`${r.deposit_doc_no}-${c.kind}-${i}`} onClick={() => { setSelDoc(r); setView("detail"); setMessage(""); }}
                       title="คลิกเพื่อเปิดดู/แก้ไข"
-                      style={{ border: "1.5px solid #8fc6cc", borderRadius: 6, padding: "10px 14px", cursor: "pointer", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                        <div style={{ flex: 1 }}>
-                          {line("ประเภทใบมัดจำ", c.kind === "receive" ? "ใบรับมัดจำ" : "ใบคืนมัดจำ", c.kind === "refund" ? { color: "#c2410c" } : null)}
+                      style={{ border: "1.5px solid #7fb6bd", borderRadius: 4, padding: "14px 16px", cursor: "pointer", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <div style={{ flex: "1 1 280px", minWidth: 0 }}>
+                          {line("ประเภทใบมัดจำ", c.kind === "receive" ? "ใบรับมัดจำ" : "ใบคืนมัดจำ")}
                           {line("หมายเลขตัวถัง", r.vin || "-")}
                           {line("ลูกค้า", `${r.customer_code ? r.customer_code + " - " : ""}${r.customer_name}`)}
                           {line("ยอดมัดจำ", fmt(c.amount))}
                         </div>
-                        <div style={{ flex: 1 }}>
+                        <div style={{ flex: "1 1 210px", minWidth: 0 }}>
                           {line("เลขที่ใบมัดจำ", r.deposit_doc_no)}
-                          {line("วันที่มัดจำ", thaiDate(c.date))}
-                          {line("สถานะ", statusLabel(r), { color: statusLabel(r).startsWith("10") ? "#15803d" : "#b91c1c" })}
-                          {line("คงเหลือ", fmt(r.remaining_amount), { color: "#15803d" })}
+                          {line("วันที่มัดจำ", dmyBE(c.date))}
+                          {line("สถานะ", statusLabel(r))}
                         </div>
                       </div>
                     </div>
@@ -605,10 +653,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
             </div>
             <div style={{ flex: "1 1 170px" }}>
               <label style={lbl}>เบอร์โทร</label>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input value={form.customer_phone} onChange={(e) => setF("customer_phone", e.target.value)} placeholder="08x-xxxxxxx" style={{ ...inp, flex: 1 }} />
-                <button onClick={() => setSearchPop({ mode: "phone", q: form.customer_phone })} title="ค้นหาลูกค้าจากเบอร์โทร" style={magBtn}>🔎</button>
-              </div>
+              <input value={form.customer_phone} onChange={(e) => setF("customer_phone", e.target.value)} placeholder="08x-xxxxxxx" style={inp} />
             </div>
             <div style={{ flex: "0 1 130px" }}>
               <label style={lbl}>ยี่ห้อ</label>
