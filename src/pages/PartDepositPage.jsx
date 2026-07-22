@@ -54,6 +54,7 @@ export default function PartDepositPage({ currentUser }) {
   const [fltReceive, setFltReceive] = useState(true);     // filter การ์ด: ใบรับมัดจำ
   const [fltRefund, setFltRefund] = useState(true);       // filter การ์ด: ใบคืนมัดจำ
   const [selDoc, setSelDoc] = useState(null);             // ใบมัดจำที่คลิกเปิดดู (แก้ไขข้อมูล)
+  const [detailLine, setDetailLine] = useState(null);     // ลูกค้าใบที่เปิดดูมี LINE ไหม (null = กำลังเช็ค/ไม่รู้)
 
   const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -66,6 +67,28 @@ export default function PartDepositPage({ currentUser }) {
     setLoading(false);
   }
   useEffect(() => { load(); }, []);
+
+  // เช็คว่าลูกค้าของใบที่เปิดดูมี LINE ไหม — ค้นฐานลูกค้า+QR/LINE+ใบขายด้วยเบอร์โทร (หรือชื่อ) ตอนเปิดหน้าแก้ไขข้อมูล
+  useEffect(() => {
+    if (view !== "detail" || !selDoc) { setDetailLine(null); return; }
+    const kw = String(selDoc.customer_phone || "").trim() || String(selDoc.customer_name || "").trim();
+    if (!kw) { setDetailLine(false); return; }
+    let alive = true;
+    setDetailLine(null);
+    fetch(CUST_SEARCH_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "search_customers", keyword: kw }) })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!alive) return;
+        const rows = Array.isArray(d) ? d : [];
+        // เบอร์เดียวอาจมีหลายลูกค้า — ถ้าใบมัดจำมีรหัสลูกค้า ให้เทียบเฉพาะรหัสนั้นก่อน
+        const code = String(selDoc.customer_code || "").trim();
+        const scoped = code ? rows.filter((x) => String(x.customer_code || "").trim() === code) : rows;
+        const pool = scoped.length ? scoped : rows;
+        setDetailLine(pool.some((x) => String(x.line_user_id || "").trim() !== ""));
+      })
+      .catch(() => { if (alive) setDetailLine(false); });
+    return () => { alive = false; };
+  }, [view, selDoc]);
 
   function switchTab(t) {
     setTab(t); setMessage(""); setPayOpen(false); setPayConfirmed(false); setSavedDocNo(""); setRefundDoc(""); setDocKind("receive"); setPayAmount("");
@@ -145,9 +168,17 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
   // กด "เพิ่มข้อมูล" → เปิดส่วนชำระโดย (ตรวจข้อมูลก่อน)
   function openPay() {
     setMessage("");
+    if (tab === "สั่งซื้อ") {
+      // แท็บสั่งซื้อ — ขั้นตอนเดียวกับมัดจำบริการ แต่ไม่ใช้เลขถัง
+      if (!String(form.customer_name).trim()) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
+      if (!String(form.customer_phone).trim()) { setMessage("❌ กรุณากรอกหมายเลขโทรศัพท์ลูกค้า"); return; }
+      setPayOpen(true);
+      return;
+    }
     if (docKind === "receive") {
       if (!String(form.vin).trim()) { setMessage("❌ กรุณาระบุหมายเลขตัวถัง (กด 🔎 ค้นจากเลขเครื่อง/เลขถังได้)"); return; }
       if (!String(form.customer_name).trim()) { setMessage("❌ กรุณาระบุชื่อลูกค้า"); return; }
+      if (!String(form.customer_phone).trim()) { setMessage("❌ กรุณากรอกหมายเลขโทรศัพท์ลูกค้า"); return; }
     } else {
       if (!refundSel) { setMessage("❌ เลือกเลขที่ใบรับมัดจำที่จะคืนเงินก่อน"); return; }
       setPayAmount(String(num(refundSel.remaining_amount)));
@@ -155,7 +186,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     setPayOpen(true);
   }
 
-  // ตกลง — ใบรับมัดจำ: บันทึกรับเงิน (save_deposit)
+  // ตกลง — ใบรับมัดจำ: บันทึกรับเงิน (save_deposit) — ใช้ทั้งแท็บบริการและสั่งซื้อ (flow เดียวกัน)
   async function okReceive() {
     if (saving) return;
     if (!(num(payAmount) > 0)) { setMessage("❌ กรอกจำนวนเงินมัดจำให้ถูกต้อง"); return; }
@@ -163,12 +194,12 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     try {
       const d = await post({
         action: "save_deposit",
-        deposit_type: "บริการ",
+        deposit_type: tab,
         deposit_date: form.deposit_date,
         branch_code: String(currentUser?.branch_code || currentUser?.branch || "").substring(0, 5),
         brand: form.brand,
         customer_code: form.customer_code, customer_name: form.customer_name, customer_phone: form.customer_phone,
-        vin: form.vin,
+        vin: tab === "บริการ" ? form.vin : "", // มัดจำสั่งซื้อไม่ใช้เลขถัง
         deposit_amount: num(payAmount),
         payment_method: payMethod,
         remark: form.remark,
@@ -207,35 +238,6 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
       resetServiceForm();
       load();
     } catch (e) { setMessage("❌ " + (e.message || "คืนเงินไม่สำเร็จ")); }
-    setSaving(false);
-  }
-
-  // บันทึก (แท็บสั่งซื้อ — ฟอร์มย่อเดิม)
-  async function handleSaveOrder() {
-    if (saving) return;
-    if (!String(form.customer_name).trim()) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
-    if (!(num(form.deposit_amount) > 0)) { setMessage("❌ กรอกจำนวนเงินมัดจำให้ถูกต้อง"); return; }
-    setSaving(true); setMessage("");
-    try {
-      const d = await post({
-        action: "save_deposit",
-        deposit_type: "สั่งซื้อ",
-        deposit_date: form.deposit_date,
-        branch_code: String(currentUser?.branch_code || currentUser?.branch || "").substring(0, 5),
-        brand: form.brand,
-        customer_code: form.customer_code, customer_name: form.customer_name, customer_phone: form.customer_phone,
-        vin: "", // มัดจำสั่งซื้อไม่ใช้เลขถัง
-        deposit_amount: num(form.deposit_amount),
-        payment_method: form.payment_method,
-        remark: form.remark,
-        recorded_by: currentUser?.name || currentUser?.username || "",
-      });
-      const row = asArray(d)[0];
-      if (!row || row.error || !row.deposit_doc_no) throw new Error(row?.error || "บันทึกไม่สำเร็จ (ตรวจสอบว่า import workflow part-deposit-api แล้ว)");
-      setMessage(`✅ บันทึกรับเงินมัดจำแล้ว เลขที่ ${row.deposit_doc_no} · ${fmt(row.deposit_amount)} บาท`);
-      setForm({ ...FORM0, deposit_date: todayStr() });
-      load();
-    } catch (e) { setMessage("❌ " + (e.message || "บันทึกไม่สำเร็จ")); }
     setSaving(false);
   }
 
@@ -358,7 +360,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                     </div>
                   </div>
                   <div style={{ flex: "1 1 170px" }}>
-                    <label style={lbl}>เบอร์โทร</label>
+                    <label style={lbl}>เบอร์โทร *</label>
                     <input value={form.customer_phone} onChange={(e) => setF("customer_phone", e.target.value)} placeholder="08x-xxxxxxx" style={inp} />
                   </div>
                 </div>
@@ -578,8 +580,15 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   <input value={selDoc.customer_code || "-"} readOnly style={roInp} />
                 </div>
                 <div style={{ flex: "2 1 300px" }}>
-                  <label style={lbl}>ชื่อลูกค้า</label>
-                  <input value={selDoc.customer_name || "-"} readOnly style={roInp} />
+                  <label style={lbl}>
+                    ชื่อลูกค้า{detailLine === true && <span style={{ color: "#16a34a", marginLeft: 8, fontWeight: 700 }}>✓ มี LINE</span>}
+                  </label>
+                  <input value={(detailLine === true ? "✓ " : "") + (selDoc.customer_name || "-")} readOnly
+                    style={{ ...roInp, ...(detailLine === true ? { color: "#15803d", fontWeight: 700 } : {}) }} />
+                </div>
+                <div style={{ flex: "1 1 160px" }}>
+                  <label style={lbl}>เบอร์โทร</label>
+                  <input value={selDoc.customer_phone || "-"} readOnly style={roInp} />
                 </div>
               </div>
               <div style={{ marginBottom: 12 }}>
@@ -635,7 +644,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
           )}
         </div>
       )) : (
-        /* ===== แท็บสั่งซื้อ: ฟอร์มย่อ (ไม่ใช้เลขถัง) ===== */
+        /* ===== แท็บสั่งซื้อ: ขั้นตอนบันทึกเดียวกับมัดจำบริการ (เพิ่มข้อมูล → ชำระโดย → ตกลง → บันทึก) แต่ไม่มีเลขถัง ===== */
         <div className="form-card">
           <div style={{ fontWeight: 700, marginBottom: 10 }}>💾 บันทึกรับเงินมัดจำ — มัดจำอะไหล่สั่งซื้อ</div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
@@ -652,7 +661,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
               {form.customer_code && <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>รหัสลูกค้า: {form.customer_code}</div>}
             </div>
             <div style={{ flex: "1 1 170px" }}>
-              <label style={lbl}>เบอร์โทร</label>
+              <label style={lbl}>เบอร์โทร *</label>
               <input value={form.customer_phone} onChange={(e) => setF("customer_phone", e.target.value)} placeholder="08x-xxxxxxx" style={inp} />
             </div>
             <div style={{ flex: "0 1 130px" }}>
@@ -664,28 +673,88 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
               </select>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div style={{ flex: "0 1 160px" }}>
-              <label style={lbl}>จำนวนเงินมัดจำ (บาท) *</label>
-              <input type="number" min="0" value={form.deposit_amount} onChange={(e) => setF("deposit_amount", e.target.value)}
-                placeholder="0.00" style={{ ...inp, textAlign: "right", fontWeight: 700 }} />
+          <div style={{ marginBottom: 12 }}>
+            <label style={lbl}>หมายเหตุ / เงื่อนไข</label>
+            <input value={form.remark} onChange={(e) => setF("remark", e.target.value)} placeholder="เช่น เงื่อนไขการคืนเงิน, รายการอะไหล่, เบอร์ติดต่อ" style={inp} />
+          </div>
+
+          {/* แถวยอดเงินมัดจำ — โผล่หลังกด "เพิ่มข้อมูล" แล้วเท่านั้น (เหมือนแท็บบริการ) */}
+          {payOpen && (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 14 }}>
+              <div style={{ flex: "0 1 220px" }}>
+                <label style={lbl}>รวม ยอดเงินมัดจำ (บาท)</label>
+                <input value={payAmount ? fmt(payAmount) : ""} readOnly style={{ ...roInp, textAlign: "right", fontWeight: 700 }} />
+              </div>
+              <div style={{ flex: "0 1 220px" }}>
+                <label style={lbl}>ยอดมัดจำ คงเหลือ (บาท)</label>
+                <input value={payAmount ? fmt(payAmount) : ""} readOnly style={{ ...roInp, textAlign: "right", fontWeight: 700, color: "#15803d" }} />
+              </div>
             </div>
-            <div style={{ flex: "0 1 140px" }}>
-              <label style={lbl}>วิธีรับเงิน</label>
-              <select value={form.payment_method} onChange={(e) => setF("payment_method", e.target.value)} style={inp}>
-                <option value="เงินสด">เงินสด</option>
-                <option value="เงินโอน">เงินโอน</option>
-              </select>
-            </div>
-            <div style={{ flex: "2 1 280px" }}>
-              <label style={lbl}>หมายเหตุ / เงื่อนไข</label>
-              <input value={form.remark} onChange={(e) => setF("remark", e.target.value)} placeholder="เช่น เงื่อนไขการคืนเงิน, รายการอะไหล่, เบอร์ติดต่อ" style={inp} />
-            </div>
-            <button onClick={handleSaveOrder} disabled={saving}
-              style={{ padding: "10px 26px", borderRadius: 10, border: "none", background: saving ? "#cbd5e1" : "#16a34a", color: "#fff", fontSize: 15, fontWeight: 700, cursor: saving ? "wait" : "pointer" }}>
-              {saving ? "⏳ กำลังบันทึก..." : "💾 บันทึกรับเงินมัดจำ"}
+          )}
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button onClick={openPay} disabled={payOpen}
+              style={{ padding: "9px 22px", borderRadius: 8, border: "none", background: payOpen ? "#cbd5e1" : "#5eb3bd", color: "#fff", fontWeight: 700, cursor: payOpen ? "default" : "pointer", fontSize: 14 }}>
+              ➕ เพิ่มข้อมูล
+            </button>
+            <button onClick={resetServiceForm}
+              style={{ padding: "9px 22px", borderRadius: 8, border: "none", background: "#7fb6bd", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+              ↩ ปิด
             </button>
           </div>
+
+          {/* ชำระโดย — โผล่หลังกดเพิ่มข้อมูล (2-step เหมือนแท็บบริการ) */}
+          {payOpen && (
+            <div style={{ marginTop: 16, border: "1px solid #d7dfe2", borderRadius: 8, overflow: "hidden" }}>
+              <div style={{ background: "#eef2f3", padding: "8px 14px", fontWeight: 700, fontSize: 14, color: "#334155" }}>☰ ชำระโดย</div>
+              {!payConfirmed ? (
+                <>
+                  <div style={{ padding: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={{ ...inp, width: 190 }}>
+                      <option value="เงินสด">1 - เงินสด</option>
+                      <option value="เงินโอน">2 - เงินโอน</option>
+                    </select>
+                    <input type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus
+                      onKeyDown={(e) => e.key === "Enter" && confirmPay()}
+                      placeholder="0.00" style={{ ...inp, width: 170, textAlign: "right", fontWeight: 700 }} />
+                    <span style={{ fontSize: 14 }}>บาท</span>
+                  </div>
+                  <div style={{ padding: "0 14px 14px", display: "flex", gap: 8, justifyContent: "center" }}>
+                    <button onClick={confirmPay}
+                      style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#16a34a", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                      ✔ ตกลง
+                    </button>
+                    <button onClick={() => { setPayOpen(false); setPayConfirmed(false); }}
+                      style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#7fb6bd", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                      ↩ ปิด
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ padding: 14 }}>
+                    <div style={{ border: "1px solid #9fc9d0", borderRadius: 4, padding: "12px 16px", textAlign: "center", fontSize: 15 }}>
+                      {payMethod} : <b>{fmt(payAmount)} บาท</b>
+                      <button onClick={() => setPayConfirmed(false)} title="แก้ไขยอด/วิธีชำระ"
+                        style={{ marginLeft: 12, padding: "2px 12px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: "pointer", fontSize: 12.5 }}>
+                        ✏️ แก้ไข
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ padding: "0 14px 14px", display: "flex", gap: 8, justifyContent: "center" }}>
+                    <button onClick={okReceive} disabled={saving}
+                      style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: saving ? "#cbd5e1" : "#16a34a", color: "#fff", fontWeight: 700, cursor: saving ? "wait" : "pointer", fontSize: 14 }}>
+                      {saving ? "⏳ กำลังบันทึก..." : "💾 บันทึกรับเงินมัดจำ"}
+                    </button>
+                    <button onClick={() => { setPayOpen(false); setPayConfirmed(false); }}
+                      style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#7fb6bd", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                      ↩ ปิด
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <div style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
             ผู้บันทึก: {currentUser?.name || currentUser?.username || "-"} · สาขา {String(currentUser?.branch_code || currentUser?.branch || "-").substring(0, 5)} · เลขที่เอกสารออกอัตโนมัติ (PDO-YYMM-XXXXX)
           </div>
@@ -709,7 +778,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
               <th style={th}>เลขที่เอกสาร</th><th style={th}>วันที่</th><th style={th}>ลูกค้า</th><th style={th}>เบอร์โทร</th>
-              {isService && <th style={th}>เลขตัวถัง</th>}<th style={th}>ยี่ห้อ</th>
+              <th style={th}>ยี่ห้อ</th>
               <th style={{ ...th, textAlign: "right" }}>ยอดมัดจำ</th><th style={{ ...th, textAlign: "right" }}>ใช้ไป</th>
               <th style={{ ...th, textAlign: "right" }}>คืนเงิน</th><th style={{ ...th, textAlign: "right" }}>คงเหลือ</th>
               <th style={th}>วิธีรับเงิน</th><th style={th}>ผู้บันทึก</th><th style={th}>หมายเหตุ</th><th style={th}></th>
@@ -724,7 +793,6 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDate(r.deposit_date)}</td>
                   <td style={td}>{r.customer_name}{r.customer_code ? <div style={{ fontSize: 11, color: "#94a3b8" }}>{r.customer_code}</div> : null}</td>
                   <td style={td}>{r.customer_phone || "-"}</td>
-                  {isService && <td style={{ ...td, fontFamily: "monospace", fontSize: 12 }}>{r.vin || "-"}</td>}
                   <td style={td}>{r.brand || "-"}</td>
                   <td style={{ ...td, textAlign: "right" }}>{fmt(r.deposit_amount)}</td>
                   <td style={{ ...td, textAlign: "right", color: "#b45309" }}>{num(r.paid_amount) ? fmt(r.paid_amount) : "-"}</td>
@@ -742,7 +810,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 </tr>
               ))}
               {items.length === 0 && !loading && (
-                <tr><td colSpan={isService ? 14 : 13} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: 24 }}>— ยังไม่มีรายการมัดจำ{isService ? "อะไหล่บริการ" : "อะไหล่สั่งซื้อ"} —</td></tr>
+                <tr><td colSpan={13} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: 24 }}>— ยังไม่มีรายการมัดจำ{isService ? "อะไหล่บริการ" : "อะไหล่สั่งซื้อ"} —</td></tr>
               )}
             </tbody>
           </table>
