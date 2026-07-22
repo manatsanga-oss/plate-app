@@ -101,16 +101,14 @@ export default function SparePartsDailyOrdersPage() {
     let body = "";
     filtered.forEach((r, i) => {
       const sys = SYSTEMS.find(s => s.key === r.system);
-      const items = (r.items || []).map(it =>
-        `<div>${esc(it.part_code || "-")} · ${esc(it.part_name || "-")} × ${Number(it.quantity) || 0}</div>`).join("");
+      const items = (r.items || []).map((it, k) =>
+        `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${esc(it.part_code || "-")} · ${esc(it.part_name || "-")} × ${Number(it.quantity) || 0}</div>`).join("");
       body += `<tr>
         <td class="c">${i + 1}</td><td class="c">${thaiTimeOf(r.created_at)}</td>
         <td>${esc(sys?.label || r.system)}</td>
-        <td>${esc(r.deposit_doc_no || r.order_no || "#" + r.order_id)}</td>
-        <td>${esc(r.model_name || "-")}</td>
-        <td>${items || "-"}</td>
-        <td class="c">${esc(r.status || "-")}</td>
         <td>${esc(r.vendor_po_no || "-")}</td>
+        <td>${esc(r.model_name || "-")}</td>
+        <td class="items">${items || "-"}</td>
       </tr>`;
     });
     const w = window.open("", "_blank", "width=1200,height=800");
@@ -120,11 +118,12 @@ export default function SparePartsDailyOrdersPage() {
 h2{margin:0 0 4px;font-size:16px} .info{color:#555;font-size:12px;margin-bottom:10px}
 table{width:100%;border-collapse:collapse} th,td{border:1px solid #ccc;padding:4px 6px;text-align:left;vertical-align:top}
 th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
+.items{padding:0} .it{text-align:left;padding:3px 6px} .sep{border-bottom:1px solid #ddd}
 @media print{body{padding:0}}</style></head><body>
 <h2>รายการสั่งอะไหล่รายวัน</h2>
 <div class="info">วันที่: ${fmtThaiDate(date)} | ระบบ: ${filterSystem === "all" ? "ทั้งหมด" : (SYSTEMS.find(s => s.key === filterSystem)?.label || filterSystem)} | ${filtered.length} ใบ · ${totalItems} ชิ้น | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
-<table><thead><tr><th>#</th><th>เวลา</th><th>ระบบ</th><th>เลขที่มัดจำ/ใบ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th><th>สถานะ</th><th>เลขที่ใบรับสั่งซื้อ</th></tr></thead>
-<tbody>${body || `<tr><td colspan="8" class="c">ไม่มีรายการ</td></tr>`}</tbody></table>
+<table><thead><tr><th>#</th><th>เวลา</th><th>ระบบ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th></tr></thead>
+<tbody>${body || `<tr><td colspan="6" class="c">ไม่มีรายการ</td></tr>`}</tbody></table>
 </body></html>`);
     w.document.close();
     setTimeout(() => w.print(), 300);
@@ -179,18 +178,16 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
               <th style={th}>#</th>
               <th style={th}>เวลา</th>
               <th style={th}>ระบบ</th>
-              <th style={th}>เลขที่มัดจำ/ใบ</th>
+              <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
               <th style={th}>รุ่นรถ</th>
               <th style={th}>รายการอะไหล่</th>
-              <th style={th}>สถานะ</th>
-              <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={center}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={6} style={center}>กำลังโหลด...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} style={center}>ไม่มีรายการสั่งอะไหล่ในวันนี้</td></tr>
+              <tr><td colSpan={6} style={center}>ไม่มีรายการสั่งอะไหล่ในวันนี้</td></tr>
             ) : filtered.map((r, i) => {
               const sys = SYSTEMS.find(s => s.key === r.system);
               return (
@@ -202,18 +199,16 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                       {sys?.label || r.system}
                     </span>
                   </td>
-                  <td style={td}>{r.deposit_doc_no || r.order_no || `#${r.order_id}`}</td>
+                  <td style={td}>{r.vendor_po_no || "-"}</td>
                   <td style={td}>{r.model_name || "-"}</td>
-                  <td style={td}>
-                    {(r.items || []).length === 0 ? "-" : (r.items || []).map((it, k) => (
-                      <div key={k} style={{ whiteSpace: "nowrap" }}>
+                  <td style={{ ...td, textAlign: "left", padding: 0 }}>
+                    {(r.items || []).length === 0 ? <div style={{ padding: "6px 10px" }}>-</div> : (r.items || []).map((it, k) => (
+                      <div key={k} style={{ whiteSpace: "nowrap", textAlign: "left", padding: "6px 10px", borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
                         <span style={{ fontFamily: "monospace", fontSize: 12 }}>{it.part_code || "-"}</span>
                         {" · "}{it.part_name || "-"}{" × "}<b>{Number(it.quantity) || 0}</b>
                       </div>
                     ))}
                   </td>
-                  <td style={{ ...td, textAlign: "center" }}>{r.status || "-"}</td>
-                  <td style={td}>{r.vendor_po_no || "-"}</td>
                 </tr>
               );
             })}
