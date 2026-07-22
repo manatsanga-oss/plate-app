@@ -417,9 +417,33 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     setPaySending(false);
   }
 
+  // ลูกค้าไม่มี LINE แต่มีเบอร์โทร → ค้นฐานลูกค้าด้วยเบอร์อัตโนมัติ เจอ LINE ผูกให้เลย
+  // (กันเคสพนักงานกด "เพิ่มลูกค้าใหม่" ซ้ำ ทั้งที่ลูกค้าเคยลงทะเบียน QR/LINE แล้ว → ใบขาย/ใบเสร็จส่ง LINE ไม่ได้)
+  async function autoLinkLineByPhone() {
+    if (text(cust.customer_line_user_id) || text(selBooking?.line_user_id)) return null;
+    const phone = text(cust.customer_phone).replace(/[^0-9]/g, "");
+    if (phone.length < 9) return null;
+    try {
+      const res = await post(DEPOSIT_API, { action: "search_customers", keyword: phone });
+      const rows = Array.isArray(res) ? res : [];
+      const hit = rows.find(r => text(r.line_user_id) && String(r.customer_phone || "").replace(/[^0-9]/g, "").slice(-9) === phone.slice(-9));
+      if (!hit) return null;
+      const patch = {
+        customer_line_user_id: text(hit.line_user_id),
+        customer_code: text(cust.customer_code) || text(hit.customer_code),
+        customer_address: text(cust.customer_address) || text(hit.customer_address),
+        customer_tax_id: text(cust.customer_tax_id) || text(hit.customer_tax_id),
+      };
+      setCust(p => ({ ...p, ...patch })); // ให้ขั้นถัดไป (ใบเสร็จ/ส่งเอกสาร) เห็น LINE ด้วย
+      return patch;
+    } catch { return null; }
+  }
+
   // ส่ง "ใบขาย" เข้า LINE ลูกค้าทันทีหลังกดบันทึกขาย — action เดียวกับหน้าขายปลีก
-  async function sendSaleFlex(sale) {
-    if (!custLineUserId) { setLineSaleStatus("no_line"); return; }
+  // lineOverride: LINE ที่เพิ่งผูกจากเบอร์โทรใน handleSaveSale (state ยังไม่ทัน update ใน tick เดียวกัน)
+  async function sendSaleFlex(sale, lineOverride) {
+    const lid = text(lineOverride) || custLineUserId;
+    if (!lid) { setLineSaleStatus("no_line"); return; }
     setLineSaleStatus("sending");
     try {
       await post(RETAIL_API, {
@@ -433,7 +457,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         advance_installment: sale.advance_installment, installment_amount: sale.installment_amount,
         finance_type: sale.finance_type,
         branch_name: sale.branch_name, branch_code: sale.branch_code,
-        line_user_id: custLineUserId,
+        line_user_id: lid,
         doc_html: buildSaleDocHtml(sale),
         sent_by: currentUser?.name || currentUser?.username || "",
       });
@@ -813,6 +837,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     setSaving(true);
     setMessage("");
     try {
+      // ไม่มี LINE → ลองผูกจากเบอร์โทรอัตโนมัติก่อนบันทึก (เจอ = ใบขาย/ใบเสร็จส่ง LINE ได้ตามปกติ)
+      const autoLink = await autoLinkLineByPhone();
       // ดึงข้อมูลรถเต็มจากตารางรับสินค้า (ต้องได้ stock_id/stock_table + เช็คว่ายังไม่ถูกขาย)
       const vres = await post(RETAIL_API, { action: "get_vehicle", keyword: selUnit.engine_no });
       const vehicle = Array.isArray(vres) ? vres[0] : vres;
@@ -827,9 +853,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         unit_cost: vehicle.unit_cost, chassis_no: vehicle.chassis_no, engine_no: vehicle.engine_no,
         model_code: vehicle.model_code, model_year: vehicle.model_year, model_color: vehicle.model_color, model_name: vehicle.model_name,
         sale_date: todayStr(),
-        customer_code: cust.customer_code, customer_name: cust.customer_name, customer_address: cust.customer_address,
-        customer_tax_id: cust.customer_tax_id, customer_phone: cust.customer_phone, customer_birthdate: cust.customer_birthdate,
-        customer_gender: cust.customer_gender, line_user_id: cust.customer_line_user_id || selBooking?.line_user_id || "",
+        customer_code: cust.customer_code || autoLink?.customer_code || "",
+        customer_name: cust.customer_name,
+        customer_address: cust.customer_address || autoLink?.customer_address || "",
+        customer_tax_id: cust.customer_tax_id || autoLink?.customer_tax_id || "",
+        customer_phone: cust.customer_phone, customer_birthdate: cust.customer_birthdate,
+        customer_gender: cust.customer_gender,
+        line_user_id: cust.customer_line_user_id || selBooking?.line_user_id || autoLink?.customer_line_user_id || "",
         seller: currentUser?.username || currentUser?.name || "",
         note: "",
         finance_type: isFin ? "moto" : "none",
@@ -871,9 +901,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       };
       setSavedSale(saleDoc);
       setStock(prev => prev.filter(r => r.engine_no !== selUnit.engine_no)); // เอาคันที่ขายออกจากลิสต์สต๊อก
-      if (custLineUserId) msg += " · กำลังส่งใบขายเข้า LINE ลูกค้า...";
+      if (autoLink?.customer_line_user_id) msg += " · 🔗 ผูก LINE ลูกค้าจากเบอร์โทรให้อัตโนมัติ";
+      if (custLineUserId || autoLink?.customer_line_user_id) msg += " · กำลังส่งใบขายเข้า LINE ลูกค้า...";
       setMessage(msg);
-      sendSaleFlex(saleDoc); // ส่งใบขายเข้า LINE ลูกค้าทันที (ถ้าไม่มี LINE จะขึ้นสถานะแจ้งเอง)
+      sendSaleFlex(saleDoc, autoLink?.customer_line_user_id); // ส่งใบขายเข้า LINE ลูกค้าทันที (ถ้าไม่มี LINE จะขึ้นสถานะแจ้งเอง)
     } catch (e) {
       setMessage("บันทึกไม่สำเร็จ: " + (e.message || e));
     }
@@ -1590,16 +1621,19 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                     <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
                       <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 14 }}>ข้อมูลลูกค้า</div>
                       <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", gap: "12px 10px", alignItems: "center" }}>
+                        {/* พิมพ์ชื่อเองไม่ได้แล้ว — ต้องเลือกจากปุ่ม 🔍 เท่านั้น (กันใบขายไม่มีรหัสลูกค้า/LINE ID ทำให้ส่งเอกสารทาง LINE ไม่ได้) */}
                         <div style={lbl}>รหัสลูกค้า</div>
                         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                          <input value={cust.customer_code} onChange={e => setCust(p => ({ ...p, customer_code: e.target.value }))} placeholder="รหัสลูกค้า" style={{ ...inp, width: 120 }} />
+                          <div style={{ ...box, width: 120, textAlign: "center" }}>{cust.customer_code || "—"}</div>
                           <button type="button" onClick={() => setShowCustomer(true)}
                             style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontFamily: "Tahoma", whiteSpace: "nowrap" }}>
                             🔍 เลือก/เพิ่ม
                           </button>
                         </div>
                         <div style={lbl}>ชื่อลูกค้า <span style={{ color: "#ef4444" }}>*</span></div>
-                        <input value={cust.customer_name} onChange={e => setCust(p => ({ ...p, customer_name: e.target.value }))} placeholder="ชื่อ-สกุล ลูกค้า (เลือกจากปุ่ม หรือพิมพ์เอง)" style={inp} />
+                        <div style={{ ...box, textAlign: cust.customer_name ? "left" : "center" }}>
+                          {cust.customer_name || "กดปุ่ม 🔍 เลือก/เพิ่ม เพื่อเลือกลูกค้า"}
+                        </div>
 
                         <div style={lbl}>ที่อยู่</div>
                         <div style={{ ...box, gridColumn: "2 / span 3", textAlign: cust.customer_address ? "left" : "center" }}>{cust.customer_address || "—"}</div>

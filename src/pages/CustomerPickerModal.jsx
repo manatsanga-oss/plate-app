@@ -210,11 +210,29 @@ function AddTab({ onSelect }) {
   const [f, setF] = useState({ title: "นาย", first_name: "", last_name: "", phone: "", id_number: "" });
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState("");
+  const [dup, setDup] = useState(null); // ลูกค้าเดิมที่เบอร์ตรงกันและมี LINE — ให้เลือกรายเดิมแทนการสร้างซ้ำ
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
 
   async function save() {
     if (!f.first_name.trim()) { setErr("กรอกชื่อลูกค้า"); return; }
-    setSaving(true); setErr("");
+    setSaving(true); setErr(""); setDup(null);
+    // กันสร้างลูกค้าซ้ำ: เบอร์นี้มีลูกค้าในระบบที่ผูก LINE แล้ว → บังคับเลือกรายเดิม (ไม่งั้นใบขาย/ใบเสร็จส่ง LINE ไม่ได้)
+    const phoneDigits = f.phone.replace(/[^0-9]/g, "");
+    if (phoneDigits.length >= 9) {
+      try {
+        const res = await postJson(SEARCH_ALL_API, { action: "search_customers", keyword: phoneDigits });
+        const hit = (Array.isArray(res) ? res : []).find((r) =>
+          String(r.line_user_id || "").trim() &&
+          String(r.customer_phone || "").replace(/[^0-9]/g, "").slice(-9) === phoneDigits.slice(-9)
+        );
+        if (hit) {
+          setDup(hit);
+          setErr(`เบอร์ ${f.phone} มีลูกค้าในระบบแล้ว: ${hit.customer_name || "-"}${hit.customer_code ? ` (${hit.customer_code})` : ""} · LINE ✓ — เลือกรายเดิมเพื่อให้ส่งใบขาย/ใบเสร็จทาง LINE ได้`);
+          setSaving(false);
+          return;
+        }
+      } catch { /* ค้นไม่ได้ — ให้บันทึกต่อตามปกติ */ }
+    }
     try {
       await postJson(URL_SAVE, { ...f, gender: "ชาย", nationality: "ไทย", status: "active", contact_date: new Date().toISOString().slice(0, 10) });
       // ดึงรายชื่อกลับมาเพื่อหา customer_id ของคนที่เพิ่งเพิ่ม (match ด้วยเบอร์/ชื่อ)
@@ -252,6 +270,19 @@ function AddTab({ onSelect }) {
         <input value={f.id_number} onChange={set("id_number")} style={inp} />
       </div>
       {err && <div style={{ color: "#b42318", marginTop: 10 }}>{err}</div>}
+      {dup && (
+        <div style={{ textAlign: "right", marginTop: 8 }}>
+          <button type="button"
+            onClick={() => onSelect({
+              code: dup.customer_code || "", name: dup.customer_name || "", phone: dup.customer_phone || "",
+              province: dup.customer_province || "", address: dup.customer_address || "",
+              tax_id: dup.customer_tax_id || "", line_user_id: dup.line_user_id || "",
+            })}
+            style={{ ...primaryBtn, background: "#067647" }}>
+            ✓ เลือกลูกค้าเดิมรายนี้
+          </button>
+        </div>
+      )}
       <div style={{ textAlign: "right", marginTop: 14 }}>
         <button onClick={save} disabled={saving} style={primaryBtn}>{saving ? "บันทึก…" : "💾 บันทึก & เลือก"}</button>
       </div>
