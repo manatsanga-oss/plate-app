@@ -353,6 +353,11 @@ export default function SparePartsOrderPage({ currentUser }) {
         items: validItems,
         created_by: currentUser?.name || "",
         branch: currentUser?.branch || "",
+        // รุ่น/แบบ/type/สี ของรถลูกค้า (ค้นจากเลขตัวถังใบมัดจำ) — เก็บลง spare_parts_orders
+        vehicle_series: vehInfo?.series || "",
+        vehicle_variant: vehInfo?.variant || "",
+        vehicle_type: vehInfo?.type || "",
+        vehicle_color: vehInfo?.color || "",
       };
       const action = editId ? "update_spare_order" : "save_spare_order";
       if (editId) payload.order_id = editId;
@@ -533,6 +538,36 @@ export default function SparePartsOrderPage({ currentUser }) {
         } catch {}
         return it;
       }));
+      // อะไหล่ทดแทน: รหัสที่สั่งเคยถูกจับคู่ทดแทนไว้ในตารางอะไหล่ใช้แทนกัน (จากใบไหนก็ได้) → แนบรหัสทดแทน + สต๊อก
+      const stripC = (s) => (s || "").replace(/-/g, "").toUpperCase().trim();
+      const subsOf = (code) => {
+        const sc = stripC(code);
+        if (!sc) return [];
+        const seen = new Set();
+        const out = [];
+        for (const ps of partSubstitutes) {
+          if (stripC(ps.original_code) !== sc) continue;
+          const key = stripC(ps.substitute_code);
+          if (!key || key === sc || seen.has(key)) continue;
+          seen.add(key);
+          out.push({ code: ps.substitute_code, name: ps.substitute_name || "" });
+        }
+        return out;
+      };
+      const itemsWithSubs = await Promise.all(itemsWithStock.map(async (it) => {
+        const subs = subsOf(it.part_code);
+        if (!subs.length) return it;
+        const enriched = await Promise.all(subs.map(async (s) => {
+          try {
+            const sr = await api("search_inventory", { code: stripC(s.code) });
+            const found = norm(sr).filter(f => Number(f.quantity || 0) > 0);
+            const qty = found.reduce((sum, f) => sum + Number(f.quantity || 0), 0);
+            const stockName = found.map(f => `${f.source || "-"}(${Number(f.quantity || 0)})`).join(", ");
+            return { ...s, stock_qty: qty, stock_name: stockName || "-" };
+          } catch { return { ...s, stock_qty: null, stock_name: "-" }; }
+        }));
+        return { ...it, substitutes: enriched };
+      }));
       // ดึงอะไหล่ค้างส่ง
       let boItems = [];
       if (order.vendor_po_no) {
@@ -555,7 +590,7 @@ export default function SparePartsOrderPage({ currentUser }) {
           setOrders(prev => prev.map(o => o.order_id === order.order_id ? { ...o, status: "มาครบ" } : o));
         } catch {}
       }
-      setShowDetail({ ...order, status: finalStatus, items: itemsWithStock, dcsStatus: null, boItems, alreadyApproved });
+      setShowDetail({ ...order, status: finalStatus, items: itemsWithSubs, dcsStatus: null, boItems, alreadyApproved });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
@@ -1262,6 +1297,9 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div><b>ยอดมัดจำ:</b> {fmt(showDetail.deposit_amount)}</div>
               <div><b>ช่าง:</b> {showDetail.technician}</div>
               <div><b>รุ่นรถ:</b> {showDetail.model_name}</div>
+              {(showDetail.vehicle_series || showDetail.vehicle_variant) && (
+                <div><b>รุ่น/แบบ/type:</b> {[showDetail.vehicle_series, showDetail.vehicle_variant, showDetail.vehicle_type].filter(Boolean).join(" / ")}{showDetail.vehicle_color ? ` · สี ${showDetail.vehicle_color}` : ""}</div>
+              )}
               <div><b>เบอร์โทร:</b> {showDetail.customer_phone || "-"}</div>
               <div><b>ทะเบียนรถ:</b> {showDetail.license_plate || "-"}</div>
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
@@ -1290,10 +1328,26 @@ export default function SparePartsOrderPage({ currentUser }) {
                 ) : showDetail.items.map((it, i) => (
                   <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
-                    <td style={td}>{it.part_code}</td>
-                    <td style={td}>{it.part_name}</td>
-                    <td style={{ ...td, textAlign: "center" }}>{it.quantity}</td>
-                    <td style={{ ...td, textAlign: "center", color: it.stock_qty > 0 ? "#10b981" : "#ef4444", fontWeight: 600 }}>{it.stock_qty != null ? it.stock_qty : "-"}</td>
+                    {/* อะไหล่ทดแทน (ตารางอะไหล่ใช้แทนกัน): แสดงในแถวเดียวกัน บรรทัดย่อยสีส้ม */}
+                    <td style={td}>
+                      <div>{it.part_code}</div>
+                      {(it.substitutes || []).map((s, k) => (
+                        <div key={k} style={{ color: "#d97706", fontWeight: 600 }}>→ {s.code}</div>
+                      ))}
+                    </td>
+                    <td style={td}>
+                      <div>{it.part_name}</div>
+                      {(it.substitutes || []).map((s, k) => (
+                        <div key={k} style={{ color: "#d97706" }} title={s.stock_name && s.stock_name !== "-" ? `สต๊อก: ${s.stock_name}` : ""}>{s.name || "(อะไหล่ทดแทน)"}</div>
+                      ))}
+                    </td>
+                    <td style={{ ...td, textAlign: "center", verticalAlign: "top" }}>{it.quantity}</td>
+                    <td style={{ ...td, textAlign: "center" }}>
+                      <div style={{ color: it.stock_qty > 0 ? "#10b981" : "#ef4444", fontWeight: 600 }}>{it.stock_qty != null ? it.stock_qty : "-"}</div>
+                      {(it.substitutes || []).map((s, k) => (
+                        <div key={k} style={{ color: Number(s.stock_qty) > 0 ? "#d97706" : "#ef4444", fontWeight: 700 }}>{s.stock_qty != null ? s.stock_qty : "-"}</div>
+                      ))}
+                    </td>
                   </tr>
                 ))}
               </tbody>
