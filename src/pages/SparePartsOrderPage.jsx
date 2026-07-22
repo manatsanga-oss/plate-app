@@ -2,6 +2,8 @@ import React, { useEffect, useState, useRef } from "react";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
+// เงินมัดจำจากระบบมัดจำอะไหล่ (หน้า "ระบบมัดจำอะไหล่" — ตาราง part_deposits) ใช้แทน upload NID เดิม
+const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api";
 
 async function api(action, extra = {}) {
   const res = await fetch(API, {
@@ -32,7 +34,8 @@ const emptyForm = () => ({
 
 export default function SparePartsOrderPage({ currentUser }) {
   const [orders, setOrders] = useState([]);
-  const [deposits, setDeposits] = useState([]);
+  const [deposits, setDeposits] = useState([]);           // มัดจำจากระบบมัดจำอะไหล่ใหม่ (part_deposits) — ใช้เลือกในใบสั่งซื้อ
+  const [legacyDeposits, setLegacyDeposits] = useState([]); // มัดจำ NID เดิม — ไว้จับคู่/แสดงใบสั่งซื้อเก่าเท่านั้น
   const [seizedDocs, setSeizedDocs] = useState(new Set());
   const [models, setModels] = useState([]);
   const [techs, setTechs] = useState([]);
@@ -118,7 +121,17 @@ export default function SparePartsOrderPage({ currentUser }) {
         try { const r2 = await api("get_spare_orders"); setOrders(norm(r2)); } catch {}
       }
     } catch {}
-    try { const r = await api("get_honda_deposits"); setDeposits(norm(r)); } catch {}
+    // เงินมัดจำ: ดึงจากระบบมัดจำอะไหล่ (part_deposits — บันทึกเองหน้า "ระบบมัดจำอะไหล่") แทน upload NID เดิม (2026-07-21)
+    try {
+      const res = await fetch(PART_DEPOSIT_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_deposits", limit: 2000 }),
+      });
+      const r = await res.json().catch(() => []);
+      setDeposits((Array.isArray(r) ? r : []).filter(d => d && d.deposit_doc_no && String(d.brand || "").toUpperCase() !== "YAMAHA"));
+    } catch { /* โหลดมัดจำใหม่ไม่ได้ — ตัวอื่นทำงานต่อ */ }
+    // มัดจำ NID เดิม — เก็บไว้จับคู่ใบสั่งซื้อเก่า (แสดงวันที่/ไม่ให้ใบเก่าหายจากตาราง) ไม่ใช้เลือกสั่งซื้อใหม่แล้ว
+    try { const r = await api("get_honda_deposits"); setLegacyDeposits(norm(r)); } catch {}
     try { const r = await api("get_repair_deposits"); setRepairDeposits(norm(r)); } catch {}
     try {
       const r = await api("list_deposit_seizures", { brand: "HONDA" });
@@ -213,7 +226,6 @@ export default function SparePartsOrderPage({ currentUser }) {
   function handleDepositSelect(docNo) {
     const dep = deposits.find(d => d.deposit_doc_no === docNo);
     if (dep) {
-      const isNotDEPD = !docNo.startsWith("DEPD");
       setForm(prev => ({
         ...prev,
         deposit_doc_no: docNo,
@@ -221,7 +233,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         customer_name: dep.customer_name || "",
         vin: dep.vin || "",
         deposit_amount: Number(dep.remaining_amount || 0),
-        technician: isNotDEPD ? (currentUser?.name || "") : prev.technician,
+        customer_phone: dep.customer_phone || prev.customer_phone,
       }));
     }
   }
@@ -229,9 +241,8 @@ export default function SparePartsOrderPage({ currentUser }) {
   function handleAddDepositSelect(docNo) {
     const dep = deposits.find(d => d.deposit_doc_no === docNo);
     if (!dep) return;
-    // หาใบสั่งซื้อเดิมของลูกค้าคนนี้ (ใบล่าสุด)
-    const prevOrder = orders
-      .filter(o => o.customer_code === dep.customer_code)
+    // หาใบสั่งซื้อเดิมของลูกค้าคนนี้ (ใบล่าสุด) — เทียบด้วยรหัสลูกค้าเท่านั้น
+    const prevOrder = (dep.customer_code ? orders.filter(o => o.customer_code === dep.customer_code) : [])
       .sort((a, b) => (b.order_id || 0) - (a.order_id || 0))[0];
     setForm(prev => ({
       ...prev,
@@ -245,7 +256,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       technician: prevOrder?.technician || prev.technician,
       model_name: prevOrder?.model_name || prev.model_name,
       parking_status: prevOrder?.parking_status || prev.parking_status,
-      customer_phone: prevOrder?.customer_phone || prev.customer_phone,
+      customer_phone: prevOrder?.customer_phone || dep.customer_phone || prev.customer_phone,
       license_plate: prevOrder?.license_plate || prev.license_plate,
       items: [emptyItem()],
     }));
@@ -314,6 +325,19 @@ export default function SparePartsOrderPage({ currentUser }) {
       if (editId) payload.order_id = editId;
       const res = await api(action, payload);
       if (res?.success || res?.order_id) {
+        // ตัดใช้เงินมัดจำในระบบมัดจำอะไหล่ (เฉพาะใบสั่งซื้อใหม่ + เลขมัดจำจากระบบใหม่ PDS-/PDO-)
+        // → หน้ามัดจำจะเห็น "ใช้ไป" เต็มยอด คงเหลือ 0 และคืนเงินซ้ำไม่ได้
+        if (!editId && /^PD[SO]-/.test(form.deposit_doc_no || "")) {
+          try {
+            await fetch(PART_DEPOSIT_API, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "use_deposit", deposit_doc_no: form.deposit_doc_no,
+                used_ref: String(res?.order_id || ""), used_by: currentUser?.name || currentUser?.username || "",
+              }),
+            });
+          } catch { /* ตัดมัดจำไม่สำเร็จ — ใบสั่งซื้อบันทึกแล้ว แจ้งใน message */ }
+        }
         setMessage(editId ? "แก้ไขสำเร็จ" : "บันทึกสำเร็จ");
         setEditId(null);
         setShowForm(false);
@@ -506,8 +530,10 @@ export default function SparePartsOrderPage({ currentUser }) {
     // ซ่อน order ที่เงินมัดจำถูกยึดแล้ว
     if (seizedDocs.has(o.deposit_doc_no)) return false;
     // ซ่อน order ที่จับคู่กับตารางเงินมัดจำไม่ได้ (ปิด Job/ปิดซ่อม) — แสดงเฉพาะที่มีเงินมัดจำคงเหลือ
-    if (deposits.length > 0 || repairDeposits.length > 0) {
+    // เช็คทั้งมัดจำระบบใหม่ + มัดจำ NID เดิม (ใบสั่งซื้อเก่ายังผูกเลข NID อยู่)
+    if (deposits.length > 0 || legacyDeposits.length > 0 || repairDeposits.length > 0) {
       const hasDeposit = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no)
+        || legacyDeposits.some(d => d.deposit_doc_no === o.deposit_doc_no)
         || repairDeposits.some(rd => rd.deposit_doc_no === o.deposit_doc_no);
       if (!hasDeposit) return false;
     }
@@ -612,7 +638,7 @@ export default function SparePartsOrderPage({ currentUser }) {
     const w = window.open("", "_blank", "width=1200,height=800");
     const filterLabel = (filterStatus === "all" ? "ทั้งหมด" : filterStatus) + (filterParking !== "all" ? ` / ${filterParking}` : "");
     const rows = filtered.map((o, i) => {
-      const dep = deposits.find(d => d.deposit_doc_no === o.deposit_doc_no);
+      const dep = deposits.find(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.find(d => d.deposit_doc_no === o.deposit_doc_no);
       const depDate = dep ? fmtDate(dep.deposit_date) : "ปิด Job";
       return `<tr>
         <td>${i + 1}</td>
@@ -626,6 +652,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         <td>${o.parking_status}</td>
         <td>${o.status}</td>
         <td>${o.vendor_po_no || "-"}</td>
+        <td>${o.job_no || "-"}</td>
         <td>${o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
       </tr>`;
     }).join("");
@@ -644,7 +671,7 @@ export default function SparePartsOrderPage({ currentUser }) {
 <div class="info">ตัวกรอง: ${filterLabel} | จำนวน: ${filtered.length} รายการ | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
 <table>
   <thead><tr>
-    <th>#</th><th>ประเภท</th><th>วันที่มัดจำ</th><th>เลขที่มัดจำ</th><th>ลูกค้า</th><th>ช่าง</th><th>รุ่นรถ</th><th>ทะเบียนรถ</th><th>สถานะจอด</th><th>สถานะ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>วันที่นัดหมาย</th>
+    <th>#</th><th>ประเภท</th><th>วันที่มัดจำ</th><th>เลขที่มัดจำ</th><th>ลูกค้า</th><th>ช่าง</th><th>รุ่นรถ</th><th>ทะเบียนรถ</th><th>สถานะจอด</th><th>สถานะ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>เลขที่ Job</th><th>วันที่นัดหมาย</th>
   </tr></thead>
   <tbody>${rows}</tbody>
 </table>
@@ -827,15 +854,16 @@ export default function SparePartsOrderPage({ currentUser }) {
               <th style={th}>สถานะ</th>
               <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
               <th style={th}>วันที่</th>
+              <th style={th}>เลขที่ Job</th>
               <th style={th}>วันที่นัดหมาย</th>
               <th style={th}>จัดการ</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={13} style={center}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={14} style={center}>กำลังโหลด...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={13} style={center}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={14} style={center}>ไม่พบข้อมูล</td></tr>
             ) : filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((o, i) => (
               <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: dcsMismatchIds.has(o.order_id) ? "#fef9c3" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                 <td style={td}>
@@ -845,7 +873,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                     color: o.order_type === "ปกติ" ? "#1e40af" : "#92400e",
                   }}>{o.order_type}</span>
                 </td>
-                <td style={td}>{(() => { const dep = deposits.find(d => d.deposit_doc_no === o.deposit_doc_no); return dep ? fmtDate(dep.deposit_date) : <span style={{ color: "#ef4444", fontWeight: 600 }}>ปิด Job</span>; })()}</td>
+                <td style={td}>{(() => { const dep = deposits.find(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.find(d => d.deposit_doc_no === o.deposit_doc_no); return dep ? fmtDate(dep.deposit_date) : <span style={{ color: "#ef4444", fontWeight: 600 }}>ปิด Job</span>; })()}</td>
                 <td style={td}>{o.deposit_doc_no}</td>
                 <td style={td}>{o.customer_name}</td>
                 <td style={td}>{(o.technician || "").split(" ")[0]}</td>
@@ -865,7 +893,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                   </span>
                 )}</td>
                 <td style={td}>{(() => {
-                  const hasDep = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
+                  const hasDep = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
                   if (!hasDep) return <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#dc2626", color: "#fff", fontWeight: 600 }}>ปิดซ่อม</span>;
                   const s = o.status;
                   return <span style={{
@@ -886,12 +914,13 @@ export default function SparePartsOrderPage({ currentUser }) {
                   )}
                 </td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
+                <td style={td}>{o.job_no || "-"}</td>
                 <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
                   {(() => {
                     // ถ้าไม่พบเลขมัดจำใน deposits = ปิดซ่อม → ดูได้อย่างเดียว
-                    const hasDepAct = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
+                    const hasDepAct = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
                     if (!hasDepAct) return null;
                     return (
                       <>
@@ -967,16 +996,16 @@ export default function SparePartsOrderPage({ currentUser }) {
                 >
                   <option value="">-- เลือกใบมัดจำ --</option>
                   {(() => {
-                    // filter ก่อน แล้วเลือกใบเก่าสุดต่อลูกค้า
+                    // filter ก่อน แล้วเลือกใบเก่าสุดต่อลูกค้า (มัดจำไม่มีรหัสลูกค้า = ไม่เช็คงานเดิมของลูกค้า)
                     const eligible = deposits.filter(d =>
                       !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
-                      && !orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")
+                      && !(d.customer_code && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
                     );
-                    // จัดกลุ่มตามลูกค้า เลือกใบเก่าสุด (วันที่น้อยสุด)
+                    // จัดกลุ่มตามลูกค้า เลือกใบเก่าสุด (วันที่น้อยสุด) — มัดจำบันทึกมืออาจไม่มีรหัสลูกค้า ใช้ชื่อ/เลขเอกสารแทน
                     const byCustomer = {};
                     for (const d of eligible) {
-                      const key = d.customer_code;
+                      const key = d.customer_code || d.customer_name || d.deposit_doc_no;
                       if (!byCustomer[key] || new Date(d.deposit_date) < new Date(byCustomer[key].deposit_date)) {
                         byCustomer[key] = d;
                       }
@@ -1003,8 +1032,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                   <option value="">-- เลือกใบมัดจำเพิ่ม --</option>
                   {deposits
                     .filter(d =>
-                      // ลูกค้ามีงานเดิมที่ยังไม่ปิด
-                      orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")
+                      // ลูกค้ามีงานเดิมที่ยังไม่ปิด (ต้องมีรหัสลูกค้าถึงจับคู่ได้)
+                      (d.customer_code && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
                       // ใบมัดจำนี้ยังไม่ถูกสั่งซื้อ
                       && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
                       // ไม่ใช่ตีราคาซ่อม
@@ -1055,24 +1084,20 @@ export default function SparePartsOrderPage({ currentUser }) {
             {/* ช่าง */}
             <div style={row}>
               <label style={labelStyle}>ช่าง</label>
-              {form.deposit_doc_no && !form.deposit_doc_no.startsWith("DEPD") ? (
-                <input
-                  value={form.technician}
-                  readOnly
-                  style={{ ...inputStyle, flex: 1, background: "#f8fafc" }}
-                />
-              ) : (
-                <select
-                  value={form.technician}
-                  onChange={e => setForm(p => ({ ...p, technician: e.target.value }))}
-                  style={{ ...inputStyle, flex: 1 }}
-                >
-                  <option value="">-- เลือกช่าง --</option>
-                  {techs.map(u => (
-                    <option key={u.user_id} value={u.name}>{u.name}</option>
-                  ))}
-                </select>
-              )}
+              <select
+                value={form.technician}
+                onChange={e => setForm(p => ({ ...p, technician: e.target.value }))}
+                style={{ ...inputStyle, flex: 1 }}
+              >
+                <option value="">-- เลือกช่าง --</option>
+                {/* ค่าเดิม (เช่น ชื่อผู้บันทึกจากใบเก่า) ที่ไม่อยู่ในรายชื่อช่าง — ใส่เป็น option ให้เลือกค้างไว้ได้ */}
+                {form.technician && !techs.some(u => u.name === form.technician) && (
+                  <option value={form.technician}>{form.technician}</option>
+                )}
+                {techs.map(u => (
+                  <option key={u.user_id} value={u.name}>{u.name}</option>
+                ))}
+              </select>
             </div>
 
             {/* รุ่นรถ */}
