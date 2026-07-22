@@ -67,6 +67,11 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
     setBankAccounts(Array.isArray(data) ? data : (data?.data || []));
   }
 
+  // ยอดค้างของใบรายได้ (รองรับรับบางส่วนแล้ว) — ใช้กับ "รายได้ค้างชำระ (หักกลบ)"
+  const incomeRemaining = (d) => d.remaining_amount != null
+    ? Number(d.remaining_amount)
+    : Math.max(0, Number(d.net_to_pay || d.total || 0) - Number(d.received_amount || 0));
+
   // โหลดรายการบันทึกรับเงินที่ยังไม่ชำระ (status != paid/cancelled)
   async function loadUnpaidIncomes() {
     try {
@@ -211,6 +216,14 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
       if (m.method === "credit_note" && !m.reference_no) {
         return alert("กรุณาระบุเลขที่ใบลดหนี้");
       }
+      if (m.method === "income_offset") {
+        if (!m.reference_no) return alert("กรุณาเลือกใบรายได้ที่จะหักกลบ");
+        const doc = unpaidIncomes.find(r => r.income_doc_no === m.reference_no);
+        const remain = doc ? incomeRemaining(doc) : 0;
+        if (!editPayment && Number(m.amount) > remain + 0.005) {
+          return alert(`ยอดหักกลบ ${fmtMoney(m.amount)} เกินยอดค้างของ ${m.reference_no} (ค้าง ${fmtMoney(remain)})`);
+        }
+      }
       if (!Number(m.amount)) return alert("กรุณาระบุจำนวนเงินให้ครบทุกวิธี");
     }
     setLoading(true);
@@ -233,12 +246,48 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
     });
     setLoading(false);
     const payNo = Array.isArray(result) && result[0]?.payment_no;
-    alert(payNo ? `บันทึกสำเร็จ: ${payNo}` : "บันทึกสำเร็จ");
+    // หักกลบรายได้ — บันทึกรับชำระฝั่งรายได้อัตโนมัติ (receive_partial รับบางส่วนได้)
+    // เฉพาะตอนสร้างใบใหม่ กันยิงซ้ำตอนแก้ไข (แบบเดียวกับหน้าบันทึกค่าใช้จ่าย)
+    let incomeMsg = "";
+    const offsetLines = form.methods.filter(m => m.method === "income_offset" && m.reference_no);
+    if (!editPayment && offsetLines.length > 0) {
+      for (const m of offsetLines) {
+        const doc = unpaidIncomes.find(r => r.income_doc_no === m.reference_no);
+        const docId = m.income_doc_id || doc?.income_doc_id;
+        if (!docId) { incomeMsg += `\n⚠️ หักกลบ ${m.reference_no} ไม่สำเร็จ — ไปบันทึกรับเงินที่เมนูรายได้อื่น ๆ เอง`; continue; }
+        try {
+          const r2 = await fetch(FINANCE_API, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "income_record", op: "receive_partial",
+              income_doc_id: Number(docId),
+              amount: Number(m.amount) || 0,
+              paid_date: form.payment_date,
+              payment_method: "หักกลบ",
+              payment_note: `หักกลบใบชำระค่าสินค้า ${payNo || ""}`.trim(),
+              paid_by: currentUser?.username || currentUser?.name || "system",
+            }),
+          });
+          const d2 = await r2.json().catch(() => ({}));
+          const row = Array.isArray(d2) ? d2[0] : d2;
+          incomeMsg += row?.result_status === "paid"
+            ? `\nรับชำระรายได้ ${m.reference_no} ครบแล้ว`
+            : `\nรับบางส่วน ${m.reference_no} ${fmtMoney(m.amount)} — ค้างอีก ${fmtMoney(row?.remaining || 0)}`;
+        } catch {
+          incomeMsg += `\n⚠️ หักกลบ ${m.reference_no} ไม่สำเร็จ — ไปบันทึกรับเงินที่เมนูรายได้อื่น ๆ เอง`;
+        }
+      }
+      loadUnpaidIncomes();
+    }
+    alert((payNo ? `บันทึกสำเร็จ: ${payNo}` : "บันทึกสำเร็จ") + incomeMsg);
     setShowForm(false);
     if (view === "invoices") loadInvoices(); else loadPayments();
   }
   async function cancelPayment(p) {
-    if (!confirm(`ยกเลิกการชำระ ${p.payment_no}?`)) return;
+    // ใบที่มีหักกลบรายได้ — ฝั่งรายได้ต้องไปยกเลิกใบรับเงินเองที่เมนูรายได้อื่น ๆ
+    const hasOffset = Array.isArray(p.payment_methods) && p.payment_methods.some(m => m.method === "income_offset");
+    const offsetWarn = hasOffset ? `\n\n⚠️ ใบนี้มีหักกลบรายได้ — ต้องไปยกเลิกใบรับเงินฝั่งรายได้ที่เมนู "บันทึกรายได้อื่น ๆ" เองด้วย` : "";
+    if (!confirm(`ยกเลิกการชำระ ${p.payment_no}?${offsetWarn}`)) return;
     setLoading(true);
     await callApi({ action: "cancel_payment", payment_id: p.id, cancelled_by: currentUser?.username || "" });
     setLoading(false);
@@ -444,8 +493,9 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                     <option value="cash">เงินสด</option>
                     <option value="cheque">เช็ค</option>
                     <option value="credit_note">ใบลดหนี้</option>
+                    <option value="income_offset">รายได้ค้างชำระ (หักกลบ)</option>
                   </select>
-                  <input type="number" value={m.amount} onChange={e => updateMethod(i, "amount", e.target.value)} placeholder="จำนวนเงิน" style={{ ...inp, textAlign: "right" }} readOnly={m.method === "credit_note"} title={m.method === "credit_note" ? "ยอดจะถูกเซ็ตอัตโนมัติเมื่อเลือกใบรับเงิน" : ""} />
+                  <input type="number" value={m.amount} onChange={e => updateMethod(i, "amount", e.target.value)} placeholder="จำนวนเงิน" style={{ ...inp, textAlign: "right" }} readOnly={m.method === "credit_note"} title={m.method === "credit_note" ? "ยอดจะถูกเซ็ตอัตโนมัติเมื่อเลือกใบรับเงิน" : m.method === "income_offset" ? "หักกลบบางส่วนได้ — ไม่เกินยอดค้างของใบรายได้ที่เลือก" : ""} />
                   {m.method === "credit_note" ? (() => {
                     // กรอง: customer_name ใน income ต้องมี brand keyword (ยามาฮ่า/ฮอนด้า) ตรงกับ brandTab
                     const keywords = brandTab === "HONDA"
@@ -472,6 +522,36 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                         {matching.map(r => (
                           <option key={r.income_doc_no} value={r.income_doc_no}>
                             {r.income_doc_no} · {fmtMoney(r.net_to_pay || r.total)} บ. · {(r.customer_name || "").slice(0, 25)}
+                          </option>
+                        ))}
+                      </select>
+                    );
+                  })() : m.method === "income_offset" ? (() => {
+                    // ใบรายได้ที่ยังมียอดค้าง (หักบางส่วนได้) — กันเลือกใบซ้ำกับแถวหักกลบอื่น
+                    const usable = unpaidIncomes.filter(r => incomeRemaining(r) > 0)
+                      .filter(r => r.income_doc_no === m.reference_no
+                        || !form.methods.some((mm, i2) => i2 !== i && mm.method === "income_offset" && mm.reference_no === r.income_doc_no));
+                    const hasCurrent = !m.reference_no || usable.some(r => r.income_doc_no === m.reference_no);
+                    return (
+                      <select value={m.reference_no || ""} onChange={e => {
+                        const docNo = e.target.value;
+                        const picked = unpaidIncomes.find(r => r.income_doc_no === docNo);
+                        setForm(prev => {
+                          const methods = [...prev.methods];
+                          methods[i] = {
+                            ...methods[i], reference_no: docNo,
+                            income_doc_id: picked?.income_doc_id || "",
+                            // default = ยอดค้างของใบ (แก้เป็นบางส่วนได้ ไม่เกินยอดค้าง)
+                            amount: picked ? incomeRemaining(picked) : 0,
+                          };
+                          return { ...prev, methods };
+                        });
+                      }} style={{ ...inp, border: "1px solid #c4b5fd", background: "#f5f3ff" }}>
+                        <option value="">-- เลือกใบรายได้ค้างชำระ (หักบางส่วนได้) --</option>
+                        {!hasCurrent && <option value={m.reference_no}>{m.reference_no}</option>}
+                        {usable.map(r => (
+                          <option key={r.income_doc_no} value={r.income_doc_no}>
+                            {r.income_doc_no} · {(r.customer_name || r.description || "").slice(0, 25)} · ค้าง {fmtMoney(incomeRemaining(r))}{Number(r.received_amount) > 0 ? ` (รับแล้ว ${fmtMoney(r.received_amount)})` : ""}
                           </option>
                         ))}
                       </select>
