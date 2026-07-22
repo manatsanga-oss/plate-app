@@ -903,14 +903,15 @@ export default function SparePartsOrderPage({ currentUser }) {
                   }}>{s}</span>;
                 })()}</td>
                 <td style={td}>
-                  {currentUser?.role === "admin" ? (
+                  {/* ยังไม่มีเลข: ทุก user กดระบุได้ (ปุ่ม "สั่ง" หายไปเมื่อสถานะเปลี่ยนจากรอดำเนินการ) · มีเลขแล้ว: แก้ได้เฉพาะ admin */}
+                  {currentUser?.role === "admin" || !o.vendor_po_no ? (
                     <span style={{ cursor: "pointer", color: o.vendor_po_no ? "#0369a1" : "#9ca3af", textDecoration: o.vendor_po_no ? "underline dotted" : "none" }}
-                      title="คลิกเพื่อแก้ไข (admin)"
+                      title={o.vendor_po_no ? "คลิกเพื่อแก้ไข (admin)" : "คลิกเพื่อระบุเลขที่ใบรับสั่งซื้อ"}
                       onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }}>
                       {o.vendor_po_no || "✏️ ระบุ"}
                     </span>
                   ) : (
-                    o.vendor_po_no || "-"
+                    o.vendor_po_no
                   )}
                 </td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
