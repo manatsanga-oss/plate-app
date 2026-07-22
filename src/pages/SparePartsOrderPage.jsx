@@ -4,6 +4,8 @@ const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
 // เงินมัดจำจากระบบมัดจำอะไหล่ (หน้า "ระบบมัดจำอะไหล่" — ตาราง part_deposits) ใช้แทน upload NID เดิม
 const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api";
+// ประวัติขายรถ (moto_sales) — ค้นรุ่น/แบบ/type ของรถลูกค้าจากเลขตัวถังในใบมัดจำ
+const SERVICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
 
 async function api(action, extra = {}) {
   const res = await fetch(API, {
@@ -70,8 +72,39 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [estimateNo, setEstimateNo] = useState("");
   const [savingRepair, setSavingRepair] = useState(false);
   const [partSubstitutes, setPartSubstitutes] = useState([]);
+  const [vehInfo, setVehInfo] = useState(null); // รุ่น/แบบ/type ของรถลูกค้า — ค้นจากเลขตัวถังในใบมัดจำ (ประวัติขาย moto_sales)
 
   useEffect(() => { loadAll(); }, []);
+
+  // เลขตัวถังเปลี่ยน (เลือกใบมัดจำ/เปิดแก้ไข) → ค้นรุ่น/แบบ/type จากประวัติขายอัตโนมัติ
+  useEffect(() => {
+    const vin = (form.vin || "").trim();
+    if (!showForm || vin.length < 8) { setVehInfo(null); return; }
+    let alive = true;
+    setVehInfo(null);
+    fetch(SERVICE_API, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "search_vehicles", keyword: vin, field: "all" }),
+    })
+      .then(res => res.json())
+      .then(d => {
+        if (!alive) return;
+        const rows = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
+        const v = rows.find(r => r && (r.model_series || r.model_code));
+        if (!v) return;
+        // model_code เช่น "WW160AS (TH) PCX160 ( ล้อแม็ก ดิสก์เบรก ABS Idling Stop)" → แบบ=WW160AS, type=TH, ชื่อ=ส่วนที่เหลือ
+        const m = String(v.model_code || "").match(/^(\S+)\s*\(([^)]*)\)\s*(.*)$/);
+        setVehInfo({
+          series: v.model_series || "",
+          variant: m ? m[1] : (v.model_code || ""),
+          type: m ? m[2].trim() : "",
+          name: m ? m[3].trim() : "",
+          color: v.color || "",
+        });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [form.vin, showForm]);
 
   async function loadAll() {
     setLoading(true);
@@ -1056,6 +1089,15 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div style={{ background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: 12, marginBottom: 12, fontSize: 13 }}>
                 <div><b>ลูกค้า:</b> {form.customer_code} - {form.customer_name}</div>
                 {form.vin && <div><b>เลขตัวถัง:</b> {form.vin}</div>}
+                {vehInfo && (
+                  <div style={{ marginTop: 4, padding: "6px 8px", background: "#fff", border: "1px solid #bae6fd", borderRadius: 6, display: "flex", gap: 14, flexWrap: "wrap" }}>
+                    {vehInfo.series && <span><b>รุ่น:</b> {vehInfo.series}</span>}
+                    {vehInfo.variant && <span><b>แบบ:</b> {vehInfo.variant}</span>}
+                    {vehInfo.type && <span><b>type:</b> {vehInfo.type}</span>}
+                    {vehInfo.name && <span>{vehInfo.name}</span>}
+                    {vehInfo.color && <span><b>สี:</b> {vehInfo.color}</span>}
+                  </div>
+                )}
                 <div><b>ยอดมัดจำคงเหลือ:</b> <span style={{ color: "#072d6b", fontWeight: 700 }}>{fmt(form.deposit_amount)}</span></div>
               </div>
             )}
