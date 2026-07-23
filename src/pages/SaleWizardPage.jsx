@@ -210,6 +210,9 @@ export default function SaleWizardPage({ currentUser }) {
     }
     for (const g of (productGiveaways || []).filter((x) => selectedProductGiveaways[x.id]))
       gRows += gRow(g.part_code || g.fmp_product_code || "", g.fmp_product_name || g.part_name || g.part_code || "-", Number(g.qty || 1));
+    // เงินดาวน์/ค่างวดออกแทน — นับเป็นของแถมในใบขายด้วย (ยอดฐานเก็บใน down_payout_amount)
+    const dpAmt = Number(sale.down_payout_amount ?? (adjOpen && useDownPayout ? downPayout : 0)) || 0;
+    if (dpAmt > 0) gRows += gRow("", `เงินดาวน์/ค่างวดออกแทน ${money(dpAmt)} บาท`, 1);
 
     return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ใบขาย ${esc(sale.sale_no)}</title>
 <style>
@@ -868,6 +871,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         booking_deposit: dep, deposit_no: selBooking?.deposit_no || "",
         total_payment: totalPayment,
         advance_installment: isFin ? fc.advance : 0,
+        // เงินดาวน์/ค่างวดออกแทน (ยอดฐานก่อนคูณ 1.07) — ไว้โชว์เป็นของแถมหักตอนรับชำระ
+        down_payout_amount: adjOpen && useDownPayout ? Number(downPayout || 0) : 0,
         theft_insurance_amount: isFin ? fc.theft : 0,
         theft_insurance_source: isFin && fc.theft > 0 ? "finance" : null,
         finance_company_code: isFin ? String(financeCo?.company_id || "") : "",
@@ -1648,7 +1653,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 })()}
 
                 {/* การ์ดของแถม-บริการ (จากบันทึกค่าใช้จ่ายการขาย ประเภทโปรโมชั่น) */}
-                {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && displayGiveaways.length > 0 && (
+                {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (displayGiveaways.length > 0 || (adjOpen && useDownPayout && Number(downPayout) > 0)) && (
                   <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
                     <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
                       <div style={{ fontWeight: 700, fontSize: 16 }}>🎁 ของแถม-บริการ</div>
@@ -1682,9 +1687,23 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           </label>
                         );
                       })}
+                      {/* เงินดาวน์/ค่างวดออกแทน — มาจากช่อง "ราคาขายบวกเพิ่ม" (ยอดฐานก่อนคูณ 1.07) นับเป็นของแถมด้วย */}
+                      {adjOpen && useDownPayout && Number(downPayout) > 0 && (
+                        <label style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 10px", background: "#fefce8", border: "1px solid #fbbf24", borderRadius: 6, cursor: "default", fontSize: 13 }}>
+                          <input type="checkbox" checked readOnly disabled />
+                          <div style={{ flex: 1, textAlign: "left" }}>
+                            <div style={{ fontWeight: 700 }}>เงินดาวน์/ค่างวดออกแทน</div>
+                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                              <span style={{ background: "#fef3c7", color: "#92400e", padding: "1px 6px", borderRadius: 3, marginRight: 4 }}>จากราคาขายบวกเพิ่ม</span>
+                              ติ๊ก/แก้ยอดได้ที่การ์ดปรับแต่งราคา
+                            </div>
+                          </div>
+                          <span style={{ fontWeight: 800, color: "#dc2626" }}>{Number(downPayout || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+                        </label>
+                      )}
                     </div>
                     <div style={{ textAlign: "right", marginTop: 10, fontSize: 14 }}>
-                      รวมของแถมที่ให้: <span style={{ fontWeight: 800, color: "#dc2626" }}>{Number(giveawaysTotal).toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท</span>
+                      รวมของแถมที่ให้: <span style={{ fontWeight: 800, color: "#dc2626" }}>{Number(giveawaysTotal + (adjOpen && useDownPayout ? Number(downPayout || 0) : 0)).toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท</span>
                     </div>
                   </div>
                 )}
