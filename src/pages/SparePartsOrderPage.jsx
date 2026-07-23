@@ -6,6 +6,9 @@ const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login
 const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api";
 // ประวัติขายรถ (moto_sales) — ค้นรุ่น/แบบ/type ของรถลูกค้าจากเลขตัวถังในใบมัดจำ
 const SERVICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
+// ฐานลูกค้า (search_customers) — เช็คว่าลูกค้ามี LINE ผูกไว้ไหม จากเบอร์โทร 9 หลักท้าย (แบบเดียวกับหน้าบันทึกขาย NEW)
+const CUSTOMER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
+const phoneLast9 = (p) => String(p || "").replace(/[^0-9]/g, "").slice(-9);
 
 async function api(action, extra = {}) {
   const res = await fetch(API, {
@@ -58,6 +61,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [showJobModal, setShowJobModal] = useState(null);
   const [jobNumber, setJobNumber] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
+  const [lineByPhone, setLineByPhone] = useState({}); // เบอร์ 9 หลักท้าย → true = ลูกค้ามี LINE ผูกในระบบ
   const [savingJob, setSavingJob] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterParking, setFilterParking] = useState("all");
@@ -104,6 +108,33 @@ export default function SparePartsOrderPage({ currentUser }) {
       .catch(() => {});
     return () => { alive = false; };
   }, [form.vin, showForm]);
+
+  // เช็คว่าลูกค้าแต่ละใบมี LINE ผูกไหม — ค้นฐานลูกค้าด้วยเบอร์โทร แล้วเทียบเบอร์ 9 หลักท้าย + ต้องมี line_user_id
+  useEffect(() => {
+    const need = [...new Set(orders.map(o => phoneLast9(o.customer_phone)).filter(p => p.length === 9))]
+      .filter(p => lineByPhone[p] === undefined);
+    if (!need.length) return;
+    let alive = true;
+    (async () => {
+      const results = await Promise.all(need.map(p =>
+        fetch(CUSTOMER_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "search_customers", keyword: p }),
+        }).then(r => r.json()).catch(() => [])
+      ));
+      if (!alive) return;
+      setLineByPhone(prev => {
+        const nx = { ...prev };
+        need.forEach((p, i) => {
+          const rows = Array.isArray(results[i]) ? results[i] : [];
+          nx[p] = rows.some(r => String(r.line_user_id || "").trim() && phoneLast9(r.customer_phone) === p);
+        });
+        return nx;
+      });
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [orders]);
 
   async function loadAll() {
     setLoading(true);
@@ -903,7 +934,13 @@ export default function SparePartsOrderPage({ currentUser }) {
                 </td>
                 <td style={td}>{(() => { const dep = deposits.find(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.find(d => d.deposit_doc_no === o.deposit_doc_no); return dep ? fmtDate(dep.deposit_date) : <span style={{ color: "#ef4444", fontWeight: 600 }}>ปิด Job</span>; })()}</td>
                 <td style={td}>{o.deposit_doc_no}</td>
-                <td style={td}>{o.customer_name}</td>
+                <td style={td}>
+                  {lineByPhone[phoneLast9(o.customer_phone)] ? (
+                    <span style={{ color: "#059669", fontWeight: 700 }} title="ลูกค้ามี LINE ผูกในระบบ — ส่งเอกสาร/แจ้งเตือนทาง LINE ได้">
+                      {o.customer_name} <span style={{ fontWeight: 800 }}>✓</span>
+                    </span>
+                  ) : o.customer_name}
+                </td>
                 <td style={td}>{(o.technician || "").split(" ")[0]}</td>
                 <td style={td}>{o.model_name}</td>
                 <td style={td}>{o.license_plate || "-"}</td>
