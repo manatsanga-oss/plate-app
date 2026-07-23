@@ -58,6 +58,16 @@ const fmtPartCode = (s) => {
   const c = strip(s);
   return c.length >= 10 ? `${c.slice(0, 5)}-${c.slice(5, 8)}-${c.slice(8)}` : String(s || "");
 };
+// รหัส YAMAHA จาก B2B ถูก pad ท้ายด้วย 0 เป็น 12 หลัก — ตัด pad แล้วใส่ขีด: 3 ตัวแรกมีตัวอักษร (B74/54P) = 3-5-2, เลขนำ (93210) = 5-5
+const fmtYamahaCode = (s) => {
+  let c = strip(s);
+  if (c.length === 12 && c.endsWith("00")) c = c.slice(0, 10);
+  if (c.length !== 10) return String(s || "");
+  return /[A-Z]/.test(c.slice(0, 3)) ? `${c.slice(0, 3)}-${c.slice(3, 8)}-${c.slice(8)}` : `${c.slice(0, 5)}-${c.slice(5)}`;
+};
+const fmtCodeFor = (system, s) => system === "YAMAHA" ? fmtYamahaCode(s) : fmtPartCode(s);
+// รหัส YAMAHA เทียบกันด้วยรูป pad 12 หลัก
+const yamahaPad = (s) => { let c = strip(s); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
 
 export default function SparePartsDailyOrdersPage({ currentUser }) {
   const [date, setDate] = useState(todayISO());
@@ -73,6 +83,8 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   const [knownPairs, setKnownPairs] = useState(new Set()); // "เดิม|ทดแทน" ทุกคู่ที่เคยบันทึกจากใบไหนก็ได้ — กันบันทึกซ้ำ
   const [savingSub, setSavingSub] = useState(null);
   const [stockCache, setStockCache] = useState({});        // strip(code) → {total, parts:[{source,qty,location}]} ของตัวที่ยังไม่สั่ง
+  const [selItem, setSelItem] = useState({});              // orderKey → strip(part_code) ของตัว ✗ ที่ติ๊กเลือกไว้รอจับคู่
+  const [pendingPairs, setPendingPairs] = useState({});    // orderKey → [{original_code, original_name, substitute_code, substitute_name}] คู่ที่จับเองแล้วยังไม่บันทึก
 
   // ตัวที่ยังไม่สั่ง (✗) → เช็คสต๊อกให้อัตโนมัติ ไว้โชว์ ที่เก็บ/สาขา/จำนวน ในคอลัมน์สถานะ
   useEffect(() => {
@@ -211,42 +223,25 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
       .catch(() => {});
   }
 
-  // สถานะเทียบใบสั่งซื้อ vs อะไหล่ที่ DCS ส่งมาจริง: 'match' ตรงครบ | 'mismatch' มีตัวไม่ตรง | null ไม่มีข้อมูล
-  function dcsStatus(r) {
-    if (r.system !== "HONDA" || !r.vendor_po_no) return null;
-    const dcs = dcsByOrder[`${r.system}-${r.order_id}`];
-    if (!dcs || dcs.length === 0) return null;
+  // รายการในใบรับสั่งซื้อที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ตัวที่ศูนย์ส่งมาแทน/ส่งเกิน (HONDA=DCS, YAMAHA=B2B)
+  function unmatchedDcs(r) {
+    if ((r.system !== "HONDA" && r.system !== "YAMAHA") || !r.vendor_po_no) return [];
+    const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
+    if (r.system === "YAMAHA") {
+      const orderCodes = (r.items || []).map(it => yamahaPad(it.part_code));
+      return dcs.filter(d => !orderCodes.includes(yamahaPad(d.part_number)) && !orderCodes.includes(yamahaPad(d.received_part_number)));
+    }
     const orderCodes = (r.items || []).map(it => strip(it.part_code));
-    const invalid = dcs.filter(d => !orderCodes.includes(strip(d.part_number)));
-    return invalid.length === 0 ? "match" : "mismatch";
+    return dcs.filter(d => !orderCodes.includes(strip(d.part_number)));
   }
 
-  // จับคู่อะไหล่ทดแทน: DCS ที่ไม่ตรง × รายการสั่งที่ยังไม่ match — กลุ่มรหัสเดียวกัน (5 ตัวหน้า เช่น 91212) ก่อน แล้วค่อยเทียบชื่อคล้าย
-  function buildSubstitutePairs(r) {
-    const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
-    const orderCodes = (r.items || []).map(it => strip(it.part_code));
-    const invalid = dcs.filter(d => !orderCodes.includes(strip(d.part_number)));
-    const waiting = (r.items || []).filter(it => !dcs.some(d => strip(d.part_number) === strip(it.part_code)));
-    const used = new Set();
-    return invalid.map(d => {
-      const dc = strip(d.part_number);
-      let bestIdx = -1, bestScore = 0;
-      waiting.forEach((it, idx) => {
-        if (used.has(idx)) return;
-        const oc = strip(it.part_code);
-        if (dc.slice(0, 5) && dc.slice(0, 5) === oc.slice(0, 5)) { bestScore = 100; bestIdx = idx; return; }
-        const dn = String(d.part_description || "").toLowerCase();
-        const on = String(it.part_name || "").toLowerCase();
-        const score = [...on].filter((c, ci) => dn[ci] === c).length;
-        if (score > bestScore) { bestScore = score; bestIdx = idx; }
-      });
-      if (bestIdx >= 0) used.add(bestIdx);
-      const m = bestIdx >= 0 ? waiting[bestIdx] : null;
-      return {
-        original_code: m?.part_code || "", original_name: m?.part_name || "",
-        substitute_code: d.part_number || "", substitute_name: d.part_description || "",
-      };
-    });
+  // คู่ที่บันทึก/รู้จักแล้วของ DCS ตัวนี้ — คืนรหัสเดิมในใบสั่งซื้อที่มันมาแทน (จากใบนี้หรือใบไหนก็ได้)
+  function savedOriginalOf(r, d) {
+    const dc = strip(d.part_number);
+    const saved = (subsByOrder[String(r.order_id)] || []).find(p => strip(p.substitute_code) === dc);
+    if (saved) return saved.original_code;
+    const it = (r.items || []).find(x => knownPairs.has(`${strip(x.part_code)}|${dc}`));
+    return it ? it.part_code : null;
   }
 
   // คู่นี้เคยบันทึกลงตารางอะไหล่ใช้แทนกันแล้วหรือยัง (จากใบไหนก็ได้)
@@ -260,9 +255,10 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     if (!dcs.length) return false;                     // มีเลขแล้วแต่ยังไม่พบในไฟล์ที่ upload
     if (r.system === "YAMAHA") {
       // รหัส YAMAHA ใน B2B ถูก pad เป็น 12 หลักท้ายด้วย 0 + มี received_part_number (ตัวที่ส่งมาแทน) ด้วย
-      const ys = (s) => { let c = strip(s); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
-      const code = ys(it.part_code);
-      return dcs.some(d => ys(d.part_number) === code || ys(d.received_part_number) === code);
+      const code = yamahaPad(it.part_code);
+      if (dcs.some(d => yamahaPad(d.part_number) === code || yamahaPad(d.received_part_number) === code)) return true;
+      if (substituteFor(r, it)) return true;             // มีอะไหล่ทดแทนส่งมาแทนแล้ว
+      return false;
     }
     if (dcs.some(d => strip(d.part_number) === strip(it.part_code))) return true;
     if (substituteFor(r, it)) return true;             // มีอะไหล่ทดแทนส่งมาแทนแล้ว
@@ -274,40 +270,74 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     const bo = boByOrder[`${r.system}-${r.order_id}`] || [];
     if (!bo.length) return false;
     if (r.system === "YAMAHA") {
-      const ys = (s) => { let c = strip(s); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
-      const code = ys(it.part_code);
-      return bo.some(b => ys(b.part_number) === code || ys(b.received_part_number) === code);
+      const code = yamahaPad(it.part_code);
+      return bo.some(b => yamahaPad(b.part_number) === code || yamahaPad(b.received_part_number) === code);
     }
     return bo.some(b => strip(b.part_number) === strip(it.part_code));
   }
 
   // รหัสทดแทนของอะไหล่ตัวนี้ (ถ้ามี) — ไว้แสดงต่อท้ายบรรทัดอะไหล่ที่ถูกแทน
+  // ดูจากคู่ที่บันทึกแล้วของใบนี้ → คู่ที่เคยบันทึกจากใบอื่น (เทียบกับ DCS ใบนี้) → คู่ที่จับเองรอบันทึก
   function substituteFor(r, it) {
-    if (dcsStatus(r) !== "mismatch") return null;
-    const pairs = subsOrders.has(String(r.order_id))
-      ? (subsByOrder[String(r.order_id)] || [])
-      : buildSubstitutePairs(r);
-    const p = pairs.find(x => x.original_code && strip(x.original_code) === strip(it.part_code));
-    return p ? p.substitute_code : null;
+    const key = `${r.system}-${r.order_id}`;
+    const oc = strip(it.part_code);
+    const saved = (subsByOrder[String(r.order_id)] || []).find(p => strip(p.original_code) === oc);
+    if (saved) return saved.substitute_code;
+    for (const d of unmatchedDcs(r)) {
+      if (knownPairs.has(`${oc}|${strip(d.part_number)}`)) return d.part_number;
+    }
+    const pend = (pendingPairs[key] || []).find(p => strip(p.original_code) === oc);
+    return pend ? pend.substitute_code : null;
+  }
+
+  // ติ๊กปุ่มหน้า ✗ แล้วกด "จับคู่" ที่รายการ DCS → เก็บคู่ไว้รอบันทึก
+  function pairWith(r, d) {
+    const key = `${r.system}-${r.order_id}`;
+    const oc = selItem[key];
+    if (!oc) { setMessage("⚠️ ติ๊กปุ่มหน้ารหัสอะไหล่ ✗ ที่ต้องการก่อน แล้วค่อยกดจับคู่"); return; }
+    const it = (r.items || []).find(x => strip(x.part_code) === oc);
+    if (!it) return;
+    setMessage("");
+    setPendingPairs(prev => {
+      const list = (prev[key] || []).filter(p => strip(p.substitute_code) !== strip(d.part_number) && strip(p.original_code) !== oc);
+      return {
+        ...prev,
+        [key]: [...list, {
+          original_code: it.part_code, original_name: it.part_name || "",
+          substitute_code: d.part_number, substitute_name: d.part_description || "",
+        }],
+      };
+    });
+    setSelItem(prev => ({ ...prev, [key]: null }));
+  }
+
+  function unpair(r, d) {
+    const key = `${r.system}-${r.order_id}`;
+    setPendingPairs(prev => ({ ...prev, [key]: (prev[key] || []).filter(p => strip(p.substitute_code) !== strip(d.part_number)) }));
   }
 
   async function saveSubstitute(r) {
     if (savingSub) return;
+    const key = `${r.system}-${r.order_id}`;
+    const all = pendingPairs[key] || [];
+    if (!all.length) return;
     setSavingSub(r.order_id);
     setMessage("");
     try {
       // ตัดคู่ที่เคยบันทึกไว้แล้ว (จากใบไหนก็ได้) — กันข้อมูลซ้ำในตาราง
-      const pairs = buildSubstitutePairs(r).filter(p => !pairKnown(p));
+      const pairs = all.filter(p => !pairKnown(p));
       if (!pairs.length) {
         setSubsOrders(prev => new Set([...prev, String(r.order_id)]));
-        setMessage("คู่อะไหล่ทดแทนของใบนี้เคยบันทึกไว้แล้ว — ไม่บันทึกซ้ำ");
+        setPendingPairs(prev => ({ ...prev, [key]: [] }));
+        setMessage("คู่อะไหล่ทดแทนนี้เคยบันทึกไว้แล้ว — ไม่บันทึกซ้ำ");
         setSavingSub(null);
         return;
       }
       await post(HONDA_API, { action: "save_part_substitutes", order_id: r.order_id, pairs, approved_by: currentUser?.name || "" });
       setSubsOrders(prev => new Set([...prev, String(r.order_id)]));
-      setSubsByOrder(prev => ({ ...prev, [String(r.order_id)]: pairs }));
+      setSubsByOrder(prev => ({ ...prev, [String(r.order_id)]: [...(prev[String(r.order_id)] || []), ...pairs] }));
       setKnownPairs(prev => new Set([...prev, ...pairs.map(p => `${strip(p.original_code)}|${strip(p.substitute_code)}`)]));
+      setPendingPairs(prev => ({ ...prev, [key]: [] }));
       setMessage(`✅ บันทึกอะไหล่ทดแทนแล้ว ${pairs.length} คู่ (ใบ ${r.vendor_po_no})`);
     } catch { setMessage("❌ บันทึกอะไหล่ทดแทนไม่สำเร็จ"); }
     setSavingSub(null);
@@ -330,7 +360,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
       const items = (r.items || []).map((it, k) => {
         const sub = substituteFor(r, it);
         const notOrdered = orderedInDcs(r, it) === false;
-        return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${esc(it.part_code || "-")} · ${esc(it.part_name || "-")} × ${Number(it.quantity) || 0}${partMatchesVehicle(r, it) ? ' <span style="color:#059669;font-weight:800">&#10003;</span>' : ""}${sub ? ` <span style="color:#d97706;font-weight:700">&#8594; ${esc(fmtPartCode(sub))}</span>` : ""}${notOrdered ? ' <span style="color:#dc2626;font-weight:800">&#10007;</span>' : ""}</div>`;
+        return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${esc(it.part_code || "-")} · ${esc(it.part_name || "-")} × ${Number(it.quantity) || 0}${partMatchesVehicle(r, it) ? ' <span style="color:#059669;font-weight:800">&#10003;</span>' : ""}${sub ? ` <span style="color:#d97706;font-weight:700">&#8594; ${esc(fmtCodeFor(r.system, sub))}</span>` : ""}${notOrdered ? ' <span style="color:#dc2626;font-weight:800">&#10007;</span>' : ""}</div>`;
       }).join("");
       const itemStatus = (r.items || []).map((it, k) => {
         const st = orderedInDcs(r, it);
@@ -349,12 +379,15 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
         <td>${esc(r.model_name || "-")}${(r.vehicle_series || r.vehicle_variant) ? `<div style="font-size:9px;color:#555">${esc([r.vehicle_series, r.vehicle_variant, r.vehicle_type].filter(Boolean).join(" / "))}${r.vehicle_color ? ` · สี ${esc(r.vehicle_color)}` : ""}</div>` : ""}</td>
         <td class="items">${items || "-"}</td>
         <td class="items">${itemStatus || "-"}</td>
-        <td class="c">${(() => {
-          const st = dcsStatus(r);
-          if (st !== "mismatch") return "";
-          const allPairs = buildSubstitutePairs(r);
-          const done = subsOrders.has(String(r.order_id)) || (allPairs.length > 0 && allPairs.every(pairKnown));
-          return done ? "ทดแทนแล้ว" : "มีอะไหล่ทดแทน (ยังไม่บันทึก)";
+        <td class="items">${(() => {
+          const un = unmatchedDcs(r);
+          if (!un.length) return "";
+          return un.map((d, k) => {
+            const orig = savedOriginalOf(r, d);
+            return `<div class="it${k < un.length - 1 ? " sep" : ""}">${esc(fmtCodeFor(r.system, d.part_number))}${d.part_description ? ` · ${esc(d.part_description)}` : ""}${orig
+              ? ` <span style="color:#059669;font-weight:700">&#10003; แทน ${esc(orig)}</span>`
+              : ' <span style="color:#dc2626">(ยังไม่จับคู่)</span>'}</div>`;
+          }).join("");
         })()}</td>
       </tr>`;
     });
@@ -425,6 +458,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
         <span><span style={{ color: "#d97706", fontWeight: 700, fontFamily: "monospace" }}>→ รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน</span>
         <span><span style={{ color: "#dc2626", fontWeight: 800 }}>✗</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS)</span>
         <span><span style={{ color: "#059669", fontWeight: 800 }}>✓</span> <span style={{ color: "#ea580c", fontWeight: 700 }}>ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์</span>
+        <span>ช่องสถานะอะไหล่ทดแทน = รายการในใบรับสั่งซื้อที่ไม่ตรงกับรหัสที่สั่ง — ติ๊กปุ่มหน้ารหัส ✗ แล้วกด "จับคู่" เพื่อเลือกอะไหล่ทดแทนเอง</span>
       </div>
 
       <div style={{ overflowX: "auto" }}>
@@ -472,6 +506,18 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                     {(r.items || []).length === 0 ? <div style={{ padding: "6px 10px" }}>-</div> : (r.items || []).map((it, k) => (
                       <div key={k} style={{ padding: "0 10px", height: 32, display: "flex", alignItems: "center", borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
                         <span style={{ whiteSpace: "nowrap" }}>
+                          {/* ปุ่มเลือกตัว ✗ ไว้จับคู่กับอะไหล่ทดแทนในช่องขวา (เฉพาะใบที่มี DCS ไม่ตรง) */}
+                          {orderedInDcs(r, it) === false && unmatchedDcs(r).length > 0 && (() => {
+                            const key = `${r.system}-${r.order_id}`;
+                            const oc = strip(it.part_code);
+                            return (
+                              <input type="radio" name={`selsub-${key}`} checked={selItem[key] === oc}
+                                onChange={() => {}}
+                                onClick={() => setSelItem(prev => ({ ...prev, [key]: prev[key] === oc ? null : oc }))}
+                                title="เลือกตัวนี้ แล้วกดปุ่ม 'จับคู่' ที่รายการในช่องสถานะอะไหล่ทดแทน"
+                                style={{ marginRight: 6, cursor: "pointer", accentColor: "#d97706" }} />
+                            );
+                          })()}
                           <span style={{ fontFamily: "monospace", fontSize: 12 }}>{it.part_code || "-"}</span>
                           {" · "}{it.part_name || "-"}{" × "}<b>{Number(it.quantity) || 0}</b>
                           {partMatchesVehicle(r, it) && (
@@ -480,8 +526,8 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                           {(() => {
                             const sub = substituteFor(r, it);
                             return sub ? (
-                              <span title="อะไหล่ทดแทนที่ DCS ส่งมาแทนตัวนี้" style={{ color: "#d97706", fontWeight: 700, marginLeft: 8, fontFamily: "monospace", fontSize: 12 }}>
-                                → {fmtPartCode(sub)}
+                              <span title="อะไหล่ทดแทนที่ใบรับสั่งซื้อส่งมาแทนตัวนี้" style={{ color: "#d97706", fontWeight: 700, marginLeft: 8, fontFamily: "monospace", fontSize: 12 }}>
+                                → {fmtCodeFor(r.system, sub)}
                               </span>
                             ) : null;
                           })()}
@@ -524,21 +570,50 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                       );
                     })}
                   </td>
-                  <td style={{ ...td, textAlign: "center" }}>
+                  <td style={{ ...td, textAlign: "left", fontSize: 12 }}>
                     {(() => {
-                      const st = dcsStatus(r);
-                      if (st !== "mismatch") return null; // ตรงกัน/ยังไม่มีข้อมูล upload — ไม่แสดงอะไร
-                      // ใบนี้บันทึกแล้ว หรือทุกคู่เคยถูกบันทึกจากใบอื่นแล้ว → ไม่ให้กดซ้ำ
-                      const allPairs = buildSubstitutePairs(r);
-                      if (subsOrders.has(String(r.order_id)) || (allPairs.length > 0 && allPairs.every(pairKnown))) {
-                        return <span style={{ color: "#059669", fontWeight: 700, fontSize: 12 }}>✓ ทดแทนแล้ว</span>;
-                      }
+                      // แสดงรายการในใบรับสั่งซื้อ (DCS) ที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ให้เลือกจับคู่เอง
+                      const un = unmatchedDcs(r);
+                      if (!un.length) return null;
+                      const key = `${r.system}-${r.order_id}`;
+                      const pend = pendingPairs[key] || [];
                       return (
-                        <button onClick={() => saveSubstitute(r)} disabled={savingSub === r.order_id}
-                          title="อะไหล่ที่ DCS ส่งมาไม่ตรงกับที่สั่ง — จับคู่เป็นอะไหล่ใช้แทนกัน (กลุ่มรหัสเดียวกัน/ชื่อคล้ายกัน) แล้วบันทึกลงตารางอะไหล่ใช้แทนกัน"
-                          style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: savingSub === r.order_id ? "wait" : "pointer", whiteSpace: "nowrap" }}>
-                          {savingSub === r.order_id ? "กำลังบันทึก…" : "บันทึกอะไหล่ทดแทน"}
-                        </button>
+                        <div>
+                          {un.map((d, k) => {
+                            const savedOrig = savedOriginalOf(r, d);
+                            const pendPair = pend.find(p => strip(p.substitute_code) === strip(d.part_number));
+                            return (
+                              <div key={k} style={{ marginBottom: 4, whiteSpace: "nowrap" }}>
+                                <span style={{ fontFamily: "monospace" }}>{fmtCodeFor(r.system, d.part_number)}</span>
+                                {d.part_description ? <span style={{ color: "#475569" }}> · {d.part_description}</span> : null}
+                                {savedOrig ? (
+                                  <span style={{ color: "#059669", fontWeight: 700, marginLeft: 6 }} title="บันทึกลงตารางอะไหล่ใช้แทนกันแล้ว">
+                                    ✓ แทน {savedOrig}
+                                  </span>
+                                ) : pendPair ? (
+                                  <span style={{ color: "#d97706", fontWeight: 700, marginLeft: 6 }} title="จับคู่แล้ว — รอกดบันทึก">
+                                    → แทน {pendPair.original_code}
+                                    <button onClick={() => unpair(r, d)} title="ยกเลิกคู่นี้"
+                                      style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer", fontWeight: 800, marginLeft: 2 }}>×</button>
+                                  </span>
+                                ) : (
+                                  <button onClick={() => pairWith(r, d)}
+                                    title="จับคู่กับรหัส ✗ ที่ติ๊กเลือกไว้ในช่องรายการอะไหล่"
+                                    style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 600, cursor: "pointer", marginLeft: 6 }}>
+                                    จับคู่
+                                  </button>
+                                )}
+                              </div>
+                            );
+                          })}
+                          {pend.length > 0 && (
+                            <button onClick={() => saveSubstitute(r)} disabled={savingSub === r.order_id}
+                              title="บันทึกคู่ที่จับไว้ลงตารางอะไหล่ใช้แทนกัน"
+                              style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: savingSub === r.order_id ? "wait" : "pointer", whiteSpace: "nowrap", marginTop: 2 }}>
+                              {savingSub === r.order_id ? "กำลังบันทึก…" : `บันทึกอะไหล่ทดแทน (${pend.length} คู่)`}
+                            </button>
+                          )}
+                        </div>
                       );
                     })()}
                   </td>
