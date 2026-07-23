@@ -144,6 +144,16 @@ function FeeMatchTab({ cfg, currentUser }) {
     } catch { setMessage("❌ ไม่สำเร็จ"); }
   }
 
+  // ลบรายการที่ไม่ใช่ค่านำพาจริง (เช่น ค่าน้ำมัน) — soft delete (excluded=TRUE) ฝั่ง workflow กัน Import ดึงกลับมาซ้ำ
+  async function deleteFee(row) {
+    if (!window.confirm(`ลบรายการ ${row.payment_no} (${row.pay_to || "-"} · ${fmt(row.total_amount)}) ออกจากค่านำพา?\nรายการที่ลบจะไม่ถูก Import กลับมาอีก`)) return;
+    try {
+      await postAPI(cfg.api, { action: "delete_delivery_fee", id: row.id });
+      setMessage(`✅ ลบรายการ ${row.payment_no} แล้ว`);
+      fetchData();
+    } catch { setMessage("❌ ลบไม่สำเร็จ"); }
+  }
+
   // key ที่ใช้บอกว่า row จับคู่แล้วหรือยัง (sale=เลขใบขาย, doc=เลขเอกสาร)
   const matchedOf = (r) => cfg.matchKind === "doc" ? r.matched_doc_no : r.matched_invoice_no;
 
@@ -266,9 +276,14 @@ function FeeMatchTab({ cfg, currentUser }) {
                       <span style={{ padding: "2px 8px", background: "#10b981", color: "#fff", borderRadius: 10, fontSize: 10, fontWeight: 600 }}>✅ Auto</span>
                     )}
                   </td>
-                  <td style={{ ...td, textAlign: "center" }}>
+                  <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
                     <button onClick={() => { setEditRow(r); setSearch(cfg.prefillSearch ? (r.pay_to || "") : ""); setSearchResults([]); }}
                       style={{ padding: "3px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>{cfg.matchKind === "doc" ? "✏️ เลือกเอกสาร" : (cfg.showDeliveryCols ? "✏️ แก้ไข" : "✏️ เลือกใบขาย")}</button>
+                    {/* ลบรายการที่ไม่ใช่ค่านำพาจริง (เช่น ค่าน้ำมัน) — soft delete ไม่ถูก Import กลับมาอีก */}
+                    {cfg.matchKind === "sale" && (
+                      <button onClick={() => deleteFee(r)}
+                        style={{ padding: "3px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 4, cursor: "pointer", fontSize: 11, fontWeight: 600, marginLeft: 4 }}>🗑 ลบ</button>
+                    )}
                   </td>
                 </tr>
               );
