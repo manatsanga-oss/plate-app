@@ -65,7 +65,6 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [filterDepType, setFilterDepType] = useState("all");
   const [currentPage, setCurrentPage] = useState(1);
   const PAGE_SIZE = 15;
-  const [dcsMismatchIds, setDcsMismatchIds] = useState(new Set());
   const [showRepairModal, setShowRepairModal] = useState(false);
   const [repairDeposits, setRepairDeposits] = useState([]);
   const [repairDocNo, setRepairDocNo] = useState("");
@@ -111,48 +110,9 @@ export default function SparePartsOrderPage({ currentUser }) {
     // แยก request แต่ละตัว ถ้าตัวใดพัง ตัวอื่นยังทำงานได้
     try {
       const r = await api("get_spare_orders");
-      const allOrders = norm(r);
-      setOrders(allOrders);
-      // เช็ค DCS อัตโนมัติสำหรับใบที่สถานะ "สั่งซื้อแล้ว"
-      const toCheck = allOrders.filter(o => (o.status === "สั่งซื้อแล้ว" || o.status === "มาครบ" || o.status === "อะไหล่ค้างส่ง") && o.vendor_po_no);
-      const mismatchSet = new Set();
-      for (const o of toCheck) {
-        try {
-          const dcsRes = await api("search_dcs_orders", { vendor_po_no: o.vendor_po_no });
-          const dcsItems = norm(dcsRes);
-          const detailRes = await api("get_spare_order_detail", { order_id: o.order_id });
-          const items = norm(detailRes);
-          const strip = s => (s || "").replace(/-/g, "").toUpperCase().trim();
-          const orderCodes = items.map(it => strip(it.part_code));
-          const invalidDcs = dcsItems.filter(d => !orderCodes.includes(strip(d.part_number)));
-          const allCorrect = invalidDcs.length === 0 && dcsItems.length > 0;
-          // เช็ค backorder
-          let hasBackorder = false;
-          try {
-            const boRes = await api("search_dcs_backorders", { vendor_po_no: o.vendor_po_no });
-            const boItems = norm(boRes).filter(b => Number(b.backorder_qty || 0) > 0);
-            hasBackorder = boItems.length > 0;
-          } catch {}
-          if (dcsItems.length > 0 && o.status === "สั่งซื้อแล้ว") {
-            const newStatus = hasBackorder ? "อะไหล่ค้างส่ง" : "มาครบ";
-            await api("update_order_status", { order_id: o.order_id, status: newStatus });
-          } else if (hasBackorder && o.status === "มาครบ") {
-            // เปลี่ยนจาก "มาครบ" เป็น "อะไหล่ค้างส่ง" ถ้าพบ backorder
-            await api("update_order_status", { order_id: o.order_id, status: "อะไหล่ค้างส่ง" });
-          } else if (!hasBackorder && dcsItems.length > 0 && o.status === "อะไหล่ค้างส่ง") {
-            // เปลี่ยนจาก "อะไหล่ค้างส่ง" → "มาครบ" เมื่อ backorder หายและมี DCS items แล้ว
-            await api("update_order_status", { order_id: o.order_id, status: "มาครบ" });
-          }
-          if (!allCorrect && dcsItems.length > 0) {
-            mismatchSet.add(o.order_id);
-          }
-        } catch {}
-      }
-      setDcsMismatchIds(mismatchSet);
-      // โหลดใหม่ถ้ามีการอัปเดต
-      if (toCheck.length > 0) {
-        try { const r2 = await api("get_spare_orders"); setOrders(norm(r2)); } catch {}
-      }
+      setOrders(norm(r));
+      // เช็ค DCS/ค้างส่งอัตโนมัติย้ายไปหน้า "รายการสั่งอะไหล่รายวัน" ที่เดียว (2026-07-23)
+      // หน้านี้เช็คเฉพาะตอนเปิดรายละเอียดใบ / กดปุ่ม "ตรวจสอบ DCS" ในป๊อปอัพ
     } catch {}
     // เงินมัดจำ: ดึงจากระบบมัดจำอะไหล่ (part_deposits — บันทึกเองหน้า "ระบบมัดจำอะไหล่") แทน upload NID เดิม (2026-07-21)
     try {
@@ -933,7 +893,7 @@ export default function SparePartsOrderPage({ currentUser }) {
             ) : filtered.length === 0 ? (
               <tr><td colSpan={14} style={center}>ไม่พบข้อมูล</td></tr>
             ) : filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE).map((o, i) => (
-              <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: dcsMismatchIds.has(o.order_id) ? "#fef9c3" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+              <tr key={o.order_id} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                 <td style={td}>
                   <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 600,
