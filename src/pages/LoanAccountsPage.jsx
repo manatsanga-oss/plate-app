@@ -10,6 +10,8 @@ const emptyForm = () => ({
   lender: "",
   loan_type: "ธนาคาร",
   account_no: "",
+  deposit_account: "",
+  deposit_account_id: "",
   principal: 0,
   current_balance: 0,
   interest_rate: 0,
@@ -39,8 +41,20 @@ export default function LoanAccountsPage({ currentUser }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all"); // all/active/paid/cancelled
   const [message, setMessage] = useState("");
+  const [bankAccounts, setBankAccounts] = useState([]); // บัญชีธนาคารบริษัท — ไว้เลือก "บัญชีที่โอนเงินเข้า"
 
-  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { fetchData(); fetchBankAccounts(); /* eslint-disable-next-line */ }, []);
+
+  async function fetchBankAccounts() {
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }),
+      });
+      const data = await res.json();
+      setBankAccounts(Array.isArray(data) ? data : []);
+    } catch { setBankAccounts([]); }
+  }
 
   async function fetchData() {
     setLoading(true); setMessage("");
@@ -96,6 +110,10 @@ export default function LoanAccountsPage({ currentUser }) {
       lender: r.lender || "",
       loan_type: r.loan_type || "ธนาคาร",
       account_no: r.account_no || "",
+      deposit_account: r.deposit_account || "",
+      // ข้อมูลเก่าที่บันทึกก่อนมี deposit_account_id — เทียบชื่อบัญชีหา id ให้อัตโนมัติ
+      deposit_account_id: r.deposit_account_id
+        || (bankAccounts.find(b => `${b.bank_name || ""} ${b.account_no || ""} ${b.account_name || ""}`.trim() === (r.deposit_account || ""))?.account_id ?? ""),
       principal: r.principal || 0,
       current_balance: r.current_balance || 0,
       interest_rate: r.interest_rate || 0,
@@ -115,7 +133,7 @@ export default function LoanAccountsPage({ currentUser }) {
   const filtered = rows.filter(r => {
     if (statusFilter !== "all" && r.status !== statusFilter) return false;
     if (!kw) return true;
-    const hay = [r.loan_name, r.lender, r.account_no, r.note].filter(Boolean).join(" ").toLowerCase();
+    const hay = [r.loan_name, r.lender, r.account_no, r.deposit_account, r.note].filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
 
@@ -199,6 +217,7 @@ export default function LoanAccountsPage({ currentUser }) {
                 <th style={th}>ประเภท</th>
                 <th style={th}>เจ้าหนี้</th>
                 <th style={th}>เลขที่สัญญา</th>
+                <th style={th}>บัญชีที่โอนเงินเข้า</th>
                 <th style={{ ...th, textAlign: "right" }}>ยอดต้น</th>
                 <th style={{ ...th, textAlign: "right" }}>คงเหลือ</th>
                 <th style={{ ...th, textAlign: "right" }}>อัตรา %</th>
@@ -223,6 +242,7 @@ export default function LoanAccountsPage({ currentUser }) {
                     <td style={td}>{r.loan_type || "-"}</td>
                     <td style={td}>{r.lender || "-"}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 12 }}>{r.account_no || "-"}</td>
+                    <td style={{ ...td, fontSize: 12, maxWidth: 180, whiteSpace: "normal" }}>{r.deposit_account || "-"}</td>
                     <td style={{ ...tdNum, fontWeight: 600 }}>{fmt(r.principal)}</td>
                     <td style={{ ...tdNum, fontWeight: 700, color: "#dc2626" }}>{fmt(r.current_balance)}</td>
                     <td style={tdNum}>{fmt(r.interest_rate)} <span style={{ fontSize: 10, color: "#6b7280" }}>/{r.interest_period}</span></td>
@@ -292,6 +312,25 @@ export default function LoanAccountsPage({ currentUser }) {
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label style={labelStyle}>เลขที่สัญญา / เลขที่บัญชี</label>
                 <input value={form.account_no} onChange={e => setForm(p => ({ ...p, account_no: e.target.value }))} style={inputStyle} />
+              </div>
+              <div style={{ gridColumn: "1 / span 2" }}>
+                <label style={labelStyle}>บัญชีที่โอนเงินเข้า <span style={{ color: "#9ca3af", fontWeight: 400 }}>(บัญชีบริษัทที่รับเงินกู้เข้า — แสดงในรายงานการเคลื่อนไหวบัญชีธนาคาร ณ วันที่เริ่ม ด้วยยอดต้น)</span></label>
+                <select value={String(form.deposit_account_id || "")}
+                  onChange={e => {
+                    const id = e.target.value;
+                    const b = bankAccounts.find(x => String(x.account_id) === id);
+                    setForm(p => ({ ...p, deposit_account_id: id, deposit_account: b ? `${b.bank_name || ""} ${b.account_no || ""} ${b.account_name || ""}`.trim() : "" }));
+                  }} style={inputStyle}>
+                  <option value="">-- ไม่ระบุ --</option>
+                  {bankAccounts.map(b => {
+                    const label = `${b.bank_name || ""} ${b.account_no || ""} ${b.account_name || ""}`.trim();
+                    return <option key={b.account_id} value={String(b.account_id)}>{label}</option>;
+                  })}
+                </select>
+                {/* ค่าเดิมที่บันทึกเป็นข้อความแต่จับคู่บัญชีไม่ได้ (ถูกปิดใช้งาน) */}
+                {form.deposit_account && !form.deposit_account_id && (
+                  <div style={{ fontSize: 11, color: "#d97706", marginTop: 3 }}>ค่าที่บันทึกไว้เดิม: {form.deposit_account} (เลือกบัญชีใหม่จากรายการเพื่อให้ขึ้นรายงานเคลื่อนไหว)</div>
+                )}
               </div>
               <div>
                 <label style={labelStyle}>ยอดต้น (ที่กู้)</label>
