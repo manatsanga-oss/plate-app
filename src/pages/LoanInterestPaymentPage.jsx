@@ -224,7 +224,7 @@ export default function LoanInterestPaymentPage({ currentUser }) {
                 {loans.length > 0 && <option disabled>──────────</option>}
                 {loans.map(l => (
                   <option key={l.loan_id} value={l.loan_id}>
-                    {l.loan_name} · {l.lender || "-"} · คงเหลือ ฿{fmt(l.current_balance)}
+                    {l.loan_name}{l.account_no ? ` · ${l.account_no}` : ""} · {l.lender || "-"} · คงเหลือ ฿{fmt(l.current_balance)}
                   </option>
                 ))}
               </select>
@@ -242,7 +242,7 @@ export default function LoanInterestPaymentPage({ currentUser }) {
               )}
               {selectedLoan && (
                 <div style={{ marginTop: 6, padding: "8px 12px", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 6, fontSize: 12 }}>
-                  📋 <strong>{selectedLoan.loan_name}</strong> · เจ้าหนี้: {selectedLoan.lender || "-"}<br />
+                  📋 <strong>{selectedLoan.loan_name}</strong>{selectedLoan.account_no ? ` · เลขที่ ${selectedLoan.account_no}` : ""} · เจ้าหนี้: {selectedLoan.lender || "-"}<br />
                   💰 ยอดต้นเดิม: {fmt(selectedLoan.principal)} · คงเหลือปัจจุบัน: <strong style={{ color: "#dc2626" }}>{fmt(selectedLoan.current_balance)}</strong>
                   {Number(selectedLoan.interest_rate) > 0 && (
                     <> · 📈 ดอก: {fmt(selectedLoan.interest_rate)}% / {selectedLoan.interest_period}</>
@@ -331,7 +331,7 @@ export default function LoanInterestPaymentPage({ currentUser }) {
             <select value={filterLoanId} onChange={e => setFilterLoanId(e.target.value)}
               style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}>
               <option value="">-- ทุกบัญชีกู้ --</option>
-              {loans.map(l => <option key={l.loan_id} value={l.loan_id}>{l.loan_name}</option>)}
+              {loans.map(l => <option key={l.loan_id} value={l.loan_id}>{l.loan_name}{l.account_no ? ` · ${l.account_no}` : ""}</option>)}
             </select>
             <input type="text" value={search} onChange={e => setSearch(e.target.value)}
               placeholder="🔍 ค้นหา"
