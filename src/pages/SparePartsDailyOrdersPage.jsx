@@ -223,6 +223,14 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
       .catch(() => {});
   }
 
+  // เลขที่ใบรับสั่งซื้อเพิ่มเติม (ใบสั่งตามหลัง) — จับด้วยเลขสั่งซื้อลูกค้า/ผู้จำหน่ายฐานเดียวกัน (เลขเดิม+อักษรท้าย) แต่ apc คนละใบ
+  // HONDA = dcs_spare_orders, YAMAHA = yamaha_b2b_orders (ทั้งคู่มี apc_order_no + customer_order_no)
+  function extraPoNos(r) {
+    if ((r.system !== "HONDA" && r.system !== "YAMAHA") || !r.vendor_po_no) return [];
+    const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
+    return [...new Set(dcs.map(d => d.apc_order_no).filter(a => a && String(a) !== String(r.vendor_po_no)))];
+  }
+
   // รายการในใบรับสั่งซื้อที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ตัวที่ศูนย์ส่งมาแทน/ส่งเกิน (HONDA=DCS, YAMAHA=B2B)
   function unmatchedDcs(r) {
     if ((r.system !== "HONDA" && r.system !== "YAMAHA") || !r.vendor_po_no) return [];
@@ -375,7 +383,8 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
       body += `<tr>
         <td class="c">${i + 1}</td><td class="c">${thaiTimeOf(r.created_at)}</td>
         <td>${esc(sys?.label || r.system)}</td>
-        <td>${esc(r.vendor_po_no || "-")}</td>
+        <td>${esc(r.deposit_doc_no || r.doc_no || "-")}</td>
+        <td>${esc(r.vendor_po_no || "-")}${extraPoNos(r).map(po => `<div style="color:#059669;font-size:9px;font-weight:700">+ ${esc(po)}</div>`).join("")}</td>
         <td>${esc(r.model_name || "-")}${(r.vehicle_series || r.vehicle_variant) ? `<div style="font-size:9px;color:#555">${esc([r.vehicle_series, r.vehicle_variant, r.vehicle_type].filter(Boolean).join(" / "))}${r.vehicle_color ? ` · สี ${esc(r.vehicle_color)}` : ""}</div>` : ""}</td>
         <td class="items">${items || "-"}</td>
         <td class="items">${itemStatus || "-"}</td>
@@ -403,8 +412,8 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
 <h2>รายการสั่งอะไหล่รายวัน</h2>
 <div class="info">วันที่: ${fmtThaiDate(date)} | ระบบ: ${filterSystem === "all" ? "ทั้งหมด" : (SYSTEMS.find(s => s.key === filterSystem)?.label || filterSystem)} | ${filtered.length} ใบ · ${totalItems} ชิ้น | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
 <div class="info"><span style="color:#059669;font-weight:800">&#10003;</span> = เคยเบิกกับรุ่นรถนี้ (ตรงรุ่น) &nbsp;·&nbsp; <span style="color:#d97706;font-weight:700">&#8594; รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน &nbsp;·&nbsp; <span style="color:#dc2626;font-weight:800">&#10007;</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS) &nbsp;·&nbsp; <span style="color:#059669;font-weight:800">&#10003;</span> <span style="color:#ea580c;font-weight:700">ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์</div>
-<table><thead><tr><th>#</th><th>เวลา</th><th>ระบบ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th><th>สถานะ</th><th>สถานะอะไหล่ทดแทน</th></tr></thead>
-<tbody>${body || `<tr><td colspan="8" class="c">ไม่มีรายการ</td></tr>`}</tbody></table>
+<table><thead><tr><th>#</th><th>เวลา</th><th>ระบบ</th><th>เลขที่ใบมัดจำ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th><th>สถานะ</th><th>สถานะอะไหล่ทดแทน</th></tr></thead>
+<tbody>${body || `<tr><td colspan="9" class="c">ไม่มีรายการ</td></tr>`}</tbody></table>
 </body></html>`);
     w.document.close();
     setTimeout(() => w.print(), 300);
@@ -468,6 +477,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
               <th style={th}>#</th>
               <th style={th}>เวลา</th>
               <th style={th}>ระบบ</th>
+              <th style={th}>เลขที่ใบมัดจำ</th>
               <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
               <th style={th}>รุ่นรถ</th>
               <th style={th}>รายการอะไหล่</th>
@@ -477,9 +487,9 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={center}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={9} style={center}>กำลังโหลด...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={8} style={center}>ไม่มีรายการสั่งอะไหล่ในวันนี้</td></tr>
+              <tr><td colSpan={9} style={center}>ไม่มีรายการสั่งอะไหล่ในวันนี้</td></tr>
             ) : filtered.map((r, i) => {
               const sys = SYSTEMS.find(s => s.key === r.system);
               return (
@@ -491,7 +501,16 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                       {sys?.label || r.system}
                     </span>
                   </td>
-                  <td style={td}>{r.vendor_po_no || "-"}</td>
+                  <td style={td}>{r.deposit_doc_no || r.doc_no || "-"}</td>
+                  <td style={td}>
+                    {r.vendor_po_no || "-"}
+                    {extraPoNos(r).map(po => (
+                      <div key={po} title="ใบรับสั่งซื้อเพิ่ม — สั่งตามหลังด้วยเลขสั่งซื้อลูกค้าเดิมต่อท้ายอักษร"
+                        style={{ fontSize: 11, color: "#059669", fontWeight: 700, marginTop: 2 }}>
+                        + {po}
+                      </div>
+                    ))}
+                  </td>
                   <td style={td}>
                     <div>{r.model_name || "-"}</div>
                     {/* รุ่น/แบบ/type/สี ที่บันทึกไว้ในใบสั่งซื้อ (ค้นจากเลขตัวถังใบมัดจำ — มีเฉพาะระบบ HONDA) */}
