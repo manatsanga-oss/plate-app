@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import catalog from "../data/parts_catalog";
+import BIKE_HOTSPOTS from "../data/bike_hotspots";
 import CustomerPickerModal from "./CustomerPickerModal";
 import { openQuotePrint, recordToQuoteData, quoteApi, nowParts, QUOTE_URL } from "./quotePrint";
 
@@ -38,6 +39,104 @@ async function fetchPrice(code) {
   } catch {
     return null;
   }
+}
+
+// ---- แผงกดที่ตัวรถ → เห็นรหัสอะไหล่ (แสดงเฉพาะรุ่น/สีที่วางจุดไว้ใน src/data/bike_hotspots.js) ----
+function BikeHotspotPanel({ data, isPicked, togglePart, modelName }) {
+  const [mirror, setMirror] = useState(false);
+  const [selIdx, setSelIdx] = useState(null);
+  const [info, setInfo] = useState({}); // code → {name, price} จาก part-price-api (โหลดตอนกดจุด)
+
+  const otherSide = data.view === "ซ้าย" ? "ขวา" : "ซ้าย";
+  const visible = mirror ? otherSide : data.view;
+
+  const openSpot = (i) => {
+    setSelIdx(i);
+    for (const it of data.hotspots[i].items) {
+      if (info[it.code] === undefined) {
+        setInfo((m) => ({ ...m, [it.code]: null }));
+        fetchPrice(it.code).then((r) => setInfo((m) => ({ ...m, [it.code]: r || { name: "", price: null } })));
+      }
+    }
+  };
+
+  const sel = selIdx != null ? data.hotspots[selIdx] : null;
+  const rows = sel ? [...sel.items].sort((a, b) => ((a.side === visible ? 0 : 1) - (b.side === visible ? 0 : 1))) : [];
+
+  return (
+    <div style={{ border: "1px solid #dbe3ef", borderRadius: 12, padding: 12, marginBottom: 12, background: "#fbfcfe" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 6 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#0b2f6b" }}>
+          🖐️ กดที่ตัวรถ ดูรหัสอะไหล่
+          <span style={{ fontWeight: 400, color: "#64748b", marginLeft: 8 }}>มุมมอง: ด้าน{visible}ของรถ{mirror ? " (ภาพกลับด้าน)" : ""}</span>
+        </div>
+        <button onClick={() => setMirror(!mirror)}
+          style={{ fontSize: 12.5, fontWeight: 600, border: "1px solid #cbd5e1", background: "#fff", color: "#1e3a8a", borderRadius: 7, padding: "4px 12px", cursor: "pointer" }}>
+          ⇄ พลิกไปด้าน{mirror ? data.view : otherSide}
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 300px", gap: 12, alignItems: "start" }}>
+        <div style={{ position: "relative", lineHeight: 0, userSelect: "none" }}>
+          <img src={data.img} alt={`${modelName} มุมด้าน${visible}`}
+            style={{ width: "100%", display: "block", borderRadius: 8, transform: mirror ? "scaleX(-1)" : "none" }} />
+          {data.hotspots.map((h, i) => (
+            <button key={i} onClick={() => openSpot(i)} title={h.label}
+              style={{
+                position: "absolute", left: `${mirror ? 100 - h.x : h.x}%`, top: `${h.y}%`,
+                width: 20, height: 20, margin: "-10px 0 0 -10px", borderRadius: "50%", padding: 0, cursor: "pointer",
+                background: i === selIdx ? "#d97706" : "#2563eb", border: "2.5px solid #fff",
+                boxShadow: "0 1px 5px rgba(0,0,0,0.35)",
+              }} />
+          ))}
+        </div>
+
+        <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, padding: 10, background: "#fff", fontSize: 13, minHeight: 120 }}>
+          {!sel ? (
+            <div style={{ color: "#94a3b8", textAlign: "center", padding: "30px 6px" }}>👆 แตะจุดสีน้ำเงินบนตัวรถ</div>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700, marginBottom: 2 }}>{sel.label}</div>
+              {sel.items.some((it) => it.side) && (
+                <div style={{ fontSize: 11.5, color: "#64748b", marginBottom: 6 }}>มีแยกซ้าย/ขวา — ฝั่งที่เห็นในมุมนี้ถูกไฮไลต์</div>
+              )}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {rows.map((it) => {
+                  const inf = info[it.code];
+                  const sel2 = isPicked(it.code, modelName);
+                  return (
+                    <div key={it.code} style={{
+                      border: it.side === visible ? "1.5px solid #d97706" : "1px solid #e2e8f0",
+                      background: it.side === visible ? "#fff7e8" : "#fff", borderRadius: 8, padding: "6px 8px",
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                        {it.side && <span style={{ fontSize: 10.5, fontWeight: 700, background: "#dbeafe", color: "#0b2f6b", borderRadius: 4, padding: "0 6px" }}>{it.side}</span>}
+                        <span style={{ fontSize: 12.5 }}>{(inf && inf.name) || it.name || "—"}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, flexWrap: "wrap" }}>
+                        <code style={{ fontSize: 12.5, fontWeight: 600, background: "#eef2f8", borderRadius: 5, padding: "1px 7px" }}>{it.code}</code>
+                        <span style={{ fontSize: 12, color: "#64748b" }}>
+                          {inf === null ? "กำลังค้นราคา…" : inf && inf.price != null ? <b style={{ color: "#0f172a" }}>{fmtMoney(inf.price)} บ.</b> : "ไม่มีราคา"}
+                        </span>
+                        <button onClick={() => togglePart({ code: it.code })}
+                          style={{
+                            fontSize: 11.5, fontWeight: 600, borderRadius: 6, padding: "2px 10px", cursor: "pointer",
+                            border: sel2 ? "1px solid #16a34a" : "1px solid #cbd5e1",
+                            background: sel2 ? "#dcfce7" : "#fff", color: sel2 ? "#15803d" : "#334155",
+                          }}>
+                          {sel2 ? "✓ เพิ่มแล้ว (กดเอาออก)" : "+ เพิ่ม"}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export default function PartImageLookupPage({ currentUser } = {}) {
@@ -503,6 +602,16 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
           <div style={{ fontSize: 12, color: "#2563eb", marginBottom: 8 }}>
             👉 ดับเบิลคลิกที่รหัสบนรูป เพื่อเพิ่ม · ดับเบิลคลิกซ้ำที่เดิม เพื่อยกเลิก
           </div>
+
+          {/* แผงกดที่ตัวรถ (เฉพาะรุ่น/สีที่มีข้อมูลจุดใน bike_hotspots.js) */}
+          {BIKE_HOTSPOTS[`${model.model}|${current.page}`] && (
+            <BikeHotspotPanel
+              data={BIKE_HOTSPOTS[`${model.model}|${current.page}`]}
+              modelName={model.model}
+              isPicked={isPicked}
+              togglePart={togglePart}
+            />
+          )}
 
           {pageList.map((pg, idx) => {
             const pParts = pagesMap[String(pg)] || [];
