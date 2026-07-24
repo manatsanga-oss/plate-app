@@ -30,6 +30,7 @@ export default function FastMovingPage() {
   const [iStockNakhonluang, setIStockNakhonluang] = useState(false);
   const [iDiscontinued, setIDiscontinued] = useState(false);
   const [filterDiscontinued, setFilterDiscontinued] = useState("active"); // active | discontinued | all
+  const [imgPopup, setImgPopup] = useState(null); // { id, part_code, product_name, has_image, loading, image_data, saving, msg }
   // ===== Add Part Popup =====
   const [addPopup, setAddPopup] = useState(false);
   const [aBrand, setABrand] = useState("HONDA");
@@ -221,6 +222,75 @@ export default function FastMovingPage() {
       alert("❌ บันทึกไม่สำเร็จ: " + e.message);
     }
     setInfoPopup(null);
+  }
+
+  // ---- รูปอะไหล่ ----
+  async function openImagePopup(r) {
+    setImgPopup({ id: r.id, part_code: r.part_code, product_name: r.product_name, has_image: !!r.has_image, loading: !!r.has_image, image_data: null, saving: false, msg: "" });
+    if (r.has_image) {
+      try {
+        const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_part_image", id: r.id }) });
+        const data = await res.json().catch(() => null);
+        const rec = Array.isArray(data) ? data[0] : data;
+        setImgPopup(m => (m && m.id === r.id)
+          ? { ...m, loading: false, image_data: rec?.image_data || null, msg: rec?.image_data ? "" : "ไม่พบรูปในระบบ" }
+          : m);
+      } catch {
+        setImgPopup(m => (m && m.id === r.id) ? { ...m, loading: false, msg: "โหลดรูปไม่สำเร็จ" } : m);
+      }
+    }
+  }
+
+  function readAndShrinkImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("read fail"));
+      reader.onload = () => {
+        const dataUrl = reader.result;
+        if (file.size <= 400 * 1024) { resolve({ dataUrl, mime: file.type || "image/png" }); return; }
+        const img = new Image();
+        img.onerror = () => reject(new Error("decode fail"));
+        img.onload = () => {
+          const maxW = 900;
+          const scale = Math.min(1, maxW / img.width);
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve({ dataUrl: canvas.toDataURL("image/jpeg", 0.85), mime: "image/jpeg" });
+        };
+        img.src = dataUrl;
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function uploadPartImage(file) {
+    if (!file || !imgPopup) return;
+    setImgPopup(m => ({ ...m, saving: true, msg: "" }));
+    try {
+      const { dataUrl, mime } = await readAndShrinkImage(file);
+      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save_part_image", id: imgPopup.id, image_data: dataUrl, mime_type: mime }) });
+      const data = await res.json().catch(() => null);
+      if (!data || (Array.isArray(data) && data.length === 0)) throw new Error("no response");
+      setImgPopup(m => m ? { ...m, saving: false, has_image: true, image_data: dataUrl } : m);
+      setRows(prev => prev.map(x => x.id === imgPopup.id ? { ...x, has_image: true } : x));
+    } catch {
+      setImgPopup(m => m ? { ...m, saving: false, msg: "บันทึกรูปไม่สำเร็จ" } : m);
+    }
+  }
+
+  async function deletePartImage() {
+    if (!imgPopup) return;
+    if (!window.confirm("ลบรูปของอะไหล่นี้?")) return;
+    setImgPopup(m => ({ ...m, saving: true, msg: "" }));
+    try {
+      await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete_part_image", id: imgPopup.id }) });
+      setRows(prev => prev.map(x => x.id === imgPopup.id ? { ...x, has_image: false } : x));
+      setImgPopup(null);
+    } catch {
+      setImgPopup(m => m ? { ...m, saving: false, msg: "ลบรูปไม่สำเร็จ" } : m);
+    }
   }
 
   const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -432,6 +502,7 @@ export default function FastMovingPage() {
               <th style={th}>กลุ่มสินค้า</th>
               <th style={th}>รหัสอะไหล่</th>
               <th style={th}>ชื่อสินค้า</th>
+              <th style={{ ...th, textAlign: "center" }}>รูป</th>
               <th style={th}>รุ่นที่ใช้</th>
               <th style={{ ...th, textAlign: "right" }}>คงเหลือ</th>
               <th style={{ ...th, textAlign: "right" }}>ราคา</th>
@@ -459,6 +530,13 @@ export default function FastMovingPage() {
                         (ยกเลิกผลิต)
                       </span>
                     )}
+                  </td>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    <button onClick={() => openImagePopup(r)} title={r.has_image ? "ดู/เปลี่ยนรูป" : "อัปโหลดรูป"}
+                      style={{ padding: "3px 8px", fontSize: 14, border: "none", borderRadius: 6, cursor: "pointer",
+                        background: r.has_image ? "#dbeafe" : "#f3f4f6", color: r.has_image ? "#1e40af" : "#9ca3af" }}>
+                      {r.has_image ? "🖼️" : "📷"}
+                    </button>
                   </td>
                   <td onClick={() => openEdit(r)} style={{ ...td, whiteSpace: "normal", maxWidth: 220, cursor: "pointer" }} title="คลิกเพื่อดู/แก้ไขรายละเอียด แบบ/type">
                     {Array.isArray(r.models) && r.models.length > 0 ? (
@@ -498,6 +576,46 @@ export default function FastMovingPage() {
                 </button>
               </React.Fragment>
             ))}
+        </div>
+      )}
+
+      {/* ===== Popup รูปอะไหล่ ===== */}
+      {imgPopup && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 480, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>🖼️ รูปอะไหล่</h3>
+              <button onClick={() => setImgPopup(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+            </div>
+            <div style={{ marginBottom: 12, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, fontSize: 13, borderLeft: "3px solid #1e40af" }}>
+              <div style={{ fontWeight: 700, color: "#072d6b" }}>{imgPopup.part_code}</div>
+              <div style={{ color: "#374151", marginTop: 2 }}>{imgPopup.product_name || "-"}</div>
+            </div>
+
+            <div style={{ marginBottom: 12, minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", background: "#f9fafb", borderRadius: 10, border: "1px dashed #d1d5db", padding: 8 }}>
+              {imgPopup.loading ? (
+                <span style={{ color: "#6b7280", fontSize: 13 }}>กำลังโหลดรูป...</span>
+              ) : imgPopup.image_data ? (
+                <img src={imgPopup.image_data} alt={imgPopup.part_code} style={{ maxWidth: "100%", maxHeight: 340, borderRadius: 8 }} />
+              ) : (
+                <span style={{ color: "#9ca3af", fontSize: 13 }}>ยังไม่มีรูป — เลือกไฟล์เพื่ออัปโหลด</span>
+              )}
+            </div>
+
+            {imgPopup.msg && <div style={{ marginBottom: 10, padding: "6px 10px", background: "#fef2f2", color: "#b91c1c", borderRadius: 6, fontSize: 13 }}>{imgPopup.msg}</div>}
+
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ flex: 1, padding: "9px", fontSize: 13, background: imgPopup.saving ? "#9ca3af" : "#10b981", color: "#fff", borderRadius: 8, cursor: imgPopup.saving ? "not-allowed" : "pointer", fontWeight: 700, textAlign: "center" }}>
+                {imgPopup.saving ? "กำลังบันทึก..." : imgPopup.image_data ? "เปลี่ยนรูป" : "เลือกรูป / อัปโหลด"}
+                <input type="file" accept="image/*" disabled={imgPopup.saving} style={{ display: "none" }}
+                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadPartImage(f); }} />
+              </label>
+              {imgPopup.has_image && (
+                <button onClick={deletePartImage} disabled={imgPopup.saving} style={{ padding: "9px 14px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: imgPopup.saving ? "not-allowed" : "pointer" }}>ลบรูป</button>
+              )}
+              <button onClick={() => setImgPopup(null)} style={{ padding: "9px 16px", fontSize: 13, background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ปิด</button>
+            </div>
+          </div>
         </div>
       )}
 
