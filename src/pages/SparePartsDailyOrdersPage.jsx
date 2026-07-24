@@ -68,6 +68,16 @@ const fmtYamahaCode = (s) => {
 const fmtCodeFor = (system, s) => system === "YAMAHA" ? fmtYamahaCode(s) : fmtPartCode(s);
 // รหัส YAMAHA เทียบกันด้วยรูป pad 12 หลัก
 const yamahaPad = (s) => { let c = strip(s); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
+// รหัสสำหรับเทียบกับรายงานรับอะไหล่: ตัด pad 12→10 ของ YAMAHA (ตารางรับเก็บรูป 10 หลักมีขีด)
+const normReceiptCode = (system, s) => {
+  let c = strip(s);
+  if (system === "YAMAHA" && c.length === 12 && c.endsWith("00")) c = c.slice(0, 10);
+  return c;
+};
+const fmtShortDate = (v) => {
+  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${Number(m[3])}/${Number(m[2])}` : String(v || "");
+};
 
 export default function SparePartsDailyOrdersPage({ currentUser }) {
   const [date, setDate] = useState(todayISO());
@@ -83,6 +93,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   const [knownPairs, setKnownPairs] = useState(new Set()); // "เดิม|ทดแทน" ทุกคู่ที่เคยบันทึกจากใบไหนก็ได้ — กันบันทึกซ้ำ
   const [savingSub, setSavingSub] = useState(null);
   const [stockCache, setStockCache] = useState({});        // strip(code) → {total, parts:[{source,qty,location}]} ของตัวที่ยังไม่สั่ง
+  const [receiptMap, setReceiptMap] = useState({});        // `${system}|${normCode}` → {date, doc} รับเข้าครั้งแรกตั้งแต่วันที่เลือก (รายงานรับอะไหล่)
   const [selItem, setSelItem] = useState({});              // orderKey → strip(part_code) ของตัว ✗ ที่ติ๊กเลือกไว้รอจับคู่
   const [pendingPairs, setPendingPairs] = useState({});    // orderKey → [{original_code, original_name, substitute_code, substitute_name}] คู่ที่จับเองแล้วยังไม่บันทึก
 
@@ -122,6 +133,59 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   }, [rows, dcsByOrder, subsByOrder, knownPairs]);
 
   useEffect(() => { load(date); /* eslint-disable-next-line */ }, [date]);
+
+  // เช็คของถึง: รวมรหัสที่สั่ง + รหัสในใบรับสั่งซื้อ (เผื่อรับเป็นอะไหล่ทดแทน) → ถามรายงานรับอะไหล่ตั้งแต่วันที่สั่ง
+  useEffect(() => {
+    if (!rows.length) { setReceiptMap({}); return; }
+    const codes = { HONDA: new Set(), YAMAHA: new Set() };
+    for (const r of rows) {
+      if (r.system !== "HONDA" && r.system !== "YAMAHA") continue;
+      for (const it of r.items || []) codes[r.system].add(normReceiptCode(r.system, it.part_code));
+      for (const d of dcsByOrder[`${r.system}-${r.order_id}`] || []) {
+        if (d.part_number) codes[r.system].add(normReceiptCode(r.system, d.part_number));
+        if (d.received_part_number) codes[r.system].add(normReceiptCode(r.system, d.received_part_number));
+      }
+    }
+    let alive = true;
+    (async () => {
+      const jobs = [];
+      for (const sys of ["HONDA", "YAMAHA"]) {
+        const list = [...codes[sys]].filter(Boolean);
+        if (!list.length) continue;
+        jobs.push(
+          post(sys === "HONDA" ? HONDA_API : YAMAHA_API, { action: "search_part_receipts", codes_csv: list.join(","), since: date })
+            .then(norm).catch(() => [])
+            .then(res => ({ sys, res }))
+        );
+      }
+      const done = await Promise.all(jobs);
+      if (!alive) return;
+      const m = {};
+      for (const { sys, res } of done) {
+        for (const rec of res) {
+          if (!rec || !rec.part_code) continue;
+          const key = `${sys}|${normReceiptCode(sys, rec.part_code)}`;
+          if (!m[key]) m[key] = { date: rec.receipt_date, doc: rec.pd_no || rec.receipt_no || "" };
+        }
+      }
+      setReceiptMap(m);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [rows, dcsByOrder, date]);
+
+  // ของถึงแล้วหรือยัง — เช็ครหัสที่สั่งตรง ๆ ก่อน แล้วค่อยเช็ครหัสอะไหล่ทดแทน (ถ้ามีคู่)
+  function arrivalOf(r, it) {
+    if (r.system !== "HONDA" && r.system !== "YAMAHA") return null;
+    const direct = receiptMap[`${r.system}|${normReceiptCode(r.system, it.part_code)}`];
+    if (direct) return { ...direct, viaSub: false };
+    const sub = substituteFor(r, it);
+    if (sub) {
+      const viaSub = receiptMap[`${r.system}|${normReceiptCode(r.system, sub)}`];
+      if (viaSub) return { ...viaSub, viaSub: true, subCode: sub };
+    }
+    return null;
+  }
 
   // โหลดประวัติเบิกอะไหล่ตามรุ่นครั้งเดียว — ไว้เทียบกับ รุ่น/แบบ/type ที่บันทึกในใบสั่งซื้อ
   useEffect(() => {
@@ -378,7 +442,9 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
         const txt = isBackordered(r, it) ? '<span style="color:#059669;font-weight:800">&#10003;</span> <span style="color:#ea580c;font-weight:700">ค้างส่ง</span>'
           : st === true ? '<span style="color:#059669;font-weight:800">&#10003;</span>'
           : st === false ? `<span style="color:#dc2626;font-weight:800">&#10007;</span>${stockTxt}` : "-";
-        return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${txt}</div>`;
+        const arr = arrivalOf(r, it);
+        const arrTxt = arr ? ` <span style="color:#0d9488;font-weight:700">&#128230; ถึงแล้ว ${esc(fmtShortDate(arr.date))}${arr.viaSub ? " (ทดแทน)" : ""}</span>` : "";
+        return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${txt}${arrTxt}</div>`;
       }).join("");
       body += `<tr>
         <td class="c">${i + 1}</td><td class="c">${thaiTimeOf(r.created_at)}</td>
@@ -411,7 +477,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
 @media print{body{padding:0}}</style></head><body>
 <h2>รายการสั่งอะไหล่รายวัน</h2>
 <div class="info">วันที่: ${fmtThaiDate(date)} | ระบบ: ${filterSystem === "all" ? "ทั้งหมด" : (SYSTEMS.find(s => s.key === filterSystem)?.label || filterSystem)} | ${filtered.length} ใบ · ${totalItems} ชิ้น | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
-<div class="info"><span style="color:#059669;font-weight:800">&#10003;</span> = เคยเบิกกับรุ่นรถนี้ (ตรงรุ่น) &nbsp;·&nbsp; <span style="color:#d97706;font-weight:700">&#8594; รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน &nbsp;·&nbsp; <span style="color:#dc2626;font-weight:800">&#10007;</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS) &nbsp;·&nbsp; <span style="color:#059669;font-weight:800">&#10003;</span> <span style="color:#ea580c;font-weight:700">ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์</div>
+<div class="info"><span style="color:#059669;font-weight:800">&#10003;</span> = เคยเบิกกับรุ่นรถนี้ (ตรงรุ่น) &nbsp;·&nbsp; <span style="color:#d97706;font-weight:700">&#8594; รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน &nbsp;·&nbsp; <span style="color:#dc2626;font-weight:800">&#10007;</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS) &nbsp;·&nbsp; <span style="color:#059669;font-weight:800">&#10003;</span> <span style="color:#ea580c;font-weight:700">ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์ &nbsp;·&nbsp; <span style="color:#0d9488;font-weight:700">&#128230; ถึงแล้ว</span> = มีรับเข้าในรายงานรับอะไหล่ตั้งแต่วันที่สั่ง (รวมรับเป็นอะไหล่ทดแทน)</div>
 <table><thead><tr><th>#</th><th>เวลา</th><th>ระบบ</th><th>เลขที่ใบมัดจำ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th><th>สถานะ</th><th>สถานะอะไหล่ทดแทน</th></tr></thead>
 <tbody>${body || `<tr><td colspan="9" class="c">ไม่มีรายการ</td></tr>`}</tbody></table>
 </body></html>`);
@@ -467,6 +533,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
         <span><span style={{ color: "#d97706", fontWeight: 700, fontFamily: "monospace" }}>→ รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน</span>
         <span><span style={{ color: "#dc2626", fontWeight: 800 }}>✗</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS)</span>
         <span><span style={{ color: "#059669", fontWeight: 800 }}>✓</span> <span style={{ color: "#ea580c", fontWeight: 700 }}>ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์</span>
+        <span><span style={{ color: "#0d9488", fontWeight: 700 }}>📦 ถึงแล้ว</span> = มีรับเข้าในรายงานรับอะไหล่ตั้งแต่วันที่สั่ง (จับคู่รหัส+วันที่ · รวมกรณีรับเป็นอะไหล่ทดแทน)</span>
         <span>ช่องสถานะอะไหล่ทดแทน = รายการในใบรับสั่งซื้อที่ไม่ตรงกับรหัสที่สั่ง — ติ๊กปุ่มหน้ารหัส ✗ แล้วกด "จับคู่" เพื่อเลือกอะไหล่ทดแทนเอง</span>
       </div>
 
@@ -584,6 +651,15 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                             ) : (
                               <span style={{ color: "#9ca3af" }}>-</span>
                             )}
+                            {(() => {
+                              const arr = arrivalOf(r, it);
+                              return arr ? (
+                                <span title={`มีรับเข้าในรายงานรับอะไหล่ ${arr.doc ? `(${arr.doc})` : ""}${arr.viaSub ? ` — รับเป็นอะไหล่ทดแทน ${fmtCodeFor(r.system, arr.subCode)}` : ""}`}
+                                  style={{ color: "#0d9488", fontWeight: 700, marginLeft: 8 }}>
+                                  📦 ถึงแล้ว {fmtShortDate(arr.date)}{arr.viaSub ? " (ทดแทน)" : ""}
+                                </span>
+                              ) : null;
+                            })()}
                           </span>
                         </div>
                       );
