@@ -45,14 +45,19 @@ function advise(sold, prev, stock, promo, received) {
   const rationed = received != null && sold >= 3 && received < sold * 0.5; // ดีมานด์มาก แต่รับเข้าน้อย = โดนจำกัดโควตา
 
   let pr; // promo
-  if (rationed) pr = { dir: "cut", level: "มาก", reason: "ขายดีแต่ของเข้าน้อย (โดนจำกัดโควตา) — ตัดโปร เอางบไปรุ่นที่ระบายได้" };
+  // สต๊อกหมด = ไม่มีของให้ขาย — ไม่ต้องทำโปร/ค่าคอม (ถ้ามีโปรค้างอยู่ให้ตัดออกประหยัดงบ)
+  if (stock === 0) pr = hasPromo
+    ? { dir: "cut", level: "มาก", reason: "สต๊อกหมด — ไม่ต้องทำโปร ตัดโปรที่มีอยู่ประหยัดงบ" }
+    : { dir: "hold", level: "-", reason: "สต๊อกหมด — ไม่ต้องทำโปร" };
+  else if (rationed) pr = { dir: "cut", level: "มาก", reason: "ขายดีแต่ของเข้าน้อย (โดนจำกัดโควตา) — ตัดโปร เอางบไปรุ่นที่ระบายได้" };
   else if (sell >= 0.8 || (up && mos < 1)) pr = { dir: hasPromo ? "down" : "hold", level: sell >= 0.9 ? "มาก" : "กลาง", reason: "ขายดี/ของขาด — ไม่ต้องกระตุ้น" + (hasPromo ? " ลดโปรประหยัดงบ" : "") };
   else if (sell < 0.4 && mos >= 2) pr = { dir: "up", level: mos >= 4 ? "มาก" : "กลาง", reason: `ของจม ~${mos.toFixed(1)} เดือน — เพิ่มโปรกระตุ้นระบาย` };
   else if (dn) pr = { dir: "up", level: "กลาง", reason: "ยอดขายร่วง — เพิ่มโปรพยุงยอด" };
   else pr = { dir: "hold", level: "-", reason: "สมดุล — คงโปร" };
 
   let pc; // price
-  if (sell >= 0.85 && mos < 0.7 && !dn) pc = { dir: "up", level: "น้อย", reason: "ดีมานด์ล้น ของขาด — ขยับราคาขึ้นได้" };
+  if (stock === 0) pc = { dir: "hold", level: "-", reason: "สต๊อกหมด — ไม่ต้องปรับราคา รอของเข้าก่อน" };
+  else if (sell >= 0.85 && mos < 0.7 && !dn) pc = { dir: "up", level: "น้อย", reason: "ดีมานด์ล้น ของขาด — ขยับราคาขึ้นได้" };
   else if (sell < 0.35 && mos >= 2.5) pc = { dir: "down", level: mos >= 4 ? "กลาง" : "น้อย", reason: "ของค้างนาน — ลดราคาช่วยระบาย" };
   else pc = { dir: "hold", level: "-", reason: "คงราคา" };
 
@@ -261,14 +266,18 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
         String(a.type || "").localeCompare(String(b.type || ""), "th", { numeric: true }));
       setRows(all);
       // prefill ช่องราคา/โปรใหม่จากค่าล่าสุดที่บันทึกไว้ (match ด้วย key เดียวกับ row.key)
+      // ยกเว้นรุ่นที่สต๊อกหมด — ไม่เติมโปรเดิมค้างไว้ กันบันทึกโปรซ้ำทั้งที่ไม่มีของขาย
+      const stockByKey = {};
+      for (const r of all) stockByKey[r.key] = r.stock;
       const ed = {};
       for (const o of (Array.isArray(overrides) ? overrides : [])) {
         if (!o || o.__error) continue;
         const key = o.brand + "|" + norm(o.model_code) + "|" + norm(o.type_code);
+        const outOfStock = stockByKey[key] === 0;
         ed[key] = {
           price: o.new_price == null ? "" : String(o.new_price),
-          down: o.new_down == null ? "" : String(o.new_down),
-          comm: o.new_comm == null ? "" : String(o.new_comm),
+          down: outOfStock || o.new_down == null ? "" : String(o.new_down),
+          comm: outOfStock || o.new_comm == null ? "" : String(o.new_comm),
         };
       }
       setEdits(ed);
@@ -398,7 +407,7 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
         </table>
       </div>
       <div style={{ marginTop: 10, fontSize: 12, color: "#6b7280" }}>
-        💡 เกณฑ์: ขายออก% = ขาย÷(ขาย+สต๊อก) · เดือนคงคลัง = สต๊อก÷ยอดขายต่อเดือน · "ขายดี/ของขาด"→ลดโปร/ขึ้นราคาได้ · "ของจม"→เพิ่มโปร/ลดราคา · "โดนจำกัดโควตา"→ตัดโปรเอางบไปรุ่นอื่น
+        💡 เกณฑ์: ขายออก% = ขาย÷(ขาย+สต๊อก) · เดือนคงคลัง = สต๊อก÷ยอดขายต่อเดือน · "ขายดี/ของขาด"→ลดโปร/ขึ้นราคาได้ · "ของจม"→เพิ่มโปร/ลดราคา · "โดนจำกัดโควตา"→ตัดโปรเอางบไปรุ่นอื่น · <b>สต๊อก 0 → ไม่ต้องทำโปร/ค่าคอม</b> (มีโปรค้างอยู่ = แนะนำตัด)
         <br />🏷️ ราคา: <b>HONDA</b> ปรับเฉพาะ <b>ไฟแนนซ์ สิงห์ชัย</b> (ราคาอื่นคงที่ — ถ้าจะเพิ่มมูลค่าใช้ของแถม เช่น ประกัน = เพิ่มโปรแทน) · <b>YAMAHA</b> ปรับได้ทุกราคา · ราคาโรงงาน(แนะนำ) = ราคาประกาศ ไม่ปรับ
         <br />✏️ ช่อง "ราคาใหม่/เงินดาวน์ออกแทนใหม่/ค่าคอมพิเศษใหม่" = พิมพ์เอง กด <b>💾 บันทึก</b> เก็บลงระบบ (มีประวัติ ดูย้อนหลังได้) · <b>🖨️ พิมพ์</b> สั่งพิมพ์ตารางนี้
       </div>
