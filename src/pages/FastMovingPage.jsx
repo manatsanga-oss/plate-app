@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-api";
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-master-api";
@@ -265,11 +265,10 @@ export default function FastMovingPage() {
     });
   }
 
-  async function uploadPartImage(file) {
-    if (!file || !imgPopup) return;
+  async function savePartImageData(dataUrl, mime) {
+    if (!dataUrl || !imgPopup) return;
     setImgPopup(m => ({ ...m, saving: true, msg: "" }));
     try {
-      const { dataUrl, mime } = await readAndShrinkImage(file);
       const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save_part_image", id: imgPopup.id, image_data: dataUrl, mime_type: mime }) });
       const data = await res.json().catch(() => null);
       if (!data || (Array.isArray(data) && data.length === 0)) throw new Error("no response");
@@ -279,6 +278,54 @@ export default function FastMovingPage() {
       setImgPopup(m => m ? { ...m, saving: false, msg: "บันทึกรูปไม่สำเร็จ" } : m);
     }
   }
+
+  async function uploadPartImage(file) {
+    if (!file || !imgPopup) return;
+    try {
+      const { dataUrl, mime } = await readAndShrinkImage(file);
+      await savePartImageData(dataUrl, mime);
+    } catch {
+      setImgPopup(m => m ? { ...m, saving: false, msg: "บันทึกรูปไม่สำเร็จ" } : m);
+    }
+  }
+
+  // ---- กล้องสด: ถ่ายเข้าระบบตรง ไม่มีไฟล์ลงเครื่อง (ท่าเดียวกับหน้าประเมินความเสียหาย) ----
+  const camVideoRef = useRef(null);
+  const camStreamRef = useRef(null);
+  const [camOn, setCamOn] = useState(false);
+
+  async function openPartCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" } }, audio: false });
+      camStreamRef.current = stream;
+      setCamOn(true);
+      setTimeout(() => { if (camVideoRef.current) { camVideoRef.current.srcObject = stream; camVideoRef.current.play().catch(() => {}); } }, 50);
+    } catch (e) {
+      setImgPopup(m => m ? { ...m, msg: "เปิดกล้องไม่สำเร็จ: " + String(e?.message || e).slice(0, 100) + " (ต้องเปิดผ่าน https และอนุญาตสิทธิ์กล้อง)" } : m);
+    }
+  }
+
+  function closePartCamera() {
+    if (camStreamRef.current) { camStreamRef.current.getTracks().forEach(t => t.stop()); camStreamRef.current = null; }
+    setCamOn(false);
+  }
+
+  async function capturePartPhoto() {
+    const video = camVideoRef.current;
+    if (!video || !video.videoWidth) return;
+    const maxW = 900;
+    const scale = Math.min(1, maxW / video.videoWidth);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(video.videoWidth * scale);
+    canvas.height = Math.round(video.videoHeight * scale);
+    canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    closePartCamera();
+    await savePartImageData(dataUrl, "image/jpeg");
+  }
+
+  function closeImgPopup() { closePartCamera(); setImgPopup(null); }
+  useEffect(() => () => { if (camStreamRef.current) camStreamRef.current.getTracks().forEach(t => t.stop()); }, []);
 
   async function deletePartImage() {
     if (!imgPopup) return;
@@ -585,7 +632,7 @@ export default function FastMovingPage() {
           <div style={{ background: "#fff", borderRadius: 14, padding: 20, width: 480, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
               <h3 style={{ margin: 0, fontSize: 16, color: "#072d6b" }}>🖼️ รูปอะไหล่</h3>
-              <button onClick={() => setImgPopup(null)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
+              <button onClick={closeImgPopup} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
             </div>
             <div style={{ marginBottom: 12, padding: "8px 12px", background: "#eff6ff", borderRadius: 8, fontSize: 13, borderLeft: "3px solid #1e40af" }}>
               <div style={{ fontWeight: 700, color: "#072d6b" }}>{imgPopup.part_code}</div>
@@ -593,27 +640,43 @@ export default function FastMovingPage() {
             </div>
 
             <div style={{ marginBottom: 12, minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", background: "#f9fafb", borderRadius: 10, border: "1px dashed #d1d5db", padding: 8 }}>
-              {imgPopup.loading ? (
+              {camOn ? (
+                <video ref={camVideoRef} autoPlay playsInline muted style={{ maxWidth: "100%", maxHeight: 340, borderRadius: 8, background: "#000" }} />
+              ) : imgPopup.loading ? (
                 <span style={{ color: "#6b7280", fontSize: 13 }}>กำลังโหลดรูป...</span>
               ) : imgPopup.image_data ? (
                 <img src={imgPopup.image_data} alt={imgPopup.part_code} style={{ maxWidth: "100%", maxHeight: 340, borderRadius: 8 }} />
               ) : (
-                <span style={{ color: "#9ca3af", fontSize: 13 }}>ยังไม่มีรูป — เลือกไฟล์เพื่ออัปโหลด</span>
+                <span style={{ color: "#9ca3af", fontSize: 13 }}>ยังไม่มีรูป — เลือกไฟล์ หรือกดถ่ายรูป</span>
               )}
             </div>
 
             {imgPopup.msg && <div style={{ marginBottom: 10, padding: "6px 10px", background: "#fef2f2", color: "#b91c1c", borderRadius: 6, fontSize: 13 }}>{imgPopup.msg}</div>}
 
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <label style={{ flex: 1, padding: "9px", fontSize: 13, background: imgPopup.saving ? "#9ca3af" : "#10b981", color: "#fff", borderRadius: 8, cursor: imgPopup.saving ? "not-allowed" : "pointer", fontWeight: 700, textAlign: "center" }}>
-                {imgPopup.saving ? "กำลังบันทึก..." : imgPopup.image_data ? "เปลี่ยนรูป" : "เลือกรูป / อัปโหลด"}
-                <input type="file" accept="image/*" disabled={imgPopup.saving} style={{ display: "none" }}
-                  onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadPartImage(f); }} />
-              </label>
-              {imgPopup.has_image && (
-                <button onClick={deletePartImage} disabled={imgPopup.saving} style={{ padding: "9px 14px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: imgPopup.saving ? "not-allowed" : "pointer" }}>ลบรูป</button>
+              {camOn ? (
+                <>
+                  <button onClick={capturePartPhoto} disabled={imgPopup.saving} style={{ flex: 1, padding: "9px", fontSize: 13, background: imgPopup.saving ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 8, cursor: imgPopup.saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                    {imgPopup.saving ? "กำลังบันทึก..." : "📸 ถ่ายรูป (ไม่บันทึกลงเครื่อง)"}
+                  </button>
+                  <button onClick={closePartCamera} style={{ padding: "9px 14px", fontSize: 13, background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>✕ ปิดกล้อง</button>
+                </>
+              ) : (
+                <>
+                  <label style={{ flex: 1, padding: "9px", fontSize: 13, background: imgPopup.saving ? "#9ca3af" : "#10b981", color: "#fff", borderRadius: 8, cursor: imgPopup.saving ? "not-allowed" : "pointer", fontWeight: 700, textAlign: "center" }}>
+                    {imgPopup.saving ? "กำลังบันทึก..." : imgPopup.image_data ? "เปลี่ยนรูป" : "เลือกรูป / อัปโหลด"}
+                    <input type="file" accept="image/*" disabled={imgPopup.saving} style={{ display: "none" }}
+                      onChange={e => { const f = e.target.files?.[0]; e.target.value = ""; if (f) uploadPartImage(f); }} />
+                  </label>
+                  <button onClick={openPartCamera} disabled={imgPopup.saving} style={{ flex: 1, padding: "9px", fontSize: 13, background: imgPopup.saving ? "#9ca3af" : "#0ea5e9", color: "#fff", border: "none", borderRadius: 8, cursor: imgPopup.saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
+                    📷 เปิดกล้องถ่าย
+                  </button>
+                  {imgPopup.has_image && (
+                    <button onClick={deletePartImage} disabled={imgPopup.saving} style={{ padding: "9px 14px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: imgPopup.saving ? "not-allowed" : "pointer" }}>ลบรูป</button>
+                  )}
+                  <button onClick={closeImgPopup} style={{ padding: "9px 16px", fontSize: 13, background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ปิด</button>
+                </>
               )}
-              <button onClick={() => setImgPopup(null)} style={{ padding: "9px 16px", fontSize: 13, background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ปิด</button>
             </div>
           </div>
         </div>
