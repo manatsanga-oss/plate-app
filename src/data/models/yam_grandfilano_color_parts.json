@@ -1,5 +1,5 @@
 {
-  "file": "B8B6-720post.pdf,B8B820B8B920post.pdf,BJK1-220post.pdf,bjkcd.pdf",
+  "file": "30bjk431t1.pdf,30bjk431ta.pdf,B8B6-720post.pdf,B8B820B8B920post.pdf,BJK1-220post.pdf,b8b4-5-for-post.pdf,bjkab.pdf,bjkcd.pdf,grand-filano(2bl7_8_9).pdf,grand-filano-hybrid-(b8b1-2).pdf",
   "brand": "YAMAHA",
   "model": "Grand Filano",
   "model_code": "Grand Filano",
@@ -19,8 +19,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjkcd3.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJKD"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKD00"
     },
     {
       "code": "2007",
@@ -34,8 +34,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjkcd4.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJKD"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKD00"
     },
     {
       "code": "1172",
@@ -49,8 +49,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjkcd5.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJKD"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKD00"
     },
     {
       "code": "2030",
@@ -64,8 +64,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjkcd6.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJKD"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKD00"
     },
     {
       "code": "1898",
@@ -79,8 +79,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjkcd7.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJKC"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKC00"
     },
     {
       "code": "903",
@@ -94,8 +94,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjkcd8.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJKC"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKC00"
     },
     {
       "code": "1867",
@@ -109,8 +109,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjkcd9.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJKC"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKC00"
     },
     {
       "code": "1511",
@@ -124,8 +124,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjkcd10.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJKC"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKC00"
     },
     {
       "code": "0903",
@@ -139,8 +139,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b6_0903.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B6"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B600"
     },
     {
       "code": "1610",
@@ -154,8 +154,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b6_1610.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B6"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B600"
     },
     {
       "code": "1565",
@@ -169,8 +169,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b6_1565.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B6"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B600"
     },
     {
       "code": "1754",
@@ -184,8 +184,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b6_1754.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B6"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B600"
     },
     {
       "code": "1651",
@@ -199,8 +199,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b7_1651.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B7"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B700"
     },
     {
       "code": "1783",
@@ -214,8 +214,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b7_1783.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B7"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B700"
     },
     {
       "code": "1862",
@@ -229,8 +229,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b8_1862.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B8"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B800"
     },
     {
       "code": "1579",
@@ -244,8 +244,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b8_1579.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B8"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B800"
     },
     {
       "code": "1763",
@@ -259,8 +259,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b8_1763.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B8"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B800"
     },
     {
       "code": "1705",
@@ -274,8 +274,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b8_1705.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B8"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B800"
     },
     {
       "code": "1864",
@@ -289,8 +289,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b8_1864.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B8"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B800"
     },
     {
       "code": "1864",
@@ -304,8 +304,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b9_1864.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B9"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B900"
     },
     {
       "code": "1863",
@@ -319,8 +319,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/b8b9_1863.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "B8B9"
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B900"
     },
     {
       "code": "1878",
@@ -334,8 +334,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjk1_1878.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJK1"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK100"
     },
     {
       "code": "1218",
@@ -349,8 +349,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjk1_1218.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJK1"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK100"
     },
     {
       "code": "0775",
@@ -364,8 +364,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjk1_0775.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJK1"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK100"
     },
     {
       "code": "1760",
@@ -379,8 +379,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjk1_1760.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJK1"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK100"
     },
     {
       "code": "0752",
@@ -394,8 +394,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjk2_0752.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJK2"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK200"
     },
     {
       "code": "0903",
@@ -409,8 +409,8 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjk2_0903.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJK2"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK200"
     },
     {
       "code": "1651",
@@ -424,8 +424,443 @@
       "imgs": [
         "/parts-img/yam_grandfilano/bjk2_1651.jpg"
       ],
-      "model_code": "Grand Filano",
-      "type": "BJK2"
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK200"
+    },
+    {
+      "code": "0582",
+      "name": "ดำ",
+      "color_code": "MBL2",
+      "page": "bjka_0582",
+      "pages": [
+        "bjka_0582"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjka_0582.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjka_0582.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKA00"
+    },
+    {
+      "code": "0779",
+      "name": "แดง",
+      "color_code": "DRMD",
+      "page": "bjkb_0779",
+      "pages": [
+        "bjkb_0779"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjkb_0779.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjkb_0779.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJKB00"
+    },
+    {
+      "code": "1763",
+      "name": "แดง",
+      "color_code": "VRCD",
+      "page": "b8b4_1763",
+      "pages": [
+        "b8b4_1763"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b4_1763.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b4_1763.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B400"
+    },
+    {
+      "code": "0903",
+      "name": "ดำ",
+      "color_code": "SMX",
+      "page": "b8b4_0903",
+      "pages": [
+        "b8b4_0903"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b4_0903.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b4_0903.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B400"
+    },
+    {
+      "code": "1667",
+      "name": "เขียว",
+      "color_code": "LNGP1",
+      "page": "b8b4_1667",
+      "pages": [
+        "b8b4_1667"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b4_1667.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b4_1667.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B400"
+    },
+    {
+      "code": "1569",
+      "name": "ฟ้า",
+      "color_code": "NBP2",
+      "page": "b8b4_1569",
+      "pages": [
+        "b8b4_1569"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b4_1569.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b4_1569.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B400"
+    },
+    {
+      "code": "1568",
+      "name": "ขาว",
+      "color_code": "MYWP1",
+      "page": "b8b5_1568",
+      "pages": [
+        "b8b5_1568"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b5_1568.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b5_1568.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B500"
+    },
+    {
+      "code": "1579",
+      "name": "ดำ",
+      "color_code": "MDNM6",
+      "page": "b8b5_1579",
+      "pages": [
+        "b8b5_1579"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b5_1579.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b5_1579.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B500"
+    },
+    {
+      "code": "1711",
+      "name": "เขียว/เทา",
+      "color_code": "MLNGM2",
+      "page": "b8b1_1711",
+      "pages": [
+        "b8b1_1711"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b1_1711.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b1_1711.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B100"
+    },
+    {
+      "code": "1210",
+      "name": "ขาว/เทา",
+      "color_code": "MWM1",
+      "page": "b8b1_1210",
+      "pages": [
+        "b8b1_1210"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b1_1210.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b1_1210.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B100"
+    },
+    {
+      "code": "1671",
+      "name": "แดง/ดำ",
+      "color_code": "VRMB",
+      "page": "b8b1_1671",
+      "pages": [
+        "b8b1_1671"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b1_1671.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b1_1671.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B100"
+    },
+    {
+      "code": "0582",
+      "name": "ดำ",
+      "color_code": "MBL2",
+      "page": "b8b1_0582",
+      "pages": [
+        "b8b1_0582"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b1_0582.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b1_0582.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B100"
+    },
+    {
+      "code": "1670",
+      "name": "เหลือง/เทา",
+      "color_code": "PGYP1",
+      "page": "b8b1_1670",
+      "pages": [
+        "b8b1_1670"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b1_1670.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b1_1670.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B100"
+    },
+    {
+      "code": "1698",
+      "name": "เทา",
+      "color_code": "MWM5",
+      "page": "b8b2_1698",
+      "pages": [
+        "b8b2_1698"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b2_1698.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b2_1698.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B200"
+    },
+    {
+      "code": "1710",
+      "name": "น้ำเงิน",
+      "color_code": "DBNC3",
+      "page": "b8b2_1710",
+      "pages": [
+        "b8b2_1710"
+      ],
+      "img": "/parts-img/yam_grandfilano/b8b2_1710.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/b8b2_1710.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "B8B200"
+    },
+    {
+      "code": "1670",
+      "name": "เหลือง/เทา",
+      "color_code": "PGYP1",
+      "page": "2bl7_1670",
+      "pages": [
+        "2bl7_1670"
+      ],
+      "img": "/parts-img/yam_grandfilano/2bl7_1670.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/2bl7_1670.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "2BL700"
+    },
+    {
+      "code": "1667",
+      "name": "เขียว/เทา",
+      "color_code": "LNGP1",
+      "page": "2bl7_1667",
+      "pages": [
+        "2bl7_1667"
+      ],
+      "img": "/parts-img/yam_grandfilano/2bl7_1667.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/2bl7_1667.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "2BL700"
+    },
+    {
+      "code": "1617",
+      "name": "เทา/ดำ",
+      "color_code": "MNM6",
+      "page": "2bl8_1617",
+      "pages": [
+        "2bl8_1617"
+      ],
+      "img": "/parts-img/yam_grandfilano/2bl8_1617.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/2bl8_1617.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "2BL800"
+    },
+    {
+      "code": "1668",
+      "name": "ฟ้า/ดำ",
+      "color_code": "MPBM2",
+      "page": "2bl8_1668",
+      "pages": [
+        "2bl8_1668"
+      ],
+      "img": "/parts-img/yam_grandfilano/2bl8_1668.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/2bl8_1668.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "2BL800"
+    },
+    {
+      "code": "1671",
+      "name": "แดง",
+      "color_code": "VRMB",
+      "page": "2bl9_1671",
+      "pages": [
+        "2bl9_1671"
+      ],
+      "img": "/parts-img/yam_grandfilano/2bl9_1671.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/2bl9_1671.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "2BL900"
+    },
+    {
+      "code": "1669",
+      "name": "น้ำเงิน",
+      "color_code": "VBM2",
+      "page": "2bl9_1669",
+      "pages": [
+        "2bl9_1669"
+      ],
+      "img": "/parts-img/yam_grandfilano/2bl9_1669.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/2bl9_1669.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "2BL900"
+    },
+    {
+      "code": "1243",
+      "name": "เทา",
+      "color_code": "MYNM2",
+      "page": "bjk600_1243",
+      "pages": [
+        "bjk600_1243"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjk600_1243.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjk600_1243.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK600"
+    },
+    {
+      "code": "1892",
+      "name": "น้ำตาล",
+      "color_code": "MDRNP1",
+      "page": "bjk900_1892",
+      "pages": [
+        "bjk900_1892"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjk900_1892.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjk900_1892.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK900"
+    },
+    {
+      "code": "1511",
+      "name": "เทา",
+      "color_code": "BNS4",
+      "page": "bjk500_1511",
+      "pages": [
+        "bjk500_1511"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjk500_1511.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjk500_1511.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK500"
+    },
+    {
+      "code": "1939",
+      "name": "ชมพู",
+      "color_code": "MRS2",
+      "page": "bjk500_1939",
+      "pages": [
+        "bjk500_1939"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjk500_1939.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjk500_1939.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK500"
+    },
+    {
+      "code": "1568",
+      "name": "ขาว",
+      "color_code": "MYWP1",
+      "page": "bjk500_1568",
+      "pages": [
+        "bjk500_1568"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjk500_1568.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjk500_1568.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK500"
+    },
+    {
+      "code": "1943",
+      "name": "เขียว",
+      "color_code": "LNLGS1",
+      "page": "bjk500_1943",
+      "pages": [
+        "bjk500_1943"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjk500_1943.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjk500_1943.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK500"
+    },
+    {
+      "code": "1710",
+      "name": "น้ำเงิน",
+      "color_code": "DBNC3",
+      "page": "bjk600_1710",
+      "pages": [
+        "bjk600_1710"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjk600_1710.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjk600_1710.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK600"
+    },
+    {
+      "code": "1917",
+      "name": "เขียว",
+      "color_code": "CM7",
+      "page": "bjk600_1917",
+      "pages": [
+        "bjk600_1917"
+      ],
+      "img": "/parts-img/yam_grandfilano/bjk600_1917.jpg",
+      "imgs": [
+        "/parts-img/yam_grandfilano/bjk600_1917.jpg"
+      ],
+      "model_code": "Grand Filano Hybrid",
+      "type": "BJK600"
     }
   ],
   "pages": {
@@ -8166,6 +8601,7974 @@
       {
         "code": "B8B-E4711-20",
         "x": 90.39,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjka_0582": [
+      {
+        "code": "BJK-F6213-00-P1",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-90",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-90",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-50",
+        "x": 65.35,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.12,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-P9",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P1",
+        "x": 2.54,
+        "y": 41.47,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P1",
+        "x": 12.74,
+        "y": 41.47,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-P9",
+        "x": 22.33,
+        "y": 41.47,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-00-P6",
+        "x": 33.93,
+        "y": 41.47,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.47,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-00-P6",
+        "x": 61.24,
+        "y": 41.47,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 73.82,
+        "y": 41.47,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-00",
+        "x": 83.23,
+        "y": 41.47,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P1",
+        "x": 91.11,
+        "y": 41.47,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-P9",
+        "x": 2.54,
+        "y": 61.54,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 18.94,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-P8",
+        "x": 31.73,
+        "y": 61.54,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-P9",
+        "x": 45.32,
+        "y": 61.54,
+        "w": 7.86,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-30",
+        "x": 60.65,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-P9",
+        "x": 72.85,
+        "y": 61.54,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-60",
+        "x": 88.88,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-30",
+        "x": 5.4,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-P9",
+        "x": 18.99,
+        "y": 78.97,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-P9",
+        "x": 31.48,
+        "y": 78.97,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-P9",
+        "x": 59.57,
+        "y": 78.97,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-P9",
+        "x": 72.37,
+        "y": 78.97,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-30",
+        "x": 88.05,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-P9",
+        "x": 2.54,
+        "y": 96.42,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.86,
+        "y": 96.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 27.9,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 40.4,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 53.72,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.47,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 79.42,
+        "y": 96.42,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 90.64,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjkb_0779": [
+      {
+        "code": "BJK-F6213-00-P1",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-P0",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-P0",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-40",
+        "x": 65.35,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.12,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PN",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P1",
+        "x": 2.67,
+        "y": 41.43,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P1",
+        "x": 12.74,
+        "y": 41.6,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PP",
+        "x": 22.33,
+        "y": 41.6,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-10-PA",
+        "x": 33.93,
+        "y": 41.6,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.6,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-10-PA",
+        "x": 61.36,
+        "y": 41.6,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 73.94,
+        "y": 41.6,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-10",
+        "x": 83.82,
+        "y": 41.6,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P1",
+        "x": 91.11,
+        "y": 41.6,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PN",
+        "x": 2.19,
+        "y": 61.54,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 16.57,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-P5",
+        "x": 29.35,
+        "y": 61.54,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PN",
+        "x": 43.19,
+        "y": 61.54,
+        "w": 8.02,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-10",
+        "x": 57.44,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PN",
+        "x": 72.25,
+        "y": 61.54,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-J0",
+        "x": 88.53,
+        "y": 61.54,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-10",
+        "x": 5.99,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PN",
+        "x": 19.23,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PN",
+        "x": 32.31,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PN",
+        "x": 59.1,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-PN",
+        "x": 71.66,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-10",
+        "x": 87.22,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F1578-E0",
+        "x": 3.27,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PN",
+        "x": 13.22,
+        "y": 96.42,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 34.14,
+        "y": 96.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 44.04,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 53.33,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 62.5,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 72.81,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 82.86,
+        "y": 96.42,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 91.71,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b4_1763": [
+      {
+        "code": "B8B-F835A-10-P0",
+        "x": 1.94,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-10-P0",
+        "x": 11.15,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-K0",
+        "x": 23.05,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-K0",
+        "x": 36.31,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-30",
+        "x": 62.61,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P8",
+        "x": 71.64,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P8",
+        "x": 81.05,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-10-P0",
+        "x": 90.32,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6167-00",
+        "x": 5.26,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P8",
+        "x": 19.54,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-70",
+        "x": 34.78,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 49.52,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P8",
+        "x": 59.02,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P8",
+        "x": 69.13,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 80.31,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P8",
+        "x": 90.46,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P8",
+        "x": 4.49,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 19.26,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P8",
+        "x": 29.52,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-10-P0",
+        "x": 39.45,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P5",
+        "x": 48.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P8",
+        "x": 58.24,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P8",
+        "x": 68.8,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 80.01,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P5",
+        "x": 90.29,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P8",
+        "x": 3.12,
+        "y": 77.29,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P8",
+        "x": 16.72,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P8",
+        "x": 30.8,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.47,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.14,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.97,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P8",
+        "x": 78.98,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.87,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P8",
+        "x": 3.18,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.48,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.45,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P5",
+        "x": 38.25,
+        "y": 94.75,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P5",
+        "x": 51.39,
+        "y": 94.85,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.84,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.78,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.83,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b4_0903": [
+      {
+        "code": "B8B-F835A-10-P1",
+        "x": 1.94,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-10-P1",
+        "x": 11.15,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-L0",
+        "x": 23.1,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-L0",
+        "x": 36.35,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-30",
+        "x": 62.61,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-PB",
+        "x": 71.6,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P6",
+        "x": 81.05,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-10-P1",
+        "x": 90.32,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6167-00",
+        "x": 5.26,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P6",
+        "x": 19.54,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-70",
+        "x": 34.78,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 49.52,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P6",
+        "x": 59.02,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P6",
+        "x": 69.13,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 80.31,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P6",
+        "x": 90.46,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P6",
+        "x": 4.49,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 19.26,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P6",
+        "x": 29.52,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-10-P1",
+        "x": 39.45,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P2",
+        "x": 48.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P6",
+        "x": 58.24,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P6",
+        "x": 68.8,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 80.01,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P2",
+        "x": 90.29,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P6",
+        "x": 3.12,
+        "y": 77.29,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P6",
+        "x": 16.72,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P6",
+        "x": 30.8,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.47,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.14,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.97,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P6",
+        "x": 78.98,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.87,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P6",
+        "x": 3.18,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.48,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.45,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P2",
+        "x": 38.25,
+        "y": 94.75,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P2",
+        "x": 51.39,
+        "y": 94.85,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.84,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.78,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.83,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b4_1667": [
+      {
+        "code": "B8B-F835A-10-P2",
+        "x": 1.94,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-10-P2",
+        "x": 11.15,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-D0",
+        "x": 23.03,
+        "y": 22.23,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-D0",
+        "x": 36.28,
+        "y": 22.23,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-30",
+        "x": 62.61,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-PC",
+        "x": 71.6,
+        "y": 22.23,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-PB",
+        "x": 81.01,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-10-P2",
+        "x": 90.32,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6167-00",
+        "x": 5.26,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-PB",
+        "x": 19.5,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-70",
+        "x": 34.78,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 49.52,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-PB",
+        "x": 58.97,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-PB",
+        "x": 69.08,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 80.31,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-PB",
+        "x": 90.41,
+        "y": 40.3,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-PB",
+        "x": 4.46,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 19.26,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-PB",
+        "x": 29.47,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-10-P2",
+        "x": 39.45,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P8",
+        "x": 48.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-PB",
+        "x": 58.2,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-PB",
+        "x": 68.76,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 80.01,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P8",
+        "x": 90.29,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-PB",
+        "x": 3.09,
+        "y": 77.29,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-PB",
+        "x": 16.72,
+        "y": 77.29,
+        "w": 8.21,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-PB",
+        "x": 30.77,
+        "y": 77.29,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.47,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.14,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.97,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-PB",
+        "x": 78.94,
+        "y": 77.4,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.87,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-PB",
+        "x": 3.14,
+        "y": 94.75,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.48,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.45,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P8",
+        "x": 38.25,
+        "y": 94.75,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P8",
+        "x": 51.39,
+        "y": 94.85,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.84,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.78,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.83,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b4_1569": [
+      {
+        "code": "B8B-F835A-10-P2",
+        "x": 1.94,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-10-P2",
+        "x": 11.15,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-50",
+        "x": 23.1,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-50",
+        "x": 36.35,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-30",
+        "x": 62.61,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-PE",
+        "x": 71.6,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-PD",
+        "x": 80.98,
+        "y": 22.23,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-10-P2",
+        "x": 90.32,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6167-00",
+        "x": 5.27,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-PD",
+        "x": 19.48,
+        "y": 40.3,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-70",
+        "x": 34.78,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 49.52,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-PD",
+        "x": 58.95,
+        "y": 40.3,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-PD",
+        "x": 69.06,
+        "y": 40.3,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 80.31,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-PD",
+        "x": 90.39,
+        "y": 40.3,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-PD",
+        "x": 4.42,
+        "y": 59.6,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 19.26,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-PD",
+        "x": 29.45,
+        "y": 59.6,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-10-P2",
+        "x": 39.45,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-PA",
+        "x": 48.47,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-PD",
+        "x": 58.18,
+        "y": 59.6,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-PD",
+        "x": 68.74,
+        "y": 59.6,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 80.01,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-PA",
+        "x": 90.24,
+        "y": 59.83,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-PD",
+        "x": 3.07,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-PD",
+        "x": 16.65,
+        "y": 77.29,
+        "w": 8.26,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-PD",
+        "x": 30.73,
+        "y": 77.29,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.47,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.14,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.97,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-PD",
+        "x": 78.91,
+        "y": 77.4,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.87,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-PD",
+        "x": 3.11,
+        "y": 94.75,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.48,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.45,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-PA",
+        "x": 38.2,
+        "y": 94.75,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-PA",
+        "x": 51.34,
+        "y": 94.85,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.84,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.78,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.83,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b5_1568": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.94,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.79,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-70",
+        "x": 23.1,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-70",
+        "x": 36.35,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-40",
+        "x": 62.61,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P9",
+        "x": 71.64,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P9",
+        "x": 81.05,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.08,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6167-00",
+        "x": 5.26,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P9",
+        "x": 19.54,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-80",
+        "x": 34.78,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 49.52,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P9",
+        "x": 59.02,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P9",
+        "x": 69.13,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 80.31,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P9",
+        "x": 90.46,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P9",
+        "x": 4.49,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 19.26,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P9",
+        "x": 29.52,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 40.09,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P6",
+        "x": 48.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P9",
+        "x": 58.24,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P9",
+        "x": 68.8,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 80.01,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P6",
+        "x": 90.29,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P9",
+        "x": 3.36,
+        "y": 77.29,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P6",
+        "x": 15.3,
+        "y": 77.29,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P9",
+        "x": 27.63,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P9",
+        "x": 39.82,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P6",
+        "x": 52.36,
+        "y": 77.29,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 63.62,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 72.6,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P9",
+        "x": 81.0,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-10",
+        "x": 90.99,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F1578-00",
+        "x": 3.84,
+        "y": 94.75,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P9",
+        "x": 13.13,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 34.24,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 44.61,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 55.03,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.27,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 80.25,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.83,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b5_1579": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.94,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.79,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-70",
+        "x": 23.1,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-70",
+        "x": 36.35,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-50",
+        "x": 62.61,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-PA",
+        "x": 71.58,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-PA",
+        "x": 81.0,
+        "y": 22.23,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.08,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6167-00",
+        "x": 5.27,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-PA",
+        "x": 19.49,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-90",
+        "x": 34.78,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 49.52,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-PA",
+        "x": 58.97,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-PA",
+        "x": 69.08,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 80.31,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-PA",
+        "x": 90.41,
+        "y": 40.3,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-PA",
+        "x": 4.44,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 19.26,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-PA",
+        "x": 29.47,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 40.09,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P7",
+        "x": 48.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-PA",
+        "x": 58.2,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-PA",
+        "x": 68.75,
+        "y": 59.6,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 80.01,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P7",
+        "x": 90.29,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-PA",
+        "x": 3.32,
+        "y": 77.29,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P7",
+        "x": 15.3,
+        "y": 77.29,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-PA",
+        "x": 27.59,
+        "y": 77.29,
+        "w": 8.21,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-PA",
+        "x": 39.77,
+        "y": 77.29,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P7",
+        "x": 52.36,
+        "y": 77.29,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 63.62,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 72.6,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-PA",
+        "x": 80.94,
+        "y": 77.4,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-10",
+        "x": 90.99,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F1578-60",
+        "x": 3.84,
+        "y": 94.75,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-PA",
+        "x": 13.1,
+        "y": 94.75,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 34.24,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 44.61,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 55.03,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.27,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 80.25,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.83,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b1_1711": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.89,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.39,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-G0",
+        "x": 22.35,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-G0",
+        "x": 35.01,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-10",
+        "x": 63.88,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P0",
+        "x": 72.93,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P0",
+        "x": 81.94,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.4,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P0",
+        "x": 4.09,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 15.25,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P0",
+        "x": 26.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-00",
+        "x": 39.23,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 51.28,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P0",
+        "x": 61.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P0",
+        "x": 70.75,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 81.36,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P0",
+        "x": 90.63,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 4.69,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P0",
+        "x": 16.77,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 29.37,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-WN",
+        "x": 39.4,
+        "y": 59.6,
+        "w": 8.26,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P0",
+        "x": 52.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P0",
+        "x": 65.32,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 79.17,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-WN",
+        "x": 89.84,
+        "y": 59.83,
+        "w": 8.26,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P0",
+        "x": 3.54,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P0",
+        "x": 17.36,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P0",
+        "x": 30.68,
+        "y": 77.4,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.41,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.1,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.94,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P0",
+        "x": 78.93,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.82,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P0",
+        "x": 3.14,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.41,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.4,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-WN",
+        "x": 38.01,
+        "y": 94.75,
+        "w": 8.42,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-WN",
+        "x": 51.15,
+        "y": 94.85,
+        "w": 8.42,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.76,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.72,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.79,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b1_1210": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.89,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.39,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-H0",
+        "x": 22.35,
+        "y": 22.23,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-H0",
+        "x": 35.03,
+        "y": 22.23,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-10",
+        "x": 63.88,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P2",
+        "x": 72.93,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P2",
+        "x": 81.94,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.4,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P2",
+        "x": 4.09,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 15.25,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P2",
+        "x": 26.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-10",
+        "x": 39.23,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 51.28,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P2",
+        "x": 61.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P2",
+        "x": 70.75,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 81.36,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P2",
+        "x": 90.63,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 4.69,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P2",
+        "x": 16.77,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 29.37,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P0",
+        "x": 39.57,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P2",
+        "x": 52.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P2",
+        "x": 65.32,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 79.17,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P0",
+        "x": 90.01,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P2",
+        "x": 3.54,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P2",
+        "x": 17.36,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P2",
+        "x": 30.68,
+        "y": 77.4,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.41,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.1,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.94,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P2",
+        "x": 78.93,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.82,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P2",
+        "x": 3.14,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.41,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.4,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P0",
+        "x": 38.19,
+        "y": 94.75,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P0",
+        "x": 51.31,
+        "y": 94.85,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.76,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.72,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.79,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b1_1671": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.89,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.39,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-E0",
+        "x": 22.35,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-E0",
+        "x": 35.03,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-10",
+        "x": 63.88,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P3",
+        "x": 72.93,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P3",
+        "x": 81.94,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.4,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P3",
+        "x": 4.09,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 15.25,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P3",
+        "x": 26.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-20",
+        "x": 39.23,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 51.28,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P3",
+        "x": 61.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P3",
+        "x": 70.75,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 81.36,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P3",
+        "x": 90.63,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 4.69,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P6",
+        "x": 16.77,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 29.37,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P1",
+        "x": 39.57,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P3",
+        "x": 52.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P3",
+        "x": 65.32,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 79.17,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P1",
+        "x": 90.01,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P3",
+        "x": 3.54,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P3",
+        "x": 17.36,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P3",
+        "x": 30.68,
+        "y": 77.4,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.41,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.1,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.94,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P3",
+        "x": 78.93,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.82,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P3",
+        "x": 3.14,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.41,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.4,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P1",
+        "x": 38.19,
+        "y": 94.75,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P1",
+        "x": 51.31,
+        "y": 94.85,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.76,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.72,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.79,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b1_0582": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.89,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.39,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-J0",
+        "x": 22.35,
+        "y": 22.23,
+        "w": 6.14,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-J0",
+        "x": 35.03,
+        "y": 22.23,
+        "w": 6.14,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-10",
+        "x": 63.88,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P4",
+        "x": 72.93,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P4",
+        "x": 81.94,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.4,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P4",
+        "x": 4.09,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 15.25,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P4",
+        "x": 26.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-30",
+        "x": 39.23,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 51.28,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P4",
+        "x": 61.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P4",
+        "x": 70.75,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 81.36,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P4",
+        "x": 90.63,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 4.69,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P6",
+        "x": 16.77,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 29.37,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P2",
+        "x": 39.57,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P4",
+        "x": 52.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P4",
+        "x": 65.32,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 79.17,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P2",
+        "x": 90.01,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P4",
+        "x": 3.54,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P4",
+        "x": 17.36,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P4",
+        "x": 30.68,
+        "y": 77.4,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.41,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.1,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.94,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P4",
+        "x": 78.93,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.82,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P4",
+        "x": 3.14,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.41,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.4,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P2",
+        "x": 38.19,
+        "y": 94.75,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P2",
+        "x": 51.31,
+        "y": 94.85,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.76,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.72,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.79,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b1_1670": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.89,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.39,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-C0",
+        "x": 22.35,
+        "y": 22.23,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-C0",
+        "x": 35.01,
+        "y": 22.23,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-10",
+        "x": 63.88,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P7",
+        "x": 72.93,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P7",
+        "x": 81.94,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.4,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P7",
+        "x": 4.09,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 15.25,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P7",
+        "x": 26.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-60",
+        "x": 39.23,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 51.28,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P7",
+        "x": 61.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P7",
+        "x": 70.75,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 81.36,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P7",
+        "x": 90.63,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 4.69,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P7",
+        "x": 16.77,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 29.37,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-WN",
+        "x": 39.4,
+        "y": 59.6,
+        "w": 8.26,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P7",
+        "x": 52.51,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P7",
+        "x": 65.32,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 79.17,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-WN",
+        "x": 89.84,
+        "y": 59.83,
+        "w": 8.26,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P7",
+        "x": 3.54,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P7",
+        "x": 17.36,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P7",
+        "x": 30.68,
+        "y": 77.4,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 44.41,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 56.1,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 67.94,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P7",
+        "x": 78.93,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-00",
+        "x": 90.82,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P7",
+        "x": 3.14,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.41,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 26.4,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-WN",
+        "x": 38.01,
+        "y": 94.75,
+        "w": 8.42,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-WN",
+        "x": 51.15,
+        "y": 94.85,
+        "w": 8.42,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.76,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.72,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.79,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b2_1698": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.89,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.39,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-70",
+        "x": 22.35,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-70",
+        "x": 35.03,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-20",
+        "x": 63.88,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P1",
+        "x": 72.93,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P1",
+        "x": 81.94,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.4,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P1",
+        "x": 4.09,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 15.25,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P1",
+        "x": 26.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-40",
+        "x": 39.23,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 51.28,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P1",
+        "x": 61.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P1",
+        "x": 70.75,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 81.36,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P1",
+        "x": 90.63,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 4.69,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P1",
+        "x": 14.99,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 25.92,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P0",
+        "x": 34.59,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P1",
+        "x": 44.56,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P1",
+        "x": 56.18,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 68.37,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P0",
+        "x": 80.05,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P1",
+        "x": 90.41,
+        "y": 59.83,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P1",
+        "x": 3.65,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P1",
+        "x": 16.35,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P0",
+        "x": 28.21,
+        "y": 77.18,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P0",
+        "x": 39.87,
+        "y": 77.29,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 52.04,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 62.75,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 72.09,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P1",
+        "x": 80.71,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-10",
+        "x": 90.82,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F1578-20",
+        "x": 4.57,
+        "y": 94.75,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P1",
+        "x": 16.35,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 40.72,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 52.04,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.76,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.72,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.79,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b8b2_1710": [
+      {
+        "code": "B8B-F835A-00",
+        "x": 2.89,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H3559-00",
+        "x": 11.39,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-70",
+        "x": 22.35,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-70",
+        "x": 35.03,
+        "y": 22.23,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4730-20",
+        "x": 63.88,
+        "y": 22.23,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F4773-00-P5",
+        "x": 72.93,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1741-00-P5",
+        "x": 81.94,
+        "y": 22.23,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-H4715-00",
+        "x": 91.4,
+        "y": 22.23,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6143-00-P5",
+        "x": 4.09,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 15.25,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6145-00-P5",
+        "x": 26.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F6192-50",
+        "x": 39.23,
+        "y": 40.3,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F174B-00",
+        "x": 51.28,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1731-00-P5",
+        "x": 61.0,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1721-00-P5",
+        "x": 70.75,
+        "y": 40.3,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F173B-00",
+        "x": 81.36,
+        "y": 40.3,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171E-00-P5",
+        "x": 90.63,
+        "y": 40.3,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F836B-00",
+        "x": 4.69,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8309-00-P5",
+        "x": 14.99,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F3391-00",
+        "x": 25.92,
+        "y": 59.6,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8346-00-P3",
+        "x": 34.59,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8312-00-P5",
+        "x": 44.56,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8311-00-P5",
+        "x": 56.18,
+        "y": 59.6,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F839B-00",
+        "x": 68.37,
+        "y": 59.6,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F8345-00-P3",
+        "x": 80.05,
+        "y": 59.83,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F831A-00-P5",
+        "x": 90.41,
+        "y": 59.83,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171M-00-P5",
+        "x": 3.65,
+        "y": 77.29,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171L-00-P5",
+        "x": 16.35,
+        "y": 77.29,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171R-00-P3",
+        "x": 28.21,
+        "y": 77.18,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F171N-00-P3",
+        "x": 39.87,
+        "y": 77.29,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F7481-00",
+        "x": 52.04,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172F-00",
+        "x": 62.75,
+        "y": 77.4,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F172A-00",
+        "x": 72.09,
+        "y": 77.4,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1711-00-P5",
+        "x": 80.71,
+        "y": 77.4,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1611-10",
+        "x": 90.82,
+        "y": 77.4,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F1578-40",
+        "x": 4.57,
+        "y": 94.75,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1511-00-P5",
+        "x": 16.35,
+        "y": 94.75,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 40.72,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1552-00",
+        "x": 52.04,
+        "y": 94.75,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 65.76,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 79.72,
+        "y": 94.85,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-00",
+        "x": 90.79,
+        "y": 94.75,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "2bl7_1670": [
+      {
+        "code": "2BL-F6143-00-PL",
+        "x": 3.94,
+        "y": 21.24,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-C0",
+        "x": 17.84,
+        "y": 21.12,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-C0",
+        "x": 30.82,
+        "y": 21.24,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1741-00-PG",
+        "x": 63.82,
+        "y": 21.24,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "5P0-F1737-00",
+        "x": 78.64,
+        "y": 21.21,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 90.23,
+        "y": 21.24,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6145-00-PL",
+        "x": 3.94,
+        "y": 37.14,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-H3559-00-P0",
+        "x": 17.13,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F3391-00",
+        "x": 30.95,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4730-A0",
+        "x": 64.64,
+        "y": 37.14,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4773-00-PK",
+        "x": 77.82,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1611-00",
+        "x": 90.28,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "1WC-F834J-00",
+        "x": 4.52,
+        "y": 55.65,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8309-20",
+        "x": 17.96,
+        "y": 55.65,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8315-00",
+        "x": 30.95,
+        "y": 55.53,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8311-00-PL",
+        "x": 42.84,
+        "y": 55.65,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8312-00-PL",
+        "x": 54.41,
+        "y": 55.65,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1731-00-PL",
+        "x": 65.94,
+        "y": 55.65,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1721-00-PL",
+        "x": 78.82,
+        "y": 55.65,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171E-20",
+        "x": 90.23,
+        "y": 55.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8346-20",
+        "x": 3.34,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8345-20",
+        "x": 13.74,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171M-00-PL",
+        "x": 22.65,
+        "y": 73.49,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171L-00-PL",
+        "x": 34.51,
+        "y": 73.53,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172F-20",
+        "x": 46.29,
+        "y": 73.53,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172A-20",
+        "x": 56.48,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F174B-00",
+        "x": 70.06,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F173B-00",
+        "x": 87.44,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1511-00-PL",
+        "x": 2.57,
+        "y": 93.14,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1556-00",
+        "x": 13.74,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1552-00",
+        "x": 23.79,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7488-20",
+        "x": 34.8,
+        "y": 93.48,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7481-20",
+        "x": 46.32,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1711-00-PL",
+        "x": 55.76,
+        "y": 93.14,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.99,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 80.75,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4711-20",
+        "x": 91.08,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      }
+    ],
+    "2bl7_1667": [
+      {
+        "code": "2BL-F6143-00-PH",
+        "x": 3.89,
+        "y": 21.24,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-D0",
+        "x": 17.84,
+        "y": 21.12,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-D0",
+        "x": 30.82,
+        "y": 21.24,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1741-00-PD",
+        "x": 63.83,
+        "y": 21.24,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "5P0-F1737-00",
+        "x": 78.64,
+        "y": 21.21,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 90.23,
+        "y": 21.24,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6145-00-PH",
+        "x": 3.88,
+        "y": 37.14,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-H3559-00-P0",
+        "x": 17.13,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F3391-00",
+        "x": 30.95,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4730-A0",
+        "x": 64.64,
+        "y": 37.14,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4773-00-PG",
+        "x": 77.79,
+        "y": 37.14,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1611-00",
+        "x": 90.28,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "1WC-F834J-00",
+        "x": 4.52,
+        "y": 55.65,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8309-20",
+        "x": 17.96,
+        "y": 55.65,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8315-00",
+        "x": 30.95,
+        "y": 55.53,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8311-00-PH",
+        "x": 42.79,
+        "y": 55.65,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8312-00-PH",
+        "x": 54.36,
+        "y": 55.65,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1731-00-PH",
+        "x": 65.89,
+        "y": 55.65,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1721-00-PH",
+        "x": 78.77,
+        "y": 55.65,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171E-20",
+        "x": 90.23,
+        "y": 55.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8346-20",
+        "x": 3.34,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8345-20",
+        "x": 13.74,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171M-00-PH",
+        "x": 22.65,
+        "y": 73.49,
+        "w": 8.15,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171L-00-PH",
+        "x": 34.45,
+        "y": 73.53,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172F-20",
+        "x": 46.29,
+        "y": 73.53,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172A-20",
+        "x": 56.48,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F174B-00",
+        "x": 70.06,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F173B-00",
+        "x": 87.44,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1511-00-PH",
+        "x": 2.51,
+        "y": 93.14,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1556-00",
+        "x": 13.74,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1552-00",
+        "x": 23.79,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7488-20",
+        "x": 34.8,
+        "y": 93.48,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7481-20",
+        "x": 46.32,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1711-00-PH",
+        "x": 55.71,
+        "y": 93.14,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.99,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 80.75,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4711-20",
+        "x": 91.08,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      }
+    ],
+    "2bl8_1617": [
+      {
+        "code": "2BL-F6143-00-PF",
+        "x": 3.89,
+        "y": 21.24,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-70",
+        "x": 17.92,
+        "y": 21.12,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-70",
+        "x": 30.91,
+        "y": 21.24,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1741-00-PB",
+        "x": 63.83,
+        "y": 21.24,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "5P0-F1737-00",
+        "x": 78.64,
+        "y": 21.21,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 90.23,
+        "y": 21.24,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6145-00-PF",
+        "x": 3.88,
+        "y": 37.14,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-H3559-00-P2",
+        "x": 17.13,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F3391-00",
+        "x": 30.95,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4730-70",
+        "x": 64.64,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4773-00-PE",
+        "x": 77.79,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1611-00",
+        "x": 90.28,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "1WC-F834J-00",
+        "x": 4.52,
+        "y": 55.65,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8309-00",
+        "x": 17.96,
+        "y": 55.65,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8315-00",
+        "x": 30.95,
+        "y": 55.53,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8311-00-PF",
+        "x": 42.79,
+        "y": 55.65,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8312-00-PF",
+        "x": 54.36,
+        "y": 55.65,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1731-00-PF",
+        "x": 65.89,
+        "y": 55.65,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1721-00-PF",
+        "x": 78.77,
+        "y": 55.65,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171E-00",
+        "x": 90.23,
+        "y": 55.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8346-00",
+        "x": 3.34,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8345-00",
+        "x": 13.74,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171M-00-PF",
+        "x": 22.65,
+        "y": 73.49,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171L-00-PF",
+        "x": 34.43,
+        "y": 73.53,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172F-00",
+        "x": 46.29,
+        "y": 73.53,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172A-00",
+        "x": 56.48,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F174B-00",
+        "x": 70.06,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F173B-00",
+        "x": 87.44,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1511-00-PF",
+        "x": 2.51,
+        "y": 93.14,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1556-00",
+        "x": 13.74,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1552-00",
+        "x": 23.79,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7488-00",
+        "x": 34.81,
+        "y": 93.48,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7481-00",
+        "x": 46.32,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1711-00-PF",
+        "x": 55.71,
+        "y": 93.14,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.99,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 80.75,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4711-20",
+        "x": 91.08,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      }
+    ],
+    "2bl8_1668": [
+      {
+        "code": "2BL-F6143-00-PG",
+        "x": 3.89,
+        "y": 21.24,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-70",
+        "x": 17.89,
+        "y": 21.12,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-70",
+        "x": 30.88,
+        "y": 21.24,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1741-00-PC",
+        "x": 63.83,
+        "y": 21.24,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "5P0-F1737-00",
+        "x": 78.64,
+        "y": 21.21,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 90.23,
+        "y": 21.24,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6145-00-PG",
+        "x": 3.88,
+        "y": 37.14,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-H3559-00-P3",
+        "x": 17.13,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F3391-00",
+        "x": 30.95,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4730-70",
+        "x": 64.64,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4773-00-PF",
+        "x": 77.79,
+        "y": 37.14,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1611-00",
+        "x": 90.28,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "1WC-F834J-00",
+        "x": 4.52,
+        "y": 55.65,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8309-00",
+        "x": 17.96,
+        "y": 55.65,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8315-00",
+        "x": 30.95,
+        "y": 55.53,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8311-00-PG",
+        "x": 42.79,
+        "y": 55.65,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8312-00-PG",
+        "x": 54.36,
+        "y": 55.65,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1731-00-PG",
+        "x": 65.89,
+        "y": 55.65,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1721-00-PG",
+        "x": 78.77,
+        "y": 55.65,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171E-00",
+        "x": 90.23,
+        "y": 55.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8346-00",
+        "x": 3.34,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8345-00",
+        "x": 13.74,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171M-00-PG",
+        "x": 22.65,
+        "y": 73.49,
+        "w": 8.21,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171L-00-PG",
+        "x": 34.43,
+        "y": 73.53,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172F-00",
+        "x": 46.29,
+        "y": 73.53,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172A-00",
+        "x": 56.48,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F174B-00",
+        "x": 70.06,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F173B-00",
+        "x": 87.44,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1511-00-PG",
+        "x": 2.5,
+        "y": 93.14,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1556-00",
+        "x": 13.74,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1552-00",
+        "x": 23.79,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7488-00",
+        "x": 34.81,
+        "y": 93.48,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7481-00",
+        "x": 46.32,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1711-00-PG",
+        "x": 55.71,
+        "y": 93.14,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.99,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 80.75,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4711-20",
+        "x": 91.08,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      }
+    ],
+    "2bl9_1671": [
+      {
+        "code": "2BL-F6143-00-PJ",
+        "x": 3.89,
+        "y": 21.24,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-E0",
+        "x": 17.88,
+        "y": 21.12,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-E0",
+        "x": 30.87,
+        "y": 21.24,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1741-00-PE",
+        "x": 63.83,
+        "y": 21.24,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "5P0-F1737-00",
+        "x": 78.64,
+        "y": 21.21,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 90.23,
+        "y": 21.24,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6145-00-PJ",
+        "x": 3.88,
+        "y": 37.14,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-H3559-00-P4",
+        "x": 17.13,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F3391-00",
+        "x": 30.95,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4730-80",
+        "x": 64.64,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4773-00-PH",
+        "x": 77.79,
+        "y": 37.14,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1611-00",
+        "x": 90.28,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "1WC-F834J-00",
+        "x": 4.29,
+        "y": 55.65,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8309-30",
+        "x": 13.84,
+        "y": 55.65,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8392-00",
+        "x": 24.58,
+        "y": 55.53,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8311-00-PJ",
+        "x": 33.76,
+        "y": 55.65,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-WF83L-00",
+        "x": 46.02,
+        "y": 55.65,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8312-00-PJ",
+        "x": 57.45,
+        "y": 55.65,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1731-00-PJ",
+        "x": 68.97,
+        "y": 55.65,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1721-00-PJ",
+        "x": 80.31,
+        "y": 55.65,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171E-40",
+        "x": 91.29,
+        "y": 55.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8346-40",
+        "x": 3.34,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8345-40",
+        "x": 13.84,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171M-00-PJ",
+        "x": 22.65,
+        "y": 73.49,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171L-00-PJ",
+        "x": 34.43,
+        "y": 73.53,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172F-40",
+        "x": 46.29,
+        "y": 73.53,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172A-40",
+        "x": 56.48,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-WF17L-20",
+        "x": 71.07,
+        "y": 73.53,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-WF17K-20",
+        "x": 87.42,
+        "y": 73.53,
+        "w": 6.67,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1511-00-PJ",
+        "x": 2.5,
+        "y": 93.14,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1556-00",
+        "x": 13.84,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1552-00",
+        "x": 23.79,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7488-40",
+        "x": 34.81,
+        "y": 93.48,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7481-40",
+        "x": 46.32,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1711-00-PJ",
+        "x": 55.71,
+        "y": 93.14,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.99,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 80.75,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4711-20",
+        "x": 91.08,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      }
+    ],
+    "2bl9_1669": [
+      {
+        "code": "2BL-F6143-00-PK",
+        "x": 3.89,
+        "y": 21.24,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6290-F0",
+        "x": 17.9,
+        "y": 21.12,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6280-F0",
+        "x": 30.89,
+        "y": 21.24,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1741-00-PF",
+        "x": 63.83,
+        "y": 21.24,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "5P0-F1737-00",
+        "x": 78.64,
+        "y": 21.21,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F17P1-00",
+        "x": 90.23,
+        "y": 21.24,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F6145-00-PK",
+        "x": 3.89,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-H3559-00-P4",
+        "x": 17.13,
+        "y": 37.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F3391-00",
+        "x": 30.95,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4730-90",
+        "x": 64.64,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F4773-00-PJ",
+        "x": 77.79,
+        "y": 37.14,
+        "w": 7.68,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1611-00",
+        "x": 90.28,
+        "y": 37.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "1WC-F834J-00",
+        "x": 4.29,
+        "y": 55.65,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8309-50",
+        "x": 13.84,
+        "y": 55.65,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8392-10",
+        "x": 24.58,
+        "y": 55.53,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8311-00-PK",
+        "x": 33.76,
+        "y": 55.65,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-WF83L-10",
+        "x": 46.02,
+        "y": 55.65,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8312-00-PK",
+        "x": 57.45,
+        "y": 55.65,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1731-00-PK",
+        "x": 68.97,
+        "y": 55.65,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1721-00-PK",
+        "x": 80.31,
+        "y": 55.65,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171E-50",
+        "x": 91.29,
+        "y": 55.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8346-50",
+        "x": 3.34,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F8345-50",
+        "x": 13.84,
+        "y": 73.3,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171M-00-PK",
+        "x": 22.65,
+        "y": 73.49,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F171L-00-PK",
+        "x": 34.43,
+        "y": 73.53,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172F-50",
+        "x": 46.29,
+        "y": 73.53,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F172A-50",
+        "x": 56.48,
+        "y": 73.53,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-WF17L-30",
+        "x": 71.07,
+        "y": 73.53,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-WF17K-30",
+        "x": 87.42,
+        "y": 73.53,
+        "w": 6.67,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1511-00-PK",
+        "x": 2.5,
+        "y": 93.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1556-00",
+        "x": 13.84,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1552-00",
+        "x": 23.79,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7488-50",
+        "x": 34.81,
+        "y": 93.48,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F7481-50",
+        "x": 46.32,
+        "y": 93.14,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-F1711-00-PK",
+        "x": 55.71,
+        "y": 93.14,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.99,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4718-00",
+        "x": 80.75,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4711-20",
+        "x": 91.08,
+        "y": 93.14,
+        "w": 6.25,
+        "h": 1.34
+      }
+    ],
+    "bjk600_1243": [
+      {
+        "code": "BJK-F6213-00-P1",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-J0",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-J0",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.19,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-40",
+        "x": 65.35,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.12,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PD",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P1",
+        "x": 12.74,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PE",
+        "x": 22.33,
+        "y": 41.46,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-10-P5",
+        "x": 33.93,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.46,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-10-P5",
+        "x": 61.36,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 73.94,
+        "y": 41.47,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-10",
+        "x": 84.18,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P1",
+        "x": 91.11,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P1",
+        "x": 2.79,
+        "y": 42.61,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PD",
+        "x": 2.9,
+        "y": 61.54,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 17.28,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-P5",
+        "x": 30.07,
+        "y": 61.54,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PD",
+        "x": 43.9,
+        "y": 61.88,
+        "w": 8.02,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-10",
+        "x": 58.15,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PD",
+        "x": 72.61,
+        "y": 61.54,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-D0",
+        "x": 88.88,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-10",
+        "x": 5.63,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PD",
+        "x": 18.87,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PD",
+        "x": 32.31,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PD",
+        "x": 59.1,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-PD",
+        "x": 72.01,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-10",
+        "x": 87.58,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F1578-F0",
+        "x": 2.91,
+        "y": 96.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PD",
+        "x": 12.87,
+        "y": 96.42,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 34.14,
+        "y": 96.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 44.04,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 53.33,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 62.5,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 72.81,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 82.86,
+        "y": 96.42,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 91.71,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjk900_1892": [
+      {
+        "code": "BJK-F6213-00-P1",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-M0",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-M0",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.71,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PL",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P1",
+        "x": 2.54,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P1",
+        "x": 12.74,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PM",
+        "x": 22.33,
+        "y": 41.46,
+        "w": 8.15,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-10-P8",
+        "x": 33.93,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.09,
+        "y": 41.46,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-10-P8",
+        "x": 61.36,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 74.05,
+        "y": 41.49,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-10",
+        "x": 83.47,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P1",
+        "x": 91.47,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PL",
+        "x": 1.71,
+        "y": 60.7,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 12.41,
+        "y": 60.7,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-P5",
+        "x": 22.23,
+        "y": 60.7,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PL",
+        "x": 33.22,
+        "y": 60.7,
+        "w": 7.86,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PL",
+        "x": 72.61,
+        "y": 60.7,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PL",
+        "x": 18.87,
+        "y": 78.13,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PL",
+        "x": 32.31,
+        "y": 78.13,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.13,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PL",
+        "x": 59.1,
+        "y": 78.13,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-PL",
+        "x": 72.01,
+        "y": 78.13,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PL",
+        "x": 12.87,
+        "y": 95.58,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 33.72,
+        "y": 95.58,
+        "w": 6.45,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 44.04,
+        "y": 95.58,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 53.33,
+        "y": 95.59,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 62.5,
+        "y": 95.58,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 72.81,
+        "y": 95.58,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 82.86,
+        "y": 95.58,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 91.71,
+        "y": 95.58,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjk500_1511": [
+      {
+        "code": "BJK-F6213-00-P0",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-E0",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-E0",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-50",
+        "x": 65.35,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.12,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PG",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P0",
+        "x": 2.54,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P0",
+        "x": 12.74,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PH",
+        "x": 22.33,
+        "y": 41.46,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-00-P8",
+        "x": 33.93,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.46,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-00-P8",
+        "x": 61.24,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 73.82,
+        "y": 41.47,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-00",
+        "x": 83.58,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P0",
+        "x": 91.11,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PG",
+        "x": 2.9,
+        "y": 61.54,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 19.3,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-PA",
+        "x": 32.08,
+        "y": 61.54,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PG",
+        "x": 45.68,
+        "y": 61.54,
+        "w": 8.08,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-00",
+        "x": 61.0,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PG",
+        "x": 73.2,
+        "y": 61.54,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-90",
+        "x": 89.24,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-00",
+        "x": 5.04,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PG",
+        "x": 18.63,
+        "y": 78.97,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PG",
+        "x": 31.48,
+        "y": 78.97,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PG",
+        "x": 59.57,
+        "y": 78.97,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-PG",
+        "x": 72.73,
+        "y": 78.97,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-00",
+        "x": 88.41,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PG",
+        "x": 2.54,
+        "y": 96.42,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.86,
+        "y": 96.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 27.9,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 40.4,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 53.72,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.47,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 79.42,
+        "y": 96.42,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 90.64,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjk500_1939": [
+      {
+        "code": "BJK-F6213-00-P0",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-F0",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-F0",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-50",
+        "x": 65.35,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.12,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PH",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P0",
+        "x": 2.54,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P0",
+        "x": 12.74,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PJ",
+        "x": 22.33,
+        "y": 41.46,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-00-P9",
+        "x": 33.93,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.46,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-00-P9",
+        "x": 61.36,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 73.93,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-00",
+        "x": 83.58,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P0",
+        "x": 91.11,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PH",
+        "x": 2.9,
+        "y": 61.54,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 19.3,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-PB",
+        "x": 32.08,
+        "y": 61.54,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PH",
+        "x": 45.68,
+        "y": 61.54,
+        "w": 8.02,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-00",
+        "x": 61.0,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PH",
+        "x": 73.2,
+        "y": 61.54,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-A0",
+        "x": 89.24,
+        "y": 61.54,
+        "w": 6.46,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-00",
+        "x": 5.04,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PH",
+        "x": 18.63,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PH",
+        "x": 31.48,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PH",
+        "x": 59.57,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-PH",
+        "x": 72.73,
+        "y": 78.97,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-00",
+        "x": 88.41,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PH",
+        "x": 2.54,
+        "y": 96.42,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.86,
+        "y": 96.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 27.9,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 40.4,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 53.72,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.47,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 79.42,
+        "y": 96.42,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 90.64,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjk500_1568": [
+      {
+        "code": "BJK-F6213-00-P0",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-G0",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.46,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-G0",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.46,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-50",
+        "x": 65.35,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.12,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PJ",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P0",
+        "x": 2.54,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P0",
+        "x": 12.74,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PK",
+        "x": 22.33,
+        "y": 41.46,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-00-PA",
+        "x": 33.93,
+        "y": 41.46,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.46,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-00-PA",
+        "x": 61.36,
+        "y": 41.46,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 73.93,
+        "y": 41.47,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-00",
+        "x": 83.58,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P0",
+        "x": 91.11,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PJ",
+        "x": 2.9,
+        "y": 61.54,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 19.3,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-PC",
+        "x": 32.08,
+        "y": 61.54,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PJ",
+        "x": 45.68,
+        "y": 61.54,
+        "w": 7.81,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-00",
+        "x": 61.0,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PJ",
+        "x": 73.2,
+        "y": 61.54,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-B0",
+        "x": 89.24,
+        "y": 61.54,
+        "w": 6.46,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-00",
+        "x": 5.04,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PJ",
+        "x": 18.63,
+        "y": 78.97,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PJ",
+        "x": 31.48,
+        "y": 78.97,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PJ",
+        "x": 59.57,
+        "y": 78.97,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-PJ",
+        "x": 72.73,
+        "y": 78.97,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-00",
+        "x": 88.41,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PJ",
+        "x": 2.54,
+        "y": 96.43,
+        "w": 7.73,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.86,
+        "y": 96.43,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 27.9,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 40.4,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 53.72,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.47,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 79.42,
+        "y": 96.43,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 90.64,
+        "y": 96.43,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjk500_1943": [
+      {
+        "code": "BJK-F6213-00-P0",
+        "x": 2.55,
+        "y": 23.0,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-H0",
+        "x": 15.89,
+        "y": 23.0,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-H0",
+        "x": 27.9,
+        "y": 23.0,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-50",
+        "x": 65.35,
+        "y": 23.0,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.12,
+        "y": 23.0,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PK",
+        "x": 91.06,
+        "y": 23.0,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P0",
+        "x": 2.55,
+        "y": 41.45,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P0",
+        "x": 12.75,
+        "y": 41.44,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PL",
+        "x": 22.33,
+        "y": 41.45,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-00-PB",
+        "x": 33.93,
+        "y": 41.45,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.45,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-00-PB",
+        "x": 61.36,
+        "y": 41.45,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 73.97,
+        "y": 41.45,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-00",
+        "x": 83.58,
+        "y": 41.45,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P0",
+        "x": 91.11,
+        "y": 41.45,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PK",
+        "x": 2.9,
+        "y": 61.52,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 19.3,
+        "y": 61.52,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-PD",
+        "x": 32.09,
+        "y": 61.52,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PK",
+        "x": 45.68,
+        "y": 61.52,
+        "w": 7.97,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-00",
+        "x": 61.0,
+        "y": 61.52,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PK",
+        "x": 73.2,
+        "y": 61.52,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-C0",
+        "x": 89.24,
+        "y": 61.52,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-00",
+        "x": 5.04,
+        "y": 78.95,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PK",
+        "x": 18.64,
+        "y": 78.95,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PK",
+        "x": 31.48,
+        "y": 78.95,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.95,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PK",
+        "x": 59.57,
+        "y": 78.95,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-PK",
+        "x": 72.72,
+        "y": 78.95,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-00",
+        "x": 88.41,
+        "y": 78.95,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PK",
+        "x": 2.55,
+        "y": 96.39,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 15.86,
+        "y": 96.39,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 27.9,
+        "y": 96.39,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 40.4,
+        "y": 96.41,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 53.72,
+        "y": 96.39,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 67.47,
+        "y": 96.39,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 79.41,
+        "y": 96.39,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 90.64,
+        "y": 96.39,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjk600_1710": [
+      {
+        "code": "BJK-F6213-00-P1",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-K0",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-K0",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-40",
+        "x": 65.35,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.71,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PE",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P1",
+        "x": 2.54,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P1",
+        "x": 12.74,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PF",
+        "x": 22.33,
+        "y": 41.46,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-10-P6",
+        "x": 33.93,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.46,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-10-P6",
+        "x": 61.36,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 73.93,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-10",
+        "x": 84.18,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P1",
+        "x": 91.11,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PE",
+        "x": 2.9,
+        "y": 61.54,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 17.28,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-P5",
+        "x": 30.07,
+        "y": 61.54,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PE",
+        "x": 43.9,
+        "y": 61.88,
+        "w": 7.97,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-40",
+        "x": 58.15,
+        "y": 61.54,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PE",
+        "x": 72.61,
+        "y": 61.54,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-E0",
+        "x": 88.88,
+        "y": 61.54,
+        "w": 6.46,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-40",
+        "x": 5.63,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PE",
+        "x": 18.87,
+        "y": 78.97,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PE",
+        "x": 32.31,
+        "y": 78.97,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PE",
+        "x": 59.1,
+        "y": 78.97,
+        "w": 7.85,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00",
+        "x": 72.01,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-40",
+        "x": 87.58,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F1578-E0",
+        "x": 2.91,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PE",
+        "x": 12.87,
+        "y": 96.42,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 34.14,
+        "y": 96.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 44.04,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 53.33,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 62.5,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 72.81,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 82.86,
+        "y": 96.42,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 91.71,
+        "y": 96.42,
+        "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "bjk600_1917": [
+      {
+        "code": "BJK-F6213-00-P1",
+        "x": 2.54,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6290-L0",
+        "x": 15.89,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6280-L0",
+        "x": 27.9,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4730-40",
+        "x": 65.35,
+        "y": 23.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F4773-00-P0",
+        "x": 77.71,
+        "y": 23.01,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F171E-00-PF",
+        "x": 91.06,
+        "y": 23.01,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6231-00-P1",
+        "x": 2.54,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8336-00-P1",
+        "x": 12.74,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F831A-00-PG",
+        "x": 22.33,
+        "y": 41.46,
+        "w": 8.1,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6143-10-P7",
+        "x": 33.93,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BKF-F6167-00",
+        "x": 48.92,
+        "y": 41.46,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F6145-10-P7",
+        "x": 61.36,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8368-00",
+        "x": 74.05,
+        "y": 41.49,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1611-10",
+        "x": 84.18,
+        "y": 41.46,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1741-00-P1",
+        "x": 91.11,
+        "y": 41.46,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8312-00-PF",
+        "x": 2.9,
+        "y": 61.54,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "BJM-F836B-00",
+        "x": 17.28,
+        "y": 61.54,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8339-00-P5",
+        "x": 30.07,
+        "y": 61.54,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F8311-00-PF",
+        "x": 43.9,
+        "y": 61.88,
+        "w": 7.92,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F839B-10",
+        "x": 58.15,
+        "y": 61.54,
+        "w": 6.6,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1711-00-PF",
+        "x": 72.61,
+        "y": 61.54,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173E-F0",
+        "x": 88.88,
+        "y": 61.54,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F174B-10",
+        "x": 5.63,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1731-01-PF",
+        "x": 18.87,
+        "y": 78.97,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7497-00-PF",
+        "x": 32.31,
+        "y": 78.97,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1552-00",
+        "x": 46.45,
+        "y": 78.97,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7496-00-PF",
+        "x": 59.1,
+        "y": 78.97,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1721-00-PF",
+        "x": 72.01,
+        "y": 78.97,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F173B-10",
+        "x": 87.58,
+        "y": 78.97,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F1578-H0",
+        "x": 2.91,
+        "y": 96.42,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F1511-00-PF",
+        "x": 12.87,
+        "y": 96.42,
+        "w": 7.84,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-F1556-00",
+        "x": 34.14,
+        "y": 96.42,
+        "w": 6.3,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7423-00",
+        "x": 44.04,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7481-00",
+        "x": 53.33,
+        "y": 96.43,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "BJK-F7413-00",
+        "x": 62.5,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BL-E4728-00",
+        "x": 72.81,
+        "y": 96.42,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "2BM-E4718-00",
+        "x": 82.86,
+        "y": 96.42,
+        "w": 6.51,
+        "h": 1.34
+      },
+      {
+        "code": "B8B-E4711-20",
+        "x": 91.71,
         "y": 96.42,
         "w": 6.35,
         "h": 1.34

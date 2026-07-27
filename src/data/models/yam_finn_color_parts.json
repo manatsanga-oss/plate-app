@@ -1,5 +1,5 @@
 {
-  "file": "1YB6F431T1.pdf,B6F5-6-7-820post.pdf,B6FD-E-F-G20post.pdf,B6FH-J-K-L20post.pdf,finn-b6fstuv.pdf",
+  "file": "1YB6F431T1.pdf,B6F5-6-7-820post.pdf,B6FD-E-F-G20post.pdf,B6FH-J-K-L20post.pdf,finn-2019.pdf,finn-b6fstuv.pdf,rev-30b6f431t1.pdf",
   "brand": "YAMAHA",
   "model": "FINN",
   "model_code": "FINN",
@@ -20,7 +20,7 @@
         "/parts-img/yam_finn/b6fm_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FM"
+      "type": "B6FM00"
     },
     {
       "code": "1878",
@@ -35,7 +35,7 @@
         "/parts-img/yam_finn/b6fn_1878.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FN"
+      "type": "B6FN00"
     },
     {
       "code": "0903",
@@ -50,7 +50,7 @@
         "/parts-img/yam_finn/b6fn_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FN"
+      "type": "B6FN00"
     },
     {
       "code": "1917",
@@ -65,7 +65,7 @@
         "/parts-img/yam_finn/b6fp_1917.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FP"
+      "type": "B6FP00"
     },
     {
       "code": "0779",
@@ -80,7 +80,7 @@
         "/parts-img/yam_finn/b6fp_0779.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FP"
+      "type": "B6FP00"
     },
     {
       "code": "003E",
@@ -95,7 +95,7 @@
         "/parts-img/yam_finn/b6fp_003e.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FP"
+      "type": "B6FP00"
     },
     {
       "code": "1258",
@@ -110,7 +110,7 @@
         "/parts-img/yam_finn/b6fr_1258.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FR"
+      "type": "B6FR00"
     },
     {
       "code": "1862",
@@ -125,7 +125,7 @@
         "/parts-img/yam_finn/b6fr_1862.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FR"
+      "type": "B6FR00"
     },
     {
       "code": "1579",
@@ -140,7 +140,7 @@
         "/parts-img/yam_finn/b6fr_1579.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FR"
+      "type": "B6FR00"
     },
     {
       "code": "1669",
@@ -155,7 +155,7 @@
         "/parts-img/yam_finn/b6f5_1669.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F5"
+      "type": "B6F500"
     },
     {
       "code": "1671",
@@ -170,7 +170,7 @@
         "/parts-img/yam_finn/b6f5_1671.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F5"
+      "type": "B6F500"
     },
     {
       "code": "0903",
@@ -185,7 +185,7 @@
         "/parts-img/yam_finn/b6f5_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F5"
+      "type": "B6F500"
     },
     {
       "code": "0903",
@@ -200,7 +200,7 @@
         "/parts-img/yam_finn/b6f6_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F6"
+      "type": "B6F600"
     },
     {
       "code": "1669",
@@ -215,7 +215,7 @@
         "/parts-img/yam_finn/b6f7_1669.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F7"
+      "type": "B6F700"
     },
     {
       "code": "1671",
@@ -230,7 +230,7 @@
         "/parts-img/yam_finn/b6f7_1671.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F7"
+      "type": "B6F700"
     },
     {
       "code": "0903",
@@ -245,7 +245,7 @@
         "/parts-img/yam_finn/b6f7_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F7"
+      "type": "B6F700"
     },
     {
       "code": "1754",
@@ -260,7 +260,7 @@
         "/parts-img/yam_finn/b6f7_1754.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F7"
+      "type": "B6F700"
     },
     {
       "code": "0903",
@@ -275,7 +275,7 @@
         "/parts-img/yam_finn/b6f8_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F8"
+      "type": "B6F800"
     },
     {
       "code": "1783",
@@ -290,7 +290,7 @@
         "/parts-img/yam_finn/b6f8_1783.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6F8"
+      "type": "B6F800"
     },
     {
       "code": "0918",
@@ -305,7 +305,7 @@
         "/parts-img/yam_finn/b6fd_0918.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FD"
+      "type": "B6FD00"
     },
     {
       "code": "0918",
@@ -320,7 +320,7 @@
         "/parts-img/yam_finn/b6fe_0918.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FE"
+      "type": "B6FE00"
     },
     {
       "code": "0903",
@@ -335,7 +335,7 @@
         "/parts-img/yam_finn/b6fe_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FE"
+      "type": "B6FE00"
     },
     {
       "code": "00WL",
@@ -350,7 +350,7 @@
         "/parts-img/yam_finn/b6fe_00wl.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FE"
+      "type": "B6FE00"
     },
     {
       "code": "0918",
@@ -365,7 +365,7 @@
         "/parts-img/yam_finn/b6ff_0918.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FF"
+      "type": "B6FF00"
     },
     {
       "code": "0903",
@@ -380,7 +380,7 @@
         "/parts-img/yam_finn/b6ff_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FF"
+      "type": "B6FF00"
     },
     {
       "code": "00WL",
@@ -395,7 +395,7 @@
         "/parts-img/yam_finn/b6ff_00wl.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FF"
+      "type": "B6FF00"
     },
     {
       "code": "1617",
@@ -410,7 +410,7 @@
         "/parts-img/yam_finn/b6fg_1617.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FG"
+      "type": "B6FG00"
     },
     {
       "code": "0903",
@@ -425,7 +425,7 @@
         "/parts-img/yam_finn/b6fh_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FH"
+      "type": "B6FH00"
     },
     {
       "code": "0918",
@@ -440,7 +440,7 @@
         "/parts-img/yam_finn/b6fj_0918.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FJ"
+      "type": "B6FJ00"
     },
     {
       "code": "0751",
@@ -455,7 +455,7 @@
         "/parts-img/yam_finn/b6fj_0751.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FJ"
+      "type": "B6FJ00"
     },
     {
       "code": "1610",
@@ -470,7 +470,7 @@
         "/parts-img/yam_finn/b6fk_1610.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FK"
+      "type": "B6FK00"
     },
     {
       "code": "1579",
@@ -485,7 +485,7 @@
         "/parts-img/yam_finn/b6fk_1579.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FK"
+      "type": "B6FK00"
     },
     {
       "code": "1124",
@@ -500,7 +500,7 @@
         "/parts-img/yam_finn/b6fk_1124.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FK"
+      "type": "B6FK00"
     },
     {
       "code": "1862",
@@ -515,7 +515,7 @@
         "/parts-img/yam_finn/b6fl_1862.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FL"
+      "type": "B6FL00"
     },
     {
       "code": "1774",
@@ -530,7 +530,7 @@
         "/parts-img/yam_finn/b6fl_1774.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FL"
+      "type": "B6FL00"
     },
     {
       "code": "0903",
@@ -545,7 +545,7 @@
         "/parts-img/yam_finn/b6fs_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FS"
+      "type": "B6FS00"
     },
     {
       "code": "0903",
@@ -560,7 +560,7 @@
         "/parts-img/yam_finn/b6ft_0903.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FT"
+      "type": "B6FT00"
     },
     {
       "code": "0779",
@@ -575,7 +575,7 @@
         "/parts-img/yam_finn/b6ft_0779.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FT"
+      "type": "B6FT00"
     },
     {
       "code": "1240",
@@ -590,7 +590,7 @@
         "/parts-img/yam_finn/b6fu_1240.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FU"
+      "type": "B6FU00"
     },
     {
       "code": "1651",
@@ -605,7 +605,7 @@
         "/parts-img/yam_finn/b6fu_1651.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FU"
+      "type": "B6FU00"
     },
     {
       "code": "0776",
@@ -620,7 +620,7 @@
         "/parts-img/yam_finn/b6fu_0776.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FU"
+      "type": "B6FU00"
     },
     {
       "code": "1579",
@@ -635,7 +635,7 @@
         "/parts-img/yam_finn/b6fv_1579.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FV"
+      "type": "B6FV00"
     },
     {
       "code": "0266",
@@ -650,7 +650,7 @@
         "/parts-img/yam_finn/b6fv_0266.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FV"
+      "type": "B6FV00"
     },
     {
       "code": "1583",
@@ -665,7 +665,52 @@
         "/parts-img/yam_finn/b6fv_1583.jpg"
       ],
       "model_code": "FINN",
-      "type": "B6FV"
+      "type": "B6FV00"
+    },
+    {
+      "code": "1668",
+      "name": "ฟ้า",
+      "color_code": "MPBM2",
+      "page": "b6fc_1668",
+      "pages": [
+        "b6fc_1668"
+      ],
+      "img": "/parts-img/yam_finn/b6fc_1668.jpg",
+      "imgs": [
+        "/parts-img/yam_finn/b6fc_1668.jpg"
+      ],
+      "model_code": "FINN",
+      "type": "B6FC00"
+    },
+    {
+      "code": "0903",
+      "name": "ดำ/แดง",
+      "color_code": "SMX",
+      "page": "b6fc_0903",
+      "pages": [
+        "b6fc_0903"
+      ],
+      "img": "/parts-img/yam_finn/b6fc_0903.jpg",
+      "imgs": [
+        "/parts-img/yam_finn/b6fc_0903.jpg"
+      ],
+      "model_code": "FINN",
+      "type": "B6FC00"
+    },
+    {
+      "code": "1918",
+      "name": "เทา/ม่วง",
+      "color_code": "LBNM9",
+      "page": "b6fw00_1918",
+      "pages": [
+        "b6fw00_1918"
+      ],
+      "img": "/parts-img/yam_finn/b6fw00_1918.jpg",
+      "imgs": [
+        "/parts-img/yam_finn/b6fw00_1918.jpg"
+      ],
+      "model_code": "FINN",
+      "type": "B6FW00"
     }
   ],
   "pages": {
@@ -11303,6 +11348,649 @@
         "x": 90.43,
         "y": 96.9,
         "w": 6.35,
+        "h": 1.34
+      }
+    ],
+    "b6fc_1668": [
+      {
+        "code": "B6F-F6290-00",
+        "x": 5.71,
+        "y": 24.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F6280-00",
+        "x": 20.08,
+        "y": 24.13,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-H3559-00-P0",
+        "x": 32.77,
+        "y": 24.13,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F4730-10",
+        "x": 67.97,
+        "y": 24.13,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F4773-00-P5",
+        "x": 78.84,
+        "y": 24.13,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "5MY-F153E-90",
+        "x": 89.72,
+        "y": 24.13,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F6143-00-P4",
+        "x": 4.94,
+        "y": 40.27,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F8311-00-P4",
+        "x": 19.07,
+        "y": 40.04,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F6145-10",
+        "x": 33.6,
+        "y": 40.27,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1721-00",
+        "x": 68.0,
+        "y": 40.27,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1711-00",
+        "x": 79.61,
+        "y": 40.27,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F171E-00-P4",
+        "x": 89.06,
+        "y": 40.27,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-WF83N-80",
+        "x": 6.22,
+        "y": 59.59,
+        "w": 6.77,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-WF83L-80",
+        "x": 22.84,
+        "y": 59.6,
+        "w": 6.61,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-WF17M-90",
+        "x": 39.9,
+        "y": 59.6,
+        "w": 6.88,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1741-02-P4",
+        "x": 52.0,
+        "y": 59.6,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1731-02-P4",
+        "x": 63.15,
+        "y": 59.6,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-WF17L-90",
+        "x": 76.85,
+        "y": 59.6,
+        "w": 6.61,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1611-01",
+        "x": 89.97,
+        "y": 59.49,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F3391-00",
+        "x": 3.84,
+        "y": 78.88,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F83B8-40",
+        "x": 18.43,
+        "y": 78.88,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F153E-10",
+        "x": 32.51,
+        "y": 78.88,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F836L-00-P4",
+        "x": 44.53,
+        "y": 78.88,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F836K-00-P4",
+        "x": 59.06,
+        "y": 78.88,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F83B7-40",
+        "x": 87.4,
+        "y": 78.87,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1511-00-P5",
+        "x": 3.07,
+        "y": 95.75,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1556-00",
+        "x": 14.51,
+        "y": 95.75,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "5YW-F175C-00",
+        "x": 25.83,
+        "y": 95.75,
+        "w": 6.72,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F8312-10",
+        "x": 35.96,
+        "y": 95.52,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F842N-10",
+        "x": 56.37,
+        "y": 95.75,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "1FC-E4728-00",
+        "x": 67.61,
+        "y": 95.71,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "1FC-E4718-00",
+        "x": 80.59,
+        "y": 95.71,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "1FP-E4711-20",
+        "x": 91.31,
+        "y": 95.71,
+        "w": 6.3,
+        "h": 1.34
+      }
+    ],
+    "b6fc_0903": [
+      {
+        "code": "B6F-F6290-00",
+        "x": 5.71,
+        "y": 24.01,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F6280-00",
+        "x": 20.08,
+        "y": 24.13,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-H3559-00-P4",
+        "x": 32.77,
+        "y": 24.13,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F4730-20",
+        "x": 67.97,
+        "y": 24.13,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F4773-00-P2",
+        "x": 78.84,
+        "y": 24.13,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "5MY-F153E-60",
+        "x": 89.72,
+        "y": 24.13,
+        "w": 6.56,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F6143-00-P2",
+        "x": 4.94,
+        "y": 40.27,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F8311-00-P2",
+        "x": 19.07,
+        "y": 40.04,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F6145-20",
+        "x": 33.6,
+        "y": 40.27,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1721-00",
+        "x": 68.0,
+        "y": 40.27,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1711-00",
+        "x": 79.61,
+        "y": 40.27,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F171E-00-P0",
+        "x": 89.06,
+        "y": 40.27,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-WF83N-90",
+        "x": 6.22,
+        "y": 59.59,
+        "w": 6.77,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-WF83L-90",
+        "x": 22.89,
+        "y": 59.6,
+        "w": 6.61,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-WF17M-A0",
+        "x": 39.86,
+        "y": 59.6,
+        "w": 6.98,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1741-02-P0",
+        "x": 52.0,
+        "y": 59.6,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1731-02-P0",
+        "x": 63.15,
+        "y": 59.6,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-WF17L-A0",
+        "x": 76.81,
+        "y": 59.6,
+        "w": 6.72,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1611-01",
+        "x": 89.97,
+        "y": 59.49,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F3391-00",
+        "x": 3.84,
+        "y": 78.88,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F83B8-50",
+        "x": 18.43,
+        "y": 78.88,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F153E-40",
+        "x": 32.51,
+        "y": 78.88,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F836L-00-P5",
+        "x": 44.53,
+        "y": 78.88,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F836K-00-P5",
+        "x": 59.06,
+        "y": 78.88,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F83B7-50",
+        "x": 87.4,
+        "y": 78.87,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1511-00-P2",
+        "x": 3.07,
+        "y": 95.75,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1556-00",
+        "x": 14.51,
+        "y": 95.75,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "5YW-F175C-00",
+        "x": 25.83,
+        "y": 95.75,
+        "w": 6.72,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F8312-20",
+        "x": 35.96,
+        "y": 95.52,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F842N-20",
+        "x": 56.37,
+        "y": 95.75,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "1FC-E4728-00",
+        "x": 67.61,
+        "y": 95.71,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "1FC-E4718-00",
+        "x": 80.59,
+        "y": 95.71,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "1FP-E4711-20",
+        "x": 91.31,
+        "y": 95.71,
+        "w": 6.3,
+        "h": 1.34
+      }
+    ],
+    "b6fw00_1918": [
+      {
+        "code": "B6F-F6290-01",
+        "x": 2.07,
+        "y": 24.05,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F6280-01",
+        "x": 11.59,
+        "y": 24.05,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-H3559-00-P4",
+        "x": 19.62,
+        "y": 24.17,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B7E-F6143-00-PB",
+        "x": 29.39,
+        "y": 24.0,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F6145-10",
+        "x": 38.92,
+        "y": 24.05,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F4773-00-P2",
+        "x": 71.02,
+        "y": 24.05,
+        "w": 7.79,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F171E-00-PN",
+        "x": 80.16,
+        "y": 24.05,
+        "w": 8.05,
+        "h": 1.34
+      },
+      {
+        "code": "5MY-F153E-C0",
+        "x": 90.72,
+        "y": 24.05,
+        "w": 6.72,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F836L-00-PS",
+        "x": 11.97,
+        "y": 42.36,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F836K-00-PS",
+        "x": 79.94,
+        "y": 42.2,
+        "w": 8.0,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F83BT-00",
+        "x": 90.45,
+        "y": 42.2,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F3391-00",
+        "x": 21.42,
+        "y": 43.2,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F173D-00",
+        "x": 30.62,
+        "y": 43.2,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1721-01",
+        "x": 39.05,
+        "y": 43.2,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1711-01",
+        "x": 46.5,
+        "y": 43.2,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F842N-10",
+        "x": 53.61,
+        "y": 43.2,
+        "w": 6.4,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1741-02-PP",
+        "x": 1.18,
+        "y": 60.11,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F8311-00-PN",
+        "x": 40.15,
+        "y": 60.31,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1731-02-PN",
+        "x": 91.05,
+        "y": 59.94,
+        "w": 7.94,
+        "h": 1.34
+      },
+      {
+        "code": "BF6-F153E-60",
+        "x": 14.72,
+        "y": 76.7,
+        "w": 6.35,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1511-00-PS",
+        "x": 0.98,
+        "y": 95.82,
+        "w": 7.89,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1569-00",
+        "x": 9.8,
+        "y": 95.82,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F1556-01",
+        "x": 18.25,
+        "y": 95.82,
+        "w": 6.25,
+        "h": 1.34
+      },
+      {
+        "code": "5YW-F175C-00",
+        "x": 27.62,
+        "y": 95.82,
+        "w": 6.72,
+        "h": 1.34
+      },
+      {
+        "code": "B6F-F8312-11",
+        "x": 36.17,
+        "y": 95.82,
+        "w": 6.25,
         "h": 1.34
       }
     ]

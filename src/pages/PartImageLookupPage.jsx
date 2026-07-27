@@ -61,7 +61,8 @@ function BikeHotspotPanel({ data, isPicked, togglePart, modelName }) {
   };
 
   const sel = selIdx != null ? data.hotspots[selIdx] : null;
-  const rows = sel ? [...sel.items].sort((a, b) => ((a.side === visible ? 0 : 1) - (b.side === visible ? 0 : 1))) : [];
+  // แสดงเฉพาะรหัสข้างที่กำลังมอง (+ ชิ้นที่ไม่แยกข้าง) — อีกข้างดูได้ด้วยปุ่มพลิกด้าน
+  const rows = sel ? sel.items.filter((it) => !it.side || it.side === visible) : [];
 
   return (
     <div style={{ border: "1px solid #dbe3ef", borderRadius: 12, padding: 12, marginBottom: 12, background: "#fbfcfe" }}>
@@ -98,7 +99,7 @@ function BikeHotspotPanel({ data, isPicked, togglePart, modelName }) {
             <>
               <div style={{ fontWeight: 700, marginBottom: 2 }}>{sel.label}</div>
               {sel.items.some((it) => it.side) && (
-                <div style={{ fontSize: 11.5, color: "#64748b", marginBottom: 6 }}>มีแยกซ้าย/ขวา — ฝั่งที่เห็นในมุมนี้ถูกไฮไลต์</div>
+                <div style={{ fontSize: 11.5, color: "#64748b", marginBottom: 6 }}>มีแยกซ้าย/ขวา — แสดงเฉพาะข้าง{visible} · กด "⇄ พลิกด้าน" เพื่อดูอีกข้าง</div>
               )}
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {rows.map((it) => {
