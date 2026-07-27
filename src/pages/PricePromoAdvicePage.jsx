@@ -8,6 +8,7 @@ import React, { useEffect, useMemo, useState } from "react";
 const ST_API = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-turnover-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const OVERRIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/price-promo-override-api"; // ราคา/โปรใหม่ที่พิมพ์เอง (มีประวัติ)
+const HONDA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/honda-report-api"; // โควต้าที่ HONDA จัดสรร (บันทึกจากหน้าส่งรายงาน)
 const PRICE_FACTORY = 1; // ราคาขายแนะนำ = ราคาประกาศโรงงาน (อ้างอิง ไม่ปรับ)
 const PRICE_ADJ = 5;     // ไฟแนนซ์ สิงห์ชัย = ราคาที่ปรับขึ้น-ลงจริง (Honda ปรับเฉพาะตัวนี้ · Yamaha ปรับทุกราคา)
 
@@ -35,7 +36,7 @@ const byModel = (rows) => (Array.isArray(rows) ? rows : []).filter((r) => r && r
 
 // ===== ตรรกะแนะนำ =====
 // sell% = ขาย/(ขาย+สต๊อก) · mos = เดือนคงคลัง (สต๊อก/ยอดขายต่อเดือน) · เทรนด์ = ขายนี้ vs ก่อน
-function advise(sold, prev, stock, promo, received) {
+function advise(sold, prev, stock, promo, received, quota) {
   const tot = sold + stock;
   const sell = tot > 0 ? sold / tot : 0;
   const mos = sold > 0 ? stock / sold : stock > 0 ? 9 : 0;
@@ -43,6 +44,10 @@ function advise(sold, prev, stock, promo, received) {
   const dn = prev != null && sold < prev * 0.7;
   const hasPromo = promo > 0;
   const rationed = received != null && sold >= 3 && received < sold * 0.5; // ดีมานด์มาก แต่รับเข้าน้อย = โดนจำกัดโควตา
+  // โควต้าเดือนหน้าที่ HONDA จัดสรรจริง (จากปุ่มโควต้า/เทียบแผนในหน้าส่งรายงาน) — null = ไม่มีข้อมูล/ไม่ใช่ HONDA
+  const goodSale = sold >= 3 && sell >= 0.6;
+  const quotaShort = quota != null && goodSale && quota < sold * 0.6;  // ขายดีแต่ได้รถไม่ถึง 60% ของยอดขาย
+  const quotaOk = quota != null && goodSale && quota >= sold * 0.8;    // ขายดีและแนวโน้มได้รถพอ
 
   let pr; // promo
   // สต๊อกหมด = ไม่มีของให้ขาย — ไม่ต้องทำโปร/ค่าคอม (ถ้ามีโปรค้างอยู่ให้ตัดออกประหยัดงบ)
@@ -56,12 +61,16 @@ function advise(sold, prev, stock, promo, received) {
   else pr = { dir: "hold", level: "-", reason: "สมดุล — คงโปร" };
 
   let pc; // price
-  if (stock === 0) pc = { dir: "hold", level: "-", reason: "สต๊อกหมด — ไม่ต้องปรับราคา รอของเข้าก่อน" };
+  if (stock === 0 && !quotaShort) pc = { dir: "hold", level: "-", reason: "สต๊อกหมด — ไม่ต้องปรับราคา รอของเข้าก่อน" };
+  // ขายดี + โควต้าเดือนหน้าได้น้อย = ของจะขาดแน่ → แนะนำขึ้นราคา (คำสั่ง 2026-07-25)
+  else if (quotaShort) pc = { dir: "up", level: quota < sold * 0.3 ? "กลาง" : "น้อย", reason: `ขายดี ${sold} คัน/เดือน แต่โควต้าเดือนหน้าได้ ${quota} คัน — ของจะขาด ขึ้นราคาได้` };
+  // ขายดี + แนวโน้มได้รถพอ → ไม่ต้องปรับอะไร
+  else if (quotaOk) pc = { dir: "hold", level: "-", reason: `ขายดีและโควต้าเดือนหน้าพอ (${quota} คัน) — คงราคา` };
   else if (sell >= 0.85 && mos < 0.7 && !dn) pc = { dir: "up", level: "น้อย", reason: "ดีมานด์ล้น ของขาด — ขยับราคาขึ้นได้" };
   else if (sell < 0.35 && mos >= 2.5) pc = { dir: "down", level: mos >= 4 ? "กลาง" : "น้อย", reason: "ของค้างนาน — ลดราคาช่วยระบาย" };
   else pc = { dir: "hold", level: "-", reason: "คงราคา" };
 
-  return { sell, mos, trend: up ? "↑" : dn ? "↓" : "→", promo: pr, price: pc };
+  return { sell, mos, trend: up ? "↑" : dn ? "↓" : "→", promo: pr, price: pc, quota };
 }
 
 const DIR = {
@@ -90,6 +99,7 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
   const [edits, setEdits] = useState({}); // ราคา/โปรใหม่ที่พิมพ์เอง keyed by row.key (prefill จาก DB ค่าล่าสุด)
   const [saving, setSaving] = useState(false);
   const [history, setHistory] = useState(null); // null = ปิด modal, array = เปิด
+  const [histMonth, setHistMonth] = useState("ALL"); // กรองเดือนในประวัติ: "YYYY-MM" หรือ "ALL"
 
   const setEdit = (key, field, val) => setEdits((e) => ({ ...e, [key]: { ...e[key], [field]: val } }));
 
@@ -116,12 +126,20 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
     setHistory([]); setMessage("");
     try {
       const res = await post(OVERRIDE_API, { action: "list_overrides", ...(brandFilter !== "ALL" ? { brand: brandFilter } : {}) });
-      setHistory(Array.isArray(res) ? res : []);
+      const list = Array.isArray(res) ? res : [];
+      setHistory(list);
+      // เริ่มต้นที่เดือนล่าสุดที่มีข้อมูล — เลือก "ทั้งหมด" เองได้จาก dropdown
+      const months = [...new Set(list.map((h) => String(h.saved_at || "").slice(0, 7)).filter(Boolean))].sort();
+      setHistMonth(months.length ? months[months.length - 1] : "ALL");
     } catch (e) { setMessage("❌ โหลดประวัติไม่สำเร็จ: " + (e && e.message ? e.message : String(e))); setHistory([]); }
   }
+  const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
+  const histMonthLabel = (ym) => { const [y, m] = ym.split("-").map(Number); return `${TH_MONTHS[(m || 1) - 1]} ${y + 543}`; };
+  const histMonths = Array.isArray(history) ? [...new Set(history.map((h) => String(h.saved_at || "").slice(0, 7)).filter(Boolean))].sort().reverse() : [];
+  const histList = Array.isArray(history) ? (histMonth === "ALL" ? history : history.filter((h) => String(h.saved_at || "").slice(0, 7) === histMonth)) : [];
   // พิมพ์เฉพาะตารางประวัติ — เปิดหน้าต่างใหม่ที่มีแค่ตารางนี้ (ข้ามหลายหน้าได้ ไม่กระทบหน้าหลัก)
   function printHistory() {
-    const list = Array.isArray(history) ? history : [];
+    const list = histList;
     const esc = (s) => String(s == null ? "" : s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
     const rowsHtml = list.map((h) => `<tr>` +
       `<td>${h.saved_at ? esc(new Date(h.saved_at).toLocaleString("th-TH")) : "-"}</td>` +
@@ -137,7 +155,7 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
       `th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:center}` +
       `thead th{background:#1e3a5f;color:#fff}td.l{text-align:left}td.r{text-align:right}` +
       `@page{size:landscape;margin:10mm}</style></head><body>` +
-      `<h3>🕘 ประวัติราคา/โปรใหม่ที่บันทึก (${list.length})</h3>` +
+      `<h3>🕘 ประวัติราคา/โปรใหม่ที่บันทึก (${list.length}) — ${histMonth === "ALL" ? "ทั้งหมด" : histMonthLabel(histMonth)}</h3>` +
       `<table><thead><tr><th>วันที่บันทึก</th><th>ยี่ห้อ</th><th class="l">รุ่น / แบบ</th>` +
       `<th>ราคาใหม่</th><th>เงินดาวน์ออกแทน</th><th>ค่าคอมพิเศษ</th><th>โดย</th></tr></thead>` +
       `<tbody>${rowsHtml || '<tr><td colspan="7">ยังไม่มีประวัติ</td></tr>'}</tbody></table></body></html>`;
@@ -205,6 +223,30 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
       }
       const activeAt = (items, D) => items.filter((x) => (!x.eff || x.eff <= D) && (!x.end || x.end >= D));
 
+      // โควต้า HONDA เดือนหน้า (รอบล่าสุดที่มีโควต้าบันทึกไว้) — ขายดี+ได้รถน้อย → แนะนำขึ้นราคา / ได้รถพอ → คงราคา
+      // planSet = รุ่นที่อยู่ในแผนสั่งซื้อรอบนั้น: วางแผนแล้วโควต้า 0 = โดนตัดจริง · ไม่อยู่ในแผนเลย = ไม่มีข้อมูล (ใช้กติกาเดิม)
+      let quotaMap = null;
+      const planSet = new Set();
+      try {
+        const periods = await post(HONDA_API, { action: "list_honda_periods" });
+        const qp = (Array.isArray(periods) ? periods : []).find((p) => Number(p.quota_total) > 0); // เรียง desc แล้ว
+        if (qp) {
+          const [qrows, prows] = await Promise.all([
+            post(HONDA_API, { action: "get_honda_quota", period: qp.period }),
+            post(HONDA_API, { action: "get_honda_report", period: qp.period }),
+          ]);
+          quotaMap = {};
+          for (const r of (Array.isArray(qrows) ? qrows : [])) {
+            if (!r || !r.model_code) continue;
+            const qk = norm(r.model_code) + "|" + norm(r.type);
+            quotaMap[qk] = (quotaMap[qk] || 0) + (Number(r.quota_qty) || 0);
+          }
+          for (const r of (Array.isArray(prows) ? prows : [])) {
+            if (r && r.model_code && Number(r.plan_next) > 0) planSet.add(norm(r.model_code) + "|" + norm(r.type));
+          }
+        }
+      } catch { quotaMap = null; }
+
       // รวม turnover เป็นระดับ (model_code|type) ต่อยี่ห้อ
       function aggregate(curRows, prevRows, brand) {
         const cur = {}, prev = {};
@@ -248,7 +290,9 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
           const downPrevTotal = sum(promoPrevItems.filter((x) => isDown(x.name)));
           const commPrevTotal = sum(promoPrevItems.filter((x) => isComm(x.name)));
           const downChanged = downTotal !== downPrevTotal, commChanged = commTotal !== commPrevTotal;
-          const a = advise(v.sold, prev[k] != null ? prev[k] : null, v.stock, promoTotal, v.received);
+          // โควต้า: เฉพาะ HONDA — มีโควต้า = ใช้ตัวเลขจริง · วางแผนแล้วไม่ได้ = 0 (โดนตัด) · ไม่อยู่ในรอบสั่งซื้อ = null
+          const quota = brand === "HONDA" && quotaMap ? (quotaMap[k] != null ? quotaMap[k] : planSet.has(k) ? 0 : null) : null;
+          const a = advise(v.sold, prev[k] != null ? prev[k] : null, v.stock, promoTotal, v.received, quota);
           return {
             brand, key: brand + "|" + k, model: v.model, code: v.code, type: v.type,
             series: t ? t.marketing_name || t.series_name : v.model,
@@ -417,8 +461,12 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
         <div onClick={() => setHistory(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "flex-start", justifyContent: "center", zIndex: 50, padding: 20, overflowY: "auto" }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, maxWidth: 1000, width: "100%", marginTop: 24, boxShadow: "0 10px 40px rgba(0,0,0,.3)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h3 style={{ margin: 0 }}>🕘 ประวัติราคา/โปรใหม่ที่บันทึก ({history.length})</h3>
-              <div style={{ display: "flex", gap: 8 }}>
+              <h3 style={{ margin: 0 }}>🕘 ประวัติราคา/โปรใหม่ที่บันทึก ({histList.length})</h3>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <select value={histMonth} onChange={(e) => setHistMonth(e.target.value)} style={{ padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>
+                  {histMonths.map((ym) => <option key={ym} value={ym}>{histMonthLabel(ym)}</option>)}
+                  <option value="ALL">ทั้งหมดทุกเดือน</option>
+                </select>
                 <button onClick={printHistory} style={{ padding: "6px 14px", background: "#1e3a5f", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>🖨️ พิมพ์</button>
                 <button onClick={() => setHistory(null)} style={{ padding: "6px 14px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" }}>✕ ปิด</button>
               </div>
@@ -437,9 +485,9 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.length === 0 ? (
+                  {histList.length === 0 ? (
                     <tr><td colSpan={7} style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>ยังไม่มีประวัติ</td></tr>
-                  ) : history.map((h) => (
+                  ) : histList.map((h) => (
                     <tr key={h.id} style={{ borderTop: "1px solid #f1f5f9" }}>
                       <td style={{ ...td, whiteSpace: "nowrap" }}>{h.saved_at ? new Date(h.saved_at).toLocaleString("th-TH") : "-"}</td>
                       <td style={td}>{h.brand}</td>
