@@ -11,59 +11,115 @@ const BRANCHES = [
   "SCY07 สิงห์ชัย ตลาด",
 ];
 
-const PAGE_OPTIONS = [
-  // ── Report ──
-  { key: "salesoverview",   label: "📈 สรุปภาพรวม" },
-  { key: "mymotoreport",    label: "📋 รายงานลงทะเบียน MyMoto" },
-  { key: "mymotoregister",  label: "📝 บันทึกลงทะเบียน MyMoto" },
-  { key: "partgiveawayreport", label: "🎁 รายงานของแถม" },
-  // ── Sales ──
-  { key: "moto",       label: "🏍️ จองรถจักรยานยนต์" },
-  { key: "booking",    label: "🚗 จองคนขับรถ" },
-  { key: "pricequote", label: "🧮 คำนวณราคาขายรถ" },
-  { key: "stockcheck", label: "📦 เช็คสต๊อก" },
-  { key: "mototransfer", label: "🔁 บันทึกโอนรถระหว่างสาขา" },
-  { key: "customer",   label: "🧑 บันทึกข้อมูลลูกค้า" },
-  { key: "deliveryfee", label: "🚚 บันทึกค่านำพา" },
-  { key: "pricemarkup", label: "➕ ราคาขายบวกเพิ่ม" },
-  { key: "receiptqr",  label: "🔳 พิมพ์ QR ออกใบเสร็จ" },
-  { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
-  { key: "salewizard", label: "🛒 บันทึกขาย NEW" },
-  { key: "salemoneyreport", label: "💰 รายงานการเงินขายรถ" },
-  { key: "retailsale", label: "🔎 ค้นหาใบขาย (ขายปลีกเดิม)" },
-  { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
-  // ── Spare Parts ──
-  { key: "spareorder", label: "🛠️ สั่งซื้ออะไหล่ HONDA" },
-  { key: "yamahaorder", label: "🛠️ สั่งซื้ออะไหล่ YAMAHA" },
-  { key: "outsideorder", label: "🛠️ สั่งซื้ออะไหล่นอกเงินมัดจำ" },
-  { key: "partdeposit", label: "🪙 ระบบมัดจำอะไหล่" },
-  { key: "fastmoving", label: "⚡ รายงานอะไหล่หมุนเร็ว" },
-  { key: "claim",      label: "🔧 ระบบการเคลม" },
-  // ── Office Supplies (วัสดุสำนักงาน) ──
-  { key: "dashboard",  label: "📊 ภาพรวม (วัสดุ)" },
-  { key: "receive",    label: "📥 รับวัสดุ" },
-  { key: "issue",      label: "📤 เบิกวัสดุ" },
-  // ── Finance ──
-  { key: "pettycash",  label: "💰 เงินสดย่อย-ค่าน้ำมันรถใหม่" },
-  { key: "postage",    label: "📮 เงินสดย่อย-ค่าไปรษณีย์" },
-  { key: "pettycashgeneral",  label: "💵 เงินสดย่อย-ค่าใช้จ่ายทั่วไป" },
-  { key: "pettycashoffering", label: "🙏 เงินสดย่อย-ค่าของไหว้" },
-  { key: "payment",    label: "📱 รับชำระเงิน (QR PromptPay)" },
-  { key: "bankdeposit", label: "🏦 บันทึกรายการฝากเงิน" },
-  { key: "expensedoccheck", label: "📑 ตรวจสอบเอกสารค่าใช้จ่าย" },
-  // ── Vehicle Registration ──
-  { key: "vehicleregistration", label: "🔎 ค้นหาทะเบียนรถ" },
-  { key: "searchreceiptwork",   label: "🔎 ค้นหางานทะเบียนรับเรื่อง" },
-  // ── Service ──
-  { key: "yamaharepairreport", label: "📃 ใบแจ้งซ่อม YAMAHA" },
-  { key: "hondarepairreport",  label: "📃 ใบแจ้งซ่อม HONDA" },
-  { key: "partwithdrawal",     label: "📤 บันทึกการเบิกอะไหล่" },
-  { key: "servicehistory",     label: "🔎 ค้นหาประวัติงานบริการ" },
-  { key: "servicerate",        label: "💲 ค้นหาค่าบริการ" },
-  { key: "partimagelookup",    label: "📋 บันทึกใบประเมินราคา" },
-  // ── จัดการผู้ใช้ ──
-  { key: "users",      label: "👤 กำหนดผู้ใช้งาน" },
+// จัดกลุ่ม/เรียงตามเมนูหลักใน Sidebar (App.jsx)
+const PAGE_GROUPS = [
+  {
+    title: "Report",
+    items: [
+      { key: "salesoverview",   label: "📈 สรุปภาพรวม" },
+      { key: "mymotoreport",    label: "📋 รายงานลงทะเบียน MyMoto" },
+      { key: "mymotoregister",  label: "📝 บันทึกลงทะเบียน MyMoto" },
+      { key: "partgiveawayreport", label: "🎁 รายงานของแถม" },
+    ],
+  },
+  {
+    title: "Sales",
+    items: [
+      { key: "moto",       label: "🏍️ จองรถจักรยานยนต์" },
+      { key: "booking",    label: "🚗 จองคนขับรถ" },
+      { key: "pricequote", label: "🧮 คำนวณราคาขายรถ" },
+      { key: "stockcheck", label: "📦 เช็คสต๊อก" },
+      { key: "mototransfer", label: "🔁 บันทึกโอนรถระหว่างสาขา" },
+      { key: "customer",   label: "🧑 บันทึกข้อมูลลูกค้า" },
+      { key: "deliveryfee", label: "🚚 บันทึกค่านำพา" },
+      { key: "pricemarkup", label: "➕ ราคาขายบวกเพิ่ม" },
+      { key: "receiptqr",  label: "🔳 พิมพ์ QR ออกใบเสร็จ" },
+      { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
+      { key: "salewizard", label: "🛒 บันทึกขาย NEW" },
+      { key: "retailsale", label: "🔎 ค้นหาใบขาย (ขายปลีกเดิม)" },
+      { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
+      { key: "salemoneyreport", label: "💰 รายงานการเงินขายรถ" },
+    ],
+  },
+  {
+    title: "Spare Parts",
+    items: [
+      { key: "spareorder", label: "🛠️ สั่งซื้ออะไหล่ HONDA" },
+      { key: "yamahaorder", label: "🛠️ สั่งซื้ออะไหล่ YAMAHA" },
+      { key: "outsideorder", label: "🛠️ สั่งซื้ออะไหล่นอกเงินมัดจำ" },
+      { key: "partdeposit", label: "🪙 ระบบมัดจำอะไหล่" },
+      { key: "fastmoving", label: "⚡ รายงานอะไหล่หมุนเร็ว" },
+      { key: "partwithdrawal", label: "📤 บันทึกการเบิกอะไหล่" },
+    ],
+  },
+  {
+    title: "Office Supplies",
+    items: [
+      { key: "dashboard",  label: "📊 ภาพรวม (วัสดุ)" },
+      { key: "receive",    label: "📥 รับวัสดุ" },
+      { key: "issue",      label: "📤 เบิกวัสดุ" },
+    ],
+  },
+  {
+    title: "Finance",
+    items: [
+      { key: "pettycash",  label: "💰 เงินสดย่อย-ค่าน้ำมันรถใหม่" },
+      { key: "postage",    label: "📮 เงินสดย่อย-ค่าไปรษณีย์" },
+      { key: "pettycashgeneral",  label: "💵 เงินสดย่อย-ค่าใช้จ่ายทั่วไป" },
+      { key: "pettycashoffering", label: "🙏 เงินสดย่อย-ค่าของไหว้" },
+      { key: "payment",    label: "📱 รับชำระเงิน (QR PromptPay)" },
+      { key: "bankdeposit", label: "🏦 บันทึกรายการฝากเงิน" },
+      { key: "expensedoccheck", label: "📑 ตรวจสอบเอกสารค่าใช้จ่าย" },
+    ],
+  },
+  {
+    title: "Vehicle Registration",
+    items: [
+      { key: "vehicleregistration", label: "🔎 ค้นหาทะเบียนรถ" },
+      { key: "searchreceiptwork",   label: "🔎 ค้นหางานทะเบียนรับเรื่อง" },
+    ],
+  },
+  {
+    title: "Service",
+    items: [
+      { key: "partimagelookup",    label: "📋 บันทึกใบประเมินราคา" },
+      { key: "damageassess",       label: "🤖 ประเมินความเสียหาย (AI)" },
+      { key: "claim",      label: "🔧 ระบบการเคลม" },
+      { key: "yamaharepairreport", label: "📃 ใบแจ้งซ่อม YAMAHA" },
+      { key: "hondarepairreport",  label: "📃 ใบแจ้งซ่อม HONDA" },
+      { key: "servicehistory",     label: "🔎 ค้นหาประวัติงานบริการ" },
+      { key: "servicerate",        label: "💲 ค้นหาค่าบริการ" },
+    ],
+  },
+  {
+    title: "Master Data",
+    items: [
+      { key: "users",      label: "👤 กำหนดผู้ใช้งาน" },
+    ],
+  },
 ];
+
+// checklist สิทธิ์หน้า ใช้ร่วมกันทั้งฟอร์มผู้ใช้และฟอร์มกลุ่มผู้ใช้
+function PageChecklist({ pages, onToggle }) {
+  return (
+    <>
+      {PAGE_GROUPS.map((g) => (
+        <div key={g.title} style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "#1e3a8a", background: "#eff6ff", padding: "4px 10px", borderRadius: 6, marginBottom: 8 }}>{g.title}</div>
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", paddingLeft: 6 }}>
+            {g.items.map((p) => (
+              <label key={p.key} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+                <input type="checkbox" checked={(pages || []).includes(p.key)}
+                  onChange={(e) => onToggle(p.key, e.target.checked)} />
+                {p.label}
+              </label>
+            ))}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
 
 const DEFAULT_PAGES = ["dashboard", "receive", "issue", "bookingdeposit", "mototransfer"];
 
@@ -76,6 +132,7 @@ const emptyForm = () => ({
   branch: "",
   position: "",
   status: "active",
+  user_group_id: "",
   pages: [...DEFAULT_PAGES],
 });
 
@@ -98,6 +155,9 @@ export default function UserPage({ currentUser }) {
   const [searchText, setSearchText] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [positions, setPositions] = useState([]);
+  const [groups, setGroups] = useState([]);
+  const [groupForm, setGroupForm] = useState(null); // null = list กลุ่ม, object = ฟอร์มเพิ่ม/แก้ไขกลุ่ม
+  const [confirmDeleteGroup, setConfirmDeleteGroup] = useState(null);
 
   const isAdmin = currentUser?.role === "admin";
   const currentUserId = String(currentUser?.user_id || "");
@@ -142,9 +202,18 @@ export default function UserPage({ currentUser }) {
     } catch { /* ignore */ }
   };
 
+  const loadGroups = async () => {
+    try {
+      const data = await api("get_user_groups");
+      const list = Array.isArray(data) ? data : data?.data || [];
+      setGroups(list);
+    } catch { /* ignore */ }
+  };
+
   useEffect(() => {
     loadUsers();
     loadPositions();
+    loadGroups();
   }, []);
 
   const handleAdd = () => {
@@ -168,9 +237,65 @@ export default function UserPage({ currentUser }) {
       branch: user.branch || "",
       position: user.position || "",
       status: user.status || "active",
+      user_group_id: user.user_group_id || "",
       pages: parsePages(user.pages),
     });
     setMode("form");
+  };
+
+  // เลือกกลุ่มผู้ใช้ → ติ๊กสิทธิ์หน้าตามชุดของกลุ่มให้อัตโนมัติ (ยังแก้รายคนต่อได้)
+  const handleGroupSelect = (gid) => {
+    if (!gid) return setForm({ ...form, user_group_id: "" });
+    const g = groups.find((x) => String(x.group_id) === String(gid));
+    setForm({ ...form, user_group_id: gid, pages: g ? parsePages(g.pages) : form.pages });
+  };
+
+  const groupName = (id) => {
+    const g = groups.find((x) => String(x.group_id) === String(id));
+    return g ? g.group_name : "-";
+  };
+
+  const handleSaveGroup = async () => {
+    if (!groupForm.group_name.trim()) return showMsg("กรุณาระบุชื่อกลุ่ม", "error");
+    try {
+      setSaving(true);
+      const action = groupForm.group_id ? "update_user_group" : "save_user_group";
+      const payload = { group_name: groupForm.group_name.trim(), pages: JSON.stringify(groupForm.pages || []) };
+      if (groupForm.group_id) payload.group_id = groupForm.group_id;
+      const raw = await api(action, payload);
+      const data = Array.isArray(raw) ? raw[0] : raw;
+      if (data?.success || data?.group_id) {
+        showMsg(groupForm.group_id ? "แก้ไขกลุ่มสำเร็จ" : "เพิ่มกลุ่มสำเร็จ");
+        setGroupForm(null);
+        await loadGroups();
+      } else {
+        showMsg(data?.message || "บันทึกไม่สำเร็จ", "error");
+      }
+    } catch {
+      showMsg("ไม่สามารถเชื่อมต่อระบบได้", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteGroup = async (g) => {
+    try {
+      setDeleting(`group-${g.group_id}`);
+      const raw = await api("delete_user_group", { group_id: g.group_id });
+      const data = Array.isArray(raw) ? raw[0] : raw;
+      if (data?.success || data?.ok) {
+        showMsg("ลบกลุ่มสำเร็จ");
+        await loadGroups();
+        await loadUsers(); // user ที่เคยอยู่กลุ่มนี้ถูกเคลียร์กลุ่มฝั่ง DB
+      } else {
+        showMsg(data?.message || "ลบไม่สำเร็จ", "error");
+      }
+    } catch {
+      showMsg("ไม่สามารถลบได้", "error");
+    } finally {
+      setDeleting(null);
+      setConfirmDeleteGroup(null);
+    }
   };
 
   const handleSave = async () => {
@@ -373,23 +498,23 @@ export default function UserPage({ currentUser }) {
 
           {isAdmin && form.role !== "admin" && (
             <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
-              <div style={{ fontSize: 13, color: "#374151", fontWeight: 600, marginBottom: 10 }}>สิทธิ์การเข้าใช้หน้า</div>
-              <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-                {PAGE_OPTIONS.map((p) => {
-                  const checked = (form.pages || []).includes(p.key);
-                  return (
-                    <label key={p.key} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
-                      <input type="checkbox" checked={checked} onChange={(e) => {
-                        const newPages = e.target.checked
-                          ? [...(form.pages || []), p.key]
-                          : (form.pages || []).filter((x) => x !== p.key);
-                        setForm({ ...form, pages: newPages });
-                      }} />
-                      {p.label}
-                    </label>
-                  );
-                })}
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+                <div style={{ fontSize: 13, color: "#374151", fontWeight: 600 }}>สิทธิ์การเข้าใช้หน้า</div>
+                <label style={{ fontSize: 13, color: "#374151" }}>กลุ่มผู้ใช้ (ไม่บังคับ):</label>
+                <select className="form-input" style={{ maxWidth: 260 }} value={form.user_group_id || ""}
+                  onChange={(e) => handleGroupSelect(e.target.value)}>
+                  <option value="">-- ไม่กำหนดกลุ่ม --</option>
+                  {groups.map((g) => (
+                    <option key={g.group_id} value={g.group_id}>{g.group_name}</option>
+                  ))}
+                </select>
               </div>
+              <PageChecklist pages={form.pages} onToggle={(key, checked) => {
+                const newPages = checked
+                  ? [...(form.pages || []), key]
+                  : (form.pages || []).filter((x) => x !== key);
+                setForm({ ...form, pages: newPages });
+              }} />
             </div>
           )}
 
@@ -404,6 +529,103 @@ export default function UserPage({ currentUser }) {
     );
   }
 
+  /* ── USER GROUPS VIEW ── */
+  if (mode === "groups") {
+    return (
+      <div className="page-container">
+        <div className="form-card">
+          <div className="page-topbar" style={{ marginBottom: 16 }}>
+            <h2 className="page-title">{groupForm ? (groupForm.group_id ? "แก้ไขกลุ่มผู้ใช้" : "เพิ่มกลุ่มผู้ใช้") : "กลุ่มผู้ใช้"}</h2>
+            <div style={{ display: "flex", gap: 8 }}>
+              {!groupForm && (
+                <button className="btn-primary" onClick={() => setGroupForm({ group_name: "", pages: [...DEFAULT_PAGES] })}>+ เพิ่มกลุ่ม</button>
+              )}
+              <button className="btn-secondary" onClick={() => (groupForm ? setGroupForm(null) : setMode("list"))}>← กลับ</button>
+            </div>
+          </div>
+
+          {msg.text && <div style={msgBox(msg.type)}>{msg.text}</div>}
+
+          {groupForm ? (
+            <>
+              <div className="form-row" style={{ maxWidth: 400, marginBottom: 16 }}>
+                <label>ชื่อกลุ่ม *</label>
+                <input className="form-input" value={groupForm.group_name}
+                  onChange={(e) => setGroupForm({ ...groupForm, group_name: e.target.value })}
+                  placeholder="เช่น พนักงานขาย, ช่าง, บัญชี" />
+              </div>
+              <div style={{ fontSize: 13, color: "#374151", fontWeight: 600, marginBottom: 10 }}>สิทธิ์การเข้าใช้หน้า ของกลุ่มนี้</div>
+              <PageChecklist pages={groupForm.pages} onToggle={(key, checked) => {
+                const newPages = checked
+                  ? [...(groupForm.pages || []), key]
+                  : (groupForm.pages || []).filter((x) => x !== key);
+                setGroupForm({ ...groupForm, pages: newPages });
+              }} />
+              <div style={{ display: "flex", gap: 8, marginTop: 20, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
+                <button className="btn-primary" onClick={handleSaveGroup} disabled={saving}>
+                  {saving ? "กำลังบันทึก..." : "บันทึก"}
+                </button>
+                <button className="btn-secondary" onClick={() => setGroupForm(null)}>ยกเลิก</button>
+              </div>
+            </>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th style={{ textAlign: "left" }}>ชื่อกลุ่ม</th>
+                    <th>จำนวนหน้าที่เข้าได้</th>
+                    <th>ผู้ใช้ในกลุ่ม</th>
+                    <th>จัดการ</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {groups.length === 0 ? (
+                    <tr><td colSpan={5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>ยังไม่มีกลุ่มผู้ใช้ — กด "+ เพิ่มกลุ่ม" เพื่อสร้างกลุ่มแรก</td></tr>
+                  ) : (
+                    groups.map((g, i) => (
+                      <tr key={g.group_id}>
+                        <td>{i + 1}</td>
+                        <td style={{ textAlign: "left", color: "#072d6b", fontWeight: 600 }}>{g.group_name}</td>
+                        <td>{parsePages(g.pages).length} หน้า</td>
+                        <td>{users.filter((u) => String(u.user_group_id) === String(g.group_id)).length} คน</td>
+                        <td>
+                          <button style={{ ...actionBtn("#f59e0b"), marginRight: 4 }}
+                            onClick={() => setGroupForm({ group_id: g.group_id, group_name: g.group_name || "", pages: parsePages(g.pages) })}>แก้ไข</button>
+                          <button style={actionBtn("#ef4444")} onClick={() => setConfirmDeleteGroup(g)}
+                            disabled={deleting === `group-${g.group_id}`}>
+                            {deleting === `group-${g.group_id}` ? "..." : "ลบ"}
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {confirmDeleteGroup && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+            <div style={{ background: "#fff", borderRadius: 10, padding: 24, maxWidth: 380, width: "90%", boxShadow: "0 4px 20px rgba(0,0,0,0.2)" }}>
+              <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 10, color: "#1e293b" }}>ยืนยันการลบกลุ่ม</div>
+              <p style={{ color: "#475569", marginBottom: 18, lineHeight: 1.6 }}>
+                ต้องการลบกลุ่ม <strong>{confirmDeleteGroup.group_name}</strong> ใช่หรือไม่?<br />
+                ผู้ใช้ที่อยู่ในกลุ่มนี้จะกลายเป็น "ไม่กำหนดกลุ่ม" (สิทธิ์หน้าที่ติ๊กไว้ของแต่ละคนยังอยู่เหมือนเดิม)
+              </p>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button className="btn-primary" style={{ background: "#ef4444" }} onClick={() => handleDeleteGroup(confirmDeleteGroup)}>ยืนยัน ลบ</button>
+                <button className="btn-secondary" onClick={() => setConfirmDeleteGroup(null)}>ยกเลิก</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   /* ── LIST VIEW ── */
   return (
     <div className="page-container">
@@ -411,7 +633,10 @@ export default function UserPage({ currentUser }) {
         <div className="page-topbar" style={{ marginBottom: 16 }}>
           <h2 className="page-title">กำหนดผู้ใช้งาน</h2>
           {isAdmin && (
-            <button className="btn-primary" onClick={handleAdd}>+ เพิ่มผู้ใช้</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="btn-secondary" onClick={() => { setGroupForm(null); setMode("groups"); }}>👥 กลุ่มผู้ใช้</button>
+              <button className="btn-primary" onClick={handleAdd}>+ เพิ่มผู้ใช้</button>
+            </div>
           )}
         </div>
 
@@ -441,6 +666,7 @@ export default function UserPage({ currentUser }) {
                 <th style={{ textAlign: "left" }}>Username</th>
                 <th style={{ textAlign: "left" }}>สาขา</th>
                 {isAdmin && <th style={{ textAlign: "left" }}>ตำแหน่ง</th>}
+                {isAdmin && <th style={{ textAlign: "left" }}>กลุ่ม</th>}
                 {isAdmin && <th>สิทธิ์</th>}
                 {isAdmin && <th>สถานะ</th>}
                 <th>จัดการ</th>
@@ -448,9 +674,9 @@ export default function UserPage({ currentUser }) {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={isAdmin ? 8 : 5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>กำลังโหลด...</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>กำลังโหลด...</td></tr>
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={isAdmin ? 8 : 5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>ไม่มีข้อมูลผู้ใช้งาน</td></tr>
+                <tr><td colSpan={isAdmin ? 9 : 5} style={{ textAlign: "center", color: "#9ca3af", padding: 24 }}>ไม่มีข้อมูลผู้ใช้งาน</td></tr>
               ) : (
                 filtered.map((u, i) => {
                   const isOtherAdmin = u.role === "admin" && String(u.user_id || u.id) !== currentUserId;
@@ -461,6 +687,7 @@ export default function UserPage({ currentUser }) {
                       <td style={{ textAlign: "left" }}>{u.username || "-"}</td>
                       <td style={{ textAlign: "left" }}>{u.branch || "-"}</td>
                       {isAdmin && <td style={{ textAlign: "left" }}>{u.position || "-"}</td>}
+                      {isAdmin && <td style={{ textAlign: "left" }}>{u.user_group_id ? groupName(u.user_group_id) : "-"}</td>}
                       {isAdmin && <td><span style={badge(u.role === "admin" ? "blue" : "")}>{u.role === "admin" ? "Admin" : "User"}</span></td>}
                       {isAdmin && <td><span style={badge(u.status === "active" ? "green" : "red")}>{u.status === "active" ? "ใช้งาน" : "ปิดใช้งาน"}</span></td>}
                       <td>
