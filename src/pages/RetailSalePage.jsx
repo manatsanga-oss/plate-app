@@ -1080,6 +1080,22 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
   const isAdmin = currentUser?.role === "admin";
   const lineSentBefore = (type) => Array.isArray(sale?.line_send_log) && sale.line_send_log.some((l) => l && l.type === type && l.status === "sent");
 
+  // เปิดใบขายเก่า (view mode): sync เงื่อนไขจับคู่ของแถมจากใบขายจริง — ไม่งั้นโปรเงื่อนไข "ไฟแนนซ์"
+  // (เช่น ค่าประกัน 3PLUS) หายจากใบพิมพ์ และโปรเงื่อนไข "เงินสด" โผล่เกินมา เพราะ form ยังเป็นค่า default
+  useEffect(() => {
+    if (!sale?.sale_no || editable) return;
+    const prov = (String(sale.customer_address || "").match(/จ\.\s*([ก-๙]+)/) || [])[1] || "";
+    setForm((f) => ({
+      ...f,
+      finance_type: sale.finance_type || "none",
+      finance_company_code: sale.finance_company_code || "",
+      sale_date: String(sale.sale_date || "").slice(0, 10) || f.sale_date,
+      customer_name: sale.customer_name || f.customer_name,
+      customer_province: prov || f.customer_province,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sale?.sale_no, editable]);
+
   // prefill ฟอร์มรับชำระเมื่อโหลดใบขาย
   useEffect(() => {
     if (!sale?.sale_no) return;

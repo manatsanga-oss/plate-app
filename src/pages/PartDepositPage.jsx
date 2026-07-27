@@ -756,7 +756,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
             </div>
           )}
           <div style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
-            ผู้บันทึก: {currentUser?.name || currentUser?.username || "-"} · สาขา {String(currentUser?.branch_code || currentUser?.branch || "-").substring(0, 5)} · เลขที่เอกสารออกอัตโนมัติ (PDO-YYMM-XXXXX)
+            ผู้บันทึก: {currentUser?.name || currentUser?.username || "-"} · สาขา {String(currentUser?.branch_code || currentUser?.branch || "-").substring(0, 5)} · เลขที่เอกสารออกอัตโนมัติ (PDO-ปปดด-XXXXX เลขปี พ.ศ. รันต่อเนื่อง)
           </div>
           {message && (
             <div style={{ marginTop: 8, fontSize: 14, fontWeight: 600, color: message.startsWith("✅") ? "#15803d" : "#b91c1c" }}>{message}</div>
