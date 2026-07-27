@@ -150,6 +150,7 @@ import QuoteViewPage from "./pages/QuoteViewPage";
 import MailInboxPage from "./pages/MailInboxPage";
 import HrYtdReportPage from "./pages/HrYtdReportPage";
 import ChequeReceivePage from "./pages/ChequeReceivePage";
+import DamageAssessPage from "./pages/DamageAssessPage";
 
 export default function App() {
   // หน้าดูใบประเมินราคา (เปิดจากลิงก์ใน LINE) — public ไม่ต้อง login
@@ -259,6 +260,7 @@ export default function App() {
     if (page === "serviceratelookup") return true;             // ค้นหา FRT จากรุ่น/แบบ — เปิดให้ทุก user
     if (page === "servicerateimport") return false;            // เฉพาะ admin (นำเข้า FRT)
     if (page === "partimagelookup") return true;               // ค้นรูปอะไหล่ (ชุดสี) — เปิดให้ทุก user
+    if (page === "damageassess") return true;                  // ประเมินความเสียหาย (AI) — เปิดให้ทุก user (คนที่กำหนดสิทธิ์รายหน้าไว้ ต้องติ๊กในหน้ากำหนดผู้ใช้งาน)
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
@@ -396,6 +398,9 @@ export default function App() {
         )}
         {activeMenu === "partimagelookup" && canAccess("partimagelookup") && (
           <PartImageLookupPage currentUser={currentUser} />
+        )}
+        {activeMenu === "damageassess" && canAccess("damageassess") && (
+          <DamageAssessPage currentUser={currentUser} />
         )}
         {activeMenu === "partwithdrawal" && canAccess("partwithdrawal") && (
           <PartWithdrawalPage currentUser={currentUser} />
@@ -901,8 +906,9 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="incometaxfiling" label="ยื่นภาษี ภ.ง.ด.50, 51" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partdispensereport","servicehistory","servicerate","servicerateimport","partimagelookup","claim"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partdispensereport","servicehistory","servicerate","servicerateimport","partimagelookup","claim","damageassess"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="partimagelookup" label="บันทึกใบประเมินราคา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="damageassess" label="ประเมินความเสียหาย (AI)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuSubGroup title="Claim System" pages={["claim"]} activeMenu={activeMenu}>
           <MenuItem page="claim" label="ระบบการเคลม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
