@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { priceGroupOf } from "../utils/priceBranchGroup";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
@@ -32,6 +33,49 @@ export default function MotoPricePage({ currentUser }) {
   const [showTypeForm, setShowTypeForm] = useState(false);
   const [typeForm, setTypeForm] = useState({ type_name: "", sort_order: 0, status: "active" });
   const [editTypeTarget, setEditTypeTarget] = useState(null);
+
+  // ร้านที่ใช้ราคา (branch_price_groups): กำหนดกลุ่มราคารายสาขา + วันเริ่มใช้
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const [branches, setBranches] = useState([]);
+  const [pbg, setPbg] = useState([]);
+  const [pbgForm, setPbgForm] = useState({ branch_code: "", price_group: "สิงห์ชัย", effective_date: "" });
+  const [pbgSaving, setPbgSaving] = useState(false);
+
+  async function loadPbg() {
+    try {
+      const [bRes, gRes] = await Promise.all([
+        fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_branches" }) }).then(r => r.json()),
+        fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_price_branch_groups" }) }).then(r => r.json()),
+      ]);
+      setBranches(Array.isArray(bRes) ? bRes.filter(b => b && b.branch_code) : []);
+      setPbg(Array.isArray(gRes) ? gRes.filter(r => r && r.branch_code) : []);
+    } catch { setMessage("โหลดข้อมูลร้านที่ใช้ราคาไม่สำเร็จ (ต้อง re-import master-data-api + รัน DDL ก่อน)"); }
+  }
+  useEffect(() => { if (tab === "branches") loadPbg(); }, [tab]);
+
+  async function savePbg() {
+    if (!pbgForm.branch_code) { setMessage("เลือกสาขาก่อน"); return; }
+    setPbgSaving(true); setMessage("");
+    try {
+      await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        action: "save_price_branch_group",
+        branch_code: pbgForm.branch_code,
+        price_group: pbgForm.price_group,
+        effective_date: pbgForm.effective_date || todayISO,
+      }) });
+      setPbgForm(f => ({ ...f, branch_code: "", effective_date: "" }));
+      await loadPbg();
+    } catch { setMessage("บันทึกไม่สำเร็จ"); }
+    setPbgSaving(false);
+  }
+
+  async function deletePbg(id) {
+    if (!window.confirm("ลบรายการนี้? สาขาจะกลับไปใช้กติกาก่อนหน้า")) return;
+    try {
+      await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save_price_branch_group", delete_id: id }) });
+      await loadPbg();
+    } catch { setMessage("ลบไม่สำเร็จ"); }
+  }
 
   useEffect(() => {
     fetchPriceTypes();
@@ -284,18 +328,26 @@ export default function MotoPricePage({ currentUser }) {
 
   const activeTypes = priceTypes.filter(t => t.status === "active");
 
-  const brandOpts = [...new Set(motoTypes.map(m => m.brand_name).filter(Boolean))].sort();
+  // ไม่แสดงรุ่น/แบบ/type ที่ยกเลิกใช้งานแล้ว (status inactive ระดับไหนก็ตาม)
+  const visibleTypes = motoTypes.filter(m =>
+    (m.status || "active") === "active" &&
+    (m.model_status || "active") === "active" &&
+    (m.series_status || "active") === "active" &&
+    (m.brand_status || "active") === "active"
+  );
+
+  const brandOpts = [...new Set(visibleTypes.map(m => m.brand_name).filter(Boolean))].sort();
   const marketingOpts = [...new Set(
-    motoTypes.filter(m => !filterBrand || m.brand_name === filterBrand)
+    visibleTypes.filter(m => !filterBrand || m.brand_name === filterBrand)
       .map(m => m.marketing_name || m.series_name).filter(Boolean)
   )].sort();
   const modelOpts = [...new Set(
-    motoTypes
+    visibleTypes
       .filter(m => (!filterBrand || m.brand_name === filterBrand) && (!filterMarketing || (m.marketing_name || m.series_name) === filterMarketing))
       .map(m => m.model_code).filter(Boolean)
   )].sort();
 
-  const filteredRows = motoTypes.filter(m =>
+  const filteredRows = visibleTypes.filter(m =>
     (!filterBrand || m.brand_name === filterBrand) &&
     (!filterMarketing || (m.marketing_name || m.series_name) === filterMarketing) &&
     (!filterModel || m.model_code === filterModel)
@@ -327,11 +379,96 @@ export default function MotoPricePage({ currentUser }) {
             className={tab === "types" ? "btn-primary" : "btn-secondary"}
             onClick={() => setTab("types")}
           >ระดับราคา</button>
+          <button
+            className={tab === "branches" ? "btn-primary" : "btn-secondary"}
+            onClick={() => setTab("branches")}
+          >ร้านที่ใช้ราคา</button>
         </div>
       </div>
 
       {message && (
         <div style={{ color: "#ef4444", marginBottom: 12, padding: "8px 12px", background: "#fef2f2", borderRadius: 8 }}>{message}</div>
+      )}
+
+      {/* TAB: ร้านที่ใช้ราคา — กำหนดกลุ่มราคารายสาขา + วันเริ่มใช้ (ก่อนวันเริ่มใช้ = กติกาเดิม) */}
+      {tab === "branches" && (
+        <div>
+          <div style={{ marginBottom: 14, padding: "10px 14px", background: "#eff6ff", borderRadius: 8, fontSize: 13, color: "#1e40af", borderLeft: "3px solid #1e40af" }}>
+            กำหนดว่าแต่ละสาขาใช้ราคาขายกลุ่มไหน (ป.เปา/สิงห์ชัย) พร้อม<b>วันที่เริ่มใช้</b> — ก่อนวันเริ่มใช้ ระบบยังตีความแบบเดิม (SCY05/SCY06 = ป.เปา, อื่น ๆ = สิงห์ชัย) ใบขายเก่าจึงไม่เปลี่ยน
+          </div>
+
+          {/* ฟอร์มเพิ่มการกำหนด */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 16 }}>
+            <select value={pbgForm.branch_code} onChange={e => setPbgForm(f => ({ ...f, branch_code: e.target.value }))}
+              style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}>
+              <option value="">-- เลือกสาขา --</option>
+              {branches.map(b => <option key={b.branch_code} value={b.branch_code}>{b.branch_code} {b.branch_display_name || b.branch_name || ""}</option>)}
+            </select>
+            <span style={{ fontSize: 13 }}>ใช้ราคา</span>
+            <select value={pbgForm.price_group} onChange={e => setPbgForm(f => ({ ...f, price_group: e.target.value }))}
+              style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}>
+              <option value="ป.เปา">ป.เปา</option>
+              <option value="สิงห์ชัย">สิงห์ชัย</option>
+            </select>
+            <span style={{ fontSize: 13 }}>เริ่มวันที่</span>
+            <input type="date" value={pbgForm.effective_date || todayISO} onChange={e => setPbgForm(f => ({ ...f, effective_date: e.target.value }))}
+              style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }} />
+            <button className="btn-primary" disabled={pbgSaving} onClick={savePbg}>{pbgSaving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>
+          </div>
+
+          {/* สรุปกลุ่มที่ใช้ ณ วันนี้ */}
+          <div style={{ overflowX: "auto", marginBottom: 18 }}>
+            <table className="data-table">
+              <thead>
+                <tr><th>สาขา</th><th>ชื่อสาขา</th><th>กลุ่มราคาที่ใช้วันนี้</th><th>ที่มา</th></tr>
+              </thead>
+              <tbody>
+                {branches.map(b => {
+                  const cur = priceGroupOf(b.branch_code, pbg);
+                  const hasRow = pbg.some(r => String(r.branch_code).toUpperCase() === String(b.branch_code).toUpperCase() && String(r.effective_date) <= todayISO);
+                  return (
+                    <tr key={b.branch_code}>
+                      <td style={{ whiteSpace: "nowrap", fontWeight: 700 }}>{b.branch_code}</td>
+                      <td>{b.branch_display_name || b.branch_name || "-"}</td>
+                      <td>
+                        <span style={{ padding: "2px 10px", borderRadius: 12, fontSize: 12, fontWeight: 700,
+                          background: cur === "ป.เปา" ? "#fee2e2" : "#dbeafe", color: cur === "ป.เปา" ? "#b91c1c" : "#1e40af" }}>{cur}</span>
+                      </td>
+                      <td style={{ fontSize: 12, color: "#6b7280" }}>{hasRow ? "ตั้งค่าเอง" : "กติกาเดิม (อัตโนมัติ)"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ประวัติ/กำหนดการทั้งหมด */}
+          <h4 style={{ margin: "0 0 8px" }}>ประวัติการกำหนด (รวมที่ตั้งล่วงหน้า)</h4>
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table">
+              <thead>
+                <tr><th>สาขา</th><th>ใช้ราคา</th><th>เริ่มวันที่</th><th>สถานะ</th><th className="no-print">จัดการ</th></tr>
+              </thead>
+              <tbody>
+                {pbg.length === 0 ? (
+                  <tr><td colSpan={5} style={{ textAlign: "center", color: "#9ca3af", padding: 20 }}>ยังไม่มีการกำหนด — ทุกสาขาใช้กติกาเดิม</td></tr>
+                ) : pbg.map(r => (
+                  <tr key={r.id}>
+                    <td style={{ whiteSpace: "nowrap", fontWeight: 700 }}>{r.branch_code}</td>
+                    <td>{r.price_group}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{String(r.effective_date).split("-").reverse().join("/")}</td>
+                    <td style={{ fontSize: 12 }}>{String(r.effective_date) > todayISO
+                      ? <span style={{ color: "#d97706", fontWeight: 700 }}>ตั้งล่วงหน้า</span>
+                      : <span style={{ color: "#065f46" }}>มีผลแล้ว</span>}</td>
+                    <td className="no-print">
+                      <button onClick={() => deletePbg(r.id)} style={{ padding: "3px 10px", fontSize: 12, background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>ลบ</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {/* TAB: ระดับราคา */}
