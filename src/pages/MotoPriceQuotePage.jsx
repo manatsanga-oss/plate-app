@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
 
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -105,8 +106,10 @@ export default function MotoPriceQuotePage({ currentUser }) {
   );
 
   // หาราคาประกาศจาก moto_type_prices
-  // branch (state) เก็บเป็น branch_code (SCY01-07) → map เป็นกลุ่ม ป.เปา/สิงห์ชัย เพื่อหา price_type
-  const branchName = ["SCY05", "SCY06"].includes(branch) ? "ป.เปา" : "สิงห์ชัย";
+  // branch (state) เก็บเป็น branch_code (SCY01-07) → กลุ่ม ป.เปา/สิงห์ชัย จากตาราง branch_price_groups (ณ วันนี้)
+  const [pbgRows, setPbgRows] = useState([]);
+  useEffect(() => { fetchPriceBranchGroups().then(setPbgRows); }, []);
+  const branchName = priceGroupOf(branch, pbgRows);
   function findPrice() {
     if (!selectedRow) return null;
     const matchingPriceType = priceTypes.find(pt => {
@@ -369,7 +372,7 @@ ${targetPrice && tgt > 0 ? `<div style="margin-top:8px;padding:8px;background:#f
 
             <Field label="สาขา (จาก user ที่ login)">
               <div style={{ padding: "8px 12px", background: "#f8fafc", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, color: "#374151" }}>
-                <strong style={{ color: "#0369a1" }}>{branch}</strong> ({["SCY05", "SCY06"].includes(branch) ? "ป.เปา" : "สิงห์ชัย"})
+                <strong style={{ color: "#0369a1" }}>{branch}</strong> ({branchName})
               </div>
             </Field>
 

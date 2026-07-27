@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import CustomerPickerModal from "./CustomerPickerModal";
+import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
 
 // บันทึกขาย NEW — wizard เลือกรถทีละขั้น: ประเภทรถ → ยี่ห้อ → รุ่น → สี (พร้อมรูป) → เลือกคันจากเลขเครื่อง/เลขถัง
 // master: master-data-api | รูปสี: get_color_image (moto_color_images) | สต๊อกรายคัน: stock-turnover-api stock_on_hand
@@ -1075,11 +1076,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   }
 
   // ราคาประกาศ: กลุ่มสาขา (ป.เปา/สิงห์ชัย) ตาม user ถ้าไม่มีก็อิงยี่ห้อ
+  // กลุ่มดูจากตาราง branch_price_groups ณ วันนี้ (ตั้งค่าได้ในหน้าบันทึกราคาขาย แท็บ "ร้านที่ใช้ราคา")
+  const [pbgRows, setPbgRows] = useState([]);
+  useEffect(() => { fetchPriceBranchGroups().then(setPbgRows); }, []);
   const branchGroup = useMemo(() => {
     const bc = text(currentUser?.branch_code || currentUser?.branch).slice(0, 5);
-    if (bc) return ["SCY05", "SCY06"].includes(bc) ? "ป.เปา" : "สิงห์ชัย";
+    if (bc) return priceGroupOf(bc, pbgRows);
     return selBrand && brandParam(selBrand) === "HONDA" ? "ป.เปา" : "สิงห์ชัย";
-  }, [currentUser, selBrand]);
+  }, [currentUser, selBrand, pbgRows]);
 
   function announcedPrice(wantSaleType) {
     const masterRow = findMasterRow(selUnit, selColor);

@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import CustomerPickerModal from "./CustomerPickerModal";
+import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
 
 // ============================================================================
 // หน้า "บันทึกขายปลีก"
@@ -355,8 +356,11 @@ export default function RetailSalePage({ currentUser }) {
   }, [bookingDateISO]);
 
   // หา "ราคาประกาศ" ตาม finance_type + branch
+  // กลุ่มราคา (ป.เปา/สิงห์ชัย) ดูจากตาราง branch_price_groups ณ วันขาย — ใบเก่าก่อนวันเริ่มใช้จึงตีความแบบเดิม
+  const [pbgRows, setPbgRows] = useState([]);
+  useEffect(() => { fetchPriceBranchGroups().then(setPbgRows); }, []);
   const branchCode = currentUser?.branch_code || currentUser?.branch || "";
-  const branchGroup = ["SCY05", "SCY06"].includes(String(branchCode).substring(0, 5)) ? "ป.เปา" : "สิงห์ชัย";
+  const branchGroup = priceGroupOf(branchCode, pbgRows, form.sale_date);
   const usingBookingPrice = !!(bookingDateISO && bookingPrices);
   const announcedPrice = useMemo(() => {
     const priceRows = usingBookingPrice ? bookingPrices : prices;
