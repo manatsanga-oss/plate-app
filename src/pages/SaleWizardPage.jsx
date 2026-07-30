@@ -528,14 +528,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // ช่องกรอกกรณีผ่อนไฟแนนท์ (สูตรเดียวกับบันทึกขายปลีก)
   const [finDown, setFinDown] = useState("");             // เงินดาวน์
   const [finTheft, setFinTheft] = useState("");           // ประกันรถหาย (ไฟแนนซ์หัก)
-  const [finRate, setFinRate] = useState("1.09");         // อัตราดอกเบี้ย %/เดือน
+  const [finRate, setFinRate] = useState("");             // อัตราดอกเบี้ย %/เดือน — default 0 (ช่องว่างโชว์ placeholder 0) ให้พิมพ์เองทุกครั้ง
   const [finN, setFinN] = useState("");                   // จำนวนงวด
   const [finRound5, setFinRound5] = useState(false);      // ปัดเศษค่างวดลงท้าย 0/5
   const [finInstOverride, setFinInstOverride] = useState("");
   const [finInstTouched, setFinInstTouched] = useState(false);
   const [finAdvance, setFinAdvance] = useState("");       // ค่างวดจ่ายล่วงหน้า
   function resetFinanceInputs() {
-    setFinDown(""); setFinTheft(""); setFinRate("1.09"); setFinN("");
+    setFinDown(""); setFinTheft(""); setFinRate(""); setFinN("");
     setFinRound5(false); setFinInstOverride(""); setFinInstTouched(false); setFinAdvance("");
   }
 
@@ -1633,11 +1633,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 {saleType && (bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (() => {
                   const inp = { width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" };
                   const box = { width: "100%", padding: "8px 10px", background: "#e9eef0", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, color: "#374151", minHeight: 19, textAlign: "center", boxSizing: "border-box" };
-                  const lbl = { fontWeight: 600, fontSize: 14, fontFamily: "Tahoma", whiteSpace: "nowrap", textAlign: isNarrow ? "left" : "right" };
+                  const lbl = { fontWeight: 600, fontSize: 14, fontFamily: "Tahoma", whiteSpace: "nowrap", textAlign: isNarrow ? "left" : "right", ...(isNarrow ? { marginTop: 8 } : {}) };
                   return (
                     <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
                       <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 14 }}>ข้อมูลลูกค้า</div>
-                      <div style={{ display: "grid", gridTemplateColumns: isNarrow ? "auto minmax(0,1fr)" : "auto 1fr auto 1fr", gap: "12px 10px", alignItems: "center" }}>
+                      <div style={{ display: "grid", gridTemplateColumns: isNarrow ? "1fr" : "auto 1fr auto 1fr", gap: isNarrow ? "4px 10px" : "12px 10px", alignItems: "center" }}>
                         {/* พิมพ์ชื่อเองไม่ได้แล้ว — ต้องเลือกจากปุ่ม 🔍 เท่านั้น (กันใบขายไม่มีรหัสลูกค้า/LINE ID ทำให้ส่งเอกสารทาง LINE ไม่ได้) */}
                         <div style={lbl}>รหัสลูกค้า</div>
                         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
@@ -1653,7 +1653,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         </div>
 
                         <div style={lbl}>ที่อยู่</div>
-                        <div style={{ ...box, gridColumn: isNarrow ? "2" : "2 / span 3", textAlign: cust.customer_address ? "left" : "center" }}>{cust.customer_address || "—"}</div>
+                        <div style={{ ...box, gridColumn: isNarrow ? "auto" : "2 / span 3", textAlign: cust.customer_address ? "left" : "center" }}>{cust.customer_address || "—"}</div>
 
                         <div style={lbl}>เบอร์โทร</div>
                         <div style={box}>{cust.customer_phone || "—"}</div>
@@ -1776,14 +1776,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       onChange={e => onChange(e.target.value)} placeholder="0"
                       style={{ width: "100%", minWidth: 72, padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, textAlign: "right", boxSizing: "border-box", ...(opts.style || {}) }} />
                   );
-                  const finLbl = { fontWeight: 600, fontSize: 14, fontFamily: "Tahoma", whiteSpace: "nowrap", textAlign: isNarrow ? "left" : "right" };
+                  const finLbl = { fontWeight: 600, fontSize: 14, fontFamily: "Tahoma", whiteSpace: "nowrap", textAlign: "left", marginTop: 8 };
                   return (
                     <>
                     <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
                       <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>สรุปยอดขาย {isFin && <span style={{ fontWeight: 400, fontSize: 13, color: "#6b7280" }}>(ผ่อนไฟแนนท์: {financeCo?.company_name || "-"})</span>}</div>
 
                       {isFin && (
-                        <div style={{ display: "grid", gridTemplateColumns: isNarrow ? "auto minmax(0,1fr)" : "auto 1fr auto 1fr", gap: "12px 10px", alignItems: "center", marginBottom: 14, maxWidth: 720 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: "4px 10px", alignItems: "center", marginBottom: 14, maxWidth: 420 }}>
                           <div style={finLbl}>เงินดาวน์</div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(finDown, setFinDown)}<span>บาท</span></div>
                           <div style={finLbl}>ยอดจัดไฟแนนซ์</div>
