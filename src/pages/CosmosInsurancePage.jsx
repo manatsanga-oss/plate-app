@@ -32,6 +32,14 @@ function fmtMoney(v) {
   return n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// เบี้ยรายแถว — 3PLUS ไม่มีคอลัมน์ premium เบี้ยฝังอยู่ท้ายชื่อแผน เช่น "ส่วนบุคคล/ซ่อม 15,000/ครั้ง *(1,879.99)"
+function premiumOf(r) {
+  const n = Number(r?.premium);
+  if (isFinite(n) && n > 0) return n;
+  const m = String(r?.plan_name || "").match(/\*\s*\(([\d,.]+)\)/);
+  return m ? Number(m[1].replace(/,/g, "")) || 0 : 0;
+}
+
 // ตัด "0 " หรือ "0  " ที่นำหน้า chassis_no
 function cleanChassis(v) {
   if (!v) return "";
@@ -448,7 +456,7 @@ function HistoryPanel({ setMessage, currentUser }) {
     return hay.includes(kw);
   });
 
-  const totalPremium = filtered.reduce((s, r) => s + (Number(r.premium) || 0), 0);
+  const totalPremium = filtered.reduce((s, r) => s + premiumOf(r), 0);
   const isPlus = plan === "3plus";
   const isPA = plan === "pa";
   const isRSA = plan === "rsa";
@@ -487,7 +495,7 @@ function HistoryPanel({ setMessage, currentUser }) {
       {/* Summary */}
       <div style={{ display: "flex", gap: 18, marginBottom: 12, padding: "10px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", flexWrap: "wrap" }}>
         <span style={{ fontSize: 13 }}>📋 รายการรวม: <strong>{filtered.length}</strong></span>
-        {!isPlus && <span style={{ fontSize: 13, color: currentPlan.color }}>💰 เบี้ยรวม: <strong>{fmtMoney(totalPremium)}</strong> บาท</span>}
+        <span style={{ fontSize: 13, color: currentPlan.color }}>💰 เบี้ยรวม: <strong>{fmtMoney(totalPremium)}</strong> บาท</span>
         <span style={{ fontSize: 13, color: "#059669" }}>🚗 จับคู่ขาย: <strong>{filtered.filter(r => r.sale_id).length}</strong></span>
         {!hideReceipt && <span style={{ fontSize: 13, color: "#0369a1" }}>📋 จับคู่รับเรื่อง: <strong>{filtered.filter(r => r.receipt_no).length}</strong></span>}
         <span style={{ fontSize: 13, color: "#7c3aed", fontWeight: 700 }}>☑️ เลือกแล้ว: {selected.size}</span>
