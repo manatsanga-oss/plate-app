@@ -3,13 +3,36 @@ import React, { useEffect, useMemo, useState } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
-const RECEIPT_TYPES = ["จดทะเบียนใหม่", "โอน", "พรบ./ประกันภัย", "ต่อทะเบียน", "อื่น ๆ"];
+// ประเภทงาน (wizard ขั้นแรก) — defaultIncome = ประเภทรายได้ที่ prefill ให้บรรทัดแรกอัตโนมัติ
+const JOB_TYPES = [
+  { label: "งานทะเบียนรถใหม่", icon: "🏍️", desc: "จดทะเบียนรถใหม่ป้ายแดง", defaultIncome: "รายได้งานทะเบียน" },
+  { label: "งานต่อภาษีและพรบ.", icon: "📅", desc: "ต่อภาษีประจำปี + พรบ.", defaultIncome: "รายได้ พรบ." },
+  { label: "งานโอนทะเบียน", icon: "🔁", desc: "โอนกรรมสิทธิ์ / ย้ายทะเบียน", defaultIncome: "รายได้งานทะเบียน" },
+  { label: "งานประกัน", icon: "🛡️", desc: "ประกันภัยภาคสมัครใจ", defaultIncome: "รายได้ประกัน" },
+  { label: "อื่นๆ", icon: "📄", desc: "งานทะเบียนอื่น ๆ", defaultIncome: "" },
+];
+const JOB_TYPE_LABELS = JOB_TYPES.map((t) => t.label);
+// เอกสารเก่าก่อนเปลี่ยนเป็น wizard เก็บประเภทชุดเดิม — map ให้ตรงประเภทใหม่ตอนเปิดแก้ไข
+const normalizeReceiptType = (t) => {
+  const s = String(t || "").trim();
+  if (!s || JOB_TYPE_LABELS.includes(s)) return s;
+  if (s === "จดทะเบียนใหม่") return "งานทะเบียนรถใหม่";
+  if (s === "โอน") return "งานโอนทะเบียน";
+  if (s === "ต่อทะเบียน") return "งานต่อภาษีและพรบ.";
+  if (s === "พรบ./ประกันภัย") return "งานประกัน";
+  if (s.replace(/\s/g, "") === "อื่นๆ") return "อื่นๆ";
+  return s;
+};
 
 // ประเภทรายได้คงที่ 3 อย่าง — 1&2 ดึงชื่อรายได้จาก master service_expenses, 3 (พรบ.) ดึงอัตโนมัติจากค่าใช้จ่ายการขายตาม CC
 const TYPE_REGISTER = "รายได้งานทะเบียน";
 const TYPE_INSURANCE = "รายได้ประกัน";
 const TYPE_PRB = "รายได้ พรบ.";
-const FIXED_INCOME_TYPES = [TYPE_REGISTER, TYPE_INSURANCE, TYPE_PRB];
+// "ทั้งหมด" = ค่าตั้งต้น รวมชื่อรายได้ทุกประเภทในลิสต์เดียว — ตอนเลือกชื่อจะ stamp ประเภทจริงของรายการนั้นลง income_type ให้เอง
+const TYPE_ALL = "ทั้งหมด";
+// รับฝากค่างวด — บริษัท (กรุ๊ปลีส/ธนบรรณ) ดูจากไฟแนนซ์ของรถที่เลือก ไม่ต้องเลือกเอง; เลขสัญญาพิมพ์ในช่องหมายเหตุ
+const TYPE_DEPOSIT = "รายได้รับฝากเงิน";
+const FIXED_INCOME_TYPES = [TYPE_ALL, TYPE_REGISTER, TYPE_INSURANCE, TYPE_PRB, TYPE_DEPOSIT];
 const stripDots = (s) => String(s || "").replace(/[.\s]/g, "");
 const containsPrb = (s) => stripDots(s).includes("พรบ");
 const normName = (s) => String(s || "").toLowerCase().replace(/\s+/g, "").trim();
@@ -82,7 +105,7 @@ async function apiPost(payload) {
   } catch { return []; }
 }
 
-const blankLine = () => ({ income_type: "", income_code: "", income_name: "", description: "", qty: 1, price_before_discount: 0, discount: 0 });
+const blankLine = () => ({ income_type: TYPE_ALL, income_code: "", income_name: "", description: "", qty: 1, price_before_discount: 0, discount: 0 });
 
 // ดึงเฉพาะ code (ตัวแรกก่อนเว้นวรรค) — "SCY01 สำนักงานใหญ่" → "SCY01"
 const stripBranchCode = (v) => String(v || "").trim().split(/\s+/)[0] || "";
@@ -90,7 +113,7 @@ const stripBranchCode = (v) => String(v || "").trim().split(/\s+/)[0] || "";
 const blankHeader = (currentUser) => ({
   receipt_no: "",
   receive_date: todayISO(),
-  receipt_type: "จดทะเบียนใหม่",
+  receipt_type: "",
   receive_status: "ปกติ",
   receipt_status: "ปกติ",
   note: "",
@@ -106,6 +129,7 @@ const blankHeader = (currentUser) => ({
 
 export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [view, setView] = useState("list"); // list | form
+  const [step, setStep] = useState(1);      // wizard: 1 ประเภทงาน/เอกสาร → 2 ข้อมูลรถ → 3 ลูกค้า → 4 รายได้+บันทึก
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -205,15 +229,37 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       .map((e) => ({ _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: e.amount != null && e.amount !== "" ? Number(e.amount) : null }));
   }, [saleExpenses, vehicleCC]);
 
+  // รับฝากค่างวด: ชื่อบริษัทดูจากไฟแนนซ์ของรถที่เลือก (contract_ref) — DB สะกด "กรุ๊ปลิส" ก็มี จับทั้ง 2 แบบ
+  const depositCodes = useMemo(() => {
+    const s = String(header.contract_ref || "");
+    const company = /กรุ๊ปล/.test(s) ? "กรุ๊ปลีส" : s.includes("ธนบรรณ") ? "ธนบรรณ" : "";
+    return [
+      { _key: "dep-inst", code: "", name: company ? `รับฝากค่างวด ${company}` : "รับฝากค่างวด", amount: null },
+      // ค่าบริการ: ราคารวม VAT 7% ในตัว (เช่น 15 = ฐาน 14.02 + VAT 0.98) — VAT คิดเฉพาะบรรทัดค่าบริการ ไม่รวมยอดค่างวด
+      { _key: "dep-fee", code: "", name: "ค่าบริการ", amount: 15, vatIncluded: true },
+      { _key: "dep-close", code: "", name: "ค่าบริการปิดบัญชี", amount: 250, vatIncluded: true },
+    ];
+  }, [header.contract_ref]);
+
   // คืน list ชื่อรายได้ตามประเภทที่เลือก — พรบ. ดึงอัตโนมัติตาม CC, อีก 2 ประเภทดึงจาก master
+  // ทุกรายการติด rtype = ประเภทจริง เพื่อให้โหมด "ทั้งหมด" stamp ประเภทลง income_type ตอนเลือกชื่อ
   function getCodesForType(label) {
-    if (label === TYPE_PRB) return prbCodes;
+    if (label === TYPE_PRB) return prbCodes.map((c) => ({ ...c, rtype: TYPE_PRB }));
+    if (label === TYPE_DEPOSIT) return depositCodes.map((c) => ({ ...c, rtype: TYPE_DEPOSIT }));
+    const typeOf = (t) => t.includes("ทะเบียน") ? TYPE_REGISTER : t.includes("ประกัน") ? TYPE_INSURANCE : normalizeIncomeType(t);
+    if (label === TYPE_ALL) {
+      const out = [];
+      incomeTypesMaster.forEach(({ type, codes }) => { codes.forEach((c) => out.push({ ...c, rtype: typeOf(type) })); });
+      prbCodes.forEach((c) => out.push({ ...c, rtype: TYPE_PRB }));
+      depositCodes.forEach((c) => out.push({ ...c, rtype: TYPE_DEPOSIT }));
+      return out;
+    }
     const pred = label === TYPE_REGISTER ? (t) => t.includes("ทะเบียน")
               : label === TYPE_INSURANCE ? (t) => t.includes("ประกัน")
               : null;
     if (!pred) return [];
     const out = [];
-    incomeTypesMaster.forEach(({ type, codes }) => { if (pred(type)) out.push(...codes); });
+    incomeTypesMaster.forEach(({ type, codes }) => { if (pred(type)) codes.forEach((c) => out.push({ ...c, rtype: label })); });
     return out;
   }
 
@@ -232,11 +278,23 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   }
   useEffect(() => { loadList(); loadServiceExpenses(); loadSaleExpenses(); loadMotoSeries(); loadMotoTypes(); /* eslint-disable-next-line */ }, []);
 
+  // เลือกประเภทงานจาก dropdown — prefill ประเภทรายได้บรรทัดแรกถ้ายังไม่เคยกรอกชื่อ/ราคา
+  function onJobTypeChange(label) {
+    setHeader((h) => ({ ...h, receipt_type: label }));
+    const t = JOB_TYPES.find((x) => x.label === label);
+    setLines((cur) => {
+      const untouched = cur.length === 1 && !cur[0].income_name && !num(cur[0].price_before_discount);
+      if (untouched) return [{ ...blankLine(), income_type: t?.defaultIncome || TYPE_ALL }];
+      return cur;
+    });
+  }
+
   async function openNew() {
     setEditMode(false);
     setHeader(blankHeader(currentUser));
     setLines([blankLine()]);
     setMessage("");
+    setStep(1);
     setView("form");
     // ขอ next receipt no (ใช้เฉพาะรหัสสาขา ไม่เอาชื่อร้าน)
     const branchCode = stripBranchCode(currentUser?.branch_code || currentUser?.branch || "SCY01");
@@ -257,6 +315,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       const ls = item.lines || [];
       const nv = normalizeVehicleModel(h, motoTypes);
       setHeader({ ...blankHeader(currentUser), ...h,
+        receipt_type: normalizeReceiptType(h.receipt_type),
         brand: nv.brand || h.brand || "",
         model_series: nv.model_series || h.model_series || "",
         model_code: nv.model_code || h.model_code || "",
@@ -266,7 +325,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         register_date: h.register_date ? String(h.register_date).slice(0,10) : "",
         tax_paid_date: h.tax_paid_date ? String(h.tax_paid_date).slice(0,10) : "",
       });
-      setLines(ls.length ? ls.map((l) => ({ ...blankLine(), ...l, income_type: normalizeIncomeType(l.income_type) })) : [blankLine()]);
+      setLines(ls.length ? ls.map((l) => ({ ...blankLine(), ...l, income_type: normalizeIncomeType(l.income_type), vat_included: String(l.description || "").includes("รวม VAT") })) : [blankLine()]);
+      setStep(1);
       setView("form");
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e.message || e).slice(0, 100));
@@ -288,7 +348,23 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     setSearched(false);
     try {
       const data = await apiPost({ action: "search_similar", keyword: kw });
-      setSearchResults(Array.isArray(data) ? data : []);
+      // n8n คืน item ว่าง {} เมื่อไม่พบข้อมูล — กรองทิ้งกันแถวขีดว่างโผล่ในตาราง
+      const list = (Array.isArray(data) ? data : []).filter((r) => r && (r.chassis_no || r.engine_no || r.customer_name || r.ref_no));
+      // ซ้ำ = เลขถัง + เลขเครื่อง ตรงกันทั้งคู่ → แสดงแหล่งเดียว เรียงความสำคัญ: ขายปลีก (ระบบใหม่) > ใบขาย moto_sales > รับเรื่อง
+      const PRIORITY = { retail: 3, sale: 2, receipt: 1 };
+      const best = new Map();
+      const noKey = [];
+      list.forEach((r) => {
+        const ch = String(r.chassis_no || "").trim().toUpperCase();
+        const en = String(r.engine_no || "").trim().toUpperCase();
+        if (!ch && !en) { noKey.push(r); return; }
+        const key = ch + "|" + en;
+        const cur = best.get(key);
+        const p = PRIORITY[r.source] || 0;
+        const cp = cur ? (PRIORITY[cur.source] || 0) : -1;
+        if (!cur || p > cp || (p === cp && String(r.ref_date || "") > String(cur.ref_date || ""))) best.set(key, r);
+      });
+      setSearchResults([...best.values(), ...noKey]);
       setSearched(true);
     } catch {
       setSearchResults([]);
@@ -315,9 +391,12 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       plate_category: s.plate_category || h.plate_category,
       plate_number: s.plate_number || h.plate_number,
       contract_ref: s.contract_ref || h.contract_ref,
+      // จากระบบขายใหม่ (retail_sales) มีข้อมูลผ่อนมาด้วย — เก็บไว้โชว์ในสรุป
+      installment_amount: s.installment_amount ?? h.installment_amount,
+      installments: s.installments ?? h.installments,
     }));
     setSearchModal(false);
-    setMessage(`✅ ดึงข้อมูลจาก ${s.source === "sale" ? "moto_sales" : "ประวัติรับเรื่อง"} แล้ว`);
+    setMessage(`✅ ดึงข้อมูลจาก ${s.source === "sale" ? "moto_sales" : s.source === "retail" ? "ใบขายปลีก" : "ประวัติรับเรื่อง"} แล้ว`);
   }
 
   // legacy: direct lookup ตามเดิม (เผื่อมีโค้ดอื่นเรียก) — แต่ตอนนี้ใช้ openSearchModal แทน
@@ -374,12 +453,19 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   }
 
   const lineTotal = useMemo(() => lines.reduce((s, l) => s + (num(l.qty) * num(l.price_before_discount) - num(l.discount)), 0), [lines]);
+  // VAT ที่รวมอยู่ในบรรทัดค่าบริการรับฝาก (ราคารวม VAT 7% ในตัว) — โชว์เป็นข้อมูล ไม่บวกเพิ่มในยอดรวม
+  const vatInFees = useMemo(() => lines.reduce((s, l) => {
+    if (!l.vat_included) return s;
+    const net = num(l.qty) * num(l.price_before_discount) - num(l.discount);
+    return s + (net - net / 1.07);
+  }, 0), [lines]);
   const vatRate = num(header.vat_rate);
   const priceBeforeVat = vatRate > 0 ? lineTotal / (1 + vatRate/100) : lineTotal;
   const vat = lineTotal - priceBeforeVat;
 
   async function handleSave() {
     if (!text(header.receipt_no)) { setMessage("❌ ไม่มีเลขที่รับเรื่อง"); return; }
+    if (!text(header.receipt_type)) { setMessage("❌ เลือกประเภทงานก่อน"); setStep(1); return; }
     if (!text(header.customer_name)) { setMessage("❌ ใส่ชื่อลูกค้า"); return; }
     if (!text(header.chassis_no)) { setMessage("❌ ใส่เลขถัง"); return; }
     if (lines.length === 0 || lines.every(l => !num(l.price_before_discount))) { setMessage("❌ เพิ่มรายการรายได้อย่างน้อย 1"); return; }
@@ -423,36 +509,73 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const sec = { fontSize: 14, fontWeight: 700, color: "#0369a1", marginBottom: 8, paddingBottom: 6, borderBottom: "2px solid #e0f2fe" };
 
   if (view === "form") {
+    const STEP_NAMES = ["ข้อมูลรถ", "ข้อมูลลูกค้า", "รายได้/สรุป"];
+    const jobType = JOB_TYPES.find((t) => t.label === header.receipt_type) || null;
+    // เดินหน้าได้ต่อเมื่อขั้นปัจจุบันผ่านเงื่อนไข
+    // ประเภทงานไม่บังคับตอนกดถัดไป (เลือกทีหลังได้ — handleSave ยังเช็คก่อนบันทึกอยู่)
+    const canNext = step === 1 ? !!text(header.chassis_no)
+                  : step === 2 ? !!text(header.customer_name)
+                  : false;
+    const nextHint = step === 1 ? "ใส่เลขถังก่อน" : step === 2 ? "ใส่ชื่อลูกค้าก่อน" : "";
     return (
       <div style={{ padding: 20, background: "#fbf7f1", minHeight: "100%" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <h2 style={{ margin: 0, color: "#333" }}>📥 {editMode ? "แก้ไข" : "สร้าง"}รับเรื่องงานทะเบียน</h2>
           <button onClick={() => setView("list")} style={btnGray}>← กลับ</button>
         </div>
 
+        {/* แถบขั้นตอน — ขั้นที่ผ่านแล้วกดย้อนได้ */}
+        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+          {STEP_NAMES.map((name, i) => {
+            const n = i + 1;
+            const active = n === step, done = n < step;
+            return (
+              <React.Fragment key={n}>
+                {i > 0 && <span style={{ color: "#9ca3af" }}>›</span>}
+                <button onClick={() => done && setStep(n)}
+                  style={{ border: "none", borderRadius: 999, padding: "6px 14px", fontSize: 13, fontFamily: "Tahoma",
+                    cursor: done ? "pointer" : "default", fontWeight: active ? 700 : 500,
+                    background: active ? "#2563eb" : done ? "#dbeafe" : "#e5e7eb",
+                    color: active ? "#fff" : done ? "#1e40af" : "#6b7280" }}>
+                  {done ? "✓ " : `${n}. `}{name}
+                </button>
+              </React.Fragment>
+            );
+          })}
+          {jobType && step > 1 && (
+            <span style={{ marginLeft: "auto", fontSize: 13, background: "#fef3c7", color: "#92400e", padding: "5px 12px", borderRadius: 999, fontWeight: 700 }}>
+              {jobType.icon} {jobType.label}
+            </span>
+          )}
+        </div>
+
         {message && <div style={{ padding: "8px 14px", marginBottom: 12, background: message.startsWith("✅") ? "#dcfce7" : message.startsWith("ℹ️") ? "#dbeafe" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : message.startsWith("ℹ️") ? "#1e40af" : "#991b1b", borderRadius: 6, fontSize: 14 }}>{message}</div>}
 
+        {/* ===== ขั้น 1: ข้อมูลเอกสาร (มี dropdown ประเภทงาน) + ข้อมูลรถ ===== */}
+        {step === 1 && (
         <div style={{ ...card, marginBottom: 14 }}>
           <div style={sec}>📌 ข้อมูลเอกสาร</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 14 }}>
             <Field label="เลขที่รับเรื่อง *"><input value={header.receipt_no} onChange={e => setHeader({ ...header, receipt_no: e.target.value })} style={{ ...inp, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }} readOnly={!editMode} /></Field>
             <Field label="วันที่รับเรื่อง *"><input type="date" value={header.receive_date} onChange={e => setHeader({ ...header, receive_date: e.target.value })} style={inp} /></Field>
-            <Field label="ประเภท *"><select value={header.receipt_type} onChange={e => setHeader({ ...header, receipt_type: e.target.value })} style={inp}>{RECEIPT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}</select></Field>
+            <Field label="ประเภทงาน *">
+              <select value={header.receipt_type} onChange={e => onJobTypeChange(e.target.value)} style={inp}>
+                <option value="">— เลือกประเภทงาน —</option>
+                {JOB_TYPES.map(t => <option key={t.label} value={t.label}>{t.icon} {t.label}</option>)}
+              </select>
+            </Field>
             <Field label="สาขา *"><input value={header.branch_code} onChange={e => setHeader({ ...header, branch_code: stripBranchCode(e.target.value) })} style={inp} placeholder="SCY01" /></Field>
             <Field label="พนักงาน"><input value={header.staff_recorder} onChange={e => setHeader({ ...header, staff_recorder: e.target.value })} style={inp} /></Field>
             <Field label="VAT (%)"><input type="number" value={header.vat_rate} onChange={e => setHeader({ ...header, vat_rate: e.target.value })} style={inp} placeholder="0" /></Field>
           </div>
-        </div>
-
-        <div style={{ ...card, marginBottom: 14 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
             <div style={sec}>🏍️ ข้อมูลรถ</div>
             <button onClick={openSearchModal} style={{ ...btn, background: "#0ea5e9", color: "#fff", fontSize: 12, padding: "6px 12px" }}>🔍 ค้นหาข้อมูลรถ/ลูกค้า</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             <Field label="เลขถัง *"><input value={header.chassis_no} onChange={e => setHeader({ ...header, chassis_no: e.target.value.toUpperCase() })} style={{ ...inp, fontFamily: "monospace" }} /></Field>
             <Field label="เลขเครื่อง"><input value={header.engine_no} onChange={e => setHeader({ ...header, engine_no: e.target.value.toUpperCase() })} style={{ ...inp, fontFamily: "monospace" }} /></Field>
-            <Field label="ทะเบียน (หมวด + เลข)">
+            <Field label={header.receipt_type === "งานทะเบียนรถใหม่" ? "ทะเบียน (เว้นได้ — รถใหม่ยังไม่มีป้าย)" : "ทะเบียน (หมวด + เลข)"}>
               <div style={{ display: "flex", gap: 6 }}>
                 <input value={header.plate_category} onChange={e => setHeader({ ...header, plate_category: e.target.value })} style={{ ...inp, flex: "0 0 90px" }} placeholder="หมวด" title="หมวด เช่น 2 กช" />
                 <input value={header.plate_number} onChange={e => setHeader({ ...header, plate_number: e.target.value })} style={{ ...inp, flex: 1 }} placeholder="เลขทะเบียน" title="เลขทะเบียน เช่น 5205" />
@@ -465,7 +588,10 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
             <Field label="สี"><input value={header.color} onChange={e => setHeader({ ...header, color: e.target.value })} style={inp} /></Field>
           </div>
         </div>
+        )}
 
+        {/* ===== ขั้น 2: ข้อมูลลูกค้า ===== */}
+        {step === 2 && (
         <div style={{ ...card, marginBottom: 14 }}>
           <div style={sec}>👤 ข้อมูลลูกค้า</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
@@ -478,7 +604,26 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
             <Field label="ที่อยู่"><input value={header.customer_address} onChange={e => setHeader({ ...header, customer_address: e.target.value })} style={inp} /></Field>
           </div>
         </div>
+        )}
 
+        {/* ===== ขั้น 3: รายการรายได้ + สรุป ===== */}
+        {step === 3 && (<>
+        <div style={{ ...card, marginBottom: 14, background: "#f8fafc" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "4px 16px", fontSize: 13 }}>
+            <div><span style={{ color: "#6b7280" }}>เลขที่:</span> <b style={{ fontFamily: "monospace", color: "#0369a1" }}>{header.receipt_no || "-"}</b></div>
+            <div><span style={{ color: "#6b7280" }}>ประเภท:</span> <b>{jobType ? `${jobType.icon} ${jobType.label}` : "-"}</b></div>
+            <div><span style={{ color: "#6b7280" }}>รถ:</span> <b>{[header.brand, header.model_series, header.color].filter(Boolean).join(" · ") || "-"}</b> <span style={{ fontFamily: "monospace", fontSize: 11 }}>{header.chassis_no}</span></div>
+            <div><span style={{ color: "#6b7280" }}>ลูกค้า:</span> <b>{header.customer_name || "-"}</b> {header.customer_phone && <span style={{ color: "#6b7280" }}>({header.customer_phone})</span>}</div>
+            <div>
+              <span style={{ color: "#6b7280" }}>ไฟแนนซ์:</span> <b style={{ color: header.contract_ref ? "#7c3aed" : "#9ca3af" }}>{header.contract_ref || "— เงินสด/ไม่มีข้อมูล —"}</b>
+              {num(header.installment_amount) > 0 && (
+                <span style={{ marginLeft: 8, color: "#b91c1c", fontWeight: 700 }}>
+                  ค่างวด {baht(num(header.installment_amount))}{num(header.installments) > 0 ? ` × ${num(header.installments)} งวด` : ""}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
         <div style={{ ...card, marginBottom: 14 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <div style={sec}>💰 รายการรายได้</div>
@@ -522,15 +667,21 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                           const opt = e.target.options[e.target.selectedIndex];
                           const amtStr = opt?.dataset?.amount || "";
                           const amt = amtStr !== "" ? Number(amtStr) : null;
+                          const vatInc = opt?.dataset?.vatinc === "1";
                           updateLine(i, {
                             income_code: opt?.dataset?.code || "",
                             income_name: opt?.dataset?.name || "",
+                            // โหมด "ทั้งหมด": stamp ประเภทจริงของรายการที่เลือกลง income_type (รายงาน/บันทึกใช้ประเภทจริง)
+                            ...(opt?.dataset?.type ? { income_type: opt.dataset.type } : {}),
                             price_before_discount: amt != null && !Number.isNaN(amt) ? amt : (l.price_before_discount || 0),
+                            // ค่าบริการรับฝาก: ราคารวม VAT ในตัว — ติดธง + note ลง description ให้ติดไปกับใบเสร็จ
+                            vat_included: vatInc,
+                            description: vatInc ? "รวม VAT 7%" : (l.description === "รวม VAT 7%" ? "" : l.description),
                           });
                         }} style={{ ...inp, padding: "5px 8px", fontSize: 12, minWidth: 220 }} disabled={!l.income_type}>
-                          <option value="" data-amount="" data-code="" data-name="">— เลือกชื่อรายได้ —</option>
+                          <option value="" data-amount="" data-code="" data-name="" data-type="" data-vatinc="">— เลือกชื่อรายได้ —</option>
                           {codes.map(c => (
-                            <option key={c._key} value={c._key} data-amount={c.amount ?? ""} data-code={c.code || ""} data-name={c.name || ""}>{c.name}</option>
+                            <option key={c._key} value={c._key} data-amount={c.amount ?? ""} data-code={c.code || ""} data-name={c.name || ""} data-type={c.rtype || ""} data-vatinc={c.vatIncluded ? "1" : ""}>{l.income_type === TYPE_ALL && c.rtype ? `${c.name} (${c.rtype.replace("รายได้", "").trim() || c.rtype})` : c.name}</option>
                           ))}
                         </select>
                         {l.income_type === TYPE_PRB && vehicleCC == null && (
@@ -553,6 +704,13 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                   <td style={{ ...td, textAlign: "right", fontWeight: 800, fontSize: 15, color: "#dc2626" }}>{baht(lineTotal)}</td>
                   <td style={td}></td>
                 </tr>
+                {vatInFees > 0 && (
+                  <tr>
+                    <td colSpan={6} style={{ ...td, textAlign: "right", color: "#6b7280", fontSize: 12 }}>ภาษีมูลค่าเพิ่มรวมในค่าบริการ (7% — รวมในยอดแล้ว)</td>
+                    <td style={{ ...td, textAlign: "right", color: "#6b7280", fontSize: 12 }}>{baht(vatInFees)}</td>
+                    <td style={td}></td>
+                  </tr>
+                )}
                 {vatRate > 0 && <>
                   <tr><td colSpan={6} style={{ ...td, textAlign: "right" }}>ราคาก่อน VAT</td><td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(priceBeforeVat)}</td><td style={td}></td></tr>
                   <tr><td colSpan={6} style={{ ...td, textAlign: "right" }}>VAT {vatRate}%</td><td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(vat)}</td><td style={td}></td></tr>
@@ -565,10 +723,25 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         <div style={{ ...card, marginBottom: 14 }}>
           <Field label="หมายเหตุ"><textarea value={header.note} onChange={e => setHeader({ ...header, note: e.target.value })} style={{ ...inp, minHeight: 60 }} /></Field>
         </div>
+        </>)}
 
-        <div style={{ display: "flex", gap: 10, justifyContent: "flex-end", padding: "10px 0" }}>
-          <button onClick={() => setView("list")} style={btnGray}>ยกเลิก</button>
-          <button onClick={handleSave} disabled={saving} style={{ ...btnGreen, opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>
+        {/* ปุ่มนำทาง wizard */}
+        <div style={{ display: "flex", gap: 10, justifyContent: "space-between", padding: "10px 0", flexWrap: "wrap" }}>
+          <div>
+            {step > 1 && <button onClick={() => setStep(step - 1)} style={btnGray}>← ย้อนกลับ</button>}
+          </div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <button onClick={() => setView("list")} style={{ ...btn, background: "transparent", color: "#6b7280" }}>ยกเลิก</button>
+            {step < 3 && (
+              <button onClick={() => canNext && setStep(step + 1)} disabled={!canNext} title={canNext ? "" : nextHint}
+                style={{ ...btnPri, opacity: canNext ? 1 : 0.45, cursor: canNext ? "pointer" : "not-allowed" }}>
+                ถัดไป →
+              </button>
+            )}
+            {step === 3 && (
+              <button onClick={handleSave} disabled={saving} style={{ ...btnGreen, opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>
+            )}
+          </div>
         </div>
 
         {searchModal && (
@@ -615,10 +788,10 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                       </thead>
                       <tbody>
                         {searchResults.map((s, i) => (
-                          <tr key={i} style={{ background: s.source === "sale" ? "#f0f9ff" : "#fef9c3" }}>
+                          <tr key={i} style={{ background: s.source === "sale" ? "#f0f9ff" : s.source === "retail" ? "#f5f3ff" : "#fef9c3" }}>
                             <td style={td}>
-                              <span style={{ background: s.source === "sale" ? "#dbeafe" : "#fef3c7", color: s.source === "sale" ? "#1e40af" : "#a16207", padding: "2px 8px", borderRadius: 4, fontWeight: 700, fontSize: 11 }}>
-                                {s.source === "sale" ? "ขาย" : "รับเรื่อง"}
+                              <span style={{ background: s.source === "sale" ? "#dbeafe" : s.source === "retail" ? "#ede9fe" : "#fef3c7", color: s.source === "sale" ? "#1e40af" : s.source === "retail" ? "#6d28d9" : "#a16207", padding: "2px 8px", borderRadius: 4, fontWeight: 700, fontSize: 11 }}>
+                                {s.source === "sale" ? "ขาย" : s.source === "retail" ? "ขายปลีก" : "รับเรื่อง"}
                               </span>
                             </td>
                             <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.chassis_no || "-"}</td>
