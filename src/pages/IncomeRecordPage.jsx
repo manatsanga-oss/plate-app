@@ -467,30 +467,32 @@ export default function IncomeRecordPage({ currentUser }) {
   function addItem() { setForm(f => ({ ...f, items: [...f.items, emptyItem()] })); }
   function removeItem(idx) { setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) })); }
 
-  // Calculations
-  const subtotal = form.items.reduce((s, it) => s + (Number(it.amount) || 0), 0);
-  const discountAmount = subtotal * (Number(form.discount_pct) || 0) / 100;
-  const afterDiscount = subtotal - discountAmount;
-  const vatAmount = afterDiscount * (Number(form.vat_pct) || 0) / 100;
-  const totalIncVat = afterDiscount + vatAmount;
+  // Calculations — ปัดเศษทุกค่ากลางเป็น 2 ตำแหน่งก่อนคำนวณต่อ กันยอดสุทธิเพี้ยน 0.01
+  // (เช่น 22,429.91×1.07=24,000.0037 − WHT 672.8973 = 23,327.1064 → เพี้ยนเป็น .11 ทั้งที่ควรเป็น 24,000.00−672.90=23,327.10)
+  const round2 = (v) => Math.round((Number(v) + Number.EPSILON) * 100) / 100;
+  const subtotal = round2(form.items.reduce((s, it) => s + (Number(it.amount) || 0), 0));
+  const discountAmount = round2(subtotal * (Number(form.discount_pct) || 0) / 100);
+  const afterDiscount = round2(subtotal - discountAmount);
+  const vatAmount = round2(afterDiscount * (Number(form.vat_pct) || 0) / 100);
+  const totalIncVat = round2(afterDiscount + vatAmount);
   // WHT คำนวณต่อ item — เฉพาะ items ที่มี wht_rate > 0
   // หาก discount > 0 จะกระจายส่วนลดลงตามสัดส่วน
-  const whtAmount = form.items.reduce((s, it) => {
+  const whtAmount = round2(form.items.reduce((s, it) => {
     const rate = Number(it.wht_rate) || 0;
     if (rate <= 0) return s;
     const itemAmt = Number(it.amount) || 0;
     // ส่วนลดเฉลี่ย proportional
     const itemAfterDisc = subtotal > 0 ? itemAmt * (afterDiscount / subtotal) : itemAmt;
     return s + (itemAfterDisc * rate / 100);
-  }, 0);
-  const whtBase = form.items.reduce((s, it) => {
+  }, 0));
+  const whtBase = round2(form.items.reduce((s, it) => {
     const rate = Number(it.wht_rate) || 0;
     if (rate <= 0) return s;
     const itemAmt = Number(it.amount) || 0;
     const itemAfterDisc = subtotal > 0 ? itemAmt * (afterDiscount / subtotal) : itemAmt;
     return s + itemAfterDisc;
-  }, 0);
-  const netToPay = totalIncVat - whtAmount;
+  }, 0));
+  const netToPay = round2(totalIncVat - whtAmount);
 
   async function handleSave() {
     if (!form.customer_id && !form.customer_name) { setMessage("❌ กรุณาเลือกลูกค้า"); return; }
