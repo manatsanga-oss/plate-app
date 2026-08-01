@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 
 const REG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
+const PRINT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-receipt-print-api";
 
 const text = (v) => (v ?? "").toString().trim();
 const pad = (n) => String(n).padStart(2, "0");
@@ -25,7 +26,7 @@ const FIELDS = [
   { key: "invoice_no", label: "เลขที่ใบขาย" },
 ];
 
-export default function GiveawayReceiptPrintPage() {
+export default function GiveawayReceiptPrintPage({ currentUser } = {}) {
   const [field, setField] = useState("all");
   const [keyword, setKeyword] = useState("");
   const [rows, setRows] = useState([]);
@@ -34,6 +35,8 @@ export default function GiveawayReceiptPrintPage() {
   const [docNo, setDocNo] = useState("");
   const [chk, setChk] = useState({ shirt: false, helmet: false, other: false });
   const [otherText, setOtherText] = useState("");
+  const [history, setHistory] = useState([]);   // ประวัติพิมพ์ใบรับของแถมของคันที่เลือก
+  const [savingPrint, setSavingPrint] = useState(false);
 
   const apiPost = async (url, payload) => {
     const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -60,16 +63,57 @@ export default function GiveawayReceiptPrintPage() {
     return `RBG${pad(yy)}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
   }
 
-  function pick(v) {
+  async function pick(v) {
     setSelected(v);
     setDocNo(genDocNo());
     setChk({ shirt: false, helmet: false, other: false });
     setOtherText("");
+    setHistory([]);
+    try {
+      const payload = { action: "list_prints" };
+      const inv = text(v.sale_doc_no || v.invoice_no);
+      if (inv) payload.invoice_no = inv; else if (text(v.frame_no)) payload.frame_no = text(v.frame_no);
+      if (payload.invoice_no || payload.frame_no) setHistory(await apiPost(PRINT_API, payload));
+    } catch { setHistory([]); }
   }
 
-  function printDoc() {
-    if (!selected) return;
+  // บันทึกประวัติพิมพ์ลง DB — ล้มเหลวให้ถามก่อนว่าจะพิมพ์ต่อโดยไม่บันทึกไหม
+  async function savePrintRecord(v) {
+    const d = await apiPost(PRINT_API, {
+      action: "save_print",
+      doc_no: docNo,
+      invoice_no: text(v.sale_doc_no || v.invoice_no),
+      customer_name: text(v.customer_name),
+      sale_date: v.sale_date || null,
+      gap_days: daysSince(v.sale_date),
+      engine_no: text(v.engine_no),
+      frame_no: text(v.frame_no),
+      brand: text(v.brand),
+      model: text(v.model),
+      color: text(v.color),
+      item_shirt: chk.shirt,
+      item_helmet: chk.helmet,
+      item_other: chk.other,
+      other_text: chk.other ? text(otherText) : "",
+      printed_by: currentUser?.username || currentUser?.name || "",
+    });
+    if (!Array.isArray(d) || !d.length || !d[0]?.id) throw new Error("no id returned");
+    return d;
+  }
+
+  async function printDoc() {
+    if (!selected || savingPrint) return;
     const v = selected;
+    setSavingPrint(true);
+    try {
+      await savePrintRecord(v);
+      setHistory((h) => [{ doc_no: docNo, created_at: new Date().toISOString(), printed_by: currentUser?.username || currentUser?.name || "" }, ...h]);
+    } catch (e) {
+      if (!window.confirm("⚠️ บันทึกประวัติพิมพ์ลงฐานข้อมูลไม่สำเร็จ (ตรวจสอบว่า import workflow giveaway-receipt-print-api + สร้างตารางแล้ว)\n\nต้องการพิมพ์ต่อโดยไม่บันทึกหรือไม่?")) {
+        setSavingPrint(false);
+        return;
+      }
+    } finally { setSavingPrint(false); }
     const box = (on) => (on ? "☑" : "☐");
     const days = daysSince(v.sale_date);
     const today = fmtDate(new Date().toISOString());
@@ -120,6 +164,7 @@ export default function GiveawayReceiptPrintPage() {
     if (!w) { alert("กรุณาอนุญาต popup เพื่อพิมพ์เอกสาร"); return; }
     w.document.write(html);
     w.document.close();
+    setDocNo(genDocNo());   // เลขเอกสารใหม่สำหรับการพิมพ์ครั้งถัดไป กันเลขซ้ำ
   }
 
   const td = { padding: "7px 10px", borderBottom: "1px solid #eef2f7", fontSize: 13 };
@@ -182,6 +227,12 @@ export default function GiveawayReceiptPrintPage() {
       {selected && (
         <div className="form-card">
           <h3 style={{ margin: "0 0 12px", fontSize: 15, color: "#072d6b" }}>เตรียมพิมพ์ใบรับของแถม</h3>
+          {history.length > 0 && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#991b1b" }}>
+              ⚠️ <b>คันนี้เคยพิมพ์ใบรับของแถมแล้ว {history.length} ครั้ง</b> — ล่าสุดเลขที่ <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{history[0].doc_no}</span>
+              {" "}วันที่ {fmtDate(history[0].created_at)}{text(history[0].printed_by) ? ` โดย ${text(history[0].printed_by)}` : ""}
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 10, marginBottom: 14 }}>
             {[["เลขที่เอกสาร", docNo], ["ลูกค้า", text(selected.customer_name)], ["เลขที่ใบขาย", text(selected.sale_doc_no || selected.invoice_no)],
               ["วันที่ขาย", fmtDate(selected.sale_date)], ["เลขเครื่อง", text(selected.engine_no)], ["เลขตัวถัง", text(selected.frame_no)]].map(([l, val]) => (
@@ -199,7 +250,10 @@ export default function GiveawayReceiptPrintPage() {
             <input value={otherText} onChange={(e) => setOtherText(e.target.value)} placeholder="ระบุของแถมอื่นๆ"
               style={{ padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13, minWidth: 200 }} disabled={!chk.other} />
           </div>
-          <button className="btn-primary" style={{ padding: "10px 24px", fontSize: 15 }} onClick={printDoc}>🖨️ พิมพ์เอกสาร</button>
+          <button className="btn-primary" style={{ padding: "10px 24px", fontSize: 15 }} onClick={printDoc} disabled={savingPrint}>
+            {savingPrint ? "⏳ กำลังบันทึก..." : "🖨️ พิมพ์เอกสาร"}
+          </button>
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>กดพิมพ์แล้วระบบจะบันทึกประวัติลงฐานข้อมูลอัตโนมัติ (ดูได้ในรายงานของแถม)</div>
         </div>
       )}
     </div>

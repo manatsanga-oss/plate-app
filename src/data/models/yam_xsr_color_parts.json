@@ -7,7 +7,7 @@
   "colors": [
     {
       "code": "0033",
-      "name": "ดำ XS",
+      "name": "ดำ",
       "color_code": "YB",
       "page": "b1v900_0033",
       "pages": [
@@ -22,7 +22,7 @@
     },
     {
       "code": "1783",
-      "name": "เทา XS",
+      "name": "เทา",
       "color_code": "WMA",
       "page": "b1v900_1783",
       "pages": [
@@ -37,7 +37,7 @@
     },
     {
       "code": "1240",
-      "name": "น้ำเงิน XS",
+      "name": "น้ำเงิน",
       "color_code": "DBNM9",
       "page": "b1v900_1240",
       "pages": [

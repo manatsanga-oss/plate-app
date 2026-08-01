@@ -37,6 +37,11 @@ export default function FinancePaymentMatchPage({ currentUser }) {
   const [historyTransfers, setHistoryTransfers] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState({});
+  // ตัวกรองแท็บประวัติการตัด
+  const [hDateFrom, setHDateFrom] = useState("");
+  const [hDateTo, setHDateTo] = useState("");
+  const [hCompany, setHCompany] = useState("");
+  const [hSearch, setHSearch] = useState("");
 
   // step 1: finance company
   const [financeCompanies, setFinanceCompanies] = useState([]);
@@ -90,6 +95,37 @@ export default function FinancePaymentMatchPage({ currentUser }) {
     } catch { setHistoryTransfers([]); }
     setHistoryLoading(false);
   }
+
+  // แปลง matched_items (json/string) เป็น array — ใช้ทั้งตอนแสดงและตอนค้นหา
+  const parseItems = (t) => {
+    if (Array.isArray(t.matched_items)) return t.matched_items;
+    if (typeof t.matched_items === "string") { try { return JSON.parse(t.matched_items) || []; } catch { return []; } }
+    return [];
+  };
+
+  // ตัวเลือกไฟแนนท์จากข้อมูลประวัติ
+  const historyCompanies = useMemo(
+    () => [...new Set(historyTransfers.map(t => (t.finance_company || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, "th")),
+    [historyTransfers]
+  );
+
+  // กรองประวัติ: ช่วงวันที่โอน + ไฟแนนท์ + ค้นหา (เลขเอกสาร/ธนาคาร/หมายเหตุ/เลขใบกำกับ/ลูกค้า/เลขเครื่อง-ถัง/ทะเบียน)
+  const filteredHistory = useMemo(() => {
+    const kw = hSearch.trim().toLowerCase();
+    return historyTransfers.filter(t => {
+      const d = String(t.transfer_date || "").slice(0, 10);
+      if (hDateFrom && d && d < hDateFrom) return false;
+      if (hDateTo && d && d > hDateTo) return false;
+      if (hCompany && (t.finance_company || "").trim() !== hCompany) return false;
+      if (!kw) return true;
+      const items = parseItems(t);
+      const hay = [
+        t.doc_no, `FT-${t.ft_id}`, t.finance_company, t.bank_name, t.account_no, t.note,
+        ...items.flatMap(it => [it.tax_invoice_no, it.customer_name, it.engine_no, it.chassis_no, it.plate_number]),
+      ].filter(Boolean).join(" ").toLowerCase();
+      return hay.includes(kw);
+    });
+  }, [historyTransfers, hDateFrom, hDateTo, hCompany, hSearch]);
 
   async function cancelMatch(t) {
     if (!window.confirm(`ยกเลิกการตัดรับชำระ ${t.doc_no || `FT-${t.ft_id}`} ?\n• เงินโอนจะกลับเป็น "รอตัดรับชำระ"\n• ใบกำกับที่ตัดไปจะปลดล็อค (paid_from_ft_id = NULL)`)) return;
@@ -461,15 +497,47 @@ export default function FinancePaymentMatchPage({ currentUser }) {
       {/* History view */}
       {tab === "history" && (
         <div style={card}>
-          <div style={cardTitle}>📜 ประวัติการตัดรับชำระ ({historyTransfers.length} รายการ)</div>
+          <div style={cardTitle}>
+            📜 ประวัติการตัดรับชำระ ({filteredHistory.length}{filteredHistory.length !== historyTransfers.length ? ` จาก ${historyTransfers.length}` : ""} รายการ)
+          </div>
+
+          {/* ตัวกรองประวัติ */}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 12, padding: "10px 12px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
+            <label style={{ fontSize: 13, fontWeight: 600 }}>📅 วันที่โอน:</label>
+            <input type="date" value={hDateFrom} onChange={e => setHDateFrom(e.target.value)}
+              style={{ padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13 }} />
+            <span style={{ fontSize: 13 }}>ถึง</span>
+            <input type="date" value={hDateTo} onChange={e => setHDateTo(e.target.value)}
+              style={{ padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13 }} />
+            <select value={hCompany} onChange={e => setHCompany(e.target.value)}
+              style={{ padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13, background: "#fff", maxWidth: 260 }}>
+              <option value="">🏦 ไฟแนนท์ (ทั้งหมด)</option>
+              {historyCompanies.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <input value={hSearch} onChange={e => setHSearch(e.target.value)}
+              placeholder="🔎 ค้นหา: เลขเอกสาร / ลูกค้า / เลขใบกำกับ / เลขเครื่อง-ถัง / ทะเบียน"
+              style={{ flex: 1, minWidth: 220, padding: "6px 10px", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 13 }} />
+            {(hDateFrom || hDateTo || hCompany || hSearch) && (
+              <button onClick={() => { setHDateFrom(""); setHDateTo(""); setHCompany(""); setHSearch(""); }}
+                style={{ padding: "6px 12px", background: "#f3f4f6", color: "#374151", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+                ✕ ล้างตัวกรอง
+              </button>
+            )}
+            <span style={{ fontSize: 12, color: "#065f46", fontWeight: 700 }}>
+              ยอดรวม ฿ {fmt(filteredHistory.reduce((s, t) => s + Number(t.amount || 0), 0))}
+            </span>
+          </div>
+
           {historyLoading ? (
             <div style={{ textAlign: "center", padding: 30, color: "#6b7280" }}>กำลังโหลด...</div>
-          ) : historyTransfers.length === 0 ? (
-            <div style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>ยังไม่มีประวัติการตัดรับชำระ</div>
+          ) : filteredHistory.length === 0 ? (
+            <div style={{ textAlign: "center", padding: 30, color: "#9ca3af" }}>
+              {historyTransfers.length === 0 ? "ยังไม่มีประวัติการตัดรับชำระ" : "ไม่พบรายการตามตัวกรอง"}
+            </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {historyTransfers.map(t => {
-                const items = Array.isArray(t.matched_items) ? t.matched_items : (t.matched_items ? (typeof t.matched_items === "string" ? JSON.parse(t.matched_items) : []) : []);
+              {filteredHistory.map(t => {
+                const items = parseItems(t);
                 const isOpen = !!historyExpanded[t.ft_id];
                 return (
                   <div key={t.ft_id} style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, overflow: "hidden" }}>

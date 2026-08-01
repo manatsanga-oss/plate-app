@@ -105,7 +105,8 @@ async function apiPost(payload) {
   } catch { return []; }
 }
 
-const blankLine = () => ({ income_type: TYPE_ALL, income_code: "", income_name: "", description: "", qty: 1, price_before_discount: 0, discount: 0 });
+// service_fee = ช่องค่าบริการต่อบรรทัด (UI) — ตอนบันทึกจะแตกเป็นบรรทัด "ค่าบริการ..." แยกใน DB (รวม VAT ในตัว) เพื่อให้วางบิลคิดฐาน WHT ถูก
+const blankLine = () => ({ income_type: TYPE_ALL, income_code: "", income_name: "", description: "", qty: 1, price_before_discount: 0, discount: 0, service_fee: 0 });
 
 // ดึงเฉพาะ code (ตัวแรกก่อนเว้นวรรค) — "SCY01 สำนักงานใหญ่" → "SCY01"
 const stripBranchCode = (v) => String(v || "").trim().split(/\s+/)[0] || "";
@@ -140,6 +141,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [header, setHeader] = useState(blankHeader(currentUser));
   const [lines, setLines] = useState([blankLine()]);
   const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false); // บันทึกสำเร็จแล้ว — ค้างหน้าเดิมให้กดพิมพ์ได้
   const [editMode, setEditMode] = useState(false);
   const [searchModal, setSearchModal] = useState(false);
   const [searchKw, setSearchKw] = useState("");
@@ -226,7 +228,13 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     };
     return saleExpenses
       .filter((e) => e.group_by === "cc" && Number(e.engine_cc) === Number(vehicleCC) && activeOn(e) && (containsPrb(e.expense_name) || containsPrb(e.category)))
-      .map((e) => ({ _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: e.amount != null && e.amount !== "" ? Number(e.amount) : null }));
+      // ราคา = เบี้ย พรบ. จ่ายจริง (amount 323.14) + ค่าบริการ = ส่วนต่างจากราคาเก็บลูกค้า (income_amount 400 → fee 76.86)
+      .map((e) => {
+        const paid = e.amount != null && e.amount !== "" ? Number(e.amount) : null;
+        const collect = e.income_amount != null && e.income_amount !== "" ? Number(e.income_amount) : null;
+        const fee = paid != null && collect != null && collect > paid ? Math.round((collect - paid) * 100) / 100 : 0;
+        return { _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: paid != null ? paid : collect, fee };
+      });
   }, [saleExpenses, vehicleCC]);
 
   // รับฝากค่างวด: ชื่อบริษัทดูจากไฟแนนซ์ของรถที่เลือก (contract_ref) — DB สะกด "กรุ๊ปลิส" ก็มี จับทั้ง 2 แบบ
@@ -294,6 +302,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     setHeader(blankHeader(currentUser));
     setLines([blankLine()]);
     setMessage("");
+    setJustSaved(false);
     setStep(1);
     setView("form");
     // ขอ next receipt no (ใช้เฉพาะรหัสสาขา ไม่เอาชื่อร้าน)
@@ -326,6 +335,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         tax_paid_date: h.tax_paid_date ? String(h.tax_paid_date).slice(0,10) : "",
       });
       setLines(ls.length ? ls.map((l) => ({ ...blankLine(), ...l, income_type: normalizeIncomeType(l.income_type), vat_included: String(l.description || "").includes("รวม VAT") })) : [blankLine()]);
+      setJustSaved(false);
       setStep(1);
       setView("form");
     } catch (e) {
@@ -452,12 +462,16 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     updateLine(i, { income_type: type, income_code: "", income_name: "" });
   }
 
-  const lineTotal = useMemo(() => lines.reduce((s, l) => s + (num(l.qty) * num(l.price_before_discount) - num(l.discount)), 0), [lines]);
-  // VAT ที่รวมอยู่ในบรรทัดค่าบริการรับฝาก (ราคารวม VAT 7% ในตัว) — โชว์เป็นข้อมูล ไม่บวกเพิ่มในยอดรวม
+  const lineTotal = useMemo(() => lines.reduce((s, l) => s + (num(l.qty) * num(l.price_before_discount) - num(l.discount) + num(l.service_fee)), 0), [lines]);
+  // VAT ที่รวมอยู่ในค่าบริการ (ช่องค่าบริการต่อบรรทัด + บรรทัดที่ติดธงรวม VAT ในตัว) — โชว์เป็นข้อมูล ไม่บวกเพิ่มในยอดรวม
   const vatInFees = useMemo(() => lines.reduce((s, l) => {
-    if (!l.vat_included) return s;
-    const net = num(l.qty) * num(l.price_before_discount) - num(l.discount);
-    return s + (net - net / 1.07);
+    const fee = num(l.service_fee);
+    let v = fee > 0 ? fee - fee / 1.07 : 0;
+    if (l.vat_included) {
+      const net = num(l.qty) * num(l.price_before_discount) - num(l.discount);
+      v += net - net / 1.07;
+    }
+    return s + v;
   }, 0), [lines]);
   const vatRate = num(header.vat_rate);
   const priceBeforeVat = vatRate > 0 ? lineTotal / (1 + vatRate/100) : lineTotal;
@@ -465,26 +479,108 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
 
   async function handleSave() {
     if (!text(header.receipt_no)) { setMessage("❌ ไม่มีเลขที่รับเรื่อง"); return; }
-    if (!text(header.receipt_type)) { setMessage("❌ เลือกประเภทงานก่อน"); setStep(1); return; }
     if (!text(header.customer_name)) { setMessage("❌ ใส่ชื่อลูกค้า"); return; }
     if (!text(header.chassis_no)) { setMessage("❌ ใส่เลขถัง"); return; }
-    if (lines.length === 0 || lines.every(l => !num(l.price_before_discount))) { setMessage("❌ เพิ่มรายการรายได้อย่างน้อย 1"); return; }
+    if (lines.length === 0 || lines.every(l => !num(l.price_before_discount) && !num(l.service_fee))) { setMessage("❌ เพิ่มรายการรายได้อย่างน้อย 1"); return; }
+    // แตกช่องค่าบริการเป็นบรรทัดแยกใน DB — ชื่อขึ้นต้น "ค่าบริการ" (ฐาน WHT ตอนวางบิล) + รวม VAT 7% ในตัว
+    const expandedLines = [];
+    lines.filter(l => num(l.price_before_discount) || num(l.service_fee)).forEach(l => {
+      const { service_fee, ...rest } = l;
+      if (num(l.price_before_discount)) expandedLines.push(rest);
+      const fee = num(service_fee);
+      if (fee > 0) {
+        const parent = String(l.income_name || "").replace(/^ค่า/, "").trim();
+        expandedLines.push({
+          income_type: l.income_type, income_code: "",
+          income_name: parent ? `ค่าบริการ${parent}` : "ค่าบริการ",
+          description: "รวม VAT 7%", qty: 1, price_before_discount: fee, discount: 0,
+        });
+      }
+    });
+    // ไม่บังคับเลือกประเภทงาน — ถ้าไม่ได้เลือก เดาจากประเภทรายได้ในรายการให้อัตโนมัติ
+    let receiptType = text(header.receipt_type);
+    if (!receiptType) {
+      const ts = new Set(lines.filter(l => l.income_name || num(l.price_before_discount)).map(l => l.income_type));
+      receiptType = ts.has(TYPE_PRB) ? "งานต่อภาษีและพรบ."
+                  : ts.has(TYPE_INSURANCE) ? "งานประกัน"
+                  : ts.has(TYPE_REGISTER) ? (text(header.plate_number) ? "งานโอนทะเบียน" : "งานทะเบียนรถใหม่")
+                  : "อื่นๆ";
+    }
     setSaving(true);
     setMessage("");
     try {
       const data = await apiPost({
         action: "save_receipt",
-        header: { ...header, created_by: currentUser?.username || currentUser?.name || "system" },
-        lines: lines.filter(l => num(l.price_before_discount) || num(l.qty) > 0),
+        header: { ...header, receipt_type: receiptType, created_by: currentUser?.username || currentUser?.name || "system" },
+        lines: expandedLines,
       });
       if (data?.[0]?.message && /missing|error/i.test(data[0].message)) throw new Error(data[0].message);
-      setMessage("✅ บันทึกสำเร็จ");
+      // ค้างหน้าเดิมหลังบันทึก — ให้กดพิมพ์ได้ กด "← กลับ" เองเมื่อเสร็จ
+      setHeader((h) => ({ ...h, receipt_type: receiptType }));
+      setJustSaved(true);
+      setMessage("✅ บันทึกสำเร็จ — กดพิมพ์ได้เลย หรือกด ← กลับ เพื่อไปหน้ารายการ");
       await loadList();
-      setTimeout(() => setView("list"), 600);
     } catch (e) {
       setMessage("❌ บันทึกไม่สำเร็จ: " + String(e.message || e).slice(0, 200));
     }
     setSaving(false);
+  }
+
+  // พิมพ์ใบรับเรื่อง — เปิดหน้าต่างใหม่แล้วสั่ง print
+  function printReceipt() {
+    const rows = lines.filter((l) => l.income_name || num(l.price_before_discount) || num(l.service_fee));
+    const rowsHtml = rows.map((l, i) => {
+      const net = num(l.qty) * num(l.price_before_discount) - num(l.discount) + num(l.service_fee);
+      return `<tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>${l.income_name || "-"}${l.description ? ` <span style="color:#666;font-size:11px">(${l.description})</span>` : ""}</td>
+        <td style="text-align:right">${num(l.qty)}</td>
+        <td style="text-align:right">${baht(num(l.price_before_discount))}</td>
+        <td style="text-align:right">${num(l.service_fee) > 0 ? baht(num(l.service_fee)) : "-"}</td>
+        <td style="text-align:right;font-weight:bold">${baht(net)}</td>
+      </tr>`;
+    }).join("");
+    const vatRow = vatInFees > 0 ? `<tr><td colspan="5" style="text-align:right;color:#666;font-size:11px;border:none">ภาษีมูลค่าเพิ่มรวมในค่าบริการ (7% — รวมในยอดแล้ว)</td><td style="text-align:right;color:#666;font-size:11px;border:none">${baht(vatInFees)}</td></tr>` : "";
+    const w = window.open("", "_blank");
+    if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ — อนุญาต popup ก่อน"); return; }
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบรับเรื่อง ${header.receipt_no}</title>
+      <style>
+        body { font-family: Tahoma, sans-serif; font-size: 13px; margin: 24px; color: #111; }
+        h2 { margin: 0 0 2px; font-size: 18px; }
+        .muted { color: #555; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 20px; margin: 10px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        th, td { border: 1px solid #999; padding: 5px 8px; font-size: 12px; }
+        th { background: #eee; }
+        .total td { font-weight: bold; background: #f7f7f7; }
+        .sign { display: flex; justify-content: space-around; margin-top: 44px; text-align: center; font-size: 12px; }
+        @media print { body { margin: 10mm; } }
+      </style></head><body>
+      <h2>📥 ใบรับเรื่องงานทะเบียน</h2>
+      <div class="muted">เลขที่ <b>${header.receipt_no || "-"}</b> · วันที่ ${fmtBE(header.receive_date) || "-"} · สาขา ${header.branch_code || "-"} · ประเภทงาน ${header.receipt_type || "-"}</div>
+      <div class="grid">
+        <div><span class="muted">ลูกค้า:</span> <b>${header.customer_name || "-"}</b> ${header.customer_phone ? `(${header.customer_phone})` : ""}</div>
+        <div><span class="muted">รถ:</span> <b>${[header.brand, header.model_series, header.color].filter(Boolean).join(" · ") || "-"}</b></div>
+        <div><span class="muted">เลขถัง:</span> ${header.chassis_no || "-"} · <span class="muted">เลขเครื่อง:</span> ${header.engine_no || "-"}</div>
+        <div><span class="muted">ทะเบียน:</span> ${[header.plate_category, header.plate_number].filter(Boolean).join(" ") || "-"}</div>
+        ${header.contract_ref ? `<div><span class="muted">ไฟแนนซ์:</span> ${header.contract_ref}${num(header.installment_amount) > 0 ? ` · ค่างวด ${baht(num(header.installment_amount))}${num(header.installments) > 0 ? ` × ${num(header.installments)} งวด` : ""}` : ""}</div>` : ""}
+      </div>
+      <table>
+        <thead><tr><th style="width:34px">#</th><th>รายการ</th><th style="width:60px">จำนวน</th><th style="width:90px">ราคา</th><th style="width:80px">ค่าบริการ</th><th style="width:100px">สุทธิ</th></tr></thead>
+        <tbody>${rowsHtml}
+          <tr class="total"><td colspan="5" style="text-align:right">รวมทั้งสิ้น</td><td style="text-align:right;font-size:14px">${baht(lineTotal)}</td></tr>
+          ${vatRow}
+        </tbody>
+      </table>
+      ${header.note ? `<div style="margin-top:8px"><span class="muted">หมายเหตุ:</span> ${header.note}</div>` : ""}
+      <div class="sign">
+        <div>ลงชื่อ ______________________ ผู้รับเรื่อง<br/>(${header.staff_recorder || "&nbsp;"})</div>
+        <div>ลงชื่อ ______________________ ลูกค้า<br/>&nbsp;</div>
+      </div>
+      </body></html>`);
+    w.document.close();
+    w.focus();
+    setTimeout(() => w.print(), 300);
   }
 
   async function handleDelete(r) {
@@ -638,14 +734,15 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                   <th style={th}>ชื่อรายได้</th>
                   <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
                   <th style={{ ...th, textAlign: "right" }}>ราคา</th>
-                  <th style={{ ...th, textAlign: "right" }}>ส่วนลด</th>
+                  <th style={{ ...th, textAlign: "right" }}>ค่าบริการ</th>
                   <th style={{ ...th, textAlign: "right" }}>สุทธิ</th>
                   <th style={{ ...th, textAlign: "center" }}>—</th>
                 </tr>
               </thead>
               <tbody>
                 {lines.map((l, i) => {
-                  const net = num(l.qty) * num(l.price_before_discount) - num(l.discount);
+                  // สุทธิ = จำนวน×ราคา + ค่าบริการ (− ส่วนลดเดิมถ้าเป็นเอกสารเก่า)
+                  const net = num(l.qty) * num(l.price_before_discount) - num(l.discount) + num(l.service_fee);
                   const codes = getCodesForType(l.income_type);
                   // หา selected key เฉพาะเมื่อ income_name ถูกเลือกแล้ว — ไม่ default ไปรายการแรก
                   const selectedKey = l.income_name
@@ -668,20 +765,24 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                           const amtStr = opt?.dataset?.amount || "";
                           const amt = amtStr !== "" ? Number(amtStr) : null;
                           const vatInc = opt?.dataset?.vatinc === "1";
+                          const feeStr = opt?.dataset?.fee || "";
+                          const fee = feeStr !== "" ? Number(feeStr) : null;
                           updateLine(i, {
                             income_code: opt?.dataset?.code || "",
                             income_name: opt?.dataset?.name || "",
                             // โหมด "ทั้งหมด": stamp ประเภทจริงของรายการที่เลือกลง income_type (รายงาน/บันทึกใช้ประเภทจริง)
                             ...(opt?.dataset?.type ? { income_type: opt.dataset.type } : {}),
                             price_before_discount: amt != null && !Number.isNaN(amt) ? amt : (l.price_before_discount || 0),
+                            // ค่าบริการ default ของรายการ (เช่น พรบ. = ราคาเก็บ − เบี้ยจริง) — เปลี่ยนรายการแล้ว reset ตาม default ใหม่
+                            service_fee: fee != null && !Number.isNaN(fee) ? fee : 0,
                             // ค่าบริการรับฝาก: ราคารวม VAT ในตัว — ติดธง + note ลง description ให้ติดไปกับใบเสร็จ
                             vat_included: vatInc,
                             description: vatInc ? "รวม VAT 7%" : (l.description === "รวม VAT 7%" ? "" : l.description),
                           });
                         }} style={{ ...inp, padding: "5px 8px", fontSize: 12, minWidth: 220 }} disabled={!l.income_type}>
-                          <option value="" data-amount="" data-code="" data-name="" data-type="" data-vatinc="">— เลือกชื่อรายได้ —</option>
+                          <option value="" data-amount="" data-code="" data-name="" data-type="" data-vatinc="" data-fee="">— เลือกชื่อรายได้ —</option>
                           {codes.map(c => (
-                            <option key={c._key} value={c._key} data-amount={c.amount ?? ""} data-code={c.code || ""} data-name={c.name || ""} data-type={c.rtype || ""} data-vatinc={c.vatIncluded ? "1" : ""}>{l.income_type === TYPE_ALL && c.rtype ? `${c.name} (${c.rtype.replace("รายได้", "").trim() || c.rtype})` : c.name}</option>
+                            <option key={c._key} value={c._key} data-amount={c.amount ?? ""} data-code={c.code || ""} data-name={c.name || ""} data-type={c.rtype || ""} data-vatinc={c.vatIncluded ? "1" : ""} data-fee={c.fee ?? ""}>{l.income_type === TYPE_ALL && c.rtype ? `${c.name} (${c.rtype.replace("รายได้", "").trim() || c.rtype})` : c.name}</option>
                           ))}
                         </select>
                         {l.income_type === TYPE_PRB && vehicleCC == null && (
@@ -693,7 +794,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                       </td>
                       <td style={td}><input type="number" value={l.qty} onChange={e => updateLine(i, { qty: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right", maxWidth: 70 }} /></td>
                       <td style={td}><input type="number" value={l.price_before_discount} onChange={e => updateLine(i, { price_before_discount: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right" }} /></td>
-                      <td style={td}><input type="number" value={l.discount} onChange={e => updateLine(i, { discount: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right", maxWidth: 80 }} /></td>
+                      <td style={td}><input type="number" value={l.service_fee} onChange={e => updateLine(i, { service_fee: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right", maxWidth: 80 }} title="ค่าบริการ (รวม VAT ในตัว) — ตอนบันทึกแยกเป็นบรรทัดค่าบริการให้อัตโนมัติ" /></td>
                       <td style={{ ...td, textAlign: "right", fontWeight: 700, color: net > 0 ? "#dc2626" : "#9ca3af" }}>{baht(net)}</td>
                       <td style={{ ...td, textAlign: "center" }}><button onClick={() => removeLine(i)} style={{ ...btnSm, background: "#ef4444" }}>✕</button></td>
                     </tr>
@@ -737,6 +838,9 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                 style={{ ...btnPri, opacity: canNext ? 1 : 0.45, cursor: canNext ? "pointer" : "not-allowed" }}>
                 ถัดไป →
               </button>
+            )}
+            {step === 3 && (justSaved || editMode) && (
+              <button onClick={printReceipt} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>🖨️ พิมพ์</button>
             )}
             {step === 3 && (
               <button onClick={handleSave} disabled={saving} style={{ ...btnGreen, opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>

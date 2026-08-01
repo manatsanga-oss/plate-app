@@ -77,6 +77,7 @@ const PAGE_GROUPS = [
     items: [
       { key: "vehicleregistration", label: "🔎 ค้นหาทะเบียนรถ" },
       { key: "searchreceiptwork",   label: "🔎 ค้นหางานทะเบียนรับเรื่อง" },
+      { key: "receiptentry",        label: "📥 รับเรื่องงานทะเบียน (manual)" },
     ],
   },
   {

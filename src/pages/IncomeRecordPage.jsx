@@ -53,15 +53,6 @@ export default function IncomeRecordPage({ currentUser }) {
   const [tfImporting, setTfImporting] = useState(false);
   const [tfBranchFilter, setTfBranchFilter] = useState("");
   const [tfSearch, setTfSearch] = useState("");
-  // Finance transfer import (เงินโอนจากไฟแนนท์ที่ยัง pending → ตัดชำระ income_records)
-  const [ftImportOpen, setFtImportOpen] = useState(false);
-  const [ftList, setFtList] = useState([]);
-  const [ftSelected, setFtSelected] = useState({});
-  const [ftLoading, setFtLoading] = useState(false);
-  const [ftImporting, setFtImporting] = useState(false);
-  // Confirm step — เปิดหลัง user เลือกเงินโอนจาก ftImport popup
-  const [ftConfirmOpen, setFtConfirmOpen] = useState(false);
-  const [ftConfirmTransfers, setFtConfirmTransfers] = useState([]);
   const [incomeCategories, setIncomeCategories] = useState([]); // หมวดจาก master
   const [bankAccounts, setBankAccounts] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -103,6 +94,9 @@ export default function IncomeRecordPage({ currentUser }) {
   // เงื่อนไข: ชื่อผู้จำหน่ายของใบค่าใช้จ่ายต้องตรงกับชื่อลูกค้าของใบรายได้ที่เลือก
   const [expenseDocs, setExpenseDocs] = useState([]);
   const [payCustomerNames, setPayCustomerNames] = useState([]);
+  // เงินโอนไฟแนนท์ที่ยังรอตัดรับชำระ — วิธีรับเงิน "เงินโอนไฟแนนท์" ดึงมาเลือกตัด (แยกตามสังกัด)
+  const [pendingFts, setPendingFts] = useState([]);
+  const [payAffiliations, setPayAffiliations] = useState([]);
 
   // ดึงรายการ invoice_no ที่ถูกใช้แล้วในหมวดนี้ (จาก income_allocations อื่น)
   useEffect(() => {
@@ -179,65 +173,6 @@ export default function IncomeRecordPage({ currentUser }) {
       fetchDocs();
     } catch (e) { alert("❌ Import ล้มเหลว: " + e.message); }
     setTfImporting(false);
-  }
-
-  async function openFtImport() {
-    setFtImportOpen(true);
-    setFtLoading(true); setFtSelected({});
-    try {
-      const res = await fetch(ACCOUNTING_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_finance_transfers", date_from: dateFrom || null, date_to: dateTo || null }),
-      });
-      const data = await res.json();
-      // กรองเฉพาะรายการที่ match_status เป็น pending (รอตัดชำระ)
-      const arr = Array.isArray(data) ? data.filter(r => r && (r.match_status || "pending") === "pending") : [];
-      setFtList(arr);
-    } catch { setFtList([]); }
-    setFtLoading(false);
-  }
-
-  // Step 1: หลังเลือกเงินโอน → ปิด popup เลือก → เปิด popup ยืนยัน
-  function proceedFtConfirm() {
-    const ftIds = Object.keys(ftSelected).filter(k => ftSelected[k]);
-    if (ftIds.length === 0) { alert("เลือกอย่างน้อย 1 รายการ"); return; }
-    if (selectedIds.length === 0) { alert("กรุณาเลือกรายการรายได้ที่ต้องการตัดชำระจากตารางหลักก่อน"); return; }
-    const selectedTransfers = ftList.filter(r => ftSelected[r.ft_id || r.id]);
-    setFtConfirmTransfers(selectedTransfers);
-    setFtImportOpen(false);
-    setFtConfirmOpen(true);
-  }
-
-  // Step 2: ยืนยันแล้ว → ส่งจริง (ตรวจยอดตรงก่อน)
-  async function submitFtImport() {
-    const ftIds = ftConfirmTransfers.map(r => r.ft_id || r.id);
-    if (ftIds.length === 0 || selectedIds.length === 0) return;
-    const incomeTotal = filtered.filter(d => selected[d.income_doc_id])
-      .reduce((s, d) => s + Number(d.net_to_pay || d.total || 0), 0);
-    const ftTotal = ftConfirmTransfers.reduce((s, r) => s + Number(r.amount || 0), 0);
-    if (Math.abs(incomeTotal - ftTotal) > 0.01) {
-      alert(`❌ ยอดไม่ตรงกัน — รายได้ ${incomeTotal.toFixed(2)} ≠ เงินโอน ${ftTotal.toFixed(2)} (ส่วนต่าง ${(incomeTotal - ftTotal).toFixed(2)})`);
-      return;
-    }
-    setFtImporting(true);
-    try {
-      const res = await fetch(ACCOUNTING_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "match_finance_transfers_to_income",
-          ft_ids: ftIds.map(Number),
-          income_doc_ids: selectedIds.map(Number),
-          paid_by: currentUser?.user_id || currentUser?.name || "",
-        }),
-      });
-      const data = await res.json();
-      const r = Array.isArray(data) ? data[0] : data;
-      setMessage(`✅ ตัดชำระจากไฟแนนท์ ${r?.matched ?? ftIds.length} รายการ`);
-      setFtConfirmOpen(false); setFtConfirmTransfers([]);
-      setFtList([]); setFtSelected({}); setSelected({});
-      fetchDocs();
-    } catch (e) { alert("❌ ตัดชำระล้มเหลว: " + e.message); }
-    setFtImporting(false);
   }
 
   // === Allocation (บันทึกรายละเอียดการรับชำระรายได้อื่น ๆ) ===
@@ -918,6 +853,23 @@ export default function IncomeRecordPage({ currentUser }) {
         d && d.expense_doc_id && (d.status || "draft") === "draft" && expenseNet(d) > 0));
     } catch { setExpenseDocs([]); }
   }
+  // ดึงเงินโอนไฟแนนท์ที่ยัง pending (รอตัดรับชำระ) ทั้งหมด — ใช้ในวิธีรับเงิน "เงินโอนไฟแนนท์"
+  async function fetchPendingFts() {
+    try {
+      const res = await fetch(ACCOUNTING_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_finance_transfers", match_status: "pending" }),
+      });
+      const data = await res.json();
+      setPendingFts((Array.isArray(data) ? data : []).filter(r => r && (r.ft_id || r.id)));
+    } catch { setPendingFts([]); }
+  }
+  // สังกัดของรายการโอน — ดูจากชื่อบัญชี/ธนาคารที่รับโอน (bank_accounts ไม่มีคอลัมน์สังกัด)
+  const ftAffiliation = (t) => {
+    const s = [t.account_name, t.bank_name, t.note].filter(Boolean).join(" ");
+    return /สิงห์ชัย/.test(s) ? "สิงห์ชัย" : /เปา/.test(s) ? "ป.เปา" : "";
+  };
+  const ftLabel = (t) => `${t.doc_no || `FT#${t.ft_id || t.id}`} · ${t.finance_company || "-"} · ฿${fmt(t.amount)} · ${fmtDate(t.transfer_date)}${t.bank_name ? ` · ${t.bank_name}` : ""}`;
   function openPayDialog() {
     if (selectedIds.length === 0) { setMessage("❌ เลือกเอกสารก่อน"); return; }
     setEditPayDocNo(null);
@@ -925,9 +877,11 @@ export default function IncomeRecordPage({ currentUser }) {
     setPayForm({ paid_date: todayISO(), payment_note: "" });
     setPayments([{ method: "โอน", amount: Number(selectedNet) || 0, from_bank_account_id: "", credit_note_no: "" }]);
     setPayCustomerNames([...new Set(selectedRows.map(d => normName(d.customer_name)).filter(Boolean))]);
+    setPayAffiliations([...new Set(selectedRows.map(d => String(d.affiliation || "").trim()).filter(Boolean))]);
     setPayDialog(true);
     fetchAvailableCreditNotes();
     fetchExpenseDocs();
+    fetchPendingFts();
   }
   function openEditPayDialog(g) {
     if (!g.paid_doc_no) return;
@@ -953,9 +907,11 @@ export default function IncomeRecordPage({ currentUser }) {
       setPayments([{ method, amount: total, from_bank_account_id: g.from_bank_account_id || "", credit_note_no: "" }]);
     }
     setPayCustomerNames([...new Set((g.items || []).map(d => normName(d.customer_name)).filter(Boolean))]);
+    setPayAffiliations([...new Set((g.items || []).map(d => String(d.affiliation || "").trim()).filter(Boolean))]);
     setPayDialog(true);
     fetchAvailableCreditNotes();
     fetchExpenseDocs();
+    fetchPendingFts();
   }
   function updatePayment(idx, patch) {
     setPayments(prev => prev.map((p, i) => i === idx ? { ...p, ...patch } : p));
@@ -992,6 +948,15 @@ export default function IncomeRecordPage({ currentUser }) {
           setMessage(`❌ แถวที่ ${i + 1} (ค่าใช้จ่ายค้างชำระ): ยอดต้องเท่ายอดใบ ${p.expense_doc_no} เต็มใบ (${fmt(expenseNet(doc))})`); return;
         }
       }
+      // โหมดแก้ไข: รายการโอนถูก mark ตัดรับไปแล้วตอนสร้าง — ไม่ต้องเลือกซ้ำ
+      if (p.method === "เงินโอนไฟแนนท์" && !editPayDocNo) {
+        if (!p.ft_id) { setMessage(`❌ แถวที่ ${i + 1} (เงินโอนไฟแนนท์): เลือกรายการเงินโอนที่จะตัดรับ`); return; }
+        const t = pendingFts.find(x => String(x.ft_id || x.id) === String(p.ft_id));
+        // ตัดรับเต็มรายการโอนเท่านั้น (ยอดต้องเท่ายอดโอน)
+        if (t && Math.abs(Number(p.amount) - Number(t.amount)) > 0.005) {
+          setMessage(`❌ แถวที่ ${i + 1} (เงินโอนไฟแนนท์): ยอดต้องเท่ายอดโอนเต็มรายการ (${fmt(t.amount)})`); return;
+        }
+      }
     }
     setSavingPay(true);
     try {
@@ -999,7 +964,10 @@ export default function IncomeRecordPage({ currentUser }) {
       // หักกลบค่าใช้จ่าย — ต่อเลขใบค่าใช้จ่ายเข้าหมายเหตุ (ไว้ trace)
       const offsetLines = payments.filter(p => p.method === "หักกลบค่าใช้จ่าย" && p.expense_doc_id);
       const offsetNotes = offsetLines.map(p => `หักกลบค่าใช้จ่าย ${p.expense_doc_no || p.expense_doc_id}`);
-      const noteWithOffset = [payForm.payment_note, ...offsetNotes].filter(Boolean).join(" · ");
+      // เงินโอนไฟแนนท์ — ต่อเลขรายการโอนเข้าหมายเหตุ (ไว้ trace)
+      const ftLines = payments.filter(p => p.method === "เงินโอนไฟแนนท์" && p.ft_id);
+      const ftNotes = ftLines.map(p => `ตัดรับเงินโอนไฟแนนท์ ${p.ft_doc_no || `FT#${p.ft_id}`}`);
+      const noteWithOffset = [payForm.payment_note, ...offsetNotes, ...ftNotes].filter(Boolean).join(" · ");
       const body = {
         action: "income_record",
         op: editPayDocNo ? "edit_payment" : "save_payment",
@@ -1052,6 +1020,26 @@ export default function IncomeRecordPage({ currentUser }) {
           }
         }
       }
+      // mark เงินโอนไฟแนนท์เป็น "ตัดรับชำระแล้ว" อัตโนมัติ (เฉพาะตอนสร้างใหม่ กัน mark ซ้ำตอนแก้ไข)
+      if (!editPayDocNo && ftLines.length > 0) {
+        for (const p of ftLines) {
+          try {
+            await fetch(ACCOUNTING_URL, {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                action: "mark_finance_transfer_matched",
+                ft_id: Number(p.ft_id),
+                match_status: "matched",
+                matched_by: currentUser?.username || currentUser?.name || "system",
+                matched_doc_no: ircNo || null,
+              }),
+            });
+            expMsg += ` · ตัดรับเงินโอน ${p.ft_doc_no || `FT#${p.ft_id}`} แล้ว`;
+          } catch {
+            expMsg += ` · ⚠️ ตัดรับเงินโอน ${p.ft_doc_no || `FT#${p.ft_id}`} ไม่สำเร็จ — ไป mark ที่เมนูรับเงินโอนไฟแนนท์เอง`;
+          }
+        }
+      }
       setMessage(editPayDocNo ? "✅ แก้ไขใบจ่ายเรียบร้อย" : `✅ บันทึกรับเงินเรียบร้อย ${ircNo}${expMsg}`);
       setPayDialog(false);
       setEditPayDocNo(null);
@@ -1061,7 +1049,23 @@ export default function IncomeRecordPage({ currentUser }) {
     setSavingPay(false);
   }
   async function cancelPaymentGroup(g) {
-    if (!g.paid_doc_no) return;
+    // ใบผิดปกติ: status=paid แต่ไม่มีเลขใบรับเงิน (เกิดจากตัดชำระซ้ำ ฯลฯ) — ยกเลิกด้วย op ซ่อมข้อมูล keyed by income_doc_id
+    if (!g.paid_doc_no) {
+      const ids = (g.items || []).map(d => Number(d.income_doc_id)).filter(Boolean);
+      if (!ids.length) return;
+      if (!window.confirm(`ใบนี้ไม่มีเลขใบรับเงิน (ข้อมูลผิดปกติ)\nยกเลิกสถานะรับเงินของเอกสาร ${ids.length} ใบ ให้กลับเป็น "ร่าง"?`)) return;
+      try {
+        const res = await fetch(ACC_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "income_record", op: "force_unpay", income_doc_ids: ids }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const n = Number(data?.cancelled ?? data?.[0]?.cancelled ?? 0);
+        if (n > 0) { setMessage(`✅ ยกเลิกเรียบร้อย ${n} ใบ`); fetchDocs(); }
+        else setMessage("❌ ยกเลิกไม่สำเร็จ — ตรวจสอบว่า re-import Finance API (op force_unpay) แล้ว");
+      } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+      return;
+    }
     if (!window.confirm(`ยกเลิกใบรับเงิน ${g.paid_doc_no}?\nเอกสาร ${g.items.length} ใบจะกลับเป็น "ร่าง"`)) return;
     try {
       await fetch(ACC_URL, {
@@ -1141,9 +1145,7 @@ export default function IncomeRecordPage({ currentUser }) {
             <span>เลือก: <strong>{selectedIds.length}</strong> / {draftDocs.length} เอกสาร</span>
             <span style={{ color: "#dc2626" }}>ยอดรวม: <strong>{fmt(selectedNet)}</strong> บาท</span>
             <div style={{ flex: 1 }} />
-            <button onClick={openFtImport} style={btn("#7c3aed")}>
-              💰 บันทึกรับชำระจากไฟแนนท์
-            </button>
+            {/* ปุ่ม "บันทึกรับชำระจากไฟแนนท์" (flow เก่า ประทับ FT- ไม่ออกใบรับเงิน) ถูกถอดออก — ใช้วิธีรับเงิน "เงินโอนไฟแนนท์ (รอตัดรับ)" ใน modal บันทึกรับเงินแทน */}
             <button onClick={openPayDialog} disabled={selectedIds.length === 0}
               style={{ ...btn(selectedIds.length === 0 ? "#9ca3af" : "#059669"), cursor: selectedIds.length === 0 ? "not-allowed" : "pointer" }}>
               💵 บันทึกรับเงิน
@@ -1211,6 +1213,11 @@ export default function IncomeRecordPage({ currentUser }) {
               <div key={g.paid_doc_no} style={{ marginBottom: 12, background: "#ecfdf5", border: "1px solid #6ee7b7", borderRadius: 10, padding: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                   <strong style={{ fontFamily: "monospace", color: "#065f46", fontSize: 15 }}>{g.paid_doc_no || "-"}</strong>
+                  {!g.paid_doc_no && (
+                    <span style={{ marginLeft: 8, padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 700, background: "#fef3c7", color: "#92400e" }}>
+                      ⚠️ ไม่มีเลขใบรับเงิน — กดยกเลิกเพื่อคืนสถานะเป็นร่าง
+                    </span>
+                  )}
                   <span style={{ fontSize: 12 }}>📅 {fmtDate(g.paid_at)}</span>
                   <span style={{ fontSize: 12 }}>💳 {g.payment_method || "-"}</span>
                   {bank && <span style={{ fontSize: 12 }}>🏦 {bank.bank_name} · {bank.account_no}</span>}
@@ -1220,7 +1227,7 @@ export default function IncomeRecordPage({ currentUser }) {
                       <span style={{ fontWeight: 400, fontSize: 11, color: "#6b7280" }}> (ยอดใบรวม {fmt(g.net)} — รับบางส่วนมาก่อนแล้ว)</span>
                     )}
                   </span>
-                  <button onClick={() => openEditPayDialog(g)} style={{ ...btnSm, background: "#0369a1" }}>✏️ แก้ไข</button>
+                  {g.paid_doc_no && <button onClick={() => openEditPayDialog(g)} style={{ ...btnSm, background: "#0369a1" }}>✏️ แก้ไข</button>}
                   <button onClick={() => cancelPaymentGroup(g)} style={{ ...btnSm, background: "#dc2626" }}>✕ ยกเลิก</button>
                 </div>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginTop: 8, background: "#fff", borderRadius: 6, overflow: "hidden" }}>
@@ -1373,11 +1380,26 @@ export default function IncomeRecordPage({ currentUser }) {
                         const doc = expenseDocs.find(d => String(d.expense_doc_id) === val);
                         updatePayment(idx, { expense_doc_id: val, expense_doc_no: doc?.expense_doc_no || "", amount: doc ? expenseNet(doc) : 0 });
                       };
-                      const lockAmount = p.method === "ใบลดหนี้" || p.method === "หักกลบค่าใช้จ่าย";
+                      // เงินโอนไฟแนนท์ pending — exclude ที่ถูกเลือกในแถวอื่น + แยกกลุ่มตามสังกัด (ถ้าใบรายได้สังกัดเดียว โชว์เฉพาะสังกัดนั้น+ไม่ระบุ)
+                      const usedFtInOtherRows = payments.filter((_, i) => i !== idx).map(x => String(x.ft_id || "")).filter(Boolean);
+                      const ftCandidates = pendingFts.filter(t => !usedFtInOtherRows.includes(String(t.ft_id || t.id)));
+                      const singleAff = payAffiliations.length === 1 ? payAffiliations[0] : "";
+                      const ftGroups = ["ป.เปา", "สิงห์ชัย", ""].map(aff => ({
+                        aff,
+                        list: ftCandidates.filter(t => ftAffiliation(t) === aff),
+                      })).filter(g => g.list.length && (!singleAff || g.aff === singleAff || g.aff === ""));
+                      const onFtSelect = (val) => {
+                        const t = pendingFts.find(x => String(x.ft_id || x.id) === val);
+                        updatePayment(idx, { ft_id: val, ft_doc_no: t?.doc_no || "", amount: t ? Number(t.amount) || 0 : 0 });
+                        // วันที่รับเงิน = วันที่โอนของรายการที่เลือก
+                        const td = String(t?.transfer_date || "").slice(0, 10);
+                        if (/^\d{4}-\d{2}-\d{2}$/.test(td)) setPayForm(f => ({ ...f, paid_date: td }));
+                      };
+                      const lockAmount = p.method === "ใบลดหนี้" || p.method === "หักกลบค่าใช้จ่าย" || p.method === "เงินโอนไฟแนนท์";
                       return (
                       <div key={idx} style={{ display: "grid", gridTemplateColumns: "110px 110px minmax(0, 1fr) 30px", gap: 8, alignItems: "center", minWidth: 0 }}>
                         <select value={p.method}
-                          onChange={e => updatePayment(idx, { method: e.target.value, from_bank_account_id: e.target.value === "โอน" ? p.from_bank_account_id : "", credit_note_no: e.target.value === "ใบลดหนี้" ? p.credit_note_no : "", expense_doc_id: e.target.value === "หักกลบค่าใช้จ่าย" ? p.expense_doc_id : "", expense_doc_no: e.target.value === "หักกลบค่าใช้จ่าย" ? p.expense_doc_no : "" })}
+                          onChange={e => updatePayment(idx, { method: e.target.value, from_bank_account_id: e.target.value === "โอน" ? p.from_bank_account_id : "", credit_note_no: e.target.value === "ใบลดหนี้" ? p.credit_note_no : "", expense_doc_id: e.target.value === "หักกลบค่าใช้จ่าย" ? p.expense_doc_id : "", expense_doc_no: e.target.value === "หักกลบค่าใช้จ่าย" ? p.expense_doc_no : "", ft_id: e.target.value === "เงินโอนไฟแนนท์" ? p.ft_id : "", ft_doc_no: e.target.value === "เงินโอนไฟแนนท์" ? p.ft_doc_no : "" })}
                           style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
                           <option value="โอน">เงินโอน</option>
                           <option value="เงินสด">เงินสด</option>
@@ -1385,7 +1407,8 @@ export default function IncomeRecordPage({ currentUser }) {
                           <option value="ใบลดหนี้">ใบลดหนี้</option>
                           <option value="หักกลบค่าใช้จ่าย">ค่าใช้จ่ายค้างชำระ (หักกลบ)</option>
                           <option value="ค่าธรรมเนียมรับโอน">ค่าธรรมเนียมรับโอนเงิน</option>
-                          {p.method && !["โอน", "เงินสด", "เช็ค", "ใบลดหนี้", "หักกลบค่าใช้จ่าย", "ค่าธรรมเนียมรับโอน"].includes(p.method) && (
+                          <option value="เงินโอนไฟแนนท์">เงินโอนไฟแนนท์ (รอตัดรับ)</option>
+                          {p.method && !["โอน", "เงินสด", "เช็ค", "ใบลดหนี้", "หักกลบค่าใช้จ่าย", "ค่าธรรมเนียมรับโอน", "เงินโอนไฟแนนท์"].includes(p.method) && (
                             <option value={p.method}>{p.method}</option>
                           )}
                         </select>
@@ -1393,7 +1416,7 @@ export default function IncomeRecordPage({ currentUser }) {
                           onChange={e => updatePayment(idx, { amount: e.target.value })}
                           placeholder="0.00"
                           readOnly={lockAmount}
-                          title={p.method === "ใบลดหนี้" ? "จำนวนเงินจะถูกตั้งจากใบลดหนี้ที่เลือก" : p.method === "หักกลบค่าใช้จ่าย" ? "จำนวนเงิน = ยอดใบค่าใช้จ่ายเต็มใบ (ฝั่งค่าใช้จ่ายไม่มีจ่ายบางส่วน)" : ""}
+                          title={p.method === "ใบลดหนี้" ? "จำนวนเงินจะถูกตั้งจากใบลดหนี้ที่เลือก" : p.method === "หักกลบค่าใช้จ่าย" ? "จำนวนเงิน = ยอดใบค่าใช้จ่ายเต็มใบ (ฝั่งค่าใช้จ่ายไม่มีจ่ายบางส่วน)" : p.method === "เงินโอนไฟแนนท์" ? "จำนวนเงิน = ยอดเงินโอนเต็มรายการที่เลือก" : ""}
                           style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "monospace", fontSize: 13, textAlign: "right", background: lockAmount ? "#f3f4f6" : "#fff" }} />
                         {p.method === "โอน" ? (
                           <select value={p.from_bank_account_id || ""}
@@ -1431,6 +1454,28 @@ export default function IncomeRecordPage({ currentUser }) {
                                 title={`${d.expense_doc_no} | ${d.vendor_name || "-"} | ฿${fmt(expenseNet(d))} | ${fmtDate(d.doc_date)}`}>
                                 {d.expense_doc_no} · {d.vendor_name || "-"} · ฿{fmt(expenseNet(d))} · {fmtDate(d.doc_date)}
                               </option>
+                            ))}
+                          </select>
+                          )
+                        ) : p.method === "เงินโอนไฟแนนท์" ? (
+                          editPayDocNo ? (
+                            <div style={{ padding: "7px 10px", fontSize: 12, color: "#6d28d9", background: "#f5f3ff", border: "1px dashed #a78bfa", borderRadius: 6 }}>
+                              🔗 ตัดรับเงินโอนไฟแนนท์ไปแล้วตอนสร้างใบรับเงิน — แก้ไขไม่กระทบสถานะรายการโอน
+                            </div>
+                          ) : (
+                          <select value={p.ft_id || ""}
+                            onChange={e => onFtSelect(e.target.value)}
+                            style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #a78bfa", fontFamily: "Tahoma", fontSize: 13, background: "#f5f3ff", minWidth: 0 }}>
+                            <option value="">{ftGroups.length === 0 ? "ไม่มีเงินโอนไฟแนนท์ที่รอตัดรับชำระ" : "-- เลือกเงินโอนไฟแนนท์ที่จะตัดรับ --"}</option>
+                            {ftGroups.map(g => (
+                              <optgroup key={g.aff || "none"} label={g.aff ? `สังกัด ${g.aff}` : "ไม่ระบุสังกัด"}>
+                                {g.list.map(t => (
+                                  <option key={t.ft_id || t.id} value={t.ft_id || t.id}
+                                    title={`${ftLabel(t)}${t.account_no ? ` · ${t.account_no}` : ""}${t.note ? ` · ${t.note}` : ""}`}>
+                                    {ftLabel(t)}
+                                  </option>
+                                ))}
+                              </optgroup>
                             ))}
                           </select>
                           )
@@ -1579,157 +1624,6 @@ export default function IncomeRecordPage({ currentUser }) {
           </div>
         </div>
       )}
-
-      {/* Finance Transfer Import — รับชำระจากไฟแนนท์ (status = pending) */}
-      {ftImportOpen && (
-        <div onClick={() => !ftImporting && setFtImportOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 20, width: "90%", maxWidth: 900, maxHeight: "90vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <h3 style={{ margin: 0, color: "#7c3aed" }}>💰 บันทึกรับชำระจากไฟแนนท์ (รอตัดชำระ)</h3>
-              <button onClick={() => setFtImportOpen(false)} disabled={ftImporting} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
-            </div>
-
-            <div style={{ padding: 10, background: "#f3e8ff", border: "1px solid #c4b5fd", borderRadius: 8, marginBottom: 10, fontSize: 12, color: "#5b21b6" }}>
-              💡 เลือกรายการรายได้ในตารางหลักไว้ก่อน → เปิด popup นี้ → เลือกเงินโอนที่จะใช้ตัดชำระ → กดยืนยัน
-            </div>
-
-            {ftLoading ? (
-              <div style={{ padding: 40, textAlign: "center", color: "#6b7280" }}>กำลังโหลด...</div>
-            ) : ftList.length === 0 ? (
-              <div style={{ padding: 40, textAlign: "center", color: "#9ca3af" }}>ไม่มีเงินโอนที่รอตัดชำระ</div>
-            ) : (
-              <>
-                <div style={{ marginBottom: 8, fontSize: 13 }}>
-                  <label style={{ cursor: "pointer", fontWeight: 600 }}>
-                    <input type="checkbox"
-                      checked={ftList.length > 0 && ftList.every(r => ftSelected[r.ft_id || r.id])}
-                      onChange={e => {
-                        const all = {};
-                        if (e.target.checked) ftList.forEach(r => { all[r.ft_id || r.id] = true; });
-                        setFtSelected(all);
-                      }} /> เลือกทั้งหมด ({ftList.length} รายการ)
-                  </label>
-                  <span style={{ marginLeft: 12, color: "#6b7280" }}>
-                    เลือกแล้ว: <strong>{Object.values(ftSelected).filter(Boolean).length}</strong>
-                    {" · ยอดรวม: "}
-                    <strong style={{ color: "#15803d" }}>
-                      {fmt(ftList.filter(r => ftSelected[r.ft_id || r.id]).reduce((s, r) => s + Number(r.amount || 0), 0))}
-                    </strong>
-                  </span>
-                </div>
-                <div style={{ overflowX: "auto", maxHeight: 500, overflowY: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
-                    <thead style={{ background: "#f3e8ff", position: "sticky", top: 0 }}>
-                      <tr>
-                        <th style={{ ...th, width: 30 }}></th>
-                        <th style={th}>วันที่โอน</th>
-                        <th style={th}>ไฟแนนท์</th>
-                        <th style={th}>ธนาคารที่รับโอน</th>
-                        <th style={{ ...th, textAlign: "right" }}>จำนวนเงิน</th>
-                        <th style={th}>หมายเหตุ</th>
-                        <th style={th}>ผู้บันทึก</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ftList.map((r, i) => {
-                        const id = r.ft_id || r.id;
-                        return (
-                        <tr key={id} style={{ borderTop: "1px solid #f3f4f6", background: ftSelected[id] ? "#faf5ff" : (i % 2 === 0 ? "#fff" : "#f9fafb") }}>
-                          <td style={{ ...td, textAlign: "center" }}>
-                            <input type="checkbox" checked={!!ftSelected[id]} onChange={e => setFtSelected(prev => ({ ...prev, [id]: e.target.checked }))} />
-                          </td>
-                          <td style={td}>{fmtDate(r.transfer_date)}</td>
-                          <td style={{ ...td, fontWeight: 600 }}>{r.finance_company || "-"}</td>
-                          <td style={td}>
-                            {r.bank_name && <strong>{r.bank_name}</strong>}
-                            {r.account_no && <div style={{ fontFamily: "monospace", fontSize: 11, color: "#6b7280" }}>{r.account_no}</div>}
-                          </td>
-                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d", fontWeight: 700 }}>{fmt(r.amount)}</td>
-                          <td style={{ ...td, fontSize: 11, color: "#6b7280" }}>{r.note || "-"}</td>
-                          <td style={{ ...td, fontSize: 11 }}>{r.created_by || "-"}</td>
-                        </tr>
-                      );})}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-
-            <div style={{ display: "flex", gap: 8, marginTop: 16, justifyContent: "flex-end" }}>
-              <button onClick={() => setFtImportOpen(false)} disabled={ftImporting} style={btn("#6b7280")}>ยกเลิก</button>
-              <button onClick={proceedFtConfirm} disabled={ftImporting || Object.values(ftSelected).filter(Boolean).length === 0} style={btn("#7c3aed")}>
-                {`➡️ ถัดไป (${Object.values(ftSelected).filter(Boolean).length} รายการ)`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Confirm popup — ยืนยันก่อนตัดชำระ (ยอดต้องตรง) */}
-      {ftConfirmOpen && (() => {
-        const incomeSelected = filtered.filter(d => selected[d.income_doc_id]);
-        const incomeTotal = incomeSelected.reduce((s, d) => s + Number(d.net_to_pay || d.total || 0), 0);
-        const ftTotal = ftConfirmTransfers.reduce((s, r) => s + Number(r.amount || 0), 0);
-        const diff = incomeTotal - ftTotal;
-        const matched = Math.abs(diff) <= 0.01;
-        return (
-        <div onClick={() => !ftImporting && setFtConfirmOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, padding: 20, width: "92%", maxWidth: 1000, maxHeight: "92vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <h3 style={{ margin: 0, color: "#7c3aed" }}>✅ ยืนยันการตัดชำระจากไฟแนนท์</h3>
-              <button onClick={() => setFtConfirmOpen(false)} disabled={ftImporting} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: "#6b7280" }}>×</button>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-              <div style={{ padding: 10, background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 8 }}>
-                <div style={{ fontWeight: 700, color: "#065f46", marginBottom: 6 }}>📥 รายได้ที่ตัด ({incomeSelected.length})</div>
-                <div style={{ maxHeight: 200, overflowY: "auto" }}>
-                  {incomeSelected.map(d => (
-                    <div key={d.income_doc_id} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid #d1fae5", display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontFamily: "monospace" }}>{d.income_doc_no}</span>
-                      <span style={{ fontWeight: 600, color: "#065f46" }}>{fmt(d.net_to_pay || d.total)}</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: 8, paddingTop: 6, borderTop: "2px solid #065f46", display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#065f46" }}>
-                  <span>รวม</span><span>{fmt(incomeTotal)}</span>
-                </div>
-              </div>
-              <div style={{ padding: 10, background: "#f3e8ff", border: "1px solid #c4b5fd", borderRadius: 8 }}>
-                <div style={{ fontWeight: 700, color: "#5b21b6", marginBottom: 6 }}>💰 เงินโอนที่ใช้ตัด ({ftConfirmTransfers.length})</div>
-                <div style={{ maxHeight: 200, overflowY: "auto" }}>
-                  {ftConfirmTransfers.map(r => (
-                    <div key={r.ft_id || r.id} style={{ fontSize: 12, padding: "4px 0", borderBottom: "1px solid #ddd6fe", display: "flex", justifyContent: "space-between" }}>
-                      <span>{fmtDate(r.transfer_date)} · {r.finance_company}</span>
-                      <span style={{ fontWeight: 600, color: "#5b21b6" }}>{fmt(r.amount)}</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ marginTop: 8, paddingTop: 6, borderTop: "2px solid #5b21b6", display: "flex", justifyContent: "space-between", fontWeight: 700, color: "#5b21b6" }}>
-                  <span>รวม</span><span>{fmt(ftTotal)}</span>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ padding: 14, background: matched ? "#dcfce7" : "#fee2e2", border: `2px solid ${matched ? "#10b981" : "#dc2626"}`, borderRadius: 8, marginBottom: 14, textAlign: "center", fontSize: 16, fontWeight: 700, color: matched ? "#065f46" : "#991b1b" }}>
-              {matched ? (
-                <>✅ ยอดตรงกัน {fmt(incomeTotal)}</>
-              ) : (
-                <>⚠ ยอดไม่ตรงกัน — ส่วนต่าง <strong>{fmt(diff)}</strong> บาท (ไม่สามารถบันทึกได้)</>
-              )}
-            </div>
-
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button onClick={() => { setFtConfirmOpen(false); setFtImportOpen(true); }} disabled={ftImporting} style={btn("#6b7280")}>← ย้อนกลับ</button>
-              <button onClick={submitFtImport} disabled={ftImporting || !matched}
-                style={{ ...btn(matched ? "#7c3aed" : "#9ca3af"), cursor: (ftImporting || !matched) ? "not-allowed" : "pointer" }}>
-                {ftImporting ? "⏳ กำลังบันทึก..." : "💾 บันทึกตัดชำระ"}
-              </button>
-            </div>
-          </div>
-        </div>
-        );
-      })()}
 
       {/* Allocation popup — แตกย่อยรายได้ตาม moto_sales */}
       {allocOpen && allocDoc && (

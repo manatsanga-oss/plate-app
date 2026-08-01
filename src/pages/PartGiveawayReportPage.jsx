@@ -3,6 +3,7 @@ import React, { useState, useEffect, useMemo } from "react";
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-giveaway-report";
 const STOCK_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api";
 const OVERRIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-giveaway-override";
+const PRINT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-receipt-print-api";
 const STOCK_CODES = ["P-0111-1", "P-003"]; // รหัสของแถมหลักที่ตามสต๊อกคงเหลือ
 
 function fmt(v, d = 2) { const n = Number(v) || 0; return n.toLocaleString("th-TH", { minimumFractionDigits: d, maximumFractionDigits: d }); }
@@ -34,6 +35,7 @@ export default function PartGiveawayReportPage({ currentUser } = {}) {
   const [showGap, setShowGap] = useState(false);
   const [showWholesale, setShowWholesale] = useState(false);
   const [stock, setStock] = useState([]);
+  const [prints, setPrints] = useState([]);   // ประวัติพิมพ์ใบเซ็นรับของแถมเกิน 45 วัน (giveaway_receipt_prints)
   const [editKey, setEditKey] = useState(null);   // sale_doc_no|part_code ที่กำลังแก้ไข
   const [editInvoice, setEditInvoice] = useState("");
   const [savingOvr, setSavingOvr] = useState(false);
@@ -73,6 +75,30 @@ export default function PartGiveawayReportPage({ currentUser } = {}) {
       } catch { setStock([]); }
     })();
   }, []);
+
+  // ดึงประวัติพิมพ์ใบเซ็นรับของแถม -> จับคู่เลขใบขายรถในรายงาน
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(PRINT_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_prints" }),
+        });
+        const data = await res.json();
+        setPrints(Array.isArray(data) ? data : []);
+      } catch { setPrints([]); }
+    })();
+  }, []);
+
+  // map เลขใบขายรถ -> ใบเซ็นรับล่าสุด (prints เรียง created_at DESC อยู่แล้ว ตัวแรกคือล่าสุด)
+  const printByInvoice = useMemo(() => {
+    const m = new Map();
+    for (const p of prints) {
+      const inv = String(p.invoice_no || "").trim();
+      if (inv && !m.has(inv)) m.set(inv, p);
+    }
+    return m;
+  }, [prints]);
 
   async function load() {
     setLoading(true);
@@ -367,7 +393,10 @@ export default function PartGiveawayReportPage({ currentUser } = {}) {
           <div onClick={e => e.stopPropagation()}
             style={{ background: "#fff", borderRadius: 12, width: "min(960px, 96vw)", maxHeight: "85vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 10px 40px rgba(0,0,0,0.3)" }}>
             <div style={{ padding: "12px 16px", background: "#9333ea", color: "#fff", fontWeight: 700, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span>📆 วันที่แถม–วันที่ขายรถ ต่างกันเกิน {GAP_DAYS} วัน — {gapRows.length} รายการ</span>
+              <span>
+                📆 วันที่แถม–วันที่ขายรถ ต่างกันเกิน {GAP_DAYS} วัน — {gapRows.length} รายการ
+                {" "}(เซ็นรับแล้ว {gapRows.filter(r => printByInvoice.has(String(r.sale_invoice_no || "").trim())).length})
+              </span>
               <button onClick={() => setShowGap(false)}
                 style={{ background: "rgba(255,255,255,0.2)", color: "#fff", border: "none", borderRadius: 6, width: 28, height: 28, fontSize: 16, cursor: "pointer", fontWeight: 700 }}>✕</button>
             </div>
@@ -382,22 +411,36 @@ export default function PartGiveawayReportPage({ currentUser } = {}) {
                     <th style={th}>เลขใบขาย</th>
                     <th style={th}>ชื่ออะไหล่</th>
                     <th style={th}>ลูกค้า</th>
+                    <th style={th}>ใบเซ็นรับของแถม</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {gapRows.map((r, i) => (
-                    <tr key={r.id ?? i} style={{ borderTop: "1px solid #f3f4f6" }}>
-                      <td style={td}>{i + 1}</td>
-                      <td style={td}>{fmtDate(r.sale_date)}</td>
-                      <td style={td}>{fmtDate(r.sale_sale_date)}</td>
-                      <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#9333ea" }}>
-                        {r._gap > 0 ? "+" : ""}{fmtInt(r._gap)}
-                      </td>
-                      <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.sale_invoice_no || "-"}</td>
-                      <td style={td}>{(r.part_name || "-").slice(0, 40)}</td>
-                      <td style={{ ...td, fontSize: 11 }}>{r.sale_customer_name || r.gv_customer_name || "-"}</td>
-                    </tr>
-                  ))}
+                  {gapRows.map((r, i) => {
+                    const p = printByInvoice.get(String(r.sale_invoice_no || "").trim());
+                    return (
+                      <tr key={r.id ?? i} style={{ borderTop: "1px solid #f3f4f6" }}>
+                        <td style={td}>{i + 1}</td>
+                        <td style={td}>{fmtDate(r.sale_date)}</td>
+                        <td style={td}>{fmtDate(r.sale_sale_date)}</td>
+                        <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#9333ea" }}>
+                          {r._gap > 0 ? "+" : ""}{fmtInt(r._gap)}
+                        </td>
+                        <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.sale_invoice_no || "-"}</td>
+                        <td style={td}>{(r.part_name || "-").slice(0, 40)}</td>
+                        <td style={{ ...td, fontSize: 11 }}>{r.sale_customer_name || r.gv_customer_name || "-"}</td>
+                        <td style={{ ...td, whiteSpace: "nowrap" }}>
+                          {p ? (
+                            <span style={{ color: "#059669", fontWeight: 700 }}>
+                              ✅ <span style={{ fontFamily: "monospace" }}>{p.doc_no}</span>
+                              <span style={{ fontWeight: 400, color: "#6b7280", fontSize: 11 }}> · {fmtDate(p.created_at)}</span>
+                            </span>
+                          ) : (
+                            <span style={{ color: "#b91c1c", fontSize: 11 }}>ยังไม่พิมพ์</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
