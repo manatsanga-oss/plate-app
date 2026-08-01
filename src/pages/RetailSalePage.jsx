@@ -548,7 +548,16 @@ export default function RetailSalePage({ currentUser }) {
       const name = String(e.expense_name || "").toLowerCase().replace(/\s+/g, "");
       if (name.includes("ค่าคอมพิเศษ") || name.includes("commission") || name.includes("คอมพิเศษ")) return false;
       return true;
-    });
+    }).filter((() => {
+      // กันโปรตัวเดียวกันเข้าเงื่อนไขหลายระดับพร้อมกัน (เช่น 3PLUS ตั้งไว้ทั้งระดับรุ่นและระดับแบบ) — ชื่อ+ยอดเดียวกันนับครั้งเดียว
+      const seen = new Set();
+      return (e) => {
+        const k = String(e.expense_name || "").replace(/\s+/g, "") + "|" + (Number(e.amount) || 0);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      };
+    })());
   }, [selectedTypeId, motoTypes, saleExpenses, selectedSeriesCC, form.finance_company_code, form.customer_province, form.finance_type, form.plate_province, form.customer_name, financeCompanies, bookingDateISO, form.sale_date]); // eslint-disable-line react-hooks/exhaustive-deps
   // auto-set form.discount จาก "เงินดาวน์ออกแทน" — ถ้ามีของแถมประเภทนี้เข้าเงื่อนไข + ติ๊กไว้
   useEffect(() => {

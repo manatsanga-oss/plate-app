@@ -761,7 +761,16 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     }).filter((e) => {
       const name = String(e.expense_name || "").toLowerCase().replace(/\s+/g, "");
       return !(name.includes("ค่าคอมพิเศษ") || name.includes("commission") || name.includes("คอมพิเศษ"));
-    });
+    }).filter((() => {
+      // กันโปรตัวเดียวกันเข้าเงื่อนไขหลายระดับพร้อมกัน (เช่น 3PLUS ตั้งไว้ทั้งระดับรุ่นและระดับแบบ) — ชื่อ+ยอดเดียวกันนับครั้งเดียว
+      const seen = new Set();
+      return (e) => {
+        const k = String(e.expense_name || "").replace(/\s+/g, "") + "|" + (Number(e.amount) || 0);
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      };
+    })());
   }, [masterRow, saleType, financeCo, saleExpenses, selSeries, cust.customer_name, cust.customer_province, financeCos, bookingDateISO]);
 
   // default: ติ๊กรายการที่เข้าเงื่อนไขไว้ก่อน (รายการใหม่ → ติ๊กอัตโนมัติ, ที่ผู้ใช้เอาออกเองคงไว้)
