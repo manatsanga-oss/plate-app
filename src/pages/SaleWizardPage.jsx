@@ -1084,14 +1084,15 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   }
 
   // ราคาประกาศ: กลุ่มสาขา (ป.เปา/สิงห์ชัย) ตาม user ถ้าไม่มีก็อิงยี่ห้อ
-  // กลุ่มดูจากตาราง branch_price_groups ณ วันนี้ (ตั้งค่าได้ในหน้าบันทึกราคาขาย แท็บ "ร้านที่ใช้ราคา")
+  // กลุ่มดูจากตาราง branch_price_groups (ตั้งค่าได้ในหน้าบันทึกราคาขาย แท็บ "ร้านที่ใช้ราคา")
+  // ลูกค้าจอง → ใช้กลุ่ม ณ วันจอง (สาขาที่เพิ่งสลับกลุ่มหลังวันจอง ต้องคิดราคากลุ่มเดิมของวันที่ลูกค้ามัดจำ)
   const [pbgRows, setPbgRows] = useState([]);
   useEffect(() => { fetchPriceBranchGroups().then(setPbgRows); }, []);
   const branchGroup = useMemo(() => {
     const bc = text(currentUser?.branch_code || currentUser?.branch).slice(0, 5);
-    if (bc) return priceGroupOf(bc, pbgRows);
+    if (bc) return priceGroupOf(bc, pbgRows, bookingDateISO || undefined);
     return selBrand && brandParam(selBrand) === "HONDA" ? "ป.เปา" : "สิงห์ชัย";
-  }, [currentUser, selBrand, pbgRows]);
+  }, [currentUser, selBrand, pbgRows, bookingDateISO]);
 
   function announcedPrice(wantSaleType) {
     const masterRow = findMasterRow(selUnit, selColor);

@@ -356,11 +356,12 @@ export default function RetailSalePage({ currentUser }) {
   }, [bookingDateISO]);
 
   // หา "ราคาประกาศ" ตาม finance_type + branch
-  // กลุ่มราคา (ป.เปา/สิงห์ชัย) ดูจากตาราง branch_price_groups ณ วันขาย — ใบเก่าก่อนวันเริ่มใช้จึงตีความแบบเดิม
+  // กลุ่มราคา (ป.เปา/สิงห์ชัย) ดูจากตาราง branch_price_groups — ลูกค้าจองใช้กลุ่ม ณ วันจอง (ให้ตรงกับตารางราคา ณ วันจอง
+  // เคสสาขาสลับกลุ่มหลังวันจอง เช่น SCY06 → สิงห์ชัย 30/07/69 ใบมัดจำก่อนหน้าต้องคิดกลุ่มเดิม) ไม่จองใช้ ณ วันขาย
   const [pbgRows, setPbgRows] = useState([]);
   useEffect(() => { fetchPriceBranchGroups().then(setPbgRows); }, []);
   const branchCode = currentUser?.branch_code || currentUser?.branch || "";
-  const branchGroup = priceGroupOf(branchCode, pbgRows, form.sale_date);
+  const branchGroup = priceGroupOf(branchCode, pbgRows, bookingDateISO || form.sale_date);
   const usingBookingPrice = !!(bookingDateISO && bookingPrices);
   const announcedPrice = useMemo(() => {
     const priceRows = usingBookingPrice ? bookingPrices : prices;
