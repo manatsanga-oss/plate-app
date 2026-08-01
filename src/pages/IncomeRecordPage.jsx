@@ -1382,7 +1382,12 @@ export default function IncomeRecordPage({ currentUser }) {
                       };
                       // เงินโอนไฟแนนท์ pending — exclude ที่ถูกเลือกในแถวอื่น + แยกกลุ่มตามสังกัด (ถ้าใบรายได้สังกัดเดียว โชว์เฉพาะสังกัดนั้น+ไม่ระบุ)
                       const usedFtInOtherRows = payments.filter((_, i) => i !== idx).map(x => String(x.ft_id || "")).filter(Boolean);
-                      const ftCandidates = pendingFts.filter(t => !usedFtInOtherRows.includes(String(t.ft_id || t.id)));
+                      let ftCandidates = pendingFts.filter(t => !usedFtInOtherRows.includes(String(t.ft_id || t.id)));
+                      // กรองตามชื่อไฟแนนท์ = ชื่อลูกค้าของใบรายได้ที่เลือก (จับคู่ชื่อแบบยืดหยุ่น) — ถ้าไม่ตรงสักรายการ โชว์ทั้งหมดกันเคสชื่อสะกดต่างมาก
+                      if (payCustomerNames.length > 0) {
+                        const byName = ftCandidates.filter(t => payCustomerNames.some(n => namesMatch(n, t.finance_company)));
+                        if (byName.length > 0) ftCandidates = byName;
+                      }
                       const singleAff = payAffiliations.length === 1 ? payAffiliations[0] : "";
                       const ftGroups = ["ป.เปา", "สิงห์ชัย", ""].map(aff => ({
                         aff,
