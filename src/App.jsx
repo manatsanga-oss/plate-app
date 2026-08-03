@@ -144,6 +144,7 @@ import PaymentPage from "./pages/PaymentPage";
 import GoodsPaymentPage from "./pages/GoodsPaymentPage";
 import ReceiptCustomerFormPage from "./pages/ReceiptCustomerFormPage";
 import PickupConfirmPage from "./pages/PickupConfirmPage";
+import SpareAppointmentPage from "./pages/SpareAppointmentPage";
 import ReceiptQrPrintPage from "./pages/ReceiptQrPrintPage";
 import ReceiptIssueFromQrPage from "./pages/ReceiptIssueFromQrPage";
 import RetailSalePage from "./pages/RetailSalePage";
@@ -172,6 +173,10 @@ export default function App() {
   // หน้าเลือกวันรับรถสำหรับลูกค้า (เปิดจากปุ่มในการ์ด LINE แจ้งรถถึงคิว) — public ไม่ต้อง login
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/pickup-confirm")) {
     return <PickupConfirmPage />;
+  }
+  // หน้าเลือกวันนัดนำรถเข้ารับบริการ (เปิดจากปุ่มการ์ด LINE แจ้งอะไหล่มาถึง — หน้าสั่งซื้ออะไหล่) — public ไม่ต้อง login
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/spare-appointment")) {
+    return <SpareAppointmentPage />;
   }
 
   const [activeMenu, setActiveMenu] = useState("salesoverview");

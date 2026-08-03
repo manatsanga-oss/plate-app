@@ -65,6 +65,8 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [jobNumber, setJobNumber] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
   const [lineByPhone, setLineByPhone] = useState({}); // เบอร์ 9 หลักท้าย → true = ลูกค้ามี LINE ผูกในระบบ
+  const [notifyingId, setNotifyingId] = useState(null); // order_id ที่กำลังส่ง LINE แจ้งลูกค้า
+  const [notifiedIds, setNotifiedIds] = useState(new Set()); // ใบที่ส่งแจ้งลูกค้าแล้ว (ในรอบนี้)
   const [savingJob, setSavingJob] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterParking, setFilterParking] = useState("all");
@@ -523,6 +525,50 @@ export default function SparePartsOrderPage({ currentUser }) {
       loadAll();
     } catch { setMessage("เกิดข้อผิดพลาด"); }
     setSavingJob(false);
+  }
+
+  // ส่ง LINE แจ้งลูกค้า (เฉพาะใบสถานะเปิดงาน + ลูกค้ามี LINE ผูก)
+  // รถไม่จอดร้าน → เชิญนำรถเข้ามารับบริการ | รถจอดร้าน → รถซ่อมเสร็จแล้ว เชิญมารับรถ
+  async function handleNotifyCustomer(o) {
+    const p9 = phoneLast9(o.customer_phone);
+    const done = o.parking_status === "จอดร้าน";
+    const confirmText = done
+      ? `ส่ง LINE แจ้ง "รถซ่อมเสร็จแล้ว เชิญมารับรถ" ถึงคุณ ${o.customer_name || "ลูกค้า"} ?`
+      : `ส่ง LINE แจ้ง "เชิญนำรถเข้ามารับบริการ" ถึงคุณ ${o.customer_name || "ลูกค้า"} ?`;
+    if (!window.confirm(confirmText)) return;
+    setNotifyingId(o.order_id);
+    try {
+      // หา line_user_id จากฐานลูกค้าด้วยเบอร์โทร (เทียบ 9 หลักท้าย — วิธีเดียวกับป้าย ✓ หน้าตาราง)
+      const rows = await fetch(CUSTOMER_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search_customers", keyword: p9 }),
+      }).then(r => r.json()).catch(() => []);
+      const hit = (Array.isArray(rows) ? rows : []).find(r =>
+        String(r.line_user_id || "").trim() && phoneLast9(r.customer_phone) === p9);
+      if (!hit) { setMessage("❌ ไม่พบ LINE ลูกค้าในระบบ — ส่งข้อความไม่ได้"); setNotifyingId(null); return; }
+      const res = await fetch(CUSTOMER_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_spare_notify",
+          line_user_id: hit.line_user_id,
+          notify_type: done ? "done" : "bring_in",
+          order_id: o.order_id,
+          customer_name: o.customer_name || "",
+          model_name: o.model_name || "",
+          license_plate: o.license_plate || "",
+          job_no: o.job_no && o.job_no !== "null" ? o.job_no : "",
+          appointment_date: o.appointment_date ? fmtDate(o.appointment_date) : "",
+          branch_code: String(currentUser?.branch || "").split(" ")[0],
+          branch_name: currentUser?.branch || "",
+        }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      setNotifiedIds(prev => new Set(prev).add(o.order_id));
+      setMessage(`📲 ส่ง LINE แจ้ง${done ? "รถซ่อมเสร็จ" : "นำรถเข้ารับบริการ"}ให้คุณ ${o.customer_name || "ลูกค้า"} แล้ว`);
+    } catch (e) {
+      setMessage("❌ ส่ง LINE ไม่สำเร็จ: " + (e.message || e));
+    }
+    setNotifyingId(null);
   }
 
   async function handleParkingChange(orderId, newStatus) {
@@ -1021,7 +1067,14 @@ export default function SparePartsOrderPage({ currentUser }) {
                 </td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
                 <td style={td}>{o.job_no && o.job_no !== "null" ? o.job_no : "-"}</td>
-                <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
+                <td style={td}>{o.appointment_date ? (
+                  o.appointment_by === "customer" ? (
+                    // ลูกค้ากดเลือกวันเองผ่านลิงก์ใน LINE — โชว์เขียวให้ต่างจากที่พนักงานบันทึก
+                    <span style={{ color: "#059669", fontWeight: 700 }} title="ลูกค้าแจ้งวันนัดเองผ่าน LINE">
+                      {fmtDate(o.appointment_date)} 📲
+                    </span>
+                  ) : fmtDate(o.appointment_date)
+                ) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
                   {(() => {
@@ -1047,6 +1100,14 @@ export default function SparePartsOrderPage({ currentUser }) {
                               style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข Job</button>
                             <button onClick={() => openJobModal(o, "appt")}
                               style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>{o.appointment_date ? "แก้ไขนัด" : "นัดหมาย"}</button>
+                            {/* แจ้งลูกค้าทาง LINE: จอดร้าน = รถซ่อมเสร็จมารับรถ | ไม่จอดร้าน = เชิญนำรถเข้ารับบริการ */}
+                            {lineByPhone[phoneLast9(o.customer_phone)] && (
+                              <button onClick={() => handleNotifyCustomer(o)} disabled={notifyingId === o.order_id}
+                                title={o.parking_status === "จอดร้าน" ? "ส่ง LINE แจ้งรถซ่อมเสร็จ เชิญมารับรถ" : "ส่ง LINE เชิญนำรถเข้ามารับบริการ"}
+                                style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: notifyingId === o.order_id ? "wait" : "pointer", marginLeft: 4, opacity: notifyingId === o.order_id ? 0.6 : 1 }}>
+                                {notifyingId === o.order_id ? "กำลังส่ง..." : notifiedIds.has(o.order_id) ? "แจ้งแล้ว ✓" : "แจ้งลูกค้า"}
+                              </button>
+                            )}
                           </>
                         )}
                       </>
