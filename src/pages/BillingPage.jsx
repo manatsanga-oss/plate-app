@@ -211,20 +211,18 @@ export default function BillingPage({ currentUser }) {
     } catch { setBankAccounts([]); }
   }
 
+  // ยอดค่าบริการจดทะเบียนของ 1 รายการ (ใช้เป็นฐาน WHT)
+  function rowSvcAmount(r) {
+    let items = [];
+    try { items = Array.isArray(r.bill_items) ? r.bill_items : (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : []); } catch {}
+    return items.reduce((s, it) => s + (String(it.expense_name || "").includes("ค่าบริการจดทะเบียน") ? Number(it.amount || 0) : 0), 0);
+  }
+
   // คำนวณ base ของ WHT จากค่าบริการจดทะเบียน
   function calcWhtBase() {
     const selectedDocNos = Object.keys(selectedBills).filter(k => selectedBills[k]);
     const selRows = filtered.filter(r => selectedDocNos.includes(r.billing_doc_no));
-    let base = 0;
-    selRows.forEach(r => {
-      let items = [];
-      try { items = Array.isArray(r.bill_items) ? r.bill_items : (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : []); } catch {}
-      items.forEach(it => {
-        const name = String(it.expense_name || "");
-        if (name.includes("ค่าบริการ")) base += Number(it.amount || 0);
-      });
-    });
-    return base;
+    return selRows.reduce((s, r) => s + rowSvcAmount(r), 0);
   }
 
   function onVendorChange(vendorName) {
@@ -805,11 +803,13 @@ export default function BillingPage({ currentUser }) {
                 billed_at: r.billed_at,
                 items: [],
                 total: 0,
+                svcTotal: 0,
                 billDocNos: new Set(),
               };
             }
             grouped[key].items.push(r);
             grouped[key].total += Number(r.bill_amount || 0);
+            grouped[key].svcTotal += rowSvcAmount(r);
             if (r.billing_doc_no) grouped[key].billDocNos.add(r.billing_doc_no);
             // เก็บเวลาวางบิลแรกสุดในกลุ่ม (สำหรับ paidHistory จะแสดงช่วงวันที่)
             if (r.billed_at && (!grouped[key].billed_at || new Date(r.billed_at) < new Date(grouped[key].billed_at))) {
@@ -896,7 +896,7 @@ export default function BillingPage({ currentUser }) {
                 <span>💰 ยอดรวม: <strong style={{ color: "#dc2626" }}>{groups.reduce((s, g) => s + g.total, 0).toLocaleString()}</strong></span>
                 {selectedDocNos.length > 0 && (
                   <span style={{ padding: "4px 10px", background: "#fef9c3", borderRadius: 6, fontWeight: 600 }}>
-                    ✓ เลือก {selectedDocNos.length} ใบ · ฿ {selSum.toLocaleString()}
+                    ✓ เลือก {selectedDocNos.length} ใบ · ฿ {selSum.toLocaleString()} · 🧾 ค่าบริการ {selectedGroups.reduce((s, g) => s + g.svcTotal, 0).toLocaleString()}
                   </span>
                 )}
                 <div style={{ flex: 1 }} />
@@ -959,6 +959,9 @@ export default function BillingPage({ currentUser }) {
                             )}
                           </>
                         )}
+                        <span style={{ background: "#fef9c3", color: "#78350f", padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600 }} title="ยอดค่าบริการจดทะเบียนในใบนี้ (ฐานหัก ณ ที่จ่าย)">
+                          🧾 ค่าบริการ {g.svcTotal.toLocaleString()}
+                        </span>
                         <div style={{ flex: 1 }} />
                         <span style={{ fontWeight: 700, fontSize: 15 }}>฿ {g.total.toLocaleString()}</span>
                         <button onClick={e => { e.stopPropagation(); reprintGroup(g); }}
