@@ -8,6 +8,8 @@ const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part
 const SERVICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
 // ฐานลูกค้า (search_customers) — เช็คว่าลูกค้ามี LINE ผูกไว้ไหม จากเบอร์โทร 9 หลักท้าย (แบบเดียวกับหน้าบันทึกขาย NEW)
 const CUSTOMER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
+// ใบแจ้งซ่อม NID (honda_repair_jobs) — เช็ค close_date จากเลข Job เพื่อปิดงานซ่อมอัตโนมัติ
+const SERVICE_JOB_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-api";
 const phoneLast9 = (p) => String(p || "").replace(/[^0-9]/g, "").slice(-9);
 
 async function api(action, extra = {}) {
@@ -59,6 +61,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [poNumber, setPoNumber] = useState("");
   const [savingPO, setSavingPO] = useState(false);
   const [showJobModal, setShowJobModal] = useState(null);
+  const [jobModalMode, setJobModalMode] = useState("job"); // 'job' = เปิด Job/แก้ไขเลขใบงาน | 'appt' = นัดหมาย (ต้องเปิด Job ก่อน)
   const [jobNumber, setJobNumber] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
   const [lineByPhone, setLineByPhone] = useState({}); // เบอร์ 9 หลักท้าย → true = ลูกค้ามี LINE ผูกในระบบ
@@ -136,14 +139,43 @@ export default function SparePartsOrderPage({ currentUser }) {
     // eslint-disable-next-line
   }, [orders]);
 
+  // ปิดงานซ่อมอัตโนมัติ: ใบสถานะ "เปิดงาน" ที่มีเลข Job → เทียบใบแจ้งซ่อม NID (honda_repair_jobs)
+  // ถ้า job นั้นมี close_date แล้ว = ช่างปิดงานใน NID → อัปเดตสถานะเป็น "ปิดงานซ่อม" ให้เอง
+  // (ข้อมูล honda_repair_jobs มาจากการ upload — สถานะจะขยับหลัง upload รอบล่าสุดที่มี job นั้น)
+  async function autoCloseFinishedJobs(list) {
+    const open = list.filter(o => o.status === "เปิดงาน" && o.job_no && o.job_no !== "null");
+    if (!open.length) return;
+    const closedIds = [];
+    for (const o of open) {
+      try {
+        const res = await fetch(SERVICE_JOB_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_honda_repair_jobs", search: String(o.job_no).trim() }),
+        });
+        const d = await res.json();
+        const hit = (Array.isArray(d) ? d : []).find(j =>
+          String(j.job_no || "").trim() === String(o.job_no).trim() && j.close_date);
+        if (!hit) continue;
+        await api("update_order_status", { order_id: o.order_id, status: "ปิดงานซ่อม" });
+        closedIds.push(o.order_id);
+      } catch { /* เช็คไม่ได้ก็ข้าม รอบหน้าเช็คใหม่ */ }
+    }
+    if (closedIds.length) {
+      setOrders(prev => prev.map(o => closedIds.includes(o.order_id) ? { ...o, status: "ปิดงานซ่อม" } : o));
+      setMessage(`✅ ปิดงานซ่อมอัตโนมัติ ${closedIds.length} ใบ (ตรวจพบปิดงานแล้วในใบแจ้งซ่อม NID)`);
+    }
+  }
+
   async function loadAll() {
     setLoading(true);
     // แยก request แต่ละตัว ถ้าตัวใดพัง ตัวอื่นยังทำงานได้
     try {
       const r = await api("get_spare_orders");
-      setOrders(norm(r));
+      const list = norm(r);
+      setOrders(list);
       // เช็ค DCS/ค้างส่งอัตโนมัติย้ายไปหน้า "รายการสั่งอะไหล่รายวัน" ที่เดียว (2026-07-23)
       // หน้านี้เช็คเฉพาะตอนเปิดรายละเอียดใบ / กดปุ่ม "ตรวจสอบ DCS" ในป๊อปอัพ
+      autoCloseFinishedJobs(list); // ไม่ await — เช็คเบื้องหลัง เสร็จแล้วค่อยอัปเดตสถานะบนจอ
     } catch {}
     // เงินมัดจำ: ดึงจากระบบมัดจำอะไหล่ (part_deposits — บันทึกเองหน้า "ระบบมัดจำอะไหล่") แทน upload NID เดิม (2026-07-21)
     try {
@@ -468,10 +500,18 @@ export default function SparePartsOrderPage({ currentUser }) {
     } catch { setMessage("เกิดข้อผิดพลาด"); }
   }
 
+  // เปิด modal เปิด Job / นัดหมาย — prefill ค่าเดิมทั้งคู่ (modal แก้เฉพาะช่องของ mode ตัวเอง อีกช่องส่งค่าเดิมกลับไปตอน save)
+  function openJobModal(o, mode) {
+    setShowJobModal(o);
+    setJobModalMode(mode);
+    setJobNumber(o.job_no && o.job_no !== "null" ? o.job_no : "");
+    setAppointmentDate((o.appointment_date || "").slice(0, 10));
+    setMessage("");
+  }
+
   async function handleSaveJob() {
-    const isDEPD = (showJobModal.deposit_doc_no || "").startsWith("DEPD");
-    if (isDEPD && !jobNumber.trim()) { setMessage("กรุณากรอกเลขที่ใบงาน"); return; }
-    if (!isDEPD && !appointmentDate) { setMessage("กรุณาเลือกวันที่นัดหมาย"); return; }
+    if (jobModalMode === "job" && !jobNumber.trim()) { setMessage("กรุณากรอกเลขที่ใบงาน"); return; }
+    if (jobModalMode === "appt" && !appointmentDate) { setMessage("กรุณาเลือกวันที่นัดหมาย"); return; }
     setSavingJob(true);
     setMessage("");
     try {
@@ -479,7 +519,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       setShowJobModal(null);
       setJobNumber("");
       setAppointmentDate("");
-      setMessage(isDEPD ? "บันทึกเลขที่ใบงานสำเร็จ" : "บันทึกนัดหมายสำเร็จ");
+      setMessage(jobModalMode === "job" ? "บันทึกเลขที่ใบงานสำเร็จ" : "บันทึกนัดหมายสำเร็จ");
       loadAll();
     } catch { setMessage("เกิดข้อผิดพลาด"); }
     setSavingJob(false);
@@ -711,7 +751,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         <td>${o.parking_status}</td>
         <td>${o.status}</td>
         <td>${o.vendor_po_no || "-"}</td>
-        <td>${o.job_no || "-"}</td>
+        <td>${o.job_no && o.job_no !== "null" ? o.job_no : "-"}</td>
         <td>${o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
       </tr>`;
     }).join("");
@@ -980,7 +1020,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                   )}
                 </td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
-                <td style={td}>{o.job_no || "-"}</td>
+                <td style={td}>{o.job_no && o.job_no !== "null" ? o.job_no : "-"}</td>
                 <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
@@ -996,14 +1036,19 @@ export default function SparePartsOrderPage({ currentUser }) {
                             <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
                           </>
                         )}
-                        {(o.status === "มาครบ" || o.status === "เปิดงาน") && (() => {
-                          const isDEPD = (o.deposit_doc_no || "").startsWith("DEPD");
-                          const label = o.status === "เปิดงาน" ? (isDEPD ? "แก้ไข Job" : "แก้ไขนัด") : (isDEPD ? "เปิดงาน" : "นัดหมาย");
-                          return (
-                            <button onClick={() => { setShowJobModal(o); setJobNumber(o.job_no || ""); setAppointmentDate(o.appointment_date || ""); setMessage(""); }}
-                              style={{ background: isDEPD ? "#7c3aed" : "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>{label}</button>
-                          );
-                        })()}
+                        {/* flow 2 ขั้น: เปิด Job (กรอกเลขใบงาน → สถานะเปิดงาน) ก่อน แล้วค่อยนัดหมายได้ */}
+                        {["สั่งซื้อแล้ว", "มาครบ"].includes(o.status) && (
+                          <button onClick={() => openJobModal(o, "job")}
+                            style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>เปิด Job</button>
+                        )}
+                        {o.status === "เปิดงาน" && (
+                          <>
+                            <button onClick={() => openJobModal(o, "job")}
+                              style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข Job</button>
+                            <button onClick={() => openJobModal(o, "appt")}
+                              style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>{o.appointment_date ? "แก้ไขนัด" : "นัดหมาย"}</button>
+                          </>
+                        )}
                       </>
                     );
                   })()}
@@ -1302,7 +1347,7 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
               <div><b>สถานะ:</b> {showDetail.status}</div>
               {showDetail.vendor_po_no && <div><b>เลขที่ใบรับสั่งซื้อ:</b> <span style={{ color: "#10b981", fontWeight: 700 }}>{showDetail.vendor_po_no}</span></div>}
-              {showDetail.job_no && <div><b>เลขที่ Job:</b> <span style={{ color: "#7c3aed", fontWeight: 700 }}>{showDetail.job_no}</span></div>}
+              {showDetail.job_no && showDetail.job_no !== "null" && <div><b>เลขที่ Job:</b> <span style={{ color: "#7c3aed", fontWeight: 700 }}>{showDetail.job_no}</span></div>}
               {showDetail.appointment_date && <div><b>วันที่นัดหมาย:</b> {fmtDate(showDetail.appointment_date)}</div>}
               <div><b>ผู้สร้าง:</b> {showDetail.created_by}</div>
               <div><b>วันที่:</b> {fmtDate(showDetail.created_at)}</div>
@@ -1497,22 +1542,22 @@ export default function SparePartsOrderPage({ currentUser }) {
 
       {/* ===== Modal เปิดงาน / นัดหมาย ===== */}
       {showJobModal && (() => {
-        const isDEPD = (showJobModal.deposit_doc_no || "").startsWith("DEPD");
         return (
         <div style={overlay}>
           <div style={{ ...modal, maxWidth: 420 }}>
-            <h3 style={{ margin: "0 0 16px", color: "#072d6b" }}>{isDEPD ? "เปิดงาน" : "นัดหมาย"} - {showJobModal.order_no || showJobModal.order_id}</h3>
+            <h3 style={{ margin: "0 0 16px", color: "#072d6b" }}>{jobModalMode === "job" ? (showJobModal.status === "เปิดงาน" ? "แก้ไข Job" : "เปิด Job") : "นัดหมาย"} - {showJobModal.order_no || showJobModal.order_id}</h3>
             {message && <div style={{ color: "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
-            {isDEPD && (
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>เลขที่ใบงาน</label>
+            {jobModalMode === "job" ? (
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>เลขที่ใบงาน *</label>
               <input value={jobNumber} onChange={e => setJobNumber(e.target.value)} placeholder="กรอกเลขที่ใบงาน" style={{ ...inputStyle, width: "100%" }} />
             </div>
-            )}
+            ) : (
             <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>วันที่นัดหมาย</label>
+              <label style={{ fontSize: 13, fontWeight: 600, display: "block", marginBottom: 4 }}>วันที่นัดหมาย *</label>
               <input type="date" value={appointmentDate} onChange={e => setAppointmentDate(e.target.value)} style={{ ...inputStyle, width: "100%" }} />
             </div>
+            )}
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={handleSaveJob} disabled={savingJob}
                 style={{ flex: 1, padding: "9px 0", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>

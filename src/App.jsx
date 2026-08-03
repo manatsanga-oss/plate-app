@@ -28,6 +28,7 @@ import ServiceRateSearchPage from "./pages/ServiceRateSearchPage";
 import ServiceRateImportPage from "./pages/ServiceRateImportPage";
 import ServiceRateLookupPage from "./pages/ServiceRateLookupPage";
 import TaxInvoiceReportPage from "./pages/TaxInvoiceReportPage";
+import DepositRefundReportPage from "./pages/DepositRefundReportPage";
 import StockCheckPage from "./pages/StockCheckPage";
 import DriverPage from "./pages/DriverPage";
 import FinancePage from "./pages/FinancePage";
@@ -51,6 +52,7 @@ import YamahaDepositPage from "./pages/YamahaDepositPage";
 import YamahaOrderPage from "./pages/YamahaOrderPage";
 import FastMovingPage from "./pages/FastMovingPage";
 import PartImageSearchPage from "./pages/PartImageSearchPage";
+import ServiceArrivalReportPage from "./pages/ServiceArrivalReportPage";
 import MotoStockPage from "./pages/MotoStockPage";
 import PettyCashFuelPage from "./pages/PettyCashFuelPage";
 import PettyCashPostagePage from "./pages/PettyCashPostagePage";
@@ -105,6 +107,7 @@ import LoanInterestPaymentPage from "./pages/LoanInterestPaymentPage";
 import BankMovementsPage from "./pages/BankMovementsPage";
 import BankTransferPage from "./pages/BankTransferPage";
 import FinanceTransferPage from "./pages/FinanceTransferPage";
+import FlowGlReconPage from "./pages/FlowGlReconPage";
 import ExpenseDocCheckPage from "./pages/ExpenseDocCheckPage";
 import SalesByPaymentReportPage from "./pages/SalesByPaymentReportPage";
 import OtherIncomeTaxReportPage from "./pages/OtherIncomeTaxReportPage";
@@ -261,6 +264,7 @@ export default function App() {
     if (page === "serviceratelookup") return true;             // ค้นหา FRT จากรุ่น/แบบ — เปิดให้ทุก user
     if (page === "servicerateimport") return false;            // เฉพาะ admin (นำเข้า FRT)
     if (page === "partimagelookup") return true;               // ค้นรูปอะไหล่ (ชุดสี) — เปิดให้ทุก user
+    if (page === "servicearrival") return true;               // รายงานรถเข้ารับบริการ (กล้อง AI) — เปิดให้ทุก user
     if (page === "damageassess") return true;                  // ประเมินความเสียหาย (AI) — เปิดให้ทุก user (คนที่กำหนดสิทธิ์รายหน้าไว้ ต้องติ๊กในหน้ากำหนดผู้ใช้งาน)
     if (page === "partimagesearch") return true;               // ค้นหาอะไหล่จากรูป (AI) — เปิดให้ทุก user
     if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
@@ -359,6 +363,9 @@ export default function App() {
         {activeMenu === "retailsalereport" && canAccess("retailsalereport") && (
           <RetailSaleReportPage currentUser={currentUser} />
         )}
+        {activeMenu === "accdepositrefund" && canAccess("accdepositrefund") && (
+          <DepositRefundReportPage currentUser={currentUser} />
+        )}
         {activeMenu === "receipttransferreport" && canAccess("receipttransferreport") && (
           <ReceiptTransferReportPage currentUser={currentUser} />
         )}
@@ -403,6 +410,9 @@ export default function App() {
         )}
         {activeMenu === "damageassess" && canAccess("damageassess") && (
           <DamageAssessPage currentUser={currentUser} />
+        )}
+        {activeMenu === "servicearrival" && canAccess("servicearrival") && (
+          <ServiceArrivalReportPage />
         )}
         {activeMenu === "partwithdrawal" && canAccess("partwithdrawal") && (
           <PartWithdrawalPage currentUser={currentUser} />
@@ -650,6 +660,9 @@ export default function App() {
         {activeMenu === "accdirectorloan" && canAccess("accdirectorloan") && (
           <DirectorLoanPage currentUser={currentUser} />
         )}
+        {activeMenu === "accflowrecon" && canAccess("accflowrecon") && (
+          <FlowGlReconPage currentUser={currentUser} />
+        )}
         {activeMenu === "accassetcategory" && canAccess("accassetcategory") && (
           <AssetCategoryPage currentUser={currentUser} />
         )}
@@ -889,13 +902,15 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="searchreceiptwork" label="ค้นหางานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan","accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan","accflowrecon","accdepositrefund","accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="accbankaccounts" label="บัญชีธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accloanaccounts" label="บัญชีเงินกู้ยืม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbankmovements" label="รายงานการเคลื่อนไหว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbanktransfer" label="โอนเงินระหว่างบัญชี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accfinancetransfer" label="บันทึกรับเงินโอนไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accdirectorloan" label="บันทึกเงินให้กู้ยืมกรรมการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="accflowrecon" label="ตรวจสอบบันทึกบัญชี FLOW" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="accdepositrefund" label="บันทึกคืนเงินมัดจำเป็นเงินโอน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuSubGroup title="จัดการทรัพย์สิน" pages={["accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="accassetlist" label="รายการสินทรัพย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="accassetdepreciation" label="บันทึกค่าเสื่อมราคา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -912,9 +927,10 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="incometaxfiling" label="ยื่นภาษี ภ.ง.ด.50, 51" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partdispensereport","servicehistory","servicerate","servicerateimport","partimagelookup","claim","damageassess"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partdispensereport","servicehistory","servicerate","servicerateimport","partimagelookup","claim","damageassess","servicearrival"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="partimagelookup" label="บันทึกใบประเมินราคา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="damageassess" label="ประเมินความเสียหาย (AI)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="servicearrival" label="รายงานรถเข้ารับบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuSubGroup title="Claim System" pages={["claim"]} activeMenu={activeMenu}>
           <MenuItem page="claim" label="ระบบการเคลม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>

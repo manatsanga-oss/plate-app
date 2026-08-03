@@ -28,7 +28,7 @@ const thaiDate = (iso) => {
   return isNaN(d) ? String(iso).slice(0, 10) : d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 };
 
-const FORM0 = { deposit_date: todayStr(), customer_code: "", customer_name: "", customer_phone: "", vin: "", brand: "", deposit_amount: "", payment_method: "เงินสด", remark: "" };
+const FORM0 = { deposit_date: todayStr(), customer_code: "", customer_name: "", customer_phone: "", line_user_id: "", vin: "", brand: "", deposit_amount: "", payment_method: "เงินสด", remark: "" };
 
 export default function PartDepositPage({ currentUser }) {
   const [tab, setTab] = useState("บริการ");
@@ -54,7 +54,6 @@ export default function PartDepositPage({ currentUser }) {
   const [fltReceive, setFltReceive] = useState(true);     // filter การ์ด: ใบรับมัดจำ
   const [fltRefund, setFltRefund] = useState(true);       // filter การ์ด: ใบคืนมัดจำ
   const [selDoc, setSelDoc] = useState(null);             // ใบมัดจำที่คลิกเปิดดู (แก้ไขข้อมูล)
-  const [detailLine, setDetailLine] = useState(null);     // ลูกค้าใบที่เปิดดูมี LINE ไหม (null = กำลังเช็ค/ไม่รู้)
 
   const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -68,27 +67,9 @@ export default function PartDepositPage({ currentUser }) {
   }
   useEffect(() => { load(); }, []);
 
-  // เช็คว่าลูกค้าของใบที่เปิดดูมี LINE ไหม — ค้นฐานลูกค้า+QR/LINE+ใบขายด้วยเบอร์โทร (หรือชื่อ) ตอนเปิดหน้าแก้ไขข้อมูล
-  useEffect(() => {
-    if (view !== "detail" || !selDoc) { setDetailLine(null); return; }
-    const kw = String(selDoc.customer_phone || "").trim() || String(selDoc.customer_name || "").trim();
-    if (!kw) { setDetailLine(false); return; }
-    let alive = true;
-    setDetailLine(null);
-    fetch(CUST_SEARCH_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "search_customers", keyword: kw }) })
-      .then((r) => r.json())
-      .then((d) => {
-        if (!alive) return;
-        const rows = Array.isArray(d) ? d : [];
-        // เบอร์เดียวอาจมีหลายลูกค้า — ถ้าใบมัดจำมีรหัสลูกค้า ให้เทียบเฉพาะรหัสนั้นก่อน
-        const code = String(selDoc.customer_code || "").trim();
-        const scoped = code ? rows.filter((x) => String(x.customer_code || "").trim() === code) : rows;
-        const pool = scoped.length ? scoped : rows;
-        setDetailLine(pool.some((x) => String(x.line_user_id || "").trim() !== ""));
-      })
-      .catch(() => { if (alive) setDetailLine(false); });
-    return () => { alive = false; };
-  }, [view, selDoc]);
+  // ใบมัดจำนี้ผูก LINE ไหม — อ่านจากข้อมูลที่ list_deposits ส่งมา (line_user_id เก็บตอนบันทึก
+  // + line_name join จาก receipt_requests ฝั่ง SQL แบบเดียวกับรายงานใบขายปลีก) ไม่ต้องค้นเบอร์ซ้ำ
+  const hasLine = (r) => String(r?.line_name || r?.line_user_id || "").trim() !== "";
 
   function switchTab(t) {
     setTab(t); setMessage(""); setPayOpen(false); setPayConfirmed(false); setSavedDocNo(""); setRefundDoc(""); setDocKind("receive"); setPayAmount("");
@@ -186,12 +167,32 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     setPayOpen(true);
   }
 
+  // ลูกค้าไม่ได้เลือกจากฐาน QR/LINE → ค้นด้วยเบอร์โทรอัตโนมัติตอนบันทึก เจอ LINE ผูกให้เลย (เหมือนบันทึกขาย NEW)
+  async function autoLinkLineByPhone() {
+    const cur = String(form.line_user_id || "").trim();
+    if (cur) return cur;
+    const phone = String(form.customer_phone || "").replace(/[^0-9]/g, "");
+    if (phone.length < 9) return "";
+    try {
+      const res = await fetch(CUST_SEARCH_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search_customers", keyword: phone }),
+      });
+      const d = await res.json();
+      const hit = (Array.isArray(d) ? d : []).find((x) =>
+        String(x.line_user_id || "").trim() &&
+        String(x.customer_phone || "").replace(/[^0-9]/g, "").slice(-9) === phone.slice(-9));
+      return hit ? String(hit.line_user_id).trim() : "";
+    } catch { return ""; }
+  }
+
   // ตกลง — ใบรับมัดจำ: บันทึกรับเงิน (save_deposit) — ใช้ทั้งแท็บบริการและสั่งซื้อ (flow เดียวกัน)
   async function okReceive() {
     if (saving) return;
     if (!(num(payAmount) > 0)) { setMessage("❌ กรอกจำนวนเงินมัดจำให้ถูกต้อง"); return; }
     setSaving(true); setMessage("");
     try {
+      const lineUserId = await autoLinkLineByPhone();
       const d = await post({
         action: "save_deposit",
         deposit_type: tab,
@@ -199,6 +200,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         branch_code: String(currentUser?.branch_code || currentUser?.branch || "").substring(0, 5),
         brand: form.brand,
         customer_code: form.customer_code, customer_name: form.customer_name, customer_phone: form.customer_phone,
+        line_user_id: lineUserId,
         vin: tab === "บริการ" ? form.vin : "", // มัดจำสั่งซื้อไม่ใช้เลขถัง
         deposit_amount: num(payAmount),
         payment_method: payMethod,
@@ -336,7 +338,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   </div>
                   <div style={{ flex: "0 1 180px" }}>
                     <label style={lbl}>วันที่มัดจำ *</label>
-                    <input type="date" value={form.deposit_date} onChange={(e) => setF("deposit_date", e.target.value)} style={inp} />
+                    <input type="date" value={form.deposit_date} readOnly onKeyDown={(e) => e.preventDefault()} style={roInp} />
                   </div>
                   <div style={{ flex: "0 1 130px" }}>
                     <label style={lbl}>ยี่ห้อ</label>
@@ -361,7 +363,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   </div>
                   <div style={{ flex: "1 1 170px" }}>
                     <label style={lbl}>เบอร์โทร *</label>
-                    <input value={form.customer_phone} onChange={(e) => setF("customer_phone", e.target.value)} placeholder="08x-xxxxxxx" style={inp} />
+                    <input value={form.customer_phone} onChange={(e) => setForm((p) => ({ ...p, customer_phone: e.target.value, line_user_id: "" }))} placeholder="08x-xxxxxxx" style={inp} />
                   </div>
                 </div>
               </>
@@ -377,7 +379,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 </div>
                 <div style={{ flex: "0 1 180px" }}>
                   <label style={lbl}>วันที่คืนเงิน</label>
-                  <input type="date" value={form.deposit_date} onChange={(e) => setF("deposit_date", e.target.value)} style={inp} />
+                  <input type="date" value={form.deposit_date} readOnly onKeyDown={(e) => e.preventDefault()} style={roInp} />
                 </div>
               </div>
             )}
@@ -508,11 +510,11 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 {searchCards.map((c, i) => {
                   const r = c.r;
                   // บรรทัดแบบ NID: ป้ายชิดขวาความกว้างคงที่ + " : " + ค่าสีน้ำเงิน
-                  const line = (l, v) => (
+                  const line = (l, v, green) => (
                     <div style={{ display: "flex", fontSize: 13.5, marginBottom: 6 }}>
                       <span style={{ color: "#334155", width: 108, textAlign: "right", whiteSpace: "nowrap", flexShrink: 0 }}>{l}</span>
                       <span style={{ color: "#334155", margin: "0 7px", flexShrink: 0 }}>:</span>
-                      <span style={{ fontWeight: 600, color: "#1d6fa5", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{v}</span>
+                      <span style={{ fontWeight: 600, color: green ? "#16a34a" : "#1d6fa5", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{green ? "✓ " : ""}{v}</span>
                     </div>
                   );
                   // วันที่แบบ NID: DD/MM/ปี พ.ศ.
@@ -529,7 +531,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                         <div style={{ flex: "1 1 280px", minWidth: 0 }}>
                           {line("ประเภทใบมัดจำ", c.kind === "receive" ? "ใบรับมัดจำ" : "ใบคืนมัดจำ")}
                           {line("หมายเลขตัวถัง", r.vin || "-")}
-                          {line("ลูกค้า", `${r.customer_code ? r.customer_code + " - " : ""}${r.customer_name}`)}
+                          {line("ลูกค้า", `${r.customer_code ? r.customer_code + " - " : ""}${r.customer_name}${r.line_name ? ` · 💬 ${r.line_name}` : ""}`, hasLine(r))}
                           {line("ยอดมัดจำ", fmt(c.amount))}
                         </div>
                         <div style={{ flex: "1 1 210px", minWidth: 0 }}>
@@ -581,10 +583,10 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 </div>
                 <div style={{ flex: "2 1 300px" }}>
                   <label style={lbl}>
-                    ชื่อลูกค้า{detailLine === true && <span style={{ color: "#16a34a", marginLeft: 8, fontWeight: 700 }}>✓ มี LINE</span>}
+                    ชื่อลูกค้า{hasLine(selDoc) && <span style={{ color: "#16a34a", marginLeft: 8, fontWeight: 700 }}>✓ มี LINE{selDoc.line_name ? ` (${selDoc.line_name})` : ""}</span>}
                   </label>
-                  <input value={(detailLine === true ? "✓ " : "") + (selDoc.customer_name || "-")} readOnly
-                    style={{ ...roInp, ...(detailLine === true ? { color: "#15803d", fontWeight: 700 } : {}) }} />
+                  <input value={(hasLine(selDoc) ? "✓ " : "") + (selDoc.customer_name || "-")} readOnly
+                    style={{ ...roInp, ...(hasLine(selDoc) ? { color: "#15803d", fontWeight: 700 } : {}) }} />
                 </div>
                 <div style={{ flex: "1 1 160px" }}>
                   <label style={lbl}>เบอร์โทร</label>
@@ -650,7 +652,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
             <div style={{ flex: "0 1 160px" }}>
               <label style={lbl}>วันที่รับเงินมัดจำ</label>
-              <input type="date" value={form.deposit_date} onChange={(e) => setF("deposit_date", e.target.value)} style={inp} />
+              <input type="date" value={form.deposit_date} readOnly onKeyDown={(e) => e.preventDefault()} style={roInp} />
             </div>
             <div style={{ flex: "2 1 240px" }}>
               <label style={lbl}>ชื่อลูกค้า *</label>
@@ -662,7 +664,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
             </div>
             <div style={{ flex: "1 1 170px" }}>
               <label style={lbl}>เบอร์โทร *</label>
-              <input value={form.customer_phone} onChange={(e) => setF("customer_phone", e.target.value)} placeholder="08x-xxxxxxx" style={inp} />
+              <input value={form.customer_phone} onChange={(e) => setForm((p) => ({ ...p, customer_phone: e.target.value, line_user_id: "" }))} placeholder="08x-xxxxxxx" style={inp} />
             </div>
             <div style={{ flex: "0 1 130px" }}>
               <label style={lbl}>ยี่ห้อ</label>
@@ -827,7 +829,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
           currentUser={currentUser}
           onClose={() => setShowCust(false)}
           onSelect={(c) => {
-            setForm((p) => ({ ...p, customer_code: c.code || "", customer_name: c.name || p.customer_name, customer_phone: c.phone || p.customer_phone }));
+            setForm((p) => ({ ...p, customer_code: c.code || "", customer_name: c.name || p.customer_name, customer_phone: c.phone || p.customer_phone, line_user_id: c.line_user_id || "" }));
             setShowCust(false);
           }}
         />
@@ -916,7 +918,7 @@ function SearchPopup({ mode, initial, onClose, onPick }) {
                       <td style={{ ...td, textAlign: "center" }}>
                         <button style={pickBtn} onClick={() => onPick({
                           customer_code: c.customer_code || "", customer_name: c.customer_name || "",
-                          customer_phone: c.customer_phone || "",
+                          customer_phone: c.customer_phone || "", line_user_id: c.line_user_id || "",
                         })}>เลือก</button>
                       </td>
                     </tr>

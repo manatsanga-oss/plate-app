@@ -15,10 +15,16 @@ const fmtBE = (v) => {
 
 const FINANCE_LABEL = { none: "เงินสด", moto: "ไฟแนนซ์", moto_kit: "ไฟแนนซ์+ชุดแต่ง", full: "ไฟแนนซ์เต็ม" };
 
+// วันที่ปัจจุบันตามเวลาเครื่อง (YYYY-MM-DD) — ห้ามใช้ toISOString ตรง ๆ เพราะเป็น UTC จะเพี้ยนข้ามวัน
+const todayStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+
 export default function RetailSaleReportPage({ currentUser }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [filter, setFilter] = useState({ keyword: "", date_from: "", date_to: "", branch_code: "" });
+  const [filter, setFilter] = useState({ keyword: "", date_from: todayStr(), date_to: todayStr(), branch_code: "" });
   const [message, setMessage] = useState("");
 
   async function load() {

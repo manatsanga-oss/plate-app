@@ -94,6 +94,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   const [savingSub, setSavingSub] = useState(null);
   const [stockCache, setStockCache] = useState({});        // strip(code) → {total, parts:[{source,qty,location}]} ของตัวที่ยังไม่สั่ง
   const [receiptMap, setReceiptMap] = useState({});        // `${system}|${normCode}` → {date, doc} รับเข้าครั้งแรกตั้งแต่วันที่เลือก (รายงานรับอะไหล่)
+  const [dispenseMap, setDispenseMap] = useState({});      // `${job_no}|${strip(code)}` → {date, qty} เบิกเข้างานซ่อมแล้ว (honda_part_sales)
   const [selItem, setSelItem] = useState({});              // orderKey → strip(part_code) ของตัว ✗ ที่ติ๊กเลือกไว้รอจับคู่
   const [pendingPairs, setPendingPairs] = useState({});    // orderKey → [{original_code, original_name, substitute_code, substitute_name}] คู่ที่จับเองแล้วยังไม่บันทึก
 
@@ -173,6 +174,39 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     return () => { alive = false; };
     // eslint-disable-next-line
   }, [rows, dcsByOrder, date]);
+
+  // เช็คเบิกเข้า Job: ใบที่ผูกเลข Job แล้ว → ถามการเบิกอะไหล่งานซ่อม (honda_part_sales: sale_doc_no = เลข Job)
+  useEffect(() => {
+    const withJob = rows.filter(r => r.system === "HONDA" && String(r.job_no || "").trim() && r.job_no !== "null");
+    if (!withJob.length) { setDispenseMap({}); return; }
+    const codes = new Set(), jobs = new Set();
+    for (const r of withJob) {
+      jobs.add(String(r.job_no).trim());
+      for (const it of r.items || []) { const c = strip(it.part_code); if (c) codes.add(c); }
+    }
+    if (!codes.size) return;
+    let alive = true;
+    post(HONDA_API, { action: "search_part_dispenses", codes_csv: [...codes].join(","), jobs_csv: [...jobs].join(",") })
+      .then(norm).catch(() => [])
+      .then(res => {
+        if (!alive) return;
+        const m = {};
+        for (const d of res) {
+          if (!d || !d.part_code) continue;
+          m[`${String(d.job_no || "").trim()}|${strip(d.part_code)}`] = { date: d.dispense_date, qty: d.qty };
+        }
+        setDispenseMap(m);
+      });
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [rows]);
+
+  // สถานะเบิกเข้า Job ของรายการ — null = ใบยังไม่ผูกเลข Job (โชว์ "-")
+  function dispenseOf(r, it) {
+    const job = String(r.job_no || "").trim();
+    if (r.system !== "HONDA" || !job || job === "null") return null;
+    return { job, hit: dispenseMap[`${job}|${strip(it.part_code)}`] || null };
+  }
 
   // ของถึงแล้วหรือยัง — เช็ครหัสที่สั่งตรง ๆ ก่อน แล้วค่อยเช็ครหัสอะไหล่ทดแทน (ถ้ามีคู่)
   function arrivalOf(r, it) {
@@ -446,14 +480,22 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
         const arrTxt = arr ? ` <span style="color:#0d9488;font-weight:700">&#128230; ถึงแล้ว ${esc(fmtShortDate(arr.date))}${arr.viaSub ? " (ทดแทน)" : ""}</span>` : "";
         return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${txt}${arrTxt}</div>`;
       }).join("");
+      const itemDispense = (r.items || []).map((it, k) => {
+        const dp = dispenseOf(r, it);
+        const txt = dp === null ? "-"
+          : dp.hit ? `<span style="color:#059669;font-weight:700">&#10003; เบิกแล้ว ${esc(fmtShortDate(dp.hit.date))}</span>`
+          : '<span style="color:#d97706;font-weight:700">ยังไม่เบิก</span>';
+        return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${txt}</div>`;
+      }).join("");
       body += `<tr>
-        <td class="c">${i + 1}</td><td class="c">${thaiTimeOf(r.created_at)}</td>
+        <td class="c">${i + 1}</td>
         <td>${esc(sys?.label || r.system)}</td>
-        <td>${esc(r.deposit_doc_no || r.doc_no || "-")}</td>
+        <td>${esc(r.deposit_doc_no || r.doc_no || "-")}${r.status === "ปิดงานซ่อม" ? '<div style="color:#059669;font-size:9px;font-weight:700">ปิด Job</div>' : ""}</td>
         <td>${esc(r.vendor_po_no || "-")}${extraPoNos(r).map(po => `<div style="color:#059669;font-size:9px;font-weight:700">+ ${esc(po)}</div>`).join("")}</td>
         <td>${esc(r.model_name || "-")}${(r.vehicle_series || r.vehicle_variant) ? `<div style="font-size:9px;color:#555">${esc([r.vehicle_series, r.vehicle_variant, r.vehicle_type].filter(Boolean).join(" / "))}${r.vehicle_color ? ` · สี ${esc(r.vehicle_color)}` : ""}</div>` : ""}</td>
         <td class="items">${items || "-"}</td>
         <td class="items">${itemStatus || "-"}</td>
+        <td class="items">${itemDispense || "-"}</td>
         <td class="items">${(() => {
           const un = unmatchedDcs(r);
           if (!un.length) return "";
@@ -478,7 +520,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
 <h2>รายการสั่งอะไหล่รายวัน</h2>
 <div class="info">วันที่: ${fmtThaiDate(date)} | ระบบ: ${filterSystem === "all" ? "ทั้งหมด" : (SYSTEMS.find(s => s.key === filterSystem)?.label || filterSystem)} | ${filtered.length} ใบ · ${totalItems} ชิ้น | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
 <div class="info"><span style="color:#059669;font-weight:800">&#10003;</span> = เคยเบิกกับรุ่นรถนี้ (ตรงรุ่น) &nbsp;·&nbsp; <span style="color:#d97706;font-weight:700">&#8594; รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน &nbsp;·&nbsp; <span style="color:#dc2626;font-weight:800">&#10007;</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS) &nbsp;·&nbsp; <span style="color:#059669;font-weight:800">&#10003;</span> <span style="color:#ea580c;font-weight:700">ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์ &nbsp;·&nbsp; <span style="color:#0d9488;font-weight:700">&#128230; ถึงแล้ว</span> = มีรับเข้าในรายงานรับอะไหล่ตั้งแต่วันที่สั่ง (รวมรับเป็นอะไหล่ทดแทน)</div>
-<table><thead><tr><th>#</th><th>เวลา</th><th>ระบบ</th><th>เลขที่ใบมัดจำ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th><th>สถานะ</th><th>สถานะอะไหล่ทดแทน</th></tr></thead>
+<table><thead><tr><th>#</th><th>ระบบ</th><th>เลขที่ใบมัดจำ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th><th>สถานะ</th><th>สถานะเบิกอะไหล่</th><th>สถานะอะไหล่ทดแทน</th></tr></thead>
 <tbody>${body || `<tr><td colspan="9" class="c">ไม่มีรายการ</td></tr>`}</tbody></table>
 </body></html>`);
     w.document.close();
@@ -534,6 +576,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
         <span><span style={{ color: "#dc2626", fontWeight: 800 }}>✗</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS)</span>
         <span><span style={{ color: "#059669", fontWeight: 800 }}>✓</span> <span style={{ color: "#ea580c", fontWeight: 700 }}>ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์</span>
         <span><span style={{ color: "#0d9488", fontWeight: 700 }}>📦 ถึงแล้ว</span> = มีรับเข้าในรายงานรับอะไหล่ตั้งแต่วันที่สั่ง (จับคู่รหัส+วันที่ · รวมกรณีรับเป็นอะไหล่ทดแทน)</span>
+        <span><span style={{ color: "#059669", fontWeight: 700 }}>✓ เบิกแล้ว</span> = ใบสั่งซื้อผูกเลข Job และรหัสนี้ถูกเบิกเข้างานซ่อมแล้ว (ตารางเบิกอะไหล่งานซ่อม) · <span style={{ color: "#d97706", fontWeight: 700 }}>ยังไม่เบิก</span> = ผูก Job แล้วแต่ยังไม่มีการเบิก</span>
         <span>ช่องสถานะอะไหล่ทดแทน = รายการในใบรับสั่งซื้อที่ไม่ตรงกับรหัสที่สั่ง — ติ๊กปุ่มหน้ารหัส ✗ แล้วกด "จับคู่" เพื่อเลือกอะไหล่ทดแทนเอง</span>
       </div>
 
@@ -542,13 +585,13 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
           <thead>
             <tr style={{ background: "#072d6b", color: "#fff" }}>
               <th style={th}>#</th>
-              <th style={th}>เวลา</th>
               <th style={th}>ระบบ</th>
               <th style={th}>เลขที่ใบมัดจำ</th>
               <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
               <th style={th}>รุ่นรถ</th>
               <th style={th}>รายการอะไหล่</th>
               <th style={th}>สถานะ</th>
+              <th style={th}>สถานะเบิกอะไหล่</th>
               <th style={th}>สถานะอะไหล่ทดแทน</th>
             </tr>
           </thead>
@@ -562,13 +605,20 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
               return (
                 <tr key={`${r.system}-${r.order_id}`} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                   <td style={{ ...td, textAlign: "center" }}>{i + 1}</td>
-                  <td style={{ ...td, textAlign: "center" }}>{thaiTimeOf(r.created_at)}</td>
                   <td style={td}>
                     <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: "#fff", background: sys?.color || "#6b7280" }}>
                       {sys?.label || r.system}
                     </span>
                   </td>
-                  <td style={td}>{r.deposit_doc_no || r.doc_no || "-"}</td>
+                  <td style={td}>
+                    {r.deposit_doc_no || r.doc_no || "-"}
+                    {r.status === "ปิดงานซ่อม" && (
+                      <div title="งานซ่อมของใบนี้ปิดแล้ว (ตรวจพบปิดงานในใบแจ้งซ่อม NID)"
+                        style={{ display: "inline-block", marginTop: 3, padding: "1px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, color: "#fff", background: "#059669" }}>
+                        ปิด Job
+                      </div>
+                    )}
+                  </td>
                   <td style={td}>
                     {r.vendor_po_no || "-"}
                     {extraPoNos(r).map(po => (
@@ -661,6 +711,25 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                               ) : null;
                             })()}
                           </span>
+                        </div>
+                      );
+                    })}
+                  </td>
+                  {/* คอลัมน์เบิกเข้า Job — บรรทัดตรงกับรายการอะไหล่ (สูง 32px เท่ากัน) */}
+                  <td style={{ ...td, textAlign: "left", padding: 0 }}>
+                    {(r.items || []).length === 0 ? <div style={{ padding: "6px 10px" }}>-</div> : (r.items || []).map((it, k) => {
+                      const dp = dispenseOf(r, it);
+                      return (
+                        <div key={k} style={{ padding: "0 10px", height: 32, display: "flex", alignItems: "center", fontSize: 12, borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
+                          {dp === null ? (
+                            <span title="ใบสั่งซื้อยังไม่ผูกเลข Job" style={{ color: "#9ca3af" }}>-</span>
+                          ) : dp.hit ? (
+                            <span title={`เบิกเข้างาน ${dp.job} แล้ว`} style={{ color: "#059669", fontWeight: 700, whiteSpace: "nowrap" }}>
+                              ✓ เบิกแล้ว {fmtShortDate(dp.hit.date)}
+                            </span>
+                          ) : (
+                            <span title={`ผูกเลข Job ${dp.job} แล้ว แต่ยังไม่พบการเบิกรหัสนี้ในงานซ่อม`} style={{ color: "#d97706", fontWeight: 700 }}>ยังไม่เบิก</span>
+                          )}
                         </div>
                       );
                     })}

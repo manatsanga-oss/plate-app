@@ -801,10 +801,23 @@ function OverpaidPanel({ currentPlan, setMessage, currentUser }) {
     const today = new Date().toISOString().slice(0, 10);
     const d = window.prompt(`ได้รับเงินคืนจาก COSMOS แล้ว?\nใบจ่าย ${g.paid_doc_no} · ยอด ${fmt(g.overpaid_amount)} บาท\n\nกรอกวันที่ได้รับเงินคืน (YYYY-MM-DD):`, today);
     if (!d) return;
+    // เลือกบัญชีที่เงินคืนเข้า (เว้นว่าง = บัญชีเดิมที่จ่ายออก) — มีผลกับรายงานเคลื่อนไหวบัญชี
+    let refundAccId = 0;
+    try {
+      const ra = await fetch(ACC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }) });
+      const accs = await ra.json();
+      const list = (Array.isArray(accs) ? accs : []).filter(a => a.account_id && a.bank_name && a.bank_name !== "-");
+      if (list.length) {
+        const menu = list.map((a, i) => `${i + 1}. ${a.bank_name} ${a.account_no || ""} ${a.account_name || ""}`).join("\n");
+        const pick = window.prompt(`เงินคืนเข้าบัญชีไหน? พิมพ์หมายเลข\n(เว้นว่าง/ยกเลิก = บัญชีเดิมที่จ่ายออก)\n\n${menu}`, "");
+        const idx = parseInt(pick);
+        if (Number.isFinite(idx) && idx >= 1 && idx <= list.length) refundAccId = Number(list[idx - 1].account_id);
+      }
+    } catch { /* เลือกไม่ได้ → ใช้บัญชีเดิม */ }
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "refund_cosmos_overpaid", paid_doc_no: g.paid_doc_no, refunded_date: d, refund_note: `บันทึกโดย ${currentUser?.username || currentUser?.name || "system"}` }),
+        body: JSON.stringify({ action: "refund_cosmos_overpaid", paid_doc_no: g.paid_doc_no, refunded_date: d, refund_account_id: refundAccId || undefined, refund_note: `บันทึกโดย ${currentUser?.username || currentUser?.name || "system"}` }),
       });
       const data = await res.json().catch(() => ({}));
       setMessage(`✅ บันทึกรับเงินคืน ${g.paid_doc_no} (${fmt(g.overpaid_amount)} บาท) แล้ว`);
