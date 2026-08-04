@@ -66,7 +66,6 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [appointmentDate, setAppointmentDate] = useState("");
   const [lineByPhone, setLineByPhone] = useState({}); // เบอร์ 9 หลักท้าย → true = ลูกค้ามี LINE ผูกในระบบ
   const [notifyingId, setNotifyingId] = useState(null); // order_id ที่กำลังส่ง LINE แจ้งลูกค้า
-  const [notifiedIds, setNotifiedIds] = useState(new Set()); // ใบที่ส่งแจ้งลูกค้าแล้ว (ในรอบนี้)
   const [savingJob, setSavingJob] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterParking, setFilterParking] = useState("all");
@@ -527,12 +526,16 @@ export default function SparePartsOrderPage({ currentUser }) {
     setSavingJob(false);
   }
 
-  // ส่ง LINE แจ้งลูกค้า (เฉพาะใบสถานะเปิดงาน + ลูกค้ามี LINE ผูก)
-  // รถไม่จอดร้าน → เชิญนำรถเข้ามารับบริการ | รถจอดร้าน → รถซ่อมเสร็จแล้ว เชิญมารับรถ
+  // ส่ง LINE แจ้งลูกค้า (ลูกค้าต้องมี LINE ผูก)
+  // PDS เปิดงาน: รถไม่จอดร้าน → เชิญนำรถเข้ามารับบริการ | รถจอดร้าน → รถซ่อมเสร็จแล้ว เชิญมารับรถ
+  // PDO มาครบ: อะไหล่ที่สั่งซื้อมาครบแล้ว → เชิญเลือกวันเข้ามารับสินค้า
   async function handleNotifyCustomer(o) {
     const p9 = phoneLast9(o.customer_phone);
-    const done = o.parking_status === "จอดร้าน";
-    const confirmText = done
+    const isPDO = (o.deposit_doc_no || "").startsWith("PDO");
+    const done = !isPDO && o.parking_status === "จอดร้าน";
+    const confirmText = isPDO
+      ? `ส่ง LINE แจ้ง "อะไหล่ที่สั่งซื้อมาครบแล้ว เชิญเลือกวันมารับสินค้า" ถึงคุณ ${o.customer_name || "ลูกค้า"} ?`
+      : done
       ? `ส่ง LINE แจ้ง "รถซ่อมเสร็จแล้ว เชิญมารับรถ" ถึงคุณ ${o.customer_name || "ลูกค้า"} ?`
       : `ส่ง LINE แจ้ง "เชิญนำรถเข้ามารับบริการ" ถึงคุณ ${o.customer_name || "ลูกค้า"} ?`;
     if (!window.confirm(confirmText)) return;
@@ -551,7 +554,7 @@ export default function SparePartsOrderPage({ currentUser }) {
         body: JSON.stringify({
           action: "send_spare_notify",
           line_user_id: hit.line_user_id,
-          notify_type: done ? "done" : "bring_in",
+          notify_type: isPDO ? "parts_ready" : done ? "done" : "bring_in",
           order_id: o.order_id,
           customer_name: o.customer_name || "",
           model_name: o.model_name || "",
@@ -563,8 +566,10 @@ export default function SparePartsOrderPage({ currentUser }) {
         }),
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
-      setNotifiedIds(prev => new Set(prev).add(o.order_id));
-      setMessage(`📲 ส่ง LINE แจ้ง${done ? "รถซ่อมเสร็จ" : "นำรถเข้ารับบริการ"}ให้คุณ ${o.customer_name || "ลูกค้า"} แล้ว`);
+      // นับจำนวนครั้งที่แจ้ง เก็บลง DB (notify_count) — โชว์เลขบนปุ่ม รู้ว่าเคยตามลูกค้าไปแล้วกี่รอบ
+      try { await api("increment_spare_notify", { order_id: o.order_id }); } catch { /* นับไม่ได้ไม่เป็นไร — LINE ส่งแล้ว */ }
+      setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, notify_count: Number(x.notify_count || 0) + 1 } : x));
+      setMessage(`📲 ส่ง LINE แจ้ง${isPDO ? "อะไหล่มาครบ เชิญมารับสินค้า" : done ? "รถซ่อมเสร็จ" : "นำรถเข้ารับบริการ"}ให้คุณ ${o.customer_name || "ลูกค้า"} แล้ว`);
     } catch (e) {
       setMessage("❌ ส่ง LINE ไม่สำเร็จ: " + (e.message || e));
     }
@@ -669,6 +674,30 @@ export default function SparePartsOrderPage({ currentUser }) {
       }
       setShowDetail({ ...order, status: finalStatus, items: itemsWithSubs, dcsStatus: null, boItems, alreadyApproved });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
+  }
+
+  // ปุ่ม "แจ้งลูกค้า" ทาง LINE (ใช้ทั้งใบ PDS เปิดงาน + ใบ PDO มาครบ) — ขึ้นเฉพาะลูกค้ามี LINE ผูก
+  function renderNotifyButton(o) {
+    if (!lineByPhone[phoneLast9(o.customer_phone)]) return null;
+    const isPDO = (o.deposit_doc_no || "").startsWith("PDO");
+    const cnt = Number(o.notify_count || 0); // จำนวนครั้งที่เคยกดแจ้งลูกค้า (เก็บใน DB)
+    const tip = isPDO
+      ? "ส่ง LINE แจ้งอะไหล่ที่สั่งซื้อมาครบแล้ว เชิญเลือกวันมารับสินค้า"
+      : o.parking_status === "จอดร้าน" ? "ส่ง LINE แจ้งรถซ่อมเสร็จ เชิญมารับรถ" : "ส่ง LINE เชิญนำรถเข้ามารับบริการ";
+    return (
+      <button onClick={() => handleNotifyCustomer(o)} disabled={notifyingId === o.order_id}
+        title={tip + (cnt > 0 ? ` — แจ้งไปแล้ว ${cnt} ครั้ง` : "")}
+        style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: notifyingId === o.order_id ? "wait" : "pointer", marginLeft: 4, opacity: notifyingId === o.order_id ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 5 }}>
+        {notifyingId === o.order_id ? "กำลังส่ง..." : (
+          <>
+            แจ้งลูกค้า
+            {cnt > 0 && (
+              <span style={{ background: "#fff", color: "#059669", borderRadius: 9, minWidth: 16, height: 16, lineHeight: "16px", fontSize: 10, fontWeight: 800, textAlign: "center", padding: "0 3px" }}>{cnt}</span>
+            )}
+          </>
+        )}
+      </button>
+    );
   }
 
   const filtered = orders.filter(o => {
@@ -1044,14 +1073,16 @@ export default function SparePartsOrderPage({ currentUser }) {
                   </span>
                 )}</td>
                 <td style={td}>{(() => {
+                  // ใบมัดจำสั่งซื้อ (PDO-) ไม่มีงานซ่อม — สถานะปิดใช้คำว่า "ปิดการขาย" แทน "ปิดงานซ่อม/ปิดซ่อม"
+                  const isPDO = (o.deposit_doc_no || "").startsWith("PDO");
                   const hasDep = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
-                  if (!hasDep) return <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#dc2626", color: "#fff", fontWeight: 600 }}>ปิดซ่อม</span>;
+                  if (!hasDep) return <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#dc2626", color: "#fff", fontWeight: 600 }}>{isPDO ? "ปิดการขาย" : "ปิดซ่อม"}</span>;
                   const s = o.status;
                   return <span style={{
                     padding: "2px 8px", borderRadius: 6, fontSize: 11,
                     background: s === "ปิดงานซ่อม" ? "#dc2626" : s === "อะไหล่ค้างส่ง" ? "#f97316" : s === "เปิดงาน" ? "#ec4899" : s === "มาครบ" ? "#dbeafe" : s === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
                     color: s === "ปิดงานซ่อม" ? "#fff" : s === "อะไหล่ค้างส่ง" ? "#fff" : s === "เปิดงาน" ? "#fff" : s === "มาครบ" ? "#1e40af" : s === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
-                  }}>{s}</span>;
+                  }}>{s === "ปิดงานซ่อม" && isPDO ? "ปิดการขาย" : s}</span>;
                 })()}</td>
                 <td style={td}>
                   {/* ยังไม่มีเลข: ทุก user กดระบุได้ (ปุ่ม "สั่ง" หายไปเมื่อสถานะเปลี่ยนจากรอดำเนินการ) · มีเลขแล้ว: แก้ได้เฉพาะ admin */}
@@ -1090,24 +1121,20 @@ export default function SparePartsOrderPage({ currentUser }) {
                           </>
                         )}
                         {/* flow 2 ขั้น: เปิด Job (กรอกเลขใบงาน → สถานะเปิดงาน) ก่อน แล้วค่อยนัดหมายได้ */}
-                        {["สั่งซื้อแล้ว", "มาครบ"].includes(o.status) && (
+                        {/* ใบมัดจำสั่งซื้อ (PDO-) = ลูกค้าซื้ออะไหล่ ไม่มีงานซ่อม → ไม่มีปุ่มเปิด Job */}
+                        {["สั่งซื้อแล้ว", "มาครบ"].includes(o.status) && !(o.deposit_doc_no || "").startsWith("PDO") && (
                           <button onClick={() => openJobModal(o, "job")}
                             style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>เปิด Job</button>
                         )}
+                        {/* ใบ PDO (มัดจำสั่งซื้อ) อะไหล่มาครบ → แจ้งลูกค้าเลือกวันมารับสินค้าทาง LINE */}
+                        {o.status === "มาครบ" && (o.deposit_doc_no || "").startsWith("PDO") && renderNotifyButton(o)}
                         {o.status === "เปิดงาน" && (
                           <>
                             <button onClick={() => openJobModal(o, "job")}
                               style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข Job</button>
                             <button onClick={() => openJobModal(o, "appt")}
                               style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>{o.appointment_date ? "แก้ไขนัด" : "นัดหมาย"}</button>
-                            {/* แจ้งลูกค้าทาง LINE: จอดร้าน = รถซ่อมเสร็จมารับรถ | ไม่จอดร้าน = เชิญนำรถเข้ารับบริการ */}
-                            {lineByPhone[phoneLast9(o.customer_phone)] && (
-                              <button onClick={() => handleNotifyCustomer(o)} disabled={notifyingId === o.order_id}
-                                title={o.parking_status === "จอดร้าน" ? "ส่ง LINE แจ้งรถซ่อมเสร็จ เชิญมารับรถ" : "ส่ง LINE เชิญนำรถเข้ามารับบริการ"}
-                                style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: notifyingId === o.order_id ? "wait" : "pointer", marginLeft: 4, opacity: notifyingId === o.order_id ? 0.6 : 1 }}>
-                                {notifyingId === o.order_id ? "กำลังส่ง..." : notifiedIds.has(o.order_id) ? "แจ้งแล้ว ✓" : "แจ้งลูกค้า"}
-                              </button>
-                            )}
+                            {renderNotifyButton(o)}
                           </>
                         )}
                       </>

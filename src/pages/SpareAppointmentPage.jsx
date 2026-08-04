@@ -48,8 +48,8 @@ export default function SpareAppointmentPage() {
         setApptDate(String(o.appointment_date).slice(0, 10));
         setSavedDate(o.appointment_date);
       }
-      // นัดหมายได้เฉพาะใบที่ยังเปิดงานอยู่ (ปิดงานซ่อมแล้ว = รถเสร็จแล้ว)
-      if (o.status !== "เปิดงาน") { setPhase("closed"); return; }
+      // นัดหมายได้เฉพาะใบที่ยังไม่ปิดงาน: PDS เปิดงาน (นัดเข้ารับบริการ) / PDO มาครบ (นัดรับสินค้า)
+      if (!["เปิดงาน", "มาครบ"].includes(o.status)) { setPhase("closed"); return; }
       setPhase("ok");
     } catch (e) {
       console.warn("load spare order failed:", e);
@@ -79,18 +79,20 @@ export default function SpareAppointmentPage() {
 
   const o = order;
   const carLine = o ? [o.model_name, o.license_plate].filter(Boolean).join(" / ") : "";
+  // ใบมัดจำสั่งซื้อ (PDO-) = ลูกค้าซื้ออะไหล่ ไม่มีงานซ่อม → ใช้คำว่า "มารับสินค้า" แทน "นำรถเข้ารับบริการ"
+  const isPDO = (o?.deposit_doc_no || "").startsWith("PDO");
 
   return (
     <div style={S.page}>
       <div style={S.card}>
         <div style={S.header}>
-          <div style={{ fontSize: 17, fontWeight: 800 }}>🔧 นัดหมายนำรถเข้ารับบริการ</div>
-          <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>อะไหล่สำหรับรถของคุณมาถึงเรียบร้อยแล้ว</div>
+          <div style={{ fontSize: 17, fontWeight: 800 }}>{isPDO ? "📦 นัดหมายรับสินค้า" : "🔧 นัดหมายนำรถเข้ารับบริการ"}</div>
+          <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>{isPDO ? "อะไหล่ที่คุณสั่งซื้อมาครบเรียบร้อยแล้ว" : "อะไหล่สำหรับรถของคุณมาถึงเรียบร้อยแล้ว"}</div>
         </div>
 
         {phase === "loading" && <div style={S.center}>กำลังโหลดข้อมูล…</div>}
         {phase === "notfound" && <div style={S.center}>❌ ไม่พบข้อมูลใบงาน<br /><span style={{ fontSize: 13, color: "#888" }}>กรุณาติดต่อพนักงานสาขา</span></div>}
-        {phase === "closed" && <div style={S.center}>✅ งานซ่อมนี้ดำเนินการเรียบร้อยแล้ว<br /><span style={{ fontSize: 13, color: "#888" }}>สอบถามเพิ่มเติมกรุณาติดต่อสาขา 🙏</span></div>}
+        {phase === "closed" && <div style={S.center}>✅ {isPDO ? "รายการสั่งซื้อนี้ดำเนินการเรียบร้อยแล้ว" : "งานซ่อมนี้ดำเนินการเรียบร้อยแล้ว"}<br /><span style={{ fontSize: 13, color: "#888" }}>สอบถามเพิ่มเติมกรุณาติดต่อสาขา 🙏</span></div>}
         {phase === "error" && (
           <div style={S.center}>
             ⚠️ โหลดข้อมูลไม่สำเร็จ
@@ -100,10 +102,10 @@ export default function SpareAppointmentPage() {
 
         {(phase === "ok" || phase === "saving") && o && (
           <div style={{ padding: 16 }}>
-            <div style={{ ...S.statusBox, background: "#fff7ed", borderColor: "#f59e0b" }}>
-              <div style={{ fontSize: 34 }}>🛠️</div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "#b54708" }}>อะไหล่มาถึงแล้ว!</div>
-              <div style={{ fontSize: 13, color: "#475467", marginTop: 4 }}>กรุณาเลือกวันที่คุณสะดวกนำรถเข้ามารับบริการ</div>
+            <div style={{ ...S.statusBox, background: isPDO ? "#eff6ff" : "#fff7ed", borderColor: isPDO ? "#0369a1" : "#f59e0b" }}>
+              <div style={{ fontSize: 34 }}>{isPDO ? "📦" : "🛠️"}</div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: isPDO ? "#0369a1" : "#b54708" }}>{isPDO ? "อะไหล่มาครบแล้ว!" : "อะไหล่มาถึงแล้ว!"}</div>
+              <div style={{ fontSize: 13, color: "#475467", marginTop: 4 }}>{isPDO ? "กรุณาเลือกวันที่คุณสะดวกเข้ามารับสินค้า" : "กรุณาเลือกวันที่คุณสะดวกนำรถเข้ามารับบริการ"}</div>
             </div>
 
             <div style={S.detail}>
@@ -115,7 +117,7 @@ export default function SpareAppointmentPage() {
             </div>
 
             <div style={{ marginTop: 16 }}>
-              <label style={S.label}>📅 วันที่สะดวกนำรถเข้ารับบริการ</label>
+              <label style={S.label}>{isPDO ? "📅 วันที่สะดวกเข้ามารับสินค้า" : "📅 วันที่สะดวกนำรถเข้ารับบริการ"}</label>
               <input type="date" value={apptDate} min={tomorrowISO()}
                 onChange={(e) => setApptDate(e.target.value)} style={S.input} />
             </div>
@@ -132,7 +134,7 @@ export default function SpareAppointmentPage() {
               <div style={{ fontSize: 34 }}>✅</div>
               <div style={{ fontSize: 18, fontWeight: 800, color: "#067647" }}>ยืนยันวันนัดหมายเรียบร้อย</div>
               <div style={{ fontSize: 15, color: "#067647", marginTop: 6, fontWeight: 700 }}>📅 {thaiDate(savedDate)}</div>
-              <div style={{ fontSize: 13, color: "#475467", marginTop: 6 }}>ทางร้านได้รับข้อมูลแล้ว แล้วพบกันที่ศูนย์บริการนะครับ 🙏</div>
+              <div style={{ fontSize: 13, color: "#475467", marginTop: 6 }}>{isPDO ? "ทางร้านได้รับข้อมูลแล้ว แล้วพบกันที่ร้านนะครับ 🙏" : "ทางร้านได้รับข้อมูลแล้ว แล้วพบกันที่ศูนย์บริการนะครับ 🙏"}</div>
             </div>
             <div style={{ textAlign: "center" }}>
               <button onClick={() => setPhase("ok")} style={S.btnGhost}>✏️ แก้ไขวันนัด</button>

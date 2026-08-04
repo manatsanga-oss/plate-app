@@ -135,6 +135,41 @@ export default function BillingPage({ currentUser }) {
   }
   useEffect(() => { fetchReceiptGroupedPayments(); }, []);
 
+  // แก้ยอดรายการค่าใช้จ่าย "เฉพาะคันนี้" — เก็บ override ใน registration_submissions.expense_overrides
+  // ทับยอดที่คำนวณจากกฎกลาง (คันอื่นไม่กระทบ) · ใส่ค่าว่าง = ลบ override กลับไปใช้ยอดตามกฎ
+  async function editExpenseAmount(row, it) {
+    const input = window.prompt(
+      `แก้ยอด "${it.expense_name}" เฉพาะคัน ${row.run_code}\n(คันอื่นยังใช้ยอดตามกฎเดิม · ใส่ค่าว่างเพื่อกลับไปใช้ยอดตามกฎ)`,
+      String(Number(it.amount) || 0)
+    );
+    if (input === null) return;
+    const val = input.trim();
+    if (val !== "" && (!isFinite(Number(val)) || Number(val) < 0)) { setMessage("❌ ยอดไม่ถูกต้อง"); return; }
+    try {
+      const res = await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "save_expense_override",
+          submission_id: row.submission_id,
+          expense_name: it.expense_name,
+          amount: val === "" ? null : Number(val),
+        }),
+      });
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!data?.submission_id) throw new Error("n8n ยังไม่ได้ re-import Registrations API (18) เวอร์ชันล่าสุด — บันทึกยังไม่ติด");
+      // โหลดรายการใหม่ (ยอด/subtotal/ฐาน WHT คำนวณจาก server) แล้วอัปเดต modal ที่เปิดอยู่
+      const listData = await post({ action: "get_billing_data", brand, category, only_unbilled: !showBilled });
+      const list = Array.isArray(listData) ? listData : [];
+      setRows(list);
+      const fresh = list.find(r => r.submission_id === row.submission_id);
+      if (fresh) setDetailRow(fresh);
+      setMessage(val === "" ? `✅ ลบยอดที่แก้เอง — ${it.expense_name} กลับไปใช้ยอดตามกฎ` : `✅ แก้ยอด ${it.expense_name} เป็น ${Number(val).toLocaleString()} บาท (เฉพาะ ${row.run_code})`);
+    } catch (e) {
+      setMessage("❌ แก้ยอดไม่สำเร็จ: " + String(e.message || e).slice(0, 140));
+    }
+  }
+
   async function fetchReceiptGroupedPayments() {
     try {
       const data = await post({ action: "list_receipt_billing_grouped" });
@@ -1223,7 +1258,18 @@ export default function BillingPage({ currentUser }) {
                         <tr key={i}>
                           <td style={{ padding: "6px 10px", border: "1px solid #e5e7eb" }}>{it.expense_name}</td>
                           <td style={{ padding: "6px 10px", textAlign: "center", border: "1px solid #e5e7eb", color: groupColor, fontSize: 11, fontWeight: 600 }}>{groupLabel}</td>
-                          <td style={{ padding: "6px 10px", textAlign: "right", border: "1px solid #e5e7eb", fontWeight: 600 }}>{Number(it.amount).toLocaleString()}</td>
+                          <td style={{ padding: "6px 10px", textAlign: "right", border: "1px solid #e5e7eb", fontWeight: 600, whiteSpace: "nowrap" }}>
+                            {it.overridden && (
+                              <span title="ยอดถูกแก้เฉพาะคันนี้ (ไม่ใช้ยอดตามกฎกลาง)" style={{ color: "#d97706", marginRight: 4, fontWeight: 800 }}>✱</span>
+                            )}
+                            {Number(it.amount).toLocaleString()}
+                            {/* แก้ยอดเฉพาะคันได้จนกว่าจะบันทึกจ่ายเงินแล้ว */}
+                            {!detailRow.paid_at && (
+                              <button onClick={() => editExpenseAmount(detailRow, it)}
+                                title="แก้ยอดรายการนี้เฉพาะคันนี้"
+                                style={{ marginLeft: 6, padding: "1px 6px", background: "transparent", border: "1px solid #d1d5db", borderRadius: 4, cursor: "pointer", fontSize: 11 }}>✏️</button>
+                            )}
+                          </td>
                         </tr>
                       );
                     });
