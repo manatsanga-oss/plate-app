@@ -370,13 +370,23 @@ ${transferSummary.length > 0 ? `
         body: JSON.stringify({ action: "list_unsubmitted_receipts", keyword: kw || "" }),
       });
       const data = await res.json();
-      setPickerReceipts(Array.isArray(data) ? data : []);
+      // กันแถวว่างจาก alwaysOutputData ตอนไม่พบผลลัพธ์ (มาเป็น [{receipt_no:null,...}])
+      setPickerReceipts((Array.isArray(data) ? data : []).filter(x => x && x.receipt_no));
     } catch { setPickerReceipts([]); }
     setPickerLoading(false);
   }
 
   async function saveRefund(receipt) {
     if (!pickerExpense) return;
+    // ใบที่ส่งงานทะเบียนแล้ว = คืนเงินกรณีเก็บเกิน → ยอดคืนห้ามเกินยอดที่วางบิลงานทะเบียนไปแล้วของใบนั้น
+    if (receipt.submitted_batch) {
+      const amt = Number(pickerAmount) || 0;
+      const billed = Number(receipt.billed_amount) || 0;
+      if (amt > billed) {
+        setMessage(`❌ ยอดคืน ฿${fmtNum(amt)} เกินยอดที่วางบิลงานทะเบียนไปแล้วของใบ ${receipt.receipt_no} (วางบิลแล้ว ฿${fmtNum(billed)})`);
+        return;
+      }
+    }
     setSavingRefund(true); setMessage("");
     try {
       const res = await fetch(REFUND_API_URL, {
@@ -613,7 +623,7 @@ ${transferSummary.length > 0 ? `
                 <button onClick={() => fetchUnsubmittedReceipts(pickerSearch)}
                   style={{ padding: "7px 16px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>🔍 ค้นหา</button>
               </div>
-              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>* แสดงเฉพาะใบที่ <strong>ยังไม่ได้ส่งงานทะเบียน</strong> และยังไม่ถูกจับคู่คืนเงิน</div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6 }}>* ไม่ใส่คำค้น = แสดงเฉพาะใบที่ <strong>ยังไม่ได้ส่งงานทะเบียน</strong> · พิมพ์ค้นหา = รวมใบที่ส่งงาน/วางบิลแล้วด้วย (ป้ายส้ม — เคสคืนเงินเก็บเกิน ย้อนหลังไม่เกิน 3 เดือน, ยอดคืนไม่เกินยอดที่วางบิลแล้ว) · ใบที่จับคู่คืนเงินแล้วไม่แสดง</div>
 
               {pickerLoading ? (
                 <div style={{ textAlign: "center", padding: 30, color: "#6b7280" }}>กำลังโหลด...</div>
@@ -636,7 +646,14 @@ ${transferSummary.length > 0 ? `
                     <tbody>
                       {pickerReceipts.map(rc => (
                         <tr key={rc.receipt_no} style={{ borderTop: "1px solid #e5e7eb" }}>
-                          <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{rc.receipt_no}</td>
+                          <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>
+                            <div>{rc.receipt_no}</div>
+                            {rc.submitted_batch && (
+                              <div style={{ fontSize: 10, color: "#b45309", fontWeight: 700, fontFamily: "sans-serif" }} title={`ใบนี้ส่งงานทะเบียนแล้ว (ชุด ${rc.submitted_batch}) — เลือกจับคู่ได้กรณีคืนเงินส่วนที่เก็บเกิน ยอดคืนต้องไม่เกินยอดที่วางบิลไปแล้ว`}>
+                                📤 ส่งงานแล้ว · {rc.submitted_batch} · วางบิลแล้ว ฿{fmtNum(rc.billed_amount)}
+                              </div>
+                            )}
+                          </td>
                           <td style={td}>{fmtDate(rc.receive_date)}</td>
                           <td style={td}>{rc.customer_name || "-"}</td>
                           <td style={td}>{rc.plate_number || "-"}</td>

@@ -79,6 +79,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [estimateNo, setEstimateNo] = useState("");
   const [savingRepair, setSavingRepair] = useState(false);
   const [partSubstitutes, setPartSubstitutes] = useState([]);
+  const [pdoSoldMap, setPdoSoldMap] = useState({}); // order_id → ผลเช็คบิลขายปลีก DCS (honda_part_sales RTSL) ของใบ PDO
   const [vehInfo, setVehInfo] = useState(null); // รุ่น/แบบ/type ของรถลูกค้า — ค้นจากเลขตัวถังในใบมัดจำ (ประวัติขาย moto_sales)
 
   useEffect(() => { loadAll(); }, []);
@@ -167,6 +168,64 @@ export default function SparePartsOrderPage({ currentUser }) {
     }
   }
 
+  // ปิดการขายอัตโนมัติ (ใบ PDO): เช็คบิลขายปลีก DCS (honda_part_sales เลข RTSL ตั้งแต่วันเปิดใบ) ทุกใบที่ยังไม่ปิด
+  // อะไหล่ขายครบทุกรายการ + ชื่อลูกค้าบนบิลตรงกับใบสั่งซื้อ → ปิดการขายให้เอง / ชื่อไม่ตรงโชว์ป้ายให้กดปิดเอง
+  // (ข้อมูลมาจาก upload รายงานขายอะไหล่ SPR07030 — สถานะจะขยับหลัง upload รอบล่าสุด)
+  const normCustName = (s) => String(s || "").toUpperCase()
+    .replace(/^[0-9]+\s*-\s*/, "")                       // ตัดรหัสลูกค้านำหน้า เช่น "23 - "
+    .replace(/นางสาว|นาย|นาง|ด\.ช\.|ด\.ญ\.|MRS\.?|MR\.?|MISS|MS\.?/g, "")
+    .replace(/[^ก-๙A-Z0-9]/g, "");
+  async function checkPdoSales() {
+    try {
+      const strip = (s) => (s || "").replace(/-/g, "").toUpperCase().trim();
+      const rows = norm(await api("check_pdo_sales")).filter(r => r && r.order_id);
+      const map = {};
+      rows.forEach(r => {
+        const m = map[r.order_id] || (map[r.order_id] = { total: 0, sold: 0, lastDate: null, docs: [], customers: [], items: {}, orderCustomer: r.order_customer, status: r.status });
+        m.total += 1;
+        if (!r.sale_doc_no) return;
+        m.sold += 1;
+        m.items[strip(r.part_code)] = { doc: r.sale_doc_no, date: r.sale_date, customer: r.sale_customer };
+        if (!m.docs.includes(r.sale_doc_no)) m.docs.push(r.sale_doc_no);
+        if (r.sale_customer && !m.customers.includes(r.sale_customer)) m.customers.push(r.sale_customer);
+        if (!m.lastDate || String(r.sale_date) > String(m.lastDate)) m.lastDate = r.sale_date;
+      });
+      setPdoSoldMap(map);
+      // ปิดอัตโนมัติเฉพาะใบที่ขายครบ + ชื่อลูกค้าตรง (กันรหัสเดียวกันที่ขายให้คนอื่น)
+      const closedIds = [];
+      for (const m of Object.values(map)) {
+        if (m.status === "ปิดงานซ่อม") continue; // ปิดไปแล้ว (query รวมใบปิด 90 วันไว้โชว์เลขบิล)
+        if (!m.total || m.sold < m.total) continue;
+        const oc = normCustName(m.orderCustomer);
+        const match = oc && m.customers.some(c => {
+          const sc = normCustName(c);
+          return sc && (sc.includes(oc) || oc.includes(sc));
+        });
+        if (!match) continue;
+        const row = rows.find(r => map[r.order_id] === m);
+        try {
+          await api("update_order_status", { order_id: row.order_id, status: "ปิดงานซ่อม" });
+          closedIds.push(row.order_id);
+        } catch { /* ปิดไม่สำเร็จ รอบหน้าเช็คใหม่ */ }
+      }
+      if (closedIds.length) {
+        setOrders(prev => prev.map(o => closedIds.includes(o.order_id) ? { ...o, status: "ปิดงานซ่อม" } : o));
+        setMessage(`🛒 ปิดการขายอัตโนมัติ ${closedIds.length} ใบ (พบบิลขายปลีก DCS ครบทุกรายการ ชื่อลูกค้าตรงกัน)`);
+      }
+    } catch { /* เช็คไม่ได้ก็ข้าม รอบหน้าเช็คใหม่ */ }
+  }
+
+  // กดป้าย "ขายแล้ว" ปิดการขายเอง (กรณีขายครบแต่ชื่อลูกค้าบนบิลไม่ตรง ระบบไม่ปิดให้อัตโนมัติ)
+  async function handleManualCloseSale(o) {
+    const ps = pdoSoldMap[o.order_id];
+    if (!window.confirm(`ปิดการขายใบ ${o.order_no || o.deposit_doc_no}?\nบิลขายปลีก DCS: ${(ps?.docs || []).join(", ")}`)) return;
+    try {
+      await api("update_order_status", { order_id: o.order_id, status: "ปิดงานซ่อม" });
+      setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, status: "ปิดงานซ่อม" } : x));
+      setMessage("🛒 ปิดการขายแล้ว");
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+  }
+
   async function loadAll() {
     setLoading(true);
     // แยก request แต่ละตัว ถ้าตัวใดพัง ตัวอื่นยังทำงานได้
@@ -177,6 +236,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       // เช็ค DCS/ค้างส่งอัตโนมัติย้ายไปหน้า "รายการสั่งอะไหล่รายวัน" ที่เดียว (2026-07-23)
       // หน้านี้เช็คเฉพาะตอนเปิดรายละเอียดใบ / กดปุ่ม "ตรวจสอบ DCS" ในป๊อปอัพ
       autoCloseFinishedJobs(list); // ไม่ await — เช็คเบื้องหลัง เสร็จแล้วค่อยอัปเดตสถานะบนจอ
+      checkPdoSales(); // ไม่ await — เช็คบิลขายปลีก DCS ของใบ PDO เบื้องหลัง (ป้าย 🛒 ขายแล้ว + ปิดการขายอัตโนมัติ)
     } catch {}
     // เงินมัดจำ: ดึงจากระบบมัดจำอะไหล่ (part_deposits — บันทึกเองหน้า "ระบบมัดจำอะไหล่") แทน upload NID เดิม (2026-07-21)
     try {
@@ -1076,13 +1136,29 @@ export default function SparePartsOrderPage({ currentUser }) {
                   // ใบมัดจำสั่งซื้อ (PDO-) ไม่มีงานซ่อม — สถานะปิดใช้คำว่า "ปิดการขาย" แทน "ปิดงานซ่อม/ปิดซ่อม"
                   const isPDO = (o.deposit_doc_no || "").startsWith("PDO");
                   const hasDep = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
-                  if (!hasDep) return <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#dc2626", color: "#fff", fontWeight: 600 }}>{isPDO ? "ปิดการขาย" : "ปิดซ่อม"}</span>;
+                  // ป้ายเช็คเร็ว: ใบ PDO ที่พบบิลขายปลีก DCS แล้ว (ขายครบแต่ยังไม่ปิด = กดป้ายเพื่อปิดการขายเอง)
+                  const ps = isPDO ? pdoSoldMap[o.order_id] : null;
+                  const canClose = ps && ps.sold >= ps.total && o.status !== "ปิดงานซ่อม";
+                  const saleBadge = ps && ps.sold > 0 ? (
+                    <span onClick={canClose ? () => handleManualCloseSale(o) : undefined}
+                      title={`บิลขายปลีก DCS: ${ps.docs.join(", ")}${ps.customers.length ? ` · ลูกค้า: ${ps.customers.join(", ")}` : ""}${canClose ? " — คลิกเพื่อปิดการขาย" : ""}`}
+                      style={{ display: "inline-block", marginTop: 3, padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, cursor: canClose ? "pointer" : "default", textDecoration: canClose ? "underline dotted" : "none", background: ps.sold >= ps.total ? "#fee2e2" : "#fef9c3", color: ps.sold >= ps.total ? "#b91c1c" : "#854d0e" }}>
+                      🛒 ขายแล้ว {ps.sold}/{ps.total}{ps.lastDate ? ` · ${fmtDate(ps.lastDate)}` : ""}
+                    </span>
+                  ) : null;
+                  if (!hasDep) return <>
+                    <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 11, background: "#dc2626", color: "#fff", fontWeight: 600 }}>{isPDO ? "ปิดการขาย" : "ปิดซ่อม"}</span>
+                    {saleBadge}
+                  </>;
                   const s = o.status;
-                  return <span style={{
-                    padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                    background: s === "ปิดงานซ่อม" ? "#dc2626" : s === "อะไหล่ค้างส่ง" ? "#f97316" : s === "เปิดงาน" ? "#ec4899" : s === "มาครบ" ? "#dbeafe" : s === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
-                    color: s === "ปิดงานซ่อม" ? "#fff" : s === "อะไหล่ค้างส่ง" ? "#fff" : s === "เปิดงาน" ? "#fff" : s === "มาครบ" ? "#1e40af" : s === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
-                  }}>{s === "ปิดงานซ่อม" && isPDO ? "ปิดการขาย" : s}</span>;
+                  return <>
+                    <span style={{
+                      padding: "2px 8px", borderRadius: 6, fontSize: 11,
+                      background: s === "ปิดงานซ่อม" ? "#dc2626" : s === "อะไหล่ค้างส่ง" ? "#f97316" : s === "เปิดงาน" ? "#ec4899" : s === "มาครบ" ? "#dbeafe" : s === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
+                      color: s === "ปิดงานซ่อม" ? "#fff" : s === "อะไหล่ค้างส่ง" ? "#fff" : s === "เปิดงาน" ? "#fff" : s === "มาครบ" ? "#1e40af" : s === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
+                    }}>{s === "ปิดงานซ่อม" && isPDO ? "ปิดการขาย" : s}</span>
+                    {saleBadge}
+                  </>;
                 })()}</td>
                 <td style={td}>
                   {/* ยังไม่มีเลข: ทุก user กดระบุได้ (ปุ่ม "สั่ง" หายไปเมื่อสถานะเปลี่ยนจากรอดำเนินการ) · มีเลขแล้ว: แก้ได้เฉพาะ admin */}
@@ -1435,6 +1511,12 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
               <div><b>สถานะ:</b> {showDetail.status}</div>
               {showDetail.vendor_po_no && <div><b>เลขที่ใบรับสั่งซื้อ:</b> <span style={{ color: "#10b981", fontWeight: 700 }}>{showDetail.vendor_po_no}</span></div>}
+              {(() => {
+                const ps = pdoSoldMap[showDetail.order_id];
+                return ps && ps.sold > 0 ? (
+                  <div><b>บิลขายปลีก DCS:</b> <span style={{ color: "#b91c1c", fontWeight: 700 }}>🛒 {ps.docs.join(", ")} ({ps.sold}/{ps.total} รายการ)</span></div>
+                ) : null;
+              })()}
               {showDetail.job_no && showDetail.job_no !== "null" && <div><b>เลขที่ Job:</b> <span style={{ color: "#7c3aed", fontWeight: 700 }}>{showDetail.job_no}</span></div>}
               {showDetail.appointment_date && <div><b>วันที่นัดหมาย:</b> {fmtDate(showDetail.appointment_date)}</div>}
               <div><b>ผู้สร้าง:</b> {showDetail.created_by}</div>
@@ -1470,6 +1552,15 @@ export default function SparePartsOrderPage({ currentUser }) {
                       {(it.substitutes || []).map((s, k) => (
                         <div key={k} style={{ color: "#d97706" }} title={s.stock_name && s.stock_name !== "-" ? `สต๊อก: ${s.stock_name}` : ""}>{s.name || "(อะไหล่ทดแทน)"}</div>
                       ))}
+                      {(() => {
+                        // ขายแล้วรายตัว — จับคู่บิลขายปลีก DCS (honda_part_sales) ตั้งแต่วันเปิดใบ
+                        const hit = pdoSoldMap[showDetail.order_id]?.items?.[(it.part_code || "").replace(/-/g, "").toUpperCase().trim()];
+                        return hit ? (
+                          <div style={{ color: "#b91c1c", fontWeight: 700, fontSize: 12 }} title={hit.customer ? `ลูกค้าบนบิล: ${hit.customer}` : ""}>
+                            🛒 ขายแล้ว {hit.doc}{hit.date ? ` · ${fmtDate(hit.date)}` : ""}
+                          </div>
+                        ) : null;
+                      })()}
                     </td>
                     <td style={{ ...td, textAlign: "center", verticalAlign: "top" }}>{it.quantity}</td>
                     <td style={{ ...td, textAlign: "center" }}>
