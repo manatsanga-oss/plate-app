@@ -40,8 +40,9 @@ export default function ServiceArrivalReportPage() {
       const exact = all.filter(v => normPlate(`${v.plate_category}${v.plate_number}`) === normPlate(plateNo));
       const list = exact.length ? exact : all;
       if (!list.length) { setHist(h => ({ ...h, stage: "done", error: "ไม่พบรถทะเบียนนี้ในฐานข้อมูล" })); return; }
-      if (list.length === 1) { await loadHistory(list[0], plateNo); return; }
-      setHist(h => ({ ...h, stage: "pick", vehicles: list.slice(0, 15) }));
+      // เปิดอัตโนมัติเฉพาะหมวด+เลขตรงเป๊ะคันเดียว — เลขตรงแต่หมวดไม่ตรง (กล้องอาจอ่านหมวดเพี้ยน) ให้ผู้ใช้เลือกยืนยันเองก่อน
+      if (exact.length === 1) { await loadHistory(exact[0], plateNo); return; }
+      setHist(h => ({ ...h, stage: "pick", approx: exact.length === 0, vehicles: list.slice(0, 15) }));
     } catch (e) {
       setHist(h => h ? { ...h, stage: "done", error: "ค้นหาไม่สำเร็จ: " + (e?.message || e) } : h);
     }
@@ -211,7 +212,11 @@ export default function ServiceArrivalReportPage() {
               <div style={{ padding: "12px 16px", background: "#fffbeb", color: "#92400e", borderRadius: 8 }}>{hist.error}</div>
             ) : hist.stage === "pick" ? (
               <div>
-                <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 8 }}>พบรถหลายคันที่เลขทะเบียนใกล้เคียง — เลือกคันที่ใช่:</div>
+                <div style={{ fontSize: 13, color: hist.approx ? "#b45309" : "#6b7280", marginBottom: 8 }}>
+                  {hist.approx
+                    ? `⚠ ไม่พบทะเบียน "${hist.plate}" ตรงหมวดในฐานข้อมูล — กล้องอาจอ่านหมวดอักษรเพี้ยน พบรถเลขทะเบียนเดียวกัน เลือกคันที่ใช่:`
+                    : "พบรถหลายคันที่เลขทะเบียนตรงกัน — เลือกคันที่ใช่:"}
+                </div>
                 {hist.vehicles.map((v, i) => (
                   <div key={i} onClick={() => loadHistory(v, hist.plate)} style={{ padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 8, marginBottom: 6, cursor: "pointer", display: "flex", gap: 12, flexWrap: "wrap", fontSize: 13 }}>
                     <b style={{ color: "#072d6b" }}>{t(v.plate_category)} {t(v.plate_number)}</b>
