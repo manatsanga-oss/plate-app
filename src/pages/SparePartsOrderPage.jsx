@@ -1276,6 +1276,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                       !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
                       && !(d.customer_code && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
+                      // คืนเงินแล้ว/ใช้หมดแล้ว (คงเหลือ 0) ไม่ให้เลือกสั่งซื้อได้อีก
+                      && Number(d.remaining_amount || 0) > 0
                     );
                     // จัดกลุ่มตามลูกค้า เลือกใบเก่าสุด (วันที่น้อยสุด) — มัดจำบันทึกมืออาจไม่มีรหัสลูกค้า ใช้ชื่อ/เลขเอกสารแทน
                     const byCustomer = {};
@@ -1765,7 +1767,9 @@ export default function SparePartsOrderPage({ currentUser }) {
                 <option value="">-- เลือกใบมัดจำ --</option>
                 {deposits
                   .filter(d => !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
-                    && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no))
+                    && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
+                    // คืนเงินแล้ว/ใช้หมดแล้ว (คงเหลือ 0) ไม่ให้เลือกบันทึกตีราคาซ่อม
+                    && Number(d.remaining_amount || 0) > 0)
                   .map(d => (
                     <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
                       {d.deposit_doc_no} | {fmtDate(d.deposit_date)} | {d.customer_name} | {fmt(d.deposit_amount)}

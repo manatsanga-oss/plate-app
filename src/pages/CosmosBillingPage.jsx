@@ -337,7 +337,7 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
   useEffect(() => { fetchData(); fetchVendors(); fetchBanks(); fetchIncomeDocs(); }, []);
 
   // ใบรายได้สถานะร่าง จากเมนูบันทึกรายได้อื่น ๆ (income_records) — เลือกมาหักออกจากยอดโอน
-  // กรองเฉพาะลูกค้าสยามคอสมอส (คู่ค้าของเมนูนี้)
+  // กรองเฉพาะลูกค้า บริษัท ประกันภัยไทยวิวัฒน์ (ใบส่วนลด/เงินคืนที่นำเข้าจากใบกำกับ)
   async function fetchIncomeDocs() {
     try {
       const res = await fetch(FINANCE_URL, {
@@ -347,7 +347,7 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
       const text = await res.text();
       const d = text ? JSON.parse(text) : [];
       setIncomeDocs((Array.isArray(d) ? d : []).filter(x =>
-        x && x.income_doc_no && /คอสมอส|cosmos/i.test(String(x.customer_name || ""))
+        x && x.income_doc_no && /ไทยวิวัฒน์/i.test(String(x.customer_name || ""))
       ));
     } catch { setIncomeDocs([]); }
   }
@@ -428,12 +428,13 @@ function PaymentPanel({ currentPlan, setMessage, currentUser }) {
     if (!payForm.paid_to_vendor) { setMessage("❌ เลือก Vendor"); return; }
     if (!payForm.from_bank_account_id) { setMessage("❌ เลือกบัญชีโอนจาก"); return; }
     const offset = Number(payForm.income_offset_amount) || 0;
-    if (offset > selectedTotal - (Number(payForm.wht_amount) || 0)) { setMessage("❌ ยอดตัดรายได้มากกว่ายอดที่ต้องโอน"); return; }
-    // ยอดที่ต้องโอน vs ยอดโอนที่คีย์เอง — โอนขาดบันทึกไม่ได้ / โอนเกิน = เงินชำระเกินรอโอนคืน
-    const required = Math.round((selectedTotal - (Number(payForm.wht_amount) || 0) - offset) * 100) / 100;
+    if (offset > selectedTotal) { setMessage("❌ ยอดตัดรายได้มากกว่ายอดที่ต้องโอน"); return; }
+    // COSMOS จ่ายเต็มไม่หัก WHT ออกจากยอดโอน — ยอด WHT ตั้งเป็น "ชำระเกิน รอโอนคืน" ให้ COSMOS โอนกลับ
+    const whtAmt = Number(payForm.wht_amount) || 0;
+    const required = Math.round((selectedTotal - offset) * 100) / 100;
     const keyed = payForm.transfer_amount === "" ? required : Number(payForm.transfer_amount) || 0;
     if (keyed < required - 0.005) { setMessage(`❌ ยอดเงินโอน (${fmt(keyed)}) น้อยกว่ายอดที่ต้องจ่าย (${fmt(required)}) — บันทึกไม่ได้`); return; }
-    const overpaid = Math.round((keyed - required) * 100) / 100;
+    const overpaid = Math.round((keyed - required + whtAmt) * 100) / 100;
     setSaving(true);
     try {
       const res = await fetch(API_URL, {
@@ -925,8 +926,9 @@ function Table({ rows, loading, selected, toggle, toggleAll, color }) {
 function PaymentDialog({ payForm, setPayForm, vendors, bankAccounts, onVendorChange, totalSum, onClose, onSave, saving, numDocs, title, incomeDocs, onIncomeChange }) {
   const offset = Number(payForm.income_offset_amount) || 0;
   // ยอดที่ต้องโอน vs ยอดโอนที่คีย์เอง (เฉพาะโหมดบันทึกจ่าย — โหมดแก้ไขไม่มีช่องนี้)
+  // COSMOS จ่ายเต็มไม่หัก WHT — ยอด WHT ตั้งเป็นชำระเกินรอโอนคืนแทน
   const hasTransferField = payForm.transfer_amount !== undefined;
-  const required = Math.round((totalSum - Number(payForm.wht_amount || 0) - offset) * 100) / 100;
+  const required = Math.round((totalSum - offset) * 100) / 100;
   const keyed = !hasTransferField || payForm.transfer_amount === "" ? required : Number(payForm.transfer_amount) || 0;
   const diff = Math.round((keyed - required) * 100) / 100; // + = ชำระเกิน / − = โอนขาด
   const shortPay = diff < -0.005;
@@ -974,8 +976,13 @@ function PaymentDialog({ payForm, setPayForm, vendors, bankAccounts, onVendorCha
             <div><label style={{ fontSize: 11 }}>หัก ณ ที่จ่าย</label><input type="number" step="0.01" value={payForm.wht_amount} onChange={e => setPayForm(p => ({ ...p, wht_amount: Number(e.target.value)||0 }))} style={{ ...inp, textAlign: "right", fontWeight: 700, color: "#dc2626" }} /></div>
           </div>
           <div style={{ marginTop: 8, padding: "6px 10px", background: "#fff", borderRadius: 6, fontSize: 13, textAlign: "center" }}>
-            ยอดวางบิล: <b>{fmt(totalSum)}</b> − WHT: <b style={{ color: "#dc2626" }}>{fmt(payForm.wht_amount)}</b>{offset > 0 && <> − ตัดรายได้: <b style={{ color: "#7c3aed" }}>{fmt(offset)}</b></>} = ยอดโอนจริง: <b style={{ color: "#059669" }}>{fmt(totalSum - Number(payForm.wht_amount || 0) - offset)}</b>
+            ยอดวางบิล: <b>{fmt(totalSum)}</b>{offset > 0 && <> − ตัดรายได้: <b style={{ color: "#7c3aed" }}>{fmt(offset)}</b></>} = ยอดโอนจริง: <b style={{ color: "#059669" }}>{fmt(totalSum - offset)}</b>
           </div>
+          {Number(payForm.wht_amount) > 0 && (
+            <div style={{ marginTop: 6, padding: "6px 10px", background: "#fffbeb", border: "1px dashed #f59e0b", borderRadius: 6, fontSize: 12, textAlign: "center", color: "#92400e" }}>
+              💡 จ่ายเต็มไม่หัก WHT — ยอดหัก ณ ที่จ่าย <b style={{ color: "#dc2626" }}>{fmt(payForm.wht_amount)}</b> จะตั้งเป็น "ชำระเกิน รอโอนคืน" ให้ COSMOS โอนกลับ
+            </div>
+          )}
         </div>
 
         {/* ตัดยอดด้วยรายได้อื่น ๆ (income_records ร่าง) — บันทึกรับชำระฝั่งรายได้ให้อัตโนมัติ */}
