@@ -144,7 +144,30 @@ export default function NormalCommissionReportPage({ currentUser }) {
   const svcHondaSum = serviceMechanics.reduce((s, g) => s + g.honda_labor, 0);
   const svcYamahaSum = serviceMechanics.reduce((s, g) => s + g.yamaha_labor, 0);
   const svcYamahaCheckSum = serviceMechanics.reduce((s, g) => s + (g.yamaha_check_fee || 0), 0);
-  const svcTotalCommission = serviceMechanics.reduce((s, g) => s + g.total_commission, 0);
+
+  // แก้ไขค่าคอมรวมรายช่างก่อนบันทึก snapshot — คลิกช่องค่าคอมรวม แก้ตัวเลข Enter บันทึก
+  // (override ค้างเฉพาะหน้าจอ ยังไม่ถาวรจนกว่าจะกด "บันทึก snapshot"; เปลี่ยนเดือน = ล้าง)
+  const [svcOverrides, setSvcOverrides] = useState({}); // mechanic_name → ยอดใหม่
+  const [svcEdit, setSvcEdit] = useState(null);         // { name, value }
+  useEffect(() => { setSvcOverrides({}); setSvcEdit(null); }, [svcYear, svcMonth]);
+  const svcRows = useMemo(() => serviceMechanics.map(g => {
+    const ov = svcOverrides[g.mechanic_name];
+    return ov == null ? g : { ...g, total_commission: ov, original_commission: g.total_commission };
+  }), [serviceMechanics, svcOverrides]);
+  const svcTotalCommission = svcRows.reduce((s, g) => s + g.total_commission, 0);
+  function commitSvcEdit() {
+    if (!svcEdit) return;
+    const v = Math.round((Number(svcEdit.value) || 0) * 100) / 100;
+    const base = serviceMechanics.find(g => g.mechanic_name === svcEdit.name);
+    setSvcOverrides(prev => {
+      const next = { ...prev };
+      // กรอกเท่ายอดคำนวณเดิม (หรือค่าไม่ถูกต้อง) = ลบ override
+      if (!base || !(v >= 0) || Math.abs(v - base.total_commission) < 0.005) delete next[svcEdit.name];
+      else next[svcEdit.name] = v;
+      return next;
+    });
+    setSvcEdit(null);
+  }
 
   // ===== Service snapshot =====
   const [svcSnapshotInfo, setSvcSnapshotInfo] = useState(null);
@@ -165,7 +188,8 @@ export default function NormalCommissionReportPage({ currentUser }) {
 
   async function saveSvcSnapshot() {
     if (serviceMechanics.length === 0) { setMessage("ไม่มีข้อมูลให้บันทึก"); return; }
-    let confirmMsg = `ยืนยันบันทึก snapshot ค่าคอมบริการ?\n\nปี: ${svcYear} เดือน: ${svcMonth}\nช่างซ่อม ${serviceMechanics.length} คน · ยอดคอม ${fmt(svcTotalCommission)} บาท`;
+    const nOverride = Object.keys(svcOverrides).length;
+    let confirmMsg = `ยืนยันบันทึก snapshot ค่าคอมบริการ?\n\nปี: ${svcYear} เดือน: ${svcMonth}\nช่างซ่อม ${serviceMechanics.length} คน · ยอดคอม ${fmt(svcTotalCommission)} บาท${nOverride ? `\n✏️ มียอดที่แก้ไขเอง ${nOverride} คน` : ""}`;
     if (svcSnapshotInfo) confirmMsg += "\n\n⚠️ มี snapshot ของเดือนนี้แล้ว — บันทึกใหม่จะ overwrite";
     if (!window.confirm(confirmMsg)) return;
     setSvcSavingSnap(true); setMessage("");
@@ -174,7 +198,7 @@ export default function NormalCommissionReportPage({ currentUser }) {
         action: "commission_service_snapshot", mode: "save",
         year: svcYear, month: svcMonth,
         saved_by: currentUser?.username || currentUser?.email || "",
-        mechanics: serviceMechanics.map(g => ({
+        mechanics: svcRows.map(g => ({
           mechanic_name: g.mechanic_name, mechanic_code: g.mechanic_code,
           honda_jobs: g.honda_jobs, honda_labor: g.honda_labor, honda_commission: g.honda_commission,
           yamaha_jobs: g.yamaha_jobs,
@@ -1529,8 +1553,8 @@ tr.excluded td { text-decoration: line-through; }
               </thead>
               <tbody>
                 {svcLoading && <tr><td colSpan={11} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-                {!svcLoading && serviceMechanics.length === 0 && <tr><td colSpan={11} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
-                {serviceMechanics.map((g, i) => (
+                {!svcLoading && svcRows.length === 0 && <tr><td colSpan={11} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+                {svcRows.map((g, i) => (
                   <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
                     <td style={{ ...td, fontWeight: 600 }}>{g.mechanic_name}</td>
@@ -1542,10 +1566,28 @@ tr.excluded td { text-decoration: line-through; }
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#9333ea" }}>{g.yamaha_check_fee ? fmt(g.yamaha_check_fee) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{g.yamaha_total ? fmt(g.yamaha_total) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, background: "#dbeafe", color: "#1e3a8a" }}>{g.yamaha_commission ? fmt(g.yamaha_commission) : "-"}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: "#dcfce7", color: "#14532d" }}>{fmt(g.total_commission)}</td>
+                    <td onClick={() => setSvcEdit({ name: g.mechanic_name, value: String(g.total_commission) })}
+                      title="คลิกเพื่อแก้ไขค่าคอมรวมก่อนบันทึก snapshot (กรอกเท่ายอดเดิม = คืนค่าคำนวณ)"
+                      style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, background: g.original_commission != null ? "#fef3c7" : "#dcfce7", color: "#14532d", cursor: "pointer" }}>
+                      {svcEdit?.name === g.mechanic_name ? (
+                        <input autoFocus type="number" step="0.01" value={svcEdit.value}
+                          onChange={e => setSvcEdit(s => ({ ...s, value: e.target.value }))}
+                          onClick={e => e.stopPropagation()}
+                          onKeyDown={e => { if (e.key === "Enter") commitSvcEdit(); else if (e.key === "Escape") setSvcEdit(null); }}
+                          onBlur={commitSvcEdit}
+                          style={{ width: 100, padding: "3px 6px", textAlign: "right", border: "1.5px solid #f59e0b", borderRadius: 5, fontFamily: "monospace" }} />
+                      ) : (
+                        <>
+                          {fmt(g.total_commission)} <span style={{ fontSize: 10, color: "#9ca3af" }}>✏️</span>
+                          {g.original_commission != null && (
+                            <div style={{ fontSize: 10, color: "#9ca3af", textDecoration: "line-through", fontWeight: 400 }}>{fmt(g.original_commission)}</div>
+                          )}
+                        </>
+                      )}
+                    </td>
                   </tr>
                 ))}
-                {serviceMechanics.length > 0 && (
+                {svcRows.length > 0 && (
                   <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                     <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(svcHondaSum)}</td>
