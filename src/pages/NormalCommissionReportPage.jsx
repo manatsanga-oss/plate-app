@@ -82,9 +82,13 @@ export default function NormalCommissionReportPage({ currentUser }) {
       g.honda_labor += isPDI ? (isPMotor ? 0 : 50) : Number(r.labor_amount || 0);
       g.honda_jobs += 1;
     }
-    // Yamaha
+    // Yamaha — นับเฉพาะใบ SCY01 เหมือนหน้ารายงานใบแจ้งซ่อม (ใบสาขาอื่นเช่น SCY07 ไม่เข้าค่าคอมชุดนี้)
+    const isOwnBranchY = (r) =>
+      String(r.branch_code || "").toUpperCase() === "SCY01" ||
+      String(r.job_no || "").toUpperCase().startsWith("SCY01");
     const yamahaJobs = new Set();
     for (const r of yamahaRows) {
+      if (!isOwnBranchY(r)) continue;
       const name = r.mechanic_name || "(ไม่ระบุ)";
       if (!map.has(name)) map.set(name, { mechanic_name: name, mechanic_code: null, honda_labor: 0, honda_jobs: 0, yamaha_labor: 0, yamaha_check_fee: 0, yamaha_jobs: 0 });
       const g = map.get(name);
@@ -280,6 +284,7 @@ export default function NormalCommissionReportPage({ currentUser }) {
   const [dateFrom, setDateFrom] = useState(firstOfMonth());
   const [dateTo, setDateTo] = useState(todayISO());
   const [rows, setRows] = useState([]);
+  const [salesAff, setSalesAff] = useState(""); // ตัวกรองสังกัดแท็บงานขาย: "" = ทั้งหมด | สิงห์ชัย | ป.เปา
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [detail, setDetail] = useState(null);
@@ -1086,10 +1091,15 @@ tr.excluded td { text-decoration: line-through; }
   }
 
   const total = rows.reduce((s, r) => s + Number(r.total_commission || 0), 0);
-  const totalMain = rows.reduce((s, r) => s + Number(r.total_main || 0), 0);
-  const totalFinance = rows.reduce((s, r) => s + Number(r.total_finance || 0), 0);
-  const totalSales = rows.reduce((s, r) => s + Number(r.sales_count || 0), 0);
-  const uniqueSales = Number(rows[0]?.total_unique_sales || 0);
+
+  // ตัวกรองสังกัด (สิงห์ชัย/ป.เปา) แท็บงานขาย — กรองเฉพาะการแสดงผล; บันทึก snapshot ใช้ข้อมูลเต็มเสมอ
+  const SALES_BRANCH_AFF = { SCY01: "สิงห์ชัย", SCY04: "สิงห์ชัย", SCY07: "สิงห์ชัย", SCY05: "ป.เปา", SCY06: "ป.เปา" };
+  const viewRows = salesAff ? rows.filter(r => SALES_BRANCH_AFF[String(r.branch_code || "").toUpperCase()] === salesAff) : rows;
+  const viewTotal = viewRows.reduce((s, r) => s + Number(r.total_commission || 0), 0);
+  const totalMain = viewRows.reduce((s, r) => s + Number(r.total_main || 0), 0);
+  const totalFinance = viewRows.reduce((s, r) => s + Number(r.total_finance || 0), 0);
+  const totalSales = viewRows.reduce((s, r) => s + Number(r.sales_count || 0), 0);
+  const uniqueSales = salesAff ? 0 : Number(rows[0]?.total_unique_sales || 0);
 
   return (
     <div className="page-container">
@@ -1559,6 +1569,11 @@ tr.excluded td { text-decoration: line-through; }
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={inp} />
         <span>ถึง:</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={inp} />
+        <select value={salesAff} onChange={e => setSalesAff(e.target.value)} style={inp}>
+          <option value="">🏢 สังกัด: ทั้งหมด</option>
+          <option value="สิงห์ชัย">สิงห์ชัย</option>
+          <option value="ป.เปา">ป.เปา</option>
+        </select>
         <button onClick={fetchData} disabled={loading} style={btnBlue}>{loading ? "..." : "🔄 รีเฟรช"}</button>
         <button onClick={saveSnapshot} disabled={savingSnap || loading || rows.length === 0}
           style={{ padding: "7px 14px", background: savingSnap ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: savingSnap || loading ? "not-allowed" : "pointer", fontWeight: 600 }}>
@@ -1579,9 +1594,9 @@ tr.excluded td { text-decoration: line-through; }
       {message && <div style={{ padding: 10, marginBottom: 10, color: message.startsWith("✅") ? "#065f46" : "#b91c1c", background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", borderRadius: 6 }}>{message}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px,1fr))", gap: 10, marginBottom: 12 }}>
-        <Card label="👥 พนักงาน" value={rows.length} color="#1e40af" />
+        <Card label="👥 พนักงาน" value={viewRows.length} color="#1e40af" />
         <Card label="🚗 ใบขาย" value={uniqueSales || totalSales} color="#0369a1" />
-        <Card label="💰 ค่าคอมรวม" value={fmt(total)} color="#059669" highlight />
+        <Card label="💰 ค่าคอมรวม" value={fmt(viewTotal)} color="#059669" highlight />
       </div>
 
       <div style={{ overflowX: "auto", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
@@ -1600,8 +1615,8 @@ tr.excluded td { text-decoration: line-through; }
           </thead>
           <tbody>
             {loading && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
-            {rows.map((r, i) => (
+            {!loading && viewRows.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+            {viewRows.map((r, i) => (
               <tr key={r.employee_id} style={{ borderTop: "1px solid #e5e7eb" }}>
                 <td style={td}>{i + 1}</td>
                 <td style={{ ...td, fontWeight: 600 }}>{r.employee_name}</td>
@@ -1615,9 +1630,9 @@ tr.excluded td { text-decoration: line-through; }
                 <td style={td}><button onClick={() => openDetail(r)} style={btnSmBlue}>📋 รายละเอียด</button></td>
               </tr>
             ))}
-            {rows.length > 0 && (() => {
-              const sumComm = rows.reduce((s, r) => s + Number(r.total_commission_only || 0), 0);
-              const sumBrok = rows.reduce((s, r) => s + Number(r.total_brokerage || 0), 0);
+            {viewRows.length > 0 && (() => {
+              const sumComm = viewRows.reduce((s, r) => s + Number(r.total_commission_only || 0), 0);
+              const sumBrok = viewRows.reduce((s, r) => s + Number(r.total_brokerage || 0), 0);
               return (
                 <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                   <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม</td>
@@ -1626,7 +1641,7 @@ tr.excluded td { text-decoration: line-through; }
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(totalFinance)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d" }}>{fmt(sumComm)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#c2410c" }}>{fmt(sumBrok)}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(total)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(viewTotal)}</td>
                   <td></td>
                 </tr>
               );
