@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api";
 const DEPOSIT_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
+const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api"; // master รุ่นรถ — ใช้กับ modal เปลี่ยนแบบ+สี
 
 const BRANCHES = [
   "SCY01 สำนักงานใหญ่",
@@ -58,6 +59,8 @@ export default function MotoBookingPage({ currentUser }) {
   const [refundForm, setRefundForm] = useState({ account_no: "", bank: "", amount: "" });
   const [changeTarget, setChangeTarget] = useState(null);
   const [changeForm, setChangeForm] = useState({ model_code: "", color_name: "" });
+  const [masterTypes, setMasterTypes] = useState([]);   // master แบบรถ (active) สำหรับ modal เปลี่ยนแบบ
+  const [masterColors, setMasterColors] = useState([]); // master สี (active)
   const [sellTarget, setSellTarget] = useState(null);
   const [sellInvoiceNo, setSellInvoiceNo] = useState("");
   const [editInvoiceTarget, setEditInvoiceTarget] = useState(null);
@@ -81,6 +84,7 @@ export default function MotoBookingPage({ currentUser }) {
   useEffect(() => {
     fetchBookings();
     fetchAllModels();
+    fetchMaster();
     fetchStockSummary();
     fetchDeposits();
     fetchSales();
@@ -204,6 +208,30 @@ export default function MotoBookingPage({ currentUser }) {
       setAllModels(Array.isArray(data) ? data : []);
     } catch { /* ignore */ }
   }
+
+  // master รุ่นรถ (ข้อมูลรุ่นรถจักรยานยนต์) — ใช้กับ modal "เปลี่ยนแบบ+สี" เฉพาะสถานะใช้งาน
+  // (รุ่นที่ยกเลิกผลิต เช่น WW160AS/SS จะไม่ขึ้นให้เลือก แต่รุ่นใหม่ WW160AV/SV ขึ้นทันทีไม่ต้องรอไฟล์ราคารถ)
+  async function fetchMaster() {
+    const post = (body) => fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()).catch(() => []);
+    try {
+      const [t, c] = await Promise.all([post({ action: "get_types" }), post({ action: "get_colors" })]);
+      setMasterTypes((Array.isArray(t) ? t : []).filter(m =>
+        m.status === "active" && m.model_status === "active" && m.series_status === "active" && m.brand_status === "active"));
+      setMasterColors((Array.isArray(c) ? c : []).filter(x => x.status === "active"));
+    } catch { /* ignore */ }
+  }
+
+  // cascade helpers ของ modal เปลี่ยนแบบ (จาก master): ยี่ห้อ → ชื่อรุ่น(การตลาด) → แบบ(รหัส+type) → สี
+  const mBrands = [...new Set(masterTypes.map(t => String(t.brand_name || "").trim()).filter(Boolean))].sort();
+  const mMarketingByBrand = (brand) =>
+    [...new Set(masterTypes.filter(t => String(t.brand_name || "").trim() === brand)
+      .map(t => String(t.marketing_name || t.series_name || "").trim()).filter(Boolean))].sort();
+  const mTypesByMarketing = (brand, marketing) =>
+    masterTypes
+      .filter(t => String(t.brand_name || "").trim() === brand && String(t.marketing_name || t.series_name || "").trim() === marketing)
+      .map(t => ({ ...t, full_code: `${String(t.model_code || "").trim()} ${String(t.type_name || "").trim()}`.trim() }))
+      .sort((a, b) => a.full_code.localeCompare(b.full_code));
+  const mColorsByType = (typeId) => masterColors.filter(c => String(c.type_id) === String(typeId));
 
   // cascade filter helpers
   const codesByBrand = (brand) =>
@@ -389,17 +417,28 @@ export default function MotoBookingPage({ currentUser }) {
     setCheckingCancel(false);
   }
 
+  // ใบจองรุ่นที่ "เลิกผลิต" (รหัสแบบเดิมไม่อยู่ใน master สถานะใช้งาน) — เปลี่ยนแบบ/สีได้โดยคงวันจองเดิม
+  // รุ่นปกติ: เปลี่ยนแล้ววันจองรีเซ็ตเป็นวันนี้ (คิวเริ่มนับใหม่)
+  const isBookingModelDiscontinued = (b) => {
+    if (!b || masterTypes.length === 0) return false; // master โหลดไม่ได้ → ใช้กติกาปกติ (รีเซ็ตวันที่)
+    const cur = normModel(b.new_model_code || b.model_code || "");
+    if (!cur) return false;
+    return !masterTypes.some(t => normModel(`${t.model_code} ${t.type_name}`) === cur);
+  };
+
   async function handleChangeModel() {
     if (!changeTarget || !changeForm.brand || !changeForm.marketing_name || !changeForm.model_code || !changeForm.color_name) {
       setMessage("กรุณาเลือกยี่ห้อ ชื่อรุ่น แบบ และสีให้ครบ");
       return;
     }
+    const keepDate = isBookingModelDiscontinued(changeTarget);
+    if (!keepDate && !window.confirm("รุ่นที่จองเดิมยังผลิตอยู่ — การเปลี่ยนแบบ/สีจะรีเซ็ตวันที่จองเป็นวันนี้ (คิวเริ่มนับใหม่)\n\nยืนยันเปลี่ยน?")) return;
     setSaving(true);
     try {
       await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "change_moto_model", booking_id: changeTarget.booking_id, ...changeForm }),
+        body: JSON.stringify({ action: "change_moto_model", booking_id: changeTarget.booking_id, ...changeForm, keep_booking_date: keepDate }),
       });
       setChangeTarget(null);
       setChangeForm({ model_code: "", color_name: "" });
@@ -1180,14 +1219,24 @@ export default function MotoBookingPage({ currentUser }) {
             <h3 style={{ marginTop: 0, color: "#f59e0b" }}>🔄 เปลี่ยนแบบ + สี</h3>
             <p><strong>{changeTarget.customer_name}</strong></p>
             <p style={{ color: "#6b7280", fontSize: 13 }}>เดิม: {changeTarget.brand} {changeTarget.marketing_name} / {changeTarget.model_code} / {changeTarget.color_name}</p>
+            {isBookingModelDiscontinued(changeTarget) ? (
+              <div style={{ padding: "7px 10px", marginBottom: 12, background: "#dcfce7", border: "1px solid #86efac", borderRadius: 6, fontSize: 12, color: "#166534" }}>
+                ✅ รุ่นที่จองเดิม<b>เลิกผลิตแล้ว</b> — เปลี่ยนแบบ/สีได้โดย<b>คงวันที่จองเดิม</b> (ลูกค้าไม่เสียคิว)
+              </div>
+            ) : (
+              <div style={{ padding: "7px 10px", marginBottom: 12, background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: 6, fontSize: 12, color: "#92400e" }}>
+                ⚠️ รุ่นที่จองเดิมยังผลิตอยู่ — เปลี่ยนแบบ/สีแล้ว<b>วันที่จองจะรีเซ็ตเป็นวันนี้</b> (คิวเริ่มนับใหม่)
+              </div>
+            )}
 
+            {/* รายการรถจาก master (ข้อมูลรุ่นรถจักรยานยนต์) เฉพาะสถานะใช้งาน — รุ่นเลิกผลิตเลือกไม่ได้ แต่รุ่นใหม่ขึ้นทันที */}
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: "block", marginBottom: 6, fontWeight: 600 }}>ยี่ห้อใหม่</label>
               <select style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}
                 value={changeForm.brand}
-                onChange={(e) => setChangeForm({ ...changeForm, brand: e.target.value, marketing_name: "", model_code: "", color_name: "" })}>
+                onChange={(e) => setChangeForm({ ...changeForm, brand: e.target.value, marketing_name: "", model_code: "", master_type_id: "", color_name: "" })}>
                 <option value="">-- เลือกยี่ห้อ --</option>
-                {BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                {mBrands.map(b => <option key={b} value={b}>{b}</option>)}
               </select>
             </div>
 
@@ -1195,20 +1244,23 @@ export default function MotoBookingPage({ currentUser }) {
               <label style={{ display: "block", marginBottom: 6, fontWeight: 600 }}>ชื่อรุ่นใหม่</label>
               <select style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}
                 value={changeForm.marketing_name}
-                onChange={(e) => setChangeForm({ ...changeForm, marketing_name: e.target.value, model_code: "", color_name: "" })}>
+                onChange={(e) => setChangeForm({ ...changeForm, marketing_name: e.target.value, model_code: "", master_type_id: "", color_name: "" })}>
                 <option value="">-- เลือกชื่อรุ่น --</option>
-                {marketingByBrand(changeForm.brand).map(m => <option key={m} value={m}>{m}</option>)}
+                {mMarketingByBrand(changeForm.brand).map(m => <option key={m} value={m}>{m}</option>)}
               </select>
             </div>
 
             <div style={{ marginBottom: 12 }}>
               <label style={{ display: "block", marginBottom: 6, fontWeight: 600 }}>แบบใหม่</label>
               <select style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 14 }}
-                value={changeForm.model_code}
-                onChange={(e) => setChangeForm({ ...changeForm, model_code: e.target.value, color_name: "" })}>
+                value={changeForm.master_type_id || ""}
+                onChange={(e) => {
+                  const t = mTypesByMarketing(changeForm.brand, changeForm.marketing_name).find(x => String(x.type_id) === e.target.value);
+                  setChangeForm({ ...changeForm, master_type_id: e.target.value, model_code: t ? t.full_code : "", color_name: "" });
+                }}>
                 <option value="">-- เลือกแบบ --</option>
-                {codesByMarketing(changeForm.brand, changeForm.marketing_name).map(m => (
-                  <option key={m.model_code} value={m.model_code}>{m.model_code}</option>
+                {mTypesByMarketing(changeForm.brand, changeForm.marketing_name).map(t => (
+                  <option key={t.type_id} value={t.type_id}>{t.full_code}</option>
                 ))}
               </select>
             </div>
@@ -1219,8 +1271,8 @@ export default function MotoBookingPage({ currentUser }) {
                 value={changeForm.color_name}
                 onChange={(e) => setChangeForm({ ...changeForm, color_name: e.target.value })}>
                 <option value="">-- เลือกสี --</option>
-                {colorsByCode(changeForm.brand, changeForm.model_code).map(m => (
-                  <option key={m.color_code} value={m.color_name}>{m.color_name}</option>
+                {mColorsByType(changeForm.master_type_id).map(m => (
+                  <option key={m.color_id} value={m.color_name}>{m.color_name}</option>
                 ))}
               </select>
             </div>
