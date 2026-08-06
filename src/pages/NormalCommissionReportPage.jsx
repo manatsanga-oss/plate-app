@@ -149,24 +149,56 @@ export default function NormalCommissionReportPage({ currentUser }) {
   // (override ค้างเฉพาะหน้าจอ ยังไม่ถาวรจนกว่าจะกด "บันทึก snapshot"; เปลี่ยนเดือน = ล้าง)
   const [svcOverrides, setSvcOverrides] = useState({}); // mechanic_name → ยอดใหม่
   const [svcEdit, setSvcEdit] = useState(null);         // { name, value }
-  useEffect(() => { setSvcOverrides({}); setSvcEdit(null); }, [svcYear, svcMonth]);
-  const svcRows = useMemo(() => serviceMechanics.map(g => {
-    const ov = svcOverrides[g.mechanic_name];
-    return ov == null ? g : { ...g, total_commission: ov, original_commission: g.total_commission };
-  }), [serviceMechanics, svcOverrides]);
+  // เพิ่มพนักงาน (ช่างที่ไม่มียอดเดือนนี้) เข้าตารางเพื่อคีย์ค่าคอมเอง
+  const [svcManual, setSvcManual] = useState([]);       // [{ name, brand }]
+  const [svcAddOpen, setSvcAddOpen] = useState(false);
+  const [svcAddForm, setSvcAddForm] = useState({ name: "", brand: "ยามาฮ่า" });
+  useEffect(() => { setSvcOverrides({}); setSvcEdit(null); setSvcManual([]); }, [svcYear, svcMonth]);
+  const svcRows = useMemo(() => {
+    const manualRows = svcManual
+      .filter(m => !serviceMechanics.some(g => g.mechanic_name === m.name))
+      .map(m => ({
+        mechanic_name: m.name, mechanic_code: null, manual: true, manual_brand: m.brand,
+        honda_jobs: 0, honda_labor: 0, honda_commission: 0,
+        yamaha_jobs: 0, yamaha_labor: 0, yamaha_check_fee: 0, yamaha_total: 0, yamaha_commission: 0,
+        total_commission: 0,
+      }));
+    return [...serviceMechanics, ...manualRows].map(g => {
+      const ov = svcOverrides[g.mechanic_name];
+      return ov == null ? g : { ...g, total_commission: ov, original_commission: g.total_commission };
+    });
+  }, [serviceMechanics, svcOverrides, svcManual]);
   const svcTotalCommission = svcRows.reduce((s, g) => s + g.total_commission, 0);
   function commitSvcEdit() {
     if (!svcEdit) return;
     const v = Math.round((Number(svcEdit.value) || 0) * 100) / 100;
     const base = serviceMechanics.find(g => g.mechanic_name === svcEdit.name);
+    const baseTotal = base ? base.total_commission : 0; // ช่างที่เพิ่มเอง ฐานคำนวณ = 0
     setSvcOverrides(prev => {
       const next = { ...prev };
       // กรอกเท่ายอดคำนวณเดิม (หรือค่าไม่ถูกต้อง) = ลบ override
-      if (!base || !(v >= 0) || Math.abs(v - base.total_commission) < 0.005) delete next[svcEdit.name];
+      if (!(v >= 0) || Math.abs(v - baseTotal) < 0.005) delete next[svcEdit.name];
       else next[svcEdit.name] = v;
       return next;
     });
     setSvcEdit(null);
+  }
+  // รายชื่อช่าง (ตำแหน่งมีคำว่า "ช่าง") ที่ยังไม่มีชื่อในตาราง — ให้เลือกเพิ่ม
+  const svcAddCandidates = useMemo(() =>
+    svcEmployees
+      .filter(e => e.employee_name && String(e.position || "").includes("ช่าง"))
+      .map(e => String(e.employee_name).trim())
+      .filter(n => !svcRows.some(g => g.mechanic_name === n)),
+  [svcEmployees, svcRows]);
+  function addManualMechanic() {
+    const name = svcAddForm.name.trim();
+    if (!name) return;
+    setSvcManual(prev => prev.some(m => m.name === name) ? prev : [...prev, { name, brand: svcAddForm.brand }]);
+    setSvcAddOpen(false); setSvcAddForm({ name: "", brand: "ยามาฮ่า" });
+  }
+  function removeManualMechanic(name) {
+    setSvcManual(prev => prev.filter(m => m.name !== name));
+    setSvcOverrides(prev => { const next = { ...prev }; delete next[name]; return next; });
   }
 
   // ===== Service snapshot =====
@@ -187,9 +219,9 @@ export default function NormalCommissionReportPage({ currentUser }) {
   useEffect(() => { if (tab === "service") checkSvcSnapshot(); /* eslint-disable-next-line */ }, [tab, svcYear, svcMonth]);
 
   async function saveSvcSnapshot() {
-    if (serviceMechanics.length === 0) { setMessage("ไม่มีข้อมูลให้บันทึก"); return; }
+    if (svcRows.length === 0) { setMessage("ไม่มีข้อมูลให้บันทึก"); return; }
     const nOverride = Object.keys(svcOverrides).length;
-    let confirmMsg = `ยืนยันบันทึก snapshot ค่าคอมบริการ?\n\nปี: ${svcYear} เดือน: ${svcMonth}\nช่างซ่อม ${serviceMechanics.length} คน · ยอดคอม ${fmt(svcTotalCommission)} บาท${nOverride ? `\n✏️ มียอดที่แก้ไขเอง ${nOverride} คน` : ""}`;
+    let confirmMsg = `ยืนยันบันทึก snapshot ค่าคอมบริการ?\n\nปี: ${svcYear} เดือน: ${svcMonth}\nช่างซ่อม ${svcRows.length} คน · ยอดคอม ${fmt(svcTotalCommission)} บาท${nOverride ? `\n✏️ มียอดที่แก้ไขเอง ${nOverride} คน` : ""}`;
     if (svcSnapshotInfo) confirmMsg += "\n\n⚠️ มี snapshot ของเดือนนี้แล้ว — บันทึกใหม่จะ overwrite";
     if (!window.confirm(confirmMsg)) return;
     setSvcSavingSnap(true); setMessage("");
@@ -198,16 +230,29 @@ export default function NormalCommissionReportPage({ currentUser }) {
         action: "commission_service_snapshot", mode: "save",
         year: svcYear, month: svcMonth,
         saved_by: currentUser?.username || currentUser?.email || "",
-        mechanics: svcRows.map(g => ({
-          mechanic_name: g.mechanic_name, mechanic_code: g.mechanic_code,
-          honda_jobs: g.honda_jobs, honda_labor: g.honda_labor, honda_commission: g.honda_commission,
-          yamaha_jobs: g.yamaha_jobs,
-          yamaha_labor: g.yamaha_total || (g.yamaha_labor + (g.yamaha_check_fee || 0)), // รวมค่าเช็ครถ
-          yamaha_commission: g.yamaha_commission,
-          total_commission: g.total_commission,
-        })),
+        mechanics: svcRows.map(g => {
+          // ยอดที่แก้เอง: เกลี่ย honda/yamaha_commission ตามสัดส่วนเดิมให้รวมเท่ายอดใหม่
+          // (เอกสารจ่าย 4 กลุ่มแยกยอดตามฝั่งแบรนด์จาก 2 คอลัมน์นี้ — ถ้าไม่เกลี่ย ยอดกลุ่มจะไม่ตรงกับที่แก้)
+          let honda = g.honda_commission, yamaha = g.yamaha_commission;
+          if (g.original_commission != null) {
+            const computed = (g.honda_commission || 0) + (g.yamaha_commission || 0);
+            if (computed > 0) {
+              honda = Math.round((g.honda_commission || 0) * (g.total_commission / computed) * 100) / 100;
+              yamaha = Math.round((g.total_commission - honda) * 100) / 100;
+            } else if (g.manual_brand === "ฮอนด้า") { honda = g.total_commission; yamaha = 0; }
+            else { honda = 0; yamaha = g.total_commission; }
+          }
+          return {
+            mechanic_name: g.mechanic_name, mechanic_code: g.mechanic_code,
+            honda_jobs: g.honda_jobs, honda_labor: g.honda_labor, honda_commission: honda,
+            yamaha_jobs: g.yamaha_jobs,
+            yamaha_labor: g.yamaha_total || (g.yamaha_labor + (g.yamaha_check_fee || 0)), // รวมค่าเช็ครถ
+            yamaha_commission: yamaha,
+            total_commission: g.total_commission,
+          };
+        }),
       });
-      setMessage(`✅ บันทึก snapshot สำเร็จ ${serviceMechanics.length} คน`);
+      setMessage(`✅ บันทึก snapshot สำเร็จ ${svcRows.length} คน`);
       checkSvcSnapshot();
     } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
     setSvcSavingSnap(false);
@@ -1509,7 +1554,11 @@ tr.excluded td { text-decoration: line-through; }
               {[1,2,3,4,5,6,7,8,9,10,11,12].map(m => <option key={m} value={m}>{m}</option>)}
             </select>
             <button onClick={fetchService} disabled={svcLoading} style={btnBlue}>{svcLoading ? "..." : "🔄 ค้นหา"}</button>
-            <button onClick={saveSvcSnapshot} disabled={svcSavingSnap || svcLoading || serviceMechanics.length === 0}
+            <button onClick={() => { setSvcAddForm({ name: "", brand: "ยามาฮ่า" }); setSvcAddOpen(true); }}
+              style={{ padding: "7px 14px", background: "#059669", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+              ➕ เพิ่มพนักงาน
+            </button>
+            <button onClick={saveSvcSnapshot} disabled={svcSavingSnap || svcLoading || svcRows.length === 0}
               style={{ padding: "7px 14px", background: svcSavingSnap ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: svcSavingSnap || svcLoading ? "not-allowed" : "pointer", fontWeight: 600 }}>
               {svcSavingSnap ? "..." : "💾 บันทึก snapshot"}
             </button>
@@ -1525,10 +1574,48 @@ tr.excluded td { text-decoration: line-through; }
             </div>
           )}
 
+          {/* modal เพิ่มพนักงาน (ช่างที่ยังไม่มีชื่อในตาราง) — เพิ่มแล้วคลิกช่องค่าคอมรวมเพื่อคีย์ยอดเอง */}
+          {svcAddOpen && (
+            <div onClick={() => setSvcAddOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+              <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 420, maxWidth: "92vw" }}>
+                <h3 style={{ margin: "0 0 12px", color: "#059669" }}>➕ เพิ่มพนักงานเข้าตารางค่าคอมบริการ</h3>
+                <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+                  เลือกจากพนักงานตำแหน่ง "ช่าง" ที่ยังไม่มีชื่อในตารางเดือนนี้ — เพิ่มแล้วคลิกช่อง "ค่าคอมรวม" เพื่อคีย์ยอดเอง (เริ่มที่ 0)
+                </div>
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>พนักงาน *</label>
+                <select value={svcAddForm.name} onChange={e => setSvcAddForm(f => ({ ...f, name: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box", marginBottom: 12 }}>
+                  <option value="">-- เลือกพนักงาน --</option>
+                  {svcAddCandidates.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+                {svcAddCandidates.length === 0 && <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>ไม่มีช่างที่ยังไม่อยู่ในตาราง</div>}
+                <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>ฝั่งแบรนด์ (ใช้แยกกลุ่มเอกสารจ่าย)</label>
+                <div style={{ display: "flex", gap: 16, marginBottom: 16 }}>
+                  {["ยามาฮ่า", "ฮอนด้า"].map(b => (
+                    <label key={b} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 14 }}>
+                      <input type="radio" name="svc_add_brand" checked={svcAddForm.brand === b} onChange={() => setSvcAddForm(f => ({ ...f, brand: b }))} />
+                      {b}
+                    </label>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={addManualMechanic} disabled={!svcAddForm.name}
+                    style={{ flex: 1, padding: "9px 0", background: svcAddForm.name ? "#059669" : "#9ca3af", color: "#fff", border: "none", borderRadius: 8, cursor: svcAddForm.name ? "pointer" : "not-allowed", fontSize: 15 }}>
+                    ➕ เพิ่มเข้าตาราง
+                  </button>
+                  <button onClick={() => setSvcAddOpen(false)}
+                    style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 15 }}>
+                    ยกเลิก
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {message && <div style={{ padding: 10, marginBottom: 10, color: message.startsWith("✅") ? "#065f46" : "#b91c1c", background: message.startsWith("✅") ? "#d1fae5" : "#fee2e2", borderRadius: 6 }}>{message}</div>}
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 10, marginBottom: 12 }}>
-            <Card label="🧑‍🔧 ช่างซ่อม" value={serviceMechanics.length} color="#1e40af" />
+            <Card label="🧑‍🔧 ช่างซ่อม" value={svcRows.length} color="#1e40af" />
             <Card label="🔴 Honda ค่าแรง" value={fmt(svcHondaSum)} color="#dc2626" />
             <Card label="🔵 Yamaha ค่าแรง" value={fmt(svcYamahaSum)} color="#0369a1" />
             <Card label="💰 ค่าคอมรวม (65%)" value={fmt(svcTotalCommission)} color="#059669" highlight />
@@ -1557,7 +1644,16 @@ tr.excluded td { text-decoration: line-through; }
                 {svcRows.map((g, i) => (
                   <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
-                    <td style={{ ...td, fontWeight: 600 }}>{g.mechanic_name}</td>
+                    <td style={{ ...td, fontWeight: 600 }}>
+                      {g.mechanic_name}
+                      {g.manual && (
+                        <>
+                          <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 8, background: "#fef3c7", color: "#92400e", fontSize: 10, fontWeight: 600 }}>เพิ่มเอง·{g.manual_brand}</span>
+                          <button onClick={() => removeManualMechanic(g.mechanic_name)} title="เอาออกจากตาราง"
+                            style={{ marginLeft: 4, padding: "0 6px", background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 12 }}>✕</button>
+                        </>
+                      )}
+                    </td>
                     <td style={{ ...td, textAlign: "right" }}>{g.honda_jobs || "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{g.honda_labor ? fmt(g.honda_labor) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, background: "#fee2e2", color: "#7f1d1d" }}>{g.honda_commission ? fmt(g.honda_commission) : "-"}</td>
