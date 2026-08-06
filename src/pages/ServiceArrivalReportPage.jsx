@@ -6,6 +6,9 @@ const API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-queue-api
 const SVC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api"; // ประวัติงานบริการ (ตัวเดียวกับหน้าค้นหาประวัติ)
 
 const CAM_LABEL = { "recamera-1": "กล้อง 1", "recamera-2": "กล้อง 2" };
+// ที่อยู่หน้าเว็บกล้องสำหรับปุ่มปิดกล้อง (แก้ได้ด้วยปุ่ม ⚙ — เก็บใน localStorage ของเครื่องที่ใช้)
+const CAM_HOST_KEY = "recamera_hosts";
+const DEFAULT_CAM_HOSTS = "recamera.local";
 const todayISO = () => new Date().toISOString().slice(0, 10);
 // detected_local จาก API เป็น "DD/MM/YYYY HH:MM:SS" (ค.ศ.)
 const dateKeyOf = (r) => {
@@ -21,6 +24,7 @@ export default function ServiceArrivalReportPage() {
   const [camFilter, setCamFilter] = useState("ALL");
   const [showDup, setShowDup] = useState(false);      // โชว์เหตุการณ์ซ้ำ (ระบบกันซ้ำกดเงียบไว้) ด้วยไหม
   const [plateSearch, setPlateSearch] = useState("");  // ค้นหาด้วยเลขทะเบียน
+  const [camLink, setCamLink] = useState("");          // ลิงก์หน้าปิดกล้อง (ใช้ตอนเบราว์เซอร์บล็อกป๊อปอัพ)
   const [viewer, setViewer] = useState(null);         // { row, image_data|null, loading }
   const [hist, setHist] = useState(null);             // modal ประวัติซ่อม: { plate, stage, vehicles, vehicle, jobs, error }
 
@@ -73,6 +77,40 @@ export default function ServiceArrivalReportPage() {
     } catch (e) {
       setHist(h => h ? { ...h, stage: "done", error: "โหลดประวัติไม่สำเร็จ (เช็คว่า Service History API ยัง Active)" } : h);
     }
+  }
+
+  // ---- ปุ่มปิดกล้อง: เปิดหน้า Power ของกล้อง (แอปเป็น https คุยกับกล้อง http ตรง ๆ ไม่ได้ เบราว์เซอร์บล็อก) ----
+  const camHosts = () => (localStorage.getItem(CAM_HOST_KEY) || DEFAULT_CAM_HOSTS).split(",").map(s => s.trim()).filter(Boolean);
+
+  function openCameraPower() {
+    const hosts = camHosts();
+    // ต้องเปิดแท็บ "ทันที" ในจังหวะที่คลิก — ถ้ารอ dialog ก่อน เบราว์เซอร์จะถือว่าไม่ได้มาจากการคลิกแล้วบล็อกป๊อปอัพ
+    const w = window.open("", "_blank");
+    let host = hosts[0];
+    if (hosts.length > 1) {
+      const menu = hosts.map((h, i) => `${i + 1}. ${h}`).join("\n");
+      const pick = window.prompt(`ปิดกล้องตัวไหน? พิมพ์หมายเลข\n\n${menu}`, "1");
+      const idx = parseInt(pick);
+      if (!Number.isFinite(idx) || idx < 1 || idx > hosts.length) { try { w && w.close(); } catch { /* ปิดไม่ได้ก็ปล่อย */ } return; }
+      host = hosts[idx - 1];
+    }
+    const url = `http://${host}/#/power`;
+    setCamLink("");
+    if (w) {
+      try { w.location.href = url; } catch { setCamLink(url); }
+      setMessage(`เปิดหน้าปิดกล้อง ${host} แล้ว — กดปุ่ม Shutdown สีแดง แล้วรอไฟ LED ดับ ~20 วินาทีค่อยถอดปลั๊ก`);
+    } else {
+      setCamLink(url); // ป๊อปอัพโดนบล็อก → ให้ลิงก์กดเองแทน
+      setMessage("เบราว์เซอร์บล็อกป๊อปอัพ — กดลิงก์ด้านล่างแทนได้เลย");
+    }
+  }
+
+  function setCameraHosts() {
+    const cur = camHosts().join(", ");
+    const v = window.prompt("ที่อยู่กล้อง (IP หรือชื่อ) — หลายตัวคั่นด้วยเครื่องหมายจุลภาค\nเช่น recamera.local, 192.168.1.43", cur);
+    if (v == null) return;
+    localStorage.setItem(CAM_HOST_KEY, v.trim() || DEFAULT_CAM_HOSTS);
+    setMessage("บันทึกที่อยู่กล้องแล้ว: " + (v.trim() || DEFAULT_CAM_HOSTS));
   }
 
   const fmtMoney = (n) => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
@@ -138,12 +176,25 @@ export default function ServiceArrivalReportPage() {
         <button onClick={load} disabled={loading} style={{ padding: "7px 16px", borderRadius: 8, border: "none", background: "#072d6b", color: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
           {loading ? "กำลังโหลด..." : "🔄 รีเฟรช"}
         </button>
+        <button onClick={openCameraPower} title="เปิดหน้าปิดกล้อง (ต้องอยู่ Wi-Fi วงเดียวกับกล้อง)"
+          style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #fecaca", background: "#fef2f2", color: "#b91c1c", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+          ⏻ ปิดกล้อง
+        </button>
+        <button onClick={setCameraHosts} title="ตั้งค่าที่อยู่กล้อง (IP/ชื่อ)"
+          style={{ padding: "7px 10px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#6b7280", cursor: "pointer", fontSize: 13 }}>
+          ⚙
+        </button>
         <span style={{ fontSize: 13, color: "#374151", marginLeft: "auto" }}>
           รถเข้าใหม่ <b style={{ color: "#065f46" }}>{arrivals}</b> ครั้ง{showDup ? ` · รวมซ้ำ ${filtered.length} เหตุการณ์` : ""}
         </span>
       </div>
 
-      {message && <div style={{ marginBottom: 10, padding: "8px 12px", background: "#fef2f2", color: "#b91c1c", borderRadius: 8, fontSize: 13 }}>{message}</div>}
+      {message && (
+        <div style={{ marginBottom: 10, padding: "8px 12px", background: "#fef2f2", color: "#b91c1c", borderRadius: 8, fontSize: 13 }}>
+          {message}
+          {camLink && <> · <a href={camLink} target="_blank" rel="noreferrer" style={{ color: "#1d4ed8", fontWeight: 700 }}>เปิดหน้าปิดกล้อง</a></>}
+        </div>
+      )}
 
       <div style={{ overflowX: "auto" }}>
         <table className="data-table">
