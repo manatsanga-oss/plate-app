@@ -789,6 +789,7 @@ function OverpaidPanel({ currentPlan, setMessage, currentUser }) {
           overpaid_amount: Number(r.overpaid_amount || 0),
           paid_transfer_amount: Number(r.paid_transfer_amount || 0),
           refunded_at: r.overpaid_refunded_at, refund_note: r.overpaid_refund_note,
+          refund_account_id: r.overpaid_refund_account_id || null,
           items: 0,
         };
         g[r.paid_doc_no].items += 1;
@@ -798,30 +799,68 @@ function OverpaidPanel({ currentPlan, setMessage, currentUser }) {
     setLoading(false);
   }
 
-  async function markRefunded(g) {
-    const today = new Date().toISOString().slice(0, 10);
-    const d = window.prompt(`ได้รับเงินคืนจาก COSMOS แล้ว?\nใบจ่าย ${g.paid_doc_no} · ยอด ${fmt(g.overpaid_amount)} บาท\n\nกรอกวันที่ได้รับเงินคืน (YYYY-MM-DD):`, today);
-    if (!d) return;
-    // เลือกบัญชีที่เงินคืนเข้า (เว้นว่าง = บัญชีเดิมที่จ่ายออก) — มีผลกับรายงานเคลื่อนไหวบัญชี
-    let refundAccId = 0;
+  // modal เลือกวันที่รับเงินคืน (แทน prompt พิมพ์เอง)
+  const [refundModal, setRefundModal] = useState(null); // { g, date, saving }
+
+  function markRefunded(g) {
+    setRefundModal({ g, date: new Date().toISOString().slice(0, 10), saving: false });
+  }
+
+  async function confirmRefund() {
+    const { g, date } = refundModal || {};
+    if (!g || !date) return;
+    setRefundModal(m => ({ ...m, saving: true }));
+    // เงินคืน COSMOS เข้าบัญชีไทยพาณิชย์ ป.เปา เสมอ (ไม่ต้องเลือก) — เคสพิเศษใช้ปุ่ม ✏️ แก้บัญชี ทีหลัง
+    let refundAccId = 4; // ไทยพาณิชย์ 7393004545 บจ. ป.เปา มอเตอร์เซอร์วิส
+    try {
+      const ra = await fetch(ACC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }) });
+      const accs = await ra.json();
+      const scb = (Array.isArray(accs) ? accs : []).find(a => String(a.bank_name || "").includes("ไทยพาณิชย์") && String(a.account_name || "").includes("ป.เปา"));
+      if (scb) refundAccId = Number(scb.account_id);
+    } catch { /* โหลดบัญชีไม่ได้ → ใช้ id 4 ตายตัว */ }
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refund_cosmos_overpaid", paid_doc_no: g.paid_doc_no, refunded_date: date, refund_account_id: refundAccId || undefined, refund_note: `บันทึกโดย ${currentUser?.username || currentUser?.name || "system"}` }),
+      });
+      setMessage(`✅ บันทึกรับเงินคืน ${g.paid_doc_no} (${fmt(g.overpaid_amount)} บาท) แล้ว`);
+      setRefundModal(null);
+      fetchData();
+    } catch (e) { setMessage("❌ " + e.message); setRefundModal(m => m ? { ...m, saving: false } : m); }
+  }
+
+  // ยกเลิกสถานะได้รับคืนแล้ว → กลับเป็นรอโอนคืน (movement ขาเข้าในรายงานเคลื่อนไหวบัญชีจะหายด้วย)
+  async function cancelRefunded(g) {
+    if (!window.confirm(`ยกเลิกสถานะ "ได้รับคืนแล้ว" ของใบ ${g.paid_doc_no}?\n\nยอด ${fmt(g.overpaid_amount)} บาท จะกลับเป็น "รอโอนคืน" และรายการรับเงินคืนจะหายจากรายงานเคลื่อนไหวบัญชี`)) return;
+    try {
+      await fetch(API_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "refund_cosmos_overpaid", op: "cancel", paid_doc_no: g.paid_doc_no }),
+      });
+      setMessage(`✅ ยกเลิกรับเงินคืน ${g.paid_doc_no} แล้ว — กลับเป็นรอโอนคืน`);
+      fetchData();
+    } catch (e) { setMessage("❌ " + e.message); }
+  }
+
+  // แก้บัญชีที่เงินคืนเข้า (มีผลกับรายงานเคลื่อนไหวบัญชี) — เว้นว่าง = บัญชีเดิมที่จ่ายออก
+  async function changeRefundAccount(g) {
     try {
       const ra = await fetch(ACC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }) });
       const accs = await ra.json();
       const list = (Array.isArray(accs) ? accs : []).filter(a => a.account_id && a.bank_name && a.bank_name !== "-");
-      if (list.length) {
-        const menu = list.map((a, i) => `${i + 1}. ${a.bank_name} ${a.account_no || ""} ${a.account_name || ""}`).join("\n");
-        const pick = window.prompt(`เงินคืนเข้าบัญชีไหน? พิมพ์หมายเลข\n(เว้นว่าง/ยกเลิก = บัญชีเดิมที่จ่ายออก)\n\n${menu}`, "");
-        const idx = parseInt(pick);
-        if (Number.isFinite(idx) && idx >= 1 && idx <= list.length) refundAccId = Number(list[idx - 1].account_id);
-      }
-    } catch { /* เลือกไม่ได้ → ใช้บัญชีเดิม */ }
-    try {
-      const res = await fetch(API_URL, {
+      if (!list.length) { setMessage("❌ โหลดรายชื่อบัญชีไม่ได้"); return; }
+      const cur = list.find(a => Number(a.account_id) === Number(g.refund_account_id));
+      const curLabel = cur ? `${cur.bank_name} ${cur.account_no || ""} ${cur.account_name || ""}` : "บัญชีเดิมที่จ่ายออก";
+      const menu = list.map((a, i) => `${i + 1}. ${a.bank_name} ${a.account_no || ""} ${a.account_name || ""}`).join("\n");
+      const pick = window.prompt(`แก้บัญชีที่เงินคืนเข้า — ใบ ${g.paid_doc_no}\nปัจจุบัน: ${curLabel}\n\nพิมพ์หมายเลขบัญชีใหม่ (เว้นว่าง = บัญชีเดิมที่จ่ายออก)\n\n${menu}`);
+      if (pick == null) return; // กดยกเลิก = ไม่แก้
+      const idx = parseInt(pick);
+      const accId = Number.isFinite(idx) && idx >= 1 && idx <= list.length ? Number(list[idx - 1].account_id) : 0;
+      await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "refund_cosmos_overpaid", paid_doc_no: g.paid_doc_no, refunded_date: d, refund_account_id: refundAccId || undefined, refund_note: `บันทึกโดย ${currentUser?.username || currentUser?.name || "system"}` }),
+        body: JSON.stringify({ action: "refund_cosmos_overpaid", op: "update_account", paid_doc_no: g.paid_doc_no, refund_account_id: accId || undefined }),
       });
-      const data = await res.json().catch(() => ({}));
-      setMessage(`✅ บันทึกรับเงินคืน ${g.paid_doc_no} (${fmt(g.overpaid_amount)} บาท) แล้ว`);
+      setMessage(`✅ แก้บัญชีรับเงินคืน ${g.paid_doc_no} → ${accId ? `${list.find(a => Number(a.account_id) === accId).bank_name} ${list.find(a => Number(a.account_id) === accId).account_no || ""}` : "บัญชีเดิมที่จ่ายออก"}`);
       fetchData();
     } catch (e) { setMessage("❌ " + e.message); }
   }
@@ -843,10 +882,17 @@ function OverpaidPanel({ currentPlan, setMessage, currentUser }) {
           ? <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#dcfce7", color: "#166534" }}>✓ ได้รับคืนแล้ว {fmtDate(g.refunded_at)}</span>
           : <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 8px", borderRadius: 10, background: "#fef3c7", color: "#92400e" }}>รอโอนคืน</span>}
       </td>
-      <td style={{ ...td, textAlign: "center" }}>
-        {!g.refunded_at && (
+      <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+        {!g.refunded_at ? (
           <button onClick={() => markRefunded(g)}
             style={{ padding: "4px 12px", background: "#059669", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>✓ รับเงินคืนแล้ว</button>
+        ) : (
+          <>
+            <button onClick={() => changeRefundAccount(g)} title="แก้บัญชีที่เงินคืนเข้า"
+              style={{ padding: "4px 10px", background: "#f59e0b", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600, marginRight: 6 }}>✏️ แก้บัญชี</button>
+            <button onClick={() => cancelRefunded(g)} title="ถอนสถานะได้รับคืนแล้ว กลับเป็นรอโอนคืน"
+              style={{ padding: "4px 10px", background: "#dc2626", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>🚫 ยกเลิก</button>
+          </>
         )}
       </td>
     </tr>
@@ -881,6 +927,33 @@ function OverpaidPanel({ currentPlan, setMessage, currentUser }) {
           </tbody>
         </table>}
       </div>
+
+      {/* modal รับเงินคืน — เลือกวันที่จากปฏิทิน เงินเข้าไทยพาณิชย์ ป.เปา อัตโนมัติ */}
+      {refundModal && (
+        <div onClick={() => !refundModal.saving && setRefundModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", padding: 22, borderRadius: 12, width: 420, maxWidth: "92vw" }}>
+            <h3 style={{ margin: "0 0 12px", color: "#059669" }}>💱 รับเงินคืนจาก COSMOS</h3>
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 13 }}>
+              <div>ใบจ่าย: <b style={{ fontFamily: "monospace" }}>{refundModal.g.paid_doc_no}</b></div>
+              <div>ยอดเงินคืน: <b style={{ color: "#dc2626", fontSize: 16 }}>{fmt(refundModal.g.overpaid_amount)}</b> บาท</div>
+              <div style={{ marginTop: 4, color: "#065f46" }}>💰 เงินเข้าบัญชี <b>ไทยพาณิชย์ · บจ. ป.เปา</b> อัตโนมัติ (เปลี่ยนทีหลังได้ด้วยปุ่มแก้บัญชี)</div>
+            </div>
+            <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>วันที่ได้รับเงินคืน *</label>
+            <input type="date" value={refundModal.date} onChange={e => setRefundModal(m => ({ ...m, date: e.target.value }))}
+              style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box", marginBottom: 16 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={confirmRefund} disabled={refundModal.saving || !refundModal.date}
+                style={{ flex: 1, padding: "9px 0", background: "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 15 }}>
+                {refundModal.saving ? "กำลังบันทึก..." : "✓ บันทึกรับเงินคืน"}
+              </button>
+              <button onClick={() => setRefundModal(null)} disabled={refundModal.saving}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 15 }}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
