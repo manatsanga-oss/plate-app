@@ -197,6 +197,46 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [header, setHeader] = useState(blankHeader(currentUser));
   const [lines, setLines] = useState([blankLine()]);
 
+  // เดา "วันสิ้นอายุภาษีเดิม" จากวันครบรอบวันจดทะเบียน — ปีที่ครบล่าสุด/กำลังจะครบ (ต่อล่วงหน้าได้ไม่เกิน 90 วัน) แก้ทับได้
+  useEffect(() => {
+    if (header.receipt_type !== "งานต่อภาษีและพรบ." || !header.register_date || header.tax_paid_date) return;
+    const reg = new Date(header.register_date + "T00:00:00");
+    if (isNaN(reg)) return;
+    const sub = new Date((taxSubmitDate || nextThursday(header.receive_date || todayISO())) + "T00:00:00");
+    const cand = new Date(reg);
+    cand.setFullYear(sub.getFullYear());
+    const limit = new Date(sub);
+    limit.setDate(limit.getDate() + 90);
+    if (cand > limit) cand.setFullYear(cand.getFullYear() - 1);
+    if (cand <= reg) return; // จดปีนี้ ยังไม่ถึงรอบต่อภาษีแรก — ไม่เดา
+    setHeader(h => h.tax_paid_date ? h : { ...h, tax_paid_date: localISO(cand) });
+    // eslint-disable-next-line
+  }, [header.register_date, header.receipt_type]);
+
+  // แยกบรรทัดของงานต่อภาษี: "ค่าต่อภาษี" (ไม่ใช่ตรวจสภาพ) vs "ตรวจสภาพ..."
+  const isTaxLine = (l) => { const n = String(l.income_name || ""); return n.includes("ต่อภาษี") && !n.includes("ตรวจ"); };
+  const isTroLine = (l) => String(l.income_name || "").includes("ตรวจสภาพ");
+
+  // งานต่อภาษี: เติมราคาอัตโนมัติ (ทับทุกครั้งที่เข้าขั้นสรุป/วันที่เปลี่ยน/เลือกชื่อรายได้)
+  // - "ค่าต่อภาษี": ราคา = ยอดที่กรมขนส่งเก็บ (ภาษี+เงินเพิ่ม), ค่าบริการ = 200 − ราคา → รวม 200 (ยอดขนส่งเกิน 200 → ค่าบริการ 0)
+  // - "ตรวจสภาพ...": ราคา = ค่าตรวจ ตรอ. 60, ค่าบริการ = 190 → รวม 250
+  const MC_RENEW_FLAT = 200;
+  const MC_TRO_FLAT = 250;
+  const taxLineKey = lines.map(l => (isTaxLine(l) ? "1" : isTroLine(l) ? "2" : "0")).join("");
+  useEffect(() => {
+    if (step !== 3 || header.receipt_type !== "งานต่อภาษีและพรบ." || !header.tax_paid_date || !/[12]/.test(taxLineKey)) return;
+    const r = calcMcTax(header.register_date, header.tax_paid_date, taxSubmitDate || nextThursday(header.receive_date || todayISO()));
+    if (!r || r.suspended) return;
+    const dltAmount = Math.round((r.taxTotal + r.surcharge) * 100) / 100;
+    const serviceFee = Math.max(0, Math.round((MC_RENEW_FLAT - dltAmount) * 100) / 100);
+    setLines(prev => prev.map(l =>
+      isTaxLine(l) ? { ...l, price_before_discount: dltAmount, service_fee: serviceFee }
+      : isTroLine(l) ? { ...l, price_before_discount: MC_TRO_FEE, service_fee: Math.round((MC_TRO_FLAT - MC_TRO_FEE) * 100) / 100 }
+      : l
+    ));
+    // eslint-disable-next-line
+  }, [step, header.receipt_type, header.tax_paid_date, header.register_date, taxSubmitDate, taxLineKey]);
+
   // งานต่อภาษี: ดึงวันจดทะเบียนอัตโนมัติจากงานส่งจดทะเบียน (registration_submissions — OCR สำเนาทะเบียนหน้ารับคืน/ส่งคืน)
   useEffect(() => {
     const ch = text(header.chassis_no);
@@ -329,6 +369,40 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         return { _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: paid != null ? paid : collect, fee };
       });
   }, [saleExpenses, vehicleCC]);
+
+  // งานต่อภาษี: บรรทัดประเภท "รายได้ พรบ." ที่ยังไม่เลือกชื่อ → เลือกรายการ พรบ. ตาม CC ให้อัตโนมัติ (ราคา+ค่าบริการตามมาสเตอร์)
+  const emptyPrbKey = lines.map(l => (l.income_type === TYPE_PRB && !text(l.income_name) ? "1" : "0")).join("");
+  useEffect(() => {
+    if (step !== 3 || header.receipt_type !== "งานต่อภาษีและพรบ.") return;
+    if (!emptyPrbKey.includes("1") || prbCodes.length === 0) return;
+    const c = prbCodes[0];
+    setLines(prev => prev.map(l =>
+      (l.income_type === TYPE_PRB && !text(l.income_name))
+        ? { ...l, income_code: c.code || "", income_name: c.name || "", price_before_discount: c.amount ?? 0, service_fee: c.fee ?? 0 }
+        : l
+    ));
+    // eslint-disable-next-line
+  }, [step, header.receipt_type, emptyPrbKey, prbCodes]);
+
+  // งานต่อภาษี: เพิ่มบรรทัดอัตโนมัติ — "ค่าต่อภาษี" เสมอ + "ตรวจสภาพ" เมื่อรถเข้าเกณฑ์ ตรอ. (อายุ ≥ 5 ปี)
+  useEffect(() => {
+    if (step !== 3 || header.receipt_type !== "งานต่อภาษีและพรบ.") return;
+    const regCodes = getCodesForType(TYPE_REGISTER);
+    const adds = [];
+    if (!lines.some(isTaxLine)) {
+      const opt = regCodes.find(c => { const n = String(c.name || ""); return n.includes("ต่อภาษี") && !n.includes("ตรวจ"); });
+      if (opt) adds.push({ ...blankLine(), income_type: TYPE_REGISTER, income_code: opt.code || "", income_name: opt.name });
+    }
+    // รถต้องตรวจสภาพ → เพิ่มบรรทัดตรวจสภาพให้ด้วย
+    const r = header.tax_paid_date ? calcMcTax(header.register_date, header.tax_paid_date, taxSubmitDate || nextThursday(header.receive_date || todayISO())) : null;
+    if (r?.needTro && !lines.some(isTroLine)) {
+      const opt = regCodes.find(c => String(c.name || "").includes("ตรวจสภาพ"));
+      if (opt) adds.push({ ...blankLine(), income_type: TYPE_REGISTER, income_code: opt.code || "", income_name: opt.name });
+    }
+    if (!adds.length) return;
+    setLines(prev => [...prev, ...adds.filter(a => !prev.some(l => l.income_name === a.income_name))]);
+    // eslint-disable-next-line
+  }, [step, header.receipt_type, lines, serviceExpenses, header.tax_paid_date, header.register_date, taxSubmitDate]);
 
   // รับฝากค่างวด: ชื่อบริษัทดูจากไฟแนนซ์ของรถที่เลือก (contract_ref) — DB สะกด "กรุ๊ปลิส" ก็มี จับทั้ง 2 แบบ
   const depositCodes = useMemo(() => {
@@ -740,8 +814,27 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
 
         {message && <div style={{ padding: "8px 14px", marginBottom: 12, background: message.startsWith("✅") ? "#dcfce7" : message.startsWith("ℹ️") ? "#dbeafe" : "#fee2e2", color: message.startsWith("✅") ? "#065f46" : message.startsWith("ℹ️") ? "#1e40af" : "#991b1b", borderRadius: 6, fontSize: 14 }}>{message}</div>}
 
-        {/* ===== ขั้น 1: ข้อมูลเอกสาร (มี dropdown ประเภทงาน) + ข้อมูลรถ ===== */}
-        {step === 1 && (
+        {/* ===== ขั้น 1a: การ์ดเลือกประเภทงานก่อน — เลือกแล้วค่อยเปิดฟอร์มค้นหา/กรอกข้อมูลรถ ===== */}
+        {step === 1 && !header.receipt_type && (
+        <div style={{ ...card, marginBottom: 14 }}>
+          <div style={{ ...sec, textAlign: "center" }}>📌 เลือกประเภทงานรับเรื่อง</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginTop: 12 }}>
+            {JOB_TYPES.map(t => (
+              <div key={t.label} onClick={() => onJobTypeChange(t.label)}
+                onMouseOver={e => { e.currentTarget.style.borderColor = "#072d6b"; e.currentTarget.style.background = "#f0f6ff"; }}
+                onMouseOut={e => { e.currentTarget.style.borderColor = "#d1d5db"; e.currentTarget.style.background = "#fff"; }}
+                style={{ border: "1.5px solid #d1d5db", borderRadius: 12, padding: "22px 14px", textAlign: "center", cursor: "pointer", background: "#fff", transition: "all .15s" }}>
+                <div style={{ fontSize: 34 }}>{t.icon}</div>
+                <div style={{ fontWeight: 700, marginTop: 8 }}>{t.label}</div>
+                <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>{t.desc}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        )}
+
+        {/* ===== ขั้น 1b: ข้อมูลเอกสาร (เปลี่ยนประเภทได้จาก dropdown) + ข้อมูลรถ ===== */}
+        {step === 1 && header.receipt_type && (
         <div style={{ ...card, marginBottom: 14 }}>
           <div style={sec}>📌 ข้อมูลเอกสาร</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 14 }}>
@@ -789,9 +882,16 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                     <input type="date" value={header.register_date} onChange={e => { setRegDateSource(""); setHeader({ ...header, register_date: e.target.value }); }}
                       style={{ ...inp, ...(regDateSource && header.register_date ? { borderColor: "#10b981", background: "#f0fdf4" } : {}) }}
                       title={regDateSource || "กรอกจากเล่มทะเบียน ถ้าระบบหาไม่เจอ"} />
+                    {header.register_date && <div style={{ fontSize: 11, color: "#92400e", marginTop: 2 }}>พ.ศ. {fmtBE(header.register_date)}</div>}
                   </Field>
-                  <Field label="วันสิ้นอายุภาษีเดิม *"><input type="date" value={header.tax_paid_date} onChange={e => setHeader({ ...header, tax_paid_date: e.target.value })} style={inp} /></Field>
-                  <Field label="วันที่คาดว่าจะยื่นขนส่ง (พฤหัสถัดไป)"><input type="date" value={submitDate} onChange={e => setTaxSubmitDate(e.target.value)} style={inp} /></Field>
+                  <Field label="วันสิ้นอายุภาษีเดิม *">
+                    <input type="date" value={header.tax_paid_date} onChange={e => setHeader({ ...header, tax_paid_date: e.target.value })} style={inp} />
+                    {header.tax_paid_date && <div style={{ fontSize: 11, color: "#92400e", marginTop: 2 }}>พ.ศ. {fmtBE(header.tax_paid_date)}</div>}
+                  </Field>
+                  <Field label="วันที่คาดว่าจะยื่นขนส่ง (พฤหัสถัดไป)">
+                    <input type="date" value={submitDate} onChange={e => setTaxSubmitDate(e.target.value)} style={inp} />
+                    {submitDate && <div style={{ fontSize: 11, color: "#92400e", marginTop: 2 }}>พ.ศ. {fmtBE(submitDate)}</div>}
+                  </Field>
                 </div>
                 {r && (
                   <div style={{ marginTop: 10, padding: 10, background: "#fff", borderRadius: 8, fontSize: 13, lineHeight: 1.9 }}>
