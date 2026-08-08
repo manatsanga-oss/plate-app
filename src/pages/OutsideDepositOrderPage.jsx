@@ -127,9 +127,29 @@ export default function OutsideDepositOrderPage({ currentUser }) {
     setShowForm(true);
   };
 
+  // เติมสต๊อกคงเหลือรายชิ้นจาก honda_inventory (search_inventory — ตัวเดียวกับหน้าสั่งซื้ออะไหล่ปกติ)
+  const enrichStock = async (items) => Promise.all(items.map(async (it) => {
+    const code = (it.part_code || "").replace(/-/g, "").trim();
+    if (!code) return it;
+    try {
+      const sr = await fetch(SPARE_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "search_inventory", code }),
+      }).then(r => r.json());
+      const found = norm(sr).filter(f => Number(f.quantity || 0) > 0);
+      if (found.length > 0) {
+        const stockName = found.map(f => `${f.source || "-"}(${Number(f.quantity || 0)})`).join(", ");
+        const totalQty = found.reduce((s, f) => s + Number(f.quantity || 0), 0);
+        const locations = [...new Set(found.map(f => f.location).filter(Boolean))].join(", ");
+        return { ...it, stock_name: stockName || "-", stock_qty: totalQty, stock_location: locations || "-" };
+      }
+    } catch { /* ค้นสต๊อกไม่ได้ — แสดงรายการเปล่า */ }
+    return it;
+  }));
+
   const openDetail = async (o) => {
     const res = await api("get_order_detail", { order_id: o.order_id });
-    setDetail({ order: o, items: norm(res) });
+    setDetail({ order: o, items: await enrichStock(norm(res)) });
   };
 
   const updateItem = (idx, key, val) => {
@@ -172,9 +192,13 @@ export default function OutsideDepositOrderPage({ currentUser }) {
     }
   };
 
-  const printOrder = async (o) => {
-    const res = await api("get_order_detail", { order_id: o.order_id });
-    const items = norm(res);
+  const printOrder = async (o, preItems) => {
+    // preItems = รายการที่เติมสต๊อกแล้ว (จาก modal ดู) — ไม่มีก็โหลด+เติมเอง
+    let items = preItems;
+    if (!items) {
+      const res = await api("get_order_detail", { order_id: o.order_id });
+      items = await enrichStock(norm(res));
+    }
     const w = window.open("", "_blank", "width=800,height=900");
     if (!w) return;
     const rows = items.map((it, i) => `
@@ -183,6 +207,9 @@ export default function OutsideDepositOrderPage({ currentUser }) {
         <td>${it.part_code || "-"}</td>
         <td>${it.part_name || "-"}</td>
         <td style="text-align:center">${it.quantity || 0}</td>
+        <td class="stock">${it.stock_name || "-"}</td>
+        <td class="stock" style="text-align:center">${it.stock_qty != null ? it.stock_qty : "-"}</td>
+        <td class="stock">${it.stock_location || "-"}</td>
       </tr>`).join("");
     w.document.write(`
       <html><head><meta charset="utf-8"><title>${o.doc_no || ""}</title>
@@ -192,6 +219,7 @@ export default function OutsideDepositOrderPage({ currentUser }) {
         table{width:100%;border-collapse:collapse;margin-top:12px;}
         th,td{border:1px solid #333;padding:6px 8px;}
         th{background:#eee;}
+        .stock{background:#f0f9ff;}
         .info{display:grid;grid-template-columns:1fr 1fr;gap:6px 16px;margin-top:8px;}
         .info div{padding:2px 0;}
         .label{color:#555;font-weight:bold;}
@@ -210,8 +238,8 @@ export default function OutsideDepositOrderPage({ currentUser }) {
         <div><span class="label">สถานะ:</span> ${o.status || "-"}</div>
       </div>
       <table>
-        <thead><tr><th style="width:40px">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th style="width:80px">จำนวน</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="4" style="text-align:center">ไม่มีรายการ</td></tr>'}</tbody>
+        <thead><tr><th style="width:40px">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th style="width:60px">จำนวน</th><th class="stock">สต๊อก</th><th class="stock" style="width:70px">คงเหลือ</th><th class="stock">ที่เก็บ</th></tr></thead>
+        <tbody>${rows || '<tr><td colspan="7" style="text-align:center">ไม่มีรายการ</td></tr>'}</tbody>
       </table>
       <div style="margin-top:40px;display:flex;justify-content:space-around;">
         <div style="text-align:center">.................................<br/>ผู้สั่งซื้อ</div>
@@ -515,21 +543,32 @@ export default function OutsideDepositOrderPage({ currentUser }) {
           <div style={{ marginTop: 16, fontWeight: 600 }}>รายการอะไหล่</div>
           <table className="data-table" style={{ marginTop: 8 }}>
             <thead>
-              <tr><th>#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th>จำนวน</th></tr>
+              <tr>
+                <th>#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th>จำนวน</th>
+                <th style={{ background: "#e0f2fe" }}>สต๊อก</th>
+                <th style={{ background: "#e0f2fe", textAlign: "center" }}>คงเหลือ</th>
+                <th style={{ background: "#e0f2fe" }}>ที่เก็บ</th>
+              </tr>
             </thead>
             <tbody>
               {detail.items.length === 0 ? (
-                <tr><td colSpan={4} style={{ textAlign: "center" }}>ไม่มีรายการ</td></tr>
+                <tr><td colSpan={7} style={{ textAlign: "center" }}>ไม่มีรายการ</td></tr>
               ) : detail.items.map((it, idx) => (
                 <tr key={idx}>
                   <td>{idx + 1}</td>
                   <td>{it.part_code || "-"}</td>
                   <td>{it.part_name || "-"}</td>
                   <td>{it.quantity}</td>
+                  <td style={{ background: "#f0f9ff", fontSize: 12 }}>{it.stock_name || "-"}</td>
+                  <td style={{ background: "#f0f9ff", textAlign: "center", fontWeight: 600, color: Number(it.stock_qty) > 0 ? "#059669" : "#9ca3af" }}>{it.stock_qty != null ? it.stock_qty : "-"}</td>
+                  <td style={{ background: "#f0f9ff", fontSize: 12 }}>{it.stock_location || "-"}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
+            <button className="btn-primary" onClick={() => printOrder(detail.order, detail.items)}>🖨️ พิมพ์ใบสั่งซื้อ</button>
+          </div>
         </Modal>
       )}
     </div>
