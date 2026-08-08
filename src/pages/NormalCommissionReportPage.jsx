@@ -57,6 +57,13 @@ export default function NormalCommissionReportPage({ currentUser }) {
     setSvcLoading(false);
   }
   useEffect(() => { if (tab === "service") fetchService(); /* eslint-disable-next-line */ }, [tab]);
+  // แท็บจ่ายเงินต้องรู้สังกัดพนักงาน (resolve กลุ่มค่าคอมอะไหล่) — โหลดรายชื่อ hr ถ้ายังไม่มี
+  useEffect(() => {
+    if (tab !== "pay" || svcEmployees.length > 0) return;
+    fetch(HR_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_hr_employees", include_inactive: "true" }) })
+      .then(r => r.json()).then(d => { if (Array.isArray(d)) setSvcEmployees(d); }).catch(() => {});
+    // eslint-disable-next-line
+  }, [tab]);
 
   const serviceMechanics = useMemo(() => {
     // map ชื่อพนักงาน → ตำแหน่ง (เช็คใครเป็นช่าง)
@@ -921,7 +928,12 @@ tr.excluded td { text-decoration: line-through; }
 
   // หา (สังกัด, แบรนด์, group_no) ที่ delta ของ cell นี้ต้องไปบวกในเอกสารจ่าย
   function resolveAdjTarget(g, colKey) {
-    if (colKey === "parts") return { affiliation: "ป.เปา", brand: "ฮอนด้า", group_no: 1 }; // ค่าคอมอะไหล่รวมในใบ ป.เปา HONDA
+    if (colKey === "parts") {
+      // ค่าคอมอะไหล่เข้าใบตามสังกัดพนักงาน (hr): สิงห์ชัย → กลุ่ม 4, ป.เปา/ไม่ทราบ → กลุ่ม 1 (ตรงกับ backend)
+      const hr = svcEmployees.find(e => String(e.employee_name || "").trim() === String(g.name || "").trim());
+      if (String(hr?.affiliation || "").includes("สิงห์ชัย")) return { affiliation: "สิงห์ชัย", brand: "ยามาฮ่า", group_no: 4 };
+      return { affiliation: "ป.เปา", brand: "ฮอนด้า", group_no: 1 };
+    }
     if (colKey === "service") {
       // ค่าคอมงานบริการแยกเข้าใบตามแบรนด์ — delta ตามฝั่งที่ช่างมียอดมากกว่า
       const brand = Number(g.service_yamaha || 0) > Number(g.service_honda || 0) ? "ยามาฮ่า" : "ฮอนด้า";
