@@ -152,24 +152,28 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   const [vehInfo, setVehInfo] = useState(null);     // ข้อมูลรถ+การขายจาก get_vehicle (ค้นด้วยเลขเครื่อง/เลขตัวถัง)
   const [vehLoading, setVehLoading] = useState(false);
 
-  // จับคู่รหัสรุ่น/แบบ → เด้ง cascade รุ่น/แบบ/type (+สี ถ้าส่ง colorCode มา) · คืน true เมื่อพบ
-  const matchModel = (raw, colorCode) => {
+  // จับคู่รหัสรุ่น/แบบ → เด้ง cascade รุ่น/แบบ/type (+สี ถ้าส่ง colorCode/colorName มา) · คืน true เมื่อพบ
+  const matchModel = (raw, colorCode, colorName) => {
     const q = (raw || "").trim().toUpperCase();
     if (!q) return false;
-    const codePart = q.replace(/\s+/g, "");
+    // ตัดขีด/จุดออกทั้งสองฝั่งก่อนเทียบ — สมุดภาพบางเล่ม series มีขีด ("N-MAX") แต่ข้อมูลรถส่ง "NMAX"
+    const normCode = (s) => String(s || "").toUpperCase().replace(/[\s\-._/]/g, "");
+    const codePart = normCode(q);
     const typeTokens = q.match(/\d?TH/g) || [];
     const typeTok = typeTokens.find((t) => /\d/.test(t)) || typeTokens[0] || null;
 
-    // 1) หา "รุ่น" จาก series ที่เป็น prefix (เลือก series ที่ยาวสุด)
+    // 1) หา "รุ่น" จาก series/model ที่เป็น prefix (เลือกตัวที่ยาวสุด)
     let bi = -1, bestLen = 0;
     catalog.forEach((m, i) => {
-      const ser = (m.series || "").toUpperCase();
+      const ser = normCode(m.series);
       if (ser && codePart.startsWith(ser) && ser.length > bestLen) { bi = i; bestLen = ser.length; }
+      const mdl = normCode(m.model);
+      if (mdl && codePart.startsWith(mdl) && mdl.length > bestLen) { bi = i; bestLen = mdl.length; }
     });
     if (bi < 0) catalog.forEach((m, i) => {
-      const ser = (m.series || "").toUpperCase();
+      const ser = normCode(m.series);
       if (ser && codePart.includes(ser) && ser.length > bestLen) { bi = i; bestLen = ser.length; }
-      if (m.model.toUpperCase() === q) bi = i;
+      if (normCode(m.model) === codePart) bi = i;
     });
     if (bi < 0) return false;
 
@@ -180,20 +184,29 @@ export default function PartImageLookupPage({ currentUser } = {}) {
     const baebs = [...new Set(cols.map((c) => c.model_code || NO_BAEB))];
     let bb = baebs[0], bl = -1;
     baebs.forEach((b) => { const l = lcp(codePart, (b || "").toUpperCase()); if (l > bl) { bl = l; bb = b; } });
-    // 3) เลือก "type" จาก token ในข้อความ (ถ้ามีใน แบบ นั้น)
+    // 3) เลือก "type" จาก token ในข้อความ — HONDA ใช้ \dTH, YAMAHA ใช้รหัส type ทั้งก้อน (เช่น BTF300) เทียบว่าอยู่ใน query ไหม
     const types = [...new Set(cols.filter((c) => (c.model_code || NO_BAEB) === bb).map((c) => c.type || "-"))];
     let bt = types[0];
     if (typeTok) { const hit = types.find((t) => t.toUpperCase().includes(typeTok)); if (hit) bt = hit; }
+    else {
+      const hit = types.find((t) => normCode(t).length >= 4 && codePart.includes(normCode(t)));
+      if (hit) bt = hit;
+    }
 
     setSelBrand(m.brand || "HONDA"); setModelIdx(bi); setSelBaeb(bb); setSelType(bt); setColorPage(null);
-    // 4) เลือก "สี" ตามรหัสสีของรถ (จากข้อมูลการขาย เช่น GBR)
+    // 4) เลือก "สี" ตามรหัสสีของรถ (เช่น GBR) — รหัสไม่ตรง (ยามาฮ่า DMS ใช้คนละชุดกับสมุดภาพ) ลองเทียบด้วยชื่อสีต่อ
     let colorNote = "";
+    const colorPool = cols.filter((c) => (c.model_code || NO_BAEB) === bb && (c.type || "-") === bt);
+    let hitColor = null;
     if (colorCode) {
       const cc = String(colorCode).toUpperCase();
-      const hit = cols.filter((c) => (c.model_code || NO_BAEB) === bb && (c.type || "-") === bt)
-        .find((c) => String(c.color_code || "").toUpperCase() === cc);
-      if (hit) { setColorPage(String(hit.page)); colorNote = ` · สี${hit.name}`; }
+      hitColor = colorPool.find((c) => String(c.color_code || "").toUpperCase() === cc) || null;
     }
+    if (!hitColor && colorName) {
+      const cn = String(colorName).replace(/\s+/g, "").trim();
+      hitColor = colorPool.find((c) => String(c.name || "").replace(/\s+/g, "").trim() === cn) || null;
+    }
+    if (hitColor) { setColorPage(String(hitColor.page)); colorNote = ` · สี${hitColor.name}`; }
     const typeNote = typeTok && !types.some((t) => t.toUpperCase().includes(typeTok)) ? ` (ไม่มี type ${typeTok} ใช้ ${bt} แทน)` : "";
     setSearchMsg(`พบ: ${m.model} · ${bb} · ${bt}${colorNote}${typeNote}`);
     return true;
@@ -212,7 +225,7 @@ export default function PartImageLookupPage({ currentUser } = {}) {
       const v = Array.isArray(data) ? data[0] : data;
       if (!v || (!v.engine_no && !v.chassis_no)) { setVehInfo(null); setSearchMsg(`ไม่พบรถที่ตรงกับ "${kw}" ในระบบ`); return; }
       setVehInfo(v);
-      const matched = matchModel(`${v.model_code || v.model_name || ""} ${v.model_type || ""}`.trim(), v.model_color);
+      const matched = matchModel(`${v.model_code || v.model_name || ""} ${v.model_type || ""}`.trim(), v.model_color, v.color_name);
       if (!matched) setSearchMsg(`พบข้อมูลรถ ${v.model_code || v.model_name || ""} — แต่ยังไม่มีสมุดภาพของรุ่นนี้`);
     } catch {
       setSearchMsg("❌ ค้นหาไม่สำเร็จ — ลองใหม่อีกครั้ง");
