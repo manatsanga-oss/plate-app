@@ -518,8 +518,18 @@ export default function MotoBookingPage({ currentUser }) {
   const queuePosMap = {}; // booking_id -> { pos, qty, engine_no, branch, age }
   Object.keys(queueGroups).forEach((key) => {
     const [mc, cn] = key.split("|");
-    const stockKey = normModel(mc) + "|" + normColor(cn);
-    const cars = stockGroups[stockKey] || [];
+    // จับคู่แบบยืดหยุ่น: แบบในใบจองอาจเป็นข้อความยาว ("Grand Filano Hybrid BJKC00") แต่สต๊อกยามาฮ่าเก็บแค่รหัส type ("BJKC00")
+    // → สีต้องตรง แล้วรหัสแบบข้างหนึ่งอยู่ในอีกข้างถือว่าแมตช์ (รหัส type ยาว ≥4 ตัว ไม่ชนกันมั่ว)
+    const bm = normModel(mc), bc = normColor(cn);
+    let cars = stockGroups[bm + "|" + bc] || [];
+    if (cars.length === 0 && bm) {
+      Object.keys(stockGroups).forEach(k => {
+        const i = k.lastIndexOf("|");
+        const sm = k.slice(0, i), sc = k.slice(i + 1);
+        if (sc !== bc || !sm || sm.length < 4) return;
+        if (bm.includes(sm) || sm.includes(bm)) cars = cars.concat(stockGroups[k]);
+      });
+    }
     queueGroups[key].forEach((b, idx) => {
       const car = cars[idx] || null;
       queuePosMap[b.booking_id] = {

@@ -623,7 +623,17 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         if (dtA !== dtB) return dtA - dtB;
         return String(a.deposit_no || "").localeCompare(String(b.deposit_no || ""), undefined, { numeric: true });
       });
-      const cars = stockGroups[qNormModel(mc) + "|" + qNormColor(cn)] || [];
+      // จับคู่แบบยืดหยุ่นเหมือน MotoBookingPage: แบบในใบจองเป็นข้อความยาวได้ ("Grand Filano Hybrid BJKC00") แต่สต๊อกยามาฮ่าเก็บรหัส type ("BJKC00")
+      const bm = qNormModel(mc), bc = qNormColor(cn);
+      let cars = stockGroups[bm + "|" + bc] || [];
+      if (cars.length === 0 && bm) {
+        Object.keys(stockGroups).forEach(k => {
+          const j = k.lastIndexOf("|");
+          const sm = k.slice(0, j), sc = k.slice(j + 1);
+          if (sc !== bc || !sm || sm.length < 4) return;
+          if (bm.includes(sm) || sm.includes(bm)) cars = cars.concat(stockGroups[k]);
+        });
+      }
       sorted.forEach((b, idx) => {
         if (idx < cars.length && matchesSeries(b) && qNormColor(cn) === wantColor) {
           out.push({ ...b, queuePos: idx + 1, stockQty: cars.length, remaining: b.deposit_no ? (depositMap[b.deposit_no] || 0) : 0 });
@@ -1333,6 +1343,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       </div>
                       <div style={{ fontWeight: 700, fontSize: 16 }}>{g.name}</div>
                       <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2 }}>รหัสสี: {g.codes.filter(Boolean).join(", ") || "-"}</div>
+                      {/* รหัสแบบ: HONDA = model_code (เช่น AFS110KDFP), YAMAHA = รหัส type (เช่น BJKD00) */}
+                      <div style={{ fontSize: 12, color: "#0369a1", marginTop: 2, fontFamily: "monospace" }}>
+                        รหัสแบบ: {[...new Set(g.rows.map(r => brandParam(selBrand) === "HONDA" ? text(r.model_code) : text(r.type_name)).filter(Boolean))].join(", ") || "-"}
+                      </div>
                       <div style={{ marginTop: 8 }}>
                         <span style={{ padding: "3px 12px", borderRadius: 12, fontSize: 13, fontWeight: 600,
                           background: count === null ? "#f3f4f6" : count > 0 ? "#d1fae5" : "#fee2e2",

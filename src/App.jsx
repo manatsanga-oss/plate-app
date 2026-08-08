@@ -782,7 +782,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 45 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","profitloss"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","priceimpact","stockturnover","partreceiptreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -798,7 +798,6 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="priceimpact" label="วิเคราะห์ผลราคา/โปร ต่อยอดขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="stockturnover" label="สินค้าคงเหลือ & อัตราการหมุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partreceiptreport" label="รายงานรับอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="profitloss" label="งบกำไรขาดทุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Sales" pages={salesPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
@@ -902,7 +901,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="searchreceiptwork" label="ค้นหางานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan","accflowrecon","accdepositrefund","accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan","accflowrecon","accdepositrefund","accassetlist","accassetdepreciation","accassetcategory","profitloss"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="accbankaccounts" label="บัญชีธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accloanaccounts" label="บัญชีเงินกู้ยืม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbankmovements" label="รายงานการเคลื่อนไหว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -911,6 +910,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="accdirectorloan" label="บันทึกเงินให้กู้ยืมกรรมการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accflowrecon" label="ตรวจสอบบันทึกบัญชี FLOW" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accdepositrefund" label="บันทึกคืนเงินมัดจำเป็นเงินโอน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="profitloss" label="งบกำไรขาดทุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuSubGroup title="จัดการทรัพย์สิน" pages={["accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="accassetlist" label="รายการสินทรัพย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="accassetdepreciation" label="บันทึกค่าเสื่อมราคา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
