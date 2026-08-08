@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
+const REG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api"; // lookup วันจดทะเบียนจากงานส่งจด (OCR สำเนาทะเบียน)
 
 // ประเภทงาน (wizard ขั้นแรก) — defaultIncome = ประเภทรายได้ที่ prefill ให้บรรทัดแรกอัตโนมัติ
 const JOB_TYPES = [
@@ -95,6 +96,58 @@ const baht = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigi
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const fmtBE = (v) => { if (!v) return "-"; const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${Number(m[1]) + 543}` : String(v); };
 
+// ===== งานต่อภาษี (เฉพาะมอเตอร์ไซค์) — เงินเพิ่ม 1%/เดือน + เกณฑ์ตรวจสภาพตามประกาศขนส่งฯ =====
+const MC_TAX_PER_YEAR = 100; // ภาษี จยย. ส่วนบุคคล (รย.12) ปีละ 100 บาท
+const MC_TRO_FEE = 60;       // ค่าตรวจสภาพ ตรอ. จยย.
+const MC_TRO_AGE = 5;        // จยย. อายุครบ 5 ปีขึ้นไปต้องตรวจสภาพ
+// format วันที่แบบ local (ห้ามใช้ toISOString — โซนเวลาไทยจะเลื่อนถอยหลัง 1 วัน)
+const localISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+// วันพฤหัสบดีถัดไปหลังวันที่ระบุ (ร้านส่งขนส่งทุกพฤหัส ภายใน 1 สัปดาห์หลังรับเรื่อง)
+function nextThursday(iso) {
+  const d = new Date(iso + "T00:00:00");
+  if (isNaN(d)) return "";
+  do { d.setDate(d.getDate() + 1); } while (d.getDay() !== 4);
+  return localISO(d);
+}
+// นับเดือนล่าช้าแบบขนส่งฯ: เศษของเดือนนับเป็น 1 เดือน
+function monthsLate(dueISO, payISO) {
+  const due = new Date(dueISO + "T00:00:00"), pay = new Date(payISO + "T00:00:00");
+  if (isNaN(due) || isNaN(pay) || pay <= due) return 0;
+  let m = (pay.getFullYear() - due.getFullYear()) * 12 + (pay.getMonth() - due.getMonth());
+  if (pay.getDate() > due.getDate()) m += 1;
+  return Math.max(m, 1);
+}
+// คำนวณภาษีค้าง + เงินเพิ่มรายปี + ธงตรวจสภาพ — registerISO=วันจดทะเบียน, expireISO=วันสิ้นอายุภาษีเดิม, payISO=วันที่คาดว่าจะยื่น
+function calcMcTax(registerISO, expireISO, payISO) {
+  const expire = new Date(expireISO + "T00:00:00"), pay = new Date(payISO + "T00:00:00");
+  if (isNaN(expire) || isNaN(pay)) return null;
+  // ไล่ทีละปีภาษีที่ครบกำหนดแล้วยังไม่จ่าย (due < วันยื่น)
+  const years = [];
+  let due = new Date(expire);
+  while (due < pay) {
+    const dueISO2 = localISO(due);
+    years.push({ due: dueISO2, months: monthsLate(dueISO2, payISO), surcharge: MC_TAX_PER_YEAR * 0.01 * monthsLate(dueISO2, payISO) });
+    due.setFullYear(due.getFullYear() + 1);
+  }
+  const lateYears = years.length;                       // จำนวนปีภาษีที่ต้องจ่าย (ค้าง)
+  const taxTotal = (lateYears || 1) * MC_TAX_PER_YEAR;  // ไม่ค้างเลย = ต่อล่วงหน้า 1 ปี
+  const surcharge = Math.round(years.reduce((s, y) => s + y.surcharge, 0) * 100) / 100;
+  if (lateYears === 0) due.setFullYear(due.getFullYear() + 1); // ต่อล่วงหน้า → รอบใหม่ = สิ้นอายุเดิม + 1 ปี
+  const newExpire = localISO(due);                      // วันสิ้นอายุภาษีรอบใหม่หลังต่อครบ
+  // อายุรถ ณ วันสิ้นอายุภาษีรอบใหม่ (เกณฑ์ ตรอ.)
+  let age = null, needTro = false;
+  if (registerISO) {
+    const reg = new Date(registerISO + "T00:00:00");
+    if (!isNaN(reg)) {
+      age = new Date(newExpire + "T00:00:00").getFullYear() - reg.getFullYear();
+      needTro = age >= MC_TRO_AGE;
+    }
+  }
+  const overYear = lateYears >= 2 || (lateYears === 1 && monthsLate(years[0]?.due, payISO) > 12); // ขาดเกิน 1 ปี
+  const suspended = lateYears > 3;                      // ขาดเกิน 3 ปี = ทะเบียนระงับ
+  return { lateYears, taxTotal, surcharge, newExpire, age, needTro, overYear, suspended, months: years[0]?.months || 0 };
+}
+
 async function apiPost(payload) {
   const r = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const raw = await r.text();
@@ -131,6 +184,9 @@ const blankHeader = (currentUser) => ({
 export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [view, setView] = useState("list"); // list | form
   const [step, setStep] = useState(1);      // wizard: 1 ประเภทงาน/เอกสาร → 2 ข้อมูลรถ → 3 ลูกค้า → 4 รายได้+บันทึก
+  // งานต่อภาษี: วันที่คาดว่าจะยื่นขนส่ง — default พฤหัสบดีถัดไปหลังวันรับเรื่อง (ร้านส่งทุกพฤหัส) แก้เองได้
+  const [taxSubmitDate, setTaxSubmitDate] = useState("");
+  const [regDateSource, setRegDateSource] = useState(""); // บอกที่มาวันจดทะเบียนที่ดึงอัตโนมัติ
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -140,6 +196,43 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [header, setHeader] = useState(blankHeader(currentUser));
   const [lines, setLines] = useState([blankLine()]);
+
+  // งานต่อภาษี: ดึงวันจดทะเบียนอัตโนมัติจากงานส่งจดทะเบียน (registration_submissions — OCR สำเนาทะเบียนหน้ารับคืน/ส่งคืน)
+  useEffect(() => {
+    const ch = text(header.chassis_no);
+    if (header.receipt_type !== "งานต่อภาษีและพรบ." || !ch || header.register_date) { setRegDateSource(""); return; }
+    let alive = true;
+    const postReg = (body) => fetch(REG_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then(r => r.text()).then(t => (t.trim() ? JSON.parse(t) : []));
+    const fill = (dateISO, source) => setHeader(h => {
+      if (h.register_date || text(h.chassis_no) !== ch) return h;
+      setRegDateSource(source);
+      return { ...h, register_date: dateISO };
+    });
+    // 1) วันจดจริงจากงานส่งจดทะเบียน (OCR สำเนาทะเบียน) → 2) fallback ฐานทะเบียนเก่า/ใบขาย ใช้วันขายเป็นค่าประมาณ
+    postReg({ action: "get_submissions", chassis_no: ch })
+      .then(d => {
+        if (!alive || !Array.isArray(d)) return null;
+        // เช็คเลขถังซ้ำฝั่งนี้ด้วย — กัน backend เวอร์ชันเก่าที่ยังไม่กรอง chassis_no คืนงานคันอื่นมา
+        const hit = d
+          .filter(x => x && x.register_date && String(x.chassis_no || "").toUpperCase().trim() === ch.toUpperCase())
+          .sort((a, b) => String(b.register_date).localeCompare(String(a.register_date)))[0];
+        if (hit) { fill(String(hit.register_date).slice(0, 10), "จากงานส่งจดทะเบียน (OCR สำเนาทะเบียน)"); return true; }
+        return null;
+      })
+      .then(found => {
+        if (found || !alive) return;
+        return postReg({ action: "search_registrations", field: "chassis_no", keyword: ch }).then(d => {
+          if (!alive || !Array.isArray(d)) return;
+          // ใช้เฉพาะวันจดจริงจากฐานทะเบียนเก่า (นำเข้าจาก Export ขนส่ง/DMS) — ไม่ประมาณจากวันขาย
+          const hit = d.find(x => x && x.register_date && String(x.frame_no || "").toUpperCase().trim() === ch.toUpperCase());
+          if (hit) fill(String(hit.register_date).slice(0, 10), "จากฐานทะเบียนเก่า (วันจดจริงจากขนส่ง)");
+        });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [header.chassis_no, header.receipt_type]);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false); // บันทึกสำเร็จแล้ว — ค้างหน้าเดิมให้กดพิมพ์ได้
   const [editMode, setEditMode] = useState(false);
@@ -683,6 +776,53 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
             <Field label="type"><input value={header.model_type} onChange={e => setHeader({ ...header, model_type: e.target.value })} style={inp} /></Field>
             <Field label="สี"><input value={header.color} onChange={e => setHeader({ ...header, color: e.target.value })} style={inp} /></Field>
           </div>
+
+          {/* ===== งานต่อภาษี: คำนวณเงินเพิ่ม + เกณฑ์ตรวจสภาพ (เฉพาะมอเตอร์ไซค์) — โชว์เมื่อเลือกรถแล้ว ===== */}
+          {header.receipt_type === "งานต่อภาษีและพรบ." && text(header.chassis_no) && (() => {
+            const submitDate = taxSubmitDate || nextThursday(header.receive_date || todayISO());
+            const r = header.tax_paid_date ? calcMcTax(header.register_date, header.tax_paid_date, submitDate) : null;
+            return (
+              <div style={{ marginTop: 14, padding: 12, background: "#fffbeb", border: "1px solid #fbbf24", borderRadius: 10 }}>
+                <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 10 }}>🧾 คำนวณภาษี/เงินเพิ่ม (มอเตอร์ไซค์ · ภาษีปีละ {MC_TAX_PER_YEAR} บาท)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+                  <Field label={`วันจดทะเบียน${regDateSource && header.register_date ? " ✓ ดึงอัตโนมัติ" : " (จากเล่ม)"}`}>
+                    <input type="date" value={header.register_date} onChange={e => { setRegDateSource(""); setHeader({ ...header, register_date: e.target.value }); }}
+                      style={{ ...inp, ...(regDateSource && header.register_date ? { borderColor: "#10b981", background: "#f0fdf4" } : {}) }}
+                      title={regDateSource || "กรอกจากเล่มทะเบียน ถ้าระบบหาไม่เจอ"} />
+                  </Field>
+                  <Field label="วันสิ้นอายุภาษีเดิม *"><input type="date" value={header.tax_paid_date} onChange={e => setHeader({ ...header, tax_paid_date: e.target.value })} style={inp} /></Field>
+                  <Field label="วันที่คาดว่าจะยื่นขนส่ง (พฤหัสถัดไป)"><input type="date" value={submitDate} onChange={e => setTaxSubmitDate(e.target.value)} style={inp} /></Field>
+                </div>
+                {r && (
+                  <div style={{ marginTop: 10, padding: 10, background: "#fff", borderRadius: 8, fontSize: 13, lineHeight: 1.9 }}>
+                    {r.suspended ? (
+                      <div style={{ color: "#dc2626", fontWeight: 700 }}>
+                        🚫 ขาดต่อภาษีเกิน 3 ปี — ทะเบียนถูกระงับแล้ว ต้องคืนป้าย+จดทะเบียนใหม่ (เปลี่ยนประเภทงาน) · ภาษีค้าง+เงินเพิ่มยังต้องชำระสูงสุด 3 ปี
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          💰 ภาษี {r.lateYears || 1} ปี = <b>{baht(r.taxTotal)}</b> บาท
+                          {r.surcharge > 0 && <> · เงินเพิ่ม (1%/เดือน) = <b style={{ color: "#dc2626" }}>{baht(r.surcharge)}</b> บาท{r.lateYears === 1 ? ` (ล่าช้า ${r.months} เดือน)` : ` (ค้าง ${r.lateYears} ปี)`}</>}
+                          {r.needTro && <> · ค่าตรวจ ตรอ. = <b>{baht(MC_TRO_FEE)}</b> บาท</>}
+                          <span style={{ marginLeft: 8, fontWeight: 700, color: "#065f46" }}>
+                            รวมประมาณ {baht(r.taxTotal + r.surcharge + (r.needTro ? MC_TRO_FEE : 0))} บาท (ยังไม่รวม พ.ร.บ. + ค่าบริการ)
+                          </span>
+                        </div>
+                        <div>
+                          {r.age != null && <>🏍️ อายุรถ ~{r.age} ปี → {r.needTro ? <b style={{ color: "#b45309" }}>ต้องตรวจสภาพ ตรอ. (อายุ ≥ {MC_TRO_AGE} ปี)</b> : "ไม่ต้องตรวจสภาพ"}</>}
+                          {r.age == null && <span style={{ color: "#9ca3af" }}>กรอกวันจดทะเบียนเพื่อเช็คเกณฑ์ตรวจสภาพ (อายุ ≥ {MC_TRO_AGE} ปี)</span>}
+                          {r.overYear && !r.suspended && <b style={{ color: "#dc2626", marginLeft: 8 }}>⚠️ ขาดต่อเกิน 1 ปี — ต้องตรวจสภาพที่สำนักงานขนส่ง (ตรอ. ไม่ได้)</b>}
+                        </div>
+                        <div style={{ color: "#6b7280", fontSize: 11 }}>สิ้นอายุภาษีรอบใหม่: {fmtBE(r.newExpire)} · คำนวณ ณ วันยื่น {fmtBE(submitDate)} (เศษของเดือนนับเป็น 1 เดือน)</div>
+                      </>
+                    )}
+                  </div>
+                )}
+                {!r && <div style={{ marginTop: 8, fontSize: 12, color: "#92400e" }}>กรอก "วันสิ้นอายุภาษีเดิม" เพื่อคำนวณเงินเพิ่มอัตโนมัติ</div>}
+              </div>
+            );
+          })()}
         </div>
         )}
 
