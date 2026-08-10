@@ -95,8 +95,12 @@ export default function YamahaRepairReportPage() {
     }
     return m;
   }, [employees]);
+  // ชื่อที่ให้แสดงแถวของตัวเองเสมอ (ไม่โอนยอดเข้า TRANSFER_TO) แม้ไม่อยู่ในทะเบียนพนักงานตำแหน่งช่าง
+  const KEEP_OWN_ROW = ["อั้ลค่อมิ้ช", "โลมาแจ่ม"];
   const isMechanic = (name) => {
-    const pos = positionByName.get(String(name || "").trim()) || "";
+    const n = String(name || "").trim();
+    if (KEEP_OWN_ROW.some(k => n.includes(k))) return true;
+    const pos = positionByName.get(n) || "";
     return pos.includes("ช่าง");
   };
   const TRANSFER_TO = "ชัยณรงค์ เกิดทรัพย์"; // ผู้รับยอด labor+coupon ของคนที่ไม่ใช่ช่าง

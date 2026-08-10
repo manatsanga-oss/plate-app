@@ -275,6 +275,57 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   }, [header.chassis_no, header.receipt_type]);
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false); // บันทึกสำเร็จแล้ว — ค้างหน้าเดิมให้กดพิมพ์ได้
+  // รับชำระเงินใบรับเรื่อง — modal เลือกประเภทการรับชำระ แล้วไปโชว์ในสรุปรายวันรับเงิน (ตามประเภทรับเรื่อง)
+  const [payModal, setPayModal] = useState(null); // { date, rows: [{method, amount, account}], note, saving }
+  const [bankAccounts, setBankAccounts] = useState([]); // บัญชีรับโอน (โหลดครั้งแรกที่เปิด modal)
+  const bankLabelOf = (a) => [a.bank_name, a.account_no, a.account_name].filter(Boolean).join(" · ");
+  const PAY_METHODS = ["เงินสด", "เงินโอน", "QR", "อื่นๆ"];
+
+  const linesTotal = () => lines.reduce((s, l) => s + num(l.qty) * num(l.price_before_discount) - num(l.discount) + num(l.service_fee), 0);
+
+  function openPayModal() {
+    setPayModal({ date: todayISO(), rows: [{ method: "เงินสด", amount: Math.round(linesTotal() * 100) / 100, account: "" }], note: "", saving: false });
+    if (!bankAccounts.length) {
+      fetch("https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "false" }),
+      }).then(r => r.json()).then(d => setBankAccounts(Array.isArray(d) ? d : [])).catch(() => {});
+    }
+  }
+  const payTotal = (m) => (m?.rows || []).reduce((s, r) => s + num(r.amount), 0);
+  const setPayRow = (i, patch) => setPayModal(m => ({ ...m, rows: m.rows.map((r, j) => j === i ? { ...r, ...patch } : r) }));
+  async function saveReceiptPayment() {
+    const rows = (payModal?.rows || []).filter(r => num(r.amount) > 0);
+    if (!rows.length) { setMessage("❌ ใส่ยอดรับชำระ"); return; }
+    if (rows.some(r => r.method === "เงินโอน" && !r.account)) { setMessage("❌ เลือกบัญชีรับโอนเงินของรายการเงินโอนก่อน"); return; }
+    const total = rows.reduce((s, r) => s + num(r.amount), 0);
+    const methodSum = rows.map(r => r.method).join("+");
+    setPayModal(m => ({ ...m, saving: true }));
+    try {
+      const r = await apiPost({
+        action: "save_receipt_payment", receipt_no: header.receipt_no,
+        paid_date: payModal.date,
+        payments: rows.map(r2 => ({ method: r2.method, amount: num(r2.amount), account: r2.method === "เงินโอน" ? r2.account : "" })),
+        payment_note: payModal.note,
+        received_by: currentUser?.username || currentUser?.name || "",
+      });
+      if (!r?.[0]?.receipt_no) throw new Error("workflow ยังไม่รองรับ — re-import Receipt Entry API ก่อน");
+      setHeader(h => ({ ...h, paid_at: new Date().toISOString(), paid_date: payModal.date, payment_method: methodSum, paid_amount: total }));
+      setPayModal(null);
+      setMessage(`✅ รับชำระเงิน ${baht(total)} (${methodSum}) แล้ว — เข้ารายงานสรุปรายวันรับเงินอัตโนมัติ`);
+    } catch (e) {
+      setMessage("❌ รับชำระไม่สำเร็จ: " + String(e.message || e).slice(0, 150));
+      setPayModal(m => m ? { ...m, saving: false } : m);
+    }
+  }
+  async function cancelReceiptPayment() {
+    if (!window.confirm(`ยกเลิกการรับชำระของใบ ${header.receipt_no}?`)) return;
+    try {
+      await apiPost({ action: "cancel_receipt_payment", receipt_no: header.receipt_no });
+      setHeader(h => ({ ...h, paid_at: "", paid_date: "", payment_method: "", paid_amount: 0 }));
+      setMessage("✅ ยกเลิกการรับชำระแล้ว");
+    } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
+  }
   const [editMode, setEditMode] = useState(false);
   const [searchModal, setSearchModal] = useState(false);
   const [searchKw, setSearchKw] = useState("");
@@ -1082,11 +1133,92 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
             {step === 3 && (justSaved || editMode) && (
               <button onClick={printReceipt} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>🖨️ พิมพ์</button>
             )}
+            {step === 3 && (justSaved || editMode) && (
+              header.paid_at ? (
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "#d1fae5", color: "#065f46", fontSize: 13, fontWeight: 600 }}>
+                  ✓ รับชำระแล้ว {baht(num(header.paid_amount))} ({header.payment_method || "-"} · {fmtBE(header.paid_date)})
+                  <button onClick={cancelReceiptPayment} title="ยกเลิกการรับชำระ (คีย์ผิด)"
+                    style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 13 }}>✕</button>
+                </span>
+              ) : (
+                <button onClick={openPayModal} style={{ ...btn, background: "#059669", color: "#fff" }}>💵 รับชำระเงิน</button>
+              )
+            )}
             {step === 3 && (
               <button onClick={handleSave} disabled={saving} style={{ ...btnGreen, opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>
             )}
           </div>
         </div>
+
+        {/* modal รับชำระเงินใบรับเรื่อง */}
+        {payModal && (
+          <div onClick={() => !payModal.saving && setPayModal(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 22, width: 420, maxWidth: "92vw" }}>
+              <h3 style={{ margin: "0 0 12px", color: "#059669" }}>💵 รับชำระเงิน — {header.receipt_no}</h3>
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: 10, marginBottom: 12, fontSize: 13 }}>
+                ประเภทงาน: <b>{header.receipt_type || "-"}</b> · ลูกค้า: <b>{header.customer_name || "-"}</b> · ยอดตามใบ: <b>{baht(linesTotal())}</b>
+              </div>
+              <Field label="วันที่รับเงิน *">
+                <input type="date" value={payModal.date} onChange={e => setPayModal(m => ({ ...m, date: e.target.value }))} style={inp} />
+              </Field>
+              <div style={{ margin: "10px 0" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>วิธีรับชำระ * (เพิ่มได้หลายวิธี)</div>
+                {payModal.rows.map((r3, i3) => (
+                  <div key={i3} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "#f9fafb" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <select value={r3.method} onChange={e => setPayRow(i3, { method: e.target.value, account: "" })} style={{ ...inp, width: 110, flex: "0 0 auto" }}>
+                        {PAY_METHODS.map(m2 => <option key={m2} value={m2}>{m2}</option>)}
+                      </select>
+                      <input type="number" step="0.01" placeholder="ยอด (บาท)" value={r3.amount}
+                        onChange={e => setPayRow(i3, { amount: e.target.value })}
+                        style={{ ...inp, flex: 1, textAlign: "right", fontWeight: 700 }} />
+                      {payModal.rows.length > 1 && (
+                        <button onClick={() => setPayModal(m => ({ ...m, rows: m.rows.filter((_, j) => j !== i3) }))}
+                          style={{ border: "none", background: "#fee2e2", color: "#b91c1c", borderRadius: 6, width: 28, height: 28, cursor: "pointer", flex: "0 0 auto" }}>✕</button>
+                      )}
+                    </div>
+                    {r3.method === "เงินโอน" && (
+                      <div style={{ marginTop: 6 }}>
+                        <select value={r3.account} onChange={e => setPayRow(i3, { account: e.target.value })}
+                          style={{ ...inp, background: r3.account ? "#fff" : "#fffbeb" }}>
+                          <option value="">— เลือกบัญชีรับโอน —</option>
+                          {bankAccounts.map(a => (
+                            <option key={a.id || bankLabelOf(a)} value={bankLabelOf(a)}>{bankLabelOf(a)}</option>
+                          ))}
+                        </select>
+                        {!bankAccounts.length && <div style={{ fontSize: 12, color: "#92400e", marginTop: 3 }}>กำลังโหลดรายชื่อบัญชี...</div>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                <button onClick={() => setPayModal(m => ({ ...m, rows: [...m.rows, { method: "เงินโอน", amount: Math.max(0, Math.round((linesTotal() - payTotal(m)) * 100) / 100), account: "" }] }))}
+                  style={{ border: "1px dashed #059669", background: "#f0fdf4", color: "#047857", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>
+                  ＋ เพิ่มวิธีรับชำระ
+                </button>
+                <div style={{ textAlign: "right", marginTop: 8, fontSize: 14 }}>
+                  รวมรับชำระ: <b style={{ color: Math.abs(payTotal(payModal) - linesTotal()) < 0.01 ? "#059669" : "#b45309" }}>{baht(payTotal(payModal))}</b>
+                  {" "}/ ยอดตามใบ {baht(linesTotal())}
+                </div>
+              </div>
+              <div style={{ marginTop: 10 }}>
+                <Field label="หมายเหตุ">
+                  <input value={payModal.note} onChange={e => setPayModal(m => ({ ...m, note: e.target.value }))} style={inp} placeholder="เช่น เลขอ้างอิงโอน" />
+                </Field>
+              </div>
+              <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+                <button onClick={saveReceiptPayment} disabled={payModal.saving}
+                  style={{ flex: 1, padding: "9px 0", background: "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 15 }}>
+                  {payModal.saving ? "กำลังบันทึก..." : "✓ บันทึกรับชำระ"}
+                </button>
+                <button onClick={() => setPayModal(null)} disabled={payModal.saving}
+                  style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 15 }}>
+                  ยกเลิก
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {searchModal && (
           <div onClick={() => setSearchModal(false)}

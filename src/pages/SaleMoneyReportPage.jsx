@@ -1,8 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 
-// รายงานการเงินขายรถ — สรุปรายวันรับเงิน: ยอดขาย + เงินที่รับ + แหล่งรับชำระ (เงินสด/โอน/บัตร/ไฟแนนซ์/มัดจำ)
-// ข้อมูล: retail-sale-api action list_sale_payments (ใบขายที่บันทึกรับชำระแล้ว กรองตามวันที่รับเงิน)
+// สรุปรายวันรับเงิน: ยอดขาย + เงินที่รับ + แหล่งรับชำระ (เงินสด/โอน/บัตร/ไฟแนนซ์/มัดจำ) + รับชำระเงินมัดจำจองรถ
+// ข้อมูล: retail-sale-api list_sale_payments (ใบขายที่รับชำระแล้ว) + booking-deposit-api get_deposits (มัดจำจองรถ)
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+const DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
+const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api"; // มัดจำอะไหล่/บริการ (PDS/PDO)
+const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api"; // รับชำระใบรับเรื่องงานทะเบียน
+const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // รับชำระค่าอะไหล่และบริการ (ใบขาย/ใบ JOB)
 
 const METHOD_COLS = [
   { key: "cash", label: "เงินสด" },
@@ -39,6 +43,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [dateTo, setDateTo] = useState(todayStr());
   const [branch, setBranch] = useState("");
   const [rows, setRows] = useState([]);
+  const [depRows, setDepRows] = useState([]); // มัดจำจองรถ (booking_deposits) — กรองช่วงวันที่ฝั่งหน้าเว็บ
+  const [partDepRows, setPartDepRows] = useState([]); // มัดจำอะไหล่/บริการ (part_deposits PDS/PDO)
+  const [rcptRows, setRcptRows] = useState([]);       // รับชำระใบรับเรื่องงานทะเบียน (registration_receipts.paid_*)
+  const [psRows, setPsRows] = useState([]);           // รับชำระค่าอะไหล่และบริการ (part_service_payments)
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -46,12 +54,39 @@ export default function SaleMoneyReportPage({ currentUser }) {
     setLoading(true);
     setMessage("");
     try {
-      const res = await fetch(RETAIL_API, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
-      });
+      const [res, resDep, resPartDep, resRcpt, resPs] = await Promise.all([
+        fetch(RETAIL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
+        }),
+        fetch(DEPOSIT_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_deposits" }),
+        }).catch(() => null),
+        fetch(PART_DEPOSIT_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_deposits", limit: 2000 }),
+        }).catch(() => null),
+        fetch(RECEIPT_ENTRY_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_receipt_payments", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
+        fetch(PART_SVC_PAY_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_payments", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
+      ]);
       const data = await res.json().catch(() => []);
       setRows(Array.isArray(data) ? data : []);
+      const dep = resDep ? await resDep.json().catch(() => []) : [];
+      setDepRows(Array.isArray(dep) ? dep.filter(d => d && d.deposit_no) : []);
+      const pdep = resPartDep ? await resPartDep.json().catch(() => []) : [];
+      // ใบยกเลิกไม่นับ (ไม่ได้รับเงินจริง) — ใบคืนเงินแล้วยังนับวันรับเงินเดิม มีป้ายกำกับ
+      setPartDepRows(Array.isArray(pdep) ? pdep.filter(d => d && d.deposit_doc_no && d.status !== "cancelled") : []);
+      const rc = resRcpt ? await resRcpt.json().catch(() => []) : [];
+      setRcptRows(Array.isArray(rc) ? rc.filter(r2 => r2 && r2.receipt_no && r2.paid_at) : []);
+      const ps = resPs ? await resPs.json().catch(() => []) : [];
+      setPsRows(Array.isArray(ps) ? ps.filter(p => p && p.payment_id && p.status === "active") : []);
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
       setRows([]);
@@ -65,7 +100,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
   // pivot ช่องทางรับชำระของแต่ละใบ — user ทั่วไปกรองเหลือเฉพาะสาขาตัวเองเสมอ
   const items = useMemo(() => {
     return rows
-      .filter((r) => (isAdmin ? !branch || r.branch_code === branch : String(r.branch_code || "").substring(0, 5).toUpperCase() === myBranch))
+      .filter((r) => (isAdmin ? !branch || String(r.branch_code || "").substring(0, 5).toUpperCase() === String(branch).substring(0, 5).toUpperCase() : String(r.branch_code || "").substring(0, 5).toUpperCase() === myBranch))
       .map((r) => {
         let pms = r.payment_methods;
         if (typeof pms === "string") { try { pms = JSON.parse(pms); } catch { pms = []; } }
@@ -80,18 +115,23 @@ export default function SaleMoneyReportPage({ currentUser }) {
       });
   }, [rows, branch, isAdmin, myBranch]);
 
-  const branchOpts = useMemo(() => [...new Set(rows.map((r) => r.branch_code).filter(Boolean))].sort(), [rows]);
-
-  // group ตามสาขา
-  const groups = useMemo(() => {
-    const m = new Map();
-    for (const it of items) {
-      const k = it.branch_code || "-";
-      if (!m.has(k)) m.set(k, { key: k, name: it.branch_name || it.branch_code || "ไม่ระบุสาขา", rows: [] });
-      m.get(k).rows.push(it);
-    }
-    return [...m.values()].sort((a, b) => a.key.localeCompare(b.key));
-  }, [items]);
+  // ตัวเลือกสาขารวมจากทุกแหล่ง (ขายรถ+มัดจำจอง+มัดจำอะไหล่+รับเรื่อง) — คีย์ 5 ตัวแรก กันสาขาที่มีแต่รายการรับเรื่อง/มัดจำหายจาก dropdown
+  const branchOpts = useMemo(() => {
+    const k5 = (v) => String(v || "").substring(0, 5).toUpperCase();
+    const map = new Map();
+    const add = (code, label) => {
+      const k = k5(code);
+      if (!k) return;
+      const lb = String(label || code || "").trim();
+      if (!map.has(k) || lb.length > map.get(k).length) map.set(k, lb);
+    };
+    rows.forEach((r) => add(r.branch_code, r.branch_name || r.branch_code));
+    depRows.forEach((d) => add(d.branch_code, d.branch_name || d.branch_code));
+    partDepRows.forEach((d) => add(d.branch_code, d.branch_code));
+    rcptRows.forEach((r2) => add(r2.branch_code, r2.branch_code));
+    psRows.forEach((p) => add(p.branch_code, p.branch_code));
+    return [...map.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.key.localeCompare(b.key));
+  }, [rows, depRows, partDepRows, rcptRows, psRows]);
 
   const sumOf = (list) => {
     const t = { sale: 0, received: 0 };
@@ -102,7 +142,171 @@ export default function SaleMoneyReportPage({ currentUser }) {
     }
     return t;
   };
-  const grand = sumOf(items);
+  // ===== รับชำระเงินมัดจำขายรถ (จองรถ) — กรองช่วงวันที่ + สาขา แบบเดียวกับใบขาย =====
+  const bc5 = (v) => String(v || "").substring(0, 5).toUpperCase();
+  const depItems = useMemo(() => {
+    return depRows
+      .filter((d) => {
+        const dt = String(d.deposit_date || "").slice(0, 10);
+        if (!dt || dt < dateFrom || dt > dateTo) return false;
+        return isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch;
+      })
+      .sort((a, b) => String(a.branch_code || "").localeCompare(String(b.branch_code || "")) || String(a.deposit_no || "").localeCompare(String(b.deposit_no || "")));
+  }, [depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+  const depSum = useMemo(() => {
+    const t = { total: 0, cash: 0, transfer: 0, other: 0 };
+    for (const d of depItems) {
+      const amt = num(d.deposit_amount);
+      t.total += amt;
+      const m = String(d.payment_method || "");
+      if (m.includes("สด")) t.cash += amt;
+      else if (m.includes("โอน")) t.transfer += amt;
+      else t.other += amt;
+    }
+    return t;
+  }, [depItems]);
+
+  // มัดจำอะไหล่/บริการ (PDS/PDO) ที่รับเงินในช่วงวันที่ + สาขา
+  const partDepItems = useMemo(() => {
+    return partDepRows
+      .filter((d) => {
+        const dt = String(d.deposit_date || "").slice(0, 10);
+        if (!dt || dt < dateFrom || dt > dateTo) return false;
+        return isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch;
+      })
+      .sort((a, b) => String(a.deposit_doc_no || "").localeCompare(String(b.deposit_doc_no || "")));
+  }, [partDepRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+  const partDepSum = useMemo(() => partDepItems.reduce((s, d) => s + num(d.deposit_amount), 0), [partDepItems]);
+
+  // ===== รวมใบขาย + มัดจำจองรถ + มัดจำอะไหล่/บริการ เป็นตารางเดียว (สไตล์รายงานรับเงิน DMS) — แต่ละแถวติดประเภทรายได้ =====
+  const allItems = useMemo(() => {
+    const sales = items.map((it) => ({
+      kind: "sale", category: "รายได้จากการขายรถ",
+      doc_no: it.receipt_no || "-", date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
+      customer_name: it.customer_name, seller: it.seller, saleAmount: it.saleAmount,
+      split: it.split, received: it.received,
+      branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
+      note: it.payment_received_note || "", finance: it.finance_type === "moto" ? it.finance_company_name : "",
+    }));
+    const deps = depItems.map((d) => {
+      const amt = num(d.deposit_amount);
+      const m = String(d.payment_method || "");
+      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+      if (m.includes("สด")) split.cash = amt;
+      else if (m.includes("โอน")) split.transfer = amt;
+      else split.other = amt;
+      return {
+        kind: "deposit", category: "รายได้เงินมัดจำจองรถ",
+        doc_no: d.deposit_no, date: d.deposit_date, ref_no: "",
+        customer_name: d.customer_name, seller: "", saleAmount: 0,
+        split, received: amt,
+        branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
+        note: [[d.brand, d.model_series, d.color_name].filter(Boolean).join(" "), d.payment_account].filter(Boolean).join(" · "),
+        refunded: !!d.refunded_at,
+      };
+    });
+    // รับชำระใบรับเรื่องงานทะเบียน — ประเภทรายได้ตามประเภทงานรับเรื่อง (ต่อภาษี/ทะเบียนรถใหม่/โอน/ประกัน)
+    const rcpts = rcptRows
+      .filter((r2) => (isAdmin ? (!branch || bc5(r2.branch_code) === bc5(branch)) : bc5(r2.branch_code) === myBranch))
+      .map((r2) => {
+        const amt = num(r2.paid_amount) || num(r2.line_total);
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+        // รับได้หลายวิธีในใบเดียว — payment_breakdowns = JSON [{method, amount, account}]
+        let bks = [];
+        try { bks = JSON.parse(r2.payment_breakdowns || "[]"); } catch { bks = []; }
+        if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(r2.payment_method || ""), amount: amt }];
+        for (const b of bks) {
+          const m = String(b.method || "");
+          const a = num(b.amount);
+          if (m.includes("สด")) split.cash += a;
+          else if (m.includes("โอน")) split.transfer += a;
+          else if (m.toUpperCase().includes("QR") || m.includes("บัตร")) split.card += a;
+          else split.other += a;
+        }
+        return {
+          kind: "receipt", category: `รายได้รับเรื่อง (${r2.receipt_type || "งานทะเบียน"})`,
+          doc_no: r2.receipt_no, date: r2.paid_date || r2.paid_at, ref_no: "",
+          customer_name: r2.customer_name, seller: r2.payment_received_by || "", saleAmount: 0,
+          split, received: amt,
+          branch_key: bc5(r2.branch_code), branch_name: r2.branch_code || "ไม่ระบุสาขา",
+          note: [r2.payment_account, r2.payment_note].filter(Boolean).join(" · "),
+        };
+      });
+    // รับชำระค่าอะไหล่และบริการ (ใบขาย/ใบ JOB — part_service_payments) — แตกยอดตามวิธี, มัดจำเข้าคอลัมน์เงินมัดจำ
+    const partSvcs = psRows
+      .filter((p) => (isAdmin ? (!branch || bc5(p.branch_code) === bc5(branch)) : bc5(p.branch_code) === myBranch))
+      .map((p) => {
+        const amt = num(p.paid_amount);
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+        let bks = [];
+        try { bks = JSON.parse(p.payment_breakdowns || "[]"); } catch { bks = []; }
+        if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(p.payment_method || ""), amount: amt }];
+        for (const b of bks) {
+          const m = String(b.method || "");
+          const a = num(b.amount);
+          if (m.includes("มัดจำ")) split.deposit += a;
+          else if (m.includes("สด")) split.cash += a;
+          else if (m.includes("โอน")) split.transfer += a;
+          else if (m.toUpperCase().includes("QR") || m.includes("บัตร")) split.card += a;
+          else split.other += a;
+        }
+        return {
+          kind: "part_service", category: "รายได้ค่าอะไหล่/บริการ",
+          doc_no: p.receipt_no || p.doc_no, date: p.paid_date, ref_no: p.doc_no,
+          customer_name: p.customer_name, seller: p.received_by || "", saleAmount: 0,
+          split, received: amt,
+          branch_key: bc5(p.branch_code), branch_name: p.branch_code || "ไม่ระบุสาขา",
+          note: [p.doc_type, p.deposit_doc_no ? `ตัดมัดจำ ${p.deposit_doc_no}` : "", p.payment_note].filter(Boolean).join(" · "),
+        };
+      });
+    const partDeps = partDepItems.map((d) => {
+      const amt = num(d.deposit_amount);
+      const m = String(d.payment_method || "");
+      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+      if (m.includes("สด")) split.cash = amt;
+      else if (m.includes("โอน")) split.transfer = amt;
+      else split.other = amt;
+      return {
+        kind: "part_deposit", category: "รายได้เงินมัดจำอะไหล่/บริการ",
+        doc_no: d.deposit_doc_no, date: d.deposit_date, ref_no: "",
+        customer_name: d.customer_name, seller: d.recorded_by || "", saleAmount: 0,
+        split, received: amt,
+        branch_key: bc5(d.branch_code), branch_name: d.branch_code || "ไม่ระบุสาขา",
+        note: [d.deposit_type ? `มัดจำ${d.deposit_type}` : "", d.brand].filter(Boolean).join(" · "),
+        refunded: d.status === "refunded" || !!d.refunded_at,
+      };
+    });
+    return [...sales, ...deps, ...partDeps, ...rcpts, ...partSvcs];
+  }, [items, depItems, partDepItems, rcptRows, psRows, branch, isAdmin, myBranch]);
+
+  // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const it of allItems) {
+      const k = it.branch_key || "-";
+      if (!m.has(k)) m.set(k, { key: k, name: it.branch_name, rows: [] });
+      m.get(k).rows.push(it);
+    }
+    for (const g of m.values()) g.rows.sort((a, b) => a.kind.localeCompare(b.kind) * -1 || String(a.doc_no).localeCompare(String(b.doc_no)));
+    return [...m.values()].sort((a, b) => a.key.localeCompare(b.key));
+  }, [allItems]);
+  const grand = sumOf(allItems);
+
+  // สรุปแยกประเภทตามรายได้
+  const catSum = useMemo(() => {
+    const m = new Map();
+    for (const it of allItems) {
+      if (!m.has(it.category)) {
+        const z = { category: it.category, count: 0, sale: 0, received: 0 };
+        METHOD_COLS.forEach((c) => { z[c.key] = 0; });
+        m.set(it.category, z);
+      }
+      const t = m.get(it.category);
+      t.count += 1; t.sale += it.saleAmount; t.received += it.received;
+      METHOD_COLS.forEach((c) => { t[c.key] += it.split[c.key]; });
+    }
+    return [...m.values()];
+  }, [allItems]);
 
   const th = { padding: "6px 8px", fontSize: 12, whiteSpace: "nowrap", background: "#e0f2fe", color: "#075985", border: "1px solid #bae6fd", textAlign: "center" };
   const td = { padding: "5px 8px", fontSize: 12.5, border: "1px solid #e5e7eb", verticalAlign: "top" };
@@ -117,17 +321,27 @@ export default function SaleMoneyReportPage({ currentUser }) {
       for (const it of g.rows) {
         idx++;
         body += `<tr>
-<td class="c">${idx}</td><td>${esc(it.receipt_no || "-")}</td><td class="c">${esc(thaiDate(it.receipt_date || it.sale_date))}</td>
-<td>${esc(it.sale_no)}</td><td>${esc(it.customer_name || "")}</td><td class="r">${fmt(it.saleAmount)}</td>
+<td class="c">${idx}</td><td>${esc(it.doc_no || "-")}</td><td class="c">${esc(thaiDate(it.date))}</td>
+<td>${esc(it.ref_no || "-")}</td><td>${esc(it.customer_name || "")}<br><span style="font-size:9.5px;color:#555">${esc(it.category)}${it.refunded ? " · คืนเงินแล้ว" : ""}</span></td><td class="r">${it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
 ${METHOD_COLS.map((c) => `<td class="r">${it.split[c.key] ? fmt(it.split[c.key]) : "-"}</td>`).join("")}
 <td class="r b">${fmt(it.received)}</td></tr>`;
       }
       const t = sumOf(g.rows);
       body += `<tr class="sub"><td colspan="5" class="r">รวมสาขา ${esc(g.name)} (${g.rows.length} รายการ)</td><td class="r">${fmt(t.sale)}</td>${METHOD_COLS.map((c) => `<td class="r">${t[c.key] ? fmt(t[c.key]) : "-"}</td>`).join("")}<td class="r b">${fmt(t.received)}</td></tr>`;
     }
-    body += `<tr class="tot"><td colspan="5" class="r">รวมทั้งสิ้น (${items.length} รายการ)</td><td class="r">${fmt(grand.sale)}</td>${METHOD_COLS.map((c) => `<td class="r">${grand[c.key] ? fmt(grand[c.key]) : "-"}</td>`).join("")}<td class="r b">${fmt(grand.received)}</td></tr>`;
+    body += `<tr class="tot"><td colspan="5" class="r">รวมทั้งสิ้น (${allItems.length} รายการ)</td><td class="r">${fmt(grand.sale)}</td>${METHOD_COLS.map((c) => `<td class="r">${grand[c.key] ? fmt(grand[c.key]) : "-"}</td>`).join("")}<td class="r b">${fmt(grand.received)}</td></tr>`;
 
-    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>รายงานการเงินขายรถ</title>
+    // สรุปแยกประเภทตามรายได้ แนบท้ายใบพิมพ์
+    let catBody = "";
+    for (const t of catSum) {
+      catBody += `<tr><td>${esc(t.category)}</td><td class="c">${t.count}</td>${METHOD_COLS.map((c) => `<td class="r">${t[c.key] ? fmt(t[c.key]) : "-"}</td>`).join("")}<td class="r b">${fmt(t.received)}</td></tr>`;
+    }
+    catBody += `<tr class="tot"><td class="r">รวมทั้งสิ้น</td><td class="c">${allItems.length}</td>${METHOD_COLS.map((c) => `<td class="r">${grand[c.key] ? fmt(grand[c.key]) : "-"}</td>`).join("")}<td class="r b">${fmt(grand.received)}</td></tr>`;
+    const depSection = catSum.length ? `
+<h3 style="margin:14px 0 4px">สรุปแยกประเภทตามรายได้</h3>
+<table><thead><tr><th>ประเภทรายได้</th><th>จำนวน</th>${METHOD_COLS.map((c) => `<th>${c.label}</th>`).join("")}<th>รวมยอดชำระ</th></tr></thead><tbody>${catBody}</tbody></table>` : "";
+
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>สรุปรายวันรับเงิน</title>
 <style>@page{size:A4 landscape;margin:8mm}
 *{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
 body{margin:0;padding:10px;color:#222;font-size:12px}
@@ -141,12 +355,13 @@ td{border:1px solid #bbb;padding:3px 6px;font-size:11px}
 .sub td{background:#fafaf5;font-weight:700}
 .tot td{background:#fde68a;font-weight:800;font-size:12px}
 </style></head><body>
-<h2>รายงานการเงินขายรถ — สรุปรายวันรับเงิน</h2>
+<h2>สรุปรายวันรับเงิน</h2>
 <div class="sub-h">เลือกระหว่างวันที่ ${esc(thaiDate(dateFrom))} ถึง ${esc(thaiDate(dateTo))}${(isAdmin ? branch : myBranch) ? " · สาขา " + esc(isAdmin ? branch : myBranch) : ""} · พิมพ์เมื่อ ${esc(new Date().toLocaleString("th-TH"))}</div>
 <table><thead><tr>
-<th>ลำดับ</th><th>เลขที่ใบเสร็จ</th><th>วันที่รับเงิน</th><th>เลขที่ใบขาย</th><th>ลูกค้า</th><th>ยอดขาย</th>
+<th>ลำดับ</th><th>เลขที่เอกสาร</th><th>วันที่รับเงิน</th><th>เอกสารอ้างอิง</th><th>ลูกค้า / ประเภทรายได้</th><th>ยอดขาย</th>
 ${METHOD_COLS.map((c) => `<th>${c.label}</th>`).join("")}<th>รวมยอดชำระ</th>
 </tr></thead><tbody>${body}</tbody></table>
+${depSection}
 </body></html>`;
     const w = window.open("", "_blank", "width=1100,height=800");
     if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup ถูกบล็อก)"); return; }
@@ -159,9 +374,9 @@ ${METHOD_COLS.map((c) => `<th>${c.label}</th>`).join("")}<th>รวมยอด�
   return (
     <div className="page-container">
       <div className="page-topbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <h2 className="page-title">💰 รายงานการเงินขายรถ (สรุปรายวันรับเงิน)</h2>
-        <button onClick={printReport} disabled={!items.length}
-          style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: items.length ? "#0369a1" : "#cbd5e1", color: "#fff", cursor: items.length ? "pointer" : "not-allowed", fontWeight: 600 }}>
+        <h2 className="page-title">💰 สรุปรายวันรับเงิน</h2>
+        <button onClick={printReport} disabled={!items.length && !depItems.length}
+          style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: (items.length || depItems.length) ? "#0369a1" : "#cbd5e1", color: "#fff", cursor: (items.length || depItems.length) ? "pointer" : "not-allowed", fontWeight: 600 }}>
           🖨️ พิมพ์รายงาน
         </button>
       </div>
@@ -181,7 +396,7 @@ ${METHOD_COLS.map((c) => `<th>${c.label}</th>`).join("")}<th>รวมยอด�
           {isAdmin ? (
             <select value={branch} onChange={(e) => setBranch(e.target.value)} style={inp}>
               <option value="">ทุกสาขา</option>
-              {branchOpts.map((b) => <option key={b} value={b}>{b}</option>)}
+              {branchOpts.map((b) => <option key={b.key} value={b.key}>{b.label && b.label !== b.key ? b.label : b.key}</option>)}
             </select>
           ) : (
             <div style={{ ...inp, background: "#f3f4f6", color: "#334155", fontWeight: 600 }} title="เห็นเฉพาะสาขาของตัวเอง">
@@ -201,14 +416,16 @@ ${METHOD_COLS.map((c) => `<th>${c.label}</th>`).join("")}<th>รวมยอด�
         {METHOD_COLS.filter((c) => grand[c.key] > 0).map((c) => (
           <SummaryCard key={c.key} label={c.label} value={fmt(grand[c.key])} color="#7c3aed" />
         ))}
+        {depSum.total > 0 && <SummaryCard label="รับมัดจำจองรถ" value={fmt(depSum.total)} color="#b45309" />}
+        {partDepSum > 0 && <SummaryCard label="รับมัดจำอะไหล่/บริการ" value={fmt(partDepSum)} color="#9333ea" />}
       </div>
 
       {/* table */}
       <div className="form-card" style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>
-            <th style={th}>ลำดับ</th><th style={th}>เลขที่ใบเสร็จ</th><th style={th}>วันที่รับเงิน</th>
-            <th style={th}>เลขที่ใบขาย</th><th style={th}>ลูกค้า</th><th style={th}>ผู้ขาย</th><th style={th}>ยอดขาย</th>
+            <th style={th}>ลำดับ</th><th style={th}>เลขที่เอกสาร</th><th style={th}>วันที่รับเงิน</th>
+            <th style={th}>เอกสารอ้างอิง</th><th style={th}>ลูกค้า / ประเภทรายได้</th><th style={th}>ผู้ขาย</th><th style={th}>ยอดขาย</th>
             {METHOD_COLS.map((c) => <th key={c.key} style={th}>{c.label}</th>)}
             <th style={th}>รวมยอดชำระ</th>
           </tr></thead>
@@ -219,17 +436,20 @@ ${METHOD_COLS.map((c) => `<th>${c.label}</th>`).join("")}<th>รวมยอด�
                 <React.Fragment key={g.key}>
                   <tr><td colSpan={14} style={{ ...td, background: "#f1f5f9", fontWeight: 700, color: "#0f172a" }}>สาขา {g.name}</td></tr>
                   {g.rows.map((it, i) => (
-                    <tr key={it.sale_no} style={{ background: i % 2 ? "#fafcff" : "#fff" }}>
+                    <tr key={it.doc_no + it.kind} style={{ background: it.kind === "deposit" ? "#fffdf2" : it.kind === "part_deposit" ? "#fdf9ff" : it.kind === "part_service" ? "#f0fdfa" : i % 2 ? "#fafcff" : "#fff" }}>
                       <td style={{ ...td, textAlign: "center", color: "#94a3b8" }}>{i + 1}</td>
-                      <td style={{ ...td, fontFamily: "monospace" }}>{it.receipt_no || "-"}</td>
-                      <td style={{ ...td, textAlign: "center" }}>{thaiDate(it.receipt_date || it.sale_date)}</td>
-                      <td style={{ ...td, fontFamily: "monospace", color: "#1e40af" }}>{it.sale_no}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{it.doc_no}
+                        {it.refunded && <div style={{ fontSize: 10.5, color: "#dc2626" }}>คืนเงินแล้ว</div>}
+                      </td>
+                      <td style={{ ...td, textAlign: "center" }}>{thaiDate(it.date)}</td>
+                      <td style={{ ...td, fontFamily: "monospace", color: "#1e40af" }}>{it.ref_no || "-"}</td>
                       <td style={td}>{it.customer_name || "-"}
-                        {it.finance_type === "moto" && <div style={{ fontSize: 10.5, color: "#7c3aed" }}>ไฟแนนซ์: {it.finance_company_name || "-"}</div>}
-                        {it.payment_received_note && <div style={{ fontSize: 10.5, color: "#92400e" }}>หมายเหตุ: {it.payment_received_note}</div>}
+                        <div style={{ fontSize: 10.5, color: it.kind === "deposit" ? "#b45309" : it.kind === "part_deposit" ? "#9333ea" : it.kind === "part_service" ? "#0d9488" : "#0369a1" }}>{it.category}</div>
+                        {it.finance && <div style={{ fontSize: 10.5, color: "#7c3aed" }}>ไฟแนนซ์: {it.finance}</div>}
+                        {it.note && <div style={{ fontSize: 10.5, color: "#92400e" }}>หมายเหตุ: {it.note}</div>}
                       </td>
                       <td style={{ ...td, textAlign: "center" }}>{it.seller || "-"}</td>
-                      <td style={tdR}>{fmt(it.saleAmount)}</td>
+                      <td style={tdR}>{it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
                       {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(it.split[c.key])}</td>)}
                       <td style={{ ...tdR, fontWeight: 700, color: "#15803d" }}>{fmt(it.received)}</td>
                     </tr>
@@ -243,15 +463,15 @@ ${METHOD_COLS.map((c) => `<th>${c.label}</th>`).join("")}<th>รวมยอด�
                 </React.Fragment>
               );
             })}
-            {items.length > 0 && (
+            {allItems.length > 0 && (
               <tr style={{ background: "#fde68a", fontWeight: 800 }}>
-                <td colSpan={6} style={{ ...td, textAlign: "right" }}>รวมทั้งสิ้น ({items.length} รายการ)</td>
+                <td colSpan={6} style={{ ...td, textAlign: "right" }}>รวมทั้งสิ้น ({allItems.length} รายการ)</td>
                 <td style={tdR}>{fmt(grand.sale)}</td>
                 {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(grand[c.key])}</td>)}
                 <td style={tdR}>{fmt(grand.received)}</td>
               </tr>
             )}
-            {items.length === 0 && !loading && (
+            {allItems.length === 0 && !loading && (
               <tr><td colSpan={14} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: 24 }}>— ไม่มีรายการรับเงินในช่วงที่เลือก —</td></tr>
             )}
           </tbody>
@@ -260,6 +480,39 @@ ${METHOD_COLS.map((c) => `<th>${c.label}</th>`).join("")}<th>รวมยอด�
       <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
         * แสดงเฉพาะใบขายที่บันทึกรับชำระเงินแล้ว (อ้างอิงวันที่รับเงิน/ใบเสร็จ) · ยอดขาย = ราคารถสุทธิ · แหล่งรับชำระแยกตามที่บันทึกตอนรับเงิน · เงินมัดจำ = เงินจองที่หักในใบขาย (รับเงินจริงตอนจอง)
       </div>
+
+      {/* ===== สรุปแยกประเภทตามรายได้ ===== */}
+      {catSum.length > 0 && (
+        <div className="form-card" style={{ overflowX: "auto", marginTop: 14 }}>
+          <div style={{ fontWeight: 700, color: "#0f172a", marginBottom: 8 }}>📊 สรุปแยกประเภทตามรายได้</div>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr>
+              <th style={th}>ประเภทรายได้</th><th style={th}>จำนวน</th>
+              {METHOD_COLS.map((c) => <th key={c.key} style={th}>{c.label}</th>)}
+              <th style={th}>รวมยอดชำระ</th>
+            </tr></thead>
+            <tbody>
+              {catSum.map((t) => (
+                <tr key={t.category}>
+                  <td style={{ ...td, fontWeight: 600 }}>{t.category}</td>
+                  <td style={{ ...td, textAlign: "center" }}>{t.count}</td>
+                  {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(t[c.key])}</td>)}
+                  <td style={{ ...tdR, fontWeight: 700, color: "#15803d" }}>{fmt(t.received)}</td>
+                </tr>
+              ))}
+              <tr style={{ background: "#fde68a", fontWeight: 800 }}>
+                <td style={{ ...td, textAlign: "right" }}>รวมทั้งสิ้น</td>
+                <td style={{ ...td, textAlign: "center" }}>{allItems.length}</td>
+                {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(grand[c.key])}</td>)}
+                <td style={tdR}>{fmt(grand.received)}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
+            * รายได้เงินมัดจำจองรถ = เงินรับจริง ณ วันจอง (จากระบบมัดจำจองรถ) — ใบที่คืนเงินแล้วมีป้ายกำกับในตารางหลัก
+          </div>
+        </div>
+      )}
     </div>
   );
 }
