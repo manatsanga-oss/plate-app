@@ -95,6 +95,9 @@ function scyOf(r) {
 
 // ลูกค้าเป็นบริษัทไฟแนนซ์ → ใบกำกับ TF ใบนั้นถือเป็นรายได้ค่าส่งเสริมจากไฟแนนซ์
 const FINANCE_KW = /ธนบรรณ|คาเธ่ย์|เน็คซ|แคปปิตอล|เอสจีเอฟ|SGF|กรุ๊ปลิ|กรุ๊ปลี|ลีสซิ่ง|ลิสซิ่ง|สมหวัง/i;
+// ใบกำกับ TF ที่ลูกค้าเป็นบริษัทผู้ผลิต (ไทยฮอนด้า/ไทยยามาฮ่า) — FLOW ลงบัญชี "ขายอะไหล่"
+// (เช่นขายอะไหล่คืน/งานเคลม) → ย้ายไปหมวดอะไหล่+งานซ่อม ให้เทียบงบ FLOW ตรงหมวด
+const MFG_KW = /ไทยฮอนด้า|ไทยยามาฮ่า/i;
 // รายการประกันรถหาย (ล็อคตั้น/คอสมอส) — ใช้แยกออกจากงานทะเบียนทั้งฝั่งรายได้และวางบิล
 const THEFT_KW = /ล็อคตั้น|LOCKTON|ประกันรถหาย|คอสมอส|COSMOS/i;
 // ค่าใช้จ่ายทั่วไป (เอกสารบันทึกค่าใช้จ่าย EXP) — ตัดหมวดที่นับเป็นต้นทุนในงบนี้แล้ว กันซ้ำ:
@@ -932,7 +935,7 @@ export default function ProfitLossReportPage() {
 
       // ระดับบริษัทระบุสาขาไม่ได้ → รายได้รวม เว้นแต่มี allocation รายคัน (ของ income_record คู่แฝด)
       // แยกใบ "ค่าส่งเสริมจากไฟแนนซ์" (ลูกค้าเป็นไฟแนนซ์ หรือแตกยอดประเภท 003) ออกจากรายได้อื่น
-      const promoAcc = [], otherAcc = [], sgfDownAcc = [];
+      const promoAcc = [], otherAcc = [], sgfDownAcc = [], mfgPartAcc = [];
       oiAll.filter((r) => !isCancelled(r.status)).forEach((r) => {
         const base = {
           branch: "",
@@ -954,6 +957,11 @@ export default function ProfitLossReportPage() {
           });
           return;
         }
+        // ใบ TF ลูกค้าเป็นผู้ผลิต (ไทยฮอนด้า/ไทยยามาฮ่า) → หมวดขายอะไหล่ ตามการลงบัญชีของ FLOW
+        if (MFG_KW.test(String(r.customer_name || ""))) {
+          mfgPartAcc.push({ ...base, detail: `${base.detail} · ใบกำกับ TF ผู้ผลิต (FLOW = ขายอะไหล่)` });
+          return;
+        }
         const lines = allocByRef[String(r.tax_invoice_no)];
         const isPromo = FINANCE_KW.test(String(r.customer_name || "")) || (lines || []).some((l) => String(l.category) === "003");
         (isPromo ? promoAcc : otherAcc).push(...(lines ? distributeByAlloc(base, lines, scyByInvoice) : [base]));
@@ -961,6 +969,7 @@ export default function ProfitLossReportPage() {
       setVehicleRows(taxByBranch.flat().concat(sgfDownAcc));
       setPromoRows(promoAcc);
       setOtherInvRows(otherAcc);
+      if (mfgPartAcc.length) setPartSvcRows(ps.concat(mfgPartAcc));
 
       // กันยอดซ้ำ: income_records ที่ import จากใบกำกับรายได้อื่น (reference_no = เลขใบกำกับ)
       const oiDocNos = new Set(oiAll.map((r) => String(r.tax_invoice_no)));

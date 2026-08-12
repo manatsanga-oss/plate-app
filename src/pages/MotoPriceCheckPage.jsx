@@ -118,7 +118,18 @@ export default function MotoPriceCheckPage({ currentUser }) {
   function getRelatedExpenses(row) {
     if (!row) return [];
     const rowCC = getRowCC(row);
+    // เฉพาะรายการที่มีผล ณ วันนี้ — โปรโมชั่นมีหลายรอบ (effective_date/end_date) รอบเก่าที่หมดอายุไม่ต้องโชว์
+    const d = new Date();
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const inPeriod = (e) => {
+      const ef = String(e.effective_date || "").slice(0, 10);
+      const en = String(e.end_date || "").slice(0, 10);
+      if (ef && ef > today) return false;
+      if (en && en < today) return false;
+      return true;
+    };
     return expenses.filter(e => {
+      if (String(e.status || "active") !== "active" || !inPeriod(e)) return false;
       if (e.group_by === "cc" && rowCC && Number(e.engine_cc) === rowCC) return true;
       if (e.group_by === "brand" && row.brand_id && String(e.brand_id) === String(row.brand_id)) return true;
       if (e.group_by === "type" && row.type_id && String(e.type_id) === String(row.type_id)) return true;

@@ -143,6 +143,19 @@ export default function ServiceArrivalReportPage() {
     }
   }
 
+  // ลบเหตุการณ์ (คีย์ผิด/ภาพซ้ำ) — ต้อง re-import Service_Queue_Camera_Workflow.json ให้มี action delete_event ก่อน
+  async function deleteEvent(r) {
+    if (!window.confirm(`ลบรายการ ${r.detected_local || ""} (${CAM_LABEL[r.source] || r.source})?`)) return;
+    try {
+      const res = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete_event", event_id: r.id }) });
+      const data = await res.json().catch(() => []);
+      const row = Array.isArray(data) ? data[0] : data;
+      if (!row?.id) throw new Error(row?.error || "workflow ยังไม่รองรับ — re-import Service_Queue_Camera_Workflow.json ก่อน");
+      setRows(prev => prev.filter(x => x.id !== r.id));
+      setMessage("✅ ลบรายการแล้ว");
+    } catch (e) { setMessage("❌ ลบไม่สำเร็จ: " + String(e?.message || e).slice(0, 140)); }
+  }
+
   const filtered = rows.filter(r =>
     (!dateFilter || dateKeyOf(r) === dateFilter) &&
     (camFilter === "ALL" || r.source === camFilter) &&
@@ -199,11 +212,11 @@ export default function ServiceArrivalReportPage() {
       <div style={{ overflowX: "auto" }}>
         <table className="data-table">
           <thead>
-            <tr><th>#</th><th>วัน-เวลา</th><th>กล้อง</th><th>ทะเบียน</th><th>จำนวนรถในภาพ</th><th>สถานะ</th><th>รูป</th></tr>
+            <tr><th>#</th><th>วัน-เวลา</th><th>กล้อง</th><th>ทะเบียน</th><th>จำนวนรถในภาพ</th><th>สถานะ</th><th>รูป</th><th>ลบ</th></tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={7} style={{ textAlign: "center", color: "#9ca3af", padding: 28 }}>{loading ? "กำลังโหลด..." : "ไม่มีเหตุการณ์ในช่วงที่เลือก"}</td></tr>
+              <tr><td colSpan={8} style={{ textAlign: "center", color: "#9ca3af", padding: 28 }}>{loading ? "กำลังโหลด..." : "ไม่มีเหตุการณ์ในช่วงที่เลือก"}</td></tr>
             ) : filtered.map((r, i) => (
               <tr key={r.id} style={{ background: r.notified ? undefined : "#f9fafb" }}>
                 <td style={{ textAlign: "center" }}>{i + 1}</td>
@@ -227,6 +240,10 @@ export default function ServiceArrivalReportPage() {
                   {r.has_image
                     ? <button onClick={() => openImage(r)} style={{ padding: "4px 12px", fontSize: 13, background: "#dbeafe", color: "#1e40af", border: "none", borderRadius: 6, cursor: "pointer" }}>🖼️ ดูรูป</button>
                     : <span style={{ color: "#9ca3af", fontSize: 12 }}>-</span>}
+                </td>
+                <td style={{ textAlign: "center" }}>
+                  <button onClick={() => deleteEvent(r)} title="ลบรายการนี้"
+                    style={{ padding: "4px 10px", fontSize: 13, background: "#fee2e2", color: "#b91c1c", border: "none", borderRadius: 6, cursor: "pointer" }}>🗑️</button>
                 </td>
               </tr>
             ))}

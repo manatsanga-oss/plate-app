@@ -208,6 +208,42 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     return { job, hit: dispenseMap[`${job}|${strip(it.part_code)}`] || null };
   }
 
+  // เกณฑ์สำรองแบบ DCS: รับเข้าแล้ว + สต๊อกคงเหลือ = 0 → ถือว่าเบิกออกไปแล้ว (รอปิดงานค่อยขึ้นบันทึกขาย)
+  // (รายงานยอดขายรายตัวใส่เฉพาะงานที่ปิดบิลแล้ว — ใบ SVIS เบิกภายในจะยังไม่โผล่)
+  const [stockQtyMap, setStockQtyMap] = useState({}); // strip(code) → จำนวนคงเหลือรวมทุกสาขา
+  useEffect(() => {
+    const codes = new Set();
+    for (const r of rows) {
+      if (r.system !== "HONDA") continue;
+      const job = String(r.job_no || "").trim();
+      if (!job || job === "null") continue;
+      for (const it of r.items || []) {
+        const c = strip(it.part_code);
+        if (!c || dispenseMap[`${job}|${c}`]) continue;
+        if (receiptMap[`HONDA|${normReceiptCode("HONDA", it.part_code)}`]) codes.add(c); // เช็คเฉพาะตัวที่ของถึงแล้ว
+      }
+    }
+    if (!codes.size) { setStockQtyMap({}); return; }
+    let alive = true;
+    Promise.all([...codes].map(async (c) => {
+      try {
+        const found = norm(await post(HONDA_API, { action: "search_inventory", code: c }));
+        const qty = found.reduce((s, f) => s + Number(f?.quantity || 0), 0);
+        return [c, qty];
+      } catch { return [c, null]; }
+    })).then(pairs => { if (alive) setStockQtyMap(Object.fromEntries(pairs.filter(p => p[1] !== null))); });
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [rows, dispenseMap, receiptMap]);
+
+  // เบิกแล้วตามเกณฑ์รับเข้า+คงเหลือหมด (ใช้เมื่อยังไม่พบในบันทึกขาย)
+  function likelyDispensed(r, it) {
+    const c = strip(it.part_code);
+    if (!c) return false;
+    const arrived = receiptMap[`HONDA|${normReceiptCode("HONDA", it.part_code)}`];
+    return !!arrived && stockQtyMap[c] === 0;
+  }
+
   // ของถึงแล้วหรือยัง — เช็ครหัสที่สั่งตรง ๆ ก่อน แล้วค่อยเช็ครหัสอะไหล่ทดแทน (ถ้ามีคู่)
   function arrivalOf(r, it) {
     if (r.system !== "HONDA" && r.system !== "YAMAHA") return null;
@@ -484,6 +520,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
         const dp = dispenseOf(r, it);
         const txt = dp === null ? "-"
           : dp.hit ? `<span style="color:#059669;font-weight:700">&#10003; เบิกแล้ว ${esc(fmtShortDate(dp.hit.date))}</span>`
+          : likelyDispensed(r, it) ? '<span style="color:#0d9488;font-weight:700">&#10003; เบิกแล้ว (สต๊อกหมด)</span>'
           : '<span style="color:#d97706;font-weight:700">ยังไม่เบิก</span>';
         return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${txt}</div>`;
       }).join("");
@@ -576,7 +613,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
         <span><span style={{ color: "#dc2626", fontWeight: 800 }}>✗</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS)</span>
         <span><span style={{ color: "#059669", fontWeight: 800 }}>✓</span> <span style={{ color: "#ea580c", fontWeight: 700 }}>ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์</span>
         <span><span style={{ color: "#0d9488", fontWeight: 700 }}>📦 ถึงแล้ว</span> = มีรับเข้าในรายงานรับอะไหล่ตั้งแต่วันที่สั่ง (จับคู่รหัส+วันที่ · รวมกรณีรับเป็นอะไหล่ทดแทน)</span>
-        <span><span style={{ color: "#059669", fontWeight: 700 }}>✓ เบิกแล้ว</span> = ใบสั่งซื้อผูกเลข Job และรหัสนี้ถูกเบิกเข้างานซ่อมแล้ว (ตารางเบิกอะไหล่งานซ่อม) · <span style={{ color: "#d97706", fontWeight: 700 }}>ยังไม่เบิก</span> = ผูก Job แล้วแต่ยังไม่มีการเบิก</span>
+        <span><span style={{ color: "#059669", fontWeight: 700 }}>✓ เบิกแล้ว</span> = ใบสั่งซื้อผูกเลข Job และรหัสนี้ถูกเบิกเข้างานซ่อมแล้ว (ตารางเบิกอะไหล่งานซ่อม) · <span style={{ color: "#0d9488", fontWeight: 700 }}>✓ เบิกแล้ว (สต๊อกหมด)</span> = รับเข้าแล้ว+สต๊อกคงเหลือ 0 รอปิดงานค่อยขึ้นบันทึกขาย · <span style={{ color: "#d97706", fontWeight: 700 }}>ยังไม่เบิก</span> = ผูก Job แล้วแต่ยังไม่มีการเบิก</span>
         <span>ช่องสถานะอะไหล่ทดแทน = รายการในใบรับสั่งซื้อที่ไม่ตรงกับรหัสที่สั่ง — ติ๊กปุ่มหน้ารหัส ✗ แล้วกด "จับคู่" เพื่อเลือกอะไหล่ทดแทนเอง</span>
       </div>
 
@@ -727,6 +764,9 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                             <span title={`เบิกเข้างาน ${dp.job} แล้ว`} style={{ color: "#059669", fontWeight: 700, whiteSpace: "nowrap" }}>
                               ✓ เบิกแล้ว {fmtShortDate(dp.hit.date)}
                             </span>
+                          ) : likelyDispensed(r, it) ? (
+                            <span title={`รับเข้าแล้วและสต๊อกคงเหลือ 0 — ของถูกเบิกออกไปแล้ว (จะขึ้นบันทึกขายเมื่อปิดงาน ${dp.job})`}
+                              style={{ color: "#0d9488", fontWeight: 700, whiteSpace: "nowrap" }}>✓ เบิกแล้ว (สต๊อกหมด)</span>
                           ) : (
                             <span title={`ผูกเลข Job ${dp.job} แล้ว แต่ยังไม่พบการเบิกรหัสนี้ในงานซ่อม`} style={{ color: "#d97706", fontWeight: 700 }}>ยังไม่เบิก</span>
                           )}

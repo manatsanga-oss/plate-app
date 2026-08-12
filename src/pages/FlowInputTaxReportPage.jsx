@@ -676,10 +676,12 @@ export default function FlowInputTaxReportPage({ currentUser }) {
 function PairModal({ flow, candidates, saving, onPick, onClose }) {
   const [kw, setKw] = useState("");
   const [srcFilter, setSrcFilter] = useState(""); // กรองประเภท — เช่นเลือกเฉพาะ COSMOS ให้ยอดรวมเป็นของ COSMOS ล้วน
+  const [showShared, setShowShared] = useState(false); // ใบที่จับคู่แล้วซ่อนเป็นค่าเริ่มต้น — เปิดเฉพาะกรณีบิลรวม (แอป 1 ใบ = FLOW หลายใบ)
   const [sel, setSel] = useState(() => new Set()); // key = source|doc_no
   const keyOf = a => `${a.source || ""}|${a.doc_no || ""}`;
 
   const srcOpts = useMemo(() => [...new Set(candidates.map(a => a.source).filter(Boolean))], [candidates]);
+  const sharedCount = useMemo(() => candidates.filter(a => a._shared).length, [candidates]);
 
   const scored = useMemo(() => {
     const list = candidates.map(a => ({
@@ -688,12 +690,13 @@ function PairModal({ flow, candidates, saving, onPick, onClose }) {
     }));
     const q = kw.trim().toLowerCase();
     const filtered = list.filter(({ a }) => {
+      if (a._shared && !showShared) return false; // จับคู่แล้วไม่ต้องขึ้นอีก
       if (srcFilter && a.source !== srcFilter) return false;
       if (!q) return true;
       return [a.doc_no, a.vendor_name, a.project].filter(Boolean).join(" ").toLowerCase().includes(q);
     });
     return filtered.sort((x, y) => y.score - x.score);
-  }, [flow, candidates, kw, srcFilter]);
+  }, [flow, candidates, kw, srcFilter, showShared]);
 
   const selRows = candidates.filter(a => sel.has(keyOf(a)));
   const selBase = selRows.reduce((s, a) => s + Number(a.amount_before_vat || 0), 0);
@@ -740,6 +743,13 @@ function PairModal({ flow, candidates, saving, onPick, onClose }) {
             ล้าง
           </button>
         </div>
+        {sharedCount > 0 && (
+          <label style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 18px 8px", fontSize: 12, color: "#991b1b", cursor: "pointer" }}
+            title="ปกติซ่อนใบที่จับคู่แล้ว — เปิดเฉพาะกรณีบิลรวม (แอป 1 ใบจับกับ FLOW หลายใบ เช่น ค่าไฟรวมสาขา)">
+            <input type="checkbox" checked={showShared} onChange={e => setShowShared(e.target.checked)} />
+            แสดงใบที่จับคู่แล้ว ({sharedCount}) — สำหรับบิลรวมเท่านั้น
+          </label>
+        )}
 
         <div style={{ maxHeight: "44vh", overflowY: "auto", padding: "0 18px" }}>
           {scored.length === 0 ? (

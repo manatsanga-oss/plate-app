@@ -186,6 +186,63 @@ export default function BankMovementsPage({ currentUser }) {
     movementsWithBalance.push({ ...m, running_balance: runningBalance });
   }
 
+  // พิมพ์สรุปยอดตามประเภทรายได้/รายจ่าย (group ตามคอลัมน์ประเภทของรายงาน)
+  function printSummary() {
+    if (!acc || movements.length === 0) return;
+    const grp = (dir) => {
+      const map = new Map();
+      for (const m of movements) {
+        if (m.direction !== dir) continue;
+        const k = String(m.movement_type || "ไม่ระบุประเภท").trim() || "ไม่ระบุประเภท";
+        const g = map.get(k) || { type: k, count: 0, sum: 0 };
+        g.count += 1;
+        g.sum += Math.abs(Number(m.amount || 0));
+        map.set(k, g);
+      }
+      return [...map.values()].sort((a, b) => b.sum - a.sum);
+    };
+    const inRows = grp("in");
+    const outRows = grp("out");
+    const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const sec = (title, rows2, total, color) => `
+      <h3 style="color:${color}">${title}</h3>
+      <table><thead><tr><th style="width:30px">#</th><th>ประเภท</th><th style="width:90px;text-align:right">จำนวนรายการ</th><th style="width:140px;text-align:right">ยอดรวม (บาท)</th></tr></thead><tbody>
+      ${rows2.map((g, i) => `<tr><td>${i + 1}</td><td>${esc(g.type)}</td><td style="text-align:right">${g.count}</td><td style="text-align:right;font-family:monospace">${fmtNum(g.sum)}</td></tr>`).join("")}
+      <tr class="tot"><td colspan="2">รวม${title}</td><td style="text-align:right">${rows2.reduce((s, g) => s + g.count, 0)}</td><td style="text-align:right;font-family:monospace">${fmtNum(total)}</td></tr>
+      </tbody></table>`;
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>สรุปเคลื่อนไหวบัญชี ${esc(acc.account_no)}</title>
+<style>
+*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
+body{margin:0;padding:24px;color:#111;font-size:14px}
+h2{margin:0 0 2px}h3{margin:18px 0 6px}
+.sub{color:#555;font-size:13px;margin-bottom:12px}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th,td{border:1px solid #bbb;padding:5px 8px}
+th{background:#eef2f7}
+.tot{font-weight:700;background:#fefce8}
+.cards{display:flex;gap:10px;margin:12px 0}
+.card{flex:1;border:1px solid #ccc;border-radius:8px;padding:8px 12px;text-align:center}
+.card b{font-size:16px;font-family:monospace}
+@media print{body{padding:8px}}
+</style></head><body>
+<h2>📊 สรุปการเคลื่อนไหวบัญชีธนาคาร — แยกตามประเภทรายได้/รายจ่าย</h2>
+<div class="sub">${esc(acc.bank_name)} · ${esc(acc.account_no)} · ${esc(acc.account_name)} · ช่วง ${fmtDate(dateFrom)} ถึง ${fmtDate(dateTo)}</div>
+<div class="cards">
+  <div class="card">ยอดยกมา<br><b>${fmtNum(opening)}</b></div>
+  <div class="card">รับเข้า (DR)<br><b style="color:#059669">${fmtNum(totalIn)}</b></div>
+  <div class="card">จ่ายออก (CR)<br><b style="color:#dc2626">${fmtNum(totalOut)}</b></div>
+  <div class="card">ยอดคงเหลือ<br><b style="color:#6d28d9">${fmtNum(currentBalance)}</b></div>
+</div>
+${sec("รายรับ (DR)", inRows, totalIn, "#059669")}
+${sec("รายจ่าย (CR)", outRows, totalOut, "#dc2626")}
+<div style="margin-top:14px;font-size:12px;color:#777">พิมพ์เมื่อ ${new Date().toLocaleString("th-TH")}</div>
+<script>window.onload = function(){ setTimeout(function(){ window.print(); }, 200); }<\/script>
+</body></html>`;
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) return;
+    w.document.write(html); w.document.close(); w.focus();
+  }
+
   return (
     <div className="page-container">
       <div className="page-topbar">
@@ -214,6 +271,10 @@ export default function BankMovementsPage({ currentUser }) {
         <button onClick={fetchMovements} disabled={loading}
           style={{ padding: "7px 16px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
           {loading ? "..." : "🔄 รีเฟรช"}
+        </button>
+        <button onClick={printSummary} disabled={!acc || movements.length === 0}
+          style={{ padding: "7px 16px", background: "#6d28d9", color: "#fff", border: "none", borderRadius: 6, cursor: acc && movements.length ? "pointer" : "not-allowed", fontWeight: 600 }}>
+          🖨️ พิมพ์
         </button>
       </div>
 
