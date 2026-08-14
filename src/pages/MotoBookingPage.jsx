@@ -360,6 +360,9 @@ export default function MotoBookingPage({ currentUser }) {
     setSaving(false);
   }
 
+  // จำนวนครั้งที่ส่งแจ้งรับรถเพิ่มระหว่างเปิดหน้า (DB นับจริงผ่าน workflow — ตัวนี้ไว้โชว์ทันทีไม่ต้องรีเฟรช)
+  const [notifyBump, setNotifyBump] = useState({});
+
   // ส่งข้อความแจ้งลูกค้าทาง LINE ว่ารถถึงคิวรับรถแล้ว → ลูกค้ากดเลือกวันรับรถ (LIFF)
   async function notifyPickup(b) {
     const lineId = b.deposit_no ? lineByDeposit[b.deposit_no] : null;
@@ -380,6 +383,7 @@ export default function MotoBookingPage({ currentUser }) {
         }),
       });
       if (!res.ok) throw new Error("HTTP " + res.status);
+      setNotifyBump(m => ({ ...m, [b.deposit_no]: (m[b.deposit_no] || 0) + 1 }));
       setMessage(`📲 ส่งข้อความแจ้งรับรถให้ ${b.customer_name || "ลูกค้า"} ทาง LINE แล้ว`);
     } catch (e) {
       setMessage("❌ ส่ง LINE ไม่สำเร็จ: " + (e.message || e));
@@ -566,6 +570,11 @@ export default function MotoBookingPage({ currentUser }) {
   const lineByDeposit = {};
   bookingDeposits.forEach((d) => {
     if (d.deposit_no && d.line_user_id) lineByDeposit[d.deposit_no] = d.line_user_id;
+  });
+  // map: deposit_no -> จำนวนครั้งที่ส่ง LINE แจ้งรับรถ (booking_deposits.pickup_notify_count)
+  const notifyCountByDeposit = {};
+  bookingDeposits.forEach((d) => {
+    if (d.deposit_no && Number(d.pickup_notify_count)) notifyCountByDeposit[d.deposit_no] = Number(d.pickup_notify_count);
   });
 
   // normalize: TRIM + ยุบทุก whitespace (รวม newline) เป็น space เดียว — กันชื่อ/รหัสที่มี space เกินหรือ newline
@@ -1007,14 +1016,17 @@ export default function MotoBookingPage({ currentUser }) {
                             📅 นัดหมาย{b.appointment_date ? " ✓" : ""}
                           </button>
                         )}
-                        {isQueueReady(b) && b.deposit_no && lineByDeposit[b.deposit_no] && (
-                          <button
-                            onClick={() => notifyPickup(b)}
-                            title="ส่งข้อความแจ้งลูกค้าทาง LINE ว่ารถถึงคิวรับรถแล้ว (ลูกค้าเลือกวันรับรถกลับมาเอง)"
-                            style={{ padding: "3px 8px", background: "#06c755", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
-                            📲 แจ้งรับรถ
-                          </button>
-                        )}
+                        {isQueueReady(b) && b.deposit_no && lineByDeposit[b.deposit_no] && (() => {
+                          const nCount = (notifyCountByDeposit[b.deposit_no] || 0) + (notifyBump[b.deposit_no] || 0);
+                          return (
+                            <button
+                              onClick={() => notifyPickup(b)}
+                              title={`ส่งข้อความแจ้งลูกค้าทาง LINE ว่ารถถึงคิวรับรถแล้ว${nCount ? ` — เคยส่งแล้ว ${nCount} ครั้ง` : ""}`}
+                              style={{ padding: "3px 8px", background: "#06c755", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+                              📲 แจ้งรับรถ{nCount ? ` (${nCount})` : ""}
+                            </button>
+                          );
+                        })()}
                       </div>
                     )}
                   </td>

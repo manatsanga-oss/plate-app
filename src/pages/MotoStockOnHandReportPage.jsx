@@ -129,7 +129,7 @@ export default function MotoStockOnHandReportPage() {
             style={{ padding: "8px 14px", background: "#0ea5e9", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>🖨️ พิมพ์</button>
         </div>
         <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>
-          คงเหลือ = รับรถใหม่ (รวมยอดยกมา) − ขายแล้ว (ขายปลีก + moto_sales) นับวันที่ขาย ≤ วันที่เลือก
+          คงเหลือ = รับรถใหม่ (รวมยอดยกมา) − ขายแล้ว · ตั้งแต่ 14/08/69 ตัดสต๊อกด้วยใบขายระบบ NEW เท่านั้น (ใบขาย DMS ก่อนหน้านั้นตัดตามเดิม)
         </div>
         {message && <div style={{ marginTop: 8, padding: "6px 12px", background: "#fef2f2", color: "#b91c1c", borderRadius: 6, fontSize: 12 }}>{message}</div>}
       </div>

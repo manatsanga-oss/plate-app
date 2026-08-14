@@ -25,11 +25,22 @@ const TAX_TYPES = [
 const yymm = v => String(v || "").slice(0, 7);            // YYYY-MM
 const periodOf = v => yymm(v).replace("-", "");           // YYYYMM
 // จำแนก ภ.ง.ด.3 (บุคคลธรรมดา) vs ภ.ง.ด.53 (นิติบุคคล)
+// ⚠ "ห้างหุ้นส่วนสามัญ" (ไม่จดทะเบียน) = คณะบุคคล ถือเป็นบุคคลธรรมดา → ภ.ง.ด.3
+//   ยกเว้นระบุ "นิติบุคคล" (ห้างหุ้นส่วนสามัญนิติบุคคล) หรือเป็น หจก. → ภ.ง.ด.53
+const isOrdinaryPartnership = name => {
+  const s = String(name || "");
+  return s.includes("ห้างหุ้นส่วนสามัญ") && !s.includes("นิติบุคคล");
+};
 const JURISTIC_KW = ["บริษัท", "หจก", "ห้างหุ้นส่วน", "จำกัด", "บมจ", "co.", "ltd", "limited", " inc", "corp"];
-const isJuristic = name => { const s = String(name || "").toLowerCase(); return JURISTIC_KW.some(k => s.includes(k)); };
+const isJuristic = name => {
+  if (isOrdinaryPartnership(name)) return false;
+  const s = String(name || "").toLowerCase();
+  return JURISTIC_KW.some(k => s.includes(k));
+};
 const pndTypeOf = name => isJuristic(name) ? "ภ.ง.ด.53" : "ภ.ง.ด.3";
-// ใช้เลขผู้เสียภาษี 13 หลักก่อน (นิติบุคคลขึ้นต้น 0) ไม่งั้น fallback ชื่อ
+// ใช้เลขผู้เสียภาษี 13 หลักก่อน (นิติบุคคลขึ้นต้น 0) ไม่งั้น fallback ชื่อ — ยกเว้น หสม. ตัดสินจากชื่อเสมอ
 function pndTypeOfVendor(taxId, name) {
+  if (isOrdinaryPartnership(name)) return "ภ.ง.ด.3";
   const tid = String(taxId || "").replace(/[^0-9]/g, "");
   if (tid.length === 13) return tid[0] === "0" ? "ภ.ง.ด.53" : "ภ.ง.ด.3";
   return pndTypeOf(name);
@@ -280,10 +291,11 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     return [...normal, ...special];
   }
   // ---------- ภ.ง.ด.53: ค่าประกันรถหาย (ออกแทน, รายเอกสาร) ----------
-  //   อัตราหัก ณ ที่จ่ายมาตรฐาน = 3% (ค่าบริการ เช่น SGF/วิริยะออกแทน) — ยืนยันจากการยื่นจริง
-  //   ยกเว้นรายใบ = 1% (เบี้ยประกันวินาศภัย เช่น ประกันรถ GE วิริยะ) — เพิ่มเลขเอกสารใน THEFT_WHT_1PCT
+  //   อัตราหัก ณ ที่จ่าย: ผู้ขายเป็นบริษัทประกันภัย (เช่น วิริยะ) = เบี้ยประกันวินาศภัย → 1%
+  //   ผู้ขายอื่น (เช่น เอสจีเอฟ แคปปิตอล = ค่าบริการออกแทน) → 3% — ยืนยันจากการยื่นจริงของสำนักงานบัญชี
   //   ที่มา: flow_expense_documents รหัส 52071 ผ่าน list_theft_insurance (หน้าบันทึกรับใบกำกับฯ ประกันรถหายออกแทน)
-  const THEFT_WHT_1PCT = new Set(["F-EXP2026050032", "F-EXP2026040023", "F-EXP2026060017", "F-EXP2026060022"]);
+  const THEFT_WHT_1PCT = new Set(["F-EXP2026050032", "F-EXP2026040023", "F-EXP2026060017", "F-EXP2026060022"]); // override รายใบ (เผื่อเคสพิเศษ)
+  const isInsurerVendor = (name) => /ประกันภัย|ประกันชีวิต|วิริยะ/.test(String(name || ""));
   async function loadTheftInsuranceRows() {
     const from = dateFrom || "2000-01-01", to = dateTo || todayISO();
     const raw = await post(THEFT_URL, { action: "list_theft_insurance", date_from: from, date_to: to }).catch(() => []);
@@ -291,7 +303,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       .filter(d => d && (d.expense_doc_no || d.id) && String(d.status || "") !== "cancelled")
       .map(d => {
         const base = Number(d.subtotal || 0);            // มูลค่าก่อน VAT
-        const is1pct = THEFT_WHT_1PCT.has(String(d.expense_doc_no || ""));
+        const is1pct = THEFT_WHT_1PCT.has(String(d.expense_doc_no || "")) || isInsurerVendor(d.vendor_name);
         const rate = is1pct ? 0.01 : 0.03;
         const wht = Math.round(base * rate * 100) / 100;
         return {

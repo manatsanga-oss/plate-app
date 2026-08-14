@@ -7,6 +7,7 @@ const DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-d
 const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api"; // มัดจำอะไหล่/บริการ (PDS/PDO)
 const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api"; // รับชำระใบรับเรื่องงานทะเบียน
 const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // รับชำระค่าอะไหล่และบริการ (ใบขาย/ใบ JOB)
+const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api"; // ขายรถมือสอง
 
 const METHOD_COLS = [
   { key: "cash", label: "เงินสด" },
@@ -47,6 +48,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [partDepRows, setPartDepRows] = useState([]); // มัดจำอะไหล่/บริการ (part_deposits PDS/PDO)
   const [rcptRows, setRcptRows] = useState([]);       // รับชำระใบรับเรื่องงานทะเบียน (registration_receipts.paid_*)
   const [psRows, setPsRows] = useState([]);           // รับชำระค่าอะไหล่และบริการ (part_service_payments)
+  const [umRows, setUmRows] = useState([]);           // ขายรถมือสอง (used_moto_stock)
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
 
@@ -54,7 +56,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
     setLoading(true);
     setMessage("");
     try {
-      const [res, resDep, resPartDep, resRcpt, resPs] = await Promise.all([
+      const [res, resDep, resPartDep, resRcpt, resPs, resUm] = await Promise.all([
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
@@ -75,6 +77,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_payments", date_from: dateFrom, date_to: dateTo }),
         }).catch(() => null),
+        fetch(USED_MOTO_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_sales", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
       ]);
       const data = await res.json().catch(() => []);
       setRows(Array.isArray(data) ? data : []);
@@ -87,6 +93,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
       setRcptRows(Array.isArray(rc) ? rc.filter(r2 => r2 && r2.receipt_no && r2.paid_at) : []);
       const ps = resPs ? await resPs.json().catch(() => []) : [];
       setPsRows(Array.isArray(ps) ? ps.filter(p => p && p.payment_id && p.status === "active") : []);
+      const um = resUm ? await resUm.json().catch(() => []) : [];
+      setUmRows(Array.isArray(um) ? um.filter(u => u && u.id && u.status === "sold") : []);
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
       setRows([]);
@@ -130,8 +138,9 @@ export default function SaleMoneyReportPage({ currentUser }) {
     partDepRows.forEach((d) => add(d.branch_code, d.branch_code));
     rcptRows.forEach((r2) => add(r2.branch_code, r2.branch_code));
     psRows.forEach((p) => add(p.branch_code, p.branch_code));
+    umRows.forEach((u) => add(u.branch_code, u.branch_code));
     return [...map.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.key.localeCompare(b.key));
-  }, [rows, depRows, partDepRows, rcptRows, psRows]);
+  }, [rows, depRows, partDepRows, rcptRows, psRows, umRows]);
 
   const sumOf = (list) => {
     const t = { sale: 0, received: 0 };
@@ -259,6 +268,33 @@ export default function SaleMoneyReportPage({ currentUser }) {
           note: [p.doc_type, p.deposit_doc_no ? `ตัดมัดจำ ${p.deposit_doc_no}` : "", p.payment_note].filter(Boolean).join(" · "),
         };
       });
+    // ขายรถมือสอง (used_moto_stock) — แตกยอดตามวิธีรับเงิน
+    const usedMotos = umRows
+      .filter((u) => (isAdmin ? (!branch || bc5(u.branch_code) === bc5(branch)) : bc5(u.branch_code) === myBranch))
+      .map((u) => {
+        const amt = num(u.sold_price);
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+        let bks = [];
+        try { bks = JSON.parse(u.payment_breakdowns || "[]"); } catch { bks = []; }
+        if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(u.payment_method || ""), amount: amt }];
+        for (const b of bks) {
+          const m = String(b.method || "");
+          const a = num(b.amount);
+          if (m.includes("มัดจำ")) split.deposit += a;
+          else if (m.includes("สด")) split.cash += a;
+          else if (m.includes("โอน")) split.transfer += a;
+          else if (m.toUpperCase().includes("QR") || m.includes("บัตร")) split.card += a;
+          else split.other += a;
+        }
+        return {
+          kind: "used_moto", category: "รายได้ขายรถมือสอง",
+          doc_no: u.doc_no, date: u.sold_date, ref_no: u.sold_invoice_no || "",
+          customer_name: u.sold_customer, seller: u.sold_by || "", saleAmount: amt,
+          split, received: amt,
+          branch_key: bc5(u.branch_code), branch_name: u.branch_code || "ไม่ระบุสาขา",
+          note: [[u.brand, u.model_series, u.color_name].filter(Boolean).join(" "), u.license_plate, u.payment_note].filter(Boolean).join(" · "),
+        };
+      });
     const partDeps = partDepItems.map((d) => {
       const amt = num(d.deposit_amount);
       const m = String(d.payment_method || "");
@@ -276,8 +312,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
         refunded: d.status === "refunded" || !!d.refunded_at,
       };
     });
-    return [...sales, ...deps, ...partDeps, ...rcpts, ...partSvcs];
-  }, [items, depItems, partDepItems, rcptRows, psRows, branch, isAdmin, myBranch]);
+    return [...sales, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs];
+  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {
@@ -436,7 +472,7 @@ ${depSection}
                 <React.Fragment key={g.key}>
                   <tr><td colSpan={14} style={{ ...td, background: "#f1f5f9", fontWeight: 700, color: "#0f172a" }}>สาขา {g.name}</td></tr>
                   {g.rows.map((it, i) => (
-                    <tr key={it.doc_no + it.kind} style={{ background: it.kind === "deposit" ? "#fffdf2" : it.kind === "part_deposit" ? "#fdf9ff" : it.kind === "part_service" ? "#f0fdfa" : i % 2 ? "#fafcff" : "#fff" }}>
+                    <tr key={it.doc_no + it.kind} style={{ background: it.kind === "deposit" ? "#fffdf2" : it.kind === "part_deposit" ? "#fdf9ff" : it.kind === "part_service" ? "#f0fdfa" : it.kind === "used_moto" ? "#fff7ed" : i % 2 ? "#fafcff" : "#fff" }}>
                       <td style={{ ...td, textAlign: "center", color: "#94a3b8" }}>{i + 1}</td>
                       <td style={{ ...td, fontFamily: "monospace" }}>{it.doc_no}
                         {it.refunded && <div style={{ fontSize: 10.5, color: "#dc2626" }}>คืนเงินแล้ว</div>}
@@ -444,7 +480,7 @@ ${depSection}
                       <td style={{ ...td, textAlign: "center" }}>{thaiDate(it.date)}</td>
                       <td style={{ ...td, fontFamily: "monospace", color: "#1e40af" }}>{it.ref_no || "-"}</td>
                       <td style={td}>{it.customer_name || "-"}
-                        <div style={{ fontSize: 10.5, color: it.kind === "deposit" ? "#b45309" : it.kind === "part_deposit" ? "#9333ea" : it.kind === "part_service" ? "#0d9488" : "#0369a1" }}>{it.category}</div>
+                        <div style={{ fontSize: 10.5, color: it.kind === "deposit" ? "#b45309" : it.kind === "part_deposit" ? "#9333ea" : it.kind === "part_service" ? "#0d9488" : it.kind === "used_moto" ? "#c2410c" : "#0369a1" }}>{it.category}</div>
                         {it.finance && <div style={{ fontSize: 10.5, color: "#7c3aed" }}>ไฟแนนซ์: {it.finance}</div>}
                         {it.note && <div style={{ fontSize: 10.5, color: "#92400e" }}>หมายเหตุ: {it.note}</div>}
                       </td>
