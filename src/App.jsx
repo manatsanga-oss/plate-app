@@ -21,6 +21,7 @@ import PricePromoAdvicePage from "./pages/PricePromoAdvicePage";
 import PriceImpactAnalysisPage from "./pages/PriceImpactAnalysisPage";
 import StockTurnoverReportPage from "./pages/StockTurnoverReportPage";
 import PartReceiptReportPage from "./pages/PartReceiptReportPage";
+import ReceiptQrCustomerReportPage from "./pages/ReceiptQrCustomerReportPage";
 import PartOrderInquiryPage from "./pages/PartOrderInquiryPage";
 import PartDispenseReportPage from "./pages/PartDispenseReportPage";
 import ServiceHistorySearchPage from "./pages/ServiceHistorySearchPage";
@@ -257,6 +258,7 @@ export default function App() {
     if (page === "priceimpact") return false;                 // เฉพาะ admin (วิเคราะห์ผลราคา/โปร ต่อยอดขาย)
     if (page === "stockturnover") return false;               // เฉพาะ admin (สินค้าคงเหลือ & turnover)
     if (page === "partreceiptreport") return false;           // เฉพาะ admin (รายงานรับอะไหล่)
+    if (page === "receiptqrreport") return false;             // เฉพาะ admin (รายงานลูกค้าสแกน QR กรอกผ่าน LINE)
     if (page === "yamaharepairreport") return true;           // ทุก user เห็นรายงานใบแจ้งซ่อม
     if (page === "hondarepairreport") return true;
     if (page === "partstatusinquiry") return false;           // เฉพาะ admin (สอบถามสถานะอะไหล่)
@@ -317,6 +319,7 @@ export default function App() {
         {activeMenu === "priceimpact" && canAccess("priceimpact") && <PriceImpactAnalysisPage currentUser={currentUser} />}
         {activeMenu === "stockturnover" && canAccess("stockturnover") && <StockTurnoverReportPage currentUser={currentUser} />}
         {activeMenu === "partreceiptreport" && canAccess("partreceiptreport") && <PartReceiptReportPage currentUser={currentUser} />}
+        {activeMenu === "receiptqrreport" && canAccess("receiptqrreport") && <ReceiptQrCustomerReportPage currentUser={currentUser} />}
         {activeMenu === "profitloss" && canAccess("profitloss") && <ProfitLossReportPage currentUser={currentUser} />}
         {activeMenu === "dashboard" && canAccess("dashboard") && <DashboardPage currentUser={currentUser} />}
         {activeMenu === "receive" && canAccess("receive") && <ReceivePage currentUser={currentUser} />}
@@ -791,7 +794,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 45 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","priceimpact","stockturnover","partreceiptreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -807,6 +810,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="priceimpact" label="วิเคราะห์ผลราคา/โปร ต่อยอดขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="stockturnover" label="สินค้าคงเหลือ & อัตราการหมุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partreceiptreport" label="รายงานรับอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="receiptqrreport" label="รายงานลูกค้าสแกน QR (LINE)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Sales" pages={salesPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

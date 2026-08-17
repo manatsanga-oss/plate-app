@@ -28,6 +28,9 @@ const GEO_URL = "https://cdn.jsdelivr.net/gh/kongvut/thai-province-data@master/a
 const COMPANY = "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด";
 
 const text = (v) => (v ?? "").toString().trim();
+// ตัวอักษรพม่า (Myanmar Unicode + Extended-A/B) — ชื่อ/ที่อยู่ต้องเป็นไทย/อังกฤษเท่านั้น
+// เพื่อให้พิมพ์ลงใบเสร็จ/ใบกำกับภาษีได้ตรงกับบัตร (การถอดเสียงอัตโนมัติไม่มีมาตรฐาน เสี่ยงสะกดผิด)
+const HAS_BURMESE = /[က-႟ꩠ-ꩿꧠ-꧿]/;
 
 // ---- คำแปล 3 ภาษา ----------------------------------------------------------
 const T = {
@@ -45,6 +48,8 @@ const T = {
     selSelect: "— เลือก —", selLoading: "กำลังโหลด…", firstProvince: "เลือกจังหวัดก่อน", firstDistrict: "เลือกอำเภอก่อน",
     submit: "ส่งข้อมูล", submitting: "กำลังส่ง…",
     errName: "กรุณากรอกชื่อ-นามสกุล", errPhone: "กรุณากรอกเบอร์โทรศัพท์",
+    errNameLang: "กรุณาพิมพ์ชื่อเป็นภาษาอังกฤษหรือไทย (ตามบัตร/พาสปอร์ต)",
+    errHouseLang: "กรุณาพิมพ์ที่อยู่เป็นภาษาอังกฤษหรือไทย",
     errHouse: "กรุณากรอกบ้านเลขที่ / หมู่ / ถนน", errAddr: "กรุณาเลือกจังหวัด / อำเภอ / ตำบล ให้ครบ",
     errRef: "ไม่พบเลขอ้างอิง — กรุณาสแกน QR ใหม่อีกครั้ง", errSubmit: "ส่งข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
     birth: "วันเกิด", gender: "เพศ", male: "ชาย", female: "หญิง",
@@ -66,6 +71,8 @@ const T = {
     selSelect: "— Select —", selLoading: "Loading…", firstProvince: "Select province first", firstDistrict: "Select district first",
     submit: "Submit", submitting: "Submitting…",
     errName: "Please enter your name", errPhone: "Please enter your phone number",
+    errNameLang: "Please type your name in English or Thai (as on your ID/passport)",
+    errHouseLang: "Please type the address in English or Thai",
     errHouse: "Please enter house no. / Moo / Road", errAddr: "Please select Province / District / Subdistrict",
     errRef: "Reference not found — please scan the QR again", errSubmit: "Submit failed, please try again",
     birth: "Date of birth", gender: "Gender", male: "Male", female: "Female",
@@ -87,6 +94,8 @@ const T = {
     selSelect: "— ရွေးချယ်ပါ —", selLoading: "ဖွင့်နေသည်…", firstProvince: "ခရိုင်အရင်ရွေးပါ", firstDistrict: "မြို့နယ်အရင်ရွေးပါ",
     submit: "ပေးပို့မည်", submitting: "ပေးပို့နေသည်…",
     errName: "အမည်ဖြည့်ပါ", errPhone: "ဖုန်းနံပါတ်ဖြည့်ပါ",
+    errNameLang: "ကျေးဇူးပြု၍ အမည်ကို အင်္ဂလိပ်စာ သို့မဟုတ် ထိုင်းစာဖြင့် ရိုက်ထည့်ပါ (မှတ်ပုံတင်/ပတ်စ်ပို့အတိုင်း)",
+    errHouseLang: "ကျေးဇူးပြု၍ လိပ်စာကို အင်္ဂလိပ်စာ သို့မဟုတ် ထိုင်းစာဖြင့် ရိုက်ထည့်ပါ",
     errHouse: "အိမ်အမှတ် / ရပ်ကွက် / လမ်း ဖြည့်ပါ", errAddr: "ခရိုင် / မြို့နယ် / ကျေးရွာအုပ်စု ရွေးပါ",
     errRef: "ကိုးကားနံပါတ် မတွေ့ပါ — QR ကို ပြန်စကင်ဖတ်ပါ", errSubmit: "ပေးပို့မအောင်မြင်ပါ၊ ထပ်ကြိုးစားပါ",
     birth: "မွေးသက္ကရာဇ်", gender: "လိင်", male: "ကျား", female: "မ",
@@ -259,7 +268,10 @@ export default function ReceiptCustomerFormPage() {
   async function handleSubmit() {
     if (!refNo) { setErrorMsg(t.errRef); return; }
     if (!text(form.customer_name)) { setErrorMsg(t.errName); return; }
+    // ห้ามชื่อ/ที่อยู่เป็นตัวอักษรพม่า — แจ้งเป็นพม่า+อังกฤษเสมอ (คนพิมพ์พม่าอาจเปิด UI ภาษาอื่นอยู่)
+    if (HAS_BURMESE.test(form.customer_name)) { setErrorMsg(`${T.my.errNameLang} / ${T.en.errNameLang}`); return; }
     if (!text(form.phone)) { setErrorMsg(t.errPhone); return; }
+    if (HAS_BURMESE.test(addr.line)) { setErrorMsg(`${T.my.errHouseLang} / ${T.en.errHouseLang}`); return; }
     if (!geoErr) {
       if (!text(addr.line)) { setErrorMsg(t.errHouse); return; }
       if (!addr.provinceId || !addr.districtId || !addr.subdistrictId) { setErrorMsg(t.errAddr); return; }
