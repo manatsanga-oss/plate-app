@@ -148,6 +148,18 @@ export default function FastMovingStockPage() {
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
+  // แถวรวมจำนวนท้ายตาราง (หน้าสุดท้าย) — รวมทุกแถวที่ผ่านตัวกรอง ไม่ใช่แค่หน้าปัจจุบัน
+  const sums = filtered.reduce((t, r) => {
+    const s = parseStores(r.stores);
+    const n = v => (v === "-" ? 0 : Number(v) || 0);
+    t.qty += Number(r.quantity || 0);
+    t.ppao += n(s.ppao); t.haahong += n(s.haahong); t.sachtalad += n(s.sachtalad); t.nakhonluang += n(s.nakhonluang);
+    t.loan += Number(r.loan_qty || 0);
+    t.backorder += Number(r.backorder_qty || 0);
+    t.pendingJob += Number(r.pending_job_qty || 0);
+    return t;
+  }, { qty: 0, ppao: 0, haahong: 0, sachtalad: 0, nakhonluang: 0, loan: 0, backorder: 0, pendingJob: 0 });
+
   function printReport() {
     const w = window.open("", "_blank", "width=1200,height=800");
     const filterLabel = [
@@ -197,7 +209,21 @@ export default function FastMovingStockPage() {
   <thead><tr>
     <th>#</th><th>กลุ่มสินค้า</th><th>รหัสสินค้า</th><th>ชื่อสินค้า</th><th>จำนวน</th><th>ป.เปา</th><th>ห้าห้อง</th><th>สช.ตลาด</th><th>นครหลวง</th><th>ให้ยืม</th><th>วันที่สั่งล่าสุด</th><th>จ่ายอะไหล่เฉลี่ย (3ด.)</th><th>ค้างส่ง</th><th>คาดว่าได้รับ</th><th>ค้างปิด JOB</th>
   </tr></thead>
-  <tbody>${rows}</tbody>
+  <tbody>${rows}
+    <tr style="background:#fef9c3;font-weight:700">
+      <td colspan="4">รวม ${filtered.length} รายการ</td>
+      <td class="r">${fmtQty(sums.qty)}</td>
+      <td class="r">${fmtQty(sums.ppao)}</td>
+      <td class="r">${fmtQty(sums.haahong)}</td>
+      <td class="r">${fmtQty(sums.sachtalad)}</td>
+      <td class="r">${fmtQty(sums.nakhonluang)}</td>
+      <td class="r">${sums.loan ? fmtQty(sums.loan) : "-"}</td>
+      <td></td><td></td>
+      <td class="r">${sums.backorder ? fmtQty(sums.backorder) : "-"}</td>
+      <td></td>
+      <td class="r">${sums.pendingJob ? fmtQty(sums.pendingJob) : "-"}</td>
+    </tr>
+  </tbody>
 </table>
 </body></html>`);
     w.document.close();
@@ -347,6 +373,22 @@ export default function FastMovingStockPage() {
                 </tr>
               );
             })}
+            {!loading && paged.length > 0 && currentPage === totalPages && (
+              <tr style={{ background: "#fef9c3", fontWeight: 700, borderTop: "2px solid #d1d5db" }}>
+                <td style={td} colSpan={4}>รวม {fmtQty(filtered.length)} รายการ</td>
+                <td style={{ ...td, textAlign: "right", color: "#065f46" }}>{fmtQty(sums.qty)}</td>
+                <td style={{ ...td, textAlign: "right" }}>{fmtQty(sums.ppao)}</td>
+                <td style={{ ...td, textAlign: "right" }}>{fmtQty(sums.haahong)}</td>
+                <td style={{ ...td, textAlign: "right" }}>{fmtQty(sums.sachtalad)}</td>
+                <td style={{ ...td, textAlign: "right" }}>{fmtQty(sums.nakhonluang)}</td>
+                <td style={{ ...td, textAlign: "right", color: "#ea580c" }}>{sums.loan ? fmtQty(sums.loan) : ""}</td>
+                <td style={td}></td>
+                <td style={td}></td>
+                <td style={{ ...td, textAlign: "right", color: "#b91c1c" }}>{sums.backorder ? fmtQty(sums.backorder) : ""}</td>
+                <td style={td}></td>
+                <td style={{ ...td, textAlign: "right", color: "#7c3aed" }}>{sums.pendingJob ? fmtQty(sums.pendingJob) : ""}</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

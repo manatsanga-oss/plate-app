@@ -82,7 +82,29 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
         (KEEP_RECEIPTS.has(String(r.receipt_no || "").trim()) ||
           !r.receive_date || String(r.receive_date).slice(0, 10) >= SUBMIT_CUTOFF_ISO)
       );
-      setRows(visible);
+      // ใบซ้ำรถคันเดียวกันจาก 2 แหล่ง: ระบบรับเรื่อง (เลข CA+ปี พ.ศ. เช่น SCY06-CA6908...) กับ upload (CA+ปี ค.ศ. เช่น SCY01-CA2608...)
+      // → แสดงเฉพาะใบจากระบบ ตัดใบ upload ของรถคันเดิมที่รับเรื่องห่างกันไม่เกิน 45 วันทิ้ง
+      const isSystemReceipt = (no) => { const m = String(no || "").match(/-CA(\d{2})/); return m ? Number(m[1]) >= 60 : false; };
+      const vkey = (r) => String(r.chassis_no || r.engine_no || "").trim().toUpperCase();
+      const sysByVehicle = new Map(); // ตัวถัง/เครื่อง → วันที่รับเรื่องของใบระบบ
+      visible.forEach(r => {
+        const k = vkey(r);
+        if (!k || !isSystemReceipt(r.receipt_no)) return;
+        if (!sysByVehicle.has(k)) sysByVehicle.set(k, []);
+        sysByVehicle.get(k).push(String(r.receive_date || "").slice(0, 10));
+      });
+      const DUP_WINDOW_MS = 45 * 86400000;
+      const deduped = visible.filter(r => {
+        if (isSystemReceipt(r.receipt_no)) return true;
+        const k = vkey(r);
+        if (!k || !sysByVehicle.has(k)) return true;
+        const d0 = new Date(String(r.receive_date || "").slice(0, 10)).getTime();
+        return !sysByVehicle.get(k).some(ds => {
+          const d1 = new Date(ds).getTime();
+          return isFinite(d0) && isFinite(d1) ? Math.abs(d1 - d0) <= DUP_WINDOW_MS : true;
+        });
+      });
+      setRows(deduped);
       if (visible.length === 0) setMessage("");
     } catch (e) {
       setRows([]);

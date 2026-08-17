@@ -26,6 +26,7 @@ export default function MotoPricePage({ currentUser }) {
   const [histEditPrices, setHistEditPrices] = useState({}); // { price_type_id: value_string }
   const [histBusy, setHistBusy] = useState(false); // กำลัง save/delete แถวประวัติ
   const [filterBrand, setFilterBrand] = useState("");
+  const [showInactive, setShowInactive] = useState(false); // แสดงรุ่น/แบบ/type ที่ยกเลิกผลิตแล้ว (ดูราคารุ่นเก่า)
   const [filterMarketing, setFilterMarketing] = useState("");
   const [filterModel, setFilterModel] = useState("");
 
@@ -328,13 +329,13 @@ export default function MotoPricePage({ currentUser }) {
 
   const activeTypes = priceTypes.filter(t => t.status === "active");
 
-  // ไม่แสดงรุ่น/แบบ/type ที่ยกเลิกใช้งานแล้ว (status inactive ระดับไหนก็ตาม)
-  const visibleTypes = motoTypes.filter(m =>
-    (m.status || "active") === "active" &&
-    (m.model_status || "active") === "active" &&
-    (m.series_status || "active") === "active" &&
-    (m.brand_status || "active") === "active"
-  );
+  // ปกติไม่แสดงรุ่น/แบบ/type ที่ยกเลิกใช้งานแล้ว — ติ๊ก "แสดงรุ่นที่ยกเลิกผลิต" เพื่อดูราคารุ่นเก่าได้
+  const isDiscontinued = (m) =>
+    (m.status || "active") !== "active" ||
+    (m.model_status || "active") !== "active" ||
+    (m.series_status || "active") !== "active" ||
+    (m.brand_status || "active") !== "active";
+  const visibleTypes = motoTypes.filter(m => showInactive || !isDiscontinued(m));
 
   const brandOpts = [...new Set(visibleTypes.map(m => m.brand_name).filter(Boolean))].sort();
   const marketingOpts = [...new Set(
@@ -546,6 +547,10 @@ export default function MotoPricePage({ currentUser }) {
                     ✕ ล้าง
                   </button>
                 )}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontFamily: "Tahoma", cursor: "pointer", padding: "6px 10px", borderRadius: 8, border: "1px solid " + (showInactive ? "#fca5a5" : "#d1d5db"), background: showInactive ? "#fef2f2" : "#fff", color: showInactive ? "#991b1b" : "#374151" }}>
+                  <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
+                  แสดงรุ่นที่ยกเลิกผลิต
+                </label>
                 <button onClick={() => window.print()}
                   className="no-print"
                   style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: "#072d6b", color: "#fff", cursor: "pointer", fontSize: 13, fontFamily: "Tahoma", marginLeft: "auto" }}>
@@ -581,7 +586,10 @@ export default function MotoPricePage({ currentUser }) {
                         <td style={{ whiteSpace: "nowrap" }}>{row.brand_name || "-"}</td>
                         <td style={{ whiteSpace: "nowrap" }}>{row.marketing_name || row.series_name || "-"}</td>
                         <td style={{ whiteSpace: "nowrap" }}>{row.model_code || "-"}</td>
-                        <td style={{ whiteSpace: "nowrap" }}>{row.type_name || "-"}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>
+                          {row.type_name || "-"}
+                          {isDiscontinued(row) && <span style={{ marginLeft: 6, fontSize: 10.5, background: "#fee2e2", color: "#b91c1c", borderRadius: 6, padding: "1px 6px", fontWeight: 700 }}>ยกเลิกผลิต</span>}
+                        </td>
                         {activeTypes.map(t => {
                           const key = `${row.type_id}|${t.type_id}`;
                           const displayVal = localPrices[key] ? Number(localPrices[key]).toLocaleString() : "-";

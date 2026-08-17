@@ -214,8 +214,9 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   }, [header.register_date, header.receipt_type]);
 
   // แยกบรรทัดของงานต่อภาษี: "ค่าต่อภาษี" (ไม่ใช่ตรวจสภาพ) vs "ตรวจสภาพ..."
-  const isTaxLine = (l) => { const n = String(l.income_name || ""); return n.includes("ต่อภาษี") && !n.includes("ตรวจ"); };
-  const isTroLine = (l) => String(l.income_name || "").includes("ตรวจสภาพ");
+  // ⚠ ต้องไม่จับบรรทัด "ค่าบริการ..." (บรรทัดแตกจากช่องค่าบริการตอนบันทึก) — ไม่งั้น auto-fill ทับแล้วบันทึกซ้ำจะเบิ้ลรายการ
+  const isTaxLine = (l) => { const n = String(l.income_name || ""); return n.includes("ต่อภาษี") && !n.includes("ตรวจ") && !n.startsWith("ค่าบริการ"); };
+  const isTroLine = (l) => { const n = String(l.income_name || ""); return n.includes("ตรวจสภาพ") && !n.startsWith("ค่าบริการ"); };
 
   // งานต่อภาษี: เติมราคาอัตโนมัติ (ทับทุกครั้งที่เข้าขั้นสรุป/วันที่เปลี่ยน/เลือกชื่อรายได้)
   // - "ค่าต่อภาษี": ราคา = ยอดที่กรมขนส่งเก็บ (ภาษี+เงินเพิ่ม), ค่าบริการ = 200 − ราคา → รวม 200 (ยอดขนส่งเกิน 200 → ค่าบริการ 0)
@@ -552,7 +553,30 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         register_date: h.register_date ? String(h.register_date).slice(0,10) : "",
         tax_paid_date: h.tax_paid_date ? String(h.tax_paid_date).slice(0,10) : "",
       });
-      setLines(ls.length ? ls.map((l) => ({ ...blankLine(), ...l, income_type: normalizeIncomeType(l.income_type), vat_included: String(l.description || "").includes("รวม VAT") })) : [blankLine()]);
+      // ยุบบรรทัด "ค่าบริการX" (ที่ระบบแตกไว้ตอนบันทึก) กลับเข้าช่องค่าบริการของบรรทัดแม่ X
+      // — กันเปิดแก้ไขแล้วบันทึกซ้ำทำให้บรรทัดเบิ้ล (เช่น ค่าบริการต่อภาษี โดน auto-fill กลายเป็นบรรทัดใหม่)
+      const mergedLines = (() => {
+        const src = ls.map((l) => ({ ...blankLine(), ...l, income_type: normalizeIncomeType(l.income_type), vat_included: String(l.description || "").includes("รวม VAT") }));
+        const out = [];
+        const feeUsed = new Set();
+        for (let i = 0; i < src.length; i++) {
+          const l = src[i];
+          if (feeUsed.has(i)) continue;
+          const nm = String(l.income_name || "");
+          if (nm.startsWith("ค่าบริการ")) { out.push(l); continue; }
+          // หา "ค่าบริการ<ชื่อบรรทัดนี้ตัดคำว่า ค่า>" ที่ยังไม่ถูกใช้ → ดึงมาเป็นค่าบริการของบรรทัดนี้
+          const feeName = `ค่าบริการ${nm.replace(/^ค่า/, "").trim()}`;
+          const j = src.findIndex((f, k) => k > i && !feeUsed.has(k) && String(f.income_name || "") === feeName && String(f.description || "").includes("รวม VAT"));
+          if (j >= 0) {
+            feeUsed.add(j);
+            out.push({ ...l, service_fee: num(src[j].price_before_discount) * num(src[j].qty || 1) });
+          } else {
+            out.push(l);
+          }
+        }
+        return out;
+      })();
+      setLines(mergedLines.length ? mergedLines : [blankLine()]);
       setJustSaved(false);
       setStep(1);
       setView("form");

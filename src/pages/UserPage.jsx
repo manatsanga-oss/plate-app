@@ -280,6 +280,23 @@ export default function UserPage({ currentUser }) {
     }
   };
 
+  // อัปเดตสิทธิ์ของกลุ่มทับให้สมาชิกทุกคนในกลุ่ม (แก้กลุ่มแล้วสิทธิ์รายคนเดิมไม่เปลี่ยนเอง — ต้องกดปุ่มนี้)
+  const handleApplyGroupPages = async () => {
+    const members = users.filter(u => String(u.user_group_id || "") === String(groupForm.group_id));
+    if (!window.confirm(`อัปเดตสิทธิ์ตามกลุ่ม "${groupForm.group_name}" ให้สมาชิก ${members.length} คน?\n⚠ สิทธิ์รายคนที่เคยแก้เองจะถูกแทนที่ด้วยชุดสิทธิ์ของกลุ่ม\n(บันทึกการแก้ไขกลุ่มก่อนกดปุ่มนี้)`)) return;
+    try {
+      setSaving(true);
+      const raw = await api("apply_group_pages", { group_id: groupForm.group_id });
+      const arr = Array.isArray(raw) ? raw.filter(x => x && x.user_id) : [];
+      showMsg(`✅ อัปเดตสิทธิ์ให้สมาชิกแล้ว ${arr.length} คน (${arr.map(x => x.name || x.username).join(", ").slice(0, 120)})`);
+      await loadUsers();
+    } catch {
+      showMsg("อัปเดตสิทธิ์สมาชิกไม่สำเร็จ (workflow ยังไม่รองรับ — re-import Login API ก่อน)", "error");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDeleteGroup = async (g) => {
     try {
       setDeleting(`group-${g.group_id}`);
@@ -563,11 +580,18 @@ export default function UserPage({ currentUser }) {
                   : (groupForm.pages || []).filter((x) => x !== key);
                 setGroupForm({ ...groupForm, pages: newPages });
               }} />
-              <div style={{ display: "flex", gap: 8, marginTop: 20, paddingTop: 14, borderTop: "1px solid #e5e7eb" }}>
+              <div style={{ display: "flex", gap: 8, marginTop: 20, paddingTop: 14, borderTop: "1px solid #e5e7eb", flexWrap: "wrap", alignItems: "center" }}>
                 <button className="btn-primary" onClick={handleSaveGroup} disabled={saving}>
                   {saving ? "กำลังบันทึก..." : "บันทึก"}
                 </button>
                 <button className="btn-secondary" onClick={() => setGroupForm(null)}>ยกเลิก</button>
+                {groupForm.group_id && (
+                  <button onClick={handleApplyGroupPages} disabled={saving}
+                    title="เอาชุดสิทธิ์ของกลุ่ม (ที่บันทึกล่าสุด) ไปทับสิทธิ์รายคนของสมาชิกทุกคนในกลุ่มนี้"
+                    style={{ marginLeft: "auto", padding: "8px 16px", background: "#b45309", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14 }}>
+                    🔄 อัปเดตสิทธิ์ให้สมาชิกในกลุ่ม ({users.filter(u => String(u.user_group_id || "") === String(groupForm.group_id)).length} คน)
+                  </button>
+                )}
               </div>
             </>
           ) : (

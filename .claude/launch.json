@@ -18,8 +18,7 @@
       "name": "plate-app",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 5173,
-      "autoPort": true
+      "port": 5175
     }
   ]
 }
