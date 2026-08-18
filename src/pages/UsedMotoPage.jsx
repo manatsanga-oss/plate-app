@@ -5,6 +5,7 @@ const API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const CUST_SEARCH_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api"; // search_customers
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api"; // get_types — ยี่ห้อ/รุ่น/แบบ/type
+const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api"; // list_retail_sales — เลือกใบขายรถใหม่ที่รับเทิร์น
 
 const num = (v) => Number(v) || 0;
 const fmt = (v) => num(v).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -90,6 +91,20 @@ export default function UsedMotoPage({ currentUser }) {
   // ===== ฟอร์มรับเข้า / แก้ไข =====
   const [form, setForm] = useState(null); // null = ปิด, {id?} = แก้ไข
   const setF = (patch) => setForm(f => ({ ...f, ...patch }));
+
+  // ใบขายรถใหม่ย้อนหลัง 120 วัน — ให้เลือกเป็น "ใบขายที่เทิร์น" (โหลดครั้งแรกที่เปิดฟอร์ม)
+  const [tradeSales, setTradeSales] = useState(null);
+  useEffect(() => {
+    if (!form || tradeSales !== null) return;
+    const from = new Date(Date.now() - 120 * 86400000).toISOString().slice(0, 10);
+    fetch(RETAIL_API, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "list_retail_sales", date_from: from, limit: 500 }),
+    }).then(r => r.json())
+      .then(d => setTradeSales((Array.isArray(d) ? d : []).filter(s => s && s.invoice_no)))
+      .catch(() => setTradeSales([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!form]);
 
   async function saveForm() {
     if (!form.model_series.trim() && !form.engine_no.trim()) { setMessage("❌ ใส่รุ่นรถหรือเลขเครื่องอย่างน้อย 1 อย่าง"); return; }
@@ -402,7 +417,26 @@ export default function UsedMotoPage({ currentUser }) {
                   <option>รับซื้อ</option><option>รับเทิร์น</option>
                 </select>
               </Field>
-              <Field label="ใบขายที่เทิร์น (ถ้ามี)"><input value={form.ref_sale_no} onChange={e => setF({ ref_sale_no: e.target.value })} style={inp} placeholder="เช่น SCY06-MCSA-..." /></Field>
+              <Field label="ใบขายที่เทิร์น (ถ้ามี)">
+                <input list="um-trade-sale" value={form.ref_sale_no}
+                  onChange={e => {
+                    const v = e.target.value;
+                    // เลือกใบขายจากรายการ → เติมเจ้าของเดิม/เบอร์จากลูกค้าใบขายให้อัตโนมัติ (ถ้ายังว่าง)
+                    const hit = (tradeSales || []).find(s => s.invoice_no === v.trim());
+                    setF(hit
+                      ? { ref_sale_no: v, seller_name: form.seller_name || hit.customer_name || "", seller_phone: form.seller_phone || hit.customer_phone || "" }
+                      : { ref_sale_no: v });
+                  }}
+                  style={{ ...inp, fontFamily: "monospace" }}
+                  placeholder={tradeSales === null ? "กำลังโหลดใบขาย..." : "เลือก/พิมพ์ เช่น SCY06-MCSA-..."} />
+                <datalist id="um-trade-sale">
+                  {(tradeSales || []).map(s => (
+                    <option key={s.invoice_no} value={s.invoice_no}>
+                      {`${String(s.sale_date || "").slice(0, 10)} · ${s.customer_name || ""}${s.model_code ? ` · ${s.model_code}` : ""}`}
+                    </option>
+                  ))}
+                </datalist>
+              </Field>
               <Field label="ยี่ห้อ">
                 <select value={form.brand} onChange={e => setF({ brand: e.target.value, model_series: "", model_code: "", type_name: "" })} style={inp}>
                   {[...new Set([...brandOpts, "ฮอนด้า", "ยามาฮ่า", "อื่นๆ"])].map(b => <option key={b}>{b}</option>)}

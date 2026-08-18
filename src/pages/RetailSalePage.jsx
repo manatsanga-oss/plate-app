@@ -1125,7 +1125,8 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
     }
   }, [sale?.sale_no, sale?.payment_status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const PAY_METHODS = ["เงินสด", "โอน", "บัตร/QR", "ไฟแนนซ์", "เงินมัดจำ"];
+  // "รถเทิร์น" = ลูกค้าเอารถเก่ามาตีราคาแทนเงิน — ใส่มูลค่าที่ตีเอง (ตัวรถไปเข้าสต๊อกที่เมนูรถมือสอง อ้างเลขใบขายนี้)
+  const PAY_METHODS = ["เงินสด", "โอน", "บัตร/QR", "ไฟแนนซ์", "เงินมัดจำ", "รถเทิร์น"];
   const payTotal = payLines.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const updatePayLine = (i, patch) => setPayLines((ls) => ls.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const addPayLine = () => setPayLines((ls) => [...ls, { method: "เงินสด", account_id: "", amount: "" }]);
