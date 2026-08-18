@@ -22,6 +22,7 @@ import PriceImpactAnalysisPage from "./pages/PriceImpactAnalysisPage";
 import StockTurnoverReportPage from "./pages/StockTurnoverReportPage";
 import PartReceiptReportPage from "./pages/PartReceiptReportPage";
 import ReceiptQrCustomerReportPage from "./pages/ReceiptQrCustomerReportPage";
+import CarPaymentReportNewPage from "./pages/CarPaymentReportNewPage";
 import PartOrderInquiryPage from "./pages/PartOrderInquiryPage";
 import PartDispenseReportPage from "./pages/PartDispenseReportPage";
 import ServiceHistorySearchPage from "./pages/ServiceHistorySearchPage";
@@ -246,6 +247,7 @@ export default function App() {
     if (page === "taxinvoicesalesreport") return false;
     if (page === "creditnotereport") return false;  // เฉพาะ admin (ใบลดหนี้รับ)
     if (page === "carpaymentreport") return false;   // เฉพาะ admin (รายงานรับชำระเงินรายคัน)
+    if (page === "carpaymentreportnew") return false; // เฉพาะ admin (รายงานรับชำระเงินรายคัน NEW — ข้อมูลจากระบบทั้งหมด)
     if (page === "salesbypayment") return false;     // เฉพาะ admin (รายงานการขายตามการชำระเงิน)
     if (page === "salemoneyreport") return false;    // เฉพาะ admin (รายงานการเงินขายรถ — กำหนดสิทธิ์รายคนได้)
     if (page === "otherincometaxreport") return false;  // เฉพาะ admin (รายงานใบกำกับรายได้อื่นๆ)
@@ -366,6 +368,9 @@ export default function App() {
         )}
         {activeMenu === "carpaymentreport" && canAccess("carpaymentreport") && (
           <CarPaymentReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "carpaymentreportnew" && canAccess("carpaymentreportnew") && (
+          <CarPaymentReportNewPage currentUser={currentUser} />
         )}
         {activeMenu === "registrationsummaryreport" && canAccess("registrationsummaryreport") && (
           <RegistrationSummaryReportPage currentUser={currentUser} />
@@ -794,12 +799,13 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 45 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","salesbypayment","otherincometaxreport","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="creditnotereport" label="รายงานใบลดหนี้รับ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="carpaymentreport" label="รายงานรับชำระเงินรายคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="carpaymentreportnew" label="รายงานรับชำระเงินรายคัน NEW" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="salesbypayment" label="รายงานการขายตามการชำระเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="otherincometaxreport" label="รายงานใบกำกับภาษีรายได้อื่นๆ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="registrationsummaryreport" label="รายงานสรุปใบปะหน้า คชจ. ขายรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

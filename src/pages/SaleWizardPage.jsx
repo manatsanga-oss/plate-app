@@ -1148,8 +1148,15 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (!unit || !group) return null;
     const bc = brandParam(selBrand);
     if (bc === "HONDA") {
-      return group.rows.find(r => text(unit.model) === text(r.model_code) && text(unit.model_type) === text(r.type_name) && text(unit.color).toUpperCase() === text(r.color_code).toUpperCase())
-        || group.rows.find(r => text(unit.model) === text(r.model_code) && text(unit.color).toUpperCase() === text(r.color_code).toUpperCase())
+      const exact = group.rows.find(r => text(unit.model) === text(r.model_code) && text(unit.model_type) === text(r.type_name) && text(unit.color).toUpperCase() === text(r.color_code).toUpperCase());
+      if (exact) return exact;
+      // ราคาขายต้องตรงตามแบบ+type ของคันจริง — ห้ามข้าม type (เคย fallback ด้วยสีแล้วไปหยิบราคา TH ทั้งที่คันจริงเป็น TH5 ราคาต่างกัน 300)
+      if (text(unit.model_type)) {
+        const byType = group.rows.find(r => text(unit.model) === text(r.model_code) && text(unit.model_type) === text(r.type_name));
+        if (byType) return byType;
+      }
+      // คันที่สต๊อกไม่มี type เท่านั้นถึงยอมจับด้วยแบบ+สี
+      return group.rows.find(r => text(unit.model) === text(r.model_code) && text(unit.color).toUpperCase() === text(r.color_code).toUpperCase())
         || null;
     }
     return group.rows.find(r => text(unit.model_type) && text(unit.model_type) === text(r.type_name))
