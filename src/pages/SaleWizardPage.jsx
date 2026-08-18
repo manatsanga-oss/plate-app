@@ -9,6 +9,7 @@ const STOCK_API = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-turno
 const BOOKING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api";
 const DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+const USED_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
 
@@ -115,6 +116,63 @@ export default function SaleWizardPage({ currentUser }) {
   const [saleType, setSaleType] = useState(null);   // 'cash' | 'finance'
   const [financeCo, setFinanceCo] = useState(null); // finance company row
   const [imgZoom, setImgZoom] = useState(null);     // data URL รูปที่ขยายดู (null = ปิด)
+
+  // ===== โหมดขายรถมือสอง (การ์ด USED) — ดึงคันจากสต๊อกมือสอง บันทึกขายผ่าน used-moto-api (sell_used) =====
+  const USED_PAY_METHODS = ["เงินสด", "เงินโอน", "QR", "อื่นๆ"];
+  const [usedMode, setUsedMode] = useState(false);
+  const [usedRows, setUsedRows] = useState(null);          // null = กำลังโหลด
+  const [usedSel, setUsedSel] = useState(null);            // คันที่เลือก
+  const [usedSale, setUsedSale] = useState(null);          // ฟอร์มขาย
+  const [usedDone, setUsedDone] = useState(null);          // ผลบันทึกขายสำเร็จ
+  const [usedImgs, setUsedImgs] = useState({});            // used_id -> [dataURL]
+  const [showUsedCustomer, setShowUsedCustomer] = useState(false);
+
+  async function enterUsedMode() {
+    setUsedMode(true); setUsedSel(null); setUsedSale(null); setUsedDone(null); setUsedRows(null); setMessage("");
+    try {
+      const d = await post(USED_API, { action: "list_used" });
+      setUsedRows(asArray(d).filter(r => r && r.id && r.status === "in_stock"));
+    } catch { setUsedRows([]); }
+  }
+  function pickUsed(r) {
+    setUsedSel(r); setUsedDone(null);
+    setUsedSale({ sold_date: todayStr(), customer_code: "", customer: "", phone: "", address: "", birthdate: "", price: "", rows: [{ method: "เงินสด", amount: "", account: "" }], note: "", saving: false });
+    if (num(r.img_count) > 0 && !usedImgs[r.id]) {
+      post(USED_API, { action: "get_images", used_id: r.id })
+        .then(d => setUsedImgs(m => ({ ...m, [r.id]: asArray(d).filter(x => x && x.image_id).map(x => x.image_data) })))
+        .catch(() => {});
+    }
+  }
+  const setUsedPayRow = (i, patch) => setUsedSale(m => ({ ...m, rows: m.rows.map((r, j) => j === i ? { ...r, ...patch } : r) }));
+  const usedPayTotal = (m) => (m?.rows || []).reduce((s, r) => s + num(r.amount), 0);
+  const usedBankLabel = (a) => [a.bank_name, a.account_no, a.account_name].filter(Boolean).join(" · ");
+  async function saveUsedSale() {
+    const m = usedSale;
+    const list = m.rows.filter(r => num(r.amount) > 0);
+    if (!text(m.customer)) { setMessage("❌ กดปุ่ม 🔍 เลือก/เพิ่ม เพื่อเลือกลูกค้าก่อน"); return; }
+    if (!num(m.price)) { setMessage("❌ ใส่ราคาขาย"); return; }
+    if (!list.length) { setMessage("❌ ใส่ยอดรับชำระอย่างน้อย 1 วิธี"); return; }
+    if (list.some(r => r.method === "เงินโอน" && !r.account)) { setMessage("❌ เลือกบัญชีรับโอนของรายการเงินโอน"); return; }
+    if (Math.abs(usedPayTotal(m) - num(m.price)) >= 0.01 &&
+        !window.confirm(`รวมรับชำระ ${num(usedPayTotal(m)).toLocaleString("th-TH")} ไม่เท่าราคาขาย ${num(m.price).toLocaleString("th-TH")}\nบันทึกต่อหรือไม่?`)) return;
+    setMessage("");
+    setUsedSale(x => ({ ...x, saving: true }));
+    try {
+      const d = await post(USED_API, {
+        action: "sell_used", id: usedSel.id,
+        sold_date: m.sold_date, sold_customer: text(m.customer), sold_customer_phone: text(m.phone),
+        sold_price: num(m.price),
+        payments: list.map(r => ({ method: r.method, amount: num(r.amount), account: r.method === "เงินโอน" ? r.account : "" })),
+        payment_note: m.note, sold_by: currentUser?.username || currentUser?.name || "",
+      });
+      if (!d?.[0]?.id) throw new Error(d?.[0]?.error || "บันทึกขายไม่สำเร็จ (คันนี้อาจถูกขาย/ยกเลิกไปแล้ว)");
+      setUsedDone({ doc_no: usedSel.doc_no, vehicle: [usedSel.brand, usedSel.model_series].filter(Boolean).join(" "), customer: text(m.customer), price: num(m.price) });
+      setUsedSale(null);
+    } catch (e) {
+      setMessage("❌ " + String(e.message || e).slice(0, 160));
+      setUsedSale(x => x ? { ...x, saving: false } : x);
+    }
+  }
 
   // ข้อมูลลูกค้า (แบบเดียวกับหน้าบันทึกขายปลีก — เลือกจาก CustomerPickerModal หรือพิมพ์เอง)
   const CUST_DEFAULT = { customer_code: "", customer_name: "", customer_address: "", customer_phone: "", customer_birthdate: "", customer_tax_id: "", customer_province: "", customer_gender: "", customer_line_user_id: "" };
@@ -1215,6 +1273,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
   function goBack() {
     setMessage("");
+    if (usedMode) {
+      if (usedDone) { setUsedDone(null); setUsedSel(null); enterUsedMode(); return; }
+      if (usedSel) { setUsedSel(null); setUsedSale(null); return; }
+      setUsedMode(false); setUsedRows(null); return;
+    }
     if (saleType === "finance" && !financeCo) { setSaleType(null); return; }   // ออกจากหน้าเลือกไฟแนนท์
     if (savedSale) return; // บันทึกแล้ว — ต้องกด "เริ่มใหม่" เท่านั้น
     if (selUnit) { setSelUnit(null); setSaleType(null); setFinanceCo(null); resetAdjustments(); resetFinanceInputs(); setBookingAsk(null); setSelBooking(null); setSelectedGiveaways({}); return; }
@@ -1224,6 +1287,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (selType) { setSelType(null); return; }
   }
   function resetAll() {
+    setUsedMode(false); setUsedRows(null); setUsedSel(null); setUsedSale(null); setUsedDone(null);
     setSelType(null); setSelBrand(null); setSelSeries(null); setSelColor(null); setSelUnit(null);
     setSaleType(null); setFinanceCo(null); setCust(CUST_DEFAULT); resetAdjustments(); resetFinanceInputs(); setBookingAsk(null); setSelBooking(null); setSelectedGiveaways({}); setSavedSale(null); resetPostSave(); setMessage("");
   }
@@ -1244,12 +1308,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       <div className="page-topbar">
         <h2 className="page-title">🛵 บันทึกขาย NEW</h2>
         <div style={{ display: "flex", gap: 8 }}>
-          {step > 1 && <button className="btn-secondary" onClick={goBack}>← ย้อนกลับ</button>}
-          {step > 1 && <button className="btn-secondary" onClick={resetAll}>เริ่มใหม่</button>}
+          {(step > 1 || usedMode) && <button className="btn-secondary" onClick={goBack}>← ย้อนกลับ</button>}
+          {(step > 1 || usedMode) && <button className="btn-secondary" onClick={resetAll}>เริ่มใหม่</button>}
         </div>
       </div>
 
       {/* breadcrumb การเลือก */}
+      {!usedMode && (
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14, fontSize: 14, fontFamily: "Tahoma" }}>
         {crumb(selType ? `ประเภท: ${selType.vehicle_type_name}` : "ประเภทรถ", selType ? () => { setSelBrand(null); setSelSeries(null); setSelColor(null); setSelUnit(null); setSelType(null); } : null)}
         <span style={{ color: "#9ca3af" }}>›</span>
@@ -1263,12 +1328,179 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         <span style={{ color: "#9ca3af" }}>›</span>
         {crumb(saleType ? `การขาย: ${saleType === "cash" ? "เงินสด" : "ผ่อนไฟแนนท์"}${financeCo ? ` (${financeCo.company_name})` : ""}` : "ประเภทการขาย", null)}
       </div>
+      )}
 
-      <h3 style={{ margin: "4px 0 14px", fontFamily: "Tahoma" }}>ขั้นตอนที่ {step}/7 — {STEP_TITLES[step]}</h3>
+      <h3 style={{ margin: "4px 0 14px", fontFamily: "Tahoma" }}>
+        {usedMode ? (usedDone ? "ขายรถมือสองสำเร็จ (USED)" : usedSel ? "บันทึกขายรถมือสอง (USED)" : "เลือกคันรถมือสอง (USED)") : `ขั้นตอนที่ ${step}/7 — ${STEP_TITLES[step]}`}
+      </h3>
       {message && <div style={{ color: "#ef4444", marginBottom: 12, padding: "8px 12px", background: "#fef2f2", borderRadius: 8 }}>{message}</div>}
 
       {loading ? (
         <div style={{ textAlign: "center", padding: 60, color: "#6b7280" }}>กำลังโหลดข้อมูลรุ่นรถ...</div>
+      ) : usedMode ? (
+        /* ===== โหมดขายรถมือสอง (USED) ===== */
+        usedRows === null ? (
+          <div style={{ textAlign: "center", padding: 60, color: "#6b7280" }}>กำลังโหลดสต๊อกรถมือสอง...</div>
+        ) : usedDone ? (
+          <div style={{ maxWidth: 560, border: "1.5px solid #86efac", background: "#f0fdf4", borderRadius: 12, padding: 24, fontFamily: "Tahoma" }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#166534" }}>✅ บันทึกขายแล้ว</div>
+            <div style={{ marginTop: 10, fontSize: 15 }}>เลขที่รับ <b>{usedDone.doc_no}</b> — {usedDone.vehicle}</div>
+            <div style={{ fontSize: 15 }}>ผู้ซื้อ <b>{usedDone.customer}</b> ราคา <b>{usedDone.price.toLocaleString("th-TH")}</b> บาท</div>
+            <div style={{ fontSize: 13, color: "#6b7280", marginTop: 6 }}>ยอดรับชำระเข้าสรุปรายวันรับเงินอัตโนมัติ</div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button className="btn-secondary" onClick={() => { setUsedDone(null); enterUsedMode(); }}>ขายคันต่อไป</button>
+              <button className="btn-secondary" onClick={resetAll}>กลับหน้าแรก</button>
+            </div>
+          </div>
+        ) : !usedSel ? (
+          usedRows.length === 0 ? (
+            <div style={{ color: "#9ca3af", padding: 30 }}>ไม่มีรถมือสองในสต๊อก — รับเข้าได้ที่เมนู "รถมือสอง (รับซื้อ/ขาย)"</div>
+          ) : (
+            <div style={gridStyle(250)}>
+              {usedRows.map(r => (
+                <div key={r.id} style={CARD}
+                  onClick={() => pickUsed(r)}
+                  onMouseOver={e => e.currentTarget.style.borderColor = "#b45309"}
+                  onMouseOut={e => e.currentTarget.style.borderColor = "#d1d5db"}>
+                  <div style={{ fontSize: 17, fontWeight: 700, color: "#b45309" }}>{[r.brand, r.model_series].filter(Boolean).join(" ") || "ไม่ระบุรุ่น"}</div>
+                  <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2 }}>{[r.model_code, r.type_name, r.color_name].filter(Boolean).join(" · ") || "-"}</div>
+                  <div style={{ fontSize: 12.5, marginTop: 6, fontFamily: "monospace" }}>{r.engine_no || "-"}</div>
+                  {text(r.chassis_no) && <div style={{ fontSize: 12, color: "#6b7280", fontFamily: "monospace" }}>{r.chassis_no}</div>}
+                  <div style={{ fontSize: 13, marginTop: 6 }}>ทะเบียน: <b>{r.license_plate || "-"}</b> {r.province || ""}</div>
+                  <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
+                    รับเข้า {String(r.receive_date || "").slice(0, 10)} · {r.doc_no}{num(r.img_count) > 0 ? ` · 📷 ${r.img_count}` : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        ) : (
+          /* ฟอร์มขายคันที่เลือก — การ์ดรถเต็มแถว (รูปซ้าย ข้อมูลขวา แบบขั้นเลือกประเภทการขายรถใหม่) → ข้อมูลลูกค้า → รับชำระเงิน */
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, fontFamily: "Tahoma" }}>
+            {/* ข้อมูลคัน + รูป */}
+            <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 20, background: "#fff", display: "flex", gap: 24, alignItems: "center", flexWrap: "wrap" }}>
+              <div style={{ width: 360, maxWidth: "100%", height: 260, display: "flex", alignItems: "center", justifyContent: "center", background: "#f9fafb", borderRadius: 8, overflow: "hidden", flexShrink: 0 }}>
+                {(usedImgs[usedSel.id] || [])[0]
+                  ? <img src={usedImgs[usedSel.id][0]} alt="รถมือสอง" title="ดับเบิลคลิกเพื่อดูรูปขยาย" onDoubleClick={() => setImgZoom(usedImgs[usedSel.id][0])}
+                      style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", cursor: "zoom-in" }} />
+                  : <span style={{ color: "#c4c9d0", fontSize: 13 }}>{num(usedSel.img_count) > 0 ? "กำลังโหลดรูป..." : "ไม่มีรูป"}</span>}
+              </div>
+              <div style={{ flex: 1, minWidth: 260, textAlign: "center" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "#b45309" }}>
+                  {[usedSel.brand, usedSel.model_series].filter(Boolean).join(" ")}
+                  <span style={{ fontSize: 14, color: "#6b7280", fontWeight: 400, marginLeft: 8 }}>USED · รถมือสอง</span>
+                </div>
+                <div style={{ fontSize: 15, marginTop: 10 }}>แบบ/type/สี: <b>{[usedSel.model_code, usedSel.type_name, usedSel.color_name].filter(Boolean).join(" · ") || "-"}</b></div>
+                <div style={{ fontSize: 15, marginTop: 6 }}>หมายเลขเครื่อง: <b>{usedSel.engine_no || "-"}</b></div>
+                <div style={{ fontSize: 15, marginTop: 6 }}>หมายเลขตัวถัง: <b>{usedSel.chassis_no || "-"}</b></div>
+                <div style={{ fontSize: 15, marginTop: 6 }}>ทะเบียน: <b>{usedSel.license_plate || "-"}</b> {usedSel.province || ""}</div>
+                <div style={{ fontSize: 15, marginTop: 6 }}>รับเข้า: <b>{String(usedSel.receive_date || "").slice(0, 10)}</b> · เลขที่รับ <b>{usedSel.doc_no}</b></div>
+                <button onClick={() => { setUsedSel(null); setUsedSale(null); }}
+                  style={{ marginTop: 12, padding: "7px 16px", border: "1px solid #d1d5db", borderRadius: 8, background: "#f3f4f6", cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}>
+                  เปลี่ยนคัน
+                </button>
+              </div>
+            </div>
+
+            {/* ฟอร์มขาย */}
+            {usedSale && (
+            <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 18, background: "#fff" }}>
+              <div style={{ display: "grid", gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr", gap: 12 }}>
+                <label style={{ fontSize: 13 }}>วันที่ขาย
+                  <input type="date" value={usedSale.sold_date} onChange={e => setUsedSale(m => ({ ...m, sold_date: e.target.value }))}
+                    style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, marginTop: 4 }} />
+                </label>
+                <label style={{ fontSize: 13 }}>ราคาขาย (บาท) *
+                  <input type="number" value={usedSale.price} onChange={e => setUsedSale(m => ({ ...m, price: e.target.value, rows: m.rows.length === 1 ? [{ ...m.rows[0], amount: e.target.value }] : m.rows }))}
+                    style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, marginTop: 4, textAlign: "right", fontWeight: 700 }} />
+                </label>
+              </div>
+
+              {/* ข้อมูลลูกค้า — แบบเดียวกับขายรถใหม่: ต้องเลือกจากปุ่ม 🔍 เท่านั้น (พิมพ์เองไม่ได้ กันใบขายไม่มีรหัสลูกค้า)
+                  จัดเป็นการ์ดแนวตั้ง label อยู่บนช่อง — พื้นที่ฟอร์มแคบ (อยู่ข้างการ์ดรูปรถ) แบบ 4 คอลัมน์จะบีบจนอ่านไม่ได้ */}
+              {(() => {
+                const box = { width: "100%", padding: "8px 10px", background: "#e9eef0", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, color: "#374151", minHeight: 19, boxSizing: "border-box" };
+                const lbl = { fontWeight: 600, fontSize: 13, fontFamily: "Tahoma", marginBottom: 4, color: "#374151" };
+                return (
+                  <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 10, padding: 14, background: "#fff", marginTop: 14 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 12 }}>ข้อมูลลูกค้า</div>
+
+                    <div style={lbl}>รหัสลูกค้า</div>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 10 }}>
+                      <div style={{ ...box, width: 130, textAlign: "center" }}>{usedSale.customer_code || "—"}</div>
+                      <button type="button" onClick={() => setShowUsedCustomer(true)}
+                        style={{ padding: "8px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontFamily: "Tahoma", whiteSpace: "nowrap" }}>
+                        🔍 เลือก/เพิ่ม
+                      </button>
+                    </div>
+
+                    <div style={lbl}>ชื่อลูกค้า <span style={{ color: "#ef4444" }}>*</span></div>
+                    <div style={{ ...box, marginBottom: 10, textAlign: usedSale.customer ? "left" : "center", color: usedSale.customer ? "#111827" : "#9ca3af" }}>
+                      {usedSale.customer || "กดปุ่ม 🔍 เลือก/เพิ่ม เพื่อเลือกลูกค้า"}
+                    </div>
+
+                    <div style={lbl}>ที่อยู่</div>
+                    <div style={{ ...box, marginBottom: 10, textAlign: usedSale.address ? "left" : "center" }}>{usedSale.address || "—"}</div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <div>
+                        <div style={lbl}>เบอร์โทร</div>
+                        <div style={{ ...box, textAlign: "center" }}>{usedSale.phone || "—"}</div>
+                      </div>
+                      <div>
+                        <div style={lbl}>วันเกิด</div>
+                        <div style={{ ...box, textAlign: "center" }}>{usedSale.birthdate ? thaiDate(usedSale.birthdate) : "—"}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              <div style={{ fontSize: 13, fontWeight: 700, margin: "14px 0 6px" }}>วิธีรับชำระ (เลือกได้หลายวิธี)</div>
+              {usedSale.rows.map((r3, i3) => (
+                <div key={i3} style={{ display: "flex", gap: 6, marginBottom: 6, flexWrap: "wrap" }}>
+                  <select value={r3.method} onChange={e => setUsedPayRow(i3, { method: e.target.value, account: "" })}
+                    style={{ padding: "7px 8px", border: "1px solid #d1d5db", borderRadius: 6 }}>
+                    {USED_PAY_METHODS.map(m2 => <option key={m2} value={m2}>{m2}</option>)}
+                  </select>
+                  <input type="number" value={r3.amount} onChange={e => setUsedPayRow(i3, { amount: e.target.value })} placeholder="จำนวนเงิน"
+                    style={{ width: 120, padding: "7px 8px", border: "1px solid #d1d5db", borderRadius: 6, textAlign: "right" }} />
+                  {r3.method === "เงินโอน" && (
+                    <select value={r3.account} onChange={e => setUsedPayRow(i3, { account: e.target.value })}
+                      style={{ flex: 1, minWidth: 180, padding: "7px 8px", border: "1px solid #d1d5db", borderRadius: 6 }}>
+                      <option value="">— เลือกบัญชีรับโอน —</option>
+                      {bankAccounts.filter(a => a.account_type !== "เงินสดย่อย" && a.account_type !== "ลูกหนี้").map(a => (
+                        <option key={a.account_id || usedBankLabel(a)} value={usedBankLabel(a)}>{usedBankLabel(a)}</option>
+                      ))}
+                    </select>
+                  )}
+                  {usedSale.rows.length > 1 && (
+                    <button onClick={() => setUsedSale(m => ({ ...m, rows: m.rows.filter((_, j) => j !== i3) }))}
+                      style={{ border: "1px solid #fca5a5", color: "#b91c1c", background: "#fff", borderRadius: 6, cursor: "pointer", padding: "0 10px" }}>✕</button>
+                  )}
+                </div>
+              ))}
+              <button onClick={() => setUsedSale(m => ({ ...m, rows: [...m.rows, { method: "เงินโอน", amount: Math.max(0, Math.round((num(m.price) - usedPayTotal(m)) * 100) / 100) || "", account: "" }] }))}
+                style={{ fontSize: 13, border: "1px dashed #94a3b8", background: "#f8fafc", borderRadius: 6, padding: "5px 12px", cursor: "pointer" }}>
+                + เพิ่มวิธีรับชำระ
+              </button>
+              <div style={{ fontSize: 13, marginTop: 8, color: Math.abs(usedPayTotal(usedSale) - num(usedSale.price)) < 0.01 ? "#166534" : "#b45309" }}>
+                รวมรับชำระ {usedPayTotal(usedSale).toLocaleString("th-TH")} / ราคาขาย {num(usedSale.price).toLocaleString("th-TH")} บาท
+              </div>
+
+              <label style={{ fontSize: 13, display: "block", marginTop: 10 }}>หมายเหตุ
+                <input value={usedSale.note} onChange={e => setUsedSale(m => ({ ...m, note: e.target.value }))}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 6, marginTop: 4 }} />
+              </label>
+
+              <button onClick={saveUsedSale} disabled={usedSale.saving}
+                style={{ marginTop: 16, width: "100%", padding: "12px", fontSize: 15, fontWeight: 700, color: "#fff", background: usedSale.saving ? "#93c5fd" : "#072d6b", border: "none", borderRadius: 8, cursor: "pointer" }}>
+                {usedSale.saving ? "กำลังบันทึก..." : "💾 บันทึกขายรถมือสอง"}
+              </button>
+            </div>
+            )}
+          </div>
+        )
       ) : (
         <>
           {/* ขั้น 1: ประเภทรถ */}
@@ -1285,6 +1517,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                   </div>
                 </div>
               ))}
+              {/* การ์ดรถมือสอง — ขายจากสต๊อกมือสอง (used_moto_stock) ไม่ผ่าน master รุ่นรถใหม่ */}
+              <div style={{ ...CARD, padding: "38px 16px", borderColor: "#fcd34d", background: "#fffbeb" }}
+                onClick={enterUsedMode}
+                onMouseOver={e => e.currentTarget.style.borderColor = "#b45309"}
+                onMouseOut={e => e.currentTarget.style.borderColor = "#fcd34d"}>
+                <div style={{ fontSize: 26, fontWeight: 700, color: "#b45309" }}>USED</div>
+                <div style={{ fontSize: 13, color: "#92400e", marginTop: 6 }}>รถมือสอง</div>
+              </div>
             </div>
           )}
 
@@ -2047,6 +2287,23 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       {/* popup เลือก/เพิ่มลูกค้า */}
       {showCustomer && (
         <CustomerPickerModal currentUser={currentUser} onSelect={pickCustomer} onClose={() => setShowCustomer(false)} />
+      )}
+
+      {/* popup เลือกลูกค้า (ขายรถมือสอง) — บันทึกข้อมูลลูกค้าแบบเดียวกับขายรถใหม่ */}
+      {showUsedCustomer && (
+        <CustomerPickerModal currentUser={currentUser}
+          onSelect={(c) => {
+            setUsedSale(m => m ? {
+              ...m,
+              customer_code: text(c.customer_code) || m.customer_code,
+              customer: text(c.customer_name) || m.customer,
+              phone: text(c.phone) || m.phone,
+              address: text(c.address) || m.address,
+              birthdate: text(c.birth_date) || m.birthdate,
+            } : m);
+            setShowUsedCustomer(false);
+          }}
+          onClose={() => setShowUsedCustomer(false)} />
       )}
 
       {/* popup รูปขยาย (ดับเบิลคลิกที่รูป) — คลิกที่ไหนก็ได้เพื่อปิด */}
