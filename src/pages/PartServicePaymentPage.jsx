@@ -19,7 +19,8 @@ const thaiDate = (iso) => {
   return isNaN(d) ? String(iso).slice(0, 10) : d.toLocaleDateString("th-TH", { day: "2-digit", month: "2-digit", year: "numeric" });
 };
 
-const PAY_METHODS = ["เงินสด", "เงินโอน", "QR", "มัดจำ", "อื่นๆ"];
+// วิธีรับชำระ — E-คูปอง ต้องกรอกเลขที่คูปอง (user สั่งเอา QR/อื่นๆ ออก 2026-08-19)
+const PAY_METHODS = ["เงินสด", "เงินโอน", "มัดจำ", "E-คูปอง"];
 const DOC_TYPES = ["ใบแจ้งซ่อม/JOB", "ใบขายอะไหล่", "อื่นๆ"];
 // สาขาสังกัด ป.เปา (SCY05/06): เติมตัวนำเลขเอกสารให้ — ใบแจ้งซ่อม = 69SERV/ · ใบขายอะไหล่ = 69RTSL/ (ปี พ.ศ. 2 หลักตามปีปัจจุบัน)
 const isPorpaoBranch = (bc) => { const c = String(bc || "").toUpperCase(); return c.startsWith("SCY05") || c.startsWith("SCY06"); };
@@ -69,7 +70,7 @@ export default function PartServicePaymentPage({ currentUser }) {
   const branchCode = myBranch; // สาขาไม่ต้องเลือก — default ตาม user ที่ login
   const [paidDate, setPaidDate] = useState(todayISO());
   const [billAmount, setBillAmount] = useState(""); // จำนวนเงินที่ต้องชำระทั้งหมด — ใส่ก่อน แล้วค่อยเลือกวิธีรับชำระ
-  const [rows, setRows] = useState([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "" }]);
+  const [rows, setRows] = useState([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "", coupon_no: "" }]);
   const [note, setNote] = useState("");
 
   // ใส่ยอดที่ต้องชำระ → เติมยอดให้วิธีแรกอัตโนมัติ (ถ้ายังมีวิธีเดียวและไม่ใช่มัดจำ)
@@ -109,6 +110,12 @@ export default function PartServicePaymentPage({ currentUser }) {
   const [bankAccounts, setBankAccounts] = useState([]);
   const [deposits, setDeposits] = useState([]);
   const bankLabelOf = (a) => [a.bank_name, a.account_no, a.account_name].filter(Boolean).join(" · ");
+  // เลือกวิธี "เงินโอน" ที่สาขา ป.เปา (SCY05/06) → default บัญชี ธ.กรุงเทพ ป.เปา ให้เลย (เปลี่ยนได้)
+  const defaultTransferAccount = () => {
+    if (!["SCY05", "SCY06"].includes(myBranch)) return "";
+    const a = bankAccounts.find(x => String(x.bank_name || "").includes("กรุงเทพ") && String(x.account_name || "").includes("ป.เปา"));
+    return a ? bankLabelOf(a) : "";
+  };
 
   useEffect(() => {
     fetch(ACC_API, {
@@ -124,14 +131,17 @@ export default function PartServicePaymentPage({ currentUser }) {
 
   // dropdown มัดจำ: ขึ้นเฉพาะใบที่ชื่อลูกค้าตรงกับชื่อในฟอร์ม (ตัดช่องว่าง/คำนำหน้า เทียบแบบมีส่วนตรงกัน)
   const normName = (s) => String(s || "").replace(/\s+/g, "").replace(/^(นาย|นาง|นางสาว|น\.ส\.|ด\.ช\.|ด\.ญ\.|ว่าที่ร\.ต\.|MR\.?|MRS\.?|MS\.?|MISS)/i, "").toUpperCase();
+  // ชื่อ default "เงินสด" ไม่ใช่ชื่อลูกค้าจริง — ห้ามใช้จับคู่ใบมัดจำ (มัดจำต้องชื่อตรงกันเท่านั้น)
+  const hasRealCustomer = !!customerName.trim() && customerName.trim() !== "เงินสด";
   const matchedDeposits = useMemo(() => {
+    if (!hasRealCustomer) return [];
     const kw = normName(customerName);
     if (!kw) return [];
     return deposits.filter(dp => {
       const dn = normName(dp.customer_name);
       return dn && (dn.includes(kw) || kw.includes(dn));
     });
-  }, [deposits, customerName]);
+  }, [deposits, customerName]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadDeposits() {
     // เงินมัดจำคงเหลือ = ใบมัดจำที่งานยังไม่ปิด (ปิดงานซ่อม/ปิดงานขาย = ตัดออก) และยังไม่ถูกใช้รับชำระในหน้านี้
@@ -186,6 +196,7 @@ export default function PartServicePaymentPage({ currentUser }) {
     if (Math.abs(total - num(billAmount)) >= 0.01 &&
         !window.confirm(`รวมรับชำระ ${fmt(total)} ไม่เท่ายอดที่ต้องชำระ ${fmt(billAmount)}\nบันทึกต่อหรือไม่?`)) return;
     if (list.some(r => r.method === "เงินโอน" && !r.account)) { setMessage("❌ เลือกบัญชีรับโอนเงินของรายการเงินโอนก่อน"); return; }
+    if (list.some(r => r.method === "E-คูปอง" && !String(r.coupon_no || "").trim())) { setMessage("❌ กรอกเลขที่ E-คูปอง ของรายการ E-คูปอง ก่อน"); return; }
     for (const r of list.filter(r2 => r2.method === "มัดจำ")) {
       if (!r.deposit_doc_no) { setMessage("❌ เลือกใบมัดจำของรายการมัดจำก่อน"); return; }
       if (!matchedDeposits.find(d => d.deposit_doc_no === r.deposit_doc_no)) {
@@ -205,8 +216,12 @@ export default function PartServicePaymentPage({ currentUser }) {
           doc_no: docNo.trim(), doc_type: docType,
           customer_name: customerName, branch_code: branchCode,
           paid_date: paidDate, bill_amount: num(billAmount),
-          payments: list.map(r => ({ method: r.method, amount: num(r.amount), account: r.method === "เงินโอน" ? r.account : "", deposit_doc_no: r.method === "มัดจำ" ? r.deposit_doc_no : "" })),
-          payment_note: note,
+          payments: list.map(r => ({ method: r.method, amount: num(r.amount), account: r.method === "เงินโอน" ? r.account : "", deposit_doc_no: r.method === "มัดจำ" ? r.deposit_doc_no : "", coupon_no: r.method === "E-คูปอง" ? String(r.coupon_no || "").trim() : "" })),
+          // แนบเลข E-คูปอง เข้าหมายเหตุด้วย — เห็นในรายการ/รายงานได้ทันทีแม้ workflow เก่ายังไม่เก็บ coupon_no ใน breakdowns
+          payment_note: (() => {
+            const cps = list.filter(r => r.method === "E-คูปอง" && String(r.coupon_no || "").trim()).map(r => String(r.coupon_no).trim());
+            return cps.length ? [note, `E-คูปอง: ${cps.join(", ")}`].filter(Boolean).join(" | ") : note;
+          })(),
           received_by: currentUser?.username || currentUser?.name || "",
         }),
       });
@@ -215,7 +230,7 @@ export default function PartServicePaymentPage({ currentUser }) {
       if (!row?.payment_id) throw new Error(row?.error || "workflow ยังไม่รองรับ — import Part_Service_Payment_Workflow.json ก่อน");
       setMessage(`✅ บันทึกรับชำระแล้ว — เลขที่ใบเสร็จ ${row.receipt_no || "-"} · อ้างอิง ${docNo.trim()} · ยอด ${fmt(total)} บาท`);
       setDocNo(docPrefixOf(docType, myBranch)); setCustomerName("เงินสด"); setNote(""); setBillAmount("");
-      setRows([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "" }]);
+      setRows([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "", coupon_no: "" }]);
       loadDeposits(); loadPayments();
     } catch (e) {
       setMessage("❌ บันทึกไม่สำเร็จ: " + String(e.message || e).slice(0, 160));
@@ -313,7 +328,7 @@ export default function PartServicePaymentPage({ currentUser }) {
           {rows.map((r, i) => (
             <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: 8, padding: "8px 10px", marginBottom: 6, background: "#f9fafb" }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <select value={r.method} onChange={e => setRow(i, { method: e.target.value, account: "", deposit_doc_no: "" })} style={{ ...inp, width: 110, flex: "0 0 auto" }}>
+                <select value={r.method} onChange={e => setRow(i, { method: e.target.value, account: e.target.value === "เงินโอน" ? defaultTransferAccount() : "", deposit_doc_no: "", coupon_no: "" })} style={{ ...inp, width: 110, flex: "0 0 auto" }}>
                   {PAY_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
                 <input type="number" step="0.01" placeholder="ยอด (บาท)" value={r.amount}
@@ -333,11 +348,18 @@ export default function PartServicePaymentPage({ currentUser }) {
                   </select>
                 </div>
               )}
+              {r.method === "E-คูปอง" && (
+                <div style={{ marginTop: 6 }}>
+                  <input value={r.coupon_no || ""} onChange={e => setRow(i, { coupon_no: e.target.value })}
+                    placeholder="เลขที่ E-คูปอง * (บังคับกรอก)"
+                    style={{ ...inp, fontFamily: "monospace", background: (r.coupon_no || "").trim() ? "#fff" : "#fffbeb" }} />
+                </div>
+              )}
               {r.method === "มัดจำ" && (
                 <div style={{ marginTop: 6 }}>
-                  {!normName(customerName) ? (
+                  {!hasRealCustomer ? (
                     <div style={{ fontSize: 12.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 7, padding: "7px 10px" }}>
-                      ⚠ ใส่ชื่อลูกค้าด้านบนก่อน — จะแสดงเฉพาะใบมัดจำของลูกค้าคนนั้น
+                      ⚠ ใส่ชื่อลูกค้าจริงด้านบนก่อน (ไม่ใช่ "เงินสด") — ใบมัดจำต้องชื่อลูกค้าตรงกันเท่านั้น
                     </div>
                   ) : !matchedDeposits.length ? (
                     <div style={{ fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: "7px 10px" }}>
@@ -362,7 +384,7 @@ export default function PartServicePaymentPage({ currentUser }) {
               )}
             </div>
           ))}
-          <button onClick={() => setRows(rs => [...rs, { method: "เงินโอน", amount: Math.max(0, Math.round((num(billAmount) - total) * 100) / 100) || "", account: "", deposit_doc_no: "" }])}
+          <button onClick={() => setRows(rs => [...rs, { method: "เงินโอน", amount: Math.max(0, Math.round((num(billAmount) - total) * 100) / 100) || "", account: defaultTransferAccount(), deposit_doc_no: "", coupon_no: "" }])}
             style={{ border: "1px dashed #059669", background: "#f0fdf4", color: "#047857", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>
             ＋ เพิ่มวิธีรับชำระ
           </button>
