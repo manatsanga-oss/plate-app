@@ -55,9 +55,16 @@ export default function CarPaymentReportNewPage() {
   //   3) เงินดาวน์/ค่างวดออกแทน (ของแถมร้านออกให้ = ถือว่าเคลียร์ยอดส่วนนั้นแล้ว)
   const saleTotal = (r) => num(r.net_car_price || r.car_price);
   const storePaid = (r) => (r.payment_status === "paid" ? num(r.paid_amount) : 0);
+  const depositOf = (r) => num(r.booking_deposit);          // เงินมัดจำจอง — ลูกค้าจ่ายไว้ตอนจอง หักจากยอดเก็บหน้าร้านแล้ว
   const ftPaid = (r) => num(r.ft_vehicle_paid);
-  const payoutOf = (r) => num(r.down_payout_amount);
-  const receivedOf = (r) => storePaid(r) + ftPaid(r) + payoutOf(r);
+  // ประกันรถหาย — นับเป็นแหล่งแยกเฉพาะ "ไฟแนนซ์หัก/โปรโมชั่นออกแทน" (หักจากยอดโอน FT)
+  // ถ้า source = finance คือลูกค้าจ่ายเบี้ยเองหน้าร้าน รวมอยู่ใน paid_amount แล้ว — ห้ามนับซ้ำ
+  const theftOf = (r) => {
+    const s = String(r.theft_insurance_source || "");
+    return (s === "ไฟแนนซ์หัก" || s === "โปรโมชั่นออกแทน") ? num(r.theft_insurance_amount) : 0;
+  };
+  const payoutOf = (r) => num(r.down_payout_amount) + theftOf(r);
+  const receivedOf = (r) => storePaid(r) + depositOf(r) + ftPaid(r) + payoutOf(r);
   const statusOf = (r) => {
     const total = saleTotal(r), got = receivedOf(r);
     if (got > total + 0.009) return "over";
@@ -91,16 +98,16 @@ export default function CarPaymentReportNewPage() {
   const sumReceived = filtered.reduce((s, r) => s + receivedOf(r), 0);
 
   function exportCSV() {
-    const head = ["สาขา", "เลขใบขาย", "วันที่ขาย", "ลูกค้า", "ไฟแนนท์", "เลขเครื่อง", "เลขตัวถัง", "รุ่น", "สี", "ยอดขายทั้งคัน", "รับหน้าร้าน", "รับไฟแนนท์ FT", "ออกแทน", "คงเหลือ", "เลขใบเสร็จ", "วันที่รับชำระ", "วิธีชำระหน้าร้าน", "สถานะ"];
+    const head = ["สาขา", "เลขใบขาย", "วันที่ขาย", "ลูกค้า", "ไฟแนนท์", "เลขเครื่อง", "เลขตัวถัง", "รุ่น", "สี", "ยอดขายทั้งคัน", "รับหน้าร้าน", "มัดจำจอง", "รับไฟแนนท์ FT", "ออกแทน/ไฟแนนซ์หัก", "คงเหลือ", "เลขใบเสร็จ", "วันที่รับชำระ", "วิธีชำระหน้าร้าน", "สถานะ"];
     const lines = filtered.map(r => {
       const methods = payMethods(r).map(p => `${p.method} ${baht(p.amount)}`).join(" | ");
       const st = statusOf(r);
-      const total = saleTotal(r), store = storePaid(r), ft = ftPaid(r), payout = payoutOf(r);
+      const total = saleTotal(r), store = storePaid(r), dep = depositOf(r), ft = ftPaid(r), payout = payoutOf(r);
       return [
         (r.branch_code || "").split(/\s+/)[0], r.invoice_no, thDate(r.sale_date), r.customer_name || "",
         r.finance_company_name || "", r.engine_no || "", r.chassis_no || "",
         r.model_name || r.model_code || "", r.model_color || "",
-        total, store, ft, payout, Math.max(0, total - store - ft - payout),
+        total, store, dep, ft, payout, Math.max(0, total - store - dep - ft - payout),
         r.receipt_no || "", r.receipt_date ? thDate(r.receipt_date) : "", methods,
         st === "full" ? "ครบ" : st === "over" ? "ชำระเกิน" : "ไม่ครบ",
       ].map(v => `"${String(v).replace(/"/g, '""')}"`).join(",");
@@ -167,7 +174,7 @@ export default function CarPaymentReportNewPage() {
           <tbody>
             {filtered.map((r, i) => {
               const st = statusOf(r);
-              const total = saleTotal(r), store = storePaid(r), ft = ftPaid(r), payout = payoutOf(r);
+              const total = saleTotal(r), store = storePaid(r) + depositOf(r), ft = ftPaid(r), payout = payoutOf(r);
               const remain = Math.max(0, total - store - ft - payout);
               return (
                 <tr key={r.invoice_no || i} style={{ borderTop: "1px solid #e5e7eb" }}>
@@ -183,11 +190,12 @@ export default function CarPaymentReportNewPage() {
                   <td style={td}>{r.model_name || r.model_code || "-"}{r.model_color ? <div style={{ fontSize: 11, color: "#6b7280" }}>สี {r.model_color}</div> : null}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#1d4ed8" }}>{baht(total)}</td>
                   <td style={{ ...td, textAlign: "right" }}>
-                    {store > 0 ? (
+                    {store > 0 ? (<>
                       <span onClick={() => setDetail(r)} style={{ color: "#7c3aed", fontWeight: 700, cursor: "pointer", textDecoration: "underline" }} title="ดูวิธีชำระหน้าร้าน">
                         {baht(store)}
                       </span>
-                    ) : "-"}
+                      {depositOf(r) > 0 && <div style={{ fontSize: 11, color: "#6b7280" }}>รวมมัดจำจอง {baht(depositOf(r))}</div>}
+                    </>) : "-"}
                   </td>
                   <td style={{ ...td, textAlign: "right" }}>
                     {ft > 0 ? (<>
@@ -195,7 +203,12 @@ export default function CarPaymentReportNewPage() {
                       {r.ft_paid_at && <div style={{ fontSize: 11, color: "#6b7280" }}>{thDate(r.ft_paid_at)}</div>}
                     </>) : (r.finance_company_name ? <span style={{ color: "#b45309", fontSize: 11 }}>รอตัดรับ</span> : "-")}
                   </td>
-                  <td style={{ ...td, textAlign: "right", color: "#b45309" }}>{payout > 0 ? baht(payout) : "-"}</td>
+                  <td style={{ ...td, textAlign: "right", color: "#b45309" }}>
+                    {payout > 0 ? (<>
+                      {baht(payout)}
+                      {theftOf(r) > 0 && <div style={{ fontSize: 11, color: "#6b7280" }}>ประกันรถหาย {baht(theftOf(r))}</div>}
+                    </>) : "-"}
+                  </td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 600, color: remain > 0.009 ? "#b91c1c" : "#047857" }}>{baht(remain)}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>
                     {r.receipt_no ? (<>
@@ -238,6 +251,23 @@ export default function CarPaymentReportNewPage() {
                     <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(p.amount)}</td>
                   </tr>
                 ))}
+                {num(detail.booking_deposit) > 0 && (
+                  <tr style={{ borderTop: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "8px 6px" }}>เงินมัดจำจอง (จ่ายไว้ตอนจอง)</td>
+                    <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(detail.booking_deposit)}</td>
+                  </tr>
+                )}
+                {theftOf(detail) > 0 && (
+                  <tr style={{ borderTop: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "8px 6px" }}>ประกันรถหาย ({detail.theft_insurance_source || "ไฟแนนซ์หักจากยอดโอน"})</td>
+                    <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700, color: "#b45309" }}>{baht(theftOf(detail))}</td>
+                  </tr>
+                )}
+                {num(detail.theft_insurance_amount) > 0 && theftOf(detail) === 0 && (
+                  <tr><td colSpan={2} style={{ padding: "6px", fontSize: 12, color: "#6b7280" }}>
+                    ℹ️ ประกันรถหาย {baht(detail.theft_insurance_amount)} ลูกค้าจ่ายเองหน้าร้าน — รวมอยู่ในยอดรับหน้าร้านแล้ว
+                  </td></tr>
+                )}
                 {num(detail.ft_vehicle_paid) > 0 && (
                   <tr style={{ borderTop: "1px solid #f1f5f9" }}>
                     <td style={{ padding: "8px 6px" }}>ตัดรับเงินโอนไฟแนนท์ (FT)
@@ -248,7 +278,7 @@ export default function CarPaymentReportNewPage() {
                 )}
                 <tr style={{ borderTop: "2px solid #e5e7eb", background: "#fefce8" }}>
                   <td style={{ padding: "8px 6px", fontWeight: 700 }}>รวมรับทุกแหล่ง</td>
-                  <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(num(detail.paid_amount) + num(detail.ft_vehicle_paid) + num(detail.down_payout_amount))}</td>
+                  <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(num(detail.paid_amount) + num(detail.booking_deposit) + num(detail.ft_vehicle_paid) + num(detail.down_payout_amount) + theftOf(detail))}</td>
                 </tr>
                 {num(detail.down_payout_amount) > 0 && (
                   <tr>

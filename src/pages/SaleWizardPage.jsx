@@ -875,6 +875,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     .filter((g) => selectedGiveaways[g.expense_id] && isDownPaymentSub(g.expense_name))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
 
+  // ประกันรถหายจากโปรโมชั่นที่ติ๊กไว้ — ร้านออกแทน (ไฟแนนซ์หักจากยอดโอน) ไม่เก็บลูกค้า ไม่บวกเข้ายอดชำระ
+  // ใช้เติม theft_insurance_amount อัตโนมัติ พนักงานไม่ต้องกรอกช่อง "ประกันรถหาย" (กรอกเองเฉพาะเคสลูกค้าจ่ายเบี้ยเอง)
+  const isTheftName = (name) => /ประกันรถหาย|รถหาย/.test(String(name || "").replace(/\s+/g, ""));
+  const promoTheft = applicableGiveaways
+    .filter((g) => selectedGiveaways[g.expense_id] && isTheftName(g.expense_name))
+    .reduce((s, g) => s + Number(g.amount || 0), 0);
+
   // บันทึกการขาย (เงินสด/ผ่อนไฟแนนท์) — payload เดียวกับหน้าบันทึกขายปลีก (retail-sale-api save_sale)
   async function handleSaveSale() {
     if (saving || savedSale || !selUnit) return;
@@ -911,7 +918,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         installment_amount: isFin ? fc.inst : 0,
         interest_rate: isFin ? num(finRate) : 0,
         finance_amount: isFin ? fc.financeAmount : 0,
-        theft_insurance_amount: isFin ? fc.theft : 0,
+        theft_insurance_amount: isFin ? (fc.theft || promoTheft) : 0,
         finance_type: isFin ? "moto" : "none",
         finance_company_name: isFin ? (financeCo?.company_name || "") : "",
         branch_name: currentUser?.branch || "",
@@ -959,8 +966,9 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         advance_installment: isFin ? fc.advance : 0,
         // เงินดาวน์/ค่างวดออกแทน (ยอดฐานก่อนคูณ 1.07) — ไว้โชว์เป็นของแถมหักตอนรับชำระ
         down_payout_amount: adjOpen && useDownPayout ? Number(downPayout || 0) : 0,
-        theft_insurance_amount: isFin ? fc.theft : 0,
-        theft_insurance_source: isFin && fc.theft > 0 ? "finance" : null,
+        // ประกันรถหาย: ลูกค้าจ่ายเอง (กรอกช่อง) ชนะ; ไม่กรอก = ใช้ยอดโปรโมชั่นออกแทนอัตโนมัติ (ไม่บวกเข้า total_payment)
+        theft_insurance_amount: isFin ? (fc.theft || promoTheft) : 0,
+        theft_insurance_source: isFin ? (fc.theft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : null,
         finance_company_code: isFin ? String(financeCo?.company_id || "") : "",
         finance_company_name: isFin ? (financeCo?.company_name || "") : "",
         interest_rate: isFin ? num(finRate) : 0,

@@ -61,8 +61,11 @@ export default function PartServicePaymentPage({ currentUser }) {
       const isBarePrefix = !p || DOC_TYPES.some(dt => p === docPrefixOf(dt, myBranch) && p !== "");
       return (!p || isBarePrefix) ? docPrefixOf(t, myBranch) : p;
     });
+    // ช่องชื่อว่างอยู่ → เติม default "เงินสด" (ลูกค้าหน้าร้านส่วนใหญ่ไม่ระบุชื่อ — แก้ทับ/กดค้นหาได้)
+    setCustomerName(prev => String(prev || "").trim() ? prev : "เงินสด");
   }
-  const [customerName, setCustomerName] = useState("");
+  // ชื่อลูกค้า default "เงินสด" ทุกประเภทเอกสาร (user สั่ง 2026-08-19)
+  const [customerName, setCustomerName] = useState("เงินสด");
   const branchCode = myBranch; // สาขาไม่ต้องเลือก — default ตาม user ที่ login
   const [paidDate, setPaidDate] = useState(todayISO());
   const [billAmount, setBillAmount] = useState(""); // จำนวนเงินที่ต้องชำระทั้งหมด — ใส่ก่อน แล้วค่อยเลือกวิธีรับชำระ
@@ -211,7 +214,7 @@ export default function PartServicePaymentPage({ currentUser }) {
       const row = Array.isArray(d) ? d[0] : d;
       if (!row?.payment_id) throw new Error(row?.error || "workflow ยังไม่รองรับ — import Part_Service_Payment_Workflow.json ก่อน");
       setMessage(`✅ บันทึกรับชำระแล้ว — เลขที่ใบเสร็จ ${row.receipt_no || "-"} · อ้างอิง ${docNo.trim()} · ยอด ${fmt(total)} บาท`);
-      setDocNo(docPrefixOf(docType, myBranch)); setCustomerName(""); setNote(""); setBillAmount("");
+      setDocNo(docPrefixOf(docType, myBranch)); setCustomerName("เงินสด"); setNote(""); setBillAmount("");
       setRows([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "" }]);
       loadDeposits(); loadPayments();
     } catch (e) {

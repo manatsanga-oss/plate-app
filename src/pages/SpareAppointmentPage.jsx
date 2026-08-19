@@ -81,6 +81,12 @@ export default function SpareAppointmentPage() {
   const carLine = o ? [o.model_name, o.license_plate].filter(Boolean).join(" / ") : "";
   // ใบมัดจำสั่งซื้อ (PDO-) = ลูกค้าซื้ออะไหล่ ไม่มีงานซ่อม → ใช้คำว่า "มารับสินค้า" แทน "นำรถเข้ารับบริการ"
   const isPDO = (o?.deposit_doc_no || "").startsWith("PDO");
+  // ชื่อลูกค้าเป็นภาษาอังกฤษล้วน = ลูกค้าต่างชาติ (พม่า) → เสริมข้อความพม่าใต้ข้อความไทย
+  const nm = String(o?.customer_name || "");
+  const isForeign = /[A-Za-z]/.test(nm) && !/[ก-๙]/.test(nm);
+  const My = ({ text, color = "#0369a1", size = 12.5 }) => isForeign ? (
+    <div style={{ fontSize: size, color, marginTop: 3, lineHeight: 1.6 }}>{text}</div>
+  ) : null;
 
   return (
     <div style={S.page}>
@@ -88,6 +94,7 @@ export default function SpareAppointmentPage() {
         <div style={S.header}>
           <div style={{ fontSize: 17, fontWeight: 800 }}>{isPDO ? "📦 นัดหมายรับสินค้า" : "🔧 นัดหมายนำรถเข้ารับบริการ"}</div>
           <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>{isPDO ? "อะไหล่ที่คุณสั่งซื้อมาครบเรียบร้อยแล้ว" : "อะไหล่สำหรับรถของคุณมาถึงเรียบร้อยแล้ว"}</div>
+          {isForeign && <div style={{ fontSize: 12, opacity: 0.95, marginTop: 3 }}>{isPDO ? "ပစ္စည်းလာယူရန် ရက်ချိန်းယူပါ" : "ကားပြသရန် ရက်ချိန်းယူပါ"}</div>}
         </div>
 
         {phase === "loading" && <div style={S.center}>กำลังโหลดข้อมูล…</div>}
@@ -106,6 +113,7 @@ export default function SpareAppointmentPage() {
               <div style={{ fontSize: 34 }}>{isPDO ? "📦" : "🛠️"}</div>
               <div style={{ fontSize: 18, fontWeight: 800, color: isPDO ? "#0369a1" : "#b54708" }}>{isPDO ? "อะไหล่มาครบแล้ว!" : "อะไหล่มาถึงแล้ว!"}</div>
               <div style={{ fontSize: 13, color: "#475467", marginTop: 4 }}>{isPDO ? "กรุณาเลือกวันที่คุณสะดวกเข้ามารับสินค้า" : "กรุณาเลือกวันที่คุณสะดวกนำรถเข้ามารับบริการ"}</div>
+              <My text={isPDO ? "မှာထားသော အပိုပစ္စည်းများ အစုံရောက်ပြီးပါပြီ။ လာယူမည့် အဆင်ပြေသည့်နေ့ကို ရွေးချယ်ပါ" : "အပိုပစ္စည်း ရောက်ပြီးပါပြီ။ ကားယူလာမည့် အဆင်ပြေသည့်နေ့ကို ရွေးချယ်ပါ"} />
             </div>
 
             <div style={S.detail}>
@@ -117,13 +125,16 @@ export default function SpareAppointmentPage() {
             </div>
 
             <div style={{ marginTop: 16 }}>
-              <label style={S.label}>{isPDO ? "📅 วันที่สะดวกเข้ามารับสินค้า" : "📅 วันที่สะดวกนำรถเข้ารับบริการ"}</label>
+              <label style={S.label}>
+                {isPDO ? "📅 วันที่สะดวกเข้ามารับสินค้า" : "📅 วันที่สะดวกนำรถเข้ารับบริการ"}
+                <My text="အဆင်ပြေသည့်နေ့ကို ရွေးချယ်ပါ" size={12} />
+              </label>
               <input type="date" value={apptDate} min={tomorrowISO()}
                 onChange={(e) => setApptDate(e.target.value)} style={S.input} />
             </div>
 
             <button onClick={submit} disabled={phase === "saving"} style={{ ...S.btnPrimary, opacity: phase === "saving" ? 0.6 : 1 }}>
-              {phase === "saving" ? "กำลังบันทึก…" : "✅ ยืนยันวันนัดหมาย"}
+              {phase === "saving" ? "กำลังบันทึก…" : isForeign ? "✅ ยืนยันวันนัดหมาย · အတည်ပြုမည်" : "✅ ยืนยันวันนัดหมาย"}
             </button>
           </div>
         )}
@@ -135,6 +146,7 @@ export default function SpareAppointmentPage() {
               <div style={{ fontSize: 18, fontWeight: 800, color: "#067647" }}>ยืนยันวันนัดหมายเรียบร้อย</div>
               <div style={{ fontSize: 15, color: "#067647", marginTop: 6, fontWeight: 700 }}>📅 {thaiDate(savedDate)}</div>
               <div style={{ fontSize: 13, color: "#475467", marginTop: 6 }}>{isPDO ? "ทางร้านได้รับข้อมูลแล้ว แล้วพบกันที่ร้านนะครับ 🙏" : "ทางร้านได้รับข้อมูลแล้ว แล้วพบกันที่ศูนย์บริการนะครับ 🙏"}</div>
+              <My text="ရက်ချိန်း အတည်ပြုပြီးပါပြီ။ ကျေးဇူးတင်ပါသည် 🙏" color="#067647" />
             </div>
             <div style={{ textAlign: "center" }}>
               <button onClick={() => setPhase("ok")} style={S.btnGhost}>✏️ แก้ไขวันนัด</button>
