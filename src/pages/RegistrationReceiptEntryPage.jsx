@@ -96,6 +96,32 @@ const baht = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigi
 const todayISO = () => new Date().toISOString().slice(0, 10);
 const fmtBE = (v) => { if (!v) return "-"; const m = String(v).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${Number(m[1]) + 543}` : String(v); };
 
+// ช่องวันที่แบบ พ.ศ. — พิมพ์ วว/ดด/ปปปป เป็น พ.ศ. ตรง ๆ (รับ ค.ศ. ด้วย, ปี 2 หลัก = 25xx) เก็บค่าภายในเป็น ISO ค.ศ.
+// ใช้แทน <input type="date"> ในส่วนคำนวณภาษี — เบราว์เซอร์บังคับแสดง พ.ศ. ไม่ได้ (user ขอ 2026-08-19)
+function BEDateInput({ value, onChange, style, title, placeholder }) {
+  const toBE = (iso) => { const m = String(iso || "").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${Number(m[1]) + 543}` : ""; };
+  const [txt, setTxt] = useState(toBE(value));
+  useEffect(() => { setTxt(toBE(value)); }, [value]); // eslint-disable-line react-hooks/exhaustive-deps
+  const commit = () => {
+    const t = String(txt || "").trim();
+    if (!t) { onChange(""); return; }
+    const m = t.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/);
+    if (!m) { setTxt(toBE(value)); return; }
+    let yy = Number(m[3]);
+    if (m[3].length <= 2) yy += 2500;   // 69 → 2569
+    if (yy > 2400) yy -= 543;           // พ.ศ. → ค.ศ.
+    const iso = `${yy}-${String(m[2]).padStart(2, "0")}-${String(m[1]).padStart(2, "0")}`;
+    if (isNaN(new Date(iso).getTime())) { setTxt(toBE(value)); return; }
+    onChange(iso);
+    setTxt(toBE(iso));
+  };
+  return (
+    <input value={txt} onChange={e => setTxt(e.target.value)} onBlur={commit}
+      onKeyDown={e => { if (e.key === "Enter") e.currentTarget.blur(); }}
+      placeholder={placeholder || "วว/ดด/ปปปป (พ.ศ.)"} style={style} title={title} inputMode="numeric" />
+  );
+}
+
 // ===== งานต่อภาษี (เฉพาะมอเตอร์ไซค์) — เงินเพิ่ม 1%/เดือน + เกณฑ์ตรวจสภาพตามประกาศขนส่งฯ =====
 const MC_TAX_PER_YEAR = 100; // ภาษี จยย. ส่วนบุคคล (รย.12) ปีละ 100 บาท
 const MC_TRO_FEE = 60;       // ค่าตรวจสภาพ ตรอ. จยย.
@@ -219,9 +245,10 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const isTroLine = (l) => { const n = String(l.income_name || ""); return n.includes("ตรวจสภาพ") && !n.startsWith("ค่าบริการ"); };
 
   // งานต่อภาษี: เติมราคาอัตโนมัติ (ทับทุกครั้งที่เข้าขั้นสรุป/วันที่เปลี่ยน/เลือกชื่อรายได้)
-  // - "ค่าต่อภาษี": ราคา = ยอดที่กรมขนส่งเก็บ (ภาษี+เงินเพิ่ม), ค่าบริการ = 200 − ราคา → รวม 200 (ยอดขนส่งเกิน 200 → ค่าบริการ 0)
+  // - "ค่าต่อภาษี": ยอดเก็บลูกค้าเหมา 200 บาท/ปี (1 ปี = 200, 2 ปี = 400, ...) — ราคา = ยอดที่กรมขนส่งเก็บจริง
+  //   (ภาษี+เงินเพิ่ม), ค่าบริการ = คำนวณกลับ (200×ปี − ราคา; ขนส่งเก็บเกินเหมา → ค่าบริการ 0)
   // - "ตรวจสภาพ...": ราคา = ค่าตรวจ ตรอ. 60, ค่าบริการ = 190 → รวม 250
-  const MC_RENEW_FLAT = 200;
+  const MC_RENEW_FLAT = 200; // ต่อปี
   const MC_TRO_FLAT = 250;
   const taxLineKey = lines.map(l => (isTaxLine(l) ? "1" : isTroLine(l) ? "2" : "0")).join("");
   useEffect(() => {
@@ -229,7 +256,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     const r = calcMcTax(header.register_date, header.tax_paid_date, taxSubmitDate || nextThursday(header.receive_date || todayISO()));
     if (!r || r.suspended) return;
     const dltAmount = Math.round((r.taxTotal + r.surcharge) * 100) / 100;
-    const serviceFee = Math.max(0, Math.round((MC_RENEW_FLAT - dltAmount) * 100) / 100);
+    const flatTotal = MC_RENEW_FLAT * (r.lateYears || 1); // เหมา 200 บาท/ปี ตามจำนวนปีที่ต่อ/ค้าง
+    const serviceFee = Math.max(0, Math.round((flatTotal - dltAmount) * 100) / 100);
     setLines(prev => prev.map(l =>
       isTaxLine(l) ? { ...l, price_before_discount: dltAmount, service_fee: serviceFee }
       : isTroLine(l) ? { ...l, price_before_discount: MC_TRO_FEE, service_fee: Math.round((MC_TRO_FLAT - MC_TRO_FEE) * 100) / 100 }
@@ -954,17 +982,17 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                 <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 10 }}>🧾 คำนวณภาษี/เงินเพิ่ม (มอเตอร์ไซค์ · ภาษีปีละ {MC_TAX_PER_YEAR} บาท)</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
                   <Field label={`วันจดทะเบียน${regDateSource && header.register_date ? " ✓ ดึงอัตโนมัติ" : " (จากเล่ม)"}`}>
-                    <input type="date" value={header.register_date} onChange={e => { setRegDateSource(""); setHeader({ ...header, register_date: e.target.value }); }}
+                    <BEDateInput value={header.register_date} onChange={v => { setRegDateSource(""); setHeader(h => ({ ...h, register_date: v })); }}
                       style={{ ...inp, ...(regDateSource && header.register_date ? { borderColor: "#10b981", background: "#f0fdf4" } : {}) }}
-                      title={regDateSource || "กรอกจากเล่มทะเบียน ถ้าระบบหาไม่เจอ"} />
+                      title={regDateSource || "กรอกจากเล่มทะเบียน (พ.ศ.) ถ้าระบบหาไม่เจอ"} />
                     {header.register_date && <div style={{ fontSize: 11, color: "#92400e", marginTop: 2 }}>พ.ศ. {fmtBE(header.register_date)}</div>}
                   </Field>
-                  <Field label="วันสิ้นอายุภาษีเดิม *">
-                    <input type="date" value={header.tax_paid_date} onChange={e => setHeader({ ...header, tax_paid_date: e.target.value })} style={inp} />
+                  <Field label="วันสิ้นอายุภาษีเดิม * (พ.ศ.)">
+                    <BEDateInput value={header.tax_paid_date} onChange={v => setHeader(h => ({ ...h, tax_paid_date: v }))} style={inp} />
                     {header.tax_paid_date && <div style={{ fontSize: 11, color: "#92400e", marginTop: 2 }}>พ.ศ. {fmtBE(header.tax_paid_date)}</div>}
                   </Field>
-                  <Field label="วันที่คาดว่าจะยื่นขนส่ง (พฤหัสถัดไป)">
-                    <input type="date" value={submitDate} onChange={e => setTaxSubmitDate(e.target.value)} style={inp} />
+                  <Field label="วันที่คาดว่าจะยื่นขนส่ง (พฤหัสถัดไป · พ.ศ.)">
+                    <BEDateInput value={submitDate} onChange={v => setTaxSubmitDate(v)} style={inp} />
                     {submitDate && <div style={{ fontSize: 11, color: "#92400e", marginTop: 2 }}>พ.ศ. {fmtBE(submitDate)}</div>}
                   </Field>
                 </div>
