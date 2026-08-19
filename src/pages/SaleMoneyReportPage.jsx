@@ -9,21 +9,25 @@ const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/rec
 const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // รับชำระค่าอะไหล่และบริการ (ใบขาย/ใบ JOB)
 const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api"; // ขายรถมือสอง
 
+// คอลัมน์วิธีรับชำระ — เอา บัตร/QR กับ อื่นๆ ออก เพิ่ม E-คูปอง (user สั่ง 2026-08-19; เช็คแล้วไม่มีข้อมูลเก่าใช้ 2 วิธีนั้น)
 const METHOD_COLS = [
   { key: "cash", label: "เงินสด" },
   { key: "transfer", label: "เงินโอน" },
-  { key: "card", label: "บัตร/QR" },
   { key: "finance", label: "ไฟแนนซ์" },
   { key: "deposit", label: "เงินมัดจำ" },
-  { key: "other", label: "อื่นๆ" },
+  { key: "coupon", label: "E-คูปอง" },
+  { key: "tradein", label: "รถเทิร์น" },
 ];
 function methodKey(name) {
   const n = String(name || "");
   if (n.includes("มัดจำ")) return "deposit";
+  if (n.includes("คูปอง")) return "coupon";
+  if (n.includes("เทิร์น") || n.includes("เทิน")) return "tradein";
   if (n.includes("สด")) return "cash";
-  if (n.includes("โอน")) return "transfer";
-  if (n.includes("บัตร") || n.toUpperCase().includes("QR")) return "card";
+  // บัตร/QR (เลิกใช้แล้ว) = เงินเข้าบัญชี → รวมกับเงินโอน กันยอดเก่าหล่นหาย
+  if (n.includes("โอน") || n.includes("บัตร") || n.toUpperCase().includes("QR")) return "transfer";
   if (n.includes("ไฟแนน")) return "finance";
+  // วิธีอื่น (เช่น รถเทิร์น/อื่นๆ เดิม) — ไม่มีคอลัมน์แยก รวมเข้าเงินสดไม่ได้ จึงลงคอลัมน์เงินมัดจำไม่ได้เช่นกัน → คืนค่า key ที่ไม่มีคอลัมน์ (ยอดรวมยังถูกเพราะใช้ paid_amount)
   return "other";
 }
 const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
@@ -113,7 +117,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         let pms = r.payment_methods;
         if (typeof pms === "string") { try { pms = JSON.parse(pms); } catch { pms = []; } }
         if (!Array.isArray(pms)) pms = [];
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
         for (const p of pms) split[methodKey(p.method)] += num(p.amount);
         const paid = num(r.paid_amount) || METHOD_COLS.reduce((s, c) => s + split[c.key], 0);
         // เงินจอง (booking_deposit) ที่หักในใบขาย — ไม่ได้อยู่ใน payment_methods ต้องบวกเข้าคอลัมน์เงินมัดจำเอง
@@ -200,7 +204,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
     const deps = depItems.map((d) => {
       const amt = num(d.deposit_amount);
       const m = String(d.payment_method || "");
-      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
       if (m.includes("สด")) split.cash = amt;
       else if (m.includes("โอน")) split.transfer = amt;
       else split.other = amt;
@@ -219,7 +223,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
       .filter((r2) => (isAdmin ? (!branch || bc5(r2.branch_code) === bc5(branch)) : bc5(r2.branch_code) === myBranch))
       .map((r2) => {
         const amt = num(r2.paid_amount) || num(r2.line_total);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
         // รับได้หลายวิธีในใบเดียว — payment_breakdowns = JSON [{method, amount, account}]
         let bks = [];
         try { bks = JSON.parse(r2.payment_breakdowns || "[]"); } catch { bks = []; }
@@ -246,7 +250,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
       .filter((p) => (isAdmin ? (!branch || bc5(p.branch_code) === bc5(branch)) : bc5(p.branch_code) === myBranch))
       .map((p) => {
         const amt = num(p.paid_amount);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
         let bks = [];
         try { bks = JSON.parse(p.payment_breakdowns || "[]"); } catch { bks = []; }
         if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(p.payment_method || ""), amount: amt }];
@@ -273,7 +277,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
       .filter((u) => (isAdmin ? (!branch || bc5(u.branch_code) === bc5(branch)) : bc5(u.branch_code) === myBranch))
       .map((u) => {
         const amt = num(u.sold_price);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
         let bks = [];
         try { bks = JSON.parse(u.payment_breakdowns || "[]"); } catch { bks = []; }
         if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(u.payment_method || ""), amount: amt }];
@@ -298,7 +302,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
     const partDeps = partDepItems.map((d) => {
       const amt = num(d.deposit_amount);
       const m = String(d.payment_method || "");
-      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, other: 0 };
+      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
       if (m.includes("สด")) split.cash = amt;
       else if (m.includes("โอน")) split.transfer = amt;
       else split.other = amt;

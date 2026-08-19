@@ -281,6 +281,28 @@ export default function PartServicePaymentPage({ currentUser }) {
     }
   }
 
+  // แก้ไขได้เฉพาะ "เลขที่เอกสารอ้างอิง" ที่พิมพ์เอง (พิมพ์ผิด) — ยอด/วิธีชำระ/มัดจำ ห้ามแก้ (ต้องยกเลิกแล้วบันทึกใหม่)
+  async function editDocNo(p) {
+    const newDoc = window.prompt(`แก้ไขเลขที่เอกสารอ้างอิงของใบเสร็จ ${p.receipt_no || p.payment_id}\n(แก้ได้เฉพาะเลขที่เอกสาร — ยอดเงินแก้ไม่ได้)`, p.doc_no || "");
+    if (newDoc == null) return;
+    const doc = String(newDoc).trim();
+    if (!doc) { setMessage("❌ เลขที่เอกสารห้ามว่าง"); return; }
+    if (doc === String(p.doc_no || "").trim()) return;
+    try {
+      const res = await fetch(API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_doc_no", payment_id: p.payment_id, doc_no: doc }),
+      });
+      const d = await res.json();
+      const row = Array.isArray(d) ? d[0] : d;
+      if (!row?.payment_id) throw new Error(row?.error || "workflow ยังไม่รองรับ — re-import Part_Service_Payment_Workflow.json ก่อน");
+      setMessage(`✅ แก้เลขที่เอกสารเป็น ${doc} แล้ว (ใบเสร็จ ${row.receipt_no || "-"})`);
+      loadPayments();
+    } catch (e) {
+      setMessage("❌ " + String(e.message || e).slice(0, 160));
+    }
+  }
+
   const activeSum = useMemo(() => payments.filter(p => p.status === "active").reduce((s, p) => s + num(p.paid_amount), 0), [payments]);
 
   return (
@@ -459,8 +481,12 @@ export default function PartServicePaymentPage({ currentUser }) {
                     {p.status === "cancelled" ? (
                       <span style={{ fontSize: 12, color: "#dc2626", fontWeight: 600 }}>ยกเลิกแล้ว</span>
                     ) : (
-                      <button onClick={() => cancelPayment(p)}
-                        style={{ border: "1px solid #fca5a5", background: "#fff", color: "#dc2626", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>ยกเลิก</button>
+                      <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        <button onClick={() => editDocNo(p)} title="แก้ไขเฉพาะเลขที่เอกสารอ้างอิง"
+                          style={{ border: "1px solid #93c5fd", background: "#fff", color: "#1d4ed8", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>แก้ไข</button>
+                        <button onClick={() => cancelPayment(p)}
+                          style={{ border: "1px solid #fca5a5", background: "#fff", color: "#dc2626", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>ยกเลิก</button>
+                      </div>
                     )}
                   </td>
                 </tr>
