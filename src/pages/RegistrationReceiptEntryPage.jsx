@@ -473,9 +473,10 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       const opt = regCodes.find(c => { const n = String(c.name || ""); return n.includes("ต่อภาษี") && !n.includes("ตรวจ"); });
       if (opt) adds.push({ ...blankLine(), income_type: TYPE_REGISTER, income_code: opt.code || "", income_name: opt.name });
     }
-    // รถต้องตรวจสภาพ → เพิ่มบรรทัดตรวจสภาพให้ด้วย
+    // รถต้องตรวจสภาพ → เพิ่มบรรทัดตรวจสภาพให้ด้วย: เข้าเกณฑ์อายุ (ตรอ.) หรือขาดต่อเกิน 1 ปี (ตรวจที่ขนส่ง)
+    // ยกเว้นขาดเกิน 3 ปี (ทะเบียนระงับ) — ต้องเปลี่ยนประเภทงานอยู่แล้ว ไม่เพิ่มให้
     const r = header.tax_paid_date ? calcMcTax(header.register_date, header.tax_paid_date, taxSubmitDate || nextThursday(header.receive_date || todayISO())) : null;
-    if (r?.needTro && !lines.some(isTroLine)) {
+    if ((r?.needTro || (r?.overYear && !r?.suspended)) && !lines.some(isTroLine)) {
       const opt = regCodes.find(c => String(c.name || "").includes("ตรวจสภาพ"));
       if (opt) adds.push({ ...blankLine(), income_type: TYPE_REGISTER, income_code: opt.code || "", income_name: opt.name });
     }
