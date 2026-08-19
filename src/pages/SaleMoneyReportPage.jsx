@@ -228,14 +228,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         let bks = [];
         try { bks = JSON.parse(r2.payment_breakdowns || "[]"); } catch { bks = []; }
         if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(r2.payment_method || ""), amount: amt }];
-        for (const b of bks) {
-          const m = String(b.method || "");
-          const a = num(b.amount);
-          if (m.includes("สด")) split.cash += a;
-          else if (m.includes("โอน")) split.transfer += a;
-          else if (m.toUpperCase().includes("QR") || m.includes("บัตร")) split.card += a;
-          else split.other += a;
-        }
+        for (const b of bks) split[methodKey(b.method)] += num(b.amount); // ใช้ตัวแยกกลาง — วิธีใหม่ ๆ ไม่ตกหล่น
         return {
           kind: "receipt", category: `รายได้รับเรื่อง (${r2.receipt_type || "งานทะเบียน"})`,
           doc_no: r2.receipt_no, date: r2.paid_date || r2.paid_at, ref_no: "",
@@ -254,15 +247,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         let bks = [];
         try { bks = JSON.parse(p.payment_breakdowns || "[]"); } catch { bks = []; }
         if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(p.payment_method || ""), amount: amt }];
-        for (const b of bks) {
-          const m = String(b.method || "");
-          const a = num(b.amount);
-          if (m.includes("มัดจำ")) split.deposit += a;
-          else if (m.includes("สด")) split.cash += a;
-          else if (m.includes("โอน")) split.transfer += a;
-          else if (m.toUpperCase().includes("QR") || m.includes("บัตร")) split.card += a;
-          else split.other += a;
-        }
+        for (const b of bks) split[methodKey(b.method)] += num(b.amount); // ใช้ตัวแยกกลาง — รองรับ E-คูปอง/รถเทิร์น ครบ
         return {
           kind: "part_service", category: "รายได้ค่าอะไหล่/บริการ",
           doc_no: p.receipt_no || p.doc_no, date: p.paid_date, ref_no: p.doc_no,
@@ -281,15 +266,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         let bks = [];
         try { bks = JSON.parse(u.payment_breakdowns || "[]"); } catch { bks = []; }
         if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(u.payment_method || ""), amount: amt }];
-        for (const b of bks) {
-          const m = String(b.method || "");
-          const a = num(b.amount);
-          if (m.includes("มัดจำ")) split.deposit += a;
-          else if (m.includes("สด")) split.cash += a;
-          else if (m.includes("โอน")) split.transfer += a;
-          else if (m.toUpperCase().includes("QR") || m.includes("บัตร")) split.card += a;
-          else split.other += a;
-        }
+        for (const b of bks) split[methodKey(b.method)] += num(b.amount); // ใช้ตัวแยกกลาง — รองรับ E-คูปอง/รถเทิร์น ครบ
         return {
           kind: "used_moto", category: "รายได้ขายรถมือสอง",
           doc_no: u.doc_no, date: u.sold_date, ref_no: u.sold_invoice_no || "",
