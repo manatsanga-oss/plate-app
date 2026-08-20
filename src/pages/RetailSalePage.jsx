@@ -1939,7 +1939,17 @@ ${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หม�
                           </button>
                         );
                       })()}
-                      <button style={btn("#e03b3b")} disabled={payingSave} onClick={cancelPayment}>{payingSave ? "…" : "✖ ยกเลิกรับชำระ"}</button>
+                      {(() => {
+                        // ยกเลิกรับชำระข้ามวัน = admin เท่านั้น (วันเดียวกับวันที่รับชำระ user แก้ได้)
+                        const sameDay = String(sale.receipt_date || "").slice(0, 10) === new Date().toISOString().slice(0, 10);
+                        const locked = !isAdmin && !sameDay;
+                        return (
+                          <button style={{ ...btn(locked ? "#94a3b8" : "#e03b3b"), cursor: locked ? "not-allowed" : "pointer" }} disabled={payingSave || locked} onClick={cancelPayment}
+                            title={locked ? "รับชำระข้ามวันแล้ว — ยกเลิก/แก้ไขได้เฉพาะ admin" : ""}>
+                            {payingSave ? "…" : locked ? "✖ ยกเลิกรับชำระ (admin)" : "✖ ยกเลิกรับชำระ"}
+                          </button>
+                        );
+                      })()}
                     </div>
                   </div>
                 ) : (

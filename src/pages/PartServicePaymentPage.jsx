@@ -47,6 +47,9 @@ function Field({ label, children }) {
 
 export default function PartServicePaymentPage({ currentUser }) {
   const myBranch = String(currentUser?.branch_code || currentUser?.branch || "").substring(0, 5).toUpperCase();
+  const isAdmin = currentUser?.role === "admin";
+  // แก้ไข/ยกเลิกรับชำระข้ามวัน = admin เท่านั้น (วันเดียวกับวันที่รับเงิน user ทำได้)
+  const isSameDay = (d) => String(d || "").slice(0, 10) === new Date().toISOString().slice(0, 10);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -480,13 +483,15 @@ export default function PartServicePaymentPage({ currentUser }) {
                   <td style={td}>
                     {p.status === "cancelled" ? (
                       <span style={{ fontSize: 12, color: "#dc2626", fontWeight: 600 }}>ยกเลิกแล้ว</span>
-                    ) : (
+                    ) : (isAdmin || isSameDay(p.paid_date)) ? (
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                         <button onClick={() => editDocNo(p)} title="แก้ไขเฉพาะเลขที่เอกสารอ้างอิง"
                           style={{ border: "1px solid #93c5fd", background: "#fff", color: "#1d4ed8", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>แก้ไข</button>
                         <button onClick={() => cancelPayment(p)}
                           style={{ border: "1px solid #fca5a5", background: "#fff", color: "#dc2626", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>ยกเลิก</button>
                       </div>
+                    ) : (
+                      <span style={{ fontSize: 11, color: "#9ca3af" }} title="รับชำระข้ามวันแล้ว — แก้ไข/ยกเลิกได้เฉพาะ admin">🔒 admin</span>
                     )}
                   </td>
                 </tr>

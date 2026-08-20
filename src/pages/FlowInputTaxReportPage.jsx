@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 // รูปแบบตารางตามรายงานภาษีซื้อของ FlowAccount + หัวรายงาน (ชื่อผู้ประกอบการ/รอบยื่น) + ยอดรวม + พิมพ์ได้
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/flow-input-tax-api";
 const INPUT_TAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api";
+const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api"; // ดูรายละเอียดใบค่าใช้จ่าย (expense_record)
 const AFFILIATIONS = ["ป.เปา", "สิงห์ชัย"];
 const SRC_LABEL = { vehicle: "รถ", part: "อะไหล่", expense: "ค่าใช้จ่าย", fuel: "ค่าน้ำมัน", theft: "ประกันรถหาย", lockton: "ประกัน LOCKTON", theft_invoice: "ประกันรถหาย (ใบกำกับ)", cosmos: "ประกัน COSMOS", material: "รับวัสดุ" };
 const COSMOS_PLAN_LABEL = { rsa: "RSA", theft: "THEFT", theft_renewal: "THEFT ปีต่อ", "3plus": "3PLUS" };
@@ -83,6 +84,28 @@ export default function FlowInputTaxReportPage({ currentUser }) {
   const [manual, setManual] = useState([]);   // คู่ที่จับเอง (flow_input_tax_manual_matches)
   const [manualOther, setManualOther] = useState([]); // คู่ที่จับไว้ในรอบก่อน/ถัดไป — ไว้กันเสนอเอกสารซ้ำ
   const [pairing, setPairing] = useState(null); // แถว FLOW ที่กำลังเลือกคู่ (เปิด popup)
+  const [docView, setDocView] = useState(null); // popup รายละเอียดเอกสารแอป — {a, loading, exp}
+
+  // กดเลขที่เอกสารในตาราง "มีในแอปแต่ไม่มีใน FLOW" → เปิดดูรายละเอียด (ใบค่าใช้จ่ายดึงเต็มพร้อมรายการ)
+  async function openDocDetail(a) {
+    setDocView({ a, loading: a.source === "expense", exp: null });
+    if (a.source !== "expense") return;
+    try {
+      const ym = String(a.doc_date || "").slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(ym)) { setDocView(v => (v && v.a === a ? { ...v, loading: false } : v)); return; }
+      const lastDay = new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0).getDate();
+      const res = await fetch(ACC_URL, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "expense_record", op: "list", date_from: `${ym}-01`, date_to: `${ym}-${String(lastDay).padStart(2, "0")}` }),
+      });
+      const rows = await res.json();
+      const exp = (Array.isArray(rows) ? rows : []).find(r => String(r.expense_doc_no || "") === String(a.doc_no || "")) || null;
+      if (exp && typeof exp.items === "string") { try { exp.items = JSON.parse(exp.items); } catch { exp.items = []; } }
+      setDocView(v => (v && v.a === a ? { ...v, loading: false, exp } : v));
+    } catch {
+      setDocView(v => (v && v.a === a ? { ...v, loading: false, exp: null } : v));
+    }
+  }
   const [pairSaving, setPairSaving] = useState(false);
   const [search, setSearch] = useState("");
   const [onlyUnmatched, setOnlyUnmatched] = useState(false); // แสดงเฉพาะแถวที่จับคู่ไม่ได้
@@ -651,7 +674,14 @@ export default function FlowInputTaxReportPage({ currentUser }) {
                   <tr key={a.doc_no ? a.source + a.doc_no : i} style={{ borderTop: "1px solid #fee2e2" }}>
                     <td style={td}>{SRC_LABEL[a.source] || a.source}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(a.doc_date)}</td>
-                    <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#1d4ed8" }}>{a.doc_no || "-"}</td>
+                    <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>
+                      {a.doc_no ? (
+                        <span onClick={() => openDocDetail(a)} title="กดเพื่อดูรายละเอียดเอกสาร"
+                          style={{ color: "#1d4ed8", cursor: "pointer", textDecoration: "underline" }}>
+                          {a.doc_no}
+                        </span>
+                      ) : "-"}
+                    </td>
                     <td style={td}>{a.vendor_name || "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(a.amount_before_vat)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(a.vat_amount)}</td>
@@ -662,6 +692,76 @@ export default function FlowInputTaxReportPage({ currentUser }) {
           </div>
         </div>
       )}
+
+      {/* popup รายละเอียดเอกสารแอป (กดจากเลขที่เอกสารในตารางไม่พบใน FLOW) */}
+      {docView && (() => {
+        const { a, loading: dvLoading, exp } = docView;
+        const money = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return (
+          <div onClick={() => setDocView(null)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={e => e.stopPropagation()}
+              style={{ background: "#fff", borderRadius: 12, padding: 20, width: "100%", maxWidth: 640, maxHeight: "88vh", overflowY: "auto", fontFamily: "Tahoma" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, fontSize: 16 }}>📄 {SRC_LABEL[a.source] || a.source} — <span style={{ fontFamily: "monospace" }}>{a.doc_no}</span></div>
+                <button onClick={() => setDocView(null)} style={{ border: "none", background: "#f3f4f6", borderRadius: 8, padding: "6px 12px", cursor: "pointer" }}>ปิด</button>
+              </div>
+              <div style={{ fontSize: 13.5, lineHeight: 2 }}>
+                <div>วันที่: <b>{fmtDate(a.doc_date)}</b> · ผู้จำหน่าย: <b>{a.vendor_name || exp?.vendor_name || "-"}</b></div>
+                <div>มูลค่า: <b>{money(a.amount_before_vat)}</b> · ภาษีมูลค่าเพิ่ม: <b>{money(a.vat_amount)}</b> บาท</div>
+              </div>
+              {a.source === "expense" ? (
+                dvLoading ? (
+                  <div style={{ padding: 20, textAlign: "center", color: "#6b7280" }}>กำลังโหลดรายละเอียดใบค่าใช้จ่าย…</div>
+                ) : !exp ? (
+                  <div style={{ padding: 14, background: "#fef2f2", borderRadius: 8, color: "#b91c1c", fontSize: 13 }}>ไม่พบใบ {a.doc_no} ในระบบบันทึกค่าใช้จ่าย (อาจถูกยกเลิก/ย้ายเดือน)</div>
+                ) : (
+                  <div style={{ marginTop: 8 }}>
+                    <div style={{ fontSize: 13.5, lineHeight: 2, background: "#f8fafc", borderRadius: 8, padding: "8px 12px" }}>
+                      <div>สังกัด: <b>{exp.affiliation || "-"}</b>{exp.usage_branch ? <> · สาขาที่ใช้: <b>{exp.usage_branch}</b></> : null} · สถานะ: <b style={{ color: exp.status === "cancelled" ? "#b91c1c" : exp.status === "paid" ? "#047857" : "#b45309" }}>{exp.status === "paid" ? "จ่ายแล้ว" : exp.status === "cancelled" ? "ยกเลิก" : exp.status || "-"}</b></div>
+                      {exp.reference_no ? <div>เลขที่อ้างอิง: <b style={{ fontFamily: "monospace" }}>{exp.reference_no}</b></div> : null}
+                      {exp.description ? <div>รายละเอียด: {exp.description}</div> : null}
+                      {exp.paid_doc_no ? <div>การจ่าย: <b style={{ fontFamily: "monospace" }}>{exp.paid_doc_no}</b> · {fmtDate(exp.paid_at)} · {exp.payment_method || "-"}</div> : null}
+                    </div>
+                    {Array.isArray(exp.items) && exp.items.length > 0 && (
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 10 }}>
+                        <thead style={{ background: "#eef2ff", color: "#3730a3" }}>
+                          <tr>
+                            <th style={{ padding: "6px 8px", textAlign: "left" }}>รายการ</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>จำนวน</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>ราคา/หน่วย</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>รวม</th>
+                            <th style={{ padding: "6px 8px", textAlign: "right" }}>WHT %</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {exp.items.map((it, i) => (
+                            <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
+                              <td style={{ padding: "6px 8px" }}>{it.expense_name || it.name || "-"}{it.description ? <span style={{ color: "#6b7280" }}> · {it.description}</span> : null}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right" }}>{Number(it.qty || 1)}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: "monospace" }}>{money(it.unit_price ?? it.amount)}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right", fontFamily: "monospace" }}>{money(it.amount != null && it.unit_price == null ? it.amount : Number(it.qty || 1) * Number(it.unit_price || 0))}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right" }}>{Number(it.wht_pct || 0) || "-"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    <div style={{ marginTop: 10, fontSize: 13.5, textAlign: "right", lineHeight: 1.9 }}>
+                      <div>มูลค่าก่อน VAT: <b>{money(exp.subtotal)}</b> · VAT: <b>{money(exp.vat_amount)}</b> · รวม: <b>{money(exp.total)}</b></div>
+                      {Number(exp.wht_amount) > 0 && <div>หัก ณ ที่จ่าย: <b style={{ color: "#b91c1c" }}>−{money(exp.wht_amount)}</b> · ยอดจ่ายสุทธิ: <b style={{ color: "#047857" }}>{money(exp.net_to_pay)}</b></div>}
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div style={{ marginTop: 10, padding: 12, background: "#f8fafc", borderRadius: 8, fontSize: 12.5, color: "#475467" }}>
+                  ℹ️ เอกสารประเภท "{SRC_LABEL[a.source] || a.source}" — ดูรายละเอียดเต็มได้ที่เมนูของเอกสารประเภทนั้น (เลขที่ {a.doc_no})
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* popup จับคู่เอง — เรียงตามความคล้าย (ชื่อ/ยอด) */}
       {pairing && (

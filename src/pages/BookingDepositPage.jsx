@@ -94,6 +94,8 @@ export default function BookingDepositPage({ currentUser }) {
 
   const branchCode = currentUser?.branch_code || currentUser?.branch || "";
   const isAdmin = currentUser?.role === "admin";
+  // แก้ไขได้เฉพาะใบของ "วันนี้" สำหรับ user ทั่วไป — ข้ามวันต้อง admin (user กำหนด 2026-08-20)
+  const isSameDay = (d) => String(d || "").slice(0, 10) === todayISO();
 
   useEffect(() => {
     let alive = true;
@@ -648,11 +650,11 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                       {r.status !== "refunded" && (
                         <>
                           <button onClick={() => createBookingFor(r)} style={btnSmGreen} title="สร้างใบจองในระบบจองรถ">📋 สร้างใบจอง</button>
+                          {(isAdmin || isSameDay(r.deposit_date)) && (
+                            <button onClick={() => editRow(r)} style={btnSmYellow} title={isAdmin ? "แก้ไข" : "แก้ไขได้เฉพาะใบของวันนี้ — ข้ามวันต้องให้ admin แก้"}>✏️ แก้ไข</button>
+                          )}
                           {isAdmin && (
-                            <>
-                              <button onClick={() => editRow(r)} style={btnSmYellow}>✏️ แก้ไข</button>
-                              <button onClick={() => setRefundTarget(r)} style={btnSmRed}>↩️ คืนเงิน</button>
-                            </>
+                            <button onClick={() => setRefundTarget(r)} style={btnSmRed}>↩️ คืนเงิน</button>
                           )}
                         </>
                       )}
