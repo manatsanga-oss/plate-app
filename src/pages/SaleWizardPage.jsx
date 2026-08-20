@@ -881,6 +881,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   const promoTheft = applicableGiveaways
     .filter((g) => selectedGiveaways[g.expense_id] && isTheftName(g.expense_name))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
+  // ติ๊ก "ค่าประกันรถหาย" ออกจากของแถม = ลูกค้าจ่ายเบี้ยเอง → บวกเข้ายอดเก็บลูกค้า (user กำหนด 2026-08-20)
+  const unpromoTheft = applicableGiveaways
+    .filter((g) => !selectedGiveaways[g.expense_id] && isTheftName(g.expense_name))
+    .reduce((s, g) => s + Number(g.amount || 0), 0);
+  // เบี้ยส่วนที่ลูกค้าจ่ายเอง: ช่องกรอกชนะเสมอ ไม่กรอกใช้ยอดโปรที่ติ๊กออก
+  const custPaidTheft = num(finTheft) > 0 ? num(finTheft) : unpromoTheft;
 
   // บันทึกการขาย (เงินสด/ผ่อนไฟแนนท์) — payload เดียวกับหน้าบันทึกขายปลีก (retail-sale-api save_sale)
   async function handleSaveSale() {
@@ -897,7 +903,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     // 🧪 โหมดทดสอบ: ไม่บันทึกลง DB — แต่ "ส่งใบขายเข้า LINE ลูกค้าจริง" ทันทีหลังบันทึก
     if (TEST_MODE) {
       const dep = depositAmt;
-      const totalPayment = (isFin ? fc.down + fc.advance + fc.theft : netCar) - dep; // ติดลบ = ต้องคืนเงินมัดจำ
+      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft : netCar) - dep; // ติดลบ = ต้องคืนเงินมัดจำ
       const testSale = {
         __test: true,
         sale_no: "TEST-" + todayStr().replace(/-/g, "") + "-" + String(Date.now()).slice(-4),
@@ -918,7 +924,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         installment_amount: isFin ? fc.inst : 0,
         interest_rate: isFin ? num(finRate) : 0,
         finance_amount: isFin ? fc.financeAmount : 0,
-        theft_insurance_amount: isFin ? (fc.theft || promoTheft) : 0,
+        theft_insurance_amount: isFin ? (custPaidTheft || promoTheft) : 0,
         finance_type: isFin ? "moto" : "none",
         finance_company_name: isFin ? (financeCo?.company_name || "") : "",
         branch_name: currentUser?.branch || "",
@@ -942,7 +948,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if ((vehicle.sale && vehicle.sale.sale_no) || vehicle.sold_at) throw new Error("รถคันนี้ถูกขายไปแล้ว");
 
       const dep = depositAmt;
-      const totalPayment = (isFin ? fc.down + fc.advance + fc.theft : netCar) - dep; // ติดลบ = ต้องคืนเงินมัดจำ
+      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft : netCar) - dep; // ติดลบ = ต้องคืนเงินมัดจำ
       const payload = {
         action: "save_sale",
         brand: vehicle.brand, stock_table: vehicle.stock_table, stock_id: vehicle.stock_id,
@@ -967,8 +973,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         // เงินดาวน์/ค่างวดออกแทน (ยอดฐานก่อนคูณ 1.07) — ไว้โชว์เป็นของแถมหักตอนรับชำระ
         down_payout_amount: adjOpen && useDownPayout ? Number(downPayout || 0) : 0,
         // ประกันรถหาย: ลูกค้าจ่ายเอง (กรอกช่อง) ชนะ; ไม่กรอก = ใช้ยอดโปรโมชั่นออกแทนอัตโนมัติ (ไม่บวกเข้า total_payment)
-        theft_insurance_amount: isFin ? (fc.theft || promoTheft) : 0,
-        theft_insurance_source: isFin ? (fc.theft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : null,
+        theft_insurance_amount: isFin ? (custPaidTheft || promoTheft) : 0,
+        theft_insurance_source: isFin ? (custPaidTheft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : null,
         finance_company_code: isFin ? String(financeCo?.company_id || "") : "",
         finance_company_name: isFin ? (financeCo?.company_name || "") : "",
         interest_rate: isFin ? num(finRate) : 0,
@@ -2043,7 +2049,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                   const fc = financeCalc(netCar || 0);
                   const dep = depositAmt;
                   // ติดลบ = มัดจำมากกว่ายอดที่ต้องจ่าย → ต้องคืนเงินมัดจำลูกค้า
-                  const receive = carPrice == null ? null : (isFin ? fc.down + fc.advance + fc.theft : netCar) - dep;
+                  const receive = carPrice == null ? null : (isFin ? fc.down + fc.advance + custPaidTheft : netCar) - dep;
                   const isRefund = receive != null && receive < 0;
                   const row = (label, val, opts = {}) => (
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: opts.big ? 18 : 14, fontWeight: opts.big ? 700 : 400, color: opts.color || "#111827", borderTop: opts.line ? "1px dashed #d1d5db" : "none" }}>
@@ -2102,7 +2108,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         {downSubTotal > 0 && row("ส่วนลด (เงินดาวน์ออกแทน)", "-" + fmtBaht(downSubTotal), { color: "#b45309" })}
                         {isFin && row("เงินดาวน์", fmtBaht(fc.down))}
                         {isFin && fc.advance > 0 && row("ค่างวดจ่ายล่วงหน้า", fmtBaht(fc.advance))}
-                        {isFin && fc.theft > 0 && row("ประกันรถหาย (ไฟแนนซ์หัก)", fmtBaht(fc.theft))}
+                        {isFin && custPaidTheft > 0 && row(num(finTheft) > 0 ? "ประกันรถหาย (ไฟแนนซ์หัก)" : "ประกันรถหาย (ลูกค้าจ่ายเอง — เอาติ๊กของแถมออก)", fmtBaht(custPaidTheft))}
                         {row("หัก เงินมัดจำ" + (selBooking?.deposit_no ? ` (${selBooking.deposit_no})` : ""), dep > 0 ? "-" + fmtBaht(dep) : "-", { color: "#b45309" })}
                         {isRefund
                           ? row("คืนเงินมัดจำลูกค้า", fmtBaht(Math.abs(receive)), { big: true, line: true, color: "#b45309" })
