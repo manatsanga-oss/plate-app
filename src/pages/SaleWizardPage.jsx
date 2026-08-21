@@ -596,6 +596,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     setFinDown(""); setFinTheft(""); setFinRate(""); setFinN("");
     setFinRound5(false); setFinInstOverride(""); setFinInstTouched(false); setFinAdvance("");
     setAdvSubsidyInput(""); // แบ่งโปรดาวน์ออกแทนไปช่วยค่างวดล่วงหน้า — เคลียร์พร้อมกัน
+    setRedPlateNo(""); // มัดจำป้ายแดง — เคลียร์พร้อมกัน
   }
 
   // คำนวณยอดฝั่งไฟแนนท์จากราคาขาย (carPrice)
@@ -878,6 +879,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // แบ่งโปรเงินดาวน์ออกแทน (user กำหนด 2026-08-20): ส่วนหนึ่งช่วยลดค่างวดจ่ายล่วงหน้าได้ (เฉพาะผ่อนไฟแนนท์)
   // ส่วนที่เหลือ = ส่วนลดราคา (ดาวน์ออกแทน) เหมือนเดิม — ยอดจัดไฟแนนซ์จะตรงตามใบอนุมัติ
   const [advSubsidyInput, setAdvSubsidyInput] = useState("");
+  // มัดจำป้ายแดง (user กำหนด 2026-08-21): กรอกทะเบียนป้ายแดง → มัดจำ 200 บาท อัตโนมัติ, ไม่กรอก = 0 — บวกเข้ายอดรับชำระ
+  const RED_PLATE_DEPOSIT = 200;
+  const [redPlateNo, setRedPlateNo] = useState("");
+  const redPlateDep = text(redPlateNo) ? RED_PLATE_DEPOSIT : 0;
   const advSub = saleType === "finance" ? Math.min(Math.max(num(advSubsidyInput), 0), downSubTotal) : 0;
   const downSubDiscount = downSubTotal - advSub;
 
@@ -909,7 +914,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     // 🧪 โหมดทดสอบ: ไม่บันทึกลง DB — แต่ "ส่งใบขายเข้า LINE ลูกค้าจริง" ทันทีหลังบันทึก
     if (TEST_MODE) {
       const dep = depositAmt;
-      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep; // ติดลบ = ต้องคืนเงินมัดจำ
+      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep + redPlateDep; // ติดลบ = ต้องคืนเงินมัดจำ
       const testSale = {
         __test: true,
         sale_no: "TEST-" + todayStr().replace(/-/g, "") + "-" + String(Date.now()).slice(-4),
@@ -925,6 +930,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         down_payment: isFin ? fc.down : 0,
         booking_deposit: dep, deposit_no: selBooking?.deposit_no || "", booking_date: selBooking?.booking_date || "",
         total_payment: totalPayment,
+        red_plate_no: text(redPlateNo), red_plate_deposit: redPlateDep,
         advance_installment: isFin ? fc.advance : 0,
         installments: isFin ? fc.n : 0,
         installment_amount: isFin ? fc.inst : 0,
@@ -954,7 +960,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if ((vehicle.sale && vehicle.sale.sale_no) || vehicle.sold_at) throw new Error("รถคันนี้ถูกขายไปแล้ว");
 
       const dep = depositAmt;
-      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep; // ติดลบ = ต้องคืนเงินมัดจำ
+      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep + redPlateDep; // ติดลบ = ต้องคืนเงินมัดจำ
       const payload = {
         action: "save_sale",
         brand: vehicle.brand, stock_table: vehicle.stock_table, stock_id: vehicle.stock_id,
@@ -975,6 +981,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         down_payment: isFin ? fc.down : 0,
         booking_deposit: dep, deposit_no: selBooking?.deposit_no || "",
         total_payment: totalPayment,
+        red_plate_no: text(redPlateNo), red_plate_deposit: redPlateDep,
         advance_installment: isFin ? fc.advance : 0,
         // เงินดาวน์/ค่างวดออกแทน (ยอดฐานก่อนคูณ 1.07) — ไว้โชว์เป็นของแถมหักตอนรับชำระ
         down_payout_amount: (adjOpen && useDownPayout ? Number(downPayout || 0) : 0) + advSub,
@@ -1920,6 +1927,27 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 </div>
                 )}
 
+                {/* การ์ดมัดจำป้ายแดง — ก่อนข้อมูลลูกค้า: กรอกทะเบียนป้ายแดง → มัดจำ 200 อัตโนมัติ (ไม่กรอก = 0) บวกเข้ายอดรับชำระ */}
+                {saleType && (bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (
+                  <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
+                    <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>🔴 มัดจำป้ายแดง</div>
+                    <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap" }}>ทะเบียนป้ายแดง</span>
+                        <input value={redPlateNo} disabled={!!savedSale} onChange={e => setRedPlateNo(e.target.value)} placeholder="เช่น ก-1234"
+                          style={{ width: 150, padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap" }}>จำนวนเงินมัดจำ</span>
+                        <div style={{ minWidth: 110, padding: "8px 12px", background: redPlateDep ? "#fef2f2" : "#e9eef0", border: redPlateDep ? "1.5px solid #fecaca" : "1.5px solid transparent", borderRadius: 8, fontSize: 15, fontWeight: 700, color: redPlateDep ? "#b91c1c" : "#6b7280", textAlign: "right", boxSizing: "border-box" }}>
+                          {redPlateDep.toLocaleString("th-TH")} บาท
+                        </div>
+                      </div>
+                      <span style={{ fontSize: 12, color: "#9ca3af" }}>ไม่ใช้ป้ายแดง = เว้นว่าง (มัดจำ 0) · กรอกทะเบียนแล้วระบบคิดมัดจำ {RED_PLATE_DEPOSIT} บาทอัตโนมัติ</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* การ์ดข้อมูลลูกค้า (แบบเดียวกับบันทึกขายปลีก) — ขึ้นหลังเลือกประเภทการขาย + ตอบ จอง/ไม่จอง แล้ว */}
                 {saleType && (bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (() => {
                   const inp = { width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" };
@@ -2055,7 +2083,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                   const fc = financeCalc(netCar || 0);
                   const dep = depositAmt;
                   // ติดลบ = มัดจำมากกว่ายอดที่ต้องจ่าย → ต้องคืนเงินมัดจำลูกค้า
-                  const receive = carPrice == null ? null : (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep;
+                  const receive = carPrice == null ? null : (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep + redPlateDep;
                   const isRefund = receive != null && receive < 0;
                   const row = (label, val, opts = {}) => (
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: opts.big ? 18 : 14, fontWeight: opts.big ? 700 : 400, color: opts.color || "#111827", borderTop: opts.line ? "1px dashed #d1d5db" : "none" }}>
@@ -2121,6 +2149,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         {isFin && advSub > 0 && row("โปรช่วยค่างวดล่วงหน้า (ออกแทน)", "-" + fmtBaht(advSub), { color: "#b45309" })}
                         {isFin && custPaidTheft > 0 && row(num(finTheft) > 0 ? "ประกันรถหาย (ไฟแนนซ์หัก)" : "ประกันรถหาย (ลูกค้าจ่ายเอง — เอาติ๊กของแถมออก)", fmtBaht(custPaidTheft))}
                         {row("หัก เงินมัดจำ" + (selBooking?.deposit_no ? ` (${selBooking.deposit_no})` : ""), dep > 0 ? "-" + fmtBaht(dep) : "-", { color: "#b45309" })}
+                        {redPlateDep > 0 && row("มัดจำป้ายแดง (" + text(redPlateNo) + ")", "+" + fmtBaht(redPlateDep), { color: "#b91c1c" })}
                         {isRefund
                           ? row("คืนเงินมัดจำลูกค้า", fmtBaht(Math.abs(receive)), { big: true, line: true, color: "#b45309" })
                           : row(isFin ? "รวมยอดชำระ" : "รับชำระเงิน", fmtBaht(receive), { big: true, line: true, color: "#166534" })}
@@ -2167,7 +2196,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       ) : (
                         <button onClick={handleSaveSale} disabled={saving || carPrice == null}
                           style={{ marginTop: 14, width: "100%", maxWidth: 420, padding: "13px 0", background: saving ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 10, cursor: saving ? "wait" : "pointer", fontSize: 17, fontWeight: 700, fontFamily: "Tahoma" }}>
-                          {saving ? "กำลังบันทึก..." : "💾 บันทึกขาย"}
+                          {saving ? "กำลังบันทึก..." : receive == null ? "💾 บันทึกขาย" : isRefund ? `💾 บันทึกขาย — คืนเงินมัดจำ ${fmtBaht(Math.abs(receive))}` : `💾 บันทึกขาย — ${isFin ? "รวมยอดชำระ" : "รับชำระ"} ${fmtBaht(receive)}`}
                         </button>
                       )}
                     </div>

@@ -1653,6 +1653,14 @@ ${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หม�
                         {form.deposit_no && <div style={{ fontSize: 10, color: "#0369a1", fontFamily: "monospace", marginTop: 2 }}>🔗 {form.deposit_no} (ดึงอัตโนมัติ)</div>}
                       </div>
                     : <MoneyBox>{baht(sale?.booking_deposit)}</MoneyBox>} />
+                  {/* มัดจำป้ายแดง — บันทึกจากหน้าบันทึกขาย NEW (กรอกทะเบียนป้ายแดง = 200) รวมอยู่ใน "รวมยอดชำระ" แล้ว */}
+                  {!editable && Number(sale?.red_plate_deposit) > 0 && (
+                    <Field label="มัดจำป้ายแดง" unit value={
+                      <div style={{ width: "100%" }}>
+                        <MoneyBox>{baht(sale?.red_plate_deposit)}</MoneyBox>
+                        <div style={{ fontSize: 10, color: "#b91c1c", marginTop: 2 }}>ทะเบียน {sale?.red_plate_no || "-"} · รวมในยอดชำระแล้ว</div>
+                      </div>} />
+                  )}
                   {/* ประกันรถหายของไฟแนนซ์ (ลูกค้าจ่ายเบี้ย) — ไฟแนนซ์หักเบี้ยจากยอดโอนค่ารถ
                       จึงนับเงินก้อนนี้เป็นยอดชำระค่ารถ · ไม่บวกเข้าราคารถ · กรอกเบี้ยตรง ๆ */}
                   {(editable ? isFinance(form.finance_type) : Number(sale?.theft_insurance_amount) > 0) && (
@@ -1958,6 +1966,11 @@ ${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หม�
                       <Field label="วันที่รับชำระ" required value={<input type="date" value={payForm.receipt_date} onChange={(e) => setPayForm((f) => ({ ...f, receipt_date: e.target.value }))} style={inp} />} />
                       <Field label="รวมยอดต้องชำระ" value={<MoneyBox>{baht(sale.total_payment)}</MoneyBox>} />
                     </Grid>
+                    {Number(sale.red_plate_deposit) > 0 && (
+                      <div style={{ marginTop: 8, padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, fontSize: 13 }}>
+                        🔴 มัดจำป้ายแดง ทะเบียน <b>{sale.red_plate_no || "-"}</b>: <b style={{ color: "#b91c1c" }}>+{baht(sale.red_plate_deposit)} บาท</b> (รวมในยอดต้องชำระแล้ว)
+                      </div>
+                    )}
                     {/* เงินดาวน์/ค่างวดออกแทน — ของแถมที่ร้านออกให้ หักออกจากยอดที่เก็บลูกค้า */}
                     {Number(sale.down_payout_amount) > 0 && (
                       <div style={{ marginTop: 8, padding: "8px 12px", background: "#fef9c3", border: "1px solid #fbbf24", borderRadius: 6, fontSize: 13, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>

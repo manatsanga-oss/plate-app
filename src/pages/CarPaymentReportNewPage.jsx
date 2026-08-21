@@ -54,7 +54,8 @@ export default function CarPaymentReportNewPage() {
   //   2) ตัดรับเงินโอนไฟแนนท์ FT (ระบบบันทึกรับชำระไฟแนนท์ — ตัดสะสมได้หลายรอบ ใน ft_vehicle_paid)
   //   3) เงินดาวน์/ค่างวดออกแทน (ของแถมร้านออกให้ = ถือว่าเคลียร์ยอดส่วนนั้นแล้ว)
   const saleTotal = (r) => num(r.net_car_price || r.car_price);
-  const storePaid = (r) => (r.payment_status === "paid" ? num(r.paid_amount) : 0);
+  // มัดจำป้ายแดง (red_plate_deposit) รวมอยู่ใน paid_amount แต่ไม่ใช่ค่ารถ (คืนลูกค้าภายหลัง) → หักออกก่อนเทียบยอดขาย
+  const storePaid = (r) => (r.payment_status === "paid" ? Math.max(num(r.paid_amount) - num(r.red_plate_deposit), 0) : 0);
   const depositOf = (r) => num(r.booking_deposit);          // เงินมัดจำจอง — ลูกค้าจ่ายไว้ตอนจอง หักจากยอดเก็บหน้าร้านแล้ว
   const ftPaid = (r) => num(r.ft_vehicle_paid);
   // ประกันรถหาย — นับเป็นแหล่งแยกเฉพาะ "ไฟแนนซ์หัก/โปรโมชั่นออกแทน" (หักจากยอดโอน FT)
@@ -278,7 +279,7 @@ export default function CarPaymentReportNewPage() {
                 )}
                 <tr style={{ borderTop: "2px solid #e5e7eb", background: "#fefce8" }}>
                   <td style={{ padding: "8px 6px", fontWeight: 700 }}>รวมรับทุกแหล่ง</td>
-                  <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(num(detail.paid_amount) + num(detail.booking_deposit) + num(detail.ft_vehicle_paid) + num(detail.down_payout_amount) + theftOf(detail))}</td>
+                  <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(Math.max(num(detail.paid_amount) - num(detail.red_plate_deposit), 0) + num(detail.booking_deposit) + num(detail.ft_vehicle_paid) + num(detail.down_payout_amount) + theftOf(detail))}</td>
                 </tr>
                 {num(detail.down_payout_amount) > 0 && (
                   <tr>
