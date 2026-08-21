@@ -11,6 +11,8 @@ const HONDA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/honda-repor
 
 const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, "").toUpperCase();
+// type พิเศษ (สีพิเศษ/ชุดแต่ง): TH+เลข เช่น TH1..TH8 หรือแบบ master พ่วง "2TH(TH1)" — สั่งซื้อ/วางแผนแยกไม่ได้
+const isSpecialTHType = (t) => /^TH\d+$/.test(norm(t)) || /\(TH\d+\)$/.test(norm(t));
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 // ช่วงวางแผนสั่งซื้อตามรอบฮอนด้า: ขายวันที่ 21 เดือนก่อน → 20 เดือนปัจจุบัน (คงเหลือ/ค้างส่ง ณ วันที่ 20)
 // ถ้าวันนี้เลยวันที่ 20 ไปแล้ว เลื่อนรอบไปจบวันที่ 20 เดือนถัดไป
@@ -241,11 +243,45 @@ export default function HondaSalesReportPage() {
   }
 
   // map ข้อมูลขาย/คงเหลือ ตาม (model_code|type|color_code)
+  // แบบสืบทอด: แบบใหม่ที่แทนแบบเก่า (ยกเลิกแล้ว) — ใช้ประวัติขายของแบบเก่าเป็นเทรนด์จนกว่าแบบใหม่จะมีประวัติเอง
+  // (user ยืนยันคู่ 2026-08-21: Click160 CATR→CATV · PCX160 AS→AV, SS→SV) — เพิ่มคู่ใหม่ที่นี่เมื่อ Honda เปลี่ยนแบบรอบหน้า
+  const SUCCESSOR = {
+    ACB160CATV: "ACB160CATR",  // Click160
+    WW160AV: "WW160AS",        // PCX160
+    WW160SV: "WW160SS",        // PCX160 (แบบพิเศษ)
+    ACF110CBTT: "ACF110CBTS",  // Scoopy (ยืนยันจาก master 2026-08-21: CBTS inactive ทั้งหมด → CBTT)
+  };
+  // แบบเก่าที่ถูกแทนแล้ว — ไม่แสดงในตารางเลยตั้งแต่ดึงข้อมูล (user สั่ง 2026-08-21) — เทรนด์ของมันยังไหลไปแบบใหม่ผ่าน histOf
+  const OLD_CODES = new Set(Object.values(SUCCESSOR).map((c) => norm(c)));
+
+  // รวมยอดขาย/สต๊อกของแบบเก่าเข้าแบบใหม่ (type TH สีเดียวกัน) — รวมขายไม่หาย (user สั่ง 2026-08-21)
+  const reportAdj = useMemo(() => {
+    const OLD2NEW = {};
+    for (const [nw, old] of Object.entries(SUCCESSOR)) OLD2NEW[norm(old)] = nw;
+    const agg = new Map();
+    for (const r of report) {
+      const nw = OLD2NEW[norm(r.model_code)];
+      const model = nw || r.model_code;
+      // ยอดแบบเก่า (ทุก type) และ type พิเศษ (TH1..TH8 — วางแผนแยกไม่ได้) ยุบเข้า type TH หลัก
+      const type = nw || isSpecialTHType(r.type) ? "TH" : r.type;
+      const key = norm(model) + "|" + norm(type) + "|" + norm(r.color_code);
+      const cur = agg.get(key);
+      if (!cur) agg.set(key, { ...r, model_code: model, type });
+      else {
+        cur.sold_qty = (Number(cur.sold_qty) || 0) + (Number(r.sold_qty) || 0);
+        cur.stock_qty = (Number(cur.stock_qty) || 0) + (Number(r.stock_qty) || 0);
+      }
+    }
+    return [...agg.values()];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [report]);
+
   const reportMap = useMemo(() => {
     const m = {};
-    for (const r of report) m[norm(r.model_code) + "|" + norm(r.type) + "|" + norm(r.color_code)] = r;
+    for (const r of reportAdj) m[norm(r.model_code) + "|" + norm(r.type) + "|" + norm(r.color_code)] = r;
     return m;
-  }, [report]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportAdj]);
 
   // จัดกลุ่ม รุ่น(series) → แบบ(model_code) → type → สี
   // รวมแถวจาก (1) master HONDA active + (2) ข้อมูลขายจริง honda_report_data — เพราะ master เก็บ type ฐาน "TH"
@@ -255,6 +291,16 @@ export default function HondaSalesReportPage() {
     const seen = new Set();
     const seriesByCode = {};   // norm(model_code) → ชื่อรุ่น(series)
     const colorNameByMC = {};  // norm(model_code)|norm(color_code) → ชื่อสี
+    // ชื่อสี: master active ของแบบนั้น → master (รวม inactive) ของแบบนั้น/แบบเก่าที่ถูกแทน → รหัสสีเดียวกันจากแบบไหนก็ได้
+    const oldOf = (code) => { const k = Object.keys(SUCCESSOR).find((k2) => norm(k2) === norm(code)); return k ? SUCCESSOR[k] : null; };
+    const anyColorName = (code, cc) => {
+      if (!cc) return "";
+      const hit = colorNameByMC[norm(code) + "|" + norm(cc)];
+      if (hit) return hit;
+      const byModel = (mc) => (colors.find((x) => norm(x.model_code) === norm(mc) && norm(x.color_code) === norm(cc)) || {}).color_name;
+      return byModel(code) || (oldOf(code) ? byModel(oldOf(code)) : "") ||
+        (colors.find((x) => norm(x.color_code) === norm(cc) && x.color_name) || {}).color_name || "";
+    };
     const grp = (run, code, type) => {
       const gk = run + "|" + code + "|" + type;
       if (!map.has(gk)) map.set(gk, { run, code, type, colors: [] });
@@ -264,6 +310,7 @@ export default function HondaSalesReportPage() {
     for (const c of colors) {
       if (!/honda|ฮอนด้า/i.test(String(c.brand_name || ""))) continue;
       if (c.status && c.status !== "active") continue;
+      if (isSpecialTHType(c.type_name)) continue; // type พิเศษไม่แสดงแถว — ยอดถูกยุบเข้า TH แล้วใน reportAdj
       const run = c.series_name || c.marketing_name || "-";
       const code = c.model_code || "-";
       const type = c.type_name || "-";
@@ -278,16 +325,19 @@ export default function HondaSalesReportPage() {
         sold: Number(dat.sold_qty) || 0, stock: Number(dat.stock_qty) || 0,
       });
     }
-    // (2) ข้อมูลจริง (HONDA-only) — เพิ่มแถว type/สี ที่ master ไม่มี
-    for (const r of report) {
+    // (2) ข้อมูลจริง (HONDA-only) — เพิ่มแถว type/สี ที่ master ไม่มี (ใช้ชุดที่รวมแบบเก่าเข้าแบบใหม่แล้ว)
+    const NEW_CODE_SET = new Set(Object.keys(SUCCESSOR).map((k) => norm(k)));
+    for (const r of reportAdj) {
       const code = r.model_code || "-";
       const type = r.type || "-";
       const cc = r.color_code || "";
+      // สีที่ยกมาจากแบบเก่าแต่แบบใหม่ไม่มีขายต่อ (ไม่อยู่ใน master active ของแบบใหม่) — ไม่แสดง (user 2026-08-21)
+      if (NEW_CODE_SET.has(norm(code)) && cc && !colorNameByMC[norm(code) + "|" + norm(cc)]) continue;
       const key = norm(code) + "|" + norm(type) + "|" + norm(cc);
       if (seen.has(key)) continue;
       seen.add(key);
       grp(seriesByCode[norm(code)] || code, code, type).colors.push({
-        key, color_code: cc, color_name: colorNameByMC[norm(code) + "|" + norm(cc)] || "",
+        key, color_code: cc, color_name: anyColorName(code, cc),
         sold: Number(r.sold_qty) || 0, stock: Number(r.stock_qty) || 0,
       });
     }
@@ -297,25 +347,56 @@ export default function HondaSalesReportPage() {
       seen.add(key);
       const [code = "-", type = "-", cc = ""] = key.split("|");
       grp(seriesByCode[norm(code)] || code, code, type).colors.push({
-        key, color_code: cc, color_name: colorNameByMC[norm(code) + "|" + norm(cc)] || "",
+        key, color_code: cc, color_name: anyColorName(code, cc),
         sold: 0, stock: 0,
       });
     }
-    const arr = [...map.values()];
+    const arr = [...map.values()].filter((g) => !OLD_CODES.has(norm(g.code))); // ตัดแบบเก่าที่ถูกแทนออกจากตาราง
     for (const g of arr) g.colors.sort((a, b) => String(a.color_code).localeCompare(String(b.color_code), "th"));
     return arr.sort((a, b) => (a.run + a.code + a.type).localeCompare(b.run + b.code + b.type, "th"));
-  }, [colors, report, reportMap, backorder]);
+  }, [colors, reportAdj, reportMap, backorder]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ชื่อสีจาก master (รวมแถว inactive ของแบบเก่า) — ใช้จับคู่สีข้ามแบบ
+  const colorNameOf = (mc, cc) =>
+    (colors.find((x) => norm(x.model_code) === norm(mc) && norm(x.color_code) === norm(cc)) || {}).color_name || "";
+  // โทนสีหลัก: "เทา-ดำ" → "เทา" (ตัดคำว่า สี + แยกด้วย -/ช่องว่าง)
+  const primaryTone = (name) => String(name || "").replace(/^สี/, "").trim().split(/[-–—/\s]+/)[0] || "";
+  const histOf = (key) => {
+    if (hist[key]) return hist[key];
+    const parts = String(key).split("|");
+    const old = SUCCESSOR[parts[0]];
+    if (!old) return undefined;
+    // ค้นประวัติแบบเก่า "ข้ามทุก type" (ประวัติเก่าอาจอยู่ใต้ 2TH/3TH เช่น CATR 2TH BGO):
+    // 1) รหัสสีตรงกันก่อน  2) ไม่เจอค่อยจับคู่สีโทนหลักเดียวกัน (เช่น เทา-ดำ ↔ เทา-ขาว) — เลือกตัวยอดล่าสุดสูงสุด
+    const prefix = norm(old) + "|";
+    const tone = primaryTone(colorNameOf(parts[0], parts[2]));
+    let bestColor, bestTone;
+    for (const k of Object.keys(hist)) {
+      if (!k.startsWith(prefix)) continue;
+      const cc = k.split("|")[2] || "";
+      const h = hist[k];
+      const s1 = Number(h && h[0]) || 0;
+      if (cc === parts[2]) {
+        if (!bestColor || s1 > (Number(bestColor[0]) || 0)) bestColor = h;
+      } else if (tone && primaryTone(colorNameOf(old, cc)) === tone) {
+        if (!bestTone || s1 > (Number(bestTone[0]) || 0)) bestTone = h;
+      }
+    }
+    return bestColor || bestTone;
+  };
 
   // demand รายสี = ยอดขายเดือนปัจจุบัน + โมเมนตัม (เทรนด์เทียบเดือนก่อน)
   //   demand = max(0, sold + 0.4×(sold − ขายเดือนก่อน))  → รุ่นโตได้เพิ่ม รุ่นร่วงโดนหั่น
-  const demandOf = (key, sold) => {
-    const h = hist[key];
+  const demandOf = (key, sold, stock) => {
+    const h = histOf(key);
     const s1 = h && h[0] != null ? h[0] : null;
     if (s1 == null) return sold;
+    // ของหมดทั้งรอบ (ขาย 0 + สต๊อก 0) แต่เดือนก่อนมียอด = stockout ไม่ใช่ demand หมด → ใช้ยอดเดือนก่อนเป็นฐาน
+    if (!sold && !(Number(stock) || 0) && Number(s1) > 0) return Number(s1);
     return Math.max(0, sold + 0.4 * (sold - s1));
   };
   const trendOf = (key, sold) => {
-    const h = hist[key]; const s1 = h && h[0] != null ? h[0] : null;
+    const h = histOf(key); const s1 = h && h[0] != null ? h[0] : null;
     if (s1 == null || sold === s1) return "→";
     return sold > s1 ? "↑" : "↓";
   };
@@ -324,7 +405,12 @@ export default function HondaSalesReportPage() {
   // แนะนำสั่ง = max(0, demand×cover − คงเหลือ − ค้างส่ง)
   const recoOrder = (key, sold, stock, back) => {
     const tot = sold + stock;
-    if (tot <= 0) return 0;
+    if (tot <= 0) {
+      // ของหมดทั้งรอบ: เดือนก่อนขายได้ → สั่งตามยอดเดือนก่อน (cover 1.1) หักค้างส่งที่กำลังมา
+      const h = histOf(key);
+      const s1 = h && h[0] != null ? Number(h[0]) : 0;
+      return s1 > 0 ? Math.max(0, Math.round(s1 * 1.1 - (Number(back) || 0))) : 0;
+    }
     const sell = sold / tot;
     const cover = sell >= 0.8 ? 1.3 : sell >= 0.5 ? 1.1 : 0;
     if (!cover) return 0;
@@ -356,9 +442,54 @@ export default function HondaSalesReportPage() {
   function autoPlan() {
     const cells = [];
     for (const g of groups) {
-      const lockNext = !!lockedNext[norm(g.code) + "|" + norm(g.type)];
-      for (const c of g.colors) cells.push({ key: c.key, reco: recoOrder(c.key, c.sold, c.stock, boOf(c.key)), demand: demandOf(c.key, c.sold), lockNext });
+      const dead = OLD_CODES.has(norm(g.code)); // แบบเก่าที่ถูกแทน — แผน 0 ทั้งสองเดือน
+      const lockNext = dead || !!lockedNext[norm(g.code) + "|" + norm(g.type)];
+      for (const c of g.colors) cells.push({
+        key: c.key, code: norm(g.code), type: norm(g.type),
+        tone: primaryTone(c.color_name || colorNameOf(g.code, c.color_code)),
+        sold: Number(c.sold) || 0, stock: Number(c.stock) || 0, back: Number(boOf(c.key)) || 0,
+        reco: dead ? 0 : recoOrder(c.key, c.sold, c.stock, boOf(c.key)),
+        demand: dead ? 0 : demandOf(c.key, c.sold, c.stock), lockNext,
+      });
     }
+    // type พิเศษ (TH+เลข เช่น TH1,TH3,TH5 — สีพิเศษ/ชุดแต่ง) สั่งซื้อแยกกับฮอนด้าไม่ได้ —
+    // รวม demand/แผน เข้าแถว TH หลัก เฉพาะเมื่อ "รหัสสีเดียวกันเป๊ะ" (เช่น GIORNO+ TH3 BBR → TH BBR)
+    // สีไม่ตรงกัน (แม้โทนใกล้) = ไม่รวม → แถวพิเศษถือแผนของตัวเอง (user กำหนด 2026-08-21)
+    // จับทั้ง "TH1" ตรง ๆ และแบบ master ตั้งชื่อพ่วง เช่น "2TH(TH1)"
+    const isSpecialType = (t) => /^TH\d+$/.test(String(t || "")) || /\(TH\d+\)$/.test(String(t || ""));
+    const isBaseType = (t) => String(t || "").replace(/[()]/g, "") === "TH";
+    const baseByCodeColor = new Map(); // norm(code)|norm(color_code) -> base cell (type TH)
+    for (const c of cells) if (isBaseType(c.type)) {
+      const cc = String(c.key).split("|")[2] || "";
+      const bk = c.code + "|" + cc;
+      if (cc && !baseByCodeColor.has(bk)) baseByCodeColor.set(bk, c);
+    }
+    for (const c of cells) {
+      if (!isSpecialType(c.type)) continue;
+      const cc = String(c.key).split("|")[2] || "";
+      const base = cc ? baseByCodeColor.get(c.code + "|" + cc) : null;
+      if (!base) continue; // สีไม่ตรงกับ TH → สีพิเศษถือแผนเอง
+      base.reco += c.reco;
+      base.demand += c.demand;
+      c.reco = 0;
+      c.demand = 0;
+    }
+    // สีใหม่ของ "แบบใหม่": ยังไม่มีขาย/สต๊อก/ค้างส่ง/เทรนด์เลย → seed แผน 1 คัน
+    // (user สั่ง 2026-08-21: สีใหม่ควรวางแผนไป 1-2 คัน ให้มีรถเข้ามาโชว์/ลองตลาด — มีค้างส่งแล้วไม่เติมซ้ำ)
+    // "แบบใหม่" = อยู่ในแมปสืบทอด SUCCESSOR + รายชื่อแบบเปิดตัวใหม่ BRAND_NEW ด้านล่าง (เพิ่มรหัสเมื่อฮอนด้าออกแบบใหม่)
+    const BRAND_NEW = ["ACF110BTT"]; // Scoopy 2TH เปิดตัวใหม่ (user ยืนยัน 2026-08-21) — ไม่มีแบบเก่าให้สืบทอด
+    const NEW_CODES = new Set([...Object.keys(SUCCESSOR), ...BRAND_NEW].map((k) => norm(k)));
+    for (const c of cells) {
+      if (c.lockNext || !NEW_CODES.has(c.code)) continue;
+      if (c.reco || c.demand || c.sold || c.stock || c.back) continue;
+      // เทรนด์ที่มีแต่ 0 ล้วน (แถวติดมากับรอบเก่าแบบไม่มียอด) ไม่นับว่ามีเทรนด์
+      const h = histOf(c.key);
+      if (h && ((Number(h[0]) || 0) > 0 || (Number(h[1]) || 0) > 0)) continue;
+      // ไม่มีสต๊อก/ค้างส่ง = เดือนนี้ไม่มีรถให้ขาย → แผนเดือนนี้ 0, seed ลงเดือนหน้าอย่างเดียว (รอรถที่สั่งเข้ามา)
+      c.reco = 0;
+      c.demand = 1;
+    }
+
     const rawTot = cells.reduce((a, x) => a + x.reco, 0);
     if (!cells.length || (!rawTot && !cells.some((x) => x.demand))) { setMessage("⚠️ ไม่มีข้อมูลสำหรับคำนวณ (ดึงข้อมูลก่อน)"); return; }
     // เดือนนี้ — แนะนำสั่ง (เทรนด์+คาลิเบรต) คุมไม่เกินเป้าเดือนนี้
@@ -500,6 +631,11 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
                         <td rowSpan={g.colors.length + 1} onDoubleClick={() => toggleLockNext(gid, g)} title="ดับเบิลคลิก = ล็อก/ปลดล็อก คาดการณ์เดือนหน้า (รุ่นที่ฮอนด้าล็อกโควตา)" style={{ ...tdc, textAlign: "left", background: lockNext ? "#ede9fe" : "#fafafa", verticalAlign: "top", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
                           <div style={{ color: "#9ca3af", fontSize: 11 }}>{g.run} [ซีรี่ย์: {g.run}]</div>
                           <div style={{ fontWeight: 700 }}>{gi + 1}. {g.code} ({g.type})</div>
+                          {OLD_CODES.has(norm(g.code)) && (
+                            <div style={{ fontSize: 10, color: "#dc2626", fontWeight: 700 }}>
+                              ⛔ ยกเลิกผลิต — แผนไปลงแบบใหม่ ({Object.keys(SUCCESSOR).find((k) => norm(SUCCESSOR[k]) === norm(g.code)) || ""})
+                            </div>
+                          )}
                           {lockNext && <div style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed" }}>🔒 ล็อกเดือนหน้า</div>}
                         </td>
                       )}
@@ -507,9 +643,10 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
                       <td style={tdc}>
                         <span style={{ ...yBox, display: "inline-block" }}>{c.sold || 0}</span>
                         {sellPct(c.sold, c.stock) != null && <div style={{ fontSize: 9, fontWeight: 700, color: sellColor(sellPct(c.sold, c.stock)) }}>ขายออก {sellPct(c.sold, c.stock)}%</div>}
-                        {hist[c.key] && hist[c.key][0] != null && (
+                        {histOf(c.key) && histOf(c.key)[0] != null && (
                           <div style={{ fontSize: 9, color: trendOf(c.key, c.sold) === "↑" ? "#059669" : trendOf(c.key, c.sold) === "↓" ? "#dc2626" : "#9ca3af" }}>
-                            {hist[c.key][1] != null ? hist[c.key][1] + "→" : ""}{hist[c.key][0]}→<b>{c.sold}</b> {trendOf(c.key, c.sold)}
+                            {histOf(c.key)[1] != null ? histOf(c.key)[1] + "→" : ""}{histOf(c.key)[0]}→<b>{c.sold}</b> {trendOf(c.key, c.sold)}
+                            {!hist[c.key] && <span style={{ color: "#7c3aed" }}> (เทรนด์จากแบบเก่า)</span>}
                           </div>
                         )}
                       </td>
