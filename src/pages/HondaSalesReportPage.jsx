@@ -400,21 +400,14 @@ export default function HondaSalesReportPage() {
     if (s1 == null || sold === s1) return "→";
     return sold > s1 ? "↑" : "↓";
   };
-  // แนะนำสั่งซื้อรายสี — เทรนด์ + คาลิเบรต cover (ลดจาก ×2 เพราะประวัติชี้ว่าสั่งเกิน ~2 เท่า ขายได้ครึ่งเดียว)
-  // sell% = ขาย÷(ขาย+คงเหลือ) · ≥80%→cover 1.3× · 50-79%→1.1× · <50%→0 (ระบายของเดิม)
-  // แนะนำสั่ง = max(0, demand×cover − คงเหลือ − ค้างส่ง)
+  // แผนขายเดือนปัจจุบันรายสี = ประมาณการยอดขายจริงของเดือน (ยอดรอบล่าสุด + โมเมนตัมเทรนด์ ผ่าน demandOf)
+  // เลิกใช้สูตรสั่งซื้อเดิม (demand×cover − สต๊อก − ค้างส่ง) ที่กดตัวเลขต่ำกว่ายอดขายจริงระหว่างเดือน — 2026-08-21
+  // ไม่ตั้งเพดานสต๊อก เพราะรถล็อตใหม่ทยอยเข้าระหว่างเดือนเหมือนเดือนก่อน ๆ (เดือนก่อนขาย 133 ทั้งที่สต๊อกเฉลี่ย ~96)
+  // ยกเว้นแถวที่ไม่มีทั้งสต๊อก/ค้างส่ง/ยอดขายรอบนี้ = ไม่มีสัญญาณว่าจะมีของขาย → 0
   const recoOrder = (key, sold, stock, back) => {
-    const tot = sold + stock;
-    if (tot <= 0) {
-      // ของหมดทั้งรอบ: เดือนก่อนขายได้ → สั่งตามยอดเดือนก่อน (cover 1.1) หักค้างส่งที่กำลังมา
-      const h = histOf(key);
-      const s1 = h && h[0] != null ? Number(h[0]) : 0;
-      return s1 > 0 ? Math.max(0, Math.round(s1 * 1.1 - (Number(back) || 0))) : 0;
-    }
-    const sell = sold / tot;
-    const cover = sell >= 0.8 ? 1.3 : sell >= 0.5 ? 1.1 : 0;
-    if (!cover) return 0;
-    return Math.max(0, Math.round(demandOf(key, sold) * cover - stock - (Number(back) || 0)));
+    const supply = (Number(stock) || 0) + (Number(back) || 0);
+    if (supply <= 0 && !sold) return 0;
+    return Math.max(0, Math.round(demandOf(key, sold, stock)));
   };
   const sellPct = (sold, stock) => (sold + stock > 0 ? Math.round((sold / (sold + stock)) * 100) : null);
   const sellColor = (p) => (p == null ? "#9ca3af" : p >= 80 ? "#059669" : p >= 50 ? "#d97706" : "#dc2626");
