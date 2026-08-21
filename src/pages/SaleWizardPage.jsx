@@ -339,6 +339,7 @@ table.bx>tbody>tr>td{border:1px solid #c2185b;padding:5px 8px;font-size:12px;ver
     <tr><td class="lbl">ราคารถสุทธิ</td><td class="r val">${money(sale.net_car_price || Math.max(Number(sale.car_price || 0) - Number(sale.discount || 0), 0))}</td></tr>
     <tr><td class="lbl">เงินจอง</td><td class="r">${dash(sale.booking_deposit)}</td></tr>
     ${Number(sale.theft_insurance_amount) > 0 ? `<tr><td class="lbl">ประกันรถหาย</td><td class="r val">${money(sale.theft_insurance_amount)}</td></tr>` : ""}
+    ${Number(sale.red_plate_deposit) > 0 ? `<tr><td class="lbl">มัดจำป้ายแดง${sale.red_plate_no ? " (" + esc(sale.red_plate_no) + ")" : ""}</td><td class="r val">${money(sale.red_plate_deposit)}<div style="font-weight:400;color:#888;font-size:10px">คืนเมื่อคืนป้าย</div></td></tr>` : ""}
   </table></td>
 </tr></table>
 
@@ -358,10 +359,38 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   }
 
   // ใบเสร็จรับเงิน / ใบเสร็จคืนเงินมัดจำ — รูปแบบเดียวกับหน้าบันทึกขายปลีก แยกหัวกระดาษ ป.เปา/สิงห์ชัย (ลูกค้ากดเปิดจากปุ่มใน LINE)
-  function buildReceiptDocHtml(sale, receiptNo, pay) {
+  function buildReceiptDocHtml(sale, receiptNo, pay, rp) {
     const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const money = (n) => (Number(n) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const lh = letterheadFor(sale);
+    // ใบรับเงินมัดจำป้ายแดง — แยกเป็นอีกหน้าต่อท้ายใบเสร็จค่ารถ (เงินมัดจำคืนได้ ไม่ใช่รายได้ ไม่รวมในใบเสร็จค่ารถ)
+    const rpHtml = rp && Number(rp.amount) > 0 ? `
+<div class="wrap" style="page-break-before:always;margin-top:28px;border-top:2px dashed #bbb;padding-top:14px">
+<div class="hdr">
+  <div class="logo">${logoHtml(lh, esc)}</div>
+  <div class="co"><div class="nm">${esc(lh.name)}</div><div>${esc(lh.addr)}</div><div>${esc(lh.tel)}</div><div>${esc(lh.tax)}</div></div>
+  <div class="ttl" style="width:190px"><div class="b" style="color:#b91c1c;font-size:18px">ใบรับเงินมัดจำป้ายแดง</div><div>Red Plate Deposit</div><div class="o" style="color:#b91c1c">(ต้นฉบับ)</div></div>
+</div>
+<table class="bx"><tr>
+  <td style="width:62%"><div class="sec" style="margin:-5px -8px 5px;padding:3px">ชื่อลูกค้า</div>
+    <div class="val">${esc(sale.customer_name)}</div>
+    <div>${esc(sale.customer_address || cust.customer_address || "")}</div>
+  </td>
+  <td style="padding:0"><table class="it" style="border:none">
+    <tr><td class="sec">เลขที่ใบรับมัดจำ</td><td class="sec">วันที่</td></tr>
+    <tr><td class="c val">${esc(rp.doc_no || "-")}</td><td class="c">${esc(thaiDate(todayStr()))}</td></tr>
+    <tr><td class="sec">อ้างอิงใบขาย</td><td class="sec">อ้างอิงใบเสร็จ</td></tr>
+    <tr><td class="c">${esc(sale.sale_no)}</td><td class="c">${esc(receiptNo || "-")}</td></tr>
+  </table></td>
+</tr></table>
+<table class="bx">
+  <tr><td class="sec" style="width:8%">ลำดับ</td><td class="sec">รายละเอียด</td><td class="sec" style="width:22%">ทะเบียนป้ายแดง</td><td class="sec" style="width:15%">จำนวนเงิน</td></tr>
+  <tr><td class="c">1</td><td>เงินมัดจำป้ายแดง (คืนเต็มจำนวนเมื่อนำป้ายแดงมาคืนร้าน)</td><td class="c val">${esc(rp.plate_no || "-")}</td><td class="r">${money(rp.amount)}</td></tr>
+  <tr><td colspan="3" class="r tot" style="color:#b91c1c">รวมเงินมัดจำ</td><td class="r tot" style="color:#b91c1c">${money(rp.amount)} บาท</td></tr>
+</table>
+<div style="margin-top:8px;font-size:11px;color:#b91c1c">* เงินมัดจำนี้ไม่ใช่ค่าสินค้า/บริการ ร้านจะคืนให้เต็มจำนวนเมื่อลูกค้านำป้ายแดงมาคืนหลังได้รับป้ายทะเบียนจริง กรุณาเก็บใบนี้ไว้แสดงตอนคืนป้าย</div>
+<div class="foot"><div class="sg">ผู้รับเงิน</div><div class="sg">ผู้ชำระเงิน</div></div>
+</div>` : "";
     const title = pay.refund ? "ใบเสร็จคืนเงิน" : "ใบเสร็จรับเงิน";
     const carLine = [sale.brand, sale.model_name, sale.engine_no].filter(Boolean).join(" / ");
     const iRows = `<tr><td class="c">1</td><td>${esc((pay.refund ? "คืนเงินมัดจำ · " : "") + pay.methodLabel)}${pay.accountName ? " · " + esc(pay.accountName) : ""}</td><td class="c">1</td><td class="r">${money(pay.amount)}</td><td class="r">${money(pay.amount)}</td></tr>`;
@@ -416,7 +445,7 @@ table.bx>tbody>tr>td{border:1px solid #047857;padding:5px 8px;font-size:12px;ver
 </table>
 <div class="foot"><div class="sg">ผู้รับเงิน</div><div class="sg">ผู้ชำระเงิน</div></div>
 ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-align:center">⚠️ เอกสารทดสอบระบบ — ไม่ใช่รายการเงินจริง</div>' : ""}
-</div></body></html>`;
+</div>${rpHtml}</body></html>`;
   }
 
   // บันทึกชำระเงิน / คืนเงินมัดจำ — บันทึกจริงผ่าน save_payment (action เดียวกับหน้าขายปลีก) แล้วส่งใบเสร็จเข้า LINE
@@ -428,9 +457,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (payMethod === "transfer" && !acc) { setMessage("❌ เลือกบัญชีรับโอนเงินก่อน"); return; }
     if (savedSale.__test && !custLineUserId) { setMessage("❌ ลูกค้าไม่มี LINE ในระบบ — ส่งใบเสร็จทาง LINE ไม่ได้"); return; }
     const refund = Number(receiveAmt) < 0;
+    // มัดจำป้ายแดงรวมอยู่ในยอดที่เก็บ แต่แยกใบ: ใบเสร็จค่ารถ = ยอดเก็บ − มัดจำ, ใบรับมัดจำป้ายแดง = มัดจำ (เลข RPD ออกจาก save_payment)
+    const rpAmt = refund ? 0 : Math.min(Number(savedSale.red_plate_deposit) || 0, Math.abs(Number(receiveAmt) || 0));
     const pay = {
       refund,
-      amount: Math.abs(Number(receiveAmt) || 0),
+      amount: Math.abs(Number(receiveAmt) || 0) - rpAmt,
       methodLabel: payMethod === "cash" ? "เงินสด" : "เงินโอน",
       accountName: acc?.account_name || null,
     };
@@ -445,8 +476,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         const row = await post(RETAIL_API, {
           action: "save_payment", sale_no: savedSale.sale_no,
           receipt_date: todayStr(),
-          payments: [{ method: payMethod === "cash" ? "เงินสด" : "โอน", account_id: acc ? Number(acc.account_id) : null, account_name: acc?.account_name || null, amount: pay.amount }],
-          paid_amount: pay.amount,
+          payments: [{ method: payMethod === "cash" ? "เงินสด" : "โอน", account_id: acc ? Number(acc.account_id) : null, account_name: acc?.account_name || null, amount: pay.amount + rpAmt }],
+          paid_amount: pay.amount + rpAmt,
           payment_note: "",
           received_by: currentUser?.username || currentUser?.name || "",
           branch_code: savedSale.branch_code || currentUser?.branch_code || currentUser?.branch || "",
@@ -455,7 +486,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         if (!updated || !updated.sale_no) throw new Error(row?.__error || row?.error || "บันทึกรับชำระไม่สำเร็จ");
         receiptNo = updated.receipt_no || receiptNo;
         // merge แถวที่อัปเดตกลับเข้า savedSale — คงชื่อรุ่น/สี/ยี่ห้อแบบแสดงผลของ wizard ไว้ใช้ในเอกสาร
-        saleForDoc = { ...savedSale, ...updated, brand: savedSale.brand, model_name: savedSale.model_name, color: savedSale.color };
+        saleForDoc = { ...savedSale, ...updated, brand: savedSale.brand, model_name: savedSale.model_name, color: savedSale.color,
+          red_plate_doc_no: row.red_plate_doc_no || updated.red_plate_doc_no || null };
         setSavedSale(saleForDoc);
       }
 
@@ -467,9 +499,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
           customer_name: savedSale.customer_name,
           paid_amount: pay.amount,
           payment_methods: [{ method: (refund ? "คืนเงินมัดจำ · " : "") + pay.methodLabel, amount: pay.amount, account_name: pay.accountName }],
+          red_plate_no: saleForDoc.red_plate_no || "", red_plate_deposit: rpAmt, red_plate_doc_no: saleForDoc.red_plate_doc_no || (savedSale.__test && rpAmt > 0 ? "TEST-RPD" : ""),
           branch_name: savedSale.branch_name, branch_code: savedSale.branch_code,
           line_user_id: custLineUserId,
-          doc_html: buildReceiptDocHtml(saleForDoc, receiptNo, pay),
+          doc_html: buildReceiptDocHtml(saleForDoc, receiptNo, pay, rpAmt > 0 ? { doc_no: saleForDoc.red_plate_doc_no || "TEST-RPD", plate_no: saleForDoc.red_plate_no, amount: rpAmt } : null),
           sent_by: currentUser?.name || currentUser?.username || "",
         });
       }
@@ -525,6 +558,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         color: sale.color, seller: sale.seller,
         car_price: sale.car_price, discount: sale.discount, total_payment: sale.total_payment,
         advance_installment: sale.advance_installment, installment_amount: sale.installment_amount,
+        red_plate_no: sale.red_plate_no || "", red_plate_deposit: Number(sale.red_plate_deposit) || 0,
         finance_type: sale.finance_type,
         branch_name: sale.branch_name, branch_code: sale.branch_code,
         line_user_id: lid,
@@ -2215,6 +2249,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           ) : (
                             <div style={{ fontSize: 15, marginBottom: 12 }}>
                               ยอดรับชำระ: <strong style={{ color: "#166534", fontSize: 18 }}>{fmtBaht(receive)}</strong>
+                              {redPlateDep > 0 && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 2 }}>รวมมัดจำป้ายแดง {fmtBaht(redPlateDep)} — ระบบออกใบรับมัดจำแยกจากใบเสร็จค่ารถให้อัตโนมัติ</div>}
                             </div>
                           )}
 

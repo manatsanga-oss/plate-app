@@ -1058,6 +1058,7 @@ table.bx>tbody>tr>td{border:1px solid #c2185b;padding:5px 8px;font-size:12px;ver
     <tr><td class="lbl">ราคารถสุทธิ</td><td class="r val">${money(s.net_car_price || s.car_price)}</td></tr>
     <tr><td class="lbl">เงินจอง</td><td class="r">${dash(s.booking_deposit)}</td></tr>
     ${Number(s.theft_insurance_amount) > 0 ? `<tr><td class="lbl">ประกันรถหาย</td><td class="r val">${money(s.theft_insurance_amount)}</td></tr>` : ""}
+    ${Number(s.red_plate_deposit) > 0 ? `<tr><td class="lbl">มัดจำป้ายแดง${s.red_plate_no ? " (" + esc(s.red_plate_no) + ")" : ""}</td><td class="r val">${money(s.red_plate_deposit)}<div style="font-weight:400;color:#888;font-size:10px">คืนเมื่อคืนป้าย</div></td></tr>` : ""}
   </table></td>
 </tr></table>
 
@@ -1193,6 +1194,7 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
         color: v.color_name || s.model_color, seller: s.seller,
         car_price: s.car_price, discount: s.discount, total_payment: s.total_payment,
         advance_installment: s.advance_installment, installment_amount: s.installment_amount,
+        red_plate_no: s.red_plate_no || "", red_plate_deposit: Number(s.red_plate_deposit) || 0,
         finance_type: s.finance_type, branch_name: s.branch_name || currentUser?.branch || "", branch_code: s.branch_code || currentUser?.branch_code || currentUser?.branch || "",
         line_user_id: s.line_user_id || form.customer_line_user_id || "",
         doc_html: buildSaleHtml(s),
@@ -1212,11 +1214,15 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
     if (!s.sale_no || s.payment_status !== "paid") throw new Error("not paid");
     setLineSending("receipt"); setMessage("");
     try {
+      const rpAmt = Math.min(Number(s.red_plate_deposit) || 0, Number(s.paid_amount) || 0);
+      const pm = Array.isArray(s.payment_methods) ? [...s.payment_methods] : [];
+      if (rpAmt > 0) pm.push({ method: "หัก มัดจำป้ายแดง (แยกใบรับมัดจำ)", amount: -rpAmt });
       await apiPost({
         action: "send_receipt_flex",
         sale_no: s.sale_no, receipt_no: s.receipt_no, receipt_date: s.receipt_date,
-        customer_name: s.customer_name, paid_amount: s.paid_amount,
-        payment_methods: Array.isArray(s.payment_methods) ? s.payment_methods : [],
+        customer_name: s.customer_name, paid_amount: (Number(s.paid_amount) || 0) - rpAmt,
+        payment_methods: pm,
+        red_plate_no: s.red_plate_no || "", red_plate_deposit: rpAmt, red_plate_doc_no: s.red_plate_doc_no || "",
         branch_name: s.branch_name || currentUser?.branch || "", branch_code: s.branch_code || currentUser?.branch_code || currentUser?.branch || "",
         line_user_id: s.line_user_id || form.customer_line_user_id || "",
         doc_html: buildReceiptHtml(s),
@@ -1275,6 +1281,37 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
     const lines = Array.isArray(s.payment_methods) ? s.payment_methods : [];
     let iRows = "", i = 0;
     for (const p of lines) { i++; iRows += `<tr><td class="c">${i}</td><td>${esc(p.method)}${p.account_name ? " · " + esc(p.account_name) : ""}</td><td class="c">1</td><td class="r">${money(p.amount)}</td><td class="r">${money(p.amount)}</td></tr>`; }
+    // มัดจำป้ายแดง: เงินรวมอยู่ใน paid_amount แต่แยกใบ — ใบเสร็จค่ารถหักออก แล้วต่อท้ายด้วยใบรับมัดจำป้ายแดง (RPD)
+    const rpAmt = Math.min(Number(s.red_plate_deposit) || 0, Number(s.paid_amount) || 0);
+    if (rpAmt > 0) { i++; iRows += `<tr><td class="c">${i}</td><td style="color:#b91c1c">หัก มัดจำป้ายแดง — แยกใบรับมัดจำ ${esc(s.red_plate_doc_no || "")}</td><td class="c">1</td><td class="r" style="color:#b91c1c">-${money(rpAmt)}</td><td class="r" style="color:#b91c1c">-${money(rpAmt)}</td></tr>`; }
+    const carPaid = (Number(s.paid_amount) || 0) - rpAmt;
+    const rpHtml = rpAmt > 0 ? `
+<div class="wrap" style="page-break-before:always;margin-top:28px;border-top:2px dashed #bbb;padding-top:14px">
+<div class="hdr">
+  <div class="logo">${logoHtml(lh, esc)}</div>
+  <div class="co"><div class="nm">${esc(lh.name)}</div><div>${esc(lh.addr)}</div><div>${esc(lh.tel)}</div><div>${esc(lh.tax)}</div></div>
+  <div class="ttl" style="width:190px"><div class="b" style="color:#b91c1c;font-size:18px">ใบรับเงินมัดจำป้ายแดง</div><div>Red Plate Deposit</div><div class="o" style="color:#b91c1c">(ต้นฉบับ)</div></div>
+</div>
+<table class="bx"><tr>
+  <td style="width:62%"><div class="sec" style="margin:-5px -8px 5px;padding:3px">ชื่อลูกค้า</div>
+    <div class="val">${esc(s.customer_name)}</div>
+    <div>${esc(s.customer_address || "")}</div>
+  </td>
+  <td style="padding:0"><table class="it" style="border:none">
+    <tr><td class="sec">เลขที่ใบรับมัดจำ</td><td class="sec">วันที่</td></tr>
+    <tr><td class="c val">${esc(s.red_plate_doc_no || "-")}</td><td class="c">${esc(thaiDate(s.receipt_date))}</td></tr>
+    <tr><td class="sec">อ้างอิงใบขาย</td><td class="sec">อ้างอิงใบเสร็จ</td></tr>
+    <tr><td class="c">${esc(s.sale_no)}</td><td class="c">${esc(s.receipt_no || "-")}</td></tr>
+  </table></td>
+</tr></table>
+<table class="bx">
+  <tr><td class="sec" style="width:8%">ลำดับ</td><td class="sec">รายละเอียด</td><td class="sec" style="width:22%">ทะเบียนป้ายแดง</td><td class="sec" style="width:15%">จำนวนเงิน</td></tr>
+  <tr><td class="c">1</td><td>เงินมัดจำป้ายแดง (คืนเต็มจำนวนเมื่อนำป้ายแดงมาคืนร้าน)</td><td class="c val">${esc(s.red_plate_no || "-")}</td><td class="r">${money(rpAmt)}</td></tr>
+  <tr><td colspan="3" class="r tot" style="color:#b91c1c">รวมเงินมัดจำ</td><td class="r tot" style="color:#b91c1c">${money(rpAmt)} บาท</td></tr>
+</table>
+<div style="margin-top:8px;font-size:11px;color:#b91c1c">* เงินมัดจำนี้ไม่ใช่ค่าสินค้า/บริการ ร้านจะคืนให้เต็มจำนวนเมื่อลูกค้านำป้ายแดงมาคืนหลังได้รับป้ายทะเบียนจริง กรุณาเก็บใบนี้ไว้แสดงตอนคืนป้าย</div>
+<div class="foot"><div class="sg">ผู้รับเงิน</div><div class="sg">ผู้ชำระเงิน</div></div>
+</div>` : "";
     const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ใบเสร็จ ${esc(s.receipt_no)}</title>
 <style>
 *{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
@@ -1321,11 +1358,11 @@ table.bx>tbody>tr>td{border:1px solid #047857;padding:5px 8px;font-size:12px;ver
 <table class="bx">
   <tr><td class="sec" style="width:8%">ลำดับ</td><td class="sec">รายละเอียด / ช่องทางรับชำระ</td><td class="sec" style="width:9%">จำนวน</td><td class="sec" style="width:15%">ราคา/หน่วย</td><td class="sec" style="width:15%">จำนวนเงิน</td></tr>
   ${iRows || `<tr><td colspan="5" class="c" style="color:#999">-</td></tr>`}
-  <tr><td colspan="4" class="r tot">รวมรับชำระ</td><td class="r tot">${money(s.paid_amount)} บาท</td></tr>
+  <tr><td colspan="4" class="r tot">รวมรับชำระ${rpAmt > 0 ? "ค่ารถ" : ""}</td><td class="r tot">${money(carPaid)} บาท</td></tr>
 </table>
 ${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ: ${esc(s.payment_received_note)}</div>` : ""}
 <div class="foot"><div class="sg">ผู้รับเงิน</div><div class="sg">ผู้ชำระเงิน</div></div>
-</div></body></html>`;
+</div>${rpHtml}</body></html>`;
     return html;
   }
 

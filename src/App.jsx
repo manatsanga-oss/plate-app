@@ -152,6 +152,7 @@ import ReceiptQrPrintPage from "./pages/ReceiptQrPrintPage";
 import ReceiptIssueFromQrPage from "./pages/ReceiptIssueFromQrPage";
 import RetailSalePage from "./pages/RetailSalePage";
 import BookingDepositPage from "./pages/BookingDepositPage";
+import RedPlateRefundPage from "./pages/RedPlateRefundPage";
 import BookingQueueStatusPage from "./pages/BookingQueueStatusPage";
 import PartImageLookupPage from "./pages/PartImageLookupPage";
 import QuoteViewPage from "./pages/QuoteViewPage";
@@ -237,7 +238,7 @@ export default function App() {
     const explicitPages = getExplicitUserPages(currentUser.pages);
     if (explicitPages) return explicitPages.includes(page);
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "sparedailyorders" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "chequereceive" || page === "mymotoreport" || page === "mymotoregister" || page === "expensedoccheck" || page === "deliveryfee" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "salewizard" || page === "usedmoto" || page === "partgiveawayreport" || page === "receiptentry") return true;
+    if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "sparedailyorders" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "chequereceive" || page === "mymotoreport" || page === "mymotoregister" || page === "expensedoccheck" || page === "deliveryfee" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "redplaterefund" || page === "salewizard" || page === "usedmoto" || page === "partgiveawayreport" || page === "receiptentry") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
     if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "motoinsuranceextra" || page === "cosmosinsurance" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrtimetracking" || page === "hremployees") return false;
     // upload, master data, convert เฉพาะ admin
@@ -510,6 +511,9 @@ export default function App() {
         {activeMenu === "bookingdeposit" && canAccess("bookingdeposit") && (
           <BookingDepositPage currentUser={currentUser} />
         )}
+        {activeMenu === "redplaterefund" && canAccess("redplaterefund") && (
+          <RedPlateRefundPage currentUser={currentUser} />
+        )}
         {activeMenu === "expenserecord" && canAccess("expenserecord") && (
           <ExpenseRecordPage currentUser={currentUser} />
         )}
@@ -780,7 +784,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "deliveryfee", "pricemarkup", "receiptqr", "receiptissue", "retailsale", "bookingdeposit"];
+  const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "deliveryfee", "pricemarkup", "receiptqr", "receiptissue", "retailsale", "bookingdeposit", "redplaterefund"];
   const sparePages = ["spareorder", "sparedailyorders", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "partdeposit", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "partimagesearch", "productgroup", "partstatusinquiry", "partorderinquiry", "partwithdrawal", "partmodelusage"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust", "mailinbox"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "giveawayrules", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
@@ -832,10 +836,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="pricemarkup" label="ราคาขายบวกเพิ่ม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="receiptqr" label="พิมพ์ QR ออกใบเสร็จ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="receiptissue" label="ออกใบเสร็จจาก QR" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuSubGroup title="ขายรถ" pages={["retailsale", "bookingdeposit", "salewizard", "usedmoto", "salemoneyreport"]} activeMenu={activeMenu} canAccess={canAccess}>
+        <MenuSubGroup title="ขายรถ" pages={["retailsale", "bookingdeposit", "redplaterefund", "salewizard", "usedmoto", "salemoneyreport"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="salewizard" label="บันทึกขาย NEW" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="retailsale" label="ค้นหาใบขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="bookingdeposit" label="มัดจำจองรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="redplaterefund" label="คืนมัดจำป้ายแดง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="usedmoto" label="รถมือสอง (รับซื้อ/ขาย)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="salemoneyreport" label="สรุปรายวันรับเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>

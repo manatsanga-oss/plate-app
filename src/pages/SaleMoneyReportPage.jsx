@@ -55,12 +55,13 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [umRows, setUmRows] = useState([]);           // ขายรถมือสอง (used_moto_stock)
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [rpRefundRows, setRpRefundRows] = useState([]); // คืนเงินมัดจำป้ายแดง (จ่ายออก) — หักจากเงินสด/โอนของวัน
 
   async function load() {
     setLoading(true);
     setMessage("");
     try {
-      const [res, resDep, resPartDep, resRcpt, resPs, resUm] = await Promise.all([
+      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp] = await Promise.all([
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
@@ -85,6 +86,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sales", date_from: dateFrom, date_to: dateTo }),
         }).catch(() => null),
+        fetch(RETAIL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_red_plate_deposits", status: "refunded", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
       ]);
       const data = await res.json().catch(() => []);
       setRows(Array.isArray(data) ? data : []);
@@ -99,6 +104,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
       setPsRows(Array.isArray(ps) ? ps.filter(p => p && p.payment_id && p.status === "active") : []);
       const um = resUm ? await resUm.json().catch(() => []) : [];
       setUmRows(Array.isArray(um) ? um.filter(u => u && u.id && u.status === "sold") : []);
+      const rp = resRp ? await resRp.json().catch(() => []) : [];
+      setRpRefundRows(Array.isArray(rp) ? rp.filter(d => d && d.deposit_no && d.status === "refunded") : []);
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
       setRows([]);
@@ -143,8 +150,9 @@ export default function SaleMoneyReportPage({ currentUser }) {
     rcptRows.forEach((r2) => add(r2.branch_code, r2.branch_code));
     psRows.forEach((p) => add(p.branch_code, p.branch_code));
     umRows.forEach((u) => add(u.branch_code, u.branch_code));
+    rpRefundRows.forEach((d) => add(d.branch_code, d.branch_name || d.branch_code));
     return [...map.entries()].map(([key, label]) => ({ key, label })).sort((a, b) => a.key.localeCompare(b.key));
-  }, [rows, depRows, partDepRows, rcptRows, psRows, umRows]);
+  }, [rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows]);
 
   const sumOf = (list) => {
     const t = { sale: 0, received: 0 };
@@ -293,8 +301,24 @@ export default function SaleMoneyReportPage({ currentUser }) {
         refunded: d.status === "refunded" || !!d.refunded_at,
       };
     });
-    return [...sales, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs];
-  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, branch, isAdmin, myBranch]);
+    // คืนเงินมัดจำป้ายแดง = เงินจ่ายออกจากลิ้นชัก/บัญชี → ติดลบในคอลัมน์เงินสด/โอน (ยอดรับ 200 ตอนขายอยู่ในใบขายแล้ว)
+    const rpRefunds = rpRefundRows
+      .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
+      .map((d) => {
+        const amt = -num(d.refund_amount);
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+        split[methodKey(d.refund_method || "เงินสด")] += amt;
+        return {
+          kind: "red_plate_refund", category: "คืนเงินมัดจำป้ายแดง (จ่ายออก)",
+          doc_no: d.refund_doc_no || d.deposit_no, date: d.refund_date, ref_no: d.sale_no || "",
+          customer_name: d.customer_name, seller: d.refund_by || "", saleAmount: 0,
+          split, received: amt,
+          branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
+          note: ["ป้ายแดง " + (d.plate_no || "-"), "อ้างอิง " + d.deposit_no, d.refund_account_name, d.refund_note].filter(Boolean).join(" · "),
+        };
+      });
+    return [...sales, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds];
+  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {
