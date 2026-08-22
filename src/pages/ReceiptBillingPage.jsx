@@ -467,7 +467,7 @@ ${transferSummary.length > 0 ? `
         // เฉพาะใบจากระบบ: "ค่าต่อภาษี" ยอดบิล = ยอดรายได้ + 20 บาท (เฉพาะที่ยังไม่วางบิล — ที่วางแล้วใช้ยอดที่บันทึกไว้)
         // "ตรวจสภาพต่อภาษี" ยอดบิล = ยอดรายได้ตรง ๆ (ค่าตรวจ ตรอ. ไม่บวกค่าบริการ)
         .map(r => {
-          if (!isSystemReceipt(r.receipt_no) || r.batch_billed_at) return r;
+          if (!isSystemReceipt(r.receipt_no) || r.billed_at || r.batch_billed_at) return r; // วางบิลแล้ว → ใช้ยอดที่บันทึกไว้ (ฟิลด์จริงคือ billed_at)
           const nm = String(r.income_name || "").trim();
           if (nm === "ค่าต่อภาษี") {
             const amt = Math.round((Number(r.net_price || 0) + 20) * 100) / 100;
