@@ -10,6 +10,8 @@ const SERVICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-h
 const CUSTOMER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
 // ใบแจ้งซ่อม NID (honda_repair_jobs) — เช็ค close_date จากเลข Job เพื่อปิดงานซ่อมอัตโนมัติ
 const SERVICE_JOB_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-api";
+const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // list_payments — เช็คว่าใบ Job ที่ปิดงานแล้วมีรับชำระ (พนักงานพิมพ์เลข Job ถูก)
+const normJob = (v) => String(v == null ? "" : v).trim().toUpperCase().replace(/\s+/g, "");
 const phoneLast9 = (p) => String(p || "").replace(/[^0-9]/g, "").slice(-9);
 
 async function api(action, extra = {}) {
@@ -81,8 +83,26 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [partSubstitutes, setPartSubstitutes] = useState([]);
   const [pdoSoldMap, setPdoSoldMap] = useState({}); // order_id → ผลเช็คบิลขายปลีก DCS (honda_part_sales RTSL) ของใบ PDO
   const [vehInfo, setVehInfo] = useState(null); // รุ่น/แบบ/type ของรถลูกค้า — ค้นจากเลขตัวถังในใบมัดจำ (ประวัติขาย moto_sales)
+  const [paidJobMap, setPaidJobMap] = useState({}); // เลข Job (normalize) → เลขใบเสร็จ PSR- ที่รับชำระแล้ว (active) — ใส่ ✓ หลังเลข Job ใบปิดงานซ่อม
 
   useEffect(() => { loadAll(); }, []);
+  // รายการรับชำระค่าอะไหล่/บริการทั้งหมด → map เลขเอกสารอ้างอิง (เลข Job) ไว้เทียบกับใบปิดงานซ่อม
+  useEffect(() => {
+    let alive = true;
+    fetch(PART_SVC_PAY_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_payments" }) })
+      .then(r => r.json()).then(d => {
+        if (!alive) return;
+        const list = Array.isArray(d) ? d : (d?.data || []);
+        const m = {};
+        for (const p of list) {
+          if (!p || p.status !== "active" || !p.doc_no) continue;
+          const k = normJob(p.doc_no);
+          if (k) m[k] = [m[k], p.receipt_no].filter(Boolean).join(", ");
+        }
+        setPaidJobMap(m);
+      }).catch(() => {});
+    return () => { alive = false; };
+  }, [orders.length]);
 
   // เลขตัวถังเปลี่ยน (เลือกใบมัดจำ/เปิดแก้ไข) → ค้นรุ่น/แบบ/type จากประวัติขายอัตโนมัติ
   useEffect(() => {
@@ -1173,7 +1193,15 @@ export default function SparePartsOrderPage({ currentUser }) {
                   )}
                 </td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
-                <td style={td}>{o.job_no && o.job_no !== "null" ? o.job_no : "-"}</td>
+                <td style={td}>{o.job_no && o.job_no !== "null" ? (
+                  <>
+                    {o.job_no}
+                    {/* ใบปิดงานซ่อม: เทียบกับรับชำระค่าอะไหล่/บริการ — ✓ มีใบเสร็จเลข Job ตรง · ⚠️ ไม่พบ (พิมพ์เลขผิดหรือยังไม่รับเงิน) */}
+                    {o.status === "ปิดงานซ่อม" && !String(o.deposit_doc_no || "").startsWith("PDO") && (paidJobMap[normJob(o.job_no)]
+                      ? <span title={"รับชำระแล้ว: " + paidJobMap[normJob(o.job_no)]} style={{ color: "#059669", fontWeight: 700, marginLeft: 4 }}>✓</span>
+                      : <span title="ยังไม่พบรับชำระเลข Job นี้ — ตรวจว่าพิมพ์เลข Job ถูกหรือยังไม่เก็บเงิน" style={{ color: "#d97706", marginLeft: 4 }}>⚠️</span>)}
+                  </>
+                ) : "-"}</td>
                 <td style={td}>{o.appointment_date ? (
                   o.appointment_by === "customer" ? (
                     // ลูกค้ากดเลือกวันเองผ่านลิงก์ใน LINE — โชว์เขียวให้ต่างจากที่พนักงานบันทึก

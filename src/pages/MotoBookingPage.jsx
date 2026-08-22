@@ -480,8 +480,9 @@ export default function MotoBookingPage({ currentUser }) {
       .replace(/[()（）]/g, "")
       .replace(/\s+/g, "")
       .toLowerCase();
-    const idx = str.indexOf("th");
-    if (idx !== -1) str = str.substring(0, idx + 2);
+    // ตัดข้อความหลังรหัสแบบทิ้ง แต่คงเลข type พิเศษไว้ (TH8/TH3 = สีพิเศษ ต้องได้สต๊อก type เดียวกันถึงจะนับว่ารถถึงคิว — user 2026-08-22)
+    const m = str.match(/th\d*/);
+    if (m) str = str.substring(0, m.index + m[0].length);
     return str;
   };
   const normColor = (s) => String(s || "").normalize("NFKC")
