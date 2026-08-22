@@ -13,6 +13,17 @@ import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup"
 // backend: n8n webhook retail-sale-api (actions: get_vehicle / save_sale / cancel_sale)
 // ============================================================================
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+
+// กฎกลุ่มไฟแนนท์ที่มี note "exclude:CODE1,CODE2,BIGBIKE" → ไม่ใช้กับรุ่น/แบบที่ระบุ (เทียบแบบขึ้นต้นด้วยรหัส เช่น ADV160 ครอบ ADV160AT) · BIGBIKE = ประเภทรถมีคำว่า BIG (2026-08-22)
+function excludedByNote(note, codes, vehicleTypeName) {
+  const m = String(note || "").match(/^exclude:(.*)$/i);
+  if (!m) return false;
+  const norm = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const toks = m[1].split(",").map(norm).filter(Boolean);
+  const cs = (codes || []).map(norm).filter(Boolean);
+  const isBig = /BIG/i.test(String(vehicleTypeName || ""));
+  return toks.some((t) => (t === "BIGBIKE" && isBig) || cs.some((c) => c.startsWith(t) || t.startsWith(c)));
+}
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const LINE_LOG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-line-log";
@@ -488,7 +499,7 @@ export default function RetailSalePage({ currentUser }) {
         return true;
       }
       if (e.group_by === "cc" && rowCC && Number(e.engine_cc) === rowCC) return true;
-      if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return true;
+      if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return !excludedByNote(e.note, [vehicle?.model_code, sel.model_code, sel.series_name, sel.marketing_name], sel.vehicle_type_name || vehicle?.vehicle_type_name);
       if (e.group_by === "series") {
         const [sid, pc] = String(e.note || "").split("|");
         if (String(sid) !== String(sel.series_id)) return false;

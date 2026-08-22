@@ -313,7 +313,7 @@ export default function MotoExpensePage({ currentUser }) {
   const seriesName = (id) => { const s = motoSeries.find(x => String(x.series_id) === String(id)); return s ? (s.marketing_name || s.series_name) : id; };
   const groupLabel = (e) => {
     if (e.group_by === "cc") return e.engine_cc ? e.engine_cc + " cc" : "-";
-    if (e.group_by === "finance") return e.company_name || "-";
+    if (e.group_by === "finance") return (e.company_name || "-") + (/^exclude:/i.test(String(e.note || "")) ? " · ยกเว้น " + String(e.note).replace(/^exclude:/i, "") : "");
     if (e.group_by === "brand") return e.brand_name || "-";
     if (e.group_by === "series") { if (!e.note) return "-"; const [sid, pc] = String(e.note).split("|"); const pl = pc === "cash" ? " · เงินสด" : pc === "finance" ? " · ไฟแนนซ์" : ""; return seriesName(sid) + pl; }
     if (e.group_by === "type") { const pc = String(e.note || "").trim(); const pl = pc === "cash" ? " · เงินสด" : pc === "finance" ? " · ไฟแนนซ์" : ""; return (e.type_name || "-") + pl; }
@@ -550,6 +550,12 @@ export default function MotoExpensePage({ currentUser }) {
                   <option value="">-- เลือกบริษัท --</option>
                   {companies.map(c => <option key={c.company_id} value={c.company_id}>{c.company_name}</option>)}
                 </select>
+                {/* ยกเว้นรุ่น/แบบ (2026-08-22): กฎไฟแนนท์ขึ้นทุกรุ่น ยกเว้นรหัสที่ระบุ — เก็บใน note เป็น exclude:CODE1,CODE2 · BIGBIKE = ยกเว้นประเภท BIG BIKE ทั้งหมด */}
+                <label style={{ display: "block", margin: "10px 0 4px", fontWeight: 600, fontSize: 14 }}>ยกเว้นรุ่น/แบบ <span style={{ fontWeight: 400, color: "#6b7280", fontSize: 12 }}>(ไม่บังคับ — รหัสรุ่นหรือแบบ คั่นด้วยจุลภาค · พิมพ์ BIGBIKE = ยกเว้นบิ๊กไบค์ทั้งหมด)</span></label>
+                <input value={String(form.note || "").replace(/^exclude:/i, "")}
+                  onChange={e => { const v = e.target.value; setForm({ ...form, note: v.trim() ? "exclude:" + v : "" }); }}
+                  placeholder="เช่น WW160SV, ADV160, CBR150, CBF150, BIGBIKE"
+                  style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
               </div>
             )}
 

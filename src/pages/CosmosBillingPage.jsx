@@ -41,6 +41,7 @@ export default function CosmosBillingPage({ currentUser }) {
           ["payment", "💵 บันทึกจ่ายเงิน"],
           ["history", "📋 ประวัติการจ่ายเงิน"],
           ["overpaid", "💱 เงินชำระเกิน รอโอนคืน"],
+          ["recon", "🛡️ กระทบยอดใบขาย NEW"],
         ].map(([v, label]) => (
           <button key={v} onClick={() => { setMode(v); setMessage(""); }}
             style={{ padding: "10px 20px", border: "none", background: "transparent", cursor: "pointer", fontFamily: "Tahoma", fontSize: 14, fontWeight: 600,
@@ -60,6 +61,169 @@ export default function CosmosBillingPage({ currentUser }) {
       {mode === "payment" && <PaymentPanel currentPlan={currentPlan} setMessage={setMessage} currentUser={currentUser} />}
       {mode === "history" && <HistoryPanel currentPlan={currentPlan} setMessage={setMessage} />}
       {mode === "overpaid" && <OverpaidPanel currentPlan={currentPlan} setMessage={setMessage} currentUser={currentUser} />}
+      {mode === "recon" && <TheftReconPanel setMessage={setMessage} />}
+    </div>
+  );
+}
+
+// ===== กระทบยอด ใบขาย NEW ↔ กรมธรรม์ประกันรถหาย COSMOS (2026-08-22) =====
+// ของแถมประกันรถหาย COSMOS คำนวณจากกฎโปร (ไม่ได้เก็บรายใบ): ปีต่อ = กฎกลุ่มไฟแนนท์ชื่อมี "ปีต่อ" + COSMOS (ยกเว้นรุ่นตาม note exclude:), เงินสด = กฎรุ่นชื่อ "ประกันรถหายเงินสด"
+// จับคู่กับกรมธรรม์ COSMOS (cosmos_theft plan theft/theft_renewal) ด้วยเลขตัวถัง → หาใบขายที่ควรมีกรมธรรม์แต่ไม่พบ / กรมธรรม์ที่ไม่ตรงกฎ
+const RETAIL_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+function TheftReconPanel({ setMessage }) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [dateFrom, setDateFrom] = useState("2026-08-01");
+  const [dateTo, setDateTo] = useState(today);
+  const [loading, setLoading] = useState(false);
+  const [sales, setSales] = useState([]);
+  const [policies, setPolicies] = useState([]);
+  const [rules, setRules] = useState([]);
+  const [series, setSeries] = useState([]);
+  const [filter, setFilter] = useState("issue");
+  const [kw, setKw] = useState("");
+
+  const post = async (url, body) => {
+    const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const t = await r.text(); return t.trim() ? JSON.parse(t) : [];
+  };
+  async function load() {
+    setLoading(true); setMessage("");
+    try {
+      const [s, p, r, se] = await Promise.all([
+        post(RETAIL_URL, { action: "list_retail_sales", date_from: dateFrom, date_to: dateTo, limit: 3000 }),
+        post(API_URL, { action: "list_cosmos_all" }),
+        post(MASTER_URL, { action: "get_sale_expenses" }),
+        post(MASTER_URL, { action: "get_series" }),
+      ]);
+      const arr = (x) => (Array.isArray(x) ? x : Array.isArray(x?.data) ? x.data : []);
+      setSales(arr(s).filter((x) => x && x.invoice_no));
+      setPolicies(arr(p).filter((x) => x && ["theft", "theft_renewal"].includes(x.plan)));
+      setRules(arr(r).filter((x) => x && x.expense_type === "promotion" && x.status === "active"));
+      setSeries(arr(se));
+    } catch { setMessage("❌ โหลดข้อมูลไม่สำเร็จ"); }
+    setLoading(false);
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const normC = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const isTheftName = (n) => /ประกันรถหาย|รถหาย/.test(String(n || "").replace(/\s+/g, ""));
+  const isCosmos = (g) => /COSMOS|คอสมอส/i.test(String(g.expense_name || "") + " " + String(g.category || ""));
+  const inRange = (e, d) => {
+    const eff = e.effective_date ? String(e.effective_date).slice(0, 10) : "";
+    const end = e.end_date ? String(e.end_date).slice(0, 10) : "";
+    return !((eff && eff > d) || (end && end < d));
+  };
+  const excluded = (note, codes) => {
+    const m = String(note || "").match(/^exclude:(.*)$/i);
+    if (!m) return false;
+    const toks = m[1].split(",").map(normC).filter(Boolean);
+    const cs = codes.map(normC).filter(Boolean);
+    return toks.some((t) => t !== "BIGBIKE" && cs.some((c) => c.startsWith(t) || t.startsWith(c)));
+  };
+  const normCo = (v) => String(v || "").replace(/บริษัท|จำกัด|\(มหาชน\)|\s+/g, "");
+  const shortCo = (v) => String(v || "").replace(/บริษัท |จำกัด|\(มหาชน\)/g, "").trim();
+  // ใบขาย → ของแถมประกันรถหาย COSMOS ที่ "ควรมี" ตามกฎ
+  const expectOf = (sale) => {
+    const d = String(sale.sale_date || "").slice(0, 10);
+    const codes = [sale.model_code, sale.model_name];
+    const fin = sale.finance_type === "moto";
+    const out = [];
+    for (const e of rules) {
+      if (!isTheftName(e.expense_name) || !isCosmos(e) || !inRange(e, d)) continue;
+      if (e.group_by === "finance") {
+        if (!fin || normCo(e.company_name) !== normCo(sale.finance_company_name)) continue;
+        if (excluded(e.note, codes)) continue;
+        out.push({ kind: /ปีต่อ/.test(e.expense_name) ? "theft_renewal" : "theft", name: e.expense_name, amount: Number(e.amount) || 0 });
+      } else if (e.group_by === "series") {
+        const [sid, pc] = String(e.note || "").split("|");
+        const sr = series.find((x) => String(x.series_id) === String(sid));
+        if (!sr) continue;
+        const mc = normC(sale.model_code), sn = normC(sr.series_name);
+        if (!(mc && sn && (mc.startsWith(sn) || normC(sale.model_name).startsWith(sn)))) continue;
+        if ((pc || "all") === "cash" && fin) continue;
+        if ((pc || "all") === "finance" && !fin) continue;
+        out.push({ kind: "theft", name: e.expense_name, amount: Number(e.amount) || 0 });
+      }
+    }
+    return out;
+  };
+  const polByChassis = {};
+  for (const p of policies) { const k = normC(p.chassis_no); if (k) (polByChassis[k] = polByChassis[k] || []).push(p); }
+  const saleChassis = new Set(sales.map((x) => normC(x.chassis_no)).filter(Boolean));
+
+  const rows = sales.map((sale) => {
+    const exp = expectOf(sale);
+    const pols = polByChassis[normC(sale.chassis_no)] || [];
+    let status, note = "";
+    if (exp.length === 0 && pols.length === 0) status = "none";
+    else if (exp.length > 0 && pols.length === 0) { status = "missing"; note = "ควรมีกรมธรรม์ " + exp.map((e) => e.name).join(", ") + " แต่ไม่พบ (ยังไม่อัปโหลด/ยังไม่ซื้อ)"; }
+    else if (exp.length === 0 && pols.length > 0) { status = "unexpected"; note = "มีกรมธรรม์ " + pols.map((p) => p.plan_name || p.plan).join(", ") + " แต่กฎโปรไม่ได้ให้ (ไฟแนนท์/รุ่นไม่เข้ากฎ)"; }
+    else {
+      const expKinds = new Set(exp.map((e) => e.kind)), polKinds = new Set(pols.map((p) => p.plan));
+      const miss = [...expKinds].filter((k) => !polKinds.has(k)), extra = [...polKinds].filter((k) => !expKinds.has(k));
+      if (!miss.length && !extra.length) status = "ok";
+      else { status = "mismatch"; note = (miss.length ? "ขาด " + miss.join(",") : "") + (extra.length ? " เกิน " + extra.join(",") : ""); }
+    }
+    return { sale, exp, pols, status, note };
+  });
+  const orphanPolicies = policies.filter((p) => { const k = normC(p.chassis_no); return k && !saleChassis.has(k); });
+
+  const kwl = kw.trim().toLowerCase();
+  const shown = rows.filter((r) => {
+    if (filter === "issue" && !["missing", "unexpected", "mismatch"].includes(r.status)) return false;
+    if (kwl && ![r.sale.invoice_no, r.sale.customer_name, r.sale.chassis_no, r.sale.finance_company_name, r.sale.model_name].some((v) => String(v || "").toLowerCase().includes(kwl))) return false;
+    return true;
+  });
+  const cnt = (st) => rows.filter((r) => r.status === st).length;
+  const badge = (st) => {
+    const m = { ok: ["✅ ตรง", "#dcfce7", "#166534"], missing: ["⚠️ ไม่พบกรมธรรม์", "#fef3c7", "#92400e"], unexpected: ["❓ มีกรมธรรม์แต่ไม่เข้ากฎ", "#fee2e2", "#991b1b"], mismatch: ["⚠️ แผนไม่ตรง", "#fee2e2", "#991b1b"], none: ["— ไม่เกี่ยว", "#f3f4f6", "#6b7280"] }[st];
+    return <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 12, fontWeight: 700, background: m[1], color: m[2], whiteSpace: "nowrap" }}>{m[0]}</span>;
+  };
+  const th = { padding: "8px 6px", fontSize: 12, textAlign: "left", background: "#072d6b", color: "#fff", whiteSpace: "nowrap" };
+  const td = { padding: "7px 6px", fontSize: 13, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" };
+  const inp = { padding: "7px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14 };
+  const finRules = rules.filter((e) => e.group_by === "finance" && isTheftName(e.expense_name) && isCosmos(e));
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+        <span>ใบขาย NEW ตั้งแต่</span><input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inp} />
+        <span>ถึง</span><input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inp} />
+        <button onClick={load} disabled={loading} style={{ padding: "8px 16px", background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, cursor: "pointer" }}>{loading ? "กำลังโหลด..." : "🔍 กระทบยอด"}</button>
+        <input value={kw} onChange={(e) => setKw(e.target.value)} placeholder="ค้นหา ใบขาย/ลูกค้า/เลขถัง/ไฟแนนท์" style={{ ...inp, width: 280 }} />
+        <select value={filter} onChange={(e) => setFilter(e.target.value)} style={inp}>
+          <option value="issue">เฉพาะที่มีปัญหา</option>
+          <option value="all">ทุกใบขาย</option>
+        </select>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12, fontSize: 13 }}>
+        {[["ok", "✅ ตรง"], ["missing", "⚠️ ควรมีแต่ไม่พบกรมธรรม์"], ["unexpected", "❓ มีกรมธรรม์แต่ไม่เข้ากฎ"], ["mismatch", "⚠️ แผนไม่ตรง"], ["none", "ไม่เกี่ยว"]].map(([k, l]) => (
+          <span key={k} style={{ padding: "4px 10px", borderRadius: 8, background: "#f3f4f6" }}>{l}: <b>{cnt(k)}</b></span>
+        ))}
+        <span style={{ padding: "4px 10px", borderRadius: 8, background: "#f3f4f6" }}>กรมธรรม์ที่ไม่พบใบขาย NEW ในช่วงนี้: <b>{orphanPolicies.length}</b> (ใบขายจาก upload/ก่อนช่วง)</span>
+      </div>
+      <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
+        กฎ: ปีต่อ COSMOS = ผ่อนกับ {finRules.map((e) => shortCo(e.company_name)).join(" / ") || "-"} (ยกเว้นรุ่นตามกฎ) · เงินสด = กฎ "ประกันรถหายเงินสด" รายรุ่น · ใบที่ "ไม่พบกรมธรรม์" อาจเพราะยังไม่อัปโหลดไฟล์ COSMOS ของเดือนนั้น
+      </div>
+      <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 10, background: "#fff" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr><th style={th}>ใบขาย</th><th style={th}>วันที่</th><th style={th}>ลูกค้า</th><th style={th}>รถ / เลขถัง</th><th style={th}>ไฟแนนท์</th><th style={th}>ควรมี (ตามกฎ)</th><th style={th}>กรมธรรม์ COSMOS ที่พบ</th><th style={th}>สถานะ</th></tr></thead>
+          <tbody>
+            {shown.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 20 }}>{loading ? "กำลังโหลด..." : "ไม่มีรายการ"}</td></tr>}
+            {shown.map((r) => (
+              <tr key={r.sale.invoice_no}>
+                <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#1d4ed8" }}>{r.sale.invoice_no}</td>
+                <td style={td}>{fmtDate(r.sale.sale_date)}</td>
+                <td style={td}>{r.sale.customer_name}</td>
+                <td style={td}>{[r.sale.brand, r.sale.model_name || r.sale.model_code].filter(Boolean).join(" ")}<div style={{ fontFamily: "monospace", fontSize: 12, color: "#6b7280" }}>{r.sale.chassis_no}</div></td>
+                <td style={td}>{r.sale.finance_type === "moto" ? shortCo(r.sale.finance_company_name) : "เงินสด"}</td>
+                <td style={td}>{r.exp.length ? r.exp.map((e, i) => <div key={i}>{e.name} <span style={{ color: "#6b7280" }}>({fmt(e.amount)})</span></div>) : "-"}</td>
+                <td style={td}>{r.pols.length ? r.pols.map((p) => <div key={p.app_no}><b>{p.plan_name || p.plan}</b> · {p.app_no} · {fmt(p.premium)}{p.invoice_no ? <span style={{ color: "#6b7280" }}> · {p.invoice_no}</span> : null}</div>) : "-"}</td>
+                <td style={td}>{badge(r.status)}{r.note && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{r.note}</div>}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -13,6 +13,17 @@ const USED_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-ap
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
 
+// กฎกลุ่มไฟแนนท์ที่มี note "exclude:CODE1,CODE2,BIGBIKE" → ไม่ใช้กับรุ่น/แบบที่ระบุ (เทียบแบบขึ้นต้นด้วยรหัส เช่น ADV160 ครอบ ADV160AT) · BIGBIKE = ประเภทรถมีคำว่า BIG (2026-08-22)
+function excludedByNote(note, codes, vehicleTypeName) {
+  const m = String(note || "").match(/^exclude:(.*)$/i);
+  if (!m) return false;
+  const norm = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const toks = m[1].split(",").map(norm).filter(Boolean);
+  const cs = (codes || []).map(norm).filter(Boolean);
+  const isBig = /BIG/i.test(String(vehicleTypeName || ""));
+  return toks.some((t) => (t === "BIGBIKE" && isBig) || cs.some((c) => c.startsWith(t) || t.startsWith(c)));
+}
+
 // หัวกระดาษเอกสาร แยกบริษัท ป.เปา (HONDA) / สิงห์ชัย (YAMAHA) — fallback เมื่อโหลด branch_master ไม่ได้
 // ปกติหัวกระดาษจริงดึงจาก branch_master ตามสาขาของใบขาย (เหมือนหน้าบันทึกขายปลีก)
 const LETTERHEAD = {
@@ -577,7 +588,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     const jobs = [
       { file: actFile, doc_type: "act", label: "พ.ร.บ." },
       { file: cosmosFile, doc_type: "cosmos", label: "3PLUS/RSA/PA" },
-      { file: docFile, doc_type: "doc", label: "ประกันรถหาย" },
+      { file: docFile, doc_type: "doc", label: "กรมธรรม์ประกันรถหาย COSMOS" },
     ].filter(j => j.file);
     if (!jobs.length) return;
     for (const j of jobs) {
@@ -816,7 +827,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         return true;
       }
       if (e.group_by === "cc" && rowCC && Number(e.engine_cc) === rowCC) return true;
-      if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return true;
+      if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return !excludedByNote(e.note, [selUnit?.model, selUnit?.model_code, selSeries?.series_name, selSeries?.marketing_name], selType?.vehicle_type_name);
       if (e.group_by === "series") {
         const [sid, pc] = String(e.note || "").split("|");
         if (String(sid) !== String(sel.series_id)) return false;
@@ -923,12 +934,17 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // ประกันรถหายจากโปรโมชั่นที่ติ๊กไว้ — ร้านออกแทน (ไฟแนนซ์หักจากยอดโอน) ไม่เก็บลูกค้า ไม่บวกเข้ายอดชำระ
   // ใช้เติม theft_insurance_amount อัตโนมัติ พนักงานไม่ต้องกรอกช่อง "ประกันรถหาย" (กรอกเองเฉพาะเคสลูกค้าจ่ายเบี้ยเอง)
   const isTheftName = (name) => /ประกันรถหาย|รถหาย/.test(String(name || "").replace(/\s+/g, ""));
+  // นับเฉพาะประกันรถหายที่ไฟแนนท์ออกแทน (หักจากยอดโอน) — กรมธรรม์ COSMOS (ปีต่อ/เงินสด หมวด "ประกัน คอสมอส") เป็นของแถมที่ร้านซื้อเอง ไม่ใช่ยอดไฟแนนท์หัก (2026-08-22)
+  const isCosmos = (g) => /COSMOS|คอสมอส/i.test(String(g.expense_name || "") + " " + String(g.category || ""));
+  const isFinTheft = (g) => isTheftName(g.expense_name) && !isCosmos(g);
+  // ใบขายนี้มีประกันรถหาย COSMOS (ปีต่อ/เงินสด) ที่ติ๊กไว้ → มีกรมธรรม์ให้ส่งลูกค้า (ของไฟแนนท์ออกแทนไม่มีเอกสาร)
+  const hasCosmosTheft = applicableGiveaways.some((g) => selectedGiveaways[g.expense_id] && isTheftName(g.expense_name) && isCosmos(g));
   const promoTheft = applicableGiveaways
-    .filter((g) => selectedGiveaways[g.expense_id] && isTheftName(g.expense_name))
+    .filter((g) => selectedGiveaways[g.expense_id] && isFinTheft(g))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
   // ติ๊ก "ค่าประกันรถหาย" ออกจากของแถม = ลูกค้าจ่ายเบี้ยเอง → บวกเข้ายอดเก็บลูกค้า (user กำหนด 2026-08-20)
   const unpromoTheft = applicableGiveaways
-    .filter((g) => !selectedGiveaways[g.expense_id] && isTheftName(g.expense_name))
+    .filter((g) => !selectedGiveaways[g.expense_id] && isFinTheft(g))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
   // เบี้ยส่วนที่ลูกค้าจ่ายเอง: ช่องกรอกชนะเสมอ ไม่กรอกใช้ยอดโปรที่ติ๊กออก
   const custPaidTheft = num(finTheft) > 0 ? num(finTheft) : unpromoTheft;
@@ -2320,13 +2336,16 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                             const files = [
                               { file: actFile, label: "พ.ร.บ." },
                               { file: cosmosFile, label: "3PLUS/RSA/PA" },
-                              { file: docFile, label: "ประกันรถหาย" },
+                              { file: docFile, label: "กรมธรรม์ประกันรถหาย COSMOS" },
                             ].filter(x => x.file);
                             return (
                               <>
                                 {pickRow("เอกสาร พ.ร.บ. ลูกค้า", "#faf5ff", "#e9d5ff", "#6b21a8", "#7c3aed", actFile, setActFile)}
                                 {pickRow("เอกสาร 3PLUS/RSA/PA", "#eff6ff", "#bfdbfe", "#1e40af", "#0369a1", cosmosFile, setCosmosFile)}
-                                {pickRow("เอกสารประกันรถหาย (PDF)", "#f0fdfa", "#99f6e4", "#0f766e", "#0f766e", docFile, setDocFile)}
+                                {/* กรมธรรม์ COSMOS: ขึ้นเฉพาะใบขายที่มีประกันรถหาย COSMOS (ปีต่อ/เงินสด) — ประกันรถหายที่ไฟแนนท์ออกแทนไม่มีเอกสาร (2026-08-22) */}
+                                {hasCosmosTheft
+                                  ? pickRow("กรมธรรม์ประกันรถหาย COSMOS (PDF)", "#f0fdfa", "#99f6e4", "#0f766e", "#0f766e", docFile, setDocFile)
+                                  : <div style={{ marginTop: 8, fontSize: 12, color: "#9ca3af" }}>ใบขายนี้ไม่มีกรมธรรม์ประกันรถหาย COSMOS (ประกันรถหายที่ไฟแนนท์ออกแทนไม่มีเอกสารให้ส่ง)</div>}
 
                                 <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
                                   {docsSent ? (
