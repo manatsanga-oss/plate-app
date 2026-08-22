@@ -144,9 +144,16 @@ function monthsLate(dueISO, payISO) {
   return Math.max(m, 1);
 }
 // คำนวณภาษีค้าง + เงินเพิ่มรายปี + ธงตรวจสภาพ — registerISO=วันจดทะเบียน, expireISO=วันสิ้นอายุภาษีเดิม, payISO=วันที่คาดว่าจะยื่น
+const MC_LATE_GRACE_DAYS = 7; // ยื่นใกล้วันสิ้นอายุ (ห่างไม่เกิน 7 วัน หรือวันเดียวกัน) → เผื่อเงินเพิ่ม 1 เดือนไว้ก่อน กันยื่นจริงเลื่อนไปพฤหัสถัดไปแล้วโดน 1% (user เลือก 2026-08-22)
 function calcMcTax(registerISO, expireISO, payISO) {
-  const expire = new Date(expireISO + "T00:00:00"), pay = new Date(payISO + "T00:00:00");
+  const expire = new Date(expireISO + "T00:00:00");
+  let pay = new Date(payISO + "T00:00:00");
   if (isNaN(expire) || isNaN(pay)) return null;
+  const daysToExpire = Math.round((expire - pay) / 86400000);
+  if (daysToExpire >= 0 && daysToExpire <= MC_LATE_GRACE_DAYS) {
+    pay = new Date(expire); pay.setDate(pay.getDate() + 1);
+    payISO = localISO(pay);
+  }
   // ไล่ทีละปีภาษีที่ครบกำหนดแล้วยังไม่จ่าย (due < วันยื่น)
   const years = [];
   let due = new Date(expire);

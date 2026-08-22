@@ -462,12 +462,20 @@ ${transferSummary.length > 0 ? `
       };
       const list = (Array.isArray(data) ? data : [])
         // เฉพาะใบจากระบบ: "ค่าบริการต่อภาษี" = บรรทัดค่าบริการที่แยกจากค่าต่อภาษี (รวม VAT) — ไม่ต้องวางบิล (วางบิลที่บรรทัดค่าต่อภาษีแทน)
-        .filter(r => !(isSystemReceipt(r.receipt_no) && String(r.income_name || "").trim() === "ค่าบริการต่อภาษี"))
+        // + "ค่าบริการตรวจสภาพต่อภาษี" (190) = ค่าบริการร้าน ไม่วางบิลเช่นกัน (user 2026-08-22)
+        .filter(r => !(isSystemReceipt(r.receipt_no) && ["ค่าบริการต่อภาษี", "ค่าบริการตรวจสภาพต่อภาษี"].includes(String(r.income_name || "").trim())))
         // เฉพาะใบจากระบบ: "ค่าต่อภาษี" ยอดบิล = ยอดรายได้ + 20 บาท (เฉพาะที่ยังไม่วางบิล — ที่วางแล้วใช้ยอดที่บันทึกไว้)
+        // "ตรวจสภาพต่อภาษี" ยอดบิล = ยอดรายได้ตรง ๆ (ค่าตรวจ ตรอ. ไม่บวกค่าบริการ)
         .map(r => {
-          if (isSystemReceipt(r.receipt_no) && String(r.income_name || "").trim() === "ค่าต่อภาษี" && !r.batch_billed_at) {
+          if (!isSystemReceipt(r.receipt_no) || r.batch_billed_at) return r;
+          const nm = String(r.income_name || "").trim();
+          if (nm === "ค่าต่อภาษี") {
             const amt = Math.round((Number(r.net_price || 0) + 20) * 100) / 100;
             return { ...r, bill_amount: amt, bill_items: [{ expense_name: "ค่าต่อภาษี + ค่าบริการ 20 บาท", amount: amt }] };
+          }
+          if (nm === "ตรวจสภาพต่อภาษี") {
+            const amt = Math.round(Number(r.net_price || 0) * 100) / 100;
+            return { ...r, bill_amount: amt, bill_items: [{ expense_name: "ค่าตรวจสภาพ (ตรอ.)", amount: amt }] };
           }
           return r;
         });
