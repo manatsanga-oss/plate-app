@@ -473,6 +473,8 @@ export default function MotoBookingPage({ currentUser }) {
     setSaving(false);
   }
 
+  // type สีพิเศษ — ต้องได้สต๊อก type เดียวกันเป๊ะถึงนับว่ารถถึงคิว (user 2026-08-22: เฉพาะ TH8) ห้ามใช้ตัวจับคู่สำรอง
+  const SPECIAL_TYPES = ["th8"];
   // Normalize ตรงกับ n8n Code node
   const normModel = (s) => {
     let str = String(s || "").normalize("NFKC")
@@ -481,7 +483,6 @@ export default function MotoBookingPage({ currentUser }) {
       .replace(/\s+/g, "")
       .toLowerCase();
     // ตัดข้อความหลัง TH ทิ้ง (TH1/TH4 = รหัสสีปกติ จับคู่ด้วยชื่อสี) ยกเว้น type สีพิเศษใน SPECIAL_TYPES ที่ต้องได้สต๊อก type เดียวกันเป๊ะ (user 2026-08-22: เฉพาะ TH8)
-    const SPECIAL_TYPES = ["th8"];
     const m = str.match(/th\d*/);
     if (m) str = str.substring(0, m.index + (SPECIAL_TYPES.includes(m[0]) ? m[0].length : 2));
     return str;
@@ -528,7 +529,8 @@ export default function MotoBookingPage({ currentUser }) {
     // → สีต้องตรง แล้วรหัสแบบข้างหนึ่งอยู่ในอีกข้างถือว่าแมตช์ (รหัส type ยาว ≥4 ตัว ไม่ชนกันมั่ว)
     const bm = normModel(mc), bc = normColor(cn);
     let cars = stockGroups[bm + "|" + bc] || [];
-    if (cars.length === 0 && bm) {
+    const isSpecial = SPECIAL_TYPES.some(t => bm.endsWith(t));
+    if (cars.length === 0 && bm && !isSpecial) {
       Object.keys(stockGroups).forEach(k => {
         const i = k.lastIndexOf("|");
         const sm = k.slice(0, i), sc = k.slice(i + 1);
