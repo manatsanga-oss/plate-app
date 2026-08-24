@@ -1351,9 +1351,6 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     return Math.floor(fee / 500) * multiplier;
   }, [adjOpen, useDeliveryFee, deliveryFee, selBrand]); // eslint-disable-line
   // เงินดาวน์/ค่างวดออกแทน: input × 1.07 ปัดขึ้นหลักร้อย
-  const downPayoutCalc = adjOpen && useDownPayout ? Math.ceil((Number(downPayout || 0) * 1.07) / 100) * 100 : 0;
-  const adjustmentsTotal = deliveryBonus + downPayoutCalc;
-
   // บวกเพิ่มอัตโนมัติจากเมนู "ราคาขายบวกเพิ่ม" (ตามไฟแนนท์/ไฟแนนท์+CC/กำหนดเอง) — logic เดียวกับหน้าบันทึกขายปลีก
   const applicableMarkups = useMemo(() => {
     if (saleType !== "finance" || !financeCo || !selUnit || !selColor) return [];
@@ -1393,6 +1390,17 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     return matched;
   }, [saleType, financeCo, selUnit, selColor, selBrand, selSeries, markups, currentUser]); // eslint-disable-line
   const markupsTotal = applicableMarkups.reduce((s, m) => s + Number(m.markup_amount || 0), 0);
+  // เงินดาวน์/ค่างวดออกแทน: ปกติบวก ceil(ยอด×1.07) ขึ้นหลักร้อย — เฉพาะ SGF ให้ "ราคาขายรวม" ปัดขึ้นหลักพัน (user 2026-08-25 เช่น 68,900+2150×1.07 → 72,000)
+  const isSGF = saleType === "finance" && /SGF|เอสจีเอฟ/i.test(String(financeCo?.company_name || ""));
+  const downPayoutCalc = (() => {
+    if (!(adjOpen && useDownPayout)) return 0;
+    const withVat = Number(downPayout || 0) * 1.07;
+    if (!isSGF) return Math.ceil(withVat / 100) * 100;
+    const base = (announcedPrice(saleType) || 0) + markupsTotal + deliveryBonus;
+    if (!base) return Math.ceil(withVat / 1000) * 1000;
+    return Math.ceil((base + withVat) / 1000) * 1000 - base;
+  })();
+  const adjustmentsTotal = deliveryBonus + downPayoutCalc;
 
   function resetAdjustments() {
     setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0);
@@ -1960,7 +1968,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           extra={deliveryBonus > 0 ? `(+โบนัส ${Number(deliveryBonus).toLocaleString("th-TH")})` : ""} />
                         <AdjRow label="เงินดาวน์/ค่างวดออกแทน" checked={useDownPayout} onCheck={setUseDownPayout}
                           value={downPayout} onChange={setDownPayout}
-                          extra={downPayoutCalc > 0 ? `(× 1.07 = ${Number(downPayoutCalc).toLocaleString("th-TH")})` : ""} />
+                          extra={downPayoutCalc > 0 ? (isSGF ? `(SGF ปัดราคารวมขึ้นหลักพัน = +${Number(downPayoutCalc).toLocaleString("th-TH")})` : `(× 1.07 = ${Number(downPayoutCalc).toLocaleString("th-TH")})`) : ""} />
                         {adjustmentsTotal > 0 && (
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed" }}>รวมบวกเพิ่ม: +{Number(adjustmentsTotal).toLocaleString("th-TH")} บาท</div>
                         )}
