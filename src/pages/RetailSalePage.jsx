@@ -28,6 +28,7 @@ const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-dat
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const LINE_LOG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-line-log";
 const BOOKING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api";
+const DEPOSIT_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api"; // refund_deposit — คืนเงินมัดจำส่วนเกินจบในหน้านี้ (user 2026-08-24)
 const LINE_AUTO_SEND_DELAY = 10; // วินาทีก่อนส่ง LINE อัตโนมัติ
 
 // หัวกระดาษใบขาย (fallback เมื่อยังโหลด branch_master ไม่ได้) — ปกติหัวกระดาษจริง
@@ -1139,6 +1140,68 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
 
   // "รถเทิร์น" = ลูกค้าเอารถเก่ามาตีราคาแทนเงิน — ใส่มูลค่าที่ตีเอง (ตัวรถไปเข้าสต๊อกที่เมนูรถมือสอง อ้างเลขใบขายนี้)
   const PAY_METHODS = ["เงินสด", "โอน", "บัตร/QR", "ไฟแนนซ์", "เงินมัดจำ", "รถเทิร์น"];
+  const [refundBank, setRefundBank] = useState("");     // คืนเงินมัดจำแบบโอน: ธนาคารลูกค้า
+  const [refundAcctNo, setRefundAcctNo] = useState(""); // คืนเงินมัดจำแบบโอน: เลขบัญชีลูกค้า
+  // ยอดต้องเก็บสุทธิ — ติดลบ = มัดจำเกิน ต้องคืนเงินมัดจำ (ปุ่มจะเปลี่ยนเป็นบันทึกคืนเงิน)
+  const dueNet = Number(sale?.total_payment || 0) - Number(sale?.down_payout_amount || 0);
+  const isDepositRefund = sale?.payment_status !== "paid" && dueNet < 0;
+
+  // คืนเงินมัดจำส่วนเกิน: refund_deposit จริง + ส่งใบเสร็จคืนเงินเข้า LINE — ไม่บันทึกรับชำระติดลบ (user 2026-08-24)
+  async function refundDepositExcess() {
+    const amt = Math.abs(dueNet);
+    const first = payLines[0] || { method: "เงินสด" };
+    const isTr = String(first.method || "").includes("โอน");
+    if (isTr && (!refundBank.trim() || !refundAcctNo.trim())) { setMessage("❌ คืนแบบโอน: กรอกธนาคารและเลขบัญชีของลูกค้าก่อน"); return; }
+    const accName = isTr ? (bankAccounts.find((a) => String(a.account_id) === String(first.account_id))?.account_name || "") : "";
+    if (isTr && !accName) { setMessage("❌ เลือกบัญชีบริษัทที่ใช้โอนเงินคืน"); return; }
+    setPayingSave(true); setMessage("");
+    try {
+      // หาใบมัดจำ: ใช้เลขที่ผูกในใบขายก่อน ไม่มีค่อยจับคู่จากชื่อลูกค้า (ใบที่ยังไม่คืน)
+      let depNo = String(sale.deposit_no || "").trim();
+      if (!depNo) {
+        const deps = await apiPostTo(DEPOSIT_REFUND_API, { action: "get_deposits" });
+        const nm = String(sale.customer_name || "").replace(/\s+/g, "");
+        const cand = (Array.isArray(deps) ? deps : []).filter((d) => d && d.deposit_no && d.status !== "refunded" && String(d.customer_name || "").replace(/\s+/g, "") === nm);
+        if (!cand.length) throw new Error("ไม่พบใบมัดจำค้างคืนของลูกค้ารายนี้ — ตรวจที่เมนูมัดจำจองรถ");
+        depNo = cand[0].deposit_no;
+      }
+      if (!window.confirm(`คืนเงินมัดจำ ${depNo} จำนวน ${baht(amt)} บาท (${isTr ? "โอนเข้าบัญชี" : "เงินสด"}) ให้ ${sale.customer_name}?`)) { setPayingSave(false); return; }
+      const r = await apiPostTo(DEPOSIT_REFUND_API, {
+        action: "refund_deposit", deposit_no: depNo,
+        refund_method: isTr ? "โอนเข้าบัญชี" : "เงินสด",
+        refund_amount: amt,
+        refund_from_account: accName, refund_bank: isTr ? refundBank.trim() : "", refund_account_no: isTr ? refundAcctNo.trim() : "",
+        refund_note: "คืนส่วนเกินมัดจำจากใบขาย " + sale.sale_no,
+        refunded_by: currentUser?.username || currentUser?.name || "system",
+      });
+      const rrow = r && (r.deposit || r);
+      if (!rrow || !rrow.deposit_no) throw new Error(r?.__error || r?.error || "คืนเงินไม่สำเร็จ (ใบมัดจำอาจถูกคืนไปแล้ว)");
+      let msg = `✅ บันทึกคืนเงินมัดจำ ${depNo} จำนวน ${baht(amt)} บาท แล้ว`;
+      // ส่งใบเสร็จคืนเงินเข้า LINE ลูกค้า
+      const lid = sale.line_user_id || form.customer_line_user_id || "";
+      if (lid) {
+        try {
+          const mLabel = "คืนเงินมัดจำ · " + (isTr ? "เงินโอน" : "เงินสด");
+          const s2 = { ...sale, receipt_no: depNo, receipt_date: payForm.receipt_date, paid_amount: amt, red_plate_deposit: 0, red_plate_doc_no: "", payment_methods: [{ method: mLabel, amount: amt, account_name: accName || null }], payment_received_note: "คืนเงินมัดจำส่วนเกิน (มัดจำมากกว่ายอดที่ต้องชำระ)" };
+          await apiPost({
+            action: "send_receipt_flex", sale_no: sale.sale_no, receipt_no: depNo, receipt_date: payForm.receipt_date,
+            customer_name: sale.customer_name, paid_amount: amt,
+            payment_methods: [{ method: mLabel, amount: amt, account_name: accName || null }],
+            branch_name: sale.branch_name || currentUser?.branch || "", branch_code: sale.branch_code || currentUser?.branch_code || currentUser?.branch || "",
+            line_user_id: lid, doc_html: buildReceiptHtml(s2),
+            sent_by: currentUser?.name || currentUser?.username || "",
+          });
+          msg += " · ส่งใบเสร็จคืนเงินเข้า LINE แล้ว";
+        } catch { msg += " · ⚠️ ส่ง LINE ไม่สำเร็จ"; }
+      } else msg += " · ลูกค้าไม่มี LINE";
+      setMessage(msg);
+    } catch (e) { setMessage("❌ " + (e.message || e)); }
+    finally { setPayingSave(false); }
+  }
+  async function apiPostTo(url, body) {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const t = await res.text(); return t.trim() ? JSON.parse(t) : null;
+  }
   const payTotal = payLines.reduce((s, p) => s + (Number(p.amount) || 0), 0);
   const updatePayLine = (i, patch) => setPayLines((ls) => ls.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   const addPayLine = () => setPayLines((ls) => [...ls, { method: "เงินสด", account_id: "", amount: "" }]);
@@ -1146,6 +1209,7 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
 
   async function savePayment() {
     if (!sale?.sale_no) return;
+    if (isDepositRefund) { await refundDepositExcess(); return; }
     const lines = payLines.filter((p) => Number(p.amount) > 0).map((p) => ({
       method: p.method,
       account_id: p.account_id ? Number(p.account_id) : null,
@@ -2062,7 +2126,13 @@ ${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หม�
                       <input value={payForm.note} onChange={(e) => setPayForm((f) => ({ ...f, note: e.target.value }))} placeholder="หมายเหตุการรับชำระ (ถ้ามี)" style={{ ...inp, width: "100%" }} />
                     </div>
                     <div style={{ display: "flex", justifyContent: "center", marginTop: 14 }}>
-                      <button style={btn("#2e9e4f")} disabled={payingSave} onClick={savePayment}>{payingSave ? "บันทึก…" : "💾 บันทึกรับชำระเงิน"}</button>
+                      {isDepositRefund && String(payLines[0]?.method || "").includes("โอน") && (
+                        <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                          <input value={refundBank} onChange={(e) => setRefundBank(e.target.value)} placeholder="ธนาคารของลูกค้า *" style={{ ...inp, width: 160 }} />
+                          <input value={refundAcctNo} onChange={(e) => setRefundAcctNo(e.target.value)} placeholder="เลขบัญชีลูกค้า *" style={{ ...inp, width: 190, fontFamily: "monospace" }} />
+                        </div>
+                      )}
+                      <button style={btn(isDepositRefund ? "#b91c1c" : "#2e9e4f")} disabled={payingSave} onClick={savePayment}>{payingSave ? "บันทึก…" : isDepositRefund ? "↩️ บันทึกคืนเงินมัดจำ + ส่ง LINE" : "💾 บันทึกรับชำระเงิน"}</button>
                     </div>
                   </div>
                 )}

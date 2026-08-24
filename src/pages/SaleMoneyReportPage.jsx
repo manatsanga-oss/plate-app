@@ -130,11 +130,14 @@ export default function SaleMoneyReportPage({ currentUser }) {
         for (const p of pms) split[methodKey(p.method)] += num(p.amount);
         const paid = num(r.paid_amount) || METHOD_COLS.reduce((s, c) => s + split[c.key], 0);
         // เงินจอง (booking_deposit) ที่หักในใบขาย — ไม่ได้อยู่ใน payment_methods ต้องบวกเข้าคอลัมน์เงินมัดจำเอง
-        split.deposit += num(r.booking_deposit);
-        const received = paid + num(r.booking_deposit);
+        // ยกเว้น: ใบมัดจำที่คืนส่วนเกินไปแล้ว (refund_note อ้างใบขายนี้) — ส่วนที่ใช้ชำระโชว์เป็นแถว "ชำระด้วยเงินมัดจำ" ณ วันคืนแล้ว กันนับซ้ำ
+        const refDep = depRows.find((d) => d.refunded_at && String(d.refund_note || "").includes(r.sale_no));
+        const depAdd = Math.max(num(r.booking_deposit) - (refDep ? num(refDep.deposit_amount) : 0), 0);
+        split.deposit += depAdd;
+        const received = paid + depAdd;
         return { ...r, split, received, saleAmount: num(r.net_car_price || r.car_price) };
       });
-  }, [rows, branch, isAdmin, myBranch]);
+  }, [rows, depRows, branch, isAdmin, myBranch]);
 
   // ตัวเลือกสาขารวมจากทุกแหล่ง (ขายรถ+มัดจำจอง+มัดจำอะไหล่+รับเรื่อง) — คีย์ 5 ตัวแรก กันสาขาที่มีแต่รายการรับเรื่อง/มัดจำหายจาก dropdown
   const branchOpts = useMemo(() => {
@@ -330,18 +333,34 @@ export default function SaleMoneyReportPage({ currentUser }) {
     const depRefunds = depRows
       .filter((d) => d.refunded_at && String(d.refunded_at).slice(0, 10) >= dateFrom && String(d.refunded_at).slice(0, 10) <= dateTo)
       .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
-      .map((d) => {
+      .flatMap((d) => {
         const amt = -num(d.refund_amount || d.deposit_amount);
         const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
         split[methodKey(d.refund_method || "เงินสด")] += amt;
-        return {
+        // เลขใบขายจากหมายเหตุคืนเงิน ("คืนส่วนเกินมัดจำจากใบขาย XXX")
+        const saleNo = (String(d.refund_note || "").match(/ใบขาย\s*(\S+)/) || [])[1] || "";
+        const out = [{
           kind: "dep_refund", category: "คืนเงินมัดจำจองรถ (จ่ายออก)",
-          doc_no: d.deposit_no, date: String(d.refunded_at).slice(0, 10), ref_no: "",
+          doc_no: d.deposit_no, date: String(d.refunded_at).slice(0, 10), ref_no: saleNo,
           customer_name: d.customer_name, seller: d.refunded_by || "", saleAmount: 0,
           split, received: amt,
           branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
           note: ["คืนเงินมัดจำ", d.refund_from_account || d.refund_bank, d.refund_note].filter(Boolean).join(" · "),
-        };
+        }];
+        // ส่วนที่เหลือของมัดจำ = ใช้ชำระค่ารถ → แถวคู่ เลขที่เอกสาร = ใบขาย, ช่องเงินมัดจำ = ยอดที่ใช้ (user 2026-08-24)
+        const used = num(d.deposit_amount) - num(d.refund_amount || d.deposit_amount);
+        if (used > 0 && saleNo) {
+          const sp2 = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: used, coupon: 0, tradein: 0, other: 0 };
+          out.push({
+            kind: "deposit_applied", category: "รายได้จากการขายรถ",
+            doc_no: saleNo, date: String(d.refunded_at).slice(0, 10), ref_no: d.deposit_no,
+            customer_name: d.customer_name, seller: d.refunded_by || "", saleAmount: 0,
+            split: sp2, received: used,
+            branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
+            note: `ชำระค่ารถด้วยเงินมัดจำ (มัดจำ ${fmt(d.deposit_amount)} − คืน ${fmt(num(d.refund_amount || 0))})`,
+          });
+        }
+        return out;
       });
     // คืนเงินมัดจำป้ายแดง = เงินจ่ายออกจากลิ้นชัก/บัญชี → ติดลบในคอลัมน์เงินสด/โอน (ยอดรับ 200 ตอนขายอยู่ในใบขายแล้ว)
     const rpRefunds = rpRefundRows
