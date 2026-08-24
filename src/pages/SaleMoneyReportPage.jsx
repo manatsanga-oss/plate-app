@@ -57,6 +57,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [rpRefundRows, setRpRefundRows] = useState([]); // คืนเงินมัดจำป้ายแดง (จ่ายออก) — หักจากเงินสด/โอนของวัน
 
+
   async function load() {
     setLoading(true);
     setMessage("");
@@ -106,6 +107,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
       setUmRows(Array.isArray(um) ? um.filter(u => u && u.id && u.status === "sold") : []);
       const rp = resRp ? await resRp.json().catch(() => []) : [];
       setRpRefundRows(Array.isArray(rp) ? rp.filter(d => d && d.deposit_no && d.status === "refunded") : []);
+
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
       setRows([]);
@@ -201,14 +203,37 @@ export default function SaleMoneyReportPage({ currentUser }) {
 
   // ===== รวมใบขาย + มัดจำจองรถ + มัดจำอะไหล่/บริการ เป็นตารางเดียว (สไตล์รายงานรับเงิน DMS) — แต่ละแถวติดประเภทรายได้ =====
   const allItems = useMemo(() => {
-    const sales = items.map((it) => ({
-      kind: "sale", category: "รายได้จากการขายรถ",
-      doc_no: it.receipt_no || "-", date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
-      customer_name: it.customer_name, seller: it.seller, saleAmount: it.saleAmount,
-      split: it.split, received: it.received,
-      branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
-      note: it.payment_received_note || "", finance: it.finance_type === "moto" ? it.finance_company_name : "",
-    }));
+    // มัดจำป้ายแดง (รับฝาก ไม่ใช่รายได้ค่ารถ): แยกออกจากแถวขายรถเป็นแถวของตัวเอง — หัก 200 ออกจากช่องสด (ไม่พอค่อยหักโอน) แล้วเพิ่มแถว "เงินมัดจำป้ายแดง"
+    const sales = []; const rpItems = [];
+    for (const it of items) {
+      const rp = Math.min(num(it.red_plate_deposit), num(it.paid_amount));
+      let split = it.split, received = it.received;
+      if (rp > 0) {
+        split = { ...split };
+        const fromCash = Math.min(split.cash, rp);
+        split.cash -= fromCash;
+        split.transfer -= Math.min(split.transfer, rp - fromCash);
+        received -= rp;
+        const rpSplit = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+        rpSplit.cash = fromCash; rpSplit.transfer = rp - fromCash;
+        rpItems.push({
+          kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
+          doc_no: it.red_plate_doc_no || "RPD-" + (it.sale_no || ""), date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
+          customer_name: it.customer_name, seller: it.seller, saleAmount: 0,
+          split: rpSplit, received: rp,
+          branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
+          note: "ทะเบียนป้ายแดง " + (it.red_plate_no || "-") + " · คืนเมื่อคืนป้าย",
+        });
+      }
+      sales.push({
+        kind: "sale", category: "รายได้จากการขายรถ",
+        doc_no: it.receipt_no || "-", date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
+        customer_name: it.customer_name, seller: it.seller, saleAmount: it.saleAmount,
+        split, received,
+        branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
+        note: it.payment_received_note || "", finance: it.finance_type === "moto" ? it.finance_company_name : "",
+      });
+    }
     const deps = depItems.map((d) => {
       const amt = num(d.deposit_amount);
       const m = String(d.payment_method || "");
@@ -301,6 +326,23 @@ export default function SaleMoneyReportPage({ currentUser }) {
         refunded: d.status === "refunded" || !!d.refunded_at,
       };
     });
+    // คืนเงินมัดจำจองรถ = เงินจ่ายออก → แถวติดลบ (ยอดรับตอนจองอยู่ในแถวมัดจำวันจองแล้ว)
+    const depRefunds = depRows
+      .filter((d) => d.refunded_at && String(d.refunded_at).slice(0, 10) >= dateFrom && String(d.refunded_at).slice(0, 10) <= dateTo)
+      .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
+      .map((d) => {
+        const amt = -num(d.refund_amount || d.deposit_amount);
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+        split[methodKey(d.refund_method || "เงินสด")] += amt;
+        return {
+          kind: "dep_refund", category: "คืนเงินมัดจำจองรถ (จ่ายออก)",
+          doc_no: d.deposit_no, date: String(d.refunded_at).slice(0, 10), ref_no: "",
+          customer_name: d.customer_name, seller: d.refunded_by || "", saleAmount: 0,
+          split, received: amt,
+          branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
+          note: ["คืนเงินมัดจำ", d.refund_from_account || d.refund_bank, d.refund_note].filter(Boolean).join(" · "),
+        };
+      });
     // คืนเงินมัดจำป้ายแดง = เงินจ่ายออกจากลิ้นชัก/บัญชี → ติดลบในคอลัมน์เงินสด/โอน (ยอดรับ 200 ตอนขายอยู่ในใบขายแล้ว)
     const rpRefunds = rpRefundRows
       .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
@@ -317,8 +359,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
           note: ["ป้ายแดง " + (d.plate_no || "-"), "อ้างอิง " + d.deposit_no, d.refund_account_name, d.refund_note].filter(Boolean).join(" · "),
         };
       });
-    return [...sales, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds];
-  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, branch, isAdmin, myBranch]);
+    return [...sales, ...rpItems, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
+  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {
@@ -332,6 +374,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
     return [...m.values()].sort((a, b) => a.key.localeCompare(b.key));
   }, [allItems]);
   const grand = sumOf(allItems);
+
 
   // สรุปแยกประเภทตามรายได้
   const catSum = useMemo(() => {
@@ -554,6 +597,19 @@ ${depSection}
           </div>
         </div>
       )}
+      {/* สรุปยอดเงินประจำวัน — ใช้ข้อมูลจากระบบอย่างเดียว (user 2026-08-24: กำลังเปลี่ยนระบบ ไม่ดึงค่าใช้จ่ายจาก upload DMS)
+          เงินสดรับสุทธิ = รวมช่องเงินสดทุกแถว (รายการคืนเงินติดลบหักในตัวแล้ว) — ค่าใช้จ่ายเงินสดสาขายังไม่มีเมนูในระบบ ไว้เพิ่มเมื่อมี */}
+      {(() => {
+        const rowSt = { display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: 14 };
+        return (
+          <div style={{ marginTop: 16, border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff", padding: 16, maxWidth: 480 }}>
+            <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>💰 สรุปยอดเงินประจำวัน (จากระบบ)</div>
+            <div style={{ ...rowSt, fontWeight: 700 }}><span>เงินสดรับสุทธิ (หักรายการคืนเงินแล้ว) — นำฝากธนาคาร</span><b style={{ color: grand.cash >= 0 ? "#166534" : "#b91c1c" }}>{fmt(grand.cash)}</b></div>
+            <div style={rowSt}><span>เงินโอนเข้าธนาคาร (รวม)</span><b style={{ color: "#1d4ed8" }}>{fmt(grand.transfer)}</b></div>
+            <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>นับเฉพาะรายการที่บันทึกในระบบ (ขาย NEW / มัดจำ / รับเรื่อง / อะไหล่-บริการ / คืนเงิน) — ไม่รวมค่าใช้จ่ายเงินสดจาก upload DMS</div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

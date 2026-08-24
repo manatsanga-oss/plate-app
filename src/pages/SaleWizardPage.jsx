@@ -192,6 +192,9 @@ export default function SaleWizardPage({ currentUser }) {
 
   // ราคาขายบวกเพิ่ม (รายการปรับแต่ง — logic เดียวกับบันทึกขายปลีก)
   const [adjOpen, setAdjOpen] = useState(false);          // default ไม่กด
+  // ขายส่ง (user 2026-08-22): ประเภทการขายที่ 3 — ไม่มีของแถม/บวกเพิ่ม/ปรับแต่ง, ราคาพิมพ์เอง, ชำระแบบเงินสด
+  const [wholesalePrice, setWholesalePrice] = useState("");
+  const isWholesale = saleType === "wholesale";
   const [useDeliveryFee, setUseDeliveryFee] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [useDownPayout, setUseDownPayout] = useState(false);
@@ -213,8 +216,9 @@ export default function SaleWizardPage({ currentUser }) {
   const [bankAccounts, setBankAccounts] = useState([]);
   const [branchMaster, setBranchMaster] = useState([]); // ข้อมูลสาขา (ชื่อ/ที่อยู่/เบอร์/เลขภาษี) สำหรับหัวเอกสาร
   const [markups, setMarkups] = useState([]);           // เมนู "ราคาขายบวกเพิ่ม" (ตามไฟแนนท์/CC/กำหนดเอง)
-  const [payMethod, setPayMethod] = useState(null);   // 'cash' | 'transfer'
-  const [payAccountId, setPayAccountId] = useState("");
+  // รับชำระหลายวิธี (user 2026-08-22): array ของ {method:'cash'|'transfer', amount, account_id} — เงินสด+เงินโอน(เลือกบัญชี) รวมกันได้
+  const PAY_LINE_DEFAULT = () => [{ method: "cash", amount: "", account_id: "" }];
+  const [payLines, setPayLines] = useState(PAY_LINE_DEFAULT());
   const [paySending, setPaySending] = useState(false);
   const [paySaved, setPaySaved] = useState(false);
 
@@ -234,7 +238,7 @@ export default function SaleWizardPage({ currentUser }) {
 
   function resetPostSave() {
     setActFile(null); setCosmosFile(null); setDocFile(null); setDocsSent(false); setDocsSending(false); setLineSaleStatus(null);
-    setPayMethod(null); setPayAccountId(""); setPaySending(false); setPaySaved(false);
+    setPayLines(PAY_LINE_DEFAULT()); setPaySending(false); setPaySaved(false);
   }
 
   // หัวกระดาษตามสาขาของใบขาย — ชื่อ/ที่อยู่/เบอร์/เลขภาษีจาก branch_master
@@ -404,7 +408,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 </div>` : "";
     const title = pay.refund ? "ใบเสร็จคืนเงิน" : "ใบเสร็จรับเงิน";
     const carLine = [sale.brand, sale.model_name, sale.engine_no].filter(Boolean).join(" / ");
-    const iRows = `<tr><td class="c">1</td><td>${esc((pay.refund ? "คืนเงินมัดจำ · " : "") + pay.methodLabel)}${pay.accountName ? " · " + esc(pay.accountName) : ""}</td><td class="c">1</td><td class="r">${money(pay.amount)}</td><td class="r">${money(pay.amount)}</td></tr>`;
+    // หลายวิธีรับชำระ: 1 แถวต่อวิธี + แถวหักมัดจำป้ายแดง (แยกใบ) ถ้ามี — รวม = ยอดค่ารถ (pay.amount)
+    const lines = Array.isArray(pay.lines) && pay.lines.length ? pay.lines : [{ methodLabel: pay.methodLabel, accountName: pay.accountName, amount: pay.amount + (Number(rp?.amount) || 0) }];
+    let iRows = "", ii = 0;
+    for (const l of lines) { ii++; iRows += `<tr><td class="c">${ii}</td><td>${esc((pay.refund ? "คืนเงินมัดจำ · " : "") + l.methodLabel)}${l.accountName ? " · " + esc(l.accountName) : ""}</td><td class="c">1</td><td class="r">${money(l.amount)}</td><td class="r">${money(l.amount)}</td></tr>`; }
+    if (rp && Number(rp.amount) > 0) { ii++; iRows += `<tr><td class="c">${ii}</td><td style="color:#b91c1c">หัก มัดจำป้ายแดง — แยกใบรับมัดจำ ${esc(rp.doc_no || "")}</td><td class="c">1</td><td class="r" style="color:#b91c1c">-${money(rp.amount)}</td><td class="r" style="color:#b91c1c">-${money(rp.amount)}</td></tr>`; }
 
     return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)} ${esc(receiptNo)}</title>
 <style>
@@ -463,9 +471,23 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // ยกเว้น: โหมดทดสอบไม่เขียน DB · ยอดติดลบ (คืนเงินมัดจำส่วนเกิน) ยังไม่เขียน DB — ให้ไปบันทึกที่เมนูมัดจำจองรถ
   async function handleSavePayment(receiveAmt) {
     if (!savedSale || paySending || paySaved) return;
-    if (!payMethod) { setMessage("❌ เลือกวิธีการรับชำระ (เงินสด/เงินโอน) ก่อน"); return; }
-    const acc = payMethod === "transfer" ? bankAccounts.find(a => String(a.account_id) === String(payAccountId)) : null;
-    if (payMethod === "transfer" && !acc) { setMessage("❌ เลือกบัญชีรับโอนเงินก่อน"); return; }
+    const target = Math.abs(Number(receiveAmt) || 0);
+    // แปลงบรรทัดรับชำระ: ช่องยอดว่าง = ยอดที่เหลือ (กรอกวิธีเดียวไม่ต้องพิมพ์ยอด)
+    const filled = payLines.map((l) => ({ ...l, amt: num(l.amount) }));
+    const known = filled.filter((l) => l.amount !== "" && l.amt > 0).reduce((s, l) => s + l.amt, 0);
+    const blanks = filled.filter((l) => l.amount === "");
+    if (blanks.length > 1) { setMessage("❌ กรอกยอดให้ครบ (เว้นว่างได้แค่ 1 บรรทัด = ยอดที่เหลือ)"); return; }
+    const lines = filled.map((l) => ({ ...l, amt: l.amount === "" ? Math.max(target - known, 0) : l.amt })).filter((l) => l.amt > 0);
+    if (!lines.length) { setMessage("❌ ใส่ยอดรับชำระอย่างน้อย 1 รายการ"); return; }
+    for (const l of lines) {
+      if (l.method === "transfer" && !bankAccounts.find(a => String(a.account_id) === String(l.account_id))) { setMessage("❌ เลือกบัญชีรับโอนเงินให้ครบทุกบรรทัดเงินโอน"); return; }
+    }
+    const sum = lines.reduce((s, l) => s + l.amt, 0);
+    if (Math.abs(sum - target) > 0.5) { setMessage(`❌ ยอดรวมวิธีรับชำระ ${sum.toLocaleString("th-TH")} ไม่เท่ายอดที่ต้องรับ ${target.toLocaleString("th-TH")}`); return; }
+    const payLinesOut = lines.map((l) => {
+      const acc = l.method === "transfer" ? bankAccounts.find(a => String(a.account_id) === String(l.account_id)) : null;
+      return { method: l.method, methodLabel: l.method === "cash" ? "เงินสด" : "เงินโอน", account_id: acc ? Number(acc.account_id) : null, accountName: acc?.account_name || null, amount: l.amt };
+    });
     if (savedSale.__test && !custLineUserId) { setMessage("❌ ลูกค้าไม่มี LINE ในระบบ — ส่งใบเสร็จทาง LINE ไม่ได้"); return; }
     const refund = Number(receiveAmt) < 0;
     // มัดจำป้ายแดงรวมอยู่ในยอดที่เก็บ แต่แยกใบ: ใบเสร็จค่ารถ = ยอดเก็บ − มัดจำ, ใบรับมัดจำป้ายแดง = มัดจำ (เลข RPD ออกจาก save_payment)
@@ -473,8 +495,9 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     const pay = {
       refund,
       amount: Math.abs(Number(receiveAmt) || 0) - rpAmt,
-      methodLabel: payMethod === "cash" ? "เงินสด" : "เงินโอน",
-      accountName: acc?.account_name || null,
+      methodLabel: payLinesOut.map((l) => l.methodLabel).join("+"),
+      accountName: payLinesOut.map((l) => l.accountName).filter(Boolean).join(", ") || null,
+      lines: payLinesOut,
     };
     setPaySending(true);
     setMessage("");
@@ -487,7 +510,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         const row = await post(RETAIL_API, {
           action: "save_payment", sale_no: savedSale.sale_no,
           receipt_date: todayStr(),
-          payments: [{ method: payMethod === "cash" ? "เงินสด" : "โอน", account_id: acc ? Number(acc.account_id) : null, account_name: acc?.account_name || null, amount: pay.amount + rpAmt }],
+          payments: payLinesOut.map((l) => ({ method: l.method === "cash" ? "เงินสด" : "โอน", account_id: l.account_id, account_name: l.accountName, amount: l.amount })),
           paid_amount: pay.amount + rpAmt,
           payment_note: "",
           received_by: currentUser?.username || currentUser?.name || "",
@@ -509,7 +532,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
           sale_no: savedSale.sale_no, receipt_no: receiptNo, receipt_date: todayStr(),
           customer_name: savedSale.customer_name,
           paid_amount: pay.amount,
-          payment_methods: [{ method: (refund ? "คืนเงินมัดจำ · " : "") + pay.methodLabel, amount: pay.amount, account_name: pay.accountName }],
+          payment_methods: [
+            ...payLinesOut.map((l) => ({ method: (refund ? "คืนเงินมัดจำ · " : "") + l.methodLabel, amount: l.amount, account_name: l.accountName })),
+            ...(rpAmt > 0 ? [{ method: "หัก มัดจำป้ายแดง (แยกใบรับมัดจำ)", amount: -rpAmt }] : []),
+          ],
           red_plate_no: saleForDoc.red_plate_no || "", red_plate_deposit: rpAmt, red_plate_doc_no: saleForDoc.red_plate_doc_no || (savedSale.__test && rpAmt > 0 ? "TEST-RPD" : ""),
           branch_name: savedSale.branch_name, branch_code: savedSale.branch_code,
           line_user_id: custLineUserId,
@@ -642,6 +668,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     setFinRound5(false); setFinInstOverride(""); setFinInstTouched(false); setFinAdvance("");
     setAdvSubsidyInput(""); // แบ่งโปรดาวน์ออกแทนไปช่วยค่างวดล่วงหน้า — เคลียร์พร้อมกัน
     setRedPlateNo(""); // มัดจำป้ายแดง — เคลียร์พร้อมกัน
+    setWholesalePrice(""); // ราคาขายส่ง — เคลียร์พร้อมกัน
   }
 
   // คำนวณยอดฝั่งไฟแนนท์จากราคาขาย (carPrice)
@@ -808,7 +835,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
   // ของแถม-บริการที่เข้าเงื่อนไขกับรถ/การขายปัจจุบัน — port จาก RetailSalePage
   const applicableGiveaways = useMemo(() => {
-    if (!masterRow || !saleType) return [];
+    if (!masterRow || !saleType || saleType === "wholesale") return [];
     const sel = masterRow; // มี brand_id / series_id / type_id
     const rowCC = selSeries ? Number(selSeries.engine_cc) || null : null;
     const fin = saleType === "finance";
@@ -954,8 +981,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (saving || savedSale || !selUnit) return;
     const isFin = saleType === "finance";
     const base = announcedPrice(saleType);
-    const carPrice = base == null ? null : base + markupsTotal + adjustmentsTotal;
-    if (carPrice == null) { setMessage("❌ ไม่พบราคาขายของรถคันนี้ — ตรวจสอบเมนูราคารถก่อน"); return; }
+    const carPrice = base == null ? null : base + (isWholesale ? 0 : markupsTotal + adjustmentsTotal);
+    if (carPrice == null) { setMessage(isWholesale ? "❌ กรอกราคาขายส่งก่อน" : "❌ ไม่พบราคาขายของรถคันนี้ — ตรวจสอบเมนูราคารถก่อน"); return; }
     if (!text(cust.customer_name)) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
     const netCar = Math.max(carPrice - downSubDiscount, 0); // หักส่วนลด "เงินดาวน์ออกแทน" (เฉพาะส่วนที่ไม่ได้แบ่งไปช่วยค่างวดล่วงหน้า)
     const fc = financeCalc(netCar);
@@ -1008,6 +1035,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       const vehicle = Array.isArray(vres) ? vres[0] : vres;
       if (!vehicle || (!vehicle.stock_id && !vehicle.engine_no)) throw new Error("ไม่พบรถคันนี้ในสต๊อก");
       if ((vehicle.sale && vehicle.sale.sale_no) || vehicle.sold_at) throw new Error("รถคันนี้ถูกขายไปแล้ว");
+      // ขายส่ง: ห้ามขายต่ำกว่าทุน (ราคาทุนจากใบรับรถ unit_cost) — user กำหนด 2026-08-22
+      if (isWholesale && num(vehicle.unit_cost) > 0 && carPrice < num(vehicle.unit_cost)) {
+        throw new Error(`ราคาขายส่ง ${Number(carPrice).toLocaleString("th-TH")} ต่ำกว่าราคาทุน ${Number(vehicle.unit_cost).toLocaleString("th-TH")} บาท — ห้ามขายต่ำกว่าทุน`);
+      }
 
       const dep = depositAmt;
       const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep + redPlateDep; // ติดลบ = ต้องคืนเงินมัดจำ
@@ -1025,7 +1056,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         customer_gender: cust.customer_gender,
         line_user_id: cust.customer_line_user_id || selBooking?.line_user_id || autoLink?.customer_line_user_id || "",
         seller: currentUser?.username || currentUser?.name || "",
-        note: "",
+        note: isWholesale ? "ขายส่ง" : "",
         finance_type: isFin ? "moto" : "none",
         car_price: carPrice, net_car_price: netCar, discount: downSubDiscount, other_sale: 0,
         down_payment: isFin ? fc.down : 0,
@@ -1256,6 +1287,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   }, [currentUser, selBrand, pbgRows, bookingDateISO]);
 
   function announcedPrice(wantSaleType) {
+    if (wantSaleType === "wholesale") return num(wholesalePrice) > 0 ? num(wholesalePrice) : null;
     const masterRow = findMasterRow(selUnit, selColor);
     if (!masterRow) return null;
     const wantFinance = wantSaleType === "finance";
@@ -1410,7 +1442,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         <span style={{ color: "#9ca3af" }}>›</span>
         {crumb(selUnit ? `คัน: ${selUnit.engine_no}` : "เลือกคัน", selUnit ? () => { setSelUnit(null); setSaleType(null); setFinanceCo(null); } : null)}
         <span style={{ color: "#9ca3af" }}>›</span>
-        {crumb(saleType ? `การขาย: ${saleType === "cash" ? "เงินสด" : "ผ่อนไฟแนนท์"}${financeCo ? ` (${financeCo.company_name})` : ""}` : "ประเภทการขาย", null)}
+        {crumb(saleType ? `การขาย: ${saleType === "cash" ? "เงินสด" : saleType === "wholesale" ? "ขายส่ง" : "ผ่อนไฟแนนท์"}${financeCo ? ` (${financeCo.company_name})` : ""}` : "ประเภทการขาย", null)}
       </div>
       )}
 
@@ -1811,6 +1843,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           border: saleType === "finance" ? "2px solid #072d6b" : "2px solid #d1d5db" }}>
                         🏦 ผ่อนไฟแนนท์ {saleType === "finance" ? "✓" : ""}
                       </button>
+                      <button onClick={() => { setSaleType("wholesale"); setFinanceCo(null); setAdjOpen(false); }}
+                        style={{ padding: "16px 0", fontSize: 17, fontWeight: 700, fontFamily: "Tahoma", borderRadius: 10, cursor: "pointer",
+                          background: isWholesale ? "#072d6b" : "#fff", color: isWholesale ? "#fff" : "#072d6b",
+                          border: isWholesale ? "2px solid #072d6b" : "2px solid #d1d5db" }}>
+                        📦 ขายส่ง {isWholesale ? "✓" : ""}
+                      </button>
                       {saleType === "finance" && financeCo && (
                         <div style={{ padding: 10, background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", fontSize: 14 }}>
                           ไฟแนนท์: <strong>{financeCo.company_name}</strong>
@@ -1826,6 +1864,16 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                     <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>ราคาขาย <span style={{ fontWeight: 400, fontSize: 12, color: "#9ca3af" }}>(ราคาประกาศ {branchGroup})</span></div>
                     {!saleType ? (
                       <div style={{ color: "#9ca3af", fontSize: 14, padding: "20px 0" }}>← เลือกประเภทการขายก่อน</div>
+                    ) : isWholesale ? (
+                      <div style={{ padding: "14px 16px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10 }}>
+                        <div style={{ fontSize: 13, color: "#92400e" }}>ราคาขายส่ง (พิมพ์เอง — ไม่มีของแถม ไม่บวกเพิ่ม)</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
+                          <input type="number" value={wholesalePrice} onChange={e => setWholesalePrice(e.target.value)} placeholder="0" disabled={!!savedSale}
+                            style={{ width: 180, padding: "10px 12px", border: "1.5px solid #f59e0b", borderRadius: 8, fontFamily: "Tahoma", fontSize: 22, fontWeight: 700, textAlign: "right", color: "#92400e", boxSizing: "border-box" }} />
+                          <span style={{ fontSize: 16, color: "#92400e", fontWeight: 700 }}>บาท</span>
+                        </div>
+                        {!(num(wholesalePrice) > 0) && <div style={{ fontSize: 12, color: "#b45309", marginTop: 4 }}>กรอกราคาขายส่งก่อนบันทึก</div>}
+                      </div>
                     ) : (
                       <div style={{ padding: "14px 16px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10 }}>
                         <div style={{ fontSize: 13, color: "#166534" }}>{saleType === "cash" ? "ราคาขายเงินสด" : "ราคาขายผ่อนไฟแนนท์"}</div>
@@ -1861,13 +1909,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       </div>
                     )}
 
-                    {/* option: ราคาขายบวกเพิ่ม (default ปิด) */}
-                    <button onClick={() => { if (adjOpen) resetAdjustments(); else setAdjOpen(true); }}
+                    {/* option: ราคาขายบวกเพิ่ม (default ปิด) — ขายส่งไม่มี */}
+                    {!isWholesale && <button onClick={() => { if (adjOpen) resetAdjustments(); else setAdjOpen(true); }}
                       style={{ marginTop: 12, padding: "8px 16px", fontSize: 14, fontWeight: 600, fontFamily: "Tahoma", borderRadius: 8, cursor: "pointer",
                         background: adjOpen ? "#7c3aed" : "#fff", color: adjOpen ? "#fff" : "#7c3aed",
                         border: "1.5px solid #7c3aed" }}>
                       ⚙️ ราคาขายบวกเพิ่ม {adjOpen ? "✓" : ""}
-                    </button>
+                    </button>}
                     {adjOpen && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
                         <AdjRow label="ค่านำพา" checked={useDeliveryFee} onCheck={setUseDeliveryFee}
@@ -1977,8 +2025,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 </div>
                 )}
 
-                {/* การ์ดมัดจำป้ายแดง — ก่อนข้อมูลลูกค้า: กรอกทะเบียนป้ายแดง → มัดจำ 200 อัตโนมัติ (ไม่กรอก = 0) บวกเข้ายอดรับชำระ */}
-                {saleType && (bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (
+                {/* การ์ดมัดจำป้ายแดง — ก่อนข้อมูลลูกค้า: กรอกทะเบียนป้ายแดง → มัดจำ 200 อัตโนมัติ (ไม่กรอก = 0) บวกเข้ายอดรับชำระ — ขายส่งไม่มี */}
+                {saleType && !isWholesale && (bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (
                   <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
                     <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>🔴 มัดจำป้ายแดง</div>
                     <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
@@ -2090,7 +2138,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 )}
 
                 {/* การ์ดของแถม-สินค้า (จาก Master Data → บันทึกของแถม) */}
-                {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && productGiveaways.length > 0 && (
+                {!isWholesale && (bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && productGiveaways.length > 0 && (
                   <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
                     <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 8 }}>🎁 ของแถม-สินค้า</div>
                     <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8 }}>
@@ -2128,7 +2176,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (() => {
                   const isFin = saleType === "finance";
                   const base = announcedPrice(saleType);
-                  const carPrice = base == null ? null : base + markupsTotal + adjustmentsTotal;
+                  const carPrice = base == null ? null : base + (isWholesale ? 0 : markupsTotal + adjustmentsTotal);
                   const netCar = carPrice == null ? null : Math.max(carPrice - downSubDiscount, 0);
                   const fc = financeCalc(netCar || 0);
                   const dep = depositAmt;
@@ -2269,36 +2317,51 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                             </div>
                           )}
 
-                          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>วิธีการ{isRefund ? "คืนเงิน" : "รับชำระ"}</div>
-                          <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
-                            <button onClick={() => { if (!paySaved) { setPayMethod("cash"); setPayAccountId(""); } }}
-                              style={{ flex: 1, padding: "12px 0", fontSize: 15, fontWeight: 700, fontFamily: "Tahoma", borderRadius: 8, cursor: paySaved ? "not-allowed" : "pointer",
-                                background: payMethod === "cash" ? "#072d6b" : "#fff", color: payMethod === "cash" ? "#fff" : "#072d6b",
-                                border: payMethod === "cash" ? "2px solid #072d6b" : "2px solid #d1d5db" }}>
-                              💵 เงินสด {payMethod === "cash" ? "✓" : ""}
-                            </button>
-                            <button onClick={() => { if (!paySaved) setPayMethod("transfer"); }}
-                              style={{ flex: 1, padding: "12px 0", fontSize: 15, fontWeight: 700, fontFamily: "Tahoma", borderRadius: 8, cursor: paySaved ? "not-allowed" : "pointer",
-                                background: payMethod === "transfer" ? "#072d6b" : "#fff", color: payMethod === "transfer" ? "#fff" : "#072d6b",
-                                border: payMethod === "transfer" ? "2px solid #072d6b" : "2px solid #d1d5db" }}>
-                              🏦 เงินโอน {payMethod === "transfer" ? "✓" : ""}
-                            </button>
-                          </div>
-
-                          {payMethod === "transfer" && (
-                            <div style={{ marginBottom: 12 }}>
-                              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6 }}>บัญชี{isRefund ? "โอนคืนเงิน" : "รับโอนเงิน"} <span style={{ color: "#ef4444" }}>*</span></div>
-                              <select value={payAccountId} disabled={paySaved} onChange={e => setPayAccountId(e.target.value)}
-                                style={{ width: "100%", padding: "9px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14 }}>
-                                <option value="">-- เลือกบัญชี --</option>
-                                {bankAccounts.filter(a => a.account_type !== "เงินสดย่อย" && a.account_type !== "ลูกหนี้").map(a => (
-                                  <option key={a.account_id} value={a.account_id}>
-                                    {a.account_name}{a.account_no && a.account_no !== "-" ? ` · ${a.account_no}` : ""}{a.bank_name && a.bank_name !== "-" ? ` (${a.bank_name})` : ""}
-                                  </option>
+                          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 8 }}>วิธีการ{isRefund ? "คืนเงิน" : "รับชำระ"} <span style={{ fontWeight: 400, fontSize: 12, color: "#6b7280" }}>(เพิ่มได้หลายวิธี เช่น เงินสด + เงินโอน · เว้นยอดว่าง = ยอดที่เหลือ)</span></div>
+                          {(() => {
+                            const target = Math.abs(Number(receive) || 0);
+                            const known = payLines.reduce((s, l) => s + (l.amount === "" ? 0 : num(l.amount)), 0);
+                            const blanks = payLines.filter((l) => l.amount === "").length;
+                            const sum = known + (blanks === 1 ? Math.max(target - known, 0) : 0);
+                            const ok = blanks <= 1 && Math.abs(sum - target) < 0.5 && payLines.every((l) => l.method !== "transfer" || l.account_id);
+                            const setLine = (idx, patch) => setPayLines((ls) => ls.map((l, k) => (k === idx ? { ...l, ...patch } : l)));
+                            const sel = { padding: "9px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14 };
+                            return (
+                              <>
+                                {payLines.map((l, idx) => (
+                                  <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                                    <select value={l.method} disabled={paySaved} onChange={(e) => setLine(idx, { method: e.target.value, account_id: "" })} style={{ ...sel, width: 130 }}>
+                                      <option value="cash">💵 เงินสด</option>
+                                      <option value="transfer">🏦 เงินโอน</option>
+                                    </select>
+                                    <input type="number" value={l.amount} disabled={paySaved} onChange={(e) => setLine(idx, { amount: e.target.value })}
+                                      placeholder={blanks === 1 && l.amount === "" ? String(Math.max(target - known, 0)) : "ยอด"}
+                                      style={{ ...sel, width: 130, textAlign: "right" }} />
+                                    {l.method === "transfer" && (
+                                      <select value={l.account_id} disabled={paySaved} onChange={(e) => setLine(idx, { account_id: e.target.value })} style={{ ...sel, flex: 1, minWidth: 200 }}>
+                                        <option value="">-- เลือกบัญชี{isRefund ? "โอนคืน" : "รับโอน"} --</option>
+                                        {bankAccounts.filter(a => a.account_type !== "เงินสดย่อย" && a.account_type !== "ลูกหนี้").map(a => (
+                                          <option key={a.account_id} value={a.account_id}>
+                                            {a.account_name}{a.account_no && a.account_no !== "-" ? ` · ${a.account_no}` : ""}{a.bank_name && a.bank_name !== "-" ? ` (${a.bank_name})` : ""}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    )}
+                                    {payLines.length > 1 && !paySaved && (
+                                      <button onClick={() => setPayLines((ls) => ls.filter((_, k) => k !== idx))} style={{ padding: "6px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma" }}>✕</button>
+                                    )}
+                                  </div>
                                 ))}
-                              </select>
-                            </div>
-                          )}
+                                {!paySaved && (
+                                  <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
+                                    <button onClick={() => setPayLines((ls) => [...ls, { method: "transfer", amount: "", account_id: "" }])}
+                                      style={{ padding: "6px 14px", background: "#fff", color: "#0369a1", border: "1.5px dashed #0369a1", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 13 }}>+ เพิ่มวิธีรับชำระ</button>
+                                    <span style={{ fontSize: 13, color: ok ? "#166534" : "#b45309" }}>รวม {sum.toLocaleString("th-TH")} / {target.toLocaleString("th-TH")} บาท{ok ? " ✓" : blanks > 1 ? " (เว้นว่างได้ 1 บรรทัด)" : Math.abs(sum - target) >= 0.5 ? " (ยอดไม่ครบ)" : " (เลือกบัญชี)"}</span>
+                                  </div>
+                                )}
+                              </>
+                            );
+                          })()}
 
                           {paySaved ? (
                             <div style={{ padding: "12px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, color: "#166534", fontWeight: 700, fontSize: 14 }}>
@@ -2306,8 +2369,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                             </div>
                           ) : (
                             <button onClick={() => handleSavePayment(receive)}
-                              disabled={paySending || !payMethod || (payMethod === "transfer" && !payAccountId)}
-                              style={{ width: "100%", padding: "12px 0", background: paySending || !payMethod || (payMethod === "transfer" && !payAccountId) ? "#cbd5e1" : "#16a34a", color: "#fff", border: "none", borderRadius: 10, cursor: paySending ? "wait" : "pointer", fontSize: 16, fontWeight: 700, fontFamily: "Tahoma" }}>
+                              disabled={paySending || payLines.some((l) => l.method === "transfer" && !l.account_id)}
+                              style={{ width: "100%", padding: "12px 0", background: paySending || payLines.some((l) => l.method === "transfer" && !l.account_id) ? "#cbd5e1" : "#16a34a", color: "#fff", border: "none", borderRadius: 10, cursor: paySending ? "wait" : "pointer", fontSize: 16, fontWeight: 700, fontFamily: "Tahoma" }}>
                               {paySending ? "⏳ กำลังส่งใบเสร็จ..." : isRefund ? "💾 บันทึกคืนเงินมัดจำ + ส่งใบเสร็จ" : "💾 บันทึกชำระเงิน + ส่งใบเสร็จ"}
                             </button>
                           )}
@@ -2315,8 +2378,17 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       </div>
                     )}
 
-                    {/* การ์ดอัปโหลดเอกสาร — เลือกไฟล์ให้ครบก่อน แล้วส่งทั้งหมดด้วยปุ่มเดียว */}
-                    {savedSale && (
+                    {/* ขายส่ง: ไม่มีการ์ดเอกสาร → ปุ่มขายคันถัดไปแยกต่างหาก */}
+                    {savedSale && isWholesale && (
+                      <div style={{ marginTop: 16, textAlign: "center" }}>
+                        <button onClick={resetAll}
+                          style={{ padding: "13px 32px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontSize: 16, fontWeight: 700, fontFamily: "Tahoma" }}>
+                          ➡️ บันทึกขายคันถัดไป
+                        </button>
+                      </div>
+                    )}
+                    {/* การ์ดอัปโหลดเอกสาร — เลือกไฟล์ให้ครบก่อน แล้วส่งทั้งหมดด้วยปุ่มเดียว (ขายส่งไม่มีเอกสารส่งลูกค้า) */}
+                    {savedSale && !isWholesale && (
                       <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
                         <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>📄 ส่งเอกสารให้ลูกค้า</div>
                           {(() => {
@@ -2345,7 +2417,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                                 {/* กรมธรรม์ COSMOS: ขึ้นเฉพาะใบขายที่มีประกันรถหาย COSMOS (ปีต่อ/เงินสด) — ประกันรถหายที่ไฟแนนท์ออกแทนไม่มีเอกสาร (2026-08-22) */}
                                 {hasCosmosTheft
                                   ? pickRow("กรมธรรม์ประกันรถหาย COSMOS (PDF)", "#f0fdfa", "#99f6e4", "#0f766e", "#0f766e", docFile, setDocFile)
-                                  : <div style={{ marginTop: 8, fontSize: 12, color: "#9ca3af" }}>ใบขายนี้ไม่มีกรมธรรม์ประกันรถหาย COSMOS (ประกันรถหายที่ไฟแนนท์ออกแทนไม่มีเอกสารให้ส่ง)</div>}
+                                  : null}
 
                                 <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
                                   {docsSent ? (

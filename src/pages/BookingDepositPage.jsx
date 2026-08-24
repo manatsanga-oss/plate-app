@@ -653,9 +653,8 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                           {(isAdmin || isSameDay(r.deposit_date)) && (
                             <button onClick={() => editRow(r)} style={btnSmYellow} title={isAdmin ? "แก้ไข" : "แก้ไขได้เฉพาะใบของวันนี้ — ข้ามวันต้องให้ admin แก้"}>✏️ แก้ไข</button>
                           )}
-                          {isAdmin && (
-                            <button onClick={() => setRefundTarget(r)} style={btnSmRed}>↩️ คืนเงิน</button>
-                          )}
+                          {/* คืนเงินเปิดให้ทุก user (2026-08-24) — ลูกค้ามารับรถแล้วคืนส่วนเกินหน้าร้านได้เลย (บันทึกผู้คืน + ยืนยันก่อน) */}
+                          <button onClick={() => setRefundTarget(r)} style={btnSmRed}>↩️ คืนเงิน</button>
                         </>
                       )}
                       {r.status === "refunded" && (
@@ -977,6 +976,7 @@ function RefundModal({ row, bankAccounts = [], onConfirm, onClose }) {
           </select>
           <label style={pLbl}>จำนวนเงินคืน</label>
           <input type="number" value={f.refund_amount} onChange={set("refund_amount")} style={{ ...pInp, textAlign: "right" }} />
+          <div style={{ gridColumn: "2", fontSize: 11, color: "#b45309", marginTop: -6 }}>คืนบางส่วนได้ — ถ้ามัดจำถูกใช้เป็นเงินดาวน์ในใบขายแล้ว ให้แก้ยอดเป็นเฉพาะส่วนที่คืนจริง</div>
           {f.refund_method === "โอนเข้าบัญชี" && (
             <>
               <label style={pLbl}>บัญชีบริษัท (โอนจาก) *</label>
