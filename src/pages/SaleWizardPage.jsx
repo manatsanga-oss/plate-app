@@ -219,6 +219,8 @@ export default function SaleWizardPage({ currentUser }) {
   // รับชำระหลายวิธี (user 2026-08-22): array ของ {method:'cash'|'transfer', amount, account_id} — เงินสด+เงินโอน(เลือกบัญชี) รวมกันได้
   const PAY_LINE_DEFAULT = () => [{ method: "cash", amount: "", account_id: "" }];
   const [payLines, setPayLines] = useState(PAY_LINE_DEFAULT());
+  const [refundBank, setRefundBank] = useState("");       // คืนเงินแบบโอน: ธนาคารของลูกค้า
+  const [refundAcctNo, setRefundAcctNo] = useState("");   // คืนเงินแบบโอน: เลขบัญชีลูกค้า
   const [paySending, setPaySending] = useState(false);
   const [paySaved, setPaySaved] = useState(false);
 
@@ -238,7 +240,7 @@ export default function SaleWizardPage({ currentUser }) {
 
   function resetPostSave() {
     setActFile(null); setCosmosFile(null); setDocFile(null); setDocsSent(false); setDocsSending(false); setLineSaleStatus(null);
-    setPayLines(PAY_LINE_DEFAULT()); setPaySending(false); setPaySaved(false);
+    setPayLines(PAY_LINE_DEFAULT()); setRefundBank(""); setRefundAcctNo(""); setPaySending(false); setPaySaved(false);
   }
 
   // หัวกระดาษตามสาขาของใบขาย — ชื่อ/ที่อยู่/เบอร์/เลขภาษีจาก branch_master
@@ -525,6 +527,29 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         setSavedSale(saleForDoc);
       }
 
+      // คืนเงินมัดจำ: บันทึกลงใบมัดจำจริงเลย (refund_deposit) — จบในหน้าขาย ไม่ต้องไปเมนูมัดจำจองรถ (user 2026-08-24)
+      let refundedDepNo = "";
+      if (!savedSale.__test && refund) {
+        const depNo = savedSale.deposit_no || selBooking?.deposit_no || "";
+        if (!depNo) throw new Error("ใบขายนี้ไม่ได้ผูกเลขใบมัดจำ — กรุณาบันทึกคืนเงินที่เมนูมัดจำจองรถ");
+        const first = payLinesOut[0];
+        const isTr = first.method === "transfer";
+        if (isTr && (!refundBank.trim() || !refundAcctNo.trim())) throw new Error("คืนแบบโอน: กรอกธนาคารและเลขบัญชีของลูกค้าก่อน");
+        const rres = await post(DEPOSIT_API, {
+          action: "refund_deposit", deposit_no: depNo,
+          refund_method: isTr ? "โอนเข้าบัญชี" : "เงินสด",
+          refund_amount: target,
+          refund_from_account: isTr ? (first.accountName || "") : "",
+          refund_bank: isTr ? refundBank.trim() : "",
+          refund_account_no: isTr ? refundAcctNo.trim() : "",
+          refund_note: "คืนส่วนเกินมัดจำจากใบขาย " + savedSale.sale_no,
+          refunded_by: currentUser?.username || currentUser?.name || "system",
+        });
+        const rrow = rres && (rres.deposit || rres);
+        if (!rrow || !rrow.deposit_no) throw new Error(rres?.__error || rres?.error || "บันทึกคืนเงินมัดจำไม่สำเร็จ (ใบมัดจำอาจถูกคืนไปแล้ว)");
+        refundedDepNo = depNo;
+      }
+
       // ส่งใบเสร็จเข้า LINE ลูกค้า (ถ้ามี LINE)
       if (custLineUserId) {
         await post(RETAIL_API, {
@@ -547,7 +572,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if (savedSale.__test) {
         setMessage("🧪 ยังไม่บันทึกลง DB · ✅ ส่ง" + (refund ? "ใบเสร็จคืนเงินมัดจำ" : "ใบเสร็จรับเงิน") + "เข้า LINE ลูกค้าแล้ว");
       } else if (refund) {
-        setMessage("✅ ส่งใบเสร็จคืนเงินมัดจำเข้า LINE แล้ว — ⚠️ ยอดคืนเงินยังไม่บันทึกลงระบบ กรุณาบันทึกคืนเงินที่เมนู \"มัดจำจองรถ\"");
+        setMessage(`✅ บันทึกคืนเงินมัดจำ ${refundedDepNo} จำนวน ${Math.abs(Number(receiveAmt)).toLocaleString("th-TH")} บาท แล้ว` + (custLineUserId ? " · ส่งใบเสร็จคืนเงินเข้า LINE แล้ว" : ""));
       } else {
         setMessage("✅ รับชำระเงินเรียบร้อย เลขที่ใบเสร็จ " + receiptNo + (custLineUserId ? " · ส่งใบเสร็จเข้า LINE ลูกค้าแล้ว" : " (ลูกค้าไม่มี LINE — ไม่ได้ส่งใบเสร็จ)"));
       }
@@ -2352,6 +2377,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                                     )}
                                   </div>
                                 ))}
+                                {isRefund && payLines[0]?.method === "transfer" && (
+                                  <div style={{ display: "flex", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
+                                    <input value={refundBank} disabled={paySaved} onChange={(e) => setRefundBank(e.target.value)} placeholder="ธนาคารของลูกค้า *" style={{ ...sel, width: 160 }} />
+                                    <input value={refundAcctNo} disabled={paySaved} onChange={(e) => setRefundAcctNo(e.target.value)} placeholder="เลขบัญชีลูกค้า *" style={{ ...sel, width: 190, fontFamily: "monospace" }} />
+                                  </div>
+                                )}
                                 {!paySaved && (
                                   <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                                     <button onClick={() => setPayLines((ls) => [...ls, { method: "transfer", amount: "", account_id: "" }])}
