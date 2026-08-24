@@ -56,13 +56,14 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [rpRefundRows, setRpRefundRows] = useState([]); // คืนเงินมัดจำป้ายแดง (จ่ายออก) — หักจากเงินสด/โอนของวัน
+  const [rpStandaloneRows, setRpStandaloneRows] = useState([]); // มัดจำป้ายแดงติดป้ายทีหลัง (standalone) — เงินรับแยกจากใบเสร็จขายรถ
 
 
   async function load() {
     setLoading(true);
     setMessage("");
     try {
-      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp] = await Promise.all([
+      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll] = await Promise.all([
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
@@ -91,6 +92,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_red_plate_deposits", status: "refunded", date_from: dateFrom, date_to: dateTo }),
         }).catch(() => null),
+        fetch(RETAIL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_red_plate_deposits", status: "all", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
       ]);
       const data = await res.json().catch(() => []);
       setRows(Array.isArray(data) ? data : []);
@@ -107,6 +112,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
       setUmRows(Array.isArray(um) ? um.filter(u => u && u.id && u.status === "sold") : []);
       const rp = resRp ? await resRp.json().catch(() => []) : [];
       setRpRefundRows(Array.isArray(rp) ? rp.filter(d => d && d.deposit_no && d.status === "refunded") : []);
+      const rpa = resRpAll ? await resRpAll.json().catch(() => []) : [];
+      setRpStandaloneRows(Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true) : []);
 
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
@@ -329,6 +336,22 @@ export default function SaleMoneyReportPage({ currentUser }) {
         refunded: d.status === "refunded" || !!d.refunded_at,
       };
     });
+    // มัดจำป้ายแดง "ติดป้ายทีหลัง" (standalone) — เงินรับสด/โอนแยกจากใบเสร็จขายรถ (ใบขายจ่ายครบไปก่อนแล้ว)
+    const rpStandalones = rpStandaloneRows
+      .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
+      .map((d) => {
+        const amt = num(d.amount);
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+        split[methodKey(d.payment_method || "เงินสด")] += amt;
+        return {
+          kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
+          doc_no: d.deposit_no, date: String(d.received_date || "").slice(0, 10), ref_no: d.sale_no,
+          customer_name: d.customer_name, seller: d.received_by || "", saleAmount: 0,
+          split, received: amt,
+          branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
+          note: "ทะเบียนป้ายแดง " + (d.plate_no || "-") + " · ติดป้ายทีหลัง" + (d.payment_account ? " · " + d.payment_account : ""),
+        };
+      });
     // คืนเงินมัดจำจองรถ = เงินจ่ายออก → แถวติดลบ (ยอดรับตอนจองอยู่ในแถวมัดจำวันจองแล้ว)
     const depRefunds = depRows
       .filter((d) => d.refunded_at && String(d.refunded_at).slice(0, 10) >= dateFrom && String(d.refunded_at).slice(0, 10) <= dateTo)
@@ -378,8 +401,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
           note: ["ป้ายแดง " + (d.plate_no || "-"), "อ้างอิง " + d.deposit_no, d.refund_account_name, d.refund_note].filter(Boolean).join(" · "),
         };
       });
-    return [...sales, ...rpItems, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
-  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+    return [...sales, ...rpItems, ...rpStandalones, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
+  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {

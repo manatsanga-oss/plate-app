@@ -38,6 +38,7 @@ const PAGE_GROUPS = [
       { key: "salewizard", label: "🛒 บันทึกขาย NEW" },
       { key: "retailsale", label: "🔎 ค้นหาใบขาย (ขายปลีกเดิม)" },
       { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
+      { key: "redplatedeposit", label: "🔴 มัดจำป้ายแดง (ติดป้ายทีหลัง)" },
       { key: "redplaterefund", label: "🔴 คืนมัดจำป้ายแดง" },
       { key: "usedmoto", label: "🏍️ รถมือสอง (รับซื้อ/ขาย)" },
       { key: "salemoneyreport", label: "💰 สรุปรายวันรับเงิน" },
