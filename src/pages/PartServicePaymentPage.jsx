@@ -20,7 +20,7 @@ const thaiDate = (iso) => {
 };
 
 // วิธีรับชำระ — E-คูปอง ต้องกรอกเลขที่คูปอง (user สั่งเอา QR/อื่นๆ ออก 2026-08-19)
-const PAY_METHODS = ["เงินสด", "เงินโอน", "มัดจำ", "E-คูปอง"];
+const PAY_METHODS = ["เงินสด", "เงินโอน", "มัดจำ", "E-คูปอง", "เช็ค", "หัก ณ ที่จ่าย"]; // เช็ค = เลขที่เช็ค+วันที่ในเช็ค บังคับ · หัก ณ ที่จ่าย = ลูกค้านิติบุคคลหักภาษี (user 2026-08-24)
 const DOC_TYPES = ["ใบแจ้งซ่อม/JOB", "ใบขายอะไหล่", "อื่นๆ"];
 // สาขาสังกัด ป.เปา (SCY05/06): เติมตัวนำเลขเอกสารให้ — ใบแจ้งซ่อม = 69SERV/ · ใบขายอะไหล่ = 69RTSL/ (ปี พ.ศ. 2 หลักตามปีปัจจุบัน)
 const isPorpaoBranch = (bc) => { const c = String(bc || "").toUpperCase(); return c.startsWith("SCY05") || c.startsWith("SCY06"); };
@@ -73,7 +73,7 @@ export default function PartServicePaymentPage({ currentUser }) {
   const branchCode = myBranch; // สาขาไม่ต้องเลือก — default ตาม user ที่ login
   const [paidDate, setPaidDate] = useState(todayISO());
   const [billAmount, setBillAmount] = useState(""); // จำนวนเงินที่ต้องชำระทั้งหมด — ใส่ก่อน แล้วค่อยเลือกวิธีรับชำระ
-  const [rows, setRows] = useState([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "", coupon_no: "" }]);
+  const [rows, setRows] = useState([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "", coupon_no: "", cheque_no: "", cheque_date: "" }]);
   const [note, setNote] = useState("");
 
   // ใส่ยอดที่ต้องชำระ → เติมยอดให้วิธีแรกอัตโนมัติ (ถ้ายังมีวิธีเดียวและไม่ใช่มัดจำ)
@@ -136,6 +136,8 @@ export default function PartServicePaymentPage({ currentUser }) {
   const normName = (s) => String(s || "").replace(/\s+/g, "").replace(/^(นาย|นาง|นางสาว|น\.ส\.|ด\.ช\.|ด\.ญ\.|ว่าที่ร\.ต\.|MR\.?|MRS\.?|MS\.?|MISS)/i, "").toUpperCase();
   // ชื่อ default "เงินสด" ไม่ใช่ชื่อลูกค้าจริง — ห้ามใช้จับคู่ใบมัดจำ (มัดจำต้องชื่อตรงกันเท่านั้น)
   const hasRealCustomer = !!customerName.trim() && customerName.trim() !== "เงินสด";
+  // หัก ณ ที่จ่าย ทำได้เฉพาะลูกค้านิติบุคคล — เช็คจากชื่อ (บริษัท/หจก./มูลนิธิ ฯลฯ)
+  const isJuristic = /บริษัท|บจ\.|บจก|บมจ|หจก|ห้างหุ้นส่วน|จำกัด|มหาชน|สหกรณ์|มูลนิธิ|สมาคม|เทศบาล|อบต|อบจ|องค์การ|สำนักงาน|โรงเรียน|มหาวิทยาลัย|โรงพยาบาล/.test(customerName);
   const matchedDeposits = useMemo(() => {
     if (!hasRealCustomer) return [];
     const kw = normName(customerName);
@@ -199,6 +201,8 @@ export default function PartServicePaymentPage({ currentUser }) {
     if (Math.abs(total - num(billAmount)) >= 0.01 &&
         !window.confirm(`รวมรับชำระ ${fmt(total)} ไม่เท่ายอดที่ต้องชำระ ${fmt(billAmount)}\nบันทึกต่อหรือไม่?`)) return;
     if (list.some(r => r.method === "เงินโอน" && !r.account)) { setMessage("❌ เลือกบัญชีรับโอนเงินของรายการเงินโอนก่อน"); return; }
+    if (list.some(r => r.method === "เช็ค" && (!String(r.cheque_no || "").trim() || !String(r.cheque_date || "").trim()))) { setMessage("❌ กรอกเลขที่เช็คและวันที่ลงในเช็คให้ครบ"); return; }
+    if (list.some(r => r.method === "หัก ณ ที่จ่าย") && !isJuristic) { setMessage("❌ หัก ณ ที่จ่าย ใช้ได้เฉพาะลูกค้านิติบุคคล (บริษัท/หจก. ฯลฯ) — กรอกชื่อนิติบุคคลในช่องชื่อลูกค้าก่อน"); return; }
     if (list.some(r => r.method === "E-คูปอง" && !String(r.coupon_no || "").trim())) { setMessage("❌ กรอกเลขที่ E-คูปอง ของรายการ E-คูปอง ก่อน"); return; }
     for (const r of list.filter(r2 => r2.method === "มัดจำ")) {
       if (!r.deposit_doc_no) { setMessage("❌ เลือกใบมัดจำของรายการมัดจำก่อน"); return; }
@@ -219,11 +223,12 @@ export default function PartServicePaymentPage({ currentUser }) {
           doc_no: docNo.trim(), doc_type: docType,
           customer_name: customerName, branch_code: branchCode,
           paid_date: paidDate, bill_amount: num(billAmount),
-          payments: list.map(r => ({ method: r.method, amount: num(r.amount), account: r.method === "เงินโอน" ? r.account : "", deposit_doc_no: r.method === "มัดจำ" ? r.deposit_doc_no : "", coupon_no: r.method === "E-คูปอง" ? String(r.coupon_no || "").trim() : "" })),
+          payments: list.map(r => ({ method: r.method, amount: num(r.amount), account: r.method === "เงินโอน" ? r.account : "", deposit_doc_no: r.method === "มัดจำ" ? r.deposit_doc_no : "", coupon_no: r.method === "E-คูปอง" ? String(r.coupon_no || "").trim() : "", cheque_no: r.method === "เช็ค" ? String(r.cheque_no || "").trim() : "", cheque_date: r.method === "เช็ค" ? String(r.cheque_date || "").trim() : "" })),
           // แนบเลข E-คูปอง เข้าหมายเหตุด้วย — เห็นในรายการ/รายงานได้ทันทีแม้ workflow เก่ายังไม่เก็บ coupon_no ใน breakdowns
           payment_note: (() => {
             const cps = list.filter(r => r.method === "E-คูปอง" && String(r.coupon_no || "").trim()).map(r => String(r.coupon_no).trim());
-            return cps.length ? [note, `E-คูปอง: ${cps.join(", ")}`].filter(Boolean).join(" | ") : note;
+            const chq = list.filter(r => r.method === "เช็ค" && String(r.cheque_no || "").trim()).map(r => `เช็ค ${String(r.cheque_no).trim()} ลงวันที่ ${String(r.cheque_date || "-")}`);
+            return [note, cps.length ? `E-คูปอง: ${cps.join(", ")}` : "", chq.join(", ")].filter(Boolean).join(" | ");
           })(),
           received_by: currentUser?.username || currentUser?.name || "",
         }),
@@ -233,7 +238,7 @@ export default function PartServicePaymentPage({ currentUser }) {
       if (!row?.payment_id) throw new Error(row?.error || "workflow ยังไม่รองรับ — import Part_Service_Payment_Workflow.json ก่อน");
       setMessage(`✅ บันทึกรับชำระแล้ว — เลขที่ใบเสร็จ ${row.receipt_no || "-"} · อ้างอิง ${docNo.trim()} · ยอด ${fmt(total)} บาท`);
       setDocNo(docPrefixOf(docType, myBranch)); setCustomerName("เงินสด"); setNote(""); setBillAmount("");
-      setRows([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "", coupon_no: "" }]);
+      setRows([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "", coupon_no: "", cheque_no: "", cheque_date: "" }]);
       loadDeposits(); loadPayments();
     } catch (e) {
       setMessage("❌ บันทึกไม่สำเร็จ: " + String(e.message || e).slice(0, 160));
@@ -372,6 +377,21 @@ export default function PartServicePaymentPage({ currentUser }) {
                     {bankAccounts.map(a => <option key={a.id || bankLabelOf(a)} value={bankLabelOf(a)}>{bankLabelOf(a)}</option>)}
                   </select>
                 </div>
+              )}
+              {r.method === "เช็ค" && (
+                <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input value={r.cheque_no || ""} onChange={e => setRow(i, { cheque_no: e.target.value })}
+                    placeholder="เลขที่เช็ค * (บังคับกรอก)"
+                    style={{ ...inp, flex: 1, minWidth: 160, fontFamily: "monospace", background: (r.cheque_no || "").trim() ? "#fff" : "#fffbeb" }} />
+                  <input type="date" value={r.cheque_date || ""} onChange={e => setRow(i, { cheque_date: e.target.value })}
+                    title="วันที่ลงในเช็ค *"
+                    style={{ ...inp, width: 170, background: (r.cheque_date || "").trim() ? "#fff" : "#fffbeb" }} />
+                </div>
+              )}
+              {r.method === "หัก ณ ที่จ่าย" && (
+                isJuristic
+                  ? <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>ภาษีหัก ณ ที่จ่ายที่ลูกค้า (นิติบุคคล) หักไว้ — ใส่ยอดภาษีในช่องยอด นับรวมเป็นยอดชำระ รอใบ 50 ทวิจากลูกค้า</div>
+                  : <div style={{ marginTop: 6, fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: "7px 10px" }}>⚠ หัก ณ ที่จ่าย ใช้ได้เฉพาะลูกค้า<b>นิติบุคคล</b> — กรอกชื่อ บริษัท/หจก./หน่วยงาน ในช่องชื่อลูกค้าด้านบนก่อน จึงจะบันทึกได้</div>
               )}
               {r.method === "E-คูปอง" && (
                 <div style={{ marginTop: 6 }}>
