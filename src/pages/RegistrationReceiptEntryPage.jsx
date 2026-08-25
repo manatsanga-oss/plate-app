@@ -10,7 +10,7 @@ const JOB_TYPES = [
   { label: "งานต่อภาษีและพรบ.", icon: "📅", desc: "ต่อภาษีประจำปี + พรบ.", defaultIncome: "รายได้ พรบ." },
   { label: "งานโอนทะเบียน", icon: "🔁", desc: "โอนกรรมสิทธิ์ / ย้ายทะเบียน", defaultIncome: "รายได้งานทะเบียน" },
   { label: "งานประกัน", icon: "🛡️", desc: "ประกันภัยภาคสมัครใจ", defaultIncome: "รายได้ประกัน" },
-  { label: "อื่นๆ", icon: "📄", desc: "งานทะเบียนอื่น ๆ", defaultIncome: "" },
+  // "อื่นๆ" เอาออกจากตัวเลือก (user 2026-08-25) — รายได้อื่นๆ ให้ใช้เมนูรับฝากเงิน/รายได้อื่นๆ แทน; เอกสารเก่าประเภทอื่นๆ ยังเปิดแก้ได้ (option เสริมใน dropdown)
 ];
 const JOB_TYPE_LABELS = JOB_TYPES.map((t) => t.label);
 // เอกสารเก่าก่อนเปลี่ยนเป็น wizard เก็บประเภทชุดเดิม — map ให้ตรงประเภทใหม่ตอนเปิดแก้ไข
@@ -955,6 +955,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
               <select value={header.receipt_type} onChange={e => onJobTypeChange(e.target.value)} style={inp}>
                 <option value="">— เลือกประเภทงาน —</option>
                 {JOB_TYPES.map(t => <option key={t.label} value={t.label}>{t.icon} {t.label}</option>)}
+                {header.receipt_type === "อื่นๆ" && <option value="อื่นๆ">📄 อื่นๆ (เอกสารเก่า)</option>}
               </select>
             </Field>
             <Field label="สาขา *"><input value={header.branch_code} onChange={e => setHeader({ ...header, branch_code: stripBranchCode(e.target.value) })} style={inp} placeholder="SCY01" /></Field>

@@ -139,7 +139,8 @@ export default function DepositIncomePage({ currentUser }) {
       const body = { action: "list_deposit_income", date_from: dateFrom, date_to: dateTo };
       if (!isAdmin) body.branch_code = myBranch;
       const d = await post(API, body);
-      setRows(asArray(d));
+      // list ตอบแถวเดียว {listjson: "[...]"} (json_agg ฝั่ง SQL — ใช้เส้นทาง PG Single เดียวกับ save)
+      setRows(typeof d?.listjson === "string" ? JSON.parse(d.listjson) : asArray(d));
     } catch { setRows([]); }
     setLoading(false);
   }

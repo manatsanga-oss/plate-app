@@ -9,6 +9,7 @@ const ST_API = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-turnover
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const OVERRIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/price-promo-override-api"; // ราคา/โปรใหม่ที่พิมพ์เอง (มีประวัติ)
 const HONDA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/honda-report-api"; // โควต้าที่ HONDA จัดสรร (บันทึกจากหน้าส่งรายงาน)
+const BOOKING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/moto-booking-api"; // คิวจองรถ — คอลัมน์ "รถจอง" นับใบสถานะจองค้างอยู่
 const PRICE_FACTORY = 1; // ราคาขายแนะนำ = ราคาประกาศโรงงาน (อ้างอิง ไม่ปรับ)
 const PRICE_ADJ = 5;     // ไฟแนนซ์ สิงห์ชัย = ราคาที่ปรับขึ้น-ลงจริง (Honda ปรับเฉพาะตัวนี้ · Yamaha ปรับทุกราคา)
 
@@ -33,6 +34,18 @@ async function post(url, body) {
   return Array.isArray(d) ? d : (d && d.data) || [];
 }
 const byModel = (rows) => (Array.isArray(rows) ? rows : []).filter((r) => r && r.kind === "by_model").map((r) => r.data);
+
+// กติกาเดียวกับหน้าส่งรายงาน HONDA (HondaSalesReportPage — user สั่ง 2026-08-25):
+// (1) แบบสืบทอด: ยอดรหัสเก่ายุบเข้ารหัสใหม่ ไม่แตกแถว (คู่ยืนยัน 2026-08-21) — เพิ่มคู่ใหม่ที่นี่และหน้าส่งรายงานพร้อมกันเมื่อ Honda เปลี่ยนแบบ
+// (2) type สีพิเศษ TH1..TH8 ยุบเข้า type TH หลัก (สั่งซื้อ/วางแผน/ตั้งราคาแยกไม่ได้)
+const SUCCESSOR = { ACB160CATV: "ACB160CATR", WW160AV: "WW160AS", WW160SV: "WW160SS", ACF110CBTT: "ACF110CBTS" };
+const OLD2NEW = {}; for (const [nw, old] of Object.entries(SUCCESSOR)) OLD2NEW[norm(old)] = nw;
+const isSpecialTHType = (t) => /^TH\d+$/.test(norm(t)) || /\(TH\d+\)$/.test(norm(t));
+const foldKey = (brand, code, type) => {
+  if (brand !== "HONDA") return { code, type };
+  const nw = OLD2NEW[norm(code)];
+  return { code: nw || code, type: nw || isSpecialTHType(type) ? "TH" : type };
+};
 
 // ===== ตรรกะแนะนำ =====
 // sell% = ขาย/(ขาย+สต๊อก) · mos = เดือนคงคลัง (สต๊อก/ยอดขายต่อเดือน) · เทรนด์ = ขายนี้ vs ก่อน
@@ -187,6 +200,28 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
         post(MASTER_API, { action: "get_types" }),
         post(OVERRIDE_API, { action: "get_overrides" }).catch(() => []), // ราคา/โปรใหม่ล่าสุดที่เคยบันทึก (อาจยังไม่ได้ deploy → ว่าง)
       ]);
+      const bookings = await post(BOOKING_API, { action: "get_moto_bookings" }).catch(() => []);
+
+      // รถจองค้าง (สถานะ "จอง") นับต่อ (ยี่ห้อ|แบบ|type) — ใช้รุ่นล่าสุดถ้ามีการเปลี่ยนรุ่น (user 2026-08-25)
+      // รูปแบบ model_code ในใบจอง: HONDA "ACF125CAT TH8" (รหัสแบบ + type) · YAMAHA "Grand Filano Hybrid BJKC00" (ชื่อรุ่น + รหัส type)
+      // → token สุดท้าย = type, ที่เหลือ = code (ตรงกับ code/type ของ turnover ทั้ง 2 ยี่ห้อ) · มี token เดียว = จับคู่ด้วย type อย่างเดียว
+      const bookedMap = {}, bookedTypeOnly = {};
+      for (const bk of (Array.isArray(bookings) ? bookings : [])) {
+        if (!bk || bk.status !== "จอง") continue;
+        const bn = String(bk.brand || "");
+        const bBrand = /ยามา|YAMAHA/i.test(bn) ? "YAMAHA" : "HONDA"; // "ฮอนด้า"/"ออนด้า"(สะกดผิดใน DB) = HONDA
+        const eff = String(bk.new_model_code || bk.model_code || "").trim();
+        if (!eff) continue;
+        const toks = eff.split(/\s+/);
+        if (toks.length >= 2) {
+          const f = foldKey(bBrand, toks.slice(0, -1).join(" "), toks[toks.length - 1]);
+          const k = bBrand + "|" + norm(f.code) + "|" + norm(f.type);
+          bookedMap[k] = (bookedMap[k] || 0) + 1;
+        } else {
+          const k = bBrand + "|" + norm(toks[0]);
+          bookedTypeOnly[k] = (bookedTypeOnly[k] || 0) + 1;
+        }
+      }
 
       // type_id lookup จาก (model_code|type_name)
       const typeByKey = {}; const typeById = {};
@@ -212,11 +247,19 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
 
       // โปร ค่าคอมพิเศษ/เงินดาวน์ออกแทน ทุกระดับ (type/series/brand) — เก็บ eff/end ไว้คำนวณ active ณ วันที่
       const isSalesPromo = (name) => { const n = String(name || ""); return n.includes("คอมพิเศษ") || n.includes("ดาวน์ออกแทน"); };
+      // ประกัน 3PLUS ("ค่าประกัน 3PLUS" ใน master โปรโมชั่น) — คอลัมน์อ้างอิงต่อจากราคาโรงงาน (user 2026-08-25)
+      const is3Plus = (name) => String(name || "").toUpperCase().replace(/\s+/g, "").includes("3PLUS");
       const promoType = {}, promoSeries = {}, promoBrand = {};
+      const tpType = {}, tpSeries = {};
       for (const e of expenses) {
         if (e.expense_type !== "promotion" || e.status !== "active") continue;
-        if (!isSalesPromo(e.expense_name)) continue;
         const item = { name: e.expense_name, amount: Number(e.amount) || 0, eff: String(e.effective_date || "").slice(0, 10), end: String(e.end_date || "").slice(0, 10) };
+        if (is3Plus(e.expense_name)) {
+          if (e.group_by === "type" && e.type_id != null) (tpType[String(e.type_id)] || (tpType[String(e.type_id)] = [])).push(item);
+          else if (e.group_by === "series") { const sid = String(e.note || "").split("|")[0]; if (sid) (tpSeries[sid] || (tpSeries[sid] = [])).push(item); }
+          continue;
+        }
+        if (!isSalesPromo(e.expense_name)) continue;
         if (e.group_by === "type" && e.type_id != null) (promoType[String(e.type_id)] || (promoType[String(e.type_id)] = [])).push(item);
         else if (e.group_by === "series") { const sid = String(e.note || "").split("|")[0]; if (sid) (promoSeries[sid] || (promoSeries[sid] = [])).push(item); }
         else if (e.group_by === "brand" && e.brand_id != null) (promoBrand[String(e.brand_id)] || (promoBrand[String(e.brand_id)] = [])).push(item);
@@ -251,12 +294,14 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
       function aggregate(curRows, prevRows, brand) {
         const cur = {}, prev = {};
         for (const r of byModel(curRows)) {
-          const k = norm(r.code) + "|" + norm(r.type);
-          if (!cur[k]) cur[k] = { code: r.code, type: r.type, model: r.model, sold: 0, stock: 0, received: 0 };
+          const f = foldKey(brand, r.code, r.type);
+          const k = norm(f.code) + "|" + norm(f.type);
+          if (!cur[k]) cur[k] = { code: f.code, type: f.type, model: r.model, sold: 0, stock: 0, received: 0 };
           cur[k].sold += Number(r.sold_qty) || 0; cur[k].stock += Number(r.stock_end_qty) || 0; cur[k].received += Number(r.received_qty) || 0;
         }
         for (const r of byModel(prevRows)) {
-          const k = norm(r.code) + "|" + norm(r.type);
+          const f = foldKey(brand, r.code, r.type);
+          const k = norm(f.code) + "|" + norm(f.type);
           prev[k] = (prev[k] || 0) + (Number(r.sold_qty) || 0);
         }
         return Object.entries(cur).map(([k, v]) => {
@@ -268,6 +313,11 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
           const priceAdj = amt(pinfo, "adj");          // ราคา id=5 รอบนี้
           const priceAdjPrev = amt(pinfoPrev, "adj");  // ราคา id=5 รอบก่อน
           const priceFactory = amt(pinfo, "factory");
+          // ประกัน 3PLUS: ระดับ type มาก่อน ไม่มีค่อยใช้ระดับรุ่น — ถ้ามีหลายแถว (master ตั้งซ้ำ) เอาตัวที่มีผลล่าสุดตัวเดียว ไม่บวกซ้อน
+          const tpPool = (tid != null && tpType[String(tid)]) && activeAt(tpType[String(tid)], W.to).length
+            ? activeAt(tpType[String(tid)], W.to)
+            : activeAt((t && tpSeries[String(t.series_id)]) || [], W.to);
+          const threePlus = tpPool.length ? tpPool.reduce((b2, x) => (!b2 || x.eff > b2.eff ? x : b2), null).amount : null;
           const priceChanged = priceAdj !== priceAdjPrev; // เปลี่ยน → โชว์สีแดง+ค่าก่อน
           // ค่าคอม/เงินดาวน์ออกแทน ทุกระดับ (type + series + brand) แล้วกรอง active ณ สิ้นรอบนี้/รอบก่อน
           const poolItems = [
@@ -297,7 +347,8 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
             brand, key: brand + "|" + k, model: v.model, code: v.code, type: v.type,
             series: t ? t.marketing_name || t.series_name : v.model,
             sold: v.sold, soldPrev: prev[k] != null ? prev[k] : null, stock: v.stock, received: v.received,
-            priceAdj, priceAdjPrev, priceChanged, priceFactory,
+            booked: (bookedMap[brand + "|" + k] || 0) + (bookedTypeOnly[brand + "|" + norm(v.type)] || 0),
+            priceAdj, priceAdjPrev, priceChanged, priceFactory, threePlus,
             promoTotal, promoPrevTotal, promoChanged, promoItems,
             downItems, downTotal, downPrevTotal, downChanged,
             commItems, commTotal, commPrevTotal, commChanged, ...a,
@@ -401,9 +452,11 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
               <th style={th}>ขาย<br />(30วัน)</th>
               <th style={th}>เทรนด์<br />(vs ก่อน)</th>
               <th style={th}>สต๊อก</th>
+              <th style={th}>รถจอง</th>
               <th style={th}>ขายออก%</th>
               <th style={th}>เดือน<br />คงคลัง</th>
               <th style={th}>ราคาโรงงาน<br /><span style={{ fontSize: 9, fontWeight: 400 }}>(แนะนำ-อ้างอิง)</span></th>
+              <th style={th}>ประกัน<br />3PLUS</th>
               <th style={th}>ราคาขายปัจจุบัน<br /><span style={{ fontSize: 9, fontWeight: 400 }}>(สิงห์ชัย ไฟแนนซ์)</span></th>
               <th style={th}>เงินดาวน์<br />ออกแทน</th>
               <th style={th}>ค่าคอม<br />พิเศษ</th>
@@ -416,9 +469,9 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={15} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={17} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
             ) : view.length === 0 ? (
-              <tr><td colSpan={15} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
+              <tr><td colSpan={17} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>
             ) : view.map((r) => (
               <tr key={r.key} style={{ borderTop: "1px solid #f1f5f9" }}>
                 <td style={{ ...td, textAlign: "left" }}>
@@ -428,9 +481,11 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
                 <td style={td}><b>{r.sold}</b></td>
                 <td style={{ ...td, color: r.trend === "↑" ? "#059669" : r.trend === "↓" ? "#dc2626" : "#9ca3af", fontWeight: 700 }}>{r.soldPrev != null ? `${r.soldPrev}→${r.sold} ${r.trend}` : "-"}</td>
                 <td style={td}>{r.stock}</td>
+                <td style={{ ...td, fontWeight: r.booked > 0 ? 700 : 400, color: r.booked > 0 ? "#7c3aed" : "#9ca3af" }}>{r.booked > 0 ? r.booked : "-"}</td>
                 <td style={{ ...td, fontWeight: 700, color: r.sell >= 0.8 ? "#059669" : r.sell >= 0.5 ? "#d97706" : "#dc2626" }}>{Math.round(r.sell * 100)}%</td>
                 <td style={td}>{r.sold > 0 ? r.mos.toFixed(1) : r.stock > 0 ? "∞" : "-"}</td>
                 <td style={{ ...td, textAlign: "right", color: "#6b7280" }}>{baht(r.priceFactory)}</td>
+                <td style={{ ...td, textAlign: "right", color: r.threePlus != null ? "#0369a1" : "#9ca3af" }}>{r.threePlus != null ? baht(r.threePlus) : "-"}</td>
                 <td style={{ ...td, textAlign: "right" }}>
                   <span style={{ fontWeight: 700, color: r.priceChanged ? "#dc2626" : "#111827" }}>{baht(r.priceAdj)}</span>
                   {r.priceChanged && <div style={{ fontSize: 9, color: "#9ca3af" }}>เดือนก่อน {baht(r.priceAdjPrev)}</div>}

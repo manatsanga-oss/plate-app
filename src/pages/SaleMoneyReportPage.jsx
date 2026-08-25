@@ -111,7 +111,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
       // ใบยกเลิกไม่นับ (ไม่ได้รับเงินจริง) — ใบคืนเงินแล้วยังนับวันรับเงินเดิม มีป้ายกำกับ
       setPartDepRows(Array.isArray(pdep) ? pdep.filter(d => d && d.deposit_doc_no && d.status !== "cancelled") : []);
       const rc = resRcpt ? await resRcpt.json().catch(() => []) : [];
-      setRcptRows(Array.isArray(rc) ? rc.filter(r2 => r2 && r2.receipt_no && r2.paid_at) : []);
+      // ใบรับเรื่องที่ยกเลิกไม่นับ (query ฝั่ง n8n กรองแล้ว — กันซ้ำเผื่อ workflow เก่า)
+      setRcptRows(Array.isArray(rc) ? rc.filter(r2 => r2 && r2.receipt_no && r2.paid_at && r2.receipt_status !== "ยกเลิก") : []);
       const ps = resPs ? await resPs.json().catch(() => []) : [];
       setPsRows(Array.isArray(ps) ? ps.filter(p => p && p.payment_id && p.status === "active") : []);
       const um = resUm ? await resUm.json().catch(() => []) : [];
@@ -120,7 +121,9 @@ export default function SaleMoneyReportPage({ currentUser }) {
       setRpRefundRows(Array.isArray(rp) ? rp.filter(d => d && d.deposit_no && d.status === "refunded") : []);
       const rpa = resRpAll ? await resRpAll.json().catch(() => []) : [];
       setRpStandaloneRows(Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true) : []);
-      const di = resDi ? await resDi.json().catch(() => []) : [];
+      const diRaw = resDi ? await resDi.json().catch(() => []) : [];
+      // list_deposit_income ตอบแถวเดียว {listjson: "[...]"} (รวมผ่าน json_agg ฝั่ง SQL)
+      const di = Array.isArray(diRaw) ? diRaw : typeof diRaw?.listjson === "string" ? JSON.parse(diRaw.listjson) : [];
       setDepIncRows(Array.isArray(di) ? di.filter(x => x && x.receipt_no) : []);
 
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
