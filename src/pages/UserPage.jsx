@@ -40,6 +40,7 @@ const PAGE_GROUPS = [
       { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
       { key: "redplatedeposit", label: "🔴 มัดจำป้ายแดง (ติดป้ายทีหลัง)" },
       { key: "redplaterefund", label: "🔴 คืนมัดจำป้ายแดง" },
+      { key: "depositincome", label: "🏦 รับฝากเงิน/รายได้อื่นๆ" },
       { key: "usedmoto", label: "🏍️ รถมือสอง (รับซื้อ/ขาย)" },
       { key: "salemoneyreport", label: "💰 สรุปรายวันรับเงิน" },
     ],

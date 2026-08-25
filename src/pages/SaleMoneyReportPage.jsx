@@ -8,6 +8,7 @@ const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part
 const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api"; // รับชำระใบรับเรื่องงานทะเบียน
 const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // รับชำระค่าอะไหล่และบริการ (ใบขาย/ใบ JOB)
 const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api"; // ขายรถมือสอง
+const DEPOSIT_INCOME_API = "https://n8n-new-project-gwf2.onrender.com/webhook/deposit-income-api"; // รับฝากค่างวดที่บันทึกจากระบบ (ไม่รวมของ upload)
 
 // คอลัมน์วิธีรับชำระ — เอา บัตร/QR กับ อื่นๆ ออก เพิ่ม E-คูปอง (user สั่ง 2026-08-19; เช็คแล้วไม่มีข้อมูลเก่าใช้ 2 วิธีนั้น)
 const METHOD_COLS = [
@@ -57,13 +58,14 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [rpRefundRows, setRpRefundRows] = useState([]); // คืนเงินมัดจำป้ายแดง (จ่ายออก) — หักจากเงินสด/โอนของวัน
   const [rpStandaloneRows, setRpStandaloneRows] = useState([]); // มัดจำป้ายแดงติดป้ายทีหลัง (standalone) — เงินรับแยกจากใบเสร็จขายรถ
+  const [depIncRows, setDepIncRows] = useState([]); // รับฝากชำระค่างวด กรุ๊ปลีส/ธนบรรณ ที่บันทึกจากระบบ (RECS-)
 
 
   async function load() {
     setLoading(true);
     setMessage("");
     try {
-      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll] = await Promise.all([
+      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi] = await Promise.all([
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
@@ -96,6 +98,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_red_plate_deposits", status: "all", date_from: dateFrom, date_to: dateTo }),
         }).catch(() => null),
+        fetch(DEPOSIT_INCOME_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_deposit_income", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
       ]);
       const data = await res.json().catch(() => []);
       setRows(Array.isArray(data) ? data : []);
@@ -114,6 +120,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
       setRpRefundRows(Array.isArray(rp) ? rp.filter(d => d && d.deposit_no && d.status === "refunded") : []);
       const rpa = resRpAll ? await resRpAll.json().catch(() => []) : [];
       setRpStandaloneRows(Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true) : []);
+      const di = resDi ? await resDi.json().catch(() => []) : [];
+      setDepIncRows(Array.isArray(di) ? di.filter(x => x && x.receipt_no) : []);
 
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
@@ -336,6 +344,22 @@ export default function SaleMoneyReportPage({ currentUser }) {
         refunded: d.status === "refunded" || !!d.refunded_at,
       };
     });
+    // รับฝากชำระค่างวด (กรุ๊ปลีส/ธนบรรณ) ที่บันทึกจากระบบ — เงินรับหน้าร้าน รอโอนให้ไฟแนนท์ (ของ upload ไม่รวม เพราะรายงานนี้ใช้ข้อมูลระบบล้วน)
+    const depIncs = depIncRows
+      .filter((r) => (isAdmin ? (!branch || bc5(r.branch_code) === bc5(branch)) : bc5(r.branch_code) === myBranch))
+      .map((r) => {
+        const amt = num(r.total_amount);
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+        split[methodKey(r.payment_method || "เงินสด")] += amt;
+        return {
+          kind: "deposit_income", category: r.income_kind === "other" ? "รายได้อื่นๆ (หน้าร้าน)" : "รายได้รับฝากชำระค่างวด",
+          doc_no: r.receipt_no, date: String(r.receipt_date || "").slice(0, 10), ref_no: "",
+          customer_name: r.customer_name, seller: r.received_by || "", saleAmount: 0,
+          split, received: amt,
+          branch_key: bc5(r.branch_code), branch_name: r.branch_code || "ไม่ระบุสาขา",
+          note: [r.description, r.payment_account].filter(Boolean).join(" · "),
+        };
+      });
     // มัดจำป้ายแดง "ติดป้ายทีหลัง" (standalone) — เงินรับสด/โอนแยกจากใบเสร็จขายรถ (ใบขายจ่ายครบไปก่อนแล้ว)
     const rpStandalones = rpStandaloneRows
       .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
@@ -401,8 +425,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
           note: ["ป้ายแดง " + (d.plate_no || "-"), "อ้างอิง " + d.deposit_no, d.refund_account_name, d.refund_note].filter(Boolean).join(" · "),
         };
       });
-    return [...sales, ...rpItems, ...rpStandalones, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
-  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+    return [...sales, ...rpItems, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
+  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {

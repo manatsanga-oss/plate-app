@@ -155,7 +155,12 @@ export default function PayDepositPage({ currentUser }) {
         }),
       });
       const data = await res.json();
-      const rows = Array.isArray(data) ? data : (data?.rows || data?.data || []);
+      let rows = Array.isArray(data) ? data : (data?.rows || data?.data || []);
+      // ใช้ 2 ระบบคู่กัน (upload DMS + บันทึกจากระบบ RECS-): ถ้ารายการซ้ำ (สัญญา+ยอด+สาขาตรงกัน) ให้ยึดใบที่บันทึกจากระบบ ตัดแถว upload ทิ้ง (user 2026-08-25)
+      const isSys = (r) => String(r.receipt_no || "").includes("-RECS");
+      const key = (r) => [extractContract(r.description), Number(r.line_amount) || 0, String(r.branch_code || "").slice(0, 5)].join("|");
+      const sysKeys = new Set(rows.filter(isSys).map(key));
+      rows = rows.filter((r) => isSys(r) || !sysKeys.has(key(r)));
       setPendingItems(rows);
       // reset selection, pre-fill contract_no from description
       const s = {};

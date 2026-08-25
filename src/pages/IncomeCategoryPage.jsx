@@ -7,6 +7,8 @@ const emptyForm = () => ({
   income_name: "",
   description: "",
   wht_rate: 0,
+  default_amount: "",
+  vat_rate: 0,
   status: "active",
 });
 
@@ -64,6 +66,8 @@ export default function IncomeCategoryPage({ currentUser }) {
       income_name: r.income_name || "",
       description: r.description || "",
       wht_rate: r.wht_rate || 0,
+      default_amount: r.default_amount ?? "",
+      vat_rate: Number(r.vat_rate) || 0,
       status: r.status || "active",
     });
     setShowForm(true);
@@ -127,6 +131,8 @@ export default function IncomeCategoryPage({ currentUser }) {
               <th style={th}>รหัส</th>
               <th style={th}>หมวดรายได้</th>
               <th style={th}>รายละเอียด</th>
+              <th style={{ ...th, textAlign: "right" }}>จำนวนเงิน</th>
+              <th style={{ ...th, textAlign: "center" }}>VAT</th>
               <th style={{ ...th, textAlign: "right" }}>WHT %</th>
               <th style={th}>สถานะ</th>
               <th style={{ ...th, width: 140 }}>จัดการ</th>
@@ -139,6 +145,8 @@ export default function IncomeCategoryPage({ currentUser }) {
                 <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#072d6b" }}>{r.income_code}</td>
                 <td style={td}>{r.income_name}</td>
                 <td style={{ ...td, color: "#6b7280", fontSize: 12 }}>{r.description || "-"}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600 }}>{r.default_amount != null && r.default_amount !== "" ? Number(r.default_amount).toLocaleString("th-TH", { minimumFractionDigits: 2 }) : "-"}</td>
+                <td style={{ ...td, textAlign: "center" }}>{Number(r.vat_rate) > 0 ? <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#dbeafe", color: "#1e40af" }}>รวม VAT {Number(r.vat_rate)}%</span> : <span style={{ color: "#9ca3af" }}>-</span>}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{Number(r.wht_rate || 0) > 0 ? `${Number(r.wht_rate)}%` : "-"}</td>
                 <td style={td}>
                   <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600,
@@ -193,7 +201,22 @@ export default function IncomeCategoryPage({ currentUser }) {
                   💡 0% = ไม่หักภาษี · 1%, 3%, 5% ตามประเภทรายได้
                 </div>
               </div>
-              <div></div>
+              <div>
+                <label style={lbl}>จำนวนเงิน (บาท)</label>
+                <input type="number" step="0.01" min="0"
+                  value={form.default_amount}
+                  onChange={e => setForm(p => ({ ...p, default_amount: e.target.value }))}
+                  placeholder="ว่าง = กรอกยอดเองตอนบันทึก"
+                  style={{ ...inp, textAlign: "right" }} />
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 3 }}>
+                  💡 ใส่ยอดตายตัวของหมวดนี้ · เว้นว่าง = ให้ผู้ใช้กรอกเองตอนบันทึกรายได้
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 13, cursor: "pointer" }}>
+                  <input type="checkbox" checked={Number(form.vat_rate) > 0}
+                    onChange={e => setForm(p => ({ ...p, vat_rate: e.target.checked ? 7 : 0 }))} />
+                  ราคารวม VAT 7% (ระบบถอด VAT ให้ตอนบันทึก)
+                </label>
+              </div>
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label style={lbl}>รายละเอียด</label>
                 <textarea value={form.description} onChange={e => setForm(p => ({ ...p, description: e.target.value }))}

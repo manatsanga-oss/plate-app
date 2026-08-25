@@ -100,6 +100,19 @@ export default function SparePartsOrderPage({ currentUser }) {
           if (k) m[k] = [m[k], p.receipt_no].filter(Boolean).join(", ");
         }
         setPaidJobMap(m);
+        // ใบ PDS ที่เปิดงานอยู่และเลข Job มีรับชำระแล้ว → ปิดงานซ่อมอัตโนมัติ (user 2026-08-25 — จ่ายเงินแล้ว = งานจบ ไม่ต้องรอ upload NID)
+        (async () => {
+          const toClose = orders.filter(o => o.status === "เปิดงาน" && o.job_no && o.job_no !== "null"
+            && !String(o.deposit_doc_no || "").startsWith("PDO") && m[normJob(o.job_no)]);
+          if (!toClose.length) return;
+          const closedIds = [];
+          for (const o of toClose) {
+            try { await api("update_order_status", { order_id: o.order_id, status: "ปิดงานซ่อม" }); closedIds.push(o.order_id); } catch { /* ข้ามใบที่พลาด */ }
+          }
+          if (!alive || !closedIds.length) return;
+          setOrders(prev => prev.map(o => closedIds.includes(o.order_id) ? { ...o, status: "ปิดงานซ่อม" } : o));
+          setMessage(`✅ ปิดงานซ่อมอัตโนมัติ ${closedIds.length} ใบ (เลข Job รับชำระเงินแล้ว)`);
+        })();
       }).catch(() => {});
     return () => { alive = false; };
   }, [orders.length]);

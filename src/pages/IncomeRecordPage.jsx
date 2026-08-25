@@ -453,12 +453,16 @@ export default function IncomeRecordPage({ currentUser }) {
       if (field === "qty" || field === "unit_price") {
         items[idx].amount = (Number(items[idx].qty) || 0) * (Number(items[idx].unit_price) || 0);
       }
-      // ถ้าเลือก income_code → fill income_name + wht_rate (อัตโนมัติจากหมวด)
+      // ถ้าเลือก income_code → fill income_name + wht_rate + จำนวนเงิน default (ว่าง = กรอกเอง)
       if (field === "income_code") {
         const ge = incomeCategories.find(g => g.income_code === val);
         if (ge) {
           items[idx].income_name = ge.income_name;
           items[idx].wht_rate = Number(ge.wht_rate) || 0;
+          if (ge.default_amount != null && ge.default_amount !== "" && Number(ge.default_amount) > 0) {
+            items[idx].unit_price = Number(ge.default_amount);
+            items[idx].amount = (Number(items[idx].qty) || 1) * Number(ge.default_amount);
+          }
         }
       }
       return { ...f, items };
