@@ -146,20 +146,35 @@ export default function PayDepositPage({ currentUser }) {
   async function fetchPending() {
     setPendingLoading(true);
     try {
-      const res = await fetch(API_URL, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "get_pending_grouplease",
-          company,
-          date_from: dateFrom, date_to: dateTo, branch_code: branchFilter, include_paid: "false",
+      const [res, resAll] = await Promise.all([
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "get_pending_grouplease",
+            company,
+            date_from: dateFrom, date_to: dateTo, branch_code: branchFilter, include_paid: "false",
+          }),
         }),
-      });
+        // ชุดที่สอง (รวมใบที่โอนแล้ว) — ไว้สร้าง key ใบระบบให้ครบ: ใบระบบที่สร้างใบโอนไปแล้วจะหายจากลิสต์ค้างโอน
+        // แต่ใบ upload ที่ซ้ำกันยังค้างอยู่ ต้องเทียบกับใบระบบทุกสถานะถึงจะตัดถูก (เคสบุญลือ 25/08 — user 2026-08-26)
+        fetch(API_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "get_pending_grouplease",
+            company,
+            date_from: dateFrom, date_to: dateTo, branch_code: branchFilter, include_paid: "true",
+          }),
+        }).catch(() => null),
+      ]);
       const data = await res.json();
       let rows = Array.isArray(data) ? data : (data?.rows || data?.data || []);
+      const dataAll = resAll ? await resAll.json().catch(() => []) : [];
+      const rowsAll = Array.isArray(dataAll) ? dataAll : (dataAll?.rows || dataAll?.data || []);
       // ใช้ 2 ระบบคู่กัน (upload DMS + บันทึกจากระบบ RECS-): ถ้ารายการซ้ำ (สัญญา+ยอด+สาขาตรงกัน) ให้ยึดใบที่บันทึกจากระบบ ตัดแถว upload ทิ้ง (user 2026-08-25)
       const isSys = (r) => String(r.receipt_no || "").includes("-RECS");
-      const key = (r) => [extractContract(r.description), Number(r.line_amount) || 0, String(r.branch_code || "").slice(0, 5)].join("|");
-      const sysKeys = new Set(rows.filter(isSys).map(key));
+      // key รวมวันที่รับด้วย — ใบซ้ำจากธุรกรรมเดียวกันวันเดียวกันเท่านั้น (สัญญาเดิมจ่ายยอดเท่ากันเดือนถัดไปต้องไม่โดนตัด)
+      const key = (r) => [extractContract(r.description), Number(r.line_amount) || 0, String(r.branch_code || "").slice(0, 5), String(r.received_date || "").slice(0, 10)].join("|");
+      const sysKeys = new Set((rowsAll.length ? rowsAll : rows).filter(isSys).map(key));
       rows = rows.filter((r) => isSys(r) || !sysKeys.has(key(r)));
       setPendingItems(rows);
       // reset selection, pre-fill contract_no from description
