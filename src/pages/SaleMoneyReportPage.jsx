@@ -31,6 +31,7 @@ function methodKey(name) {
   // วิธีอื่น (เช่น รถเทิร์น/อื่นๆ เดิม) — ไม่มีคอลัมน์แยก รวมเข้าเงินสดไม่ได้ จึงลงคอลัมน์เงินมัดจำไม่ได้เช่นกัน → คืนค่า key ที่ไม่มีคอลัมน์ (ยอดรวมยังถูกเพราะใช้ paid_amount)
   return "other";
 }
+const shiftDate = (iso, days) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
 const fmt = (n) => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmt0 = (n) => (Number(n) ? fmt(n) : "-");
@@ -96,7 +97,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
         }).catch(() => null),
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "list_red_plate_deposits", status: "all", date_from: dateFrom, date_to: dateTo }),
+          // ดึงย้อน 90 วันเผื่อใบขายรับเงินก่อนแล้วค่อยติดป้ายทีหลัง — ใช้กันหักมัดจำป้ายแดงซ้ำจากแถวขาย (แถวแสดงผลกรองช่วงวันที่อีกที)
+          body: JSON.stringify({ action: "list_red_plate_deposits", status: "all", date_from: shiftDate(dateFrom, -90), date_to: dateTo }),
         }).catch(() => null),
         fetch(DEPOSIT_INCOME_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -226,8 +228,11 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const allItems = useMemo(() => {
     // มัดจำป้ายแดง (รับฝาก ไม่ใช่รายได้ค่ารถ): แยกออกจากแถวขายรถเป็นแถวของตัวเอง — หัก 200 ออกจากช่องสด (ไม่พอค่อยหักโอน) แล้วเพิ่มแถว "เงินมัดจำป้ายแดง"
     const sales = []; const rpItems = [];
+    // RPD แบบติดป้ายทีหลัง (standalone) — เงิน 200 เก็บแยกใบ ไม่อยู่ใน paid ของใบขาย ห้ามหักออกจากแถวขาย (เคส SCY04-MCSA-2608-00065 โชว์ค่ารถขาด 200)
+    const standaloneRpDocs = new Set(rpStandaloneRows.map((d) => String(d.deposit_no)));
     for (const it of items) {
-      const rp = Math.min(num(it.red_plate_deposit), num(it.paid_amount));
+      const rpStandaloneAttached = standaloneRpDocs.has(String(it.red_plate_doc_no || ""));
+      const rp = rpStandaloneAttached ? 0 : Math.min(num(it.red_plate_deposit), num(it.paid_amount));
       let split = it.split, received = it.received;
       if (rp > 0) {
         split = { ...split };
@@ -365,6 +370,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
       });
     // มัดจำป้ายแดง "ติดป้ายทีหลัง" (standalone) — เงินรับสด/โอนแยกจากใบเสร็จขายรถ (ใบขายจ่ายครบไปก่อนแล้ว)
     const rpStandalones = rpStandaloneRows
+      .filter((d) => { const dt = String(d.received_date || "").slice(0, 10); return dt >= dateFrom && dt <= dateTo; })
       .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
       .map((d) => {
         const amt = num(d.amount);
