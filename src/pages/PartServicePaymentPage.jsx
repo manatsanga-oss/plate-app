@@ -350,19 +350,19 @@ export default function PartServicePaymentPage({ currentUser }) {
     }).join("");
     // ฟอร์แมตสลิป 72mm — พิมพ์ผ่านเครื่องพิมพ์ใบเสร็จตัวเดียวกับหน้าพิมพ์ QR (user 2026-08-27)
     const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบเสร็จรับเงิน ${esc(pRow.receipt_no || "")}</title>
-<style>@page{size:80mm auto;margin:0}
+<style>@page{size:72mm auto;margin:0}
 *{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
-body{margin:0 auto;width:72mm;padding:4mm 2mm;color:#000;font-size:12px;line-height:1.35}
+body{margin:0;width:62mm;padding:3mm 1mm 4mm 1mm;color:#000;font-size:11px;line-height:1.35}
 .ctr{text-align:center}
-.nm{font-weight:800;font-size:13px}
-.tiny{font-size:9.5px;color:#111}
+.nm{font-weight:800;font-size:12px}
+.tiny{font-size:9px;color:#111}
 .hr{border-top:1px dashed #000;margin:6px 0}
-.ttl{font-weight:800;font-size:14px;margin-top:4px}
-.kv{display:flex;justify-content:space-between;gap:6px;font-size:11.5px}
+.ttl{font-weight:800;font-size:13px;margin-top:4px}
+.kv{display:flex;justify-content:space-between;gap:6px;font-size:10.5px}
 .kv b{text-align:right}
-.ln{display:flex;justify-content:space-between;font-size:12px;margin-top:2px}
+.ln{display:flex;justify-content:space-between;font-size:11px;margin-top:2px}
 .sub{font-size:10px;color:#333;padding-left:8px}
-.tot{display:flex;justify-content:space-between;font-weight:800;font-size:13.5px;margin-top:4px}
+.tot{display:flex;justify-content:space-between;font-weight:800;font-size:12.5px;margin-top:4px}
 .sig{margin-top:16px;text-align:center;font-size:11px}
 .sig .dash{border-top:1px dotted #000;width:60%;margin:0 auto 2px}</style></head><body>
 <div class="ctr">
