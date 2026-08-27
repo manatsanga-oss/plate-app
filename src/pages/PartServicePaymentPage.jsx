@@ -32,6 +32,22 @@ const docPrefixOf = (docType, branch) => {
   return "";
 };
 
+// หัวกระดาษใบเสร็จ แยกบริษัทตามสาขา (SCY05/06 = ป.เปา, อื่น = สิงห์ชัย) — ชุดเดียวกับใบเสร็จหน้าขาย
+const LETTERHEAD = {
+  PORPAO: {
+    name: "บริษัท ป.เปามอเตอร์เซอร์วิส จำกัด - สำนักงานใหญ่",
+    addr: "189-191 ม.7 ต.ลำไทร อ.วังน้อย จ.พระนครศรีอยุธยา 13170",
+    tel: "โทรศัพท์ : (035)271146-7   แฟกซ์ : (035) 272613",
+    tax: "เลขประจำตัวผู้เสียภาษีอากร : 0145546000707   สำนักงานใหญ่",
+  },
+  SINGCHAI: {
+    name: "หจก. สิงห์ชัย สยามยนต์ - สำนักงานใหญ่",
+    addr: "34 หมู่ 7 ซอย 10 ต.ลำไทร อ.วังน้อย จ.พระนครศรีอยุธยา 13170",
+    tel: "",
+    tax: "เลขประจำตัวผู้เสียภาษีอากร : 0143543001310   สำนักงานใหญ่",
+  },
+};
+
 const inp = { width: "100%", padding: "7px 9px", border: "1px solid #cbd5e1", borderRadius: 7, fontSize: 14, boxSizing: "border-box" };
 const th = { padding: "7px 8px", fontSize: 12.5, textAlign: "left", whiteSpace: "nowrap" };
 const td = { padding: "6px 8px", fontSize: 13 };
@@ -237,6 +253,14 @@ export default function PartServicePaymentPage({ currentUser }) {
       const row = Array.isArray(d) ? d[0] : d;
       if (!row?.payment_id) throw new Error(row?.error || "workflow ยังไม่รองรับ — import Part_Service_Payment_Workflow.json ก่อน");
       setMessage(`✅ บันทึกรับชำระแล้ว — เลขที่ใบเสร็จ ${row.receipt_no || "-"} · อ้างอิง ${docNo.trim()} · ยอด ${fmt(total)} บาท`);
+      // เก็บข้อมูลใบล่าสุดไว้ให้ปุ่ม "พิมพ์ใบเสร็จ" (response อาจไม่ครบ field — เติมจากฟอร์ม)
+      setLastSaved({
+        ...row, doc_no: row.doc_no || docNo.trim(), doc_type: row.doc_type || docType,
+        customer_name: row.customer_name || customerName, branch_code: row.branch_code || branchCode,
+        paid_date: row.paid_date || paidDate, paid_amount: row.paid_amount != null ? row.paid_amount : total,
+        payment_breakdowns: row.payment_breakdowns || JSON.stringify(list.map(r => ({ method: r.method, amount: num(r.amount), account: r.account, deposit_doc_no: r.deposit_doc_no, coupon_no: r.coupon_no, cheque_no: r.cheque_no, cheque_date: r.cheque_date }))),
+        payment_note: row.payment_note || note, received_by: row.received_by || currentUser?.username || currentUser?.name || "",
+      });
       setDocNo(docPrefixOf(docType, myBranch)); setCustomerName("เงินสด"); setNote(""); setBillAmount("");
       setRows([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "", coupon_no: "", cheque_no: "", cheque_date: "" }]);
       loadDeposits(); loadPayments();
@@ -311,6 +335,65 @@ export default function PartServicePaymentPage({ currentUser }) {
     }
   }
 
+  // พิมพ์ใบเสร็จรับเงิน (PSR) — ใช้ได้ทั้งใบที่เพิ่งบันทึกและใบเก่าในรายการ (user 2026-08-27)
+  const [lastSaved, setLastSaved] = useState(null);
+  function printReceipt(pRow) {
+    const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    const bc5 = String(pRow.branch_code || "").substring(0, 5).toUpperCase();
+    const lh = (bc5 === "SCY05" || bc5 === "SCY06") ? LETTERHEAD.PORPAO : LETTERHEAD.SINGCHAI;
+    let bks = [];
+    try { bks = Array.isArray(pRow.payment_breakdowns) ? pRow.payment_breakdowns : JSON.parse(pRow.payment_breakdowns || "[]"); } catch { bks = []; }
+    if (!Array.isArray(bks) || !bks.length) bks = [{ method: "เงินสด", amount: pRow.paid_amount }];
+    const lines = bks.map((b) => {
+      const detail = [b.account, b.deposit_doc_no, b.coupon_no ? "คูปอง " + b.coupon_no : "", b.cheque_no ? "เช็ค " + b.cheque_no + (b.cheque_date ? " ลว. " + thaiDate(b.cheque_date) : "") : ""].filter(Boolean).join(" · ");
+      return `<div class="ln"><span>${esc(b.method || "-")}</span><span>${fmt(b.amount)}</span></div>${detail ? `<div class="sub">${esc(detail)}</div>` : ""}`;
+    }).join("");
+    // ฟอร์แมตสลิป 72mm — พิมพ์ผ่านเครื่องพิมพ์ใบเสร็จตัวเดียวกับหน้าพิมพ์ QR (user 2026-08-27)
+    const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบเสร็จรับเงิน ${esc(pRow.receipt_no || "")}</title>
+<style>@page{size:80mm auto;margin:0}
+*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
+body{margin:0 auto;width:72mm;padding:4mm 2mm;color:#000;font-size:12px;line-height:1.35}
+.ctr{text-align:center}
+.nm{font-weight:800;font-size:13px}
+.tiny{font-size:9.5px;color:#111}
+.hr{border-top:1px dashed #000;margin:6px 0}
+.ttl{font-weight:800;font-size:14px;margin-top:4px}
+.kv{display:flex;justify-content:space-between;gap:6px;font-size:11.5px}
+.kv b{text-align:right}
+.ln{display:flex;justify-content:space-between;font-size:12px;margin-top:2px}
+.sub{font-size:10px;color:#333;padding-left:8px}
+.tot{display:flex;justify-content:space-between;font-weight:800;font-size:13.5px;margin-top:4px}
+.sig{margin-top:16px;text-align:center;font-size:11px}
+.sig .dash{border-top:1px dotted #000;width:60%;margin:0 auto 2px}</style></head><body>
+<div class="ctr">
+  <div class="nm">${esc(lh.name)}</div>
+  <div class="tiny">${esc(lh.addr)}</div>
+  ${lh.tel ? `<div class="tiny">${esc(lh.tel)}</div>` : ""}
+  <div class="tiny">${esc(lh.tax)}</div>
+  <div class="ttl">ใบเสร็จรับเงิน</div>
+  <div class="tiny">ค่าอะไหล่และบริการ</div>
+</div>
+<div class="hr"></div>
+<div class="kv"><span>เลขที่</span><b>${esc(pRow.receipt_no || "-")}</b></div>
+<div class="kv"><span>วันที่</span><b>${esc(thaiDate(pRow.paid_date))}</b></div>
+<div class="kv"><span>ลูกค้า</span><b>${esc(pRow.customer_name || "-")}</b></div>
+<div class="kv"><span>เอกสารอ้างอิง</span><b>${esc(pRow.doc_no || "-")}</b></div>
+${pRow.doc_type ? `<div class="kv"><span>ประเภท</span><b>${esc(pRow.doc_type)}</b></div>` : ""}
+<div class="kv"><span>สาขา</span><b>${esc(pRow.branch_code || "-")}</b></div>
+<div class="hr"></div>
+${lines}
+<div class="hr"></div>
+<div class="tot"><span>รวมรับชำระ</span><span>${fmt(pRow.paid_amount)} บาท</span></div>
+${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเหตุ: ${esc(pRow.payment_note)}</div>` : ""}
+<div class="sig"><div class="dash"></div>ผู้รับเงิน${pRow.received_by ? " : " + esc(pRow.received_by) : ""}</div>
+<div class="ctr tiny" style="margin-top:8px">ขอบคุณที่ใช้บริการ</div>
+</body></html>`;
+    const w = window.open("", "_blank", "width=420,height=700");
+    if (!w) { setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup ถูกบล็อก)"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+    setTimeout(() => { try { w.print(); } catch { /* ignore */ } }, 350);
+  }
+
   const activeSum = useMemo(() => payments.filter(p => p.status === "active").reduce((s, p) => s + num(p.paid_amount), 0), [payments]);
 
   return (
@@ -319,6 +402,14 @@ export default function PartServicePaymentPage({ currentUser }) {
       {message && (
         <div style={{ padding: "8px 12px", borderRadius: 8, marginBottom: 10, fontSize: 14, background: message.startsWith("✅") ? "#ecfdf5" : "#fef2f2", color: message.startsWith("✅") ? "#047857" : "#b91c1c", border: `1px solid ${message.startsWith("✅") ? "#a7f3d0" : "#fecaca"}` }}>
           {message}
+        </div>
+      )}
+      {lastSaved && (
+        <div style={{ margin: "6px 0 10px" }}>
+          <button onClick={() => printReceipt(lastSaved)}
+            style={{ padding: "8px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+            🖨️ พิมพ์ใบเสร็จ {lastSaved.receipt_no || ""}
+          </button>
         </div>
       )}
 
@@ -503,15 +594,19 @@ export default function PartServicePaymentPage({ currentUser }) {
                   <td style={td}>
                     {p.status === "cancelled" ? (
                       <span style={{ fontSize: 12, color: "#dc2626", fontWeight: 600 }}>ยกเลิกแล้ว</span>
-                    ) : (isAdmin || isSameDay(p.paid_date)) ? (
+                    ) : (
                       <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                        <button onClick={() => printReceipt(p)} title="พิมพ์ใบเสร็จรับเงิน"
+                          style={{ border: "1px solid #7dd3fc", background: "#fff", color: "#0369a1", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>🖨️ พิมพ์</button>
+                        {(isAdmin || isSameDay(p.paid_date)) ? (<>
                         <button onClick={() => editDocNo(p)} title="แก้ไขเฉพาะเลขที่เอกสารอ้างอิง"
                           style={{ border: "1px solid #93c5fd", background: "#fff", color: "#1d4ed8", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>แก้ไข</button>
                         <button onClick={() => cancelPayment(p)}
                           style={{ border: "1px solid #fca5a5", background: "#fff", color: "#dc2626", borderRadius: 6, padding: "3px 10px", cursor: "pointer", fontSize: 12 }}>ยกเลิก</button>
+                        </>) : (
+                          <span style={{ fontSize: 11, color: "#9ca3af" }} title="รับชำระข้ามวันแล้ว — แก้ไข/ยกเลิกได้เฉพาะ admin">🔒 admin</span>
+                        )}
                       </div>
-                    ) : (
-                      <span style={{ fontSize: 11, color: "#9ca3af" }} title="รับชำระข้ามวันแล้ว — แก้ไข/ยกเลิกได้เฉพาะ admin">🔒 admin</span>
                     )}
                   </td>
                 </tr>
