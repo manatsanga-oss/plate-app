@@ -534,7 +534,7 @@ ${depSection}
     <div className="page-container">
       <div className="page-topbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <h2 className="page-title">💰 สรุปรายวันรับเงิน</h2>
-        <button onClick={printReport} disabled={!items.length && !depItems.length}
+        <button onClick={printReport} disabled={!allItems.length}
           style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: (items.length || depItems.length) ? "#0369a1" : "#cbd5e1", color: "#fff", cursor: (items.length || depItems.length) ? "pointer" : "not-allowed", fontWeight: 600 }}>
           🖨️ พิมพ์รายงาน
         </button>
@@ -569,7 +569,7 @@ ${depSection}
 
       {/* summary cards */}
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", margin: "10px 0" }}>
-        <SummaryCard label="จำนวนรายการ" value={items.length.toLocaleString("th-TH")} color="#334155" />
+        <SummaryCard label="จำนวนรายการ" value={allItems.length.toLocaleString("th-TH")} color="#334155" />
         <SummaryCard label="ยอดขายรวม" value={fmt(grand.sale)} color="#0369a1" />
         <SummaryCard label="เงินรับรวม" value={fmt(grand.received)} color="#15803d" />
         {METHOD_COLS.filter((c) => grand[c.key] > 0).map((c) => (

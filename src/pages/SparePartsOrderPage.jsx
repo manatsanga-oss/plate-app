@@ -806,7 +806,9 @@ export default function SparePartsOrderPage({ currentUser }) {
     }
     if (filterStatus === "ตีราคาซ่อม") {
       if (!repairDeposits.some(rd => rd.deposit_doc_no === o.deposit_doc_no)) return false;
-    } else if (filterStatus !== "all" && o.status !== filterStatus) return false;
+    } else if (filterStatus === "all") {
+      if (o.status === "ปิดงานซ่อม") return false; // default ไม่โชว์ใบปิดงานซ่อม — กดชิป "ปิดงานซ่อม" เพื่อดู (user 2026-08-26)
+    } else if (o.status !== filterStatus) return false;
     if (filterParking !== "all" && o.parking_status !== filterParking) return false;
     if (filterDepType === "repair" && !(o.deposit_doc_no || "").startsWith("DEPD")) return false;
     if (filterDepType === "purchase" && (o.deposit_doc_no || "").startsWith("DEPD")) return false;
@@ -903,7 +905,7 @@ export default function SparePartsOrderPage({ currentUser }) {
 
   function printTable() {
     const w = window.open("", "_blank", "width=1200,height=800");
-    const filterLabel = (filterStatus === "all" ? "ทั้งหมด" : filterStatus) + (filterParking !== "all" ? ` / ${filterParking}` : "");
+    const filterLabel = (filterStatus === "all" ? "ทั้งหมด (ไม่รวมปิดงานซ่อม)" : filterStatus) + (filterParking !== "all" ? ` / ${filterParking}` : "");
     const rows = filtered.map((o, i) => {
       const dep = deposits.find(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.find(d => d.deposit_doc_no === o.deposit_doc_no);
       const depDate = dep ? fmtDate(dep.deposit_date) : "ปิด Job";
@@ -1029,7 +1031,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       {/* ===== Filter สถานะ ===== */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ตีราคาซ่อม"].map(s => {
-          const count = s === "all" ? orders.length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
+          const count = s === "all" ? orders.filter(o => o.status !== "ปิดงานซ่อม").length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
           const active = filterStatus === s;
           return (
             <button key={s} onClick={() => { setFilterStatus(s); setCurrentPage(1); }}
