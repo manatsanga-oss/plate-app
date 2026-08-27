@@ -535,7 +535,7 @@ ${depSection}
       <div className="page-topbar" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <h2 className="page-title">💰 สรุปรายวันรับเงิน</h2>
         <button onClick={printReport} disabled={!allItems.length}
-          style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: (items.length || depItems.length) ? "#0369a1" : "#cbd5e1", color: "#fff", cursor: (items.length || depItems.length) ? "pointer" : "not-allowed", fontWeight: 600 }}>
+          style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: allItems.length ? "#0369a1" : "#cbd5e1", color: "#fff", cursor: allItems.length ? "pointer" : "not-allowed", fontWeight: 600 }}>
           🖨️ พิมพ์รายงาน
         </button>
       </div>
