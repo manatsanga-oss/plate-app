@@ -22,6 +22,8 @@ const thaiDate = (iso) => {
   return y && m && d ? `${Number(d)}/${Number(m)}/${Number(y) + 543}` : s;
 };
 const normPlate = (v) => String(v || "").replace(/[^0-9A-Za-zก-๙]/g, "");
+// ป้ายแดงเลขซ้ำกันได้ข้ามสังกัด (สิงห์ชัย/ป.เปา มีป้ายจริงคนละชุด) — เช็คซ้ำเฉพาะสังกัดเดียวกัน (user 2026-08-28)
+const affOf = (bc) => { const c = String(bc || "").substring(0, 5).toUpperCase(); return (c === "SCY05" || c === "SCY06") ? "ป.เปา" : "สิงห์ชัย"; };
 
 export default function RedPlateDepositPage({ currentUser }) {
   const isAdmin = currentUser?.role === "admin";
@@ -57,7 +59,7 @@ export default function RedPlateDepositPage({ currentUser }) {
       // เฉพาะใบขายที่ยังไม่ติดป้ายแดง (ไม่เคยมีมัดจำ/เลข RPD)
       setSales(all.filter((r) => !(num(r.red_plate_deposit) > 0) && !r.red_plate_doc_no));
       // ป้ายที่ถูกจองไว้ในใบขายค้างชำระ (พิมพ์ป้ายตอนขายแต่ยังไม่ออก RPD)
-      setPendingPlates(all.filter((r) => r.red_plate_no && r.payment_status !== "paid").map((r) => ({ plate_no: r.red_plate_no, invoice_no: r.invoice_no, customer_name: r.customer_name })));
+      setPendingPlates(all.filter((r) => r.red_plate_no && r.payment_status !== "paid").map((r) => ({ plate_no: r.red_plate_no, invoice_no: r.invoice_no, customer_name: r.customer_name, branch_code: r.branch_code })));
       setHeldPlates(asArray(held));
     } catch { setMessage("❌ โหลดไม่สำเร็จ (ตรวจว่า re-import retail-sale-api แล้ว)"); }
     setLoading(false);
@@ -87,9 +89,10 @@ export default function RedPlateDepositPage({ currentUser }) {
     if (!plate) { setMessage("❌ กรอกทะเบียนป้ายแดง"); return; }
     if (form.method === "เงินโอน" && !form.account) { setMessage("❌ เลือกบัญชีรับโอน"); return; }
     // ห้ามเลขป้ายซ้ำกับที่ยังค้างคืน (กติกาเดียวกับหน้าขาย)
-    const dup = heldPlates.find((d) => normPlate(d.plate_no) === normPlate(plate));
+    const myAff = affOf(modal.branch_code);
+    const dup = heldPlates.find((d) => normPlate(d.plate_no) === normPlate(plate) && affOf(d.branch_code) === myAff);
     if (dup) { setMessage(`❌ ทะเบียนป้ายแดง ${plate} ยังค้างคืนอยู่ (${dup.deposit_no} · ${dup.customer_name || "-"}) — รับป้ายคืนก่อน หรือใช้ป้ายอื่น`); return; }
-    const dup2 = pendingPlates.find((d) => normPlate(d.plate_no) === normPlate(plate));
+    const dup2 = pendingPlates.find((d) => normPlate(d.plate_no) === normPlate(plate) && affOf(d.branch_code) === myAff && d.invoice_no !== modal.invoice_no);
     if (dup2) { setMessage(`❌ ทะเบียนป้ายแดง ${plate} ถูกใช้ในใบขาย ${dup2.invoice_no} (${dup2.customer_name || "-"}) ที่ยังไม่รับชำระ — ใช้ป้ายอื่น`); return; }
     if (!window.confirm(`ติดป้ายแดง ${plate} ให้ใบขาย ${modal.invoice_no} (${modal.customer_name})\nรับมัดจำ ${baht(RED_PLATE_DEPOSIT)} บาท (${form.method}) ?`)) return;
     setSaving(true); setMessage("");

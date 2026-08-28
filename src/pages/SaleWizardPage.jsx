@@ -1063,13 +1063,16 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       // มัดจำป้ายแดง: ห้ามใช้เลขป้ายที่ยังค้างคืนอยู่ (มีใบรับมัดจำ held หรือใบขายอื่นที่ยังไม่รับชำระถือป้ายนี้) — user 2026-08-24
       if (redPlateDep > 0) {
         const normPlate = (v) => String(v || "").replace(/[^0-9A-Za-zก-๙]/g, "");
+        // ป้ายแดงเลขซ้ำกันได้ข้ามสังกัด (สิงห์ชัย/ป.เปา มีป้ายจริงคนละชุด) — เช็คซ้ำเฉพาะสังกัดเดียวกัน (user 2026-08-28)
+        const affOf = (bc) => { const c = String(bc || "").substring(0, 5).toUpperCase(); return (c === "SCY05" || c === "SCY06") ? "ป.เปา" : "สิงห์ชัย"; };
+        const myAff = affOf(currentUser?.branch_code || currentUser?.branch);
         const myPlate = normPlate(redPlateNo);
         const held = await post(RETAIL_API, { action: "list_red_plate_deposits", status: "held" }).catch(() => []);
-        const dup = (Array.isArray(held) ? held : []).find((d) => normPlate(d.plate_no) === myPlate);
+        const dup = (Array.isArray(held) ? held : []).find((d) => normPlate(d.plate_no) === myPlate && affOf(d.branch_code) === myAff);
         if (dup) throw new Error(`ทะเบียนป้ายแดง ${text(redPlateNo)} ยังค้างคืนอยู่ (ใบรับมัดจำ ${dup.deposit_no} · ${dup.customer_name || "-"} · ใบขาย ${dup.sale_no}) — รับป้ายคืนก่อน หรือใช้ป้ายอื่น`);
         const d0 = new Date(); d0.setDate(d0.getDate() - 60);
         const recent = await post(RETAIL_API, { action: "list_retail_sales", date_from: d0.toISOString().slice(0, 10), date_to: todayStr(), limit: 2000 }).catch(() => []);
-        const dup2 = (Array.isArray(recent) ? recent : []).find((r) => normPlate(r.red_plate_no) === myPlate && r.payment_status !== "paid" && String(r.sale_status || "10") !== "90");
+        const dup2 = (Array.isArray(recent) ? recent : []).find((r) => normPlate(r.red_plate_no) === myPlate && affOf(r.branch_code) === myAff && r.payment_status !== "paid" && String(r.sale_status || "10") !== "90");
         if (dup2) throw new Error(`ทะเบียนป้ายแดง ${text(redPlateNo)} ถูกใช้ในใบขาย ${dup2.invoice_no} (${dup2.customer_name || "-"}) ที่ยังไม่รับชำระ — ใช้ป้ายอื่น`);
       }
       // ขายส่ง: ห้ามขายต่ำกว่าทุน (ราคาทุนจากใบรับรถ unit_cost) — user กำหนด 2026-08-22
