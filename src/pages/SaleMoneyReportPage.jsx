@@ -68,7 +68,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
     setLoading(true);
     setMessage("");
     try {
-      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel] = await Promise.all([
+      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero] = await Promise.all([
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
@@ -110,10 +110,24 @@ export default function SaleMoneyReportPage({ currentUser }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_fuel_withdraws", date_from: dateFrom, date_to: dateTo }),
         }).catch(() => null),
+        fetch(RETAIL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          // ใบขายที่ลูกค้าไม่ต้องชำระเงิน (ไฟแนนท์จ่ายทั้งหมด ยอดชำระ 0) ไม่มีการกดรับเงิน → ดึงมาโชว์เป็นแถวขาย ณ วันขาย (user 2026-08-29)
+          body: JSON.stringify({ action: "list_retail_sales", date_from: dateFrom, date_to: dateTo, limit: 2000 }),
+        }).catch(() => null),
       ]);
       const data = await res.json().catch(() => []);
       // กรองแถวว่างจาก n8n (ตอบ {} เมื่อไม่มีข้อมูล) — กันกลุ่ม "ไม่ระบุสาขา" โผล่
-      setRows((Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no)));
+      const paidRows = (Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no));
+      const zeroRaw = resZero ? await resZero.json().catch(() => []) : [];
+      const zeroDue = (Array.isArray(zeroRaw) ? zeroRaw : [])
+        .filter(r => r && r.invoice_no && String(r.payment_status || "") !== "paid" && num(r.total_payment) === 0)
+        .map(r => ({
+          ...r, sale_no: r.invoice_no, receipt_no: null, receipt_date: r.sale_date,
+          paid_amount: 0, payment_methods: [],
+          payment_received_note: "ลูกค้าไม่ต้องชำระเงิน (ยอดชำระ 0)",
+        }));
+      setRows([...paidRows, ...zeroDue]);
       const dep = resDep ? await resDep.json().catch(() => []) : [];
       setDepRows(Array.isArray(dep) ? dep.filter(d => d && d.deposit_no) : []);
       const pdep = resPartDep ? await resPartDep.json().catch(() => []) : [];
@@ -383,7 +397,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
     const deliveryFees = items
       .filter((it) => num(it.delivery_fee_amount) > 0)
       .map((it) => {
-        const amt = -num(it.delivery_fee_amount);
+        // ค่านำพามีหัก ณ ที่จ่าย 3% — จ่ายจริง = ยอดค่านำพา − ภาษีหัก (user 2026-08-29: 500 หัก 15 จ่ายจริง 485)
+        const gross = num(it.delivery_fee_amount);
+        const wht = Math.round(gross * 3) / 100;
+        const amt = -(gross - wht);
         const split = { cash: amt, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
         return {
           kind: "delivery_fee", category: "ค่านำพา (จ่ายออก)",
@@ -391,7 +408,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
           customer_name: it.customer_name, seller: it.seller, saleAmount: 0,
           split, received: amt,
           branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
-          note: "จ่ายค่านำพา — หักเงินสดหน้าร้าน",
+          note: `จ่ายค่านำพา ${gross.toLocaleString("th-TH", { minimumFractionDigits: 2 })} หัก ณ ที่จ่าย 3% = ${wht.toLocaleString("th-TH", { minimumFractionDigits: 2 })} — หักเงินสดหน้าร้าน`,
         };
       });
     // เบิกค่าน้ำมันรถใช้จ่าย (บันทึกจากระบบ) = เงินจ่ายออกจากลิ้นชัก → แถวติดลบช่องเงินสด (user 2026-08-29)
