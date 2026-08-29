@@ -118,7 +118,8 @@ function TheftReconPanel({ setMessage }) {
     if (!m) return false;
     const toks = m[1].split(",").map(normC).filter(Boolean);
     const cs = codes.map(normC).filter(Boolean);
-    return toks.some((t) => t !== "BIGBIKE" && cs.some((c) => c.startsWith(t) || t.startsWith(c)));
+    // เทียบทิศเดียวเท่านั้น — กันบั๊ก series "WW160" (PCX160) ไปชน token "WW160SV" (2026-08-29)
+    return toks.some((t) => t !== "BIGBIKE" && cs.some((c) => c.startsWith(t)));
   };
   const normCo = (v) => String(v || "").replace(/บริษัท|จำกัด|\(มหาชน\)|\s+/g, "");
   const shortCo = (v) => String(v || "").replace(/บริษัท |จำกัด|\(มหาชน\)/g, "").trim();

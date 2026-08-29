@@ -22,7 +22,9 @@ function excludedByNote(note, codes, vehicleTypeName) {
   const toks = m[1].split(",").map(norm).filter(Boolean);
   const cs = (codes || []).map(norm).filter(Boolean);
   const isBig = /BIG/i.test(String(vehicleTypeName || ""));
-  return toks.some((t) => (t === "BIGBIKE" && isBig) || cs.some((c) => c.startsWith(t) || t.startsWith(c)));
+  // เทียบทิศเดียว: รหัสรถขึ้นต้นด้วย token เท่านั้น (exclude ADV160 ครอบ ADV160AT) —
+  // ห้ามกลับทิศ ไม่งั้น series สั้น ๆ เช่น "WW160" ของ PCX160 ไปชน token "WW160SV" ทำให้ AV โดนตัดผิด (บั๊ก 2026-08-29)
+  return toks.some((t) => (t === "BIGBIKE" && isBig) || cs.some((c) => c.startsWith(t)));
 }
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
