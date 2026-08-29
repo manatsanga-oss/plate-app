@@ -4,6 +4,7 @@ const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
 // เงินมัดจำจากระบบมัดจำอะไหล่ (หน้า "ระบบมัดจำอะไหล่" — ตาราง part_deposits) ใช้แทน upload NID เดิม
 const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api";
+const PART_RETURN_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-return-api"; // สถานะทำคืนสินค้า (user 2026-08-31)
 // ประวัติขายรถ (moto_sales) — ค้นรุ่น/แบบ/type ของรถลูกค้าจากเลขตัวถังในใบมัดจำ
 const SERVICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
 // ฐานลูกค้า (search_customers) — เช็คว่าลูกค้ามี LINE ผูกไว้ไหม จากเบอร์โทร 9 หลักท้าย (แบบเดียวกับหน้าบันทึกขาย NEW)
@@ -51,6 +52,19 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
+  // ใบคืนสินค้า (part_returns) — โชว์สถานะทำคืนในรายละเอียดใบสั่งซื้อ (จับคู่ทั้งใบใหม่ source_order_id และใบเก่าผ่านเลขมัดจำใน ref_doc)
+  const [partReturns, setPartReturns] = useState([]);
+  useEffect(() => {
+    const d0 = new Date(); d0.setFullYear(d0.getFullYear() - 1);
+    fetch(PART_RETURN_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_part_returns", date_from: d0.toISOString().slice(0, 10), date_to: new Date().toISOString().slice(0, 10) }) })
+      .then((r) => r.json()).then((d) => { try { setPartReturns(typeof d?.listjson === "string" ? JSON.parse(d.listjson) : []); } catch { setPartReturns([]); } })
+      .catch(() => {});
+  }, []);
+  const returnOf = (order, partCode) => {
+    const normC = (v) => String(v || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+    return partReturns.find((rr) => rr && rr.status !== "ยกเลิก" && normC(rr.part_code) === normC(partCode) &&
+      (String(rr.source_order_id || "") === String(order.order_id) || (order.deposit_doc_no && String(rr.ref_doc || "").includes(order.deposit_doc_no))));
+  };
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -1597,6 +1611,14 @@ export default function SparePartsOrderPage({ currentUser }) {
                       {(it.substitutes || []).map((s, k) => (
                         <div key={k} style={{ color: "#d97706" }} title={s.stock_name && s.stock_name !== "-" ? `สต๊อก: ${s.stock_name}` : ""}>{s.name || "(อะไหล่ทดแทน)"}</div>
                       ))}
+                      {(() => {
+                        const ret = returnOf(showDetail, it.part_code);
+                        return ret ? (
+                          <div style={{ color: "#b45309", fontWeight: 700, fontSize: 12 }} title={ret.note || ""}>
+                            ↩️ ทำคืนแล้ว {ret.doc_no} · {ret.reason || "-"}{ret.status === "สั่งใหม่แล้ว" ? ` · 🛒 ${ret.reorder_no || "สั่งใหม่แล้ว"}` : " · ⏳ รอสั่งใหม่"}
+                          </div>
+                        ) : null;
+                      })()}
                       {(() => {
                         // ขายแล้วรายตัว — จับคู่บิลขายปลีก DCS (honda_part_sales) ตั้งแต่วันเปิดใบ
                         const hit = pdoSoldMap[showDetail.order_id]?.items?.[(it.part_code || "").replace(/-/g, "").toUpperCase().trim()];

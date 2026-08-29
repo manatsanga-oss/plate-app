@@ -53,6 +53,7 @@ const PAGE_GROUPS = [
       { key: "yamahaorder", label: "🛠️ สั่งซื้ออะไหล่ YAMAHA" },
       { key: "outsideorder", label: "🛠️ สั่งซื้ออะไหล่นอกเงินมัดจำ" },
       { key: "partdeposit", label: "🪙 ระบบมัดจำอะไหล่" },
+      { key: "partreturn", label: "↩️ บันทึกคืนสินค้า/สั่งใหม่" },
       { key: "fastmoving", label: "⚡ รายงานอะไหล่หมุนเร็ว" },
       { key: "partwithdrawal", label: "📤 บันทึกการเบิกอะไหล่" },
     ],
