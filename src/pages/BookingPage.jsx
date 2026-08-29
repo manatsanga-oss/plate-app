@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-api";
+// เบิกค่าน้ำมันจากระบบ (fuel_withdrawals) — แทน daily_expenses DMS (user 2026-08-29)
+const FUEL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fuel-withdraw-api";
+const unwrapFuelList = (d) => { try { return typeof d?.listjson === "string" ? JSON.parse(d.listjson) : Array.isArray(d) ? d : []; } catch { return []; } };
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
 const STATUS_LABEL = { pending: "จอง", cancelled: "ยกเลิก", จอง: "จอง", ยกเลิก: "ยกเลิก" };
@@ -128,17 +131,13 @@ export default function BookingPage({ currentUser }) {
   async function fetchFuelExpenses() {
     setFuelLoading(true);
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetch(FUEL_API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "get_fuel_expenses",
-          from: fuelFrom,
-          to: fuelTo,
-        }),
+        body: JSON.stringify({ action: "list_fuel_withdraws", date_from: fuelFrom, date_to: fuelTo }),
       });
       const data = await res.json();
-      setFuelData(Array.isArray(data) ? data : data.rows || []);
+      setFuelData(unwrapFuelList(data).filter(r => r && r.doc_no));
     } catch {
       setFuelData([]);
     }
@@ -1025,11 +1024,11 @@ function FuelSummaryTab() {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         }).then(r => r.json()).then(d => (Array.isArray(d) ? d : d.rows || [])).catch(() => []);
-        const [fuel, ov] = await Promise.all([
-          call({ action: "get_fuel_expenses", from: start, to: end }),
+        const [fuelRaw, ov] = await Promise.all([
+          fetch(FUEL_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_fuel_withdraws", date_from: start, date_to: end }) }).then(r => r.json()).then(unwrapFuelList).catch(() => []),
           call({ action: "get_booking_overview", from: start, to: end }),
         ]);
-        const ok = fuel.filter(r => r && !/ยกเลิก/.test(String(r.status || "")));
+        const ok = fuelRaw.filter(r => r && r.doc_no && !/ยกเลิก/.test(String(r.status || "")));
         const fuelTotal = ok.reduce((s, r) => s + Number(r.total_amount || 0), 0);
         const counts = {};
         let totalCount = 0;
@@ -1210,13 +1209,13 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin, cur
     setSaving(false);
   }
 
-  const filtered = data.filter(r => !/ยกเลิก/.test(String(r.status || "")) && range.match(Number(r.total_amount || 0)) && (!onlyUnmatched || !r.receipt_no));
+  const filtered = data.filter(r => !/ยกเลิก/.test(String(r.status || "")) && range.match(Number(r.total_amount || 0)) && (!onlyUnmatched || !String(r.tax_invoice_no || "").trim()));
   // ตรวจเลขที่อ้างอิงซ้ำ (ห้ามซ้ำ) — นับเฉพาะที่ไม่ว่าง
   const refCounts = {};
-  filtered.forEach(r => { const k = String(r.receipt_ref || "").trim(); if (k) refCounts[k] = (refCounts[k] || 0) + 1; });
+  filtered.forEach(r => { const k = String(r.tax_invoice_no || "").trim(); if (k) refCounts[k] = (refCounts[k] || 0) + 1; });
   const dupRefCount = Object.values(refCounts).filter(c => c > 1).length;
   const total = filtered.reduce((s, r) => s + Number(r.total_amount || 0), 0);
-  const matchedCount = filtered.filter(r => r.receipt_no).length;
+  const matchedCount = filtered.filter(r => String(r.tax_invoice_no || "").trim()).length;
   const unmatchedCount = filtered.length - matchedCount;
 
   return (
@@ -1245,8 +1244,8 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin, cur
 
         <div style={{ marginLeft: "auto", fontSize: 13, color: "#374151" }}>
           <span>จำนวน: <b>{filtered.length}</b></span>
-          <span style={{ marginLeft: 12, color: "#059669" }}>✅ จับคู่: <b>{matchedCount}</b></span>
-          <span style={{ marginLeft: 12, color: "#b45309" }}>⚠️ ไม่มีใบเสร็จ: <b>{unmatchedCount}</b></span>
+          <span style={{ marginLeft: 12, color: "#059669" }}>✅ มีใบกำกับ: <b>{matchedCount}</b></span>
+          <span style={{ marginLeft: 12, color: "#b45309" }}>⚠️ ไม่มีใบกำกับ: <b>{unmatchedCount}</b></span>
           {dupRefCount > 0 && <span style={{ marginLeft: 12, color: "#dc2626", fontWeight: 700 }}>🔁 เลขอ้างอิงซ้ำ: <b>{dupRefCount}</b></span>}
           <span style={{ marginLeft: 12 }}>รวม: <b style={{ color: "#dc2626" }}>{fmt(total)}</b> บาท</span>
         </div>
@@ -1262,50 +1261,34 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin, cur
             <thead>
               <tr>
                 <th style={{ whiteSpace: "nowrap" }}>วันที่</th>
-                <th>เลขที่จ่าย</th>
+                <th>เลขที่เบิก</th>
+                <th>สาขา</th>
+                <th>รถ</th>
                 <th style={{ textAlign: "right" }}>เงินสด</th>
-                <th style={{ textAlign: "right" }}>โอน</th>
-                <th style={{ textAlign: "right" }}>รวม</th>
-                <th>ผู้จัดทำ</th>
-                <th>⛽ ใบเสร็จน้ำมัน (อัตโนมัติ/เลือกเอง)</th>
+                <th style={{ textAlign: "right" }}>เลขไมล์</th>
+                <th>⛽ ใบกำกับน้ำมัน (เลขที่ · วันที่ · ปั้ม)</th>
                 <th>สถานะ</th>
-                <th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((r, i) => (
                 <tr key={r.id || i}>
                   <td style={{ whiteSpace: "nowrap" }}>{fmtDate(r.payment_date)}</td>
-                  <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{r.payment_no || "-"}</td>
-                  <td style={{ textAlign: "right" }}>{Number(r.cash || 0) > 0 ? fmt(r.cash) : "-"}</td>
-                  <td style={{ textAlign: "right" }}>{Number(r.transfer || 0) > 0 ? fmt(r.transfer) : "-"}</td>
-                  <td style={{ textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{fmt(r.total_amount)}</td>
-                  <td style={{ fontSize: 12 }}>{r.prepared_by || "-"}</td>
+                  <td style={{ whiteSpace: "nowrap", fontWeight: 600 }}>{r.doc_no || r.payment_no || "-"}</td>
+                  <td style={{ fontSize: 12 }}>{r.branch_code || "-"}</td>
+                  <td style={{ fontSize: 12 }}>{r.vehicle || "-"}</td>
+                  <td style={{ textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{fmt(r.amount ?? r.total_amount)}</td>
+                  <td style={{ textAlign: "right", fontFamily: "monospace" }}>{r.mileage != null && r.mileage !== "" ? Number(r.mileage).toLocaleString("th-TH") : "-"}</td>
                   <td style={{ fontSize: 12 }}>
-                    {r.receipt_no ? (
+                    {String(r.tax_invoice_no || "").trim() ? (
                       <div>
-                        <div style={{ fontWeight: 600, color: "#065f46" }}>✅ {r.receipt_no}
-                          {r.match_type === "manual" && <span style={{ marginLeft: 6, fontSize: 10, color: "#7c3aed", background: "#f3e8ff", padding: "1px 5px", borderRadius: 6 }}>เลือกเอง</span>}
+                        <div style={{ fontWeight: 600, color: "#065f46" }}>✅ {r.tax_invoice_no}
+                          {refCounts[String(r.tax_invoice_no).trim()] > 1 && <span style={{ marginLeft: 6, fontSize: 10, color: "#fff", background: "#dc2626", padding: "1px 6px", borderRadius: 6 }}>⚠️ เลขซ้ำ</span>}
                         </div>
-                        <div style={{ color: "#6b7280", fontSize: 11 }}>
-                          {r.receipt_vendor || "-"}
-                          {Number(r.receipt_vat) > 0 ? ` · VAT ${fmt(r.receipt_vat)}` : ""}
-                          {r.receipt_aff ? ` · ${r.receipt_aff}` : ""}
-                        </div>
-                        {(() => {
-                          const ref = String(r.receipt_ref || "").trim();
-                          if (!ref) return null;
-                          const dup = refCounts[ref] > 1;
-                          return (
-                            <div style={{ fontSize: 11, marginTop: 2, color: dup ? "#991b1b" : "#1d4ed8", fontWeight: dup ? 700 : 500 }}>
-                              อ้างอิง: {ref}
-                              {dup && <span style={{ marginLeft: 6, fontSize: 10, color: "#fff", background: "#dc2626", padding: "1px 6px", borderRadius: 6 }}>⚠️ ซ้ำ</span>}
-                            </div>
-                          );
-                        })()}
+                        <div style={{ color: "#6b7280", fontSize: 11 }}>{r.tax_invoice_date ? fmtDate(r.tax_invoice_date) : "-"}{r.station_name ? ` · ${r.station_name}` : ""}{` · VAT ${fmt(r.vat_amount != null ? r.vat_amount : Number(r.amount || 0) * 7 / 107)}`}</div>
                       </div>
                     ) : (
-                      <span style={{ color: "#b45309", fontWeight: 600 }}>⚠️ ไม่มีใบเสร็จ</span>
+                      <span style={{ color: "#b45309", fontWeight: 600 }}>⚠️ ยังไม่มีใบกำกับ — เติมได้ที่เมนูบันทึกเบิกค่าน้ำมัน</span>
                     )}
                   </td>
                   <td>
@@ -1313,12 +1296,6 @@ function FuelExpensesTab({ data, loading, from, to, setFrom, setTo, isAdmin, cur
                       background: r.status === "ปกติ" ? "#d1fae5" : "#fee2e2",
                       color: r.status === "ปกติ" ? "#065f46" : "#991b1b",
                     }}>{r.status || "-"}</span>
-                  </td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    <button onClick={() => openMatch(r)} title="จับคู่ใบเสร็จเอง"
-                      style={{ padding: "4px 10px", border: "1px solid #2563eb", background: "#eff6ff", color: "#1d4ed8", borderRadius: 6, fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-                      🔗 จับคู่
-                    </button>
                   </td>
                 </tr>
               ))}
