@@ -931,7 +931,8 @@ export default function IncomeRecordPage({ currentUser }) {
   async function savePayment() {
     const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
     const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-    if (Math.abs(sum - totalRequired) > 0.01) {
+    // เผื่อเศษสตางค์ ≤ 0.05 — ยอดโอนไฟแนนท์ปัดสตางค์ต่างจากยอดสุทธิใบรายได้ได้ (เช่น ธนบรรณ .99 vs ใบ .98) (user 2026-08-31)
+    if (Math.abs(sum - totalRequired) > 0.05) {
       setMessage(`❌ ยอดรวมของวิธีรับเงิน (${sum.toFixed(2)}) ต้องเท่ากับยอดที่จะรับ (${totalRequired.toFixed(2)})`);
       return;
     }
@@ -1355,7 +1356,7 @@ export default function IncomeRecordPage({ currentUser }) {
               const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
               const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
               const diff = totalRequired - sum;
-              const exact = Math.abs(diff) < 0.01;
+              const exact = Math.abs(diff) <= 0.05; // เผื่อเศษสตางค์ยอดโอนไฟแนนท์
               return (
                 <div style={{ marginTop: 14, padding: 12, background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -1519,7 +1520,7 @@ export default function IncomeRecordPage({ currentUser }) {
               {(() => {
                 const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
                 const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-                const exact = Math.abs(sum - totalRequired) < 0.01;
+                const exact = Math.abs(sum - totalRequired) <= 0.05; // เผื่อเศษสตางค์ยอดโอนไฟแนนท์
                 const disabled = savingPay || !exact;
                 return (
               <button onClick={savePayment} disabled={disabled}
