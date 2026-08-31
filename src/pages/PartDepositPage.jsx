@@ -243,6 +243,33 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     setSaving(false);
   }
 
+  // คืนเงินมัดจำจากแถวในตาราง (แท็บสั่งซื้อ — แท็บบริการใช้ radio ใบคืนมัดจำ) — user 2026-08-31
+  const [rfd, setRfd] = useState(null); // {doc, amount, method, note}
+  async function okRowRefund() {
+    if (saving || !rfd) return;
+    const amt = num(rfd.amount);
+    if (!(amt > 0)) { setMessage("❌ กรอกจำนวนเงินคืนให้ถูกต้อง"); return; }
+    if (amt > num(rfd.doc.remaining_amount)) { setMessage(`❌ ยอดคืนเกินมัดจำคงเหลือ (${fmt(rfd.doc.remaining_amount)} บาท)`); return; }
+    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${rfd.doc.deposit_doc_no}\nลูกค้า ${rfd.doc.customer_name} จำนวน ${fmt(amt)} บาท (${rfd.method})?`)) return;
+    setSaving(true); setMessage("");
+    try {
+      const d = await post({
+        action: "refund_deposit",
+        deposit_doc_no: rfd.doc.deposit_doc_no,
+        refund_amount: amt,
+        refund_method: rfd.method,
+        refund_note: rfd.note,
+        refunded_by: currentUser?.name || currentUser?.username || "",
+      });
+      const row = asArray(d)[0];
+      if (!row || row.error || !row.deposit_doc_no) throw new Error(row?.error || "คืนเงินไม่สำเร็จ (ยอดอาจถูกใช้/คืนไปแล้ว)");
+      setMessage(`✅ คืนเงินมัดจำ ${row.deposit_doc_no} จำนวน ${fmt(amt)} บาท แล้ว · คงเหลือ ${fmt(row.remaining_amount)} บาท`);
+      setRfd(null);
+      load();
+    } catch (e) { setMessage("❌ " + (e.message || "คืนเงินไม่สำเร็จ")); }
+    setSaving(false);
+  }
+
   async function handleCancel(r) {
     if (!window.confirm(`ยกเลิกใบมัดจำ ${r.deposit_doc_no} (${r.customer_name} · ${fmt(r.deposit_amount)} บาท)?`)) return;
     try {
@@ -803,7 +830,11 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   <td style={td}>{r.payment_method || "-"}</td>
                   <td style={td}>{r.recorded_by || "-"}</td>
                   <td style={{ ...td, fontSize: 12, maxWidth: 240 }}>{r.remark || "-"}</td>
-                  <td style={{ ...td, textAlign: "center" }}>
+                  <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+                    {r.status !== "refunded" && num(r.remaining_amount) > 0 && (
+                      <button onClick={() => { setRfd({ doc: r, amount: String(num(r.remaining_amount)), method: "เงินสด", note: "" }); setMessage(""); }} title="คืนเงินมัดจำ"
+                        style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #f59e0b", background: "#fff", color: "#b45309", cursor: "pointer", fontSize: 12, marginRight: 4 }}>↩ คืนเงิน</button>
+                    )}
                     {r.status === "active" && num(r.paid_amount) === 0 && num(r.refunded_amount) === 0 && (
                       <button onClick={() => handleCancel(r)} title="ยกเลิกใบมัดจำ"
                         style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #ef4444", background: "#fff", color: "#b91c1c", cursor: "pointer", fontSize: 12 }}>✖ ยกเลิก</button>
@@ -821,6 +852,50 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
           * โครงข้อมูลเดียวกับมัดจำที่ upload จาก NID/DMS (ลูกค้า/VIN/ยอดมัดจำ/ใช้ไป/คืนเงิน/คงเหลือ/ผู้บันทึก/หมายเหตุ) · ยกเลิกได้เฉพาะใบที่ยังไม่ถูกใช้ตัด/คืนเงิน
         </div>
       </div>
+      )}
+
+      {/* modal คืนเงินมัดจำจากแถวตาราง (แท็บสั่งซื้อ) */}
+      {rfd && (
+        <div onClick={() => !saving && setRfd(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 430, maxWidth: "94vw", fontFamily: "inherit" }}>
+            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 10 }}>↩ คืนเงินมัดจำ {rfd.doc.deposit_doc_no}</div>
+            <div style={{ fontSize: 13.5, marginBottom: 12, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px" }}>
+              ลูกค้า <b>{rfd.doc.customer_name}</b>{rfd.doc.customer_phone ? ` · ${rfd.doc.customer_phone}` : ""}<br />
+              ยอดมัดจำ {fmt(rfd.doc.deposit_amount)} · ใช้ไป {fmt(rfd.doc.paid_amount)} · คืนแล้ว {fmt(rfd.doc.refunded_amount)} · <span style={{ color: "#15803d", fontWeight: 700 }}>คงเหลือคืนได้ {fmt(rfd.doc.remaining_amount)} บาท</span>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>จำนวนเงินคืน (บาท)</label>
+                <input type="number" min="0" value={rfd.amount} autoFocus
+                  onChange={(e) => setRfd((p) => ({ ...p, amount: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 14, textAlign: "right", fontWeight: 700, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>คืนเงินโดย</label>
+                <select value={rfd.method} onChange={(e) => setRfd((p) => ({ ...p, method: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }}>
+                  <option value="เงินสด">1 - เงินสด</option>
+                  <option value="เงินโอน">2 - เงินโอน</option>
+                </select>
+              </div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>หมายเหตุการคืน</label>
+              <input value={rfd.note} onChange={(e) => setRfd((p) => ({ ...p, note: e.target.value }))} placeholder="เช่น ลูกค้ายกเลิกสั่งซื้อ"
+                style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+              <button onClick={okRowRefund} disabled={saving}
+                style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: saving ? "#cbd5e1" : "#ea580c", color: "#fff", fontWeight: 700, cursor: saving ? "wait" : "pointer", fontSize: 14 }}>
+                {saving ? "⏳ กำลังบันทึก..." : "💾 บันทึกคืนเงินมัดจำ"}
+              </button>
+              <button onClick={() => setRfd(null)} disabled={saving}
+                style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#7fb6bd", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                ↩ ปิด
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* เลือกลูกค้าจากฐาน (ช่องชื่อ) */}
