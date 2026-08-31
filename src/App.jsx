@@ -189,10 +189,29 @@ export default function App() {
 
   const [activeMenu, setActiveMenu] = useState("salesoverview");
   const [currentUser, setCurrentUser] = useState(null);
+  // เตือนเมื่อมี deploy เวอร์ชันใหม่ — แท็บที่เปิดค้างหลายวันจะบันทึกข้อมูลแบบเก่า (เคสค่านำพา SCY04 ไม่ถูกเก็บลงใบขาย 2026-08-30)
+  const [newVersion, setNewVersion] = useState(false);
 
   // ลบ session เก่าทุกครั้งที่โหลด page — บังคับ login ใหม่ทุกครั้ง
   useEffect(() => {
     localStorage.removeItem("user");
+  }, []);
+
+  // เช็คทุก 10 นาที: โหลด index.html สด เทียบชื่อไฟล์ bundle — เปลี่ยน = มี deploy ใหม่ → แสดงแถบให้กดรีเฟรช
+  useEffect(() => {
+    let first = null;
+    async function check() {
+      try {
+        const t = await (await fetch("/index.html", { cache: "no-store" })).text();
+        const m = t.match(/\/assets\/index-[^"']+\.js/);
+        if (!m) return;
+        if (first === null) first = m[0];
+        else if (m[0] !== first) setNewVersion(true);
+      } catch { /* offline ชั่วคราว — ข้ามรอบนี้ */ }
+    }
+    check();
+    const id = setInterval(check, 10 * 60 * 1000);
+    return () => clearInterval(id);
   }, []);
 
   // listen หา request เปลี่ยน page จาก child components (เช่น ServiceRateLookupPage → ServiceRateSearchPage)
@@ -305,6 +324,15 @@ export default function App() {
 
   return (
     <div className="app-layout">
+      {newVersion && (
+        <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, background: "#b91c1c", color: "#fff", padding: "9px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, fontFamily: "Tahoma", fontSize: 14, boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>
+          <span>⚠️ มีโปรแกรมเวอร์ชันใหม่ — กรุณารีเฟรชก่อนบันทึกข้อมูล ไม่เช่นนั้นข้อมูลบางช่องอาจไม่ถูกเก็บ</span>
+          <button onClick={() => window.location.reload(true)}
+            style={{ padding: "5px 16px", background: "#fff", color: "#b91c1c", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>
+            🔄 รีเฟรชเลย
+          </button>
+        </div>
+      )}
       <Sidebar
         activeMenu={activeMenu}
         onChange={setActiveMenu}
