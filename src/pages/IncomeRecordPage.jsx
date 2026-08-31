@@ -1381,10 +1381,12 @@ export default function IncomeRecordPage({ currentUser }) {
                       const usedCnInOtherRows = payments.filter((_, i) => i !== idx).map(x => x.credit_note_no).filter(Boolean);
                       // ใบค่าใช้จ่ายค้างจ่ายที่ชื่อผู้จำหน่ายตรงกับลูกค้าของใบรายได้ที่เลือก — exclude ที่ถูกเลือกในแถวอื่น
                       const usedExpInOtherRows = payments.filter((_, i) => i !== idx).map(x => String(x.expense_doc_id || "")).filter(Boolean);
-                      // แยก 2 กลุ่ม: ชื่อตรงกันขึ้นก่อน / ใบอื่น ๆ เลือกข้ามชื่อได้ (เคสคู่หักคนละชื่อ เช่น จ่าย COSMOS แต่รายได้ชื่อไทยวิวัฒน์)
+                      // แยก 2 กลุ่ม: ชื่อตรงกันขึ้นก่อน / ใบอื่น ๆ เลือกข้ามชื่อได้เฉพาะ "ยอดเท่ากัน" (เคสคู่หักคนละชื่อ เช่น จ่าย COSMOS แต่รายได้ชื่อไทยวิวัฒน์/วิริยะ)
                       const expFree = expenseDocs.filter(d => !usedExpInOtherRows.includes(String(d.expense_doc_id)));
                       const matchedExpenseDocs = expFree.filter(d => payCustomerNames.some(n => namesMatch(n, d.vendor_name)));
-                      const otherExpenseDocs = expFree.filter(d => !payCustomerNames.some(n => namesMatch(n, d.vendor_name)));
+                      // ยอดที่แถวนี้ต้องหัก = ยอดรับทั้งหมด − ยอดที่แถวอื่นระบุแล้ว → โชว์เฉพาะใบค้างจ่ายที่ยอดเท่ากันเป๊ะ (กติกา: ยอดตรงกันจึงหักกลบได้)
+                      const rowTarget = Math.round(((Number(editPayDocNo ? editTotalRequired : selectedNet) || 0) - payments.reduce((sm, x, i2) => i2 === idx ? sm : sm + (Number(x.amount) || 0), 0)) * 100) / 100;
+                      const otherExpenseDocs = expFree.filter(d => !payCustomerNames.some(n => namesMatch(n, d.vendor_name)) && Math.abs(expenseNet(d) - rowTarget) <= 0.05);
                       const onExpSelect = (val) => {
                         const doc = expenseDocs.find(d => String(d.expense_doc_id) === val);
                         updatePayment(idx, { expense_doc_id: val, expense_doc_no: doc?.expense_doc_no || "", amount: doc ? expenseNet(doc) : 0 });
@@ -1474,7 +1476,7 @@ export default function IncomeRecordPage({ currentUser }) {
                               </optgroup>
                             )}
                             {otherExpenseDocs.length > 0 && (
-                              <optgroup label="ใบอื่น ๆ (ชื่อไม่ตรง — เช่นคู่หักคนละบริษัท)">
+                              <optgroup label="ใบอื่น ๆ ยอดเท่ากัน (คู่หักคนละบริษัท เช่น COSMOS)">
                                 {otherExpenseDocs.map(d => (
                                   <option key={d.expense_doc_id} value={d.expense_doc_id}
                                     title={`${d.expense_doc_no} | ${d.vendor_name || "-"} | ฿${fmt(expenseNet(d))} | ${fmtDate(d.doc_date)}`}>
