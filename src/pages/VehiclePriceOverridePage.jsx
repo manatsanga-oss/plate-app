@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
 
-// บันทึกแก้ไขราคาขายเฉพาะคัน (user 2026-09-01) — บันทึก "ก่อน" ขาย เพื่อให้หน้าบันทึกขาย NEW
-// ใช้ราคานี้เป็นฐานแทนราคาประกาศ (ยังไม่รวมกฎบวกเพิ่มต่าง ๆ) · แดง = ต่ำกว่าประกาศ, ฟ้า = สูงกว่าประกาศ
+// บันทึกแก้ไขราคาขายเฉพาะคัน (user 2026-09-01) — บันทึก "ก่อน" ขาย: ราคาสุทธิสุดท้าย เหนือทุกกฎ
+// หน้าบันทึกขาย NEW ใช้ราคานี้ตรง ๆ ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ อีก · แดง = ต่ำกว่าประกาศ, ฟ้า = สูงกว่าประกาศ
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/vehicle-price-override-api";
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
@@ -114,7 +114,7 @@ export default function VehiclePriceOverridePage({ currentUser }) {
     if (!note.trim()) { setMessage("❌ กรอกหมายเหตุ (เหตุผลที่แก้ราคา)"); return; }
     const diff = annPrice != null ? p - num(annPrice) : null;
     const diffTxt = diff == null ? "ไม่พบราคาประกาศเทียบ" : diff === 0 ? "เท่าราคาประกาศ" : diff < 0 ? `ต่ำกว่าประกาศ ${baht(-diff)} บาท` : `สูงกว่าประกาศ ${baht(diff)} บาท`;
-    if (!window.confirm(`บันทึกแก้ไขราคาขายเฉพาะคัน\n${veh.brand} ${veh.model_name || veh.model_code} · ${veh.engine_no}\nราคาใหม่ ${baht(p)} บาท (${diffTxt})\nใช้แทนราคาประกาศเป็นฐานก่อนบวกกฎในหน้าบันทึกขาย NEW ?`)) return;
+    if (!window.confirm(`บันทึกแก้ไขราคาขายเฉพาะคัน\n${veh.brand} ${veh.model_name || veh.model_code} · ${veh.engine_no}\nราคาใหม่ ${baht(p)} บาท (${diffTxt})\nหน้าบันทึกขาย NEW จะใช้ราคานี้เป็นราคาขายสุดท้าย ไม่บวกกฎใด ๆ อีก ?`)) return;
     setSaving(true); setMessage("");
     try {
       const r = await post(API, {
@@ -125,7 +125,7 @@ export default function VehiclePriceOverridePage({ currentUser }) {
         branch_code: myBranch, created_by: currentUser?.username || currentUser?.name || "system",
       });
       if (!r || !r.id) throw new Error(r?.__error || "บันทึกไม่สำเร็จ (ตรวจว่า import workflow vehicle-price-override-api แล้ว)");
-      setMessage(`✅ บันทึกราคาเฉพาะคัน ${veh.engine_no} = ${baht(p)} บาท แล้ว — หน้าบันทึกขาย NEW จะใช้ราคานี้เป็นฐานอัตโนมัติ`);
+      setMessage(`✅ บันทึกราคาสุทธิเฉพาะคัน ${veh.engine_no} = ${baht(p)} บาท แล้ว — หน้าบันทึกขาย NEW จะใช้เป็นราคาสุดท้ายอัตโนมัติ`);
       setVeh(null); setKw(""); setNewPrice(""); setNote("");
       load();
     } catch (e) { setMessage("❌ " + (e.message || e)); }
@@ -152,7 +152,7 @@ export default function VehiclePriceOverridePage({ currentUser }) {
     <div style={{ fontFamily: "Tahoma", padding: 16, maxWidth: 1150 }}>
       <h2 style={{ margin: "0 0 4px", color: "#072d6b" }}>🏷️ บันทึกแก้ไขราคาขายเฉพาะคัน</h2>
       <div style={{ fontSize: 13, color: "#64748b", marginBottom: 14 }}>
-        บันทึก<b>ก่อน</b>ขาย — หน้าบันทึกขาย NEW จะใช้ราคานี้เป็นฐานแทนราคาประกาศ (ยังไม่รวมกฎบวกเพิ่มต่าง ๆ) ·
+        บันทึก<b>ก่อน</b>ขาย — เป็น<b>ราคาสุทธิสุดท้าย เหนือทุกกฎ</b>: หน้าบันทึกขาย NEW ใช้ราคานี้ตรง ๆ ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ อีก ·
         <span style={{ color: "#dc2626", fontWeight: 700 }}> แดง = ต่ำกว่าประกาศ</span> · <span style={{ color: "#0284c7", fontWeight: 700 }}>ฟ้า = สูงกว่าประกาศ</span>
       </div>
 
@@ -183,7 +183,7 @@ export default function VehiclePriceOverridePage({ currentUser }) {
             </div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
               <div style={{ flex: "0 1 220px" }}>
-                <label style={lbl}>ราคาขายใหม่ (ยังไม่รวมกฎ) *</label>
+                <label style={lbl}>ราคาขายสุทธิ (ราคาสุดท้าย เหนือทุกกฎ) *</label>
                 <input type="number" min="0" value={newPrice} onChange={(e) => setNewPrice(e.target.value)}
                   style={{ ...inp, width: "100%", textAlign: "right", fontWeight: 700, fontSize: 16, color: cmpColor(newPrice, annPrice) }} />
                 {num(newPrice) > 0 && annPrice != null && num(newPrice) !== num(annPrice) && (
@@ -217,7 +217,7 @@ export default function VehiclePriceOverridePage({ currentUser }) {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr>
               <th style={th}>วันที่บันทึก</th><th style={th}>สาขา</th><th style={th}>รถ</th><th style={th}>เลขเครื่อง</th>
-              <th style={{ ...th, textAlign: "right" }}>ราคาประกาศ</th><th style={{ ...th, textAlign: "right" }}>ราคาใหม่</th>
+              <th style={{ ...th, textAlign: "right" }}>ราคาประกาศ</th><th style={{ ...th, textAlign: "right" }}>ราคาสุทธิใหม่</th>
               <th style={{ ...th, textAlign: "right" }}>ส่วนต่าง</th>
               <th style={th}>หมายเหตุ</th><th style={th}>สถานะ</th><th style={th}>ผู้บันทึก</th><th style={th}></th>
             </tr></thead>

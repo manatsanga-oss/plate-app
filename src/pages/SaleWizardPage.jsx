@@ -1008,8 +1008,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   async function handleSaveSale() {
     if (saving || savedSale || !selUnit) return;
     const isFin = saleType === "finance";
-    const base = basePrice(saleType);
-    const carPrice = base == null ? null : base + (isWholesale ? 0 : markupsTotal + adjustmentsTotal);
+    const carPrice = finalCarPrice(saleType); // ราคาสุทธิเฉพาะคัน (ถ้ามี) = ราคาสุดท้าย ไม่บวกกฎใด ๆ
     if (carPrice == null) { setMessage(isWholesale ? "❌ กรอกราคาขายส่งก่อน" : "❌ ไม่พบราคาขายของรถคันนี้ — ตรวจสอบเมนูราคารถก่อน"); return; }
     if (!text(cust.customer_name)) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
     const netCar = Math.max(carPrice - downSubDiscount, 0); // หักส่วนลด "เงินดาวน์ออกแทน" (เฉพาะส่วนที่ไม่ได้แบ่งไปช่วยค่างวดล่วงหน้า)
@@ -1345,11 +1344,19 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     const eng = text(selUnit.engine_no).toUpperCase();
     return priceOverrides.find((o) => o && o.status === "active" && text(o.engine_no).toUpperCase() === eng) || null;
   }, [selUnit, priceOverrides]);
-  // ราคาฐานที่ใช้จริง: ราคาเฉพาะคัน (ถ้ามี) ชนะราคาประกาศ — ขายส่งยังพิมพ์เองเหมือนเดิม
+  // ราคาสุทธิเฉพาะคัน = ราคาสุดท้าย เหนือทุกกฎ (ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ อีก) — user 2026-09-01
+  const overrideFinal = useMemo(() => (unitOverride && num(unitOverride.new_price) > 0 ? num(unitOverride.new_price) : null), [unitOverride]);
   function basePrice(wantSaleType) {
     if (wantSaleType === "wholesale") return announcedPrice(wantSaleType);
-    if (unitOverride && num(unitOverride.new_price) > 0) return num(unitOverride.new_price);
+    if (overrideFinal != null) return overrideFinal;
     return announcedPrice(wantSaleType);
+  }
+  // ราคาขายรวมของคัน: ราคาสุทธิเฉพาะคันชนะทุกอย่าง ไม่งั้น ฐาน + กฎบวกเพิ่ม + ปรับแต่ง ตามปกติ
+  function finalCarPrice(wantSaleType) {
+    if (wantSaleType === "wholesale") return announcedPrice(wantSaleType);
+    if (overrideFinal != null) return overrideFinal;
+    const base = announcedPrice(wantSaleType);
+    return base == null ? null : base + markupsTotal + adjustmentsTotal;
   }
 
   function announcedPrice(wantSaleType) {
@@ -1425,7 +1432,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (!(adjOpen && useDownPayout)) return 0;
     const withVat = Number(downPayout || 0) * 1.07;
     if (!isSGF) return Math.ceil(withVat / 100) * 100;
-    const base = (basePrice(saleType) || 0) + markupsTotal + deliveryBonus;
+    const base = overrideFinal != null ? overrideFinal : (announcedPrice(saleType) || 0) + markupsTotal + deliveryBonus;
     if (!base) return Math.ceil(withVat / 1000) * 1000;
     return Math.ceil((base + withVat) / 1000) * 1000 - base;
   })();
@@ -1952,16 +1959,16 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       <div style={{ padding: "14px 16px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10 }}>
                         <div style={{ fontSize: 13, color: "#166534" }}>{saleType === "cash" ? "ราคาขายเงินสด" : "ราคาขายผ่อนไฟแนนท์"}</div>
                         <div style={{ fontSize: 28, fontWeight: 700, color: "#166534", marginTop: 4 }}>
-                          {fmtBaht(price == null ? null : price + markupsTotal + adjustmentsTotal)}
+                          {fmtBaht(finalCarPrice(saleType))}
                         </div>
-                        {price != null && (markupsTotal > 0 || adjustmentsTotal > 0) && (
+                        {!unitOverride && price != null && (markupsTotal > 0 || adjustmentsTotal > 0) && (
                           <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
-                            {unitOverride ? "ราคาเฉพาะคัน" : "ราคาประกาศ"} {fmtBaht(price)}
+                            ราคาประกาศ {fmtBaht(price)}
                             {markupsTotal > 0 ? ` + บวกเพิ่ม ${Number(markupsTotal).toLocaleString("th-TH")}` : ""}
                             {adjustmentsTotal > 0 ? ` + ปรับแต่ง ${Number(adjustmentsTotal).toLocaleString("th-TH")}` : ""}
                           </div>
                         )}
-                        {/* ป้ายราคาแก้ไขเฉพาะคัน: แดง = ต่ำกว่าประกาศ · ฟ้า = สูงกว่าประกาศ */}
+                        {/* ป้ายราคาสุทธิเฉพาะคัน (เหนือทุกกฎ — ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ): แดง = ต่ำกว่าประกาศ · ฟ้า = สูงกว่าประกาศ */}
                         {unitOverride && (() => {
                           const ann = announcedPrice(saleType);
                           const ovr = num(unitOverride.new_price);
@@ -1970,13 +1977,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           const c = below ? "#dc2626" : above ? "#0284c7" : "#334155";
                           return (
                             <div style={{ marginTop: 6, padding: "6px 10px", borderRadius: 8, background: below ? "#fef2f2" : above ? "#eff6ff" : "#f8fafc", border: `1px solid ${below ? "#fecaca" : above ? "#bfdbfe" : "#e2e8f0"}`, fontSize: 12.5, color: c, textAlign: "left" }}>
-                              🏷️ <b>ใช้ราคาแก้ไขเฉพาะคัน {fmtBaht(ovr)}</b>
+                              🏷️ <b>ราคาสุทธิเฉพาะคัน {fmtBaht(ovr)} — ราคาสุดท้าย ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ</b>
                               {ann != null && ovr !== num(ann) ? ` (ราคาประกาศ ${fmtBaht(ann)} · ${below ? "ต่ำกว่า" : "สูงกว่า"} ${Number(Math.abs(ovr - num(ann))).toLocaleString("th-TH")})` : ""}
                               {unitOverride.note ? <div style={{ color: "#64748b", marginTop: 2 }}>หมายเหตุ: {unitOverride.note} · โดย {unitOverride.created_by || "-"}</div> : null}
                             </div>
                           );
                         })()}
-                        {applicableMarkups.length > 0 && (
+                        {!unitOverride && applicableMarkups.length > 0 && (
                           <div style={{ fontSize: 12, color: "#7c3aed", marginTop: 4, textAlign: "left" }}>
                             {applicableMarkups.map((m, i) => {
                               const label = m.markup_type === "finance" ? `ตามไฟแนนท์: ${m.finance_company || "-"}`
@@ -2264,8 +2271,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 {/* การ์ดรับชำระเงิน + ปุ่มบันทึก */}
                 {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (() => {
                   const isFin = saleType === "finance";
-                  const base = basePrice(saleType);
-                  const carPrice = base == null ? null : base + (isWholesale ? 0 : markupsTotal + adjustmentsTotal);
+                  const carPrice = finalCarPrice(saleType); // ราคาสุทธิเฉพาะคันชนะทุกกฎ
                   const netCar = carPrice == null ? null : Math.max(carPrice - downSubDiscount, 0);
                   const fc = financeCalc(netCar || 0);
                   const dep = depositAmt;
