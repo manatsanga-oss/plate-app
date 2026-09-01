@@ -229,6 +229,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [header, setHeader] = useState(blankHeader(currentUser));
   const [lines, setLines] = useState([blankLine()]);
+  // user กดลบบรรทัดตรวจสภาพเอง (เช่น ลูกค้าตรวจสภาพมาแล้ว) → ห้าม auto เพิ่มกลับ (user 2026-09-01)
+  const [skipAutoTro, setSkipAutoTro] = useState(false);
 
   // เดา "วันสิ้นอายุภาษีเดิม" จากวันครบรอบวันจดทะเบียน — ปีที่ครบล่าสุด/กำลังจะครบ (ต่อล่วงหน้าได้ไม่เกิน 90 วัน) แก้ทับได้
   useEffect(() => {
@@ -457,6 +459,30 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       });
   }, [saleExpenses, vehicleCC]);
 
+  // รุ่นที่หา CC ไม่เจอ (รุ่นเก่า/ไม่อยู่ใน master เช่น TENA) → fallback โชว์ พรบ. ทุกช่วง cc ให้เลือกเอง
+  // ไม่ auto เลือก และไม่ต้องเพิ่มรุ่น/cc ใน master — ใช้เฉพาะใบนี้ ไม่กระทบใบอื่น (user 2026-09-01)
+  const prbCodesAllCC = useMemo(() => {
+    if (vehicleCC != null) return [];
+    const today = todayISO();
+    const activeOn = (e) => {
+      if (e.status && e.status !== "active") return false;
+      const eff = e.effective_date ? String(e.effective_date).slice(0, 10) : null;
+      const end = e.end_date ? String(e.end_date).slice(0, 10) : null;
+      if (eff && eff > today) return false;
+      if (end && end < today) return false;
+      return true;
+    };
+    return saleExpenses
+      .filter((e) => e.group_by === "cc" && e.engine_cc != null && activeOn(e) && (containsPrb(e.expense_name) || containsPrb(e.category)))
+      .sort((a, b) => Number(a.engine_cc) - Number(b.engine_cc))
+      .map((e) => {
+        const paid = e.amount != null && e.amount !== "" ? Number(e.amount) : null;
+        const collect = e.income_amount != null && e.income_amount !== "" ? Number(e.income_amount) : null;
+        const fee = paid != null && collect != null && collect > paid ? Math.round((collect - paid) * 100) / 100 : 0;
+        return { _key: `prbcc-${e.expense_id}`, code: "", name: `${e.expense_name || ""} — ${e.engine_cc} cc`, amount: paid != null ? paid : collect, fee };
+      });
+  }, [saleExpenses, vehicleCC]);
+
   // งานต่อภาษี: บรรทัดประเภท "รายได้ พรบ." ที่ยังไม่เลือกชื่อ → เลือกรายการ พรบ. ตาม CC ให้อัตโนมัติ (ราคา+ค่าบริการตามมาสเตอร์)
   const emptyPrbKey = lines.map(l => (l.income_type === TYPE_PRB && !text(l.income_name) ? "1" : "0")).join("");
   useEffect(() => {
@@ -483,7 +509,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     // รถต้องตรวจสภาพ → เพิ่มบรรทัดตรวจสภาพให้ด้วย: เข้าเกณฑ์อายุ (ตรอ.) หรือขาดต่อเกิน 1 ปี (ตรวจที่ขนส่ง)
     // ยกเว้นขาดเกิน 3 ปี (ทะเบียนระงับ) — ต้องเปลี่ยนประเภทงานอยู่แล้ว ไม่เพิ่มให้
     const r = header.tax_paid_date ? calcMcTax(header.register_date, header.tax_paid_date, taxSubmitDate || nextThursday(header.receive_date || todayISO())) : null;
-    if ((r?.needTro || (r?.overYear && !r?.suspended)) && !lines.some(isTroLine)) {
+    if ((r?.needTro || (r?.overYear && !r?.suspended)) && !skipAutoTro && !lines.some(isTroLine)) {
       const opt = regCodes.find(c => String(c.name || "").includes("ตรวจสภาพ"));
       if (opt) adds.push({ ...blankLine(), income_type: TYPE_REGISTER, income_code: opt.code || "", income_name: opt.name });
     }
@@ -507,7 +533,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   // คืน list ชื่อรายได้ตามประเภทที่เลือก — พรบ. ดึงอัตโนมัติตาม CC, อีก 2 ประเภทดึงจาก master
   // ทุกรายการติด rtype = ประเภทจริง เพื่อให้โหมด "ทั้งหมด" stamp ประเภทลง income_type ตอนเลือกชื่อ
   function getCodesForType(label) {
-    if (label === TYPE_PRB) return prbCodes.map((c) => ({ ...c, rtype: TYPE_PRB }));
+    if (label === TYPE_PRB) return (prbCodes.length ? prbCodes : prbCodesAllCC).map((c) => ({ ...c, rtype: TYPE_PRB }));
     if (label === TYPE_DEPOSIT) return depositCodes.map((c) => ({ ...c, rtype: TYPE_DEPOSIT }));
     const typeOf = (t) => t.includes("ทะเบียน") ? TYPE_REGISTER : t.includes("ประกัน") ? TYPE_INSURANCE : normalizeIncomeType(t);
     if (label === TYPE_ALL) {
@@ -556,6 +582,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     setEditMode(false);
     setHeader(blankHeader(currentUser));
     setLines([blankLine()]);
+    setSkipAutoTro(false);
     setMessage("");
     setJustSaved(false);
     setStep(1);
@@ -723,7 +750,14 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
 
   function updateLine(i, patch) { setLines((arr) => arr.map((l, idx) => idx === i ? { ...l, ...patch } : l)); }
   function addLine() { setLines((arr) => [...arr, blankLine()]); }
-  function removeLine(i) { setLines((arr) => arr.length > 1 ? arr.filter((_, idx) => idx !== i) : arr); }
+  function removeLine(i) {
+    setLines((arr) => {
+      if (arr.length <= 1) return arr;
+      // ลบบรรทัดตรวจสภาพเอง → จำไว้ไม่ให้ auto เพิ่มกลับ (ลูกค้าตรวจสภาพมาแล้ว)
+      if (arr[i] && isTroLine(arr[i])) setSkipAutoTro(true);
+      return arr.filter((_, idx) => idx !== i);
+    });
+  }
 
   // เลือกรหัส → auto-fill ชื่อ + ราคา (จาก master service_expenses)
   function onSelectIncomeCode(i, codeKey) {
@@ -1138,7 +1172,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                           ))}
                         </select>
                         {l.income_type === TYPE_PRB && vehicleCC == null && (
-                          <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>⚠️ ไม่พบ CC ของรุ่น "{header.model_series || "-"}" — เลือก/แก้รุ่นรถก่อน</div>
+                          <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>⚠️ ไม่พบ CC ของรุ่น "{header.model_series || "-"}" — เลือกรายการ พรบ. ตามช่วง cc ของรถเอง (เฉพาะใบนี้ ไม่ต้องเพิ่มรุ่นใน master)</div>
                         )}
                         {l.income_type === TYPE_PRB && vehicleCC != null && codes.length === 0 && (
                           <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>ไม่มีรายการ พรบ. สำหรับ {vehicleCC} cc</div>
