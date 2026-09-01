@@ -201,6 +201,9 @@ export default function SaleWizardPage({ currentUser }) {
   const [useDeliveryFee, setUseDeliveryFee] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [useDownPayout, setUseDownPayout] = useState(false);
+  // ซื้อประกันรถหาย COSMOS เพิ่ม (เฉพาะขายเงินสด — ไฟแนนท์ไม่ขึ้น): ใส่ค่าเบี้ยแล้วบวกเข้าราคาขายตรง ๆ ตามที่ใส่ (user 2026-09-01)
+  const [useInsAdd, setUseInsAdd] = useState(false);
+  const [insAdd, setInsAdd] = useState(0);
   const [downPayout, setDownPayout] = useState(0);
 
   // บันทึกการขาย
@@ -810,6 +813,27 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       customer_name: b.customer_name || p.customer_name,
       customer_phone: b.customer_phone || b.phone || p.customer_phone,
     }));
+    // เติม ที่อยู่/วันเกิด/รหัสลูกค้า/เลขบัตร อัตโนมัติจากฐานลูกค้า (ค้นด้วยเบอร์จากใบจอง) — user 2026-09-01
+    const phone = String(b.customer_phone || b.phone || "").replace(/[^0-9]/g, "");
+    if (phone.length >= 9) {
+      post(DEPOSIT_API, { action: "search_customers", keyword: phone }).then((d) => {
+        const list = (Array.isArray(d) ? d : []).filter((c) => c && (c.customer_name || c.customer_address));
+        if (!list.length) return;
+        const nb = text(b.customer_name).replace(/\s+/g, "");
+        // เลือกแถวชื่อตรงก่อน ไม่งั้นแถวแรกที่เบอร์ตรง — เติมเฉพาะช่องที่ยังว่าง ไม่ทับข้อมูลใบจอง
+        const c = list.find((x) => text(x.customer_name).replace(/\s+/g, "") === nb) || list[0];
+        setCust((p) => ({
+          ...p,
+          customer_code: p.customer_code || c.customer_code || c.code || "",
+          customer_address: p.customer_address || c.customer_address || c.address || "",
+          customer_tax_id: p.customer_tax_id || c.customer_tax_id || c.tax_id || "",
+          customer_province: p.customer_province || c.customer_province || c.province || "",
+          customer_birthdate: p.customer_birthdate || c.customer_birthdate || c.birth_date || c.birthdate || "",
+          customer_gender: p.customer_gender || c.customer_gender || c.gender || "",
+          customer_line_user_id: p.customer_line_user_id || c.line_user_id || "",
+        }));
+      }).catch(() => {});
+    }
   }
   // เงินมัดจำที่ใช้หัก = มัดจำคงเหลือของใบจองที่เลือก (ไม่จอง = 0)
   const depositAmt = bookingAsk === "booked" && selBooking ? Number(selBooking.remaining || 0) : 0;
@@ -1112,8 +1136,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         // ค่านำพาที่กรอกในการ์ดราคาขายบวกเพิ่ม — เก็บลงใบขายไว้ทำรายงานค่านำพาจากระบบ (user 2026-08-29)
         delivery_fee_amount: adjOpen && useDeliveryFee ? Number(deliveryFee || 0) : 0,
         // ประกันรถหาย: ลูกค้าจ่ายเอง (กรอกช่อง) ชนะ; ไม่กรอก = ใช้ยอดโปรโมชั่นออกแทนอัตโนมัติ (ไม่บวกเข้า total_payment)
-        theft_insurance_amount: isFin ? (custPaidTheft || promoTheft) : 0,
-        theft_insurance_source: isFin ? (custPaidTheft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : null,
+        theft_insurance_amount: isFin ? (custPaidTheft || promoTheft) : insAddTotal,
+        theft_insurance_source: isFin ? (custPaidTheft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : (insAddTotal > 0 ? "เงินสดซื้อเพิ่ม" : null),
         finance_company_code: isFin ? String(financeCo?.company_id || "") : "",
         finance_company_name: isFin ? (financeCo?.company_name || "") : "",
         interest_rate: isFin ? num(finRate) : 0,
@@ -1437,10 +1461,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (!base) return Math.ceil(withVat / 1000) * 1000;
     return Math.ceil((base + withVat) / 1000) * 1000 - base;
   })();
-  const adjustmentsTotal = deliveryBonus + downPayoutCalc;
+  // ซื้อประกันรถหาย COSMOS เพิ่ม: บวกตรงตามเบี้ยที่ใส่ เฉพาะขายเงินสด
+  const insAddTotal = adjOpen && saleType === "cash" && useInsAdd ? Math.max(num(insAdd), 0) : 0;
+  const adjustmentsTotal = deliveryBonus + downPayoutCalc + insAddTotal;
 
   function resetAdjustments() {
-    setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0);
+    setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0); setUseInsAdd(false); setInsAdd(0);
   }
   const thaiDate = (iso) => {
     if (!iso) return "—";
@@ -2021,6 +2047,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         <AdjRow label="เงินดาวน์/ค่างวดออกแทน" checked={useDownPayout} onCheck={setUseDownPayout}
                           value={downPayout} onChange={setDownPayout}
                           extra={downPayoutCalc > 0 ? (isSGF ? `(SGF ปัดราคารวมขึ้นหลักพัน = +${Number(downPayoutCalc).toLocaleString("th-TH")})` : `(× 1.07 = ${Number(downPayoutCalc).toLocaleString("th-TH")})`) : ""} />
+                        {/* ซื้อประกันรถหาย COSMOS เพิ่ม — เฉพาะขายเงินสด (ไฟแนนท์ไม่แสดง): บวกเข้าราคาตรงตามเบี้ยที่ใส่ */}
+                        {saleType === "cash" && (
+                          <AdjRow label="ซื้อประกันรถหาย COSMOS เพิ่ม" checked={useInsAdd} onCheck={setUseInsAdd}
+                            value={insAdd} onChange={setInsAdd}
+                            extra={insAddTotal > 0 ? `(บวกเข้าราคาขาย +${Number(insAddTotal).toLocaleString("th-TH")})` : "ใส่ค่าเบี้ยประกัน"} />
+                        )}
                         {adjustmentsTotal > 0 && (
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed" }}>รวมบวกเพิ่ม: +{Number(adjustmentsTotal).toLocaleString("th-TH")} บาท</div>
                         )}
@@ -2053,6 +2085,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                     <div style={{ marginTop: 12, padding: 12, background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                       <div style={{ fontSize: 14 }}>
                         ✓ ลูกค้าจอง: <strong>{selBooking.customer_name || "-"}</strong>
+                        {text(selBooking.line_user_id) && (
+                          <span style={{ marginLeft: 8, padding: "2px 10px", borderRadius: 10, background: "#dcfce7", color: "#15803d", fontSize: 12, fontWeight: 700 }} title="ลูกค้าผูก LINE ไว้แล้ว — ใบขายจะส่งเข้า LINE อัตโนมัติ">
+                            LINE ✓
+                          </span>
+                        )}
                         <span style={{ marginLeft: 10, padding: "2px 10px", borderRadius: 10, background: "#dcfce7", color: "#15803d", fontSize: 12, fontWeight: 700 }}>
                           🔔 คิวที่ {selBooking.queuePos}/{selBooking.stockQty}
                         </span>
@@ -2096,7 +2133,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                               return (
                                 <tr key={b.booking_id || i} style={picked ? { background: "#eff6ff" } : undefined}>
                                   <td>{i + 1}</td>
-                                  <td style={{ fontWeight: 600 }}>{b.customer_name || "-"}</td>
+                                  <td style={{ fontWeight: 600 }}>{b.customer_name || "-"}{text(b.line_user_id) ? <span style={{ marginLeft: 6, color: "#15803d", fontSize: 11.5, fontWeight: 700 }}>LINE ✓</span> : null}</td>
                                   <td>{bColor}</td>
                                   <td>{thaiDate(b.booking_date)}</td>
                                   <td style={{ textAlign: "center" }}>
@@ -2164,6 +2201,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         <div style={lbl}>ชื่อลูกค้า <span style={{ color: "#ef4444" }}>*</span></div>
                         <div style={{ ...box, textAlign: cust.customer_name ? "left" : "center" }}>
                           {cust.customer_name || "กดปุ่ม 🔍 เลือก/เพิ่ม เพื่อเลือกลูกค้า"}
+                          {cust.customer_name && custLineUserId ? <span style={{ marginLeft: 8, color: "#15803d", fontSize: 12, fontWeight: 700 }} title="ลูกค้าผูก LINE ไว้แล้ว — ใบขายจะส่งเข้า LINE อัตโนมัติ">LINE ✓</span> : null}
                         </div>
 
                         <div style={lbl}>ที่อยู่</div>
