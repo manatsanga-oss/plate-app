@@ -1070,7 +1070,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         const myAff = affOf(currentUser?.branch_code || currentUser?.branch);
         const myPlate = normPlate(redPlateNo);
         const held = await post(RETAIL_API, { action: "list_red_plate_deposits", status: "held" }).catch(() => []);
-        const dup = (Array.isArray(held) ? held : []).find((d) => normPlate(d.plate_no) === myPlate && affOf(d.branch_code) === myAff);
+        // ใบ legacy = มัดจำค้างคืนที่ import จากระบบเก่า (เงินค้างคืนลูกค้า แต่ป้ายจริงถูกเวียนใช้ต่อแล้ว) — ไม่บล็อคการใช้เลขป้ายนั้นขายคันใหม่
+        const dup = (Array.isArray(held) ? held : []).find((d) => !d.legacy && normPlate(d.plate_no) === myPlate && affOf(d.branch_code) === myAff);
         if (dup) throw new Error(`ทะเบียนป้ายแดง ${text(redPlateNo)} ยังค้างคืนอยู่ (ใบรับมัดจำ ${dup.deposit_no} · ${dup.customer_name || "-"} · ใบขาย ${dup.sale_no}) — รับป้ายคืนก่อน หรือใช้ป้ายอื่น`);
         const d0 = new Date(); d0.setDate(d0.getDate() - 60);
         const recent = await post(RETAIL_API, { action: "list_retail_sales", date_from: d0.toISOString().slice(0, 10), date_to: todayStr(), limit: 2000 }).catch(() => []);
