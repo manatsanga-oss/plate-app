@@ -115,6 +115,7 @@ import SalesByPaymentReportPage from "./pages/SalesByPaymentReportPage";
 import OtherIncomeTaxReportPage from "./pages/OtherIncomeTaxReportPage";
 import DeliveryFeePage from "./pages/DeliveryFeePage";
 import FuelWithdrawPage from "./pages/FuelWithdrawPage";
+import VehiclePriceOverridePage from "./pages/VehiclePriceOverridePage";
 import PartReturnPage from "./pages/PartReturnPage";
 import SalePriceMarkupPage from "./pages/SalePriceMarkupPage";
 import FinancePaymentMatchPage from "./pages/FinancePaymentMatchPage";
@@ -252,6 +253,8 @@ export default function App() {
     }
     // งบกำไรขาดทุน — เห็นเฉพาะ user "admin" คนเดียว (จำกัดก่อนเช็ค role admin ทั่วไป)
     if (page === "profitloss") return currentUser.username === "admin";
+    // บันทึกแก้ไขราคาขายเฉพาะคัน — เฉพาะ admin (user 2026-09-01)
+    if (page === "vehpriceoverride") return currentUser.role === "admin";
     if (currentUser.role === "admin") return true;
     // ตั้งค่าค่าใช้จ่าย (การขาย/งานบริการ/ทั่วไป) — เฉพาะ admin เท่านั้น (override explicit pages)
     if (page === "motoexpense" || page === "serviceexpense" || page === "generalexpense") return false;
@@ -402,6 +405,9 @@ export default function App() {
         )}
         {activeMenu === "pricemarkup" && canAccess("pricemarkup") && (
           <SalePriceMarkupPage currentUser={currentUser} />
+        )}
+        {activeMenu === "vehpriceoverride" && canAccess("vehpriceoverride") && (
+          <VehiclePriceOverridePage currentUser={currentUser} />
         )}
         {activeMenu === "carpaymentreport" && canAccess("carpaymentreport") && (
           <CarPaymentReportPage currentUser={currentUser} />
@@ -829,7 +835,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "fuelwithdraw", "pricemarkup", "receiptqr", "receiptissue", "retailsale", "bookingdeposit", "redplaterefund", "redplatedeposit", "depositincome"];
+  const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "fuelwithdraw", "pricemarkup", "vehpriceoverride", "receiptqr", "receiptissue", "retailsale", "bookingdeposit", "redplaterefund", "redplatedeposit", "depositincome"];
   const sparePages = ["spareorder", "sparedailyorders", "partreturn", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "partdeposit", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "partimagesearch", "productgroup", "partstatusinquiry", "partorderinquiry", "partwithdrawal", "partmodelusage"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust", "mailinbox"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "giveawayrules", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
@@ -880,6 +886,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="customer" label="บันทึกข้อมูลลูกค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="fuelwithdraw" label="บันทึกเบิกค่าน้ำมันรถใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="pricemarkup" label="ราคาขายบวกเพิ่ม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="vehpriceoverride" label="บันทึกแก้ไขราคาขายเฉพาะคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="receiptqr" label="พิมพ์ QR ออกใบเสร็จ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="receiptissue" label="ออกใบเสร็จจาก QR" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuSubGroup title="ขายรถ" pages={["retailsale", "bookingdeposit", "redplatedeposit", "redplaterefund", "depositincome", "salewizard", "usedmoto", "salemoneyreport"]} activeMenu={activeMenu} canAccess={canAccess}>

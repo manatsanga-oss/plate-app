@@ -12,6 +12,7 @@ const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sal
 const USED_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
+const PRICE_OVERRIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/vehicle-price-override-api"; // ราคาแก้ไขเฉพาะคัน (บันทึกก่อนขาย) — ใช้แทนราคาประกาศเป็นฐาน (user 2026-09-01)
 
 // กฎกลุ่มไฟแนนท์ที่มี note "exclude:CODE1,CODE2,BIGBIKE" → ไม่ใช้กับรุ่น/แบบที่ระบุ (เทียบแบบขึ้นต้นด้วยรหัส เช่น ADV160 ครอบ ADV160AT) · BIGBIKE = ประเภทรถมีคำว่า BIG (2026-08-22)
 function excludedByNote(note, codes, vehicleTypeName) {
@@ -1007,7 +1008,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   async function handleSaveSale() {
     if (saving || savedSale || !selUnit) return;
     const isFin = saleType === "finance";
-    const base = announcedPrice(saleType);
+    const base = basePrice(saleType);
     const carPrice = base == null ? null : base + (isWholesale ? 0 : markupsTotal + adjustmentsTotal);
     if (carPrice == null) { setMessage(isWholesale ? "❌ กรอกราคาขายส่งก่อน" : "❌ ไม่พบราคาขายของรถคันนี้ — ตรวจสอบเมนูราคารถก่อน"); return; }
     if (!text(cust.customer_name)) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
@@ -1144,6 +1145,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       };
       setSavedSale(saleDoc);
       setStock(prev => prev.filter(r => r.engine_no !== selUnit.engine_no)); // เอาคันที่ขายออกจากลิสต์สต๊อก
+      // ใช้ราคาแก้ไขเฉพาะคันไปแล้ว → ปิดสถานะเป็น "ใช้ขายแล้ว" ผูกเลขใบขาย (กันเอาไปใช้ซ้ำ)
+      if (unitOverride) post(PRICE_OVERRIDE_API, { action: "mark_used", engine_no: selUnit.engine_no, sale_no: sale.sale_no }).catch(() => {});
       if (autoLink?.customer_line_user_id) msg += " · 🔗 ผูก LINE ลูกค้าจากเบอร์โทรให้อัตโนมัติ";
       if (custLineUserId || autoLink?.customer_line_user_id) msg += " · กำลังส่งใบขายเข้า LINE ลูกค้า...";
       setMessage(msg);
@@ -1330,6 +1333,25 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     return selBrand && brandParam(selBrand) === "HONDA" ? "ป.เปา" : "สิงห์ชัย";
   }, [currentUser, selBrand, pbgRows, bookingDateISO]);
 
+  // ราคาแก้ไขเฉพาะคัน (บันทึกจากเมนู "บันทึกแก้ไขราคาขายเฉพาะคัน" ก่อนขาย) — ใช้แทนราคาประกาศเป็นฐานก่อนบวกกฎ (user 2026-09-01)
+  const [priceOverrides, setPriceOverrides] = useState([]);
+  useEffect(() => {
+    post(PRICE_OVERRIDE_API, { action: "list_overrides", status: "active" })
+      .then((d) => { try { setPriceOverrides(typeof d?.listjson === "string" ? JSON.parse(d.listjson) : Array.isArray(d) ? d : []); } catch { setPriceOverrides([]); } })
+      .catch(() => setPriceOverrides([]));
+  }, []);
+  const unitOverride = useMemo(() => {
+    if (!selUnit?.engine_no) return null;
+    const eng = text(selUnit.engine_no).toUpperCase();
+    return priceOverrides.find((o) => o && o.status === "active" && text(o.engine_no).toUpperCase() === eng) || null;
+  }, [selUnit, priceOverrides]);
+  // ราคาฐานที่ใช้จริง: ราคาเฉพาะคัน (ถ้ามี) ชนะราคาประกาศ — ขายส่งยังพิมพ์เองเหมือนเดิม
+  function basePrice(wantSaleType) {
+    if (wantSaleType === "wholesale") return announcedPrice(wantSaleType);
+    if (unitOverride && num(unitOverride.new_price) > 0) return num(unitOverride.new_price);
+    return announcedPrice(wantSaleType);
+  }
+
   function announcedPrice(wantSaleType) {
     if (wantSaleType === "wholesale") return num(wholesalePrice) > 0 ? num(wholesalePrice) : null;
     const masterRow = findMasterRow(selUnit, selColor);
@@ -1403,7 +1425,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (!(adjOpen && useDownPayout)) return 0;
     const withVat = Number(downPayout || 0) * 1.07;
     if (!isSGF) return Math.ceil(withVat / 100) * 100;
-    const base = (announcedPrice(saleType) || 0) + markupsTotal + deliveryBonus;
+    const base = (basePrice(saleType) || 0) + markupsTotal + deliveryBonus;
     if (!base) return Math.ceil(withVat / 1000) * 1000;
     return Math.ceil((base + withVat) / 1000) * 1000 - base;
   })();
@@ -1844,7 +1866,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
           {/* ขั้น 6: ข้อมูลรถ (ข้อมูลอยู่ข้างรูป) + การ์ดประเภทการขาย/ราคาขาย */}
           {step === 6 && (() => {
             const img = groupImage(selColor);
-            const price = saleType ? announcedPrice(saleType) : null;
+            const price = saleType ? basePrice(saleType) : null;
             const info = (label, value) => (
               <div style={{ fontSize: 14, marginBottom: 6 }}>
                 <span style={{ color: "#6b7280" }}>{label}: </span><strong>{value}</strong>
@@ -1934,11 +1956,26 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         </div>
                         {price != null && (markupsTotal > 0 || adjustmentsTotal > 0) && (
                           <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
-                            ราคาประกาศ {fmtBaht(price)}
+                            {unitOverride ? "ราคาเฉพาะคัน" : "ราคาประกาศ"} {fmtBaht(price)}
                             {markupsTotal > 0 ? ` + บวกเพิ่ม ${Number(markupsTotal).toLocaleString("th-TH")}` : ""}
                             {adjustmentsTotal > 0 ? ` + ปรับแต่ง ${Number(adjustmentsTotal).toLocaleString("th-TH")}` : ""}
                           </div>
                         )}
+                        {/* ป้ายราคาแก้ไขเฉพาะคัน: แดง = ต่ำกว่าประกาศ · ฟ้า = สูงกว่าประกาศ */}
+                        {unitOverride && (() => {
+                          const ann = announcedPrice(saleType);
+                          const ovr = num(unitOverride.new_price);
+                          const below = ann != null && ovr < num(ann);
+                          const above = ann != null && ovr > num(ann);
+                          const c = below ? "#dc2626" : above ? "#0284c7" : "#334155";
+                          return (
+                            <div style={{ marginTop: 6, padding: "6px 10px", borderRadius: 8, background: below ? "#fef2f2" : above ? "#eff6ff" : "#f8fafc", border: `1px solid ${below ? "#fecaca" : above ? "#bfdbfe" : "#e2e8f0"}`, fontSize: 12.5, color: c, textAlign: "left" }}>
+                              🏷️ <b>ใช้ราคาแก้ไขเฉพาะคัน {fmtBaht(ovr)}</b>
+                              {ann != null && ovr !== num(ann) ? ` (ราคาประกาศ ${fmtBaht(ann)} · ${below ? "ต่ำกว่า" : "สูงกว่า"} ${Number(Math.abs(ovr - num(ann))).toLocaleString("th-TH")})` : ""}
+                              {unitOverride.note ? <div style={{ color: "#64748b", marginTop: 2 }}>หมายเหตุ: {unitOverride.note} · โดย {unitOverride.created_by || "-"}</div> : null}
+                            </div>
+                          );
+                        })()}
                         {applicableMarkups.length > 0 && (
                           <div style={{ fontSize: 12, color: "#7c3aed", marginTop: 4, textAlign: "left" }}>
                             {applicableMarkups.map((m, i) => {
@@ -2227,7 +2264,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 {/* การ์ดรับชำระเงิน + ปุ่มบันทึก */}
                 {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (() => {
                   const isFin = saleType === "finance";
-                  const base = announcedPrice(saleType);
+                  const base = basePrice(saleType);
                   const carPrice = base == null ? null : base + (isWholesale ? 0 : markupsTotal + adjustmentsTotal);
                   const netCar = carPrice == null ? null : Math.max(carPrice - downSubDiscount, 0);
                   const fc = financeCalc(netCar || 0);
