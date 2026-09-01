@@ -143,7 +143,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
       const rp = resRp ? await resRp.json().catch(() => []) : [];
       setRpRefundRows(Array.isArray(rp) ? rp.filter(d => d && d.deposit_no && d.status === "refunded") : []);
       const rpa = resRpAll ? await resRpAll.json().catch(() => []) : [];
-      setRpStandaloneRows(Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true) : []);
+      // ใบ legacy (import มัดจำป้ายแดงระบบเก่า) ไม่ใช่เงินรับของวันนั้น — รับเงินไปนานแล้วในระบบเก่า ห้ามขึ้นสรุปรายวัน; ใบยกเลิกก็ไม่นับ
+      setRpStandaloneRows(Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true && !d.legacy && d.status !== "cancelled") : []);
       const diRaw = resDi ? await resDi.json().catch(() => []) : [];
       // list_deposit_income ตอบแถวเดียว {listjson: "[...]"} (รวมผ่าน json_agg ฝั่ง SQL)
       const di = Array.isArray(diRaw) ? diRaw : typeof diRaw?.listjson === "string" ? JSON.parse(diRaw.listjson) : [];
