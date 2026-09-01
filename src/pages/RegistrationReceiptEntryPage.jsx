@@ -231,6 +231,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [lines, setLines] = useState([blankLine()]);
   // user กดลบบรรทัดตรวจสภาพเอง (เช่น ลูกค้าตรวจสภาพมาแล้ว) → ห้าม auto เพิ่มกลับ (user 2026-09-01)
   const [skipAutoTro, setSkipAutoTro] = useState(false);
+  // user กดลบบรรทัดค่าต่อภาษีเอง (เช่น ลูกค้าต่อ พรบ. อย่างเดียว) → ห้าม auto เพิ่มกลับ (user 2026-09-01)
+  const [skipAutoTax, setSkipAutoTax] = useState(false);
 
   // เดา "วันสิ้นอายุภาษีเดิม" จากวันครบรอบวันจดทะเบียน — ปีที่ครบล่าสุด/กำลังจะครบ (ต่อล่วงหน้าได้ไม่เกิน 90 วัน) แก้ทับได้
   useEffect(() => {
@@ -502,7 +504,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     if (step !== 3 || header.receipt_type !== "งานต่อภาษีและพรบ.") return;
     const regCodes = getCodesForType(TYPE_REGISTER);
     const adds = [];
-    if (!lines.some(isTaxLine)) {
+    if (!skipAutoTax && !lines.some(isTaxLine)) {
       const opt = regCodes.find(c => { const n = String(c.name || ""); return n.includes("ต่อภาษี") && !n.includes("ตรวจ"); });
       if (opt) adds.push({ ...blankLine(), income_type: TYPE_REGISTER, income_code: opt.code || "", income_name: opt.name });
     }
@@ -583,6 +585,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     setHeader(blankHeader(currentUser));
     setLines([blankLine()]);
     setSkipAutoTro(false);
+    setSkipAutoTax(false);
     setMessage("");
     setJustSaved(false);
     setStep(1);
@@ -753,8 +756,9 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   function removeLine(i) {
     setLines((arr) => {
       if (arr.length <= 1) return arr;
-      // ลบบรรทัดตรวจสภาพเอง → จำไว้ไม่ให้ auto เพิ่มกลับ (ลูกค้าตรวจสภาพมาแล้ว)
+      // ลบบรรทัดตรวจสภาพ/ค่าต่อภาษีเอง → จำไว้ไม่ให้ auto เพิ่มกลับ (ตรวจมาแล้ว / ต่อ พรบ. อย่างเดียว)
       if (arr[i] && isTroLine(arr[i])) setSkipAutoTro(true);
+      if (arr[i] && isTaxLine(arr[i])) setSkipAutoTax(true);
       return arr.filter((_, idx) => idx !== i);
     });
   }
