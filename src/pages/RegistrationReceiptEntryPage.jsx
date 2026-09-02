@@ -644,7 +644,9 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       })();
       setLines(mergedLines.length ? mergedLines : [blankLine()]);
       setJustSaved(false);
-      setStep(1);
+      // เปิดใบเก่า: บรรทัดที่บันทึกไว้คือความจริง — ปิดตัวเติมบรรทัดอัตโนมัติ (ค่าต่อภาษี/ตรวจสภาพ) ไม่ให้เพิ่มกลับ (user 2026-09-02)
+      setSkipAutoTax(true); setSkipAutoTro(true);
+      setStep(3); // โหมดแก้ไขโชว์ทุกส่วน
       setView("form");
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e.message || e).slice(0, 100));
@@ -929,6 +931,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                   : step === 2 ? !!text(header.customer_name)
                   : false;
     const nextHint = step === 1 ? "ใส่เลขถังก่อน" : step === 2 ? "ใส่ชื่อลูกค้าก่อน" : "";
+    // โหมดแก้ไข: แสดงทุกส่วน (รถ/ลูกค้า/รายได้) ในหน้าเดียว ไม่ต้องกดถัดไปทีละขั้น (user 2026-09-02)
+    const showAll = editMode;
     return (
       <div style={{ padding: 20, background: "#fbf7f1", minHeight: "100%" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
@@ -937,7 +941,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         </div>
 
         {/* แถบขั้นตอน — ขั้นที่ผ่านแล้วกดย้อนได้ */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: showAll ? "none" : "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
           {STEP_NAMES.map((name, i) => {
             const n = i + 1;
             const active = n === step, done = n < step;
@@ -983,7 +987,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         )}
 
         {/* ===== ขั้น 1b: ข้อมูลเอกสาร (เปลี่ยนประเภทได้จาก dropdown) + ข้อมูลรถ ===== */}
-        {step === 1 && header.receipt_type && (
+        {(showAll || step === 1) && header.receipt_type && (
         <div style={{ ...card, marginBottom: 14 }}>
           <div style={sec}>📌 ข้อมูลเอกสาร</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 14 }}>
@@ -1077,7 +1081,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         )}
 
         {/* ===== ขั้น 2: ข้อมูลลูกค้า ===== */}
-        {step === 2 && (
+        {(showAll || step === 2) && (
         <div style={{ ...card, marginBottom: 14 }}>
           <div style={sec}>👤 ข้อมูลลูกค้า</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
@@ -1093,7 +1097,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         )}
 
         {/* ===== ขั้น 3: รายการรายได้ + สรุป ===== */}
-        {step === 3 && (<>
+        {(showAll || step === 3) && (<>
         <div style={{ ...card, marginBottom: 14, background: "#f8fafc" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "4px 16px", fontSize: 13 }}>
             <div><span style={{ color: "#6b7280" }}>เลขที่:</span> <b style={{ fontFamily: "monospace", color: "#0369a1" }}>{header.receipt_no || "-"}</b></div>
@@ -1219,20 +1223,20 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         {/* ปุ่มนำทาง wizard */}
         <div style={{ display: "flex", gap: 10, justifyContent: "space-between", padding: "10px 0", flexWrap: "wrap" }}>
           <div>
-            {step > 1 && <button onClick={() => setStep(step - 1)} style={btnGray}>← ย้อนกลับ</button>}
+            {!showAll && step > 1 && <button onClick={() => setStep(step - 1)} style={btnGray}>← ย้อนกลับ</button>}
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <button onClick={() => setView("list")} style={{ ...btn, background: "transparent", color: "#6b7280" }}>ยกเลิก</button>
-            {step < 3 && (
+            {!showAll && step < 3 && (
               <button onClick={() => canNext && setStep(step + 1)} disabled={!canNext} title={canNext ? "" : nextHint}
                 style={{ ...btnPri, opacity: canNext ? 1 : 0.45, cursor: canNext ? "pointer" : "not-allowed" }}>
                 ถัดไป →
               </button>
             )}
-            {step === 3 && (justSaved || editMode) && (
+            {(showAll || step === 3) && (justSaved || editMode) && (
               <button onClick={printReceipt} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>🖨️ พิมพ์</button>
             )}
-            {step === 3 && (justSaved || editMode) && (
+            {(showAll || step === 3) && (justSaved || editMode) && (
               header.paid_at ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "#d1fae5", color: "#065f46", fontSize: 13, fontWeight: 600 }}>
                   ✓ รับชำระแล้ว {baht(num(header.paid_amount))} ({header.payment_method || "-"} · {fmtBE(header.paid_date)})
@@ -1243,7 +1247,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                 <button onClick={openPayModal} style={{ ...btn, background: "#059669", color: "#fff" }}>💵 รับชำระเงิน</button>
               )
             )}
-            {step === 3 && (
+            {(showAll || step === 3) && (
               <button onClick={handleSave} disabled={saving} style={{ ...btnGreen, opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>
             )}
           </div>
