@@ -185,6 +185,18 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       }));
   }
   // ---------- ภ.ง.ด.3/53: ค่าแนะนำ (สรุปเดือน × สังกัด × ประเภทผู้รับ) จาก referral-fee-api ----------
+  // สังกัดของค่าแนะนำ/ค่านำพา = ยี่ห้อรถที่ขาย ไม่ใช่สาขาที่บันทึก (user 2026-09-01): YAMAHA → สิงห์ชัย, HONDA → ป.เปา
+  // อ่านจากรหัสเครื่องในหมายเหตุใบจ่าย — YAMAHA = อักษร+ตัวเลข (E34SE, E35NE, G3V4E, H345E XMAX) · HONDA = อักษร+อักษร (JA74E, JK16E, KF50E, JC93E, NF09E NSS350)
+  // ยืนยันจาก moto_sales 2026-09-01: H345E ยามาฮ่าทั้ง 50 ใบ, NF09E ฮอนด้าทั้ง 38 ใบ
+  function affByEngineNote(note) {
+    // รหัสเครื่องยาว 5 ตัวลงท้าย E เสมอ (ไม่ใช้ \b เพราะบางแถวพิมพ์ติดกับรหัสรุ่น เช่น "AFS110MCBT 3THJA74E-1534196")
+    const m = String(note || "").toUpperCase().match(/([A-Z][A-Z0-9]{3}E)[-\s]?\d{6,8}/);
+    if (!m) return null;
+    const p = m[1];
+    if (/^[A-Z]\d/.test(p)) return "สิงห์ชัย";
+    if (/^[A-Z][A-Z]/.test(p)) return "ป.เปา";
+    return null;
+  }
   async function loadReferralRows() {
     const ref = await post(REFERRAL_URL, { action: "list_referral_fees" });
     const rows = Array.isArray(ref) ? ref : [];
@@ -193,7 +205,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const wht = Number(r.withholding_tax || 0);
       if (wht <= 0) return;
       const tt = pndTypeOf(r.pay_to);
-      const aff = r.affiliation || "(ไม่ระบุสังกัด)";
+      const aff = affByEngineNote(r.note) || r.affiliation || "(ไม่ระบุสังกัด)";
       const pm = periodOf(r.payment_date);
       const key = `${tt}|${pm}|${aff}`;
       if (!map[key]) map[key] = { source_id: `ref|${key}`, kind: "referral", pndType: tt, sourceLabel: "ค่าแนะนำ", affiliation: aff, paid_at: `${yymm(r.payment_date)}-01`, period_month: pm, amount: 0, count: 0, vendor_name: "ค่าแนะนำ", details: [] };

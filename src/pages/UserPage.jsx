@@ -75,7 +75,6 @@ const PAGE_GROUPS = [
       { key: "pettycashoffering", label: "🙏 เงินสดย่อย-ค่าของไหว้" },
       { key: "payment",    label: "📱 รับชำระเงิน (QR PromptPay)" },
       { key: "bankdeposit", label: "🏦 บันทึกรายการฝากเงิน" },
-      { key: "expensedoccheck", label: "📑 ตรวจสอบเอกสารค่าใช้จ่าย" },
     ],
   },
   {
