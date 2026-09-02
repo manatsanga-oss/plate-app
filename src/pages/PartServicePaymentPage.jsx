@@ -158,7 +158,8 @@ export default function PartServicePaymentPage({ currentUser }) {
   // หัก ณ ที่จ่าย ทำได้เฉพาะลูกค้านิติบุคคล — เช็คจากชื่อ (บริษัท/หจก./มูลนิธิ ฯลฯ)
   const isJuristic = /บริษัท|บจ\.|บจก|บมจ|หจก|ห้างหุ้นส่วน|จำกัด|มหาชน|สหกรณ์|มูลนิธิ|สมาคม|เทศบาล|อบต|อบจ|องค์การ|สำนักงาน|โรงเรียน|มหาวิทยาลัย|โรงพยาบาล/.test(customerName);
   const matchedDeposits = useMemo(() => {
-    if (autoOtherMode) return deposits; // SCY01 อื่นๆ: เลือกใบมัดจำที่มียอดคงเหลือได้ทุกใบ ไม่ต้องตรงชื่อ
+    // SCY01 อื่นๆ: เฉพาะมัดจำคงเหลือของระบบสั่งซื้ออะไหล่ YAMAHA (ใบ SCYxx-RECxxxx จาก moto_deposit) เท่านั้น — ไม่เอา PDS/PDO ของฮอนด้า และไม่ต้องตรงชื่อลูกค้า (user 2026-09-02)
+    if (autoOtherMode) return deposits.filter(d => d.source === "REC");
     if (!hasRealCustomer) return [];
     const kw = normName(customerName);
     if (!kw) return [];
@@ -171,7 +172,7 @@ export default function PartServicePaymentPage({ currentUser }) {
   async function loadDeposits() {
     // เงินมัดจำคงเหลือ = ใบมัดจำที่งานยังไม่ปิด (ปิดงานซ่อม/ปิดงานขาย = ตัดออก) และยังไม่ถูกใช้รับชำระในหน้านี้
     try {
-      const [dRes, oRes, pRes, yRes] = await Promise.all([
+      const [dRes, yRes, oRes, pRes] = await Promise.all([ // ลำดับต้องตรงกับ fetch ด้านล่าง: มัดจำ PDS/PDO → มัดจำ YAMAHA (REC) → ใบสั่งซื้อ → รับชำระ
         fetch(DEPOSIT_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_deposits", limit: 1000 }),
@@ -515,12 +516,12 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
                     </div>
                   ) : !matchedDeposits.length ? (
                     <div style={{ fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: "7px 10px" }}>
-                      ไม่พบใบมัดจำคงเหลือของ "{customerName}" (เฉพาะงานที่ยังไม่ปิดซ่อม/ปิดขาย)
+                      {autoOtherMode ? "ไม่พบใบมัดจำ YAMAHA (SCY01-REC…) ที่มียอดคงเหลือ — ตรวจว่า upload เงินมัดจำคงเหลือรอบล่าสุดแล้ว" : `ไม่พบใบมัดจำคงเหลือของ "${customerName}" (เฉพาะงานที่ยังไม่ปิดซ่อม/ปิดขาย)`}
                     </div>
                   ) : (
                     <select value={r.deposit_doc_no} onChange={e => pickDeposit(i, e.target.value)}
                       style={{ ...inp, background: r.deposit_doc_no ? "#fff" : "#fffbeb" }}>
-                      <option value="">{autoOtherMode ? `— เลือกใบมัดจำที่มียอดคงเหลือ (${matchedDeposits.length} ใบ) —` : `— เลือกใบมัดจำของ ${customerName} (${matchedDeposits.length} ใบ) —`}</option>
+                      <option value="">{autoOtherMode ? `— เลือกใบมัดจำ YAMAHA ที่มียอดคงเหลือ (${matchedDeposits.length} ใบ) —` : `— เลือกใบมัดจำของ ${customerName} (${matchedDeposits.length} ใบ) —`}</option>
                       {matchedDeposits.map(dp => (
                         <option key={dp.deposit_doc_no} value={dp.deposit_doc_no}>
                           {dp.deposit_doc_no} · {dp.customer_name} · คงเหลือ {fmt(depositAvail(dp))}
