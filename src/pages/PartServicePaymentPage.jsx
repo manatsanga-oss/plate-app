@@ -6,6 +6,7 @@ const DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-depo
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const CUST_SEARCH_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api"; // action: search_customers — ฐานลูกค้า+QR/LINE+ใบขาย
 const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api"; // get_spare_orders — เช็คสถานะปิดงานซ่อม/ปิดงานขายของใบมัดจำ
+const YAMAHA_DEP_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-deposit-api"; // get_deposits — มัดจำ NID (moto_deposit) SCYxx-RECxxxx ที่ยังมียอดคงเหลือ (โหมด SCY01 อื่นๆ)
 
 const num = (v) => Number(v) || 0;
 const fmt = (v) => num(v).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -72,6 +73,8 @@ export default function PartServicePaymentPage({ currentUser }) {
   // ===== ฟอร์มบันทึก =====
   const [docType, setDocType] = useState(DOC_TYPES[0]);
   const [docNo, setDocNo] = useState(() => docPrefixOf(DOC_TYPES[0], myBranch));
+  // โหมด SCY01 + ประเภท "อื่นๆ": ระบบออกเลขที่เอกสารให้เอง (<สาขา>-OTH-YYMM-NNNN) + ตัดมัดจำที่มียอดคงเหลือได้ทุกใบไม่ต้องดูชื่อลูกค้า (user 2026-09-02)
+  const autoOtherMode = myBranch === "SCY01" && docType === "อื่นๆ";
 
   // เปลี่ยนประเภทเอกสาร → เปลี่ยนตัวนำให้ (เฉพาะตอนช่องยังว่างหรือยังเป็นตัวนำเดิม ไม่ทับเลขที่พิมพ์ไปแล้ว)
   function changeDocType(t) {
@@ -155,6 +158,7 @@ export default function PartServicePaymentPage({ currentUser }) {
   // หัก ณ ที่จ่าย ทำได้เฉพาะลูกค้านิติบุคคล — เช็คจากชื่อ (บริษัท/หจก./มูลนิธิ ฯลฯ)
   const isJuristic = /บริษัท|บจ\.|บจก|บมจ|หจก|ห้างหุ้นส่วน|จำกัด|มหาชน|สหกรณ์|มูลนิธิ|สมาคม|เทศบาล|อบต|อบจ|องค์การ|สำนักงาน|โรงเรียน|มหาวิทยาลัย|โรงพยาบาล/.test(customerName);
   const matchedDeposits = useMemo(() => {
+    if (autoOtherMode) return deposits; // SCY01 อื่นๆ: เลือกใบมัดจำที่มียอดคงเหลือได้ทุกใบ ไม่ต้องตรงชื่อ
     if (!hasRealCustomer) return [];
     const kw = normName(customerName);
     if (!kw) return [];
@@ -162,15 +166,19 @@ export default function PartServicePaymentPage({ currentUser }) {
       const dn = normName(dp.customer_name);
       return dn && (dn.includes(kw) || kw.includes(dn));
     });
-  }, [deposits, customerName]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [deposits, customerName, autoOtherMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadDeposits() {
     // เงินมัดจำคงเหลือ = ใบมัดจำที่งานยังไม่ปิด (ปิดงานซ่อม/ปิดงานขาย = ตัดออก) และยังไม่ถูกใช้รับชำระในหน้านี้
     try {
-      const [dRes, oRes, pRes] = await Promise.all([
+      const [dRes, oRes, pRes, yRes] = await Promise.all([
         fetch(DEPOSIT_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_deposits", limit: 1000 }),
+        }).then(r => r.json()).catch(() => []),
+        fetch(YAMAHA_DEP_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "get_deposits" }),
         }).then(r => r.json()).catch(() => []),
         fetch(SPARE_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -191,7 +199,11 @@ export default function PartServicePaymentPage({ currentUser }) {
         if (!p || p.status !== "active" || !p.deposit_doc_no) continue;
         String(p.deposit_doc_no).split(" / ").forEach(x => x.trim() && usedDocs.add(x.trim()));
       }
-      setDeposits((Array.isArray(dRes) ? dRes : [])
+      // มัดจำ NID (moto_deposit) จาก upload "เงินมัดจำคงเหลือ" — แปลงให้หน้าตาเหมือนใบ PDS/PDO (เลขที่ = SCYxx-RECxxxx)
+      const recDeps = (Array.isArray(yRes) ? yRes : [])
+        .filter(r => r && r.receipt_no && num(r.remaining_amount) > 0)
+        .map(r => ({ deposit_doc_no: String(r.receipt_no).trim(), customer_name: r.customer_name || "", deposit_type: r.deposit_type || "NID", deposit_amount: r.deposit_amount, remaining_amount: r.remaining_amount, status: "active", source: "REC" }));
+      setDeposits([...(Array.isArray(dRes) ? dRes : []), ...recDeps]
         .filter(r => r && r.deposit_doc_no && r.status === "active"
           && depositAvail(r) > 0
           && !closedDocs.has(r.deposit_doc_no)
@@ -211,7 +223,7 @@ export default function PartServicePaymentPage({ currentUser }) {
 
   async function save() {
     const list = rows.filter(r => num(r.amount) > 0);
-    if (!docNo.trim() || docNo.trim() === docPrefixOf(docType, myBranch)) { setMessage("❌ พิมพ์เลขที่ใบขาย/ใบ JOB ให้ครบก่อน"); return; }
+    if (!autoOtherMode && (!docNo.trim() || docNo.trim() === docPrefixOf(docType, myBranch))) { setMessage("❌ พิมพ์เลขที่ใบขาย/ใบ JOB ให้ครบก่อน"); return; }
     if (!num(billAmount)) { setMessage("❌ ใส่จำนวนเงินที่ต้องชำระทั้งหมดก่อน"); return; }
     if (!list.length) { setMessage("❌ ใส่ยอดรับชำระอย่างน้อย 1 วิธี"); return; }
     if (Math.abs(total - num(billAmount)) >= 0.01 &&
@@ -222,7 +234,7 @@ export default function PartServicePaymentPage({ currentUser }) {
     if (list.some(r => r.method === "E-คูปอง" && !String(r.coupon_no || "").trim())) { setMessage("❌ กรอกเลขที่ E-คูปอง ของรายการ E-คูปอง ก่อน"); return; }
     for (const r of list.filter(r2 => r2.method === "มัดจำ")) {
       if (!r.deposit_doc_no) { setMessage("❌ เลือกใบมัดจำของรายการมัดจำก่อน"); return; }
-      if (!matchedDeposits.find(d => d.deposit_doc_no === r.deposit_doc_no)) {
+      if (!autoOtherMode && !matchedDeposits.find(d => d.deposit_doc_no === r.deposit_doc_no)) {
         setMessage(`❌ ใบมัดจำ ${r.deposit_doc_no} ไม่ตรงกับชื่อลูกค้า "${customerName}" — เลือกใหม่`); return;
       }
       const dep = deposits.find(d => d.deposit_doc_no === r.deposit_doc_no);
@@ -236,7 +248,7 @@ export default function PartServicePaymentPage({ currentUser }) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "save_payment",
-          doc_no: docNo.trim(), doc_type: docType,
+          doc_no: autoOtherMode ? "" : docNo.trim(), doc_type: docType, auto_doc: autoOtherMode,
           customer_name: customerName, branch_code: branchCode,
           paid_date: paidDate, bill_amount: num(billAmount),
           payments: list.map(r => ({ method: r.method, amount: num(r.amount), account: r.method === "เงินโอน" ? r.account : "", deposit_doc_no: r.method === "มัดจำ" ? r.deposit_doc_no : "", coupon_no: r.method === "E-คูปอง" ? String(r.coupon_no || "").trim() : "", cheque_no: r.method === "เช็ค" ? String(r.cheque_no || "").trim() : "", cheque_date: r.method === "เช็ค" ? String(r.cheque_date || "").trim() : "" })),
@@ -252,7 +264,7 @@ export default function PartServicePaymentPage({ currentUser }) {
       const d = await res.json();
       const row = Array.isArray(d) ? d[0] : d;
       if (!row?.payment_id) throw new Error(row?.error || "workflow ยังไม่รองรับ — import Part_Service_Payment_Workflow.json ก่อน");
-      setMessage(`✅ บันทึกรับชำระแล้ว — เลขที่ใบเสร็จ ${row.receipt_no || "-"} · อ้างอิง ${docNo.trim()} · ยอด ${fmt(total)} บาท`);
+      setMessage(`✅ บันทึกรับชำระแล้ว — เลขที่ใบเสร็จ ${row.receipt_no || "-"} · อ้างอิง ${row.doc_no || docNo.trim()} · ยอด ${fmt(total)} บาท`);
       // เก็บข้อมูลใบล่าสุดไว้ให้ปุ่ม "พิมพ์ใบเสร็จ" (response อาจไม่ครบ field — เติมจากฟอร์ม)
       setLastSaved({
         ...row, doc_no: row.doc_no || docNo.trim(), doc_type: row.doc_type || docType,
@@ -424,9 +436,13 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
               {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </Field>
-          <Field label="เลขที่เอกสาร * (พิมพ์เอง)">
-            <input value={docNo} onChange={e => setDocNo(e.target.value)} style={{ ...inp, fontFamily: "monospace", fontWeight: 700 }}
-              placeholder={docType === "ใบขายอะไหล่" ? "เช่น 69RTSL/0000468" : docType === "ใบแจ้งซ่อม/JOB" ? "เลขที่ใบ JOB" : "เลขที่เอกสาร"} />
+          <Field label={autoOtherMode ? "เลขที่เอกสาร (ระบบออกให้อัตโนมัติ)" : "เลขที่เอกสาร * (พิมพ์เอง)"}>
+            {autoOtherMode ? (
+              <input value={myBranch + "-OTH-…  (ออกเลขเมื่อบันทึก)"} readOnly style={{ ...inp, fontFamily: "monospace", fontWeight: 700, background: "#f1f5f9", color: "#64748b" }} />
+            ) : (
+              <input value={docNo} onChange={e => setDocNo(e.target.value)} style={{ ...inp, fontFamily: "monospace", fontWeight: 700 }}
+                placeholder={docType === "ใบขายอะไหล่" ? "เช่น 69RTSL/0000468" : docType === "ใบแจ้งซ่อม/JOB" ? "เลขที่ใบ JOB" : "เลขที่เอกสาร"} />
+            )}
           </Field>
           <Field label="ชื่อลูกค้า (กดค้นหา หรือพิมพ์เอง)">
             <div style={{ display: "flex", gap: 6 }}>
@@ -493,7 +509,7 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
               )}
               {r.method === "มัดจำ" && (
                 <div style={{ marginTop: 6 }}>
-                  {!hasRealCustomer ? (
+                  {!autoOtherMode && !hasRealCustomer ? (
                     <div style={{ fontSize: 12.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 7, padding: "7px 10px" }}>
                       ⚠ ใส่ชื่อลูกค้าจริงด้านบนก่อน (ไม่ใช่ "เงินสด") — ใบมัดจำต้องชื่อลูกค้าตรงกันเท่านั้น
                     </div>
@@ -504,7 +520,7 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
                   ) : (
                     <select value={r.deposit_doc_no} onChange={e => pickDeposit(i, e.target.value)}
                       style={{ ...inp, background: r.deposit_doc_no ? "#fff" : "#fffbeb" }}>
-                      <option value="">— เลือกใบมัดจำของ {customerName} ({matchedDeposits.length} ใบ) —</option>
+                      <option value="">{autoOtherMode ? `— เลือกใบมัดจำที่มียอดคงเหลือ (${matchedDeposits.length} ใบ) —` : `— เลือกใบมัดจำของ ${customerName} (${matchedDeposits.length} ใบ) —`}</option>
                       {matchedDeposits.map(dp => (
                         <option key={dp.deposit_doc_no} value={dp.deposit_doc_no}>
                           {dp.deposit_doc_no} · {dp.customer_name} · คงเหลือ {fmt(depositAvail(dp))}
