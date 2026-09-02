@@ -142,6 +142,7 @@ import UsedMotoPage from "./pages/UsedMotoPage";
 import PartStatusInquiryPage from "./pages/PartStatusInquiryPage";
 import HondaRepairReportPage from "./pages/HondaRepairReportPage";
 import MotoInsuranceExtraExpensePage from "./pages/MotoInsuranceExtraExpensePage";
+import InsuranceRefundPage from "./pages/InsuranceRefundPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
 import CosmosInsurancePage from "./pages/CosmosInsurancePage";
@@ -480,6 +481,9 @@ export default function App() {
         )}
         {activeMenu === "motoinsuranceextra" && canAccess("motoinsuranceextra") && (
           <MotoInsuranceExtraExpensePage currentUser={currentUser} />
+        )}
+        {activeMenu === "insurancerefund" && canAccess("insurancerefund") && (
+          <InsuranceRefundPage currentUser={currentUser} />
         )}
         {activeMenu === "stockcheck" && canAccess("stockcheck") && (
           <StockCheckPage currentUser={currentUser} />
@@ -957,7 +961,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="theftinsuranceinvoice" label="📑 บันทึกรับใบกำกับฯ ประกันรถหาย (ออกแทน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","receiptreceive","receiptentry","searchreceiptwork","motoinsurance","cosmosinsurance","registrationbilling","receiptbilling","insurancebilling","cosmosbilling","motoinsuranceextra"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","receiptreceive","receiptentry","searchreceiptwork","motoinsurance","cosmosinsurance","registrationbilling","receiptbilling","insurancebilling","cosmosbilling","motoinsuranceextra","insurancerefund"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="รับเรื่องงานทะเบียน" pages={["receiptentry"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="receiptentry" label="📥 รับเรื่องงานทะเบียน (manual)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
@@ -965,11 +969,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="registrationsubmit" label="ส่งจดทะเบียนรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="registrationsubmitreceipt" label="ส่งงานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
-        <MenuSubGroup title="บันทึกงานทะเบียน/ประกัน" pages={["registrationreceive","receiptreceive","motoinsurance","cosmosinsurance"]} activeMenu={activeMenu} canAccess={canAccess}>
+        <MenuSubGroup title="บันทึกงานทะเบียน/ประกัน" pages={["registrationreceive","receiptreceive","motoinsurance","insurancerefund","cosmosinsurance"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="registrationreceive" label="บันทึกรับ/ส่งคืนงานทะเบียนรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="receiptreceive" label="บันทึกรับ/ส่งคืน งานรับเรื่องงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="motoinsurance" label="บันทึกงาน พรบ." activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="motoinsuranceextra" label="บันทึกค่าใช้จ่ายเพิ่มเติมงาน พรบ." activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="insurancerefund" label="บันทึกคืนเงินค่าเบี้ยประกัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="cosmosinsurance" label="บันทึกประกัน COSMOS" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="วางบิล" pages={["registrationbilling","receiptbilling","insurancebilling","cosmosbilling"]} activeMenu={activeMenu} canAccess={canAccess}>

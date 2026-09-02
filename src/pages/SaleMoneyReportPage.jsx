@@ -9,7 +9,8 @@ const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/rec
 const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // รับชำระค่าอะไหล่และบริการ (ใบขาย/ใบ JOB)
 const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api"; // ขายรถมือสอง
 const DEPOSIT_INCOME_API = "https://n8n-new-project-gwf2.onrender.com/webhook/deposit-income-api"; // รับฝากค่างวดที่บันทึกจากระบบ (ไม่รวมของ upload)
-const FUEL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fuel-withdraw-api"; // เบิกค่าน้ำมันรถใช้จ่าย — หักเงินสดหน้าร้าน (user 2026-08-29)
+const FUEL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fuel-withdraw-api";
+const INS_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/insurance-refund-api"; // คืนเงินค่าเบี้ยประกัน (เงินสด = หักเงินสด) // เบิกค่าน้ำมันรถใช้จ่าย — หักเงินสดหน้าร้าน (user 2026-08-29)
 
 // คอลัมน์วิธีรับชำระ — เอา บัตร/QR กับ อื่นๆ ออก เพิ่ม E-คูปอง (user สั่ง 2026-08-19; เช็คแล้วไม่มีข้อมูลเก่าใช้ 2 วิธีนั้น)
 const METHOD_COLS = [
@@ -62,13 +63,14 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [rpStandaloneRows, setRpStandaloneRows] = useState([]); // มัดจำป้ายแดงติดป้ายทีหลัง (standalone) — เงินรับแยกจากใบเสร็จขายรถ
   const [depIncRows, setDepIncRows] = useState([]); // รับฝากชำระค่างวด กรุ๊ปลีส/ธนบรรณ ที่บันทึกจากระบบ (RECS-)
   const [fuelRows, setFuelRows] = useState([]); // เบิกค่าน้ำมันรถใช้จ่าย (fuel_withdrawals) — แถวหักเงินสด
+  const [insRefundRows, setInsRefundRows] = useState([]); // คืนเงินค่าเบี้ยประกัน (insurance_fee_refunds) — เงินสด = แถวหักเงินสด
 
 
   async function load() {
     setLoading(true);
     setMessage("");
     try {
-      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero] = await Promise.all([
+      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf] = await Promise.all([
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
@@ -115,6 +117,11 @@ export default function SaleMoneyReportPage({ currentUser }) {
           // ใบขายที่ลูกค้าไม่ต้องชำระเงิน (ไฟแนนท์จ่ายทั้งหมด ยอดชำระ 0) ไม่มีการกดรับเงิน → ดึงมาโชว์เป็นแถวขาย ณ วันขาย (user 2026-08-29)
           body: JSON.stringify({ action: "list_retail_sales", date_from: dateFrom, date_to: dateTo, limit: 2000 }),
         }).catch(() => null),
+        fetch(INS_REFUND_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          // คืนเงินค่าเบี้ยประกันลูกค้า (เงินสด) = เงินจ่ายออกจากลิ้นชัก → แถวหักเงินสด (user 2026-09-01)
+          body: JSON.stringify({ action: "list_refunds", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
       ]);
       const data = await res.json().catch(() => []);
       // กรองแถวว่างจาก n8n (ตอบ {} เมื่อไม่มีข้อมูล) — กันกลุ่ม "ไม่ระบุสาขา" โผล่
@@ -153,6 +160,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
       let fuel = [];
       try { fuel = typeof fuelRaw?.listjson === "string" ? JSON.parse(fuelRaw.listjson) : Array.isArray(fuelRaw) ? fuelRaw : []; } catch { fuel = []; }
       setFuelRows(fuel.filter(f => f && f.doc_no && f.status !== "ยกเลิก"));
+      const irRaw = resInsRf ? await resInsRf.json().catch(() => ({})) : {};
+      let ir = [];
+      try { ir = typeof irRaw?.listjson === "string" ? JSON.parse(irRaw.listjson) : Array.isArray(irRaw) ? irRaw : []; } catch { ir = []; }
+      setInsRefundRows(ir.filter(r => r && r.id));
 
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
@@ -428,6 +439,22 @@ export default function SaleMoneyReportPage({ currentUser }) {
           note: ["เบิกเติมน้ำมันรถใช้งาน", f.station_name, f.tax_invoice_no ? "ใบกำกับ " + f.tax_invoice_no : ""].filter(Boolean).join(" · "),
         };
       });
+    // คืนเงินค่าเบี้ยประกันลูกค้า (เงินสด) — เงินจ่ายออกจากลิ้นชัก → แถวติดลบช่องเงินสด (user 2026-09-01; เงินโอนไม่หักเงินสด)
+    const insRefundOuts = insRefundRows
+      .filter((r) => r.method === "เงินสด" && r.status === "ปกติ")
+      .filter((r) => (isAdmin ? (!branch || bc5(r.branch_code) === bc5(branch)) : bc5(r.branch_code) === myBranch))
+      .map((r) => {
+        const amt = -num(r.refund_amount);
+        const split = { cash: amt, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+        return {
+          kind: "ins_refund", category: "คืนเงินค่าเบี้ยประกัน (จ่ายออก)",
+          doc_no: r.policy_no || "-", date: String(r.refund_date || "").slice(0, 10), ref_no: r.policy_no || "",
+          customer_name: r.customer_name || "-", seller: r.refund_by || "", saleAmount: 0,
+          split, received: amt,
+          branch_key: bc5(r.branch_code), branch_name: r.branch_code || "ไม่ระบุสาขา",
+          note: ["คืนเงินเบี้ยประกันลูกค้า — หักเงินสดหน้าร้าน", r.note].filter(Boolean).join(" · "),
+        };
+      });
     // มัดจำป้ายแดง "ติดป้ายทีหลัง" (standalone) — เงินรับสด/โอนแยกจากใบเสร็จขายรถ (ใบขายจ่ายครบไปก่อนแล้ว)
     const rpStandalones = rpStandaloneRows
       .filter((d) => { const dt = String(d.received_date || "").slice(0, 10); return dt >= dateFrom && dt <= dateTo; })
@@ -494,8 +521,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
           note: ["ป้ายแดง " + (d.plate_no || "-"), "อ้างอิง " + d.deposit_no, d.refund_account_name, d.refund_note].filter(Boolean).join(" · "),
         };
       });
-    return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
-  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+    return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
+  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {

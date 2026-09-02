@@ -84,6 +84,7 @@ const PAGE_GROUPS = [
       { key: "vehicleregistration", label: "🔎 ค้นหาทะเบียนรถ" },
       { key: "searchreceiptwork",   label: "🔎 ค้นหางานทะเบียนรับเรื่อง" },
       { key: "receiptentry",        label: "📥 รับเรื่องงานทะเบียน (manual)" },
+      { key: "insurancerefund",     label: "💸 บันทึกคืนเงินค่าเบี้ยประกัน" },
     ],
   },
   {
