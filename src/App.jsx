@@ -868,7 +868,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="salesbypayment" label="รายงานการขายตามการชำระเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="otherincometaxreport" label="รายงานใบกำกับภาษีรายได้อื่นๆ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="registrationsummaryreport" label="รายงานสรุปใบปะหน้า คชจ. ขายรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="receipttransferreport" label="รายงานสรุปรับชำระเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="receipttransferreport" label="รายงานสรุปรับชำระเงิน (มัดจำ)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="vehiclepurchasereport" label="รายงานรับรถจักรยานยนต์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="deliveryfee" label="รายงานค่านำพา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hondasalesreport" label="ส่งรายงาน HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
