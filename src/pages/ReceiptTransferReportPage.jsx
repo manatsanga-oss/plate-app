@@ -27,6 +27,7 @@ export default function ReceiptTransferReportPage() {
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [depMap, setDepMap] = useState({}); // receipt_no → [{deposit_no, used_amount, ...}]
+  const [depModal, setDepModal] = useState(null); // {receipt, list} — popup ใบมัดจำที่ตัด
 
   async function fetchData() {
     setLoading(true); setMessage("");
@@ -192,11 +193,10 @@ export default function ReceiptTransferReportPage() {
             <th style={th}>ลูกค้า</th><th style={th}>ประเภทใบเสร็จ</th><th style={th}>เอกสารอ้างอิง</th>
             <th style={{ ...th, textAlign: "right" }}>ยอดรวมใบเสร็จ</th>
             <th style={{ ...th, textAlign: "right" }}>ชำระด้วยมัดจำ</th>
-            <th style={th}>เลขที่ใบมัดจำ (ตัดจาก)</th>
             <th style={th}>ผู้รับเงิน</th><th style={th}>หมายเหตุ</th>
           </tr></thead>
           <tbody>
-            {filtered.length === 0 && <tr><td colSpan={12} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>{loading ? "กำลังโหลด..." : "ไม่มีข้อมูล"}</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={11} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>{loading ? "กำลังโหลด..." : "ไม่มีข้อมูล"}</td></tr>}
             {filtered.map((r, i) => (
               <tr key={r.receipt_no + i} style={{ background: String(r.status || "") === "ยกเลิก" ? "#fef2f2" : undefined }}>
                 <td style={td}>{i + 1}</td>
@@ -209,16 +209,21 @@ export default function ReceiptTransferReportPage() {
                 <td style={{ ...td, fontSize: 12 }}>{r.receipt_type || "-"}</td>
                 <td style={{ ...td, fontFamily: "monospace", fontSize: 12 }}>{r.sale_invoice_no || "-"}</td>
                 <td style={{ ...td, textAlign: "right" }}>{fmt(r.total_amount)}</td>
-                <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#7c3aed" }}>{fmt(r.deposit)}</td>
-                <td style={{ ...td, fontSize: 12 }}>
-                  {(depMap[r.receipt_no] || []).length === 0 ? <span style={{ color: "#9ca3af" }}>-</span> : (depMap[r.receipt_no] || []).map((u, k) => (
-                    <div key={k} style={{ whiteSpace: "nowrap" }}>
-                      <span style={{ fontFamily: "monospace", color: "#7c3aed", fontWeight: 600 }}>{u.deposit_no}</span>
-                      <span style={{ color: "#374151" }}> · {u.used_amount != null ? fmt(u.used_amount) : fmt(u.deposit_amount)}</span>
-                      {u.group_size > 1 && <span style={{ color: "#b45309" }}> (รวมกลุ่ม {u.group_size} ใบ)</span>}
-                      {u.deposit_type ? <div style={{ color: "#94a3b8", fontSize: 11 }}>{u.deposit_type} · รับ {fmtDate(u.deposit_date)}</div> : null}
-                    </div>
-                  ))}
+                <td style={{ ...td, textAlign: "right", padding: 0 }}>
+                  {(() => {
+                    const list = depMap[r.receipt_no] || [];
+                    return (
+                      <button onClick={() => list.length && setDepModal({ receipt: r, list })} disabled={!list.length}
+                        title={list.length ? `กดดูใบมัดจำที่ตัด (${list.length} ใบ)` : "ไม่พบใบมัดจำที่ตัดในรายงานเงินมัดจำ"}
+                        style={{ width: "100%", padding: "5px 8px", border: "none", background: "transparent", textAlign: "right",
+                          fontWeight: 700, fontSize: 13, fontFamily: "inherit", color: list.length ? "#7c3aed" : "#b91c1c",
+                          cursor: list.length ? "pointer" : "default", textDecoration: list.length ? "underline dotted" : "none" }}>
+                        {fmt(r.deposit)}
+                        {list.length > 1 && <span style={{ fontSize: 11, color: "#b45309" }}> ({list.length} ใบ)</span>}
+                        {!list.length && <span style={{ fontSize: 11 }}> ⚠️</span>}
+                      </button>
+                    );
+                  })()}
                 </td>
                 <td style={{ ...td, fontSize: 12 }}>{r.cashier || "-"}</td>
                 <td style={{ ...td, fontSize: 12 }}>{r.note || "-"}</td>
@@ -229,12 +234,58 @@ export default function ReceiptTransferReportPage() {
                 <td colSpan={7} style={{ ...td, textAlign: "right" }}>รวมทั้งสิ้น</td>
                 <td style={{ ...td, textAlign: "right" }}>{fmt(totalReceipt)}</td>
                 <td style={{ ...td, textAlign: "right", color: "#7c3aed" }}>{fmt(totalDeposit)}</td>
-                <td colSpan={3} style={td}></td>
+                <td colSpan={2} style={td}></td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+
+      {/* popup: ใบมัดจำที่ถูกตัดในใบเสร็จนี้ (มีได้หลายใบ) */}
+      {depModal && (
+        <div onClick={() => setDepModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: 820, maxWidth: "96vw", maxHeight: "86vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, color: "#7c3aed" }}>🪙 ใบมัดจำที่ตัดในใบเสร็จนี้ ({depModal.list.length} ใบ)</div>
+              <button onClick={() => setDepModal(null)} style={{ padding: "4px 12px", background: "#e5e7eb", border: "none", borderRadius: 6, cursor: "pointer" }}>ปิด</button>
+            </div>
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 12 }}>
+              ใบเสร็จ <b style={{ fontFamily: "monospace" }}>{depModal.receipt.receipt_no}</b> · {fmtDate(depModal.receipt.receipt_date)} · {depModal.receipt.customer_name || "-"}<br />
+              {depModal.receipt.receipt_type || "-"} · ยอดรวมใบเสร็จ <b>{fmt(depModal.receipt.total_amount)}</b> · ชำระด้วยมัดจำ <b style={{ color: "#7c3aed" }}>{fmt(depModal.receipt.deposit)}</b>
+              {depModal.receipt.sale_invoice_no ? <> · อ้างอิง <span style={{ fontFamily: "monospace" }}>{depModal.receipt.sale_invoice_no}</span></> : null}
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead><tr style={{ background: "#f0f4f9" }}>
+                <th style={th}>#</th><th style={th}>เลขที่ใบมัดจำ</th><th style={th}>วันที่รับมัดจำ</th>
+                <th style={th}>ประเภท</th><th style={th}>ลูกค้า (ในใบมัดจำ)</th>
+                <th style={{ ...th, textAlign: "right" }}>ยอดรับมัดจำ</th>
+                <th style={{ ...th, textAlign: "right" }}>ยอดที่ตัด</th>
+                <th style={{ ...th, textAlign: "right" }}>คงเหลือ</th>
+                <th style={th}>หมายเหตุ</th>
+              </tr></thead>
+              <tbody>
+                {depModal.list.map((u, i) => (
+                  <tr key={i}>
+                    <td style={td}>{i + 1}</td>
+                    <td style={{ ...td, fontFamily: "monospace", color: "#7c3aed", fontWeight: 600 }}>{u.deposit_no}</td>
+                    <td style={td}>{fmtDate(u.deposit_date)}</td>
+                    <td style={td}>{u.deposit_type || "-"}</td>
+                    <td style={td}>{u.customer_name || "-"}</td>
+                    <td style={{ ...td, textAlign: "right" }}>{fmt(u.deposit_amount)}</td>
+                    <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>
+                      {u.used_amount != null ? fmt(u.used_amount) : <span style={{ color: "#b45309" }}>ตัดรวมกลุ่ม</span>}
+                      {u.group_size > 1 && <div style={{ fontSize: 11, color: "#b45309" }}>บรรทัดเดียวตัด {u.group_size} ใบเสร็จ</div>}
+                    </td>
+                    <td style={{ ...td, textAlign: "right", color: Number(u.remain_amount || 0) > 0 ? "#b91c1c" : "#15803d" }}>{fmt(u.remain_amount)}</td>
+                    <td style={{ ...td, fontSize: 12 }}>{u.note || "-"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 11.5, color: "#94a3b8", marginTop: 8 }}>ที่มา: รายงานเงินมัดจำ NID (RECEIPT_PLEDGE) ที่นำเข้าระบบ</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

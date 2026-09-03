@@ -692,7 +692,8 @@ ${depSection}
                 <React.Fragment key={g.key}>
                   <tr><td colSpan={14} style={{ ...td, background: "#f1f5f9", fontWeight: 700, color: "#0f172a" }}>สาขา {g.name}</td></tr>
                   {g.rows.map((it, i) => (
-                    <tr key={it.doc_no + it.kind} style={{ background: it.kind === "deposit" ? "#fffdf2" : it.kind === "part_deposit" ? "#fdf9ff" : it.kind === "part_service" ? "#f0fdfa" : it.kind === "used_moto" ? "#fff7ed" : i % 2 ? "#fafcff" : "#fff" }}>
+                    // key ต้องไม่ซ้ำ: แถวค่านำพา/จ่ายออกไม่มีเลขเอกสาร (doc_no "-") พอสาขาเดียวมี 2 คันในวันเดียว key ชนกัน → React วาดแถวผีซ้ำ (user 2026-09-03)
+                    <tr key={`${g.key}|${it.kind}|${it.doc_no}|${it.ref_no || ""}|${i}`} style={{ background: it.kind === "deposit" ? "#fffdf2" : it.kind === "part_deposit" ? "#fdf9ff" : it.kind === "part_service" ? "#f0fdfa" : it.kind === "used_moto" ? "#fff7ed" : i % 2 ? "#fafcff" : "#fff" }}>
                       <td style={{ ...td, textAlign: "center", color: "#94a3b8" }}>{i + 1}</td>
                       <td style={{ ...td, fontFamily: "monospace" }}>{it.doc_no}
                         {it.refunded && <div style={{ fontSize: 10.5, color: "#dc2626" }}>คืนเงินแล้ว</div>}
