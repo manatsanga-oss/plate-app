@@ -175,7 +175,11 @@ export default function PayDepositPage({ currentUser }) {
       // key รวมวันที่รับด้วย — ใบซ้ำจากธุรกรรมเดียวกันวันเดียวกันเท่านั้น (สัญญาเดิมจ่ายยอดเท่ากันเดือนถัดไปต้องไม่โดนตัด)
       const key = (r) => [extractContract(r.description), Number(r.line_amount) || 0, String(r.branch_code || "").slice(0, 5), String(r.received_date || "").slice(0, 10)].join("|");
       const sysKeys = new Set((rowsAll.length ? rowsAll : rows).filter(isSys).map(key));
-      rows = rows.filter((r) => isSys(r) || !sysKeys.has(key(r)));
+      // key สำรอง: เลขสัญญาพิมพ์ไม่ตรงกัน (เช่น 01230189717 vs 0123018717 — เคสสุกฤษฎิ์ 02/09) → เทียบ ชื่อลูกค้า+ยอด+สาขา+วันที่ แทน (user 2026-09-03)
+      const normName = (v) => String(v || "").toUpperCase().replace(/^(นางสาว|นาย|นาง|น\.ส\.|MISS|MRS|MR)\.?\s*/i, "").replace(/[^A-Z0-9ก-๙]/g, "");
+      const key2 = (r) => [normName(r.customer_name), Number(r.line_amount) || 0, String(r.branch_code || "").slice(0, 5), String(r.received_date || "").slice(0, 10)].join("|");
+      const sysKeys2 = new Set((rowsAll.length ? rowsAll : rows).filter(isSys).map(key2));
+      rows = rows.filter((r) => isSys(r) || (!sysKeys.has(key(r)) && !(normName(r.customer_name) && sysKeys2.has(key2(r)))));
       setPendingItems(rows);
       // reset selection, pre-fill contract_no from description
       const s = {};
