@@ -273,12 +273,22 @@ export default function SaleMoneyReportPage({ currentUser }) {
       let split = it.split, received = it.received;
       if (rp > 0) {
         split = { ...split };
-        const fromCash = Math.min(split.cash, rp);
-        split.cash -= fromCash;
-        split.transfer -= Math.min(split.transfer, rp - fromCash);
-        received -= rp;
+        // มัดจำป้ายแดงจ่ายด้วยวิธีไหน: ถ้ามีรายการรับชำระที่ยอดเท่ามัดจำป้ายแดงพอดี (เช่น โอน 200 เข้าบัญชีสิงห์ชัยแยก) ให้หักจากวิธีนั้น
+        // ไม่งั้นหักจากเงินสดก่อน (ไม่พอค่อยหักโอน) — เคส SCY01-RC-2609-00004 โอน 200 แต่รายงานเคยหักจากสด (user 2026-09-02)
+        let pmsRaw = it.payment_methods;
+        if (typeof pmsRaw === "string") { try { pmsRaw = JSON.parse(pmsRaw); } catch { pmsRaw = []; } }
+        const exactLine = (Array.isArray(pmsRaw) ? pmsRaw : []).find((p) => Math.abs(num(p.amount) - rp) < 0.01);
+        const exactKey = exactLine ? methodKey(exactLine.method) : null;
         const rpSplit = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        rpSplit.cash = fromCash; rpSplit.transfer = rp - fromCash;
+        if (exactKey && (exactKey === "cash" || exactKey === "transfer") && split[exactKey] >= rp) {
+          split[exactKey] -= rp; rpSplit[exactKey] = rp;
+        } else {
+          const fromCash = Math.min(split.cash, rp);
+          split.cash -= fromCash;
+          split.transfer -= Math.min(split.transfer, rp - fromCash);
+          rpSplit.cash = fromCash; rpSplit.transfer = rp - fromCash;
+        }
+        received -= rp;
         rpItems.push({
           kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
           doc_no: it.red_plate_doc_no || "RPD-" + (it.sale_no || ""), date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
