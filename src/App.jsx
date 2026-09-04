@@ -213,8 +213,17 @@ export default function App() {
     }
     check();
     const id = setInterval(check, 10 * 60 * 1000);
-    return () => clearInterval(id);
+    // มือถือ: แท็บถูกพักไว้นาน ๆ แล้วกลับมาเปิด — เช็คทันทีตอนกลับมาเห็นหน้าจอ/โฟกัส (user 2026-09-03: RATTANA ใช้มือถือ กด Ctrl+F5 ไม่ได้)
+    const onVisible = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", check);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", check); };
   }, []);
+
+  // มีเวอร์ชันใหม่ + ยังไม่ได้ login (หน้า login ไม่มีข้อมูลค้าง) → รีโหลดให้เองทันที ไม่ต้องรอกด
+  useEffect(() => {
+    if (newVersion && !currentUser) window.location.reload();
+  }, [newVersion, currentUser]);
 
   // listen หา request เปลี่ยน page จาก child components (เช่น ServiceRateLookupPage → ServiceRateSearchPage)
   useEffect(() => {

@@ -88,6 +88,8 @@ export default function BookingDepositPage({ currentUser }) {
 
   // history
   const [rows, setRows] = useState([]);
+  const [bookings, setBookings] = useState([]); // ใบจองในระบบจองรถ — ใช้เช็คว่ามัดจำใบไหน "ถึงคิวแล้ว" (มีวันนัดรับรถ) ห้าม user คืน (user 2026-09-04)
+  const queueReached = (r) => bookings.some((b) => b && b.deposit_no === r.deposit_no && b.status === "จอง" && b.appointment_date);
   const [loadingRows, setLoadingRows] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -123,6 +125,7 @@ export default function BookingDepositPage({ currentUser }) {
     try {
       const d = await postJson(DEPOSIT_API, { action: "get_deposits", keyword: kw, status: st });
       setRows(Array.isArray(d) ? d.filter((x) => x && x.deposit_no) : []);
+      postJson(MOTO_BOOKING_API, { action: "get_moto_bookings" }).then((b) => setBookings(Array.isArray(b) ? b : [])).catch(() => {});
     } catch { setRows([]); }
     setLoadingRows(false);
   }
@@ -653,8 +656,12 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                           {(isAdmin || isSameDay(r.deposit_date)) && (
                             <button onClick={() => editRow(r)} style={btnSmYellow} title={isAdmin ? "แก้ไข" : "แก้ไขได้เฉพาะใบของวันนี้ — ข้ามวันต้องให้ admin แก้"}>✏️ แก้ไข</button>
                           )}
+                          {/* คืนมัดจำ = admin เท่านั้น (user 2026-09-04 ยืนยัน) · ถ้ารถถึงคิวแล้ว (มีวันนัดรับ) ต้องระบุเหตุผลตอนคืน */}
                           {isAdmin && (
-                            <button onClick={() => setRefundTarget(r)} style={btnSmRed}>↩️ คืนเงิน</button>
+                            <button onClick={() => setRefundTarget(r)} style={btnSmRed}
+                              title={queueReached(r) ? "รถถึงคิวแล้ว — คืนได้แต่ต้องระบุเหตุผล" : "คืนเงินมัดจำ"}>
+                              ↩️ คืนเงิน{queueReached(r) && <span style={{ fontSize: 10 }}> ⚠</span>}
+                            </button>
                           )}
                         </>
                       )}
@@ -674,7 +681,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
         <DepositCustomerPicker currentUser={currentUser} onSelect={pickCustomer} onClose={() => setShowCustomerPicker(false)} />
       )}
       {refundTarget && (
-        <RefundModal row={refundTarget} bankAccounts={bankAccounts} onConfirm={doRefund} onClose={() => setRefundTarget(null)} />
+        <RefundModal row={refundTarget} bankAccounts={bankAccounts} isAdmin={isAdmin} queueReached={queueReached(refundTarget)} onConfirm={doRefund} onClose={() => setRefundTarget(null)} />
       )}
     </div>
   );
@@ -940,9 +947,9 @@ function QrLineTab({ currentUser, onSelect }) {
 // Modal คืนเงินมัดจำ — เลือกวิธีคืน (เงินสด / โอนเข้าบัญชี)
 // โอน: ต้องเลือก "บัญชีบริษัทที่ใช้โอนคืน" + กรอกธนาคาร/เลขบัญชีของลูกค้า
 // ============================================================================
-function RefundModal({ row, bankAccounts = [], onConfirm, onClose }) {
+function RefundModal({ row, bankAccounts = [], isAdmin = false, queueReached = false, onConfirm, onClose }) {
   const [f, setF] = useState({
-    refund_method: "เงินสด", refund_amount: row.deposit_amount || "",
+    refund_method: "เงินสด", refund_amount: row.deposit_amount || "", refund_date: todayISO(), // วันที่คืนเงิน ระบุย้อนหลังได้ (user 2026-09-04)
     refund_from_account: "", refund_bank: "", refund_account_no: "", refund_note: "",
   });
   const [busy, setBusy] = useState(false);
@@ -952,6 +959,8 @@ function RefundModal({ row, bankAccounts = [], onConfirm, onClose }) {
 
   async function confirm() {
     if (!(Number(String(f.refund_amount).replace(/,/g, "")) > 0)) { alert("กรอกจำนวนเงินคืน"); return; }
+    if (!f.refund_date) { alert("ระบุวันที่คืนเงิน"); return; }
+    if (queueReached && !f.refund_note.trim()) { alert("รถถึงคิวแล้ว — ต้องระบุเหตุผลที่คืนมัดจำในช่องหมายเหตุ"); return; }
     if (f.refund_method === "โอนเข้าบัญชี") {
       if (!f.refund_from_account) { alert("เลือกบัญชีบริษัทที่ใช้โอนเงินคืน"); return; }
       if (!f.refund_bank.trim() || !f.refund_account_no.trim()) { alert("กรอกธนาคารและเลขบัญชีของลูกค้าให้ครบ"); return; }
@@ -970,11 +979,14 @@ function RefundModal({ row, bankAccounts = [], onConfirm, onClose }) {
           {row.deposit_no} — {row.customer_name} (ยอดมัดจำ {baht(row.deposit_amount)} บาท)
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: 10, alignItems: "center" }}>
+          <label style={pLbl}>วันที่คืนเงิน</label>
+          <input type="date" value={f.refund_date} onChange={set("refund_date")} max={todayISO()} style={pInp} />
           <label style={pLbl}>วิธีคืนเงิน</label>
           <select value={f.refund_method} onChange={set("refund_method")} style={pInp}>
             <option value="เงินสด">เงินสด</option>
             <option value="โอนเข้าบัญชี">โอนเข้าบัญชี</option>
           </select>
+          {queueReached && <><span /><div style={{ fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: "6px 10px" }}>⚠ รถถึงคิวแล้ว (มีวันนัดรับรถ) — ปกติไม่คืนมัดจำ ต้องระบุเหตุผลในหมายเหตุ</div></>}
           <label style={pLbl}>จำนวนเงินคืน</label>
           <input type="number" value={f.refund_amount} onChange={set("refund_amount")} style={{ ...pInp, textAlign: "right" }} />
           {f.refund_method === "โอนเข้าบัญชี" && (
@@ -992,8 +1004,8 @@ function RefundModal({ row, bankAccounts = [], onConfirm, onClose }) {
               <input value={f.refund_account_no} onChange={set("refund_account_no")} style={{ ...pInp, fontFamily: "monospace" }} />
             </>
           )}
-          <label style={pLbl}>หมายเหตุ</label>
-          <input value={f.refund_note} onChange={set("refund_note")} style={pInp} />
+          <label style={pLbl}>หมายเหตุ{queueReached ? " *" : ""}</label>
+          <input value={f.refund_note} onChange={set("refund_note")} style={{ ...pInp, background: queueReached && !f.refund_note.trim() ? "#fffbeb" : "#fff" }} placeholder={queueReached ? "เหตุผลที่คืนมัดจำทั้งที่รถถึงคิวแล้ว (บังคับ)" : ""} />
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
           <button onClick={onClose} style={pSecondaryBtn}>ยกเลิก</button>

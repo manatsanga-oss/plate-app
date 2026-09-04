@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 // สรุปรายวันรับเงิน: ยอดขาย + เงินที่รับ + แหล่งรับชำระ (เงินสด/โอน/บัตร/ไฟแนนซ์/มัดจำ) + รับชำระเงินมัดจำจองรถ
 // ข้อมูล: retail-sale-api list_sale_payments (ใบขายที่รับชำระแล้ว) + booking-deposit-api get_deposits (มัดจำจองรถ)
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login"; // get_users — แปลง username ผู้ขาย/ผู้รับเงิน → ชื่อ-สกุล (user 2026-09-03)
 const DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
 const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api"; // มัดจำอะไหล่/บริการ (PDS/PDO)
 const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api"; // รับชำระใบรับเรื่องงานทะเบียน
@@ -52,6 +53,17 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [dateTo, setDateTo] = useState(todayStr());
   const [branch, setBranch] = useState("");
   const [rows, setRows] = useState([]);
+  const [userMap, setUserMap] = useState({}); // USERNAME → ชื่อ-สกุล จากเมนูกำหนดผู้ใช้ (ช่องผู้ขายเก็บ username เช่น P002)
+  useEffect(() => {
+    fetch(USER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_users" }) })
+      .then((r) => r.json()).then((d) => {
+        const list = Array.isArray(d) ? d : (d?.rows || d?.data || []);
+        const m = {};
+        for (const u of list) if (u && u.username && u.name) m[String(u.username).trim().toUpperCase()] = String(u.name).trim();
+        setUserMap(m);
+      }).catch(() => {});
+  }, []);
+  const dispSeller = (v) => { const k = String(v || "").trim(); return k ? (userMap[k.toUpperCase()] || k) : "-"; };
   const [depRows, setDepRows] = useState([]); // มัดจำจองรถ (booking_deposits) — กรองช่วงวันที่ฝั่งหน้าเว็บ
   const [partDepRows, setPartDepRows] = useState([]); // มัดจำอะไหล่/บริการ (part_deposits PDS/PDO)
   const [rcptRows, setRcptRows] = useState([]);       // รับชำระใบรับเรื่องงานทะเบียน (registration_receipts.paid_*)
@@ -705,7 +717,7 @@ ${depSection}
                         {it.finance && <div style={{ fontSize: 10.5, color: "#7c3aed" }}>ไฟแนนซ์: {it.finance}</div>}
                         {it.note && <div style={{ fontSize: 10.5, color: "#92400e" }}>หมายเหตุ: {it.note}</div>}
                       </td>
-                      <td style={{ ...td, textAlign: "center" }}>{it.seller || "-"}</td>
+                      <td style={{ ...td, textAlign: "center" }}>{dispSeller(it.seller)}</td>
                       <td style={tdR}>{it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
                       {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(it.split[c.key])}</td>)}
                       <td style={{ ...tdR, fontWeight: 700, color: "#15803d" }}>{fmt(it.received)}</td>

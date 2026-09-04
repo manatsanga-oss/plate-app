@@ -26,8 +26,17 @@ const DOC_TYPES = ["ใบแจ้งซ่อม/JOB", "ใบขายอะ�
 // สาขาสังกัด ป.เปา (SCY05/06): เติมตัวนำเลขเอกสารให้ — ใบแจ้งซ่อม = 69SERV/ · ใบขายอะไหล่ = 69RTSL/ (ปี พ.ศ. 2 หลักตามปีปัจจุบัน)
 const isPorpaoBranch = (bc) => { const c = String(bc || "").toUpperCase(); return c.startsWith("SCY05") || c.startsWith("SCY06"); };
 const beYY = () => String((new Date().getFullYear() + 543) % 100).padStart(2, "0");
+// ปี ค.ศ. 2 หลัก + เดือน 2 หลัก (เช่น 2609) — user 2026-09-04 ให้ใช้ ค.ศ. ไม่ใช่ พ.ศ.
+const ceYYMM = () => String(new Date().getFullYear() % 100).padStart(2, "0") + String(new Date().getMonth() + 1).padStart(2, "0");
 const docPrefixOf = (docType, branch) => {
-  if (!isPorpaoBranch(branch)) return "";
+  if (!isPorpaoBranch(branch)) {
+    // สังกัดสิงห์ชัย (SCY01/04/07): ใบแจ้งซ่อม/JOB เติมตัวนำ สังกัด+JOB+ปี ค.ศ. 2 หลัก+เดือน 2 หลัก เช่น SCY01-JOB2609 (user 2026-09-04) — ป.เปาใช้ 69SERV/ เหมือนเดิม
+    const bc = String(branch || "").substring(0, 5).toUpperCase();
+    if (docType === "ใบแจ้งซ่อม/JOB" && bc) return `${bc}-JOB${ceYYMM()}`;
+    // ใบขายอะไหล่สิงห์ชัย (NID) = สาขา-SS+ปีค.ศ.2หลัก+เดือน+running 5 หลัก เช่น SCY01-SS260900033
+    if (docType === "ใบขายอะไหล่" && bc) return `${bc}-SS${ceYYMM()}`;
+    return "";
+  }
   if (docType === "ใบแจ้งซ่อม/JOB") return `${beYY()}SERV/`;
   if (docType === "ใบขายอะไหล่") return `${beYY()}RTSL/`;
   return "";
@@ -118,6 +127,24 @@ export default function PartServicePaymentPage({ currentUser }) {
       });
       const d = await res.json();
       const seen = new Set(); const list = [];
+      // ลูกค้าที่มีใบมัดจำอะไหล่/บริการคงเหลือ (PDS/PDO/REC) ขึ้นก่อน — ลูกค้าที่ไม่เคยซื้อรถจะไม่อยู่ในฐานค้นหา แต่ต้องเลือกชื่อให้ตรงใบมัดจำจึงจะตัดมัดจำได้ (user 2026-09-04)
+      const kwN = normName(kw);
+      // รวมทุกใบของลูกค้าคนเดียวกันเป็นการ์ดเดียว — โชว์จำนวนใบ + ยอดรวม + เลขใบทั้งหมด (ลูกค้าอาจมีมัดจำหลายใบ เช่น ทศพร 500+598)
+      const byName = new Map();
+      for (const dp of deposits) {
+        const nm = String(dp.customer_name || "").trim();
+        if (!nm || !kwN || !normName(nm).includes(kwN)) continue;
+        const k = normName(nm);
+        if (!byName.has(k)) byName.set(k, { nm, phone: dp.customer_phone || "", code: dp.customer_code || "", docs: [], total: 0 });
+        const g = byName.get(k); g.docs.push(dp.deposit_doc_no); g.total += depositAvail(dp);
+      }
+      for (const g of byName.values()) {
+        seen.add(["DEP", g.nm].join("|"));
+        list.push({ customer_name: g.nm, customer_phone: g.phone, customer_code: g.code,
+          source_label: g.docs.length > 1
+            ? `ใบมัดจำ ${g.docs.length} ใบ · คงเหลือรวม ${fmt(g.total)} (${g.docs.join(", ")})`
+            : `ใบมัดจำ ${g.docs[0]} · คงเหลือ ${fmt(g.total)}` });
+      }
       for (const x of (Array.isArray(d) ? d : [])) {
         const k = [x.customer_code, x.customer_name, x.customer_phone].join("|");
         if (!x.customer_name || seen.has(k)) continue;
@@ -158,8 +185,9 @@ export default function PartServicePaymentPage({ currentUser }) {
   // หัก ณ ที่จ่าย ทำได้เฉพาะลูกค้านิติบุคคล — เช็คจากชื่อ (บริษัท/หจก./มูลนิธิ ฯลฯ)
   const isJuristic = /บริษัท|บจ\.|บจก|บมจ|หจก|ห้างหุ้นส่วน|จำกัด|มหาชน|สหกรณ์|มูลนิธิ|สมาคม|เทศบาล|อบต|อบจ|องค์การ|สำนักงาน|โรงเรียน|มหาวิทยาลัย|โรงพยาบาล/.test(customerName);
   const matchedDeposits = useMemo(() => {
-    // SCY01 อื่นๆ: เฉพาะมัดจำคงเหลือของระบบสั่งซื้ออะไหล่ YAMAHA (ใบ SCYxx-RECxxxx จาก moto_deposit) เท่านั้น — ไม่เอา PDS/PDO ของฮอนด้า และไม่ต้องตรงชื่อลูกค้า (user 2026-09-02)
-    if (autoOtherMode) return deposits.filter(d => d.source === "REC");
+    // (แก้ 2026-09-04 ให้รวม PDS/PDO ของ SCY01 ด้วย)
+    // SCY01 อื่นๆ: ใบมัดจำจากระบบ (PDS/PDO สาขา SCY01) ก่อน + ใบ upload NID (REC) ที่ไม่มีคู่ในระบบ — ไม่ต้องตรงชื่อลูกค้า
+    if (autoOtherMode) return deposits.filter(d => d.source === "REC" || String(d.branch_code || "").toUpperCase().startsWith("SCY01"));
     if (!hasRealCustomer) return [];
     const kw = normName(customerName);
     if (!kw) return [];
@@ -204,7 +232,12 @@ export default function PartServicePaymentPage({ currentUser }) {
       const recDeps = (Array.isArray(yRes) ? yRes : [])
         .filter(r => r && r.receipt_no && num(r.remaining_amount) > 0)
         .map(r => ({ deposit_doc_no: String(r.receipt_no).trim(), customer_name: r.customer_name || "", deposit_type: r.deposit_type || "NID", deposit_amount: r.deposit_amount, remaining_amount: r.remaining_amount, status: "active", source: "REC" }));
-      setDeposits([...(Array.isArray(dRes) ? dRes : []), ...recDeps]
+      // ระบบก่อน NID ทีหลัง (user 2026-09-04): ใบ upload NID (REC) ขึ้นเฉพาะลูกค้าที่ไม่มีใบมัดจำในระบบ (PDS/PDO) คงเหลือ — กันเลือกเงินก้อนเดียวกันซ้ำ 2 ใบ
+      const pdsList = (Array.isArray(dRes) ? dRes : []).filter(r => r && r.deposit_doc_no && r.status === "active" && depositAvail(r) > 0 && !usedDocs.has(r.deposit_doc_no));
+      const nn = (v) => String(v || "").replace(/\s+/g, "").replace(/^(นาย|นาง|นางสาว|น\.ส\.|MR\.?|MRS\.?|MS\.?|MISS)/i, "").toUpperCase();
+      const pdsNames = new Set(pdsList.map(r => nn(r.customer_name)).filter(Boolean));
+      const recOnlyNew = recDeps.filter(r => !pdsNames.has(nn(r.customer_name)));
+      setDeposits([...(Array.isArray(dRes) ? dRes : []), ...recOnlyNew]
         .filter(r => r && r.deposit_doc_no && r.status === "active"
           && depositAvail(r) > 0
           && !closedDocs.has(r.deposit_doc_no)
@@ -442,13 +475,13 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
               <input value={myBranch + "-OTH-…  (ออกเลขเมื่อบันทึก)"} readOnly style={{ ...inp, fontFamily: "monospace", fontWeight: 700, background: "#f1f5f9", color: "#64748b" }} />
             ) : (
               <input value={docNo} onChange={e => setDocNo(e.target.value)} style={{ ...inp, fontFamily: "monospace", fontWeight: 700 }}
-                placeholder={docType === "ใบขายอะไหล่" ? "เช่น 69RTSL/0000468" : docType === "ใบแจ้งซ่อม/JOB" ? "เลขที่ใบ JOB" : "เลขที่เอกสาร"} />
+                placeholder={docType === "ใบขายอะไหล่" ? (isPorpaoBranch(myBranch) ? "เช่น 69RTSL/0000468" : `เช่น ${myBranch}-SS${ceYYMM()}00033`) : docType === "ใบแจ้งซ่อม/JOB" ? (isPorpaoBranch(myBranch) ? "เลขที่ใบ JOB" : `เช่น ${myBranch}-JOB${ceYYMM()}0001`) : "เลขที่เอกสาร"} />
             )}
           </Field>
           <Field label="ชื่อลูกค้า (กดค้นหา หรือพิมพ์เอง)">
             <div style={{ display: "flex", gap: 6 }}>
               <input value={customerName} onChange={e => setCustomerName(e.target.value)} style={{ ...inp, flex: 1 }} />
-              <button onClick={() => { setCustPop(true); setCustKw(customerName); setCustResults(null); }} title="ค้นหาลูกค้าจากฐานข้อมูล"
+              <button onClick={() => { setCustPop(true); setCustKw(customerName.trim() === "เงินสด" ? "" : customerName); setCustResults(null); }} title="ค้นหาลูกค้าจากฐานข้อมูล"
                 style={{ border: "1px solid #1d4ed8", background: "#eff6ff", color: "#1d4ed8", borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 15, flex: "0 0 auto" }}>🔍</button>
             </div>
           </Field>
@@ -516,12 +549,12 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
                     </div>
                   ) : !matchedDeposits.length ? (
                     <div style={{ fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: "7px 10px" }}>
-                      {autoOtherMode ? "ไม่พบใบมัดจำ YAMAHA (SCY01-REC…) ที่มียอดคงเหลือ — ตรวจว่า upload เงินมัดจำคงเหลือรอบล่าสุดแล้ว" : `ไม่พบใบมัดจำคงเหลือของ "${customerName}" (เฉพาะงานที่ยังไม่ปิดซ่อม/ปิดขาย)`}
+                      {autoOtherMode ? "ไม่พบใบมัดจำ SCY01 ที่มียอดคงเหลือ (ทั้งระบบ PDS/PDO และ upload NID)" : `ไม่พบใบมัดจำคงเหลือของ "${customerName}" (เฉพาะงานที่ยังไม่ปิดซ่อม/ปิดขาย)`}
                     </div>
                   ) : (
                     <select value={r.deposit_doc_no} onChange={e => pickDeposit(i, e.target.value)}
                       style={{ ...inp, background: r.deposit_doc_no ? "#fff" : "#fffbeb" }}>
-                      <option value="">{autoOtherMode ? `— เลือกใบมัดจำ YAMAHA ที่มียอดคงเหลือ (${matchedDeposits.length} ใบ) —` : `— เลือกใบมัดจำของ ${customerName} (${matchedDeposits.length} ใบ) —`}</option>
+                      <option value="">{autoOtherMode ? `— เลือกใบมัดจำ SCY01 ที่มียอดคงเหลือ (${matchedDeposits.length} ใบ: ระบบ PDS/PDO + upload NID) —` : `— เลือกใบมัดจำของ ${customerName} (${matchedDeposits.length} ใบ) —`}</option>
                       {matchedDeposits.map(dp => (
                         <option key={dp.deposit_doc_no} value={dp.deposit_doc_no}>
                           {dp.deposit_doc_no} · {dp.customer_name} · คงเหลือ {fmt(depositAvail(dp))}
@@ -653,7 +686,7 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
               </button>
             </div>
             {custResults === null ? (
-              <div style={{ fontSize: 13, color: "#94a3b8" }}>พิมพ์คำค้นแล้วกด Enter — ค้นจากฐานลูกค้า + QR/LINE + ใบขาย</div>
+              <div style={{ fontSize: 13, color: "#94a3b8" }}>พิมพ์คำค้นแล้วกด Enter — ค้นจากใบมัดจำคงเหลือ + ฐานลูกค้า + QR/LINE + ใบขาย</div>
             ) : !custResults.length ? (
               <div style={{ fontSize: 13.5, color: "#b45309" }}>ไม่พบลูกค้า — ปิดหน้าต่างนี้แล้วพิมพ์ชื่อเองได้เลย</div>
             ) : (
