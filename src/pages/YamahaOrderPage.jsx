@@ -5,7 +5,7 @@ const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login
 const YAMAHA_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-deposit-api";
 const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api";
 const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // list_payments — ใบมัดจำที่ถูกดึงไปรับชำระแล้ว → ปิดงานซ่อมอัตโนมัติ (user 2026-09-04)
-const CLOSED_STATUSES = ["ปิดงานซ่อม", "ปิดการขาย"];
+const CLOSED_STATUSES = ["ปิดงานซ่อม", "ปิดการขาย", "ยกเลิก (คืนเงิน)"];
 const normNameY = (v) => String(v || "").replace(/\s+/g, "").replace(/^(นาย|นาง|นางสาว|น\.ส\.|MR\.?|MRS\.?|MS\.?|MISS)/i, "").toUpperCase();
 const normJobY = (v) => String(v || "").replace(/[\s\-\/]/g, "").toUpperCase(); // ระบบมัดจำอะไหล่ (PDS/PDO) สาขา SCY01 — แหล่งมัดจำหลักของใบสั่งซื้อ YAMAHA (user 2026-09-04)
 const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
@@ -410,6 +410,27 @@ export default function YamahaOrderPage({ currentUser }) {
     });
   }
 
+  // คืนเงินมัดจำจากใบสั่งซื้อที่สินค้ายังไม่มา → สถานะ "ยกเลิก (คืนเงิน)" (user 2026-09-04)
+  const [refundOrder, setRefundOrder] = useState(null);
+  const NOT_ARRIVED = ["อะไหล่ค้างส่ง"]; // คืนมัดจำได้เฉพาะใบที่ผู้ขายแจ้ง "อะไหล่ค้างส่ง" (สั่งแล้วของไม่มา) — ใบสั่งซื้อปกติที่รอของไม่ให้คืน (user 2026-09-04)
+  async function doRefundOrder({ amount, method, note }) {
+    const o = refundOrder; if (!o) return;
+    try {
+      if (/^PD[SO]-/.test(String(o.deposit_doc_no || ""))) {
+        const r = await fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "refund_deposit", deposit_doc_no: o.deposit_doc_no, refund_amount: amount, refund_method: method, from_order: true,
+            refund_note: `ยกเลิกใบสั่งซื้อ ${o.order_no || o.order_id} (สินค้ายังไม่มา)${note ? " · " + note : ""}`, refunded_by: currentUser?.name || currentUser?.username || "" }) });
+        const d = await r.json().catch(() => null);
+        const row = Array.isArray(d) ? d[0] : (d && d.listJson ? JSON.parse(d.listJson)[0] : d);
+        if (!row || row.error) throw new Error(row?.error || "คืนเงินมัดจำไม่สำเร็จ (ตรวจว่า re-import Part_Deposit_Workflow แล้ว)");
+      }
+      await api("update_yamaha_order_status", { order_id: o.order_id, status: "ยกเลิก (คืนเงิน)" });
+      setMessage(`✅ คืนเงินมัดจำ ${o.deposit_doc_no} ${Number(amount).toLocaleString("th-TH")} บาท (${method}) และยกเลิกใบสั่งซื้อแล้ว`);
+      setRefundOrder(null);
+      loadAll();
+    } catch (e) { setMessage("❌ " + (e.message || "คืนเงินไม่สำเร็จ")); }
+  }
+
   async function handleSave() {
     if (!form.deposit_doc_no && form.order_type === "ปกติ") { setMessage("กรุณาเลือกเลขที่มัดจำ"); return; }
     if (!form.ref_order_id && form.order_type === "สั่งเพิ่ม") { setMessage("กรุณาเลือกใบสั่งซื้อเดิม"); return; }
@@ -664,7 +685,7 @@ export default function YamahaOrderPage({ currentUser }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "มาไม่ครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ตีราคาซ่อม"].map(s => {
+        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "มาไม่ครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ยกเลิก (คืนเงิน)", "ตีราคาซ่อม"].map(s => {
           const count = s === "all" ? orders.filter(o => !CLOSED_STATUSES.includes(String(o.status || "").trim())).length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
           const active = filterStatus === s;
           return (
@@ -796,6 +817,9 @@ export default function YamahaOrderPage({ currentUser }) {
                 <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
+                  {!isClosed && NOT_ARRIVED.includes(o.status) && (
+                    <button onClick={() => setRefundOrder(o)} title="สั่งซื้อแล้วแต่สินค้ายังไม่มา → คืนเงินมัดจำ + ยกเลิกใบสั่งซื้อ" style={{ background: "#fff", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: 4 }}>↩ คืนเงิน</button>
+                  )}
                   {!isClosed && o.status === "รอดำเนินการ" && (
                     <>
                       <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
@@ -1196,6 +1220,9 @@ export default function YamahaOrderPage({ currentUser }) {
       )}
 
       {/* ===== Modal บันทึกเลขที่ใบรับสั่งซื้อ ===== */}
+      {refundOrder && (
+        <RefundOrderModal order={refundOrder} onClose={() => setRefundOrder(null)} onConfirm={doRefundOrder} />
+      )}
       {showPOModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
@@ -1391,4 +1418,55 @@ function fmtDate(d) {
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
   const yy = dt.getFullYear() + 543;
   return `${dd}/${mm}/${yy}`;
+}
+
+// ============================================================================
+// Modal คืนเงินมัดจำจากใบสั่งซื้อที่สินค้ายังไม่มา (user 2026-09-04): คืนเงิน + สถานะใบสั่งซื้อ → "ยกเลิก (คืนเงิน)"
+// ใบมัดจำจากระบบ (PDS/PDO) คืนจริงผ่าน part-deposit-api (from_order) · ใบ NID เดิม (DEPD/REC) บันทึกได้แค่สถานะ+หมายเหตุ (เงินคืนบันทึกใน NID)
+// ============================================================================
+function RefundOrderModal({ order, onClose, onConfirm }) {
+  const [method, setMethod] = useState("เงินสด");
+  const [amount, setAmount] = useState(String(Number(order.deposit_amount || 0)));
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const isSys = /^PD[SO]-/.test(String(order.deposit_doc_no || ""));
+  const inp = { width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box" };
+  async function ok() {
+    const amt = Number(String(amount).replace(/,/g, ""));
+    if (!(amt > 0)) { alert("กรอกจำนวนเงินคืน"); return; }
+    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${order.deposit_doc_no} ${amt.toLocaleString("th-TH")} บาท (${method})\nและเปลี่ยนสถานะใบสั่งซื้อเป็น "ยกเลิก (คืนเงิน)"?`)) return;
+    setBusy(true);
+    await onConfirm({ amount: amt, method, note });
+    setBusy(false);
+  }
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 440, maxWidth: "95vw" }}>
+        <h3 style={{ margin: "0 0 4px", color: "#b91c1c" }}>↩️ คืนเงินมัดจำ — ยกเลิกใบสั่งซื้อ</h3>
+        <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
+          {order.deposit_doc_no} · {order.customer_name} · สถานะ {order.status}{order.vendor_po_no ? ` · PO ${order.vendor_po_no}` : ""}
+        </div>
+        {!isSys && (
+          <div style={{ fontSize: 12.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
+            ใบมัดจำนี้มาจาก NID (ไม่ใช่ใบระบบ PDS/PDO) — ระบบจะบันทึกสถานะ/หมายเหตุให้ ส่วนการคืนเงินจริงต้องทำใบคืนมัดจำใน NID ด้วย
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, alignItems: "center" }}>
+          <label>วิธีคืนเงิน</label>
+          <select value={method} onChange={e => setMethod(e.target.value)} style={inp}>
+            <option value="เงินสด">เงินสด</option>
+            <option value="เงินโอน">เงินโอน</option>
+          </select>
+          <label>จำนวนเงินคืน</label>
+          <input type="number" value={amount} onChange={e => setAmount(e.target.value)} style={{ ...inp, textAlign: "right" }} />
+          <label>หมายเหตุ</label>
+          <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น สินค้าไม่มา ลูกค้าขอคืน" style={inp} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button onClick={onClose} style={{ padding: "8px 16px", border: "1px solid #d1d5db", background: "#fff", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={ok} disabled={busy} style={{ padding: "8px 16px", border: "none", background: "#dc2626", color: "#fff", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>{busy ? "..." : "↩️ ยืนยันคืนเงิน"}</button>
+        </div>
+      </div>
+    </div>
+  );
 }

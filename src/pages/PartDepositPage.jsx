@@ -8,6 +8,10 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-
 // popup ค้นหา: เบอร์โทร → ฐานลูกค้า+QR/LINE+ใบขาย (search_customers) · เลขถัง/เลขเครื่อง → ประวัติรถ (search_vehicles)
 const CUST_SEARCH_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
 const SVC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
+// ใบสั่งซื้อที่ผูกใบมัดจำ — ใบที่ "สั่งซื้อแล้วแต่สินค้ายังไม่มา" คืนมัดจำได้ (คืนยอดที่ใบสั่งซื้อตัดไว้) + ยกเลิกใบสั่งซื้อ (user 2026-09-04)
+const SPARE_ORDER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
+const YAMAHA_ORDER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
+const NOT_ARRIVED = ["อะไหล่ค้างส่ง"]; // คืนมัดจำได้เฉพาะใบที่ผู้ขายแจ้ง "อะไหล่ค้างส่ง" (สั่งแล้วของไม่มา) — ใบสั่งซื้อปกติที่รอของไม่ให้คืน (user 2026-09-04)
 
 const TABS = [
   { key: "บริการ", label: "🔧 มัดจำอะไหล่บริการ", docPrefix: "PDS" },
@@ -64,6 +68,32 @@ export default function PartDepositPage({ currentUser }) {
       setRows(asArray(d).filter((r) => r && r.deposit_doc_no));
     } catch { setRows([]); }
     setLoading(false);
+    // ใบสั่งซื้อ HONDA + YAMAHA → map เลขมัดจำ → ใบสั่งซื้อ (ไว้เช็ค "สั่งซื้อแล้ว สินค้ายังไม่มา")
+    try {
+      const [h, y] = await Promise.all([
+        fetch(SPARE_ORDER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_spare_orders" }) }).then((r) => r.json()).catch(() => []),
+        fetch(YAMAHA_ORDER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_yamaha_orders", status: "all" }) }).then((r) => r.json()).catch(() => []),
+      ]);
+      const m = {};
+      for (const o of asArray(h)) if (o && o.deposit_doc_no) m[o.deposit_doc_no] = { ...o, brand: "HONDA" };
+      for (const o of asArray(y)) if (o && o.deposit_doc_no) m[o.deposit_doc_no] = { ...o, brand: "YAMAHA" };
+      setOrderMap(m);
+    } catch { /* ไม่มีข้อมูลใบสั่งซื้อ — คืนได้เฉพาะใบที่ยังไม่ถูกสั่งซื้อ */ }
+  }
+  const [orderMap, setOrderMap] = useState({}); // deposit_doc_no → ใบสั่งซื้อ
+  // ยอดที่คืนได้: ยังไม่สั่งซื้อ = คงเหลือ · สั่งซื้อแล้วแต่สินค้ายังไม่มา = ยอดรับ − ที่เคยคืน (ใบสั่งซื้อตัดใช้ไว้ คืนกลับได้)
+  const orderOf = (r) => orderMap[r?.deposit_doc_no];
+  const pendingOrder = (r) => { const o = orderOf(r); return !!(o && NOT_ARRIVED.includes(String(o.status || "").trim())); };
+  const refundAvail = (r) => { if (!r) return 0; if (num(r.remaining_amount) > 0) return num(r.remaining_amount); return pendingOrder(r) ? Math.max(num(r.deposit_amount) - num(r.refunded_amount), 0) : 0; };
+  // คืนแล้ว → ยกเลิกใบสั่งซื้อที่ผูกอยู่ (สถานะ "ยกเลิก (คืนเงิน)")
+  async function cancelLinkedOrder(r) {
+    const o = orderOf(r); if (!o || !pendingOrder(r)) return "";
+    try {
+      const url = o.brand === "YAMAHA" ? YAMAHA_ORDER_API : SPARE_ORDER_API;
+      const action = o.brand === "YAMAHA" ? "update_yamaha_order_status" : "update_order_status";
+      await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, order_id: o.order_id, status: "ยกเลิก (คืนเงิน)" }) });
+      return ` · ยกเลิกใบสั่งซื้อ ${o.order_no || o.order_id} แล้ว`;
+    } catch { return " · (เปลี่ยนสถานะใบสั่งซื้อไม่สำเร็จ — แก้เองในหน้าสั่งซื้อ)"; }
   }
   useEffect(() => { load(); }, []);
 
@@ -87,8 +117,8 @@ export default function PartDepositPage({ currentUser }) {
   function confirmPay() {
     const amt = num(payAmount);
     if (!(amt > 0)) { setMessage("❌ กรอกจำนวนเงินให้ถูกต้อง"); return; }
-    if (isRefund && refundSel && amt > num(refundSel.remaining_amount)) {
-      setMessage(`❌ ยอดคืนเกินมัดจำคงเหลือ (${fmt(refundSel.remaining_amount)} บาท)`); return;
+    if (isRefund && refundSel && amt > refundAvail(refundSel)) {
+      setMessage(`❌ ยอดคืนเกินมัดจำที่คืนได้ (${fmt(refundAvail(refundSel))} บาท)`); return;
     }
     setMessage("");
     setPayConfirmed(true);
@@ -96,15 +126,15 @@ export default function PartDepositPage({ currentUser }) {
 
   // ใบรับมัดจำ (บริการ) ที่ยังมีเงินคงเหลือ — สำหรับ dropdown ใบคืนมัดจำ
   const refundables = useMemo(
-    () => rows.filter((r) => r.deposit_type === "บริการ" && r.status === "active" && num(r.remaining_amount) > 0),
-    [rows]
+    () => rows.filter((r) => r.deposit_type === tab && r.status === "active" && refundAvail(r) > 0),
+    [rows, orderMap, tab] // eslint-disable-line react-hooks/exhaustive-deps
   );
   const refundSel = refundables.find((r) => r.deposit_doc_no === refundDoc) || null;
 
   // การ์ดค้นหาแบบ NID (แท็บบริการ): ใบรับมัดจำ = แถวจริง · ใบคืนมัดจำ = การ์ดจากยอดที่คืนเงินแล้ว
   const searchCards = useMemo(() => {
     const kw = searchQ.trim().toUpperCase();
-    const svc = rows.filter((r) => r.deposit_type === "บริการ")
+    const svc = rows.filter((r) => r.deposit_type === tab)
       .filter((r) => !kw || [r.deposit_doc_no, r.customer_name, r.customer_code, r.customer_phone, r.vin].some((v) => String(v || "").toUpperCase().includes(kw)));
     const cards = [];
     for (const r of svc) {
@@ -149,20 +179,13 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
   // กด "เพิ่มข้อมูล" → เปิดส่วนชำระโดย (ตรวจข้อมูลก่อน)
   function openPay() {
     setMessage("");
-    if (tab === "สั่งซื้อ") {
-      // แท็บสั่งซื้อ — ขั้นตอนเดียวกับมัดจำบริการ แต่ไม่ใช้เลขถัง
-      if (!String(form.customer_name).trim()) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
-      if (!String(form.customer_phone).trim()) { setMessage("❌ กรุณากรอกหมายเลขโทรศัพท์ลูกค้า"); return; }
-      setPayOpen(true);
-      return;
-    }
     if (docKind === "receive") {
-      if (!String(form.vin).trim()) { setMessage("❌ กรุณาระบุหมายเลขตัวถัง (กด 🔎 ค้นจากเลขเครื่อง/เลขถังได้)"); return; }
+      if (isService && !String(form.vin).trim()) { setMessage("❌ กรุณาระบุหมายเลขตัวถัง (กด 🔎 ค้นจากเลขเครื่อง/เลขถังได้)"); return; }
       if (!String(form.customer_name).trim()) { setMessage("❌ กรุณาระบุชื่อลูกค้า"); return; }
       if (!String(form.customer_phone).trim()) { setMessage("❌ กรุณากรอกหมายเลขโทรศัพท์ลูกค้า"); return; }
     } else {
       if (!refundSel) { setMessage("❌ เลือกเลขที่ใบรับมัดจำที่จะคืนเงินก่อน"); return; }
-      setPayAmount(String(num(refundSel.remaining_amount)));
+      setPayAmount(String(refundAvail(refundSel)));
     }
     setPayOpen(true);
   }
@@ -201,7 +224,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         brand: form.brand,
         customer_code: form.customer_code, customer_name: form.customer_name, customer_phone: form.customer_phone,
         line_user_id: lineUserId,
-        vin: tab === "บริการ" ? form.vin : "", // มัดจำสั่งซื้อไม่ใช้เลขถัง
+        vin: form.vin, // แท็บสั่งซื้อใส่เลขถังได้ถ้ามี (ไม่บังคับ)
         deposit_amount: num(payAmount),
         payment_method: payMethod,
         remark: form.remark,
@@ -222,8 +245,9 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     if (saving || !refundSel) return;
     const amt = num(payAmount);
     if (!(amt > 0)) { setMessage("❌ กรอกจำนวนเงินคืนให้ถูกต้อง"); return; }
-    if (amt > num(refundSel.remaining_amount)) { setMessage(`❌ ยอดคืนเกินมัดจำคงเหลือ (${fmt(refundSel.remaining_amount)} บาท)`); return; }
-    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${refundSel.deposit_doc_no}\nลูกค้า ${refundSel.customer_name} จำนวน ${fmt(amt)} บาท (${payMethod})?`)) return;
+    if (amt > refundAvail(refundSel)) { setMessage(`❌ ยอดคืนเกินมัดจำที่คืนได้ (${fmt(refundAvail(refundSel))} บาท)`); return; }
+    const fromOrder = num(refundSel.remaining_amount) <= 0 && pendingOrder(refundSel);
+    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${refundSel.deposit_doc_no}\nลูกค้า ${refundSel.customer_name} จำนวน ${fmt(amt)} บาท (${payMethod})?${fromOrder ? "\n\n⚠ ใบนี้สั่งซื้อแล้วแต่สินค้ายังไม่มา → ใบสั่งซื้อจะเปลี่ยนเป็น \"ยกเลิก (คืนเงิน)\"" : ""}`)) return;
     setSaving(true); setMessage("");
     try {
       const d = await post({
@@ -231,12 +255,14 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         deposit_doc_no: refundSel.deposit_doc_no,
         refund_amount: amt,
         refund_method: payMethod,
-        refund_note: form.remark,
+        refund_note: fromOrder ? `ยกเลิกใบสั่งซื้อ ${orderOf(refundSel)?.order_no || orderOf(refundSel)?.order_id} (สินค้ายังไม่มา)${form.remark ? " · " + form.remark : ""}` : form.remark,
+        from_order: fromOrder,
         refunded_by: currentUser?.name || currentUser?.username || "",
       });
       const row = asArray(d)[0];
-      if (!row || row.error || !row.deposit_doc_no) throw new Error(row?.error || "คืนเงินไม่สำเร็จ (ยอดอาจถูกใช้/คืนไปแล้ว)");
-      setMessage(`✅ คืนเงินมัดจำ ${row.deposit_doc_no} จำนวน ${fmt(amt)} บาท แล้ว · คงเหลือ ${fmt(row.remaining_amount)} บาท`);
+      if (!row || row.error || !row.deposit_doc_no) throw new Error(row?.error || (fromOrder ? "คืนเงินไม่สำเร็จ (ตรวจว่า re-import Part_Deposit_Workflow แล้ว)" : "คืนเงินไม่สำเร็จ (ยอดอาจถูกใช้/คืนไปแล้ว)"));
+      const extra = fromOrder ? await cancelLinkedOrder(refundSel) : "";
+      setMessage(`✅ คืนเงินมัดจำ ${row.deposit_doc_no} จำนวน ${fmt(amt)} บาท แล้ว · คงเหลือ ${fmt(row.remaining_amount)} บาท${extra}`);
       resetServiceForm();
       load();
     } catch (e) { setMessage("❌ " + (e.message || "คืนเงินไม่สำเร็จ")); }
@@ -249,8 +275,9 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     if (saving || !rfd) return;
     const amt = num(rfd.amount);
     if (!(amt > 0)) { setMessage("❌ กรอกจำนวนเงินคืนให้ถูกต้อง"); return; }
-    if (amt > num(rfd.doc.remaining_amount)) { setMessage(`❌ ยอดคืนเกินมัดจำคงเหลือ (${fmt(rfd.doc.remaining_amount)} บาท)`); return; }
-    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${rfd.doc.deposit_doc_no}\nลูกค้า ${rfd.doc.customer_name} จำนวน ${fmt(amt)} บาท (${rfd.method})?`)) return;
+    if (amt > refundAvail(rfd.doc)) { setMessage(`❌ ยอดคืนเกินมัดจำที่คืนได้ (${fmt(refundAvail(rfd.doc))} บาท)`); return; }
+    const fromOrder = num(rfd.doc.remaining_amount) <= 0 && pendingOrder(rfd.doc);
+    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${rfd.doc.deposit_doc_no}\nลูกค้า ${rfd.doc.customer_name} จำนวน ${fmt(amt)} บาท (${rfd.method})?${fromOrder ? "\n\n⚠ ใบนี้สั่งซื้อแล้วแต่สินค้ายังไม่มา → ใบสั่งซื้อจะเปลี่ยนเป็น \"ยกเลิก (คืนเงิน)\"" : ""}`)) return;
     setSaving(true); setMessage("");
     try {
       const d = await post({
@@ -258,12 +285,14 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         deposit_doc_no: rfd.doc.deposit_doc_no,
         refund_amount: amt,
         refund_method: rfd.method,
-        refund_note: rfd.note,
+        refund_note: fromOrder ? `ยกเลิกใบสั่งซื้อ ${orderOf(rfd.doc)?.order_no || orderOf(rfd.doc)?.order_id} (สินค้ายังไม่มา)${rfd.note ? " · " + rfd.note : ""}` : rfd.note,
+        from_order: fromOrder,
         refunded_by: currentUser?.name || currentUser?.username || "",
       });
       const row = asArray(d)[0];
-      if (!row || row.error || !row.deposit_doc_no) throw new Error(row?.error || "คืนเงินไม่สำเร็จ (ยอดอาจถูกใช้/คืนไปแล้ว)");
-      setMessage(`✅ คืนเงินมัดจำ ${row.deposit_doc_no} จำนวน ${fmt(amt)} บาท แล้ว · คงเหลือ ${fmt(row.remaining_amount)} บาท`);
+      if (!row || row.error || !row.deposit_doc_no) throw new Error(row?.error || (fromOrder ? "คืนเงินไม่สำเร็จ (ตรวจว่า re-import Part_Deposit_Workflow แล้ว)" : "คืนเงินไม่สำเร็จ (ยอดอาจถูกใช้/คืนไปแล้ว)"));
+      const extra = fromOrder ? await cancelLinkedOrder(rfd.doc) : "";
+      setMessage(`✅ คืนเงินมัดจำ ${row.deposit_doc_no} จำนวน ${fmt(amt)} บาท แล้ว · คงเหลือ ${fmt(row.remaining_amount)} บาท${extra}`);
       setRfd(null);
       load();
     } catch (e) { setMessage("❌ " + (e.message || "คืนเงินไม่สำเร็จ")); }
@@ -299,7 +328,9 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
   const magBtn = { padding: "0 12px", borderRadius: 8, border: "1px solid #1e3a8a", background: "#1e3a8a", color: "#fff", cursor: "pointer" };
 
   const isService = tab === "บริการ";
-  const isRefund = isService && docKind === "refund";
+  const isRefund = docKind === "refund"; // ทั้ง 2 แท็บใช้ฟอร์มแบบ NID เหมือนกัน (user 2026-09-04: แท็บสั่งซื้อทำเหมือนแท็บบริการ)
+  const tabTitle = isService ? "มัดจำงานบริการ" : "มัดจำอะไหล่สั่งซื้อ";
+  const docPrefix = TABS.find((t) => t.key === tab)?.docPrefix || "PDS";
 
   return (
     <div className="page-container">
@@ -320,9 +351,9 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
       </div>
 
       {/* ===== แท็บบริการ: ฟอร์มแบบ NID (เลือกรถก่อน → เพิ่มข้อมูล → ชำระโดย → ตกลง) ===== */}
-      {isService ? (view === "form" ? (
+      {(isService || !isService) ? (view === "form" ? (
         <div className="form-card" style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{ background: "#5eb3bd", color: "#fff", fontWeight: 700, padding: "10px 16px", fontSize: 15 }}>➕ มัดจำงานบริการ — เพิ่มข้อมูล</div>
+          <div style={{ background: "#5eb3bd", color: "#fff", fontWeight: 700, padding: "10px 16px", fontSize: 15 }}>➕ {tabTitle} — เพิ่มข้อมูล</div>
           <div style={{ padding: 16 }}>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
               <div style={{ flex: "1 1 320px" }}>
@@ -343,12 +374,12 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                     <option value="">— เลือกใบรับมัดจำที่จะคืนเงิน —</option>
                     {refundables.map((r) => (
                       <option key={r.deposit_doc_no} value={r.deposit_doc_no}>
-                        {r.deposit_doc_no} · {r.customer_name} · คงเหลือ {fmt(r.remaining_amount)}
+                        {r.deposit_doc_no} · {r.customer_name} · {num(r.remaining_amount) > 0 ? `คงเหลือ ${fmt(r.remaining_amount)}` : `อะไหล่ค้างส่ง · คืนได้ ${fmt(refundAvail(r))}`}
                       </option>
                     ))}
                   </select>
                 ) : (
-                  <input value={savedDocNo} readOnly placeholder="ออกอัตโนมัติเมื่อบันทึก (PDS-YYMM-XXXXX)" style={roInp} />
+                  <input value={savedDocNo} readOnly placeholder={`ออกอัตโนมัติเมื่อบันทึก (${docPrefix}-YYMM-XXXXX)`} style={roInp} />
                 )}
               </div>
             </div>
@@ -357,7 +388,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
               <>
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
                   <div style={{ flex: "1 1 320px" }}>
-                    <label style={lbl}>หมายเลขตัวถัง * <span style={{ fontWeight: 400, color: "#64748b" }}>(กด 🔎 ค้นจากเลขเครื่อง/เลขถัง)</span></label>
+                    <label style={lbl}>หมายเลขตัวถัง {isService ? "*" : "(ถ้ามี)"} <span style={{ fontWeight: 400, color: "#64748b" }}>(กด 🔎 ค้นจากเลขเครื่อง/เลขถัง)</span></label>
                     <div style={{ display: "flex", gap: 6 }}>
                       <input value={form.vin} onChange={(e) => setF("vin", e.target.value)} placeholder="เลขตัวถัง" style={{ ...inp, flex: 1, fontFamily: "monospace" }} />
                       <button onClick={() => setSearchPop({ mode: "vin", q: form.vin })} title="ค้นหารถจากเลขตัวถังหรือเลขเครื่อง" style={magBtn}>🔎</button>
@@ -514,7 +545,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
       ) : view === "search" ? (
         /* ===== โหมดค้นหาข้อมูล (แบบ NID): การ์ดใบมัดจำ + filter ใบรับ/ใบคืน ===== */
         <div className="form-card" style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{ background: "#5eb3bd", color: "#fff", fontWeight: 700, padding: "10px 16px", fontSize: 15 }}>🔍 มัดจำงานบริการ — ค้นหาข้อมูล</div>
+          <div style={{ background: "#5eb3bd", color: "#fff", fontWeight: 700, padding: "10px 16px", fontSize: 15 }}>🔍 {tabTitle} — ค้นหาข้อมูล</div>
           <div style={{ padding: 16 }}>
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
               <button onClick={() => setView("form")}
@@ -577,7 +608,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
       ) : (
         /* ===== โหมดแก้ไขข้อมูล (เปิดจากการ์ดค้นหา): แสดงใบมัดจำ + ชำระโดย + ยกเลิก/พิมพ์/ปิด ===== */
         <div className="form-card" style={{ padding: 0, overflow: "hidden" }}>
-          <div style={{ background: "#5eb3bd", color: "#fff", fontWeight: 700, padding: "10px 16px", fontSize: 15 }}>📝 มัดจำงานบริการ — แก้ไขข้อมูล</div>
+          <div style={{ background: "#5eb3bd", color: "#fff", fontWeight: 700, padding: "10px 16px", fontSize: 15 }}>📝 {tabTitle} — แก้ไขข้อมูล</div>
           {selDoc && (
             <div style={{ padding: 16 }}>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
@@ -793,8 +824,8 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         </div>
       )}
 
-      {/* รายการมัดจำ (เฉพาะแท็บสั่งซื้อ — แท็บบริการใช้ปุ่มค้นหาข้อมูลแบบ NID) */}
-      {!isService && (
+      {/* ตารางแบบเดิมของแท็บสั่งซื้อ — ปิดไว้ ทั้ง 2 แท็บใช้ปุ่ม "ค้นหาข้อมูล" แบบ NID (user 2026-09-04) */}
+      {false && (
       <div className="form-card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 8 }}>
           <div style={{ fontWeight: 700 }}>📋 รายการ{TABS.find((t) => t.key === tab)?.label.replace(/^..\s/, "")} ({items.length}) · มัดจำคงเหลือรวม {fmt(totalRemaining)} บาท</div>
@@ -831,8 +862,8 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   <td style={td}>{r.recorded_by || "-"}</td>
                   <td style={{ ...td, fontSize: 12, maxWidth: 240 }}>{r.remark || "-"}</td>
                   <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
-                    {r.status !== "refunded" && num(r.remaining_amount) > 0 && (
-                      <button onClick={() => { setRfd({ doc: r, amount: String(num(r.remaining_amount)), method: "เงินสด", note: "" }); setMessage(""); }} title="คืนเงินมัดจำ"
+                    {r.status !== "refunded" && refundAvail(r) > 0 && (
+                      <button onClick={() => { setRfd({ doc: r, amount: String(refundAvail(r)), method: "เงินสด", note: "" }); setMessage(""); }} title={pendingOrder(r) && num(r.remaining_amount) <= 0 ? "สั่งซื้อแล้วแต่สินค้ายังไม่มา → คืนเงิน + ยกเลิกใบสั่งซื้อ" : "คืนเงินมัดจำ"}
                         style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #f59e0b", background: "#fff", color: "#b45309", cursor: "pointer", fontSize: 12, marginRight: 4 }}>↩ คืนเงิน</button>
                     )}
                     {r.status === "active" && num(r.paid_amount) === 0 && num(r.refunded_amount) === 0 && (
