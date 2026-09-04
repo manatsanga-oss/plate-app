@@ -6,9 +6,6 @@ const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 const RETAIL_API = `${BASE}/retail-sale-api`;
 const ACC_API = `${BASE}/accounting-api`;
 // นำเข้ามัดจำป้ายแดงระบบเก่าจากข้อมูล upload เงินมัดจำคงเหลือ (มัดจำหลายประเภทปน — user เลือกเองว่าใบไหนคือป้ายแดง) (user 2026-09-01)
-const SPARE_API = `${BASE}/spare-parts-api`;          // get_honda_deposits (honda_deposits)
-const YAMAHA_DEP_API = `${BASE}/yamaha-deposit-api`;  // get_deposits (moto_deposit)
-const BRANCHES = ["SCY01", "SCY04", "SCY05", "SCY06", "SCY07"];
 
 async function post(url, body) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -104,66 +101,6 @@ export default function RedPlateRefundPage({ currentUser }) {
     finally { setSaving(false); }
   }
 
-  // ===== นำเข้ามัดจำป้ายแดงระบบเก่า (จากข้อมูล upload เงินมัดจำคงเหลือ HONDA/YAMAHA) =====
-  const [imp, setImp] = useState(null); // {loading, rows, kw, brand, sel, form}
-  const [impSaving, setImpSaving] = useState(false);
-  const [impDone, setImpDone] = useState({}); // key → เลข RPD ที่นำเข้าแล้วในรอบนี้
-  async function openImport() {
-    setImp({ loading: true, rows: [], kw: "", brand: "", sel: null, form: null });
-    const [honda, yamaha] = await Promise.all([
-      post(SPARE_API, { action: "get_honda_deposits" }).catch(() => []),
-      post(YAMAHA_DEP_API, { action: "get_deposits" }).catch(() => []),
-    ]);
-    const rowsU = [
-      ...asArray(honda).filter((r) => r && num(r.remaining_amount) > 0).map((r) => ({
-        key: "H" + r.deposit_id, src: "HONDA", doc: r.deposit_doc_no, date: r.deposit_date,
-        customer: r.customer_name, type: r.deposit_type || "", amount: num(r.remaining_amount),
-        note: [r.remark, r.vin ? "VIN " + r.vin : ""].filter(Boolean).join(" · "),
-      })),
-      ...asArray(yamaha).filter((r) => r && num(r.remaining_amount) > 0).map((r) => ({
-        key: "Y" + r.id, src: "YAMAHA", doc: r.receipt_no, date: r.deposit_date,
-        customer: r.customer_name, type: r.deposit_type || "", amount: num(r.remaining_amount),
-        note: r.note || "",
-      })),
-    ].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
-    setImp((p) => (p ? { ...p, loading: false, rows: rowsU } : p));
-  }
-  function pickImportRow(r) {
-    setImp((p) => ({
-      ...p, sel: r,
-      form: {
-        plate_no: "", branch_code: "", customer_phone: "",
-        received_date: String(r.date || "").slice(0, 10) || todayStr(),
-        amount: String(r.amount || 200),
-      },
-    }));
-  }
-  async function confirmImport() {
-    if (!imp?.sel || !imp.form || impSaving) return;
-    const f = imp.form, s = imp.sel;
-    // ทะเบียนป้ายเว้นว่างได้ — มัดจำระบบเก่าหลายใบไม่ได้จดเลขป้ายไว้ (โชว์ "-" ในตาราง)
-    if (!f.branch_code) { setMessage("❌ เลือกสาขา"); return; }
-    if (!(num(f.amount) > 0)) { setMessage("❌ กรอกยอดมัดจำ"); return; }
-    if (!window.confirm(`นำเข้ามัดจำป้ายแดงระบบเก่า\n${s.customer} · ป้าย ${f.plate_no.trim() || "-"} · ${baht(f.amount)} บาท (รับ ${thaiDate(f.received_date)})\nอ้างอิง ${s.src} ${s.doc} ?`)) return;
-    setImpSaving(true); setMessage("");
-    try {
-      const r = await post(RETAIL_API, {
-        action: "add_red_plate_deposit", mode: "import_old",
-        plate_no: f.plate_no.trim().toUpperCase(), amount: num(f.amount),
-        received_date: f.received_date, customer_name: s.customer, customer_phone: f.customer_phone.trim(),
-        branch_code: f.branch_code, branch_name: f.branch_code,
-        old_sale_no: s.doc, note: `import ระบบเก่า · ${s.src} ${s.doc}${s.type ? " · " + s.type : ""}`,
-        received_by: currentUser?.username || currentUser?.name || "import",
-      });
-      if (!r || !r.deposit_no) throw new Error(r?.__error || "นำเข้าไม่สำเร็จ — ป้ายนี้อาจมีใบมัดจำค้างคืนอยู่แล้ว (หรือยัง re-import workflow retail-sale-api ตัวที่มีโหมด import)");
-      setImpDone((p) => ({ ...p, [s.key]: r.deposit_no }));
-      setMessage(`✅ นำเข้าแล้ว ${r.deposit_no} · ป้าย ${r.plate_no} · ${s.customer} — ขึ้นในแท็บป้ายค้างคืน กดคืนเงินได้ตามปกติ`);
-      setImp((p) => ({ ...p, sel: null, form: null }));
-      load();
-    } catch (e) { setMessage("❌ " + (e.message || e)); }
-    setImpSaving(false);
-  }
-
   function printRefund(r) {
     const esc = (x) => String(x == null ? "" : x).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
     const html = `<!doctype html><html lang="th"><head><meta charset="utf-8"><title>ใบคืนเงินมัดจำป้ายแดง ${esc(r.refund_doc_no)}</title>
@@ -205,10 +142,6 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inp} />
         </>)}
         <button onClick={load} disabled={loading} style={{ padding: "8px 18px", background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, cursor: "pointer" }}>{loading ? "กำลังโหลด..." : "🔍 ค้นหา"}</button>
-        {currentUser?.role === "admin" && (
-          <button onClick={openImport} title="นำเข้ามัดจำป้ายแดงระบบเก่า จากข้อมูล upload เงินมัดจำคงเหลือ (moto_deposit / honda_deposits)"
-            style={{ padding: "8px 16px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, cursor: "pointer" }}>📥 นำเข้าจากระบบเก่า</button>
-        )}
         <span style={{ marginLeft: "auto", fontSize: 14 }}>{rows.length} รายการ · รวม <b style={{ color: tab === "held" ? "#b91c1c" : "#0f766e" }}>{baht(total)}</b> บาท</span>
       </div>
       {message && <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: message.startsWith("❌") ? "#fef2f2" : "#f0fdf4", border: message.startsWith("❌") ? "1px solid #fecaca" : "1px solid #bbf7d0", fontSize: 14 }}>{message}</div>}
@@ -254,99 +187,6 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
         </table>
       </div>
       <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 8 }}>ใบรับมัดจำป้ายแดง (RPD-) ออกอัตโนมัติตอนรับชำระเงินใบขาย NEW ที่กรอกทะเบียนป้ายแดง · แถวสีส้ม = ค้างคืนเกิน 45 วัน</div>
-
-      {imp && (
-        <div onClick={() => !impSaving && setImp(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: 820, maxWidth: "96vw", maxHeight: "88vh", overflowY: "auto", fontFamily: "Tahoma" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <div style={{ fontWeight: 700, fontSize: 16, color: "#7c3aed" }}>📥 นำเข้ามัดจำป้ายแดงระบบเก่า</div>
-              <button onClick={() => setImp(null)} style={{ padding: "4px 12px", background: "#e5e7eb", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma" }}>ปิด</button>
-            </div>
-            <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 10 }}>
-              ข้อมูลจาก upload "เงินมัดจำคงเหลือ" (moto_deposit + honda_deposits) — มัดจำหลายประเภทปนกัน <b>เลือกเองเฉพาะใบที่เป็นมัดจำป้ายแดง</b> แล้วกรอกทะเบียนป้าย+สาขา · ใบที่นำเข้าจะขึ้นแท็บป้ายค้างคืน (RPD-) คืนเงินได้ตามปกติ
-            </div>
-            {!imp.sel ? (<>
-              <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-                {["", "HONDA", "YAMAHA"].map((b) => (
-                  <button key={b || "all"} onClick={() => setImp((p) => ({ ...p, brand: b }))}
-                    style={{ padding: "5px 14px", borderRadius: 16, border: "none", cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700, fontSize: 12.5,
-                      background: imp.brand === b ? "#7c3aed" : "#f3f4f6", color: imp.brand === b ? "#fff" : "#374151" }}>
-                    {b || "ทั้งหมด"} ({imp.rows.filter((r) => !b || r.src === b).length})
-                  </button>
-                ))}
-                <button onClick={() => setImp((p) => ({ ...p, only200: !p.only200 }))}
-                  style={{ padding: "5px 14px", borderRadius: 16, border: "none", cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700, fontSize: 12.5,
-                    background: imp.only200 ? "#b45309" : "#fefce8", color: imp.only200 ? "#fff" : "#b45309" }}>
-                  เฉพาะ 200 บาท ({imp.rows.filter((r) => (!imp.brand || r.src === imp.brand) && num(r.amount) === 200).length})
-                </button>
-                <input value={imp.kw} onChange={(e) => setImp((p) => ({ ...p, kw: e.target.value }))} placeholder="ค้นหา ลูกค้า / เลขใบมัดจำ / ประเภท"
-                  style={{ ...inp, flex: 1, minWidth: 200 }} />
-              </div>
-              {imp.loading ? <div style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>กำลังโหลดข้อมูลมัดจำ...</div> : (() => {
-                const k = imp.kw.trim().toLowerCase();
-                const list = imp.rows.filter((r) => (!imp.brand || r.src === imp.brand) && (!imp.only200 || num(r.amount) === 200) && (!k || [r.customer, r.doc, r.type, r.note].some((v) => String(v || "").toLowerCase().includes(k))));
-                if (!list.length) return <div style={{ padding: 20, textAlign: "center", color: "#9ca3af", fontSize: 13.5 }}>ไม่มีมัดจำคงเหลือตามเงื่อนไข</div>;
-                return (
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead><tr>
-                      <th style={th}>ระบบ</th><th style={th}>เลขที่ใบมัดจำ</th><th style={th}>วันที่</th><th style={th}>ลูกค้า</th>
-                      <th style={th}>ประเภทมัดจำ</th><th style={{ ...th, textAlign: "right" }}>คงเหลือ</th><th style={th}>หมายเหตุ</th><th style={th}></th>
-                    </tr></thead>
-                    <tbody>
-                      {list.map((r) => (
-                        <tr key={r.key} style={{ background: impDone[r.key] ? "#f0fdf4" : num(r.amount) === 200 ? "#fefce8" : "#fff" }}>
-                          <td style={{ ...td, fontWeight: 700, color: r.src === "HONDA" ? "#dc2626" : "#1e40af" }}>{r.src}</td>
-                          <td style={{ ...td, fontFamily: "monospace" }}>{r.doc || "-"}</td>
-                          <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDate(r.date)}</td>
-                          <td style={td}>{r.customer || "-"}</td>
-                          <td style={td}>{r.type || "-"}</td>
-                          <td style={{ ...td, textAlign: "right", fontWeight: 700, color: num(r.amount) === 200 ? "#b45309" : "#374151" }}>{baht(r.amount)}</td>
-                          <td style={{ ...td, fontSize: 12, maxWidth: 200 }}>{r.note || "-"}</td>
-                          <td style={{ ...td, whiteSpace: "nowrap" }}>
-                            {impDone[r.key]
-                              ? <span style={{ fontSize: 12, color: "#15803d", fontWeight: 700 }}>✅ {impDone[r.key]}</span>
-                              : <button onClick={() => pickImportRow(r)} style={{ padding: "4px 12px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", fontSize: 12.5 }}>เลือก → ป้ายแดง</button>}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                );
-              })()}
-              <div style={{ fontSize: 11.5, color: "#9ca3af", marginTop: 8 }}>แถวสีเหลือง = ยอด 200 บาท (เท่ามัดจำป้ายแดงมาตรฐาน — มีโอกาสเป็นป้ายแดงสูง แต่ต้องยืนยันเองก่อนนำเข้า)</div>
-            </>) : (<>
-              <div style={{ background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 8, padding: "8px 12px", fontSize: 13.5, marginBottom: 12 }}>
-                <button onClick={() => setImp((p) => ({ ...p, sel: null, form: null }))} style={{ padding: "2px 10px", background: "#e5e7eb", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", marginRight: 8, fontSize: 12 }}>← กลับ</button>
-                <b>{imp.sel.src}</b> · <span style={{ fontFamily: "monospace" }}>{imp.sel.doc}</span> · {imp.sel.customer} · {imp.sel.type || "-"} · คงเหลือ <b>{baht(imp.sel.amount)}</b> บาท
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "10px 12px", alignItems: "center", fontSize: 14, maxWidth: 520 }}>
-                <label>ทะเบียนป้ายแดง</label>
-                <input value={imp.form.plate_no} autoFocus onChange={(e) => setImp((p) => ({ ...p, form: { ...p.form, plate_no: e.target.value } }))} placeholder="เช่น 99-048 (ไม่ทราบ เว้นว่างได้)" style={{ ...inp, fontWeight: 700, color: "#b91c1c" }} />
-                <label>สาขา *</label>
-                <select value={imp.form.branch_code} onChange={(e) => setImp((p) => ({ ...p, form: { ...p.form, branch_code: e.target.value } }))} style={inp}>
-                  <option value="">— เลือกสาขา —</option>
-                  {BRANCHES.map((b) => <option key={b} value={b}>{b}</option>)}
-                </select>
-                <label>วันที่รับมัดจำ</label>
-                <input type="date" value={imp.form.received_date} onChange={(e) => setImp((p) => ({ ...p, form: { ...p.form, received_date: e.target.value } }))} style={inp} />
-                <label>ยอดมัดจำ (บาท)</label>
-                <input type="number" value={imp.form.amount} onChange={(e) => setImp((p) => ({ ...p, form: { ...p.form, amount: e.target.value } }))} style={{ ...inp, textAlign: "right", fontWeight: 700 }} />
-                <label>เบอร์โทรลูกค้า</label>
-                <input value={imp.form.customer_phone} onChange={(e) => setImp((p) => ({ ...p, form: { ...p.form, customer_phone: e.target.value } }))} placeholder="ไม่บังคับ" style={inp} />
-              </div>
-              <div style={{ display: "flex", gap: 10, marginTop: 16, maxWidth: 520 }}>
-                <button onClick={confirmImport} disabled={impSaving}
-                  style={{ flex: 1, padding: "11px 0", background: impSaving ? "#9ca3af" : "#7c3aed", color: "#fff", border: "none", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
-                  {impSaving ? "กำลังนำเข้า..." : "📥 นำเข้าเป็นป้ายค้างคืน"}
-                </button>
-                <button onClick={() => setImp((p) => ({ ...p, sel: null, form: null }))} disabled={impSaving}
-                  style={{ padding: "11px 18px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, fontFamily: "Tahoma", cursor: "pointer" }}>ยกเลิก</button>
-              </div>
-            </>)}
-            {message && <div style={{ marginTop: 10, fontSize: 13.5, fontWeight: 600, color: message.startsWith("✅") ? "#15803d" : "#b91c1c" }}>{message}</div>}
-          </div>
-        </div>
-      )}
 
       {modal && (
         <div onClick={() => !saving && setModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
