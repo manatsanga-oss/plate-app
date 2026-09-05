@@ -367,6 +367,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
   }
   const [editMode, setEditMode] = useState(false);
+  const [origTotal, setOrigTotal] = useState(null); // ยอดรวมเดิมของใบที่เปิดแก้ไข — แก้แล้วยอดรวมต้องเท่าเดิม (user 2026-09-05)
   const [searchModal, setSearchModal] = useState(false);
   const [searchKw, setSearchKw] = useState("");
   const [searchResults, setSearchResults] = useState([]);
@@ -607,6 +608,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       const item = data?.[0]?.data || data?.[0] || {};
       const h = item.header || {};
       const ls = item.lines || [];
+      setOrigTotal(h.product_value != null && h.product_value !== "" ? num(h.product_value) : (h.total != null ? num(h.total) : null));
       const nv = normalizeVehicleModel(h, motoTypes);
       setHeader({ ...blankHeader(currentUser), ...h,
         receipt_type: normalizeReceiptType(h.receipt_type),
@@ -800,6 +802,19 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     if (!text(header.customer_name)) { setMessage("❌ ใส่ชื่อลูกค้า"); return; }
     if (!text(header.chassis_no)) { setMessage("❌ ใส่เลขถัง"); return; }
     if (lines.length === 0 || lines.every(l => !num(l.price_before_discount) && !num(l.service_fee))) { setMessage("❌ เพิ่มรายการรายได้อย่างน้อย 1"); return; }
+    // งานต่อภาษี (มีบรรทัดค่าต่อภาษี/ตรวจสภาพ) ต้องรู้วันจดทะเบียนอย่างน้อย + วันสิ้นอายุภาษีเดิม — ไม่งั้นระบบแยกราคา/ค่าบริการไม่ได้ (เคส SCY01-CA690900003 ค่าบริการเป็น 0) (user 2026-09-05)
+    if (header.receipt_type === "งานต่อภาษีและพรบ." && lines.some(l => (isTaxLine(l) || isTroLine(l)) && (num(l.price_before_discount) || num(l.service_fee)))) {
+      if (!header.register_date) { setMessage("❌ งานต่อภาษีต้องใส่ \"วันจดทะเบียน\" (ดูจากเล่มทะเบียน) ก่อนบันทึก"); return; }
+      if (!header.tax_paid_date) { setMessage("❌ ใส่ \"วันสิ้นอายุภาษีเดิม\" ก่อนบันทึก (ระบบใช้คำนวณภาษี/เงินเพิ่ม และแยกค่าบริการ)"); return; }
+    }
+    // แก้ไขใบเดิม: ยอดรวมต้องเท่าเดิม (แก้การแยกราคา/ค่าบริการได้ แต่ห้ามทำให้ยอดรวมมากขึ้น/น้อยลง — ใบเสร็จ/เงินที่รับไปแล้วอ้างยอดนี้) (user 2026-09-05)
+    if (editMode && origTotal != null) {
+      const newTotal = Math.round(linesTotal() * 100) / 100;
+      if (Math.abs(newTotal - Math.round(origTotal * 100) / 100) > 0.005) {
+        setMessage(`❌ บันทึกไม่ได้ — ยอดรวมเปลี่ยนจากเดิม ${baht(origTotal)} เป็น ${baht(newTotal)} บาท · แก้ไขใบเดิมต้องให้ยอดรวมเท่าเดิม (ปรับช่องราคา/ค่าบริการให้ลงตัวก่อน)`);
+        return;
+      }
+    }
     // แตกช่องค่าบริการเป็นบรรทัดแยกใน DB — ชื่อขึ้นต้น "ค่าบริการ" (ฐาน WHT ตอนวางบิล) + รวม VAT 7% ในตัว
     const expandedLines = [];
     lines.filter(l => num(l.price_before_discount) || num(l.service_fee)).forEach(l => {
@@ -1032,7 +1047,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
               <div style={{ marginTop: 14, padding: 12, background: "#fffbeb", border: "1px solid #fbbf24", borderRadius: 10 }}>
                 <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 10 }}>🧾 คำนวณภาษี/เงินเพิ่ม (มอเตอร์ไซค์ · ภาษีปีละ {MC_TAX_PER_YEAR} บาท)</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-                  <Field label={`วันจดทะเบียน${regDateSource && header.register_date ? " ✓ ดึงอัตโนมัติ" : " (จากเล่ม)"}`}>
+                  <Field label={`วันจดทะเบียน *${regDateSource && header.register_date ? " ✓ ดึงอัตโนมัติ" : " (จากเล่ม)"}`}>
                     <BEDateInput value={header.register_date} onChange={v => { setRegDateSource(""); setHeader(h => ({ ...h, register_date: v })); }}
                       style={{ ...inp, ...(regDateSource && header.register_date ? { borderColor: "#10b981", background: "#f0fdf4" } : {}) }}
                       title={regDateSource || "กรอกจากเล่มทะเบียน (พ.ศ.) ถ้าระบบหาไม่เจอ"} />
