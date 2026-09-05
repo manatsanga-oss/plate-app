@@ -20,6 +20,8 @@ const UPLOAD_GROUPS = [
     title: "UPLOAD ข้อมูลบริการและอะไหล่",
     items: [
       { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด — ไฟล์ HONDA (SPR08010) รวม 2 สาขา แยก ป.เปา/นครหลวง จากคอลัมน์สาขาอัตโนมัติ + ห้าห้อง + สช.ตลาด", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
+      // สช.ตลาด (SCY07) ปรับปรุงยอดจากไฟล์ DMS "รายงาน STOCK อะไหล่" ทุกสาขา — อัปเดตเฉพาะรหัสที่มีในระบบ ไม่เพิ่มรหัสใหม่ (user 2026-09-05)
+      { key: "honda-inventory-scy07", label: "สินค้าคงเหลืออะไหล่ สช.ตลาด (DMS)", desc: "เลือกไฟล์ DMS รายงาน STOCK อะไหล่ (ทุกสาขา) → อ่านในเครื่อง ใช้เฉพาะแถว SCY07 ที่รหัสมีในระบบอยู่แล้ว (ส่งแค่ ~500 รหัส เร็ว) · อัปเดตยอด/ที่เก็บ · รหัสที่ไม่มีในไฟล์ตั้งเป็น 0 · รหัสอื่นไม่นำเข้า", db: "honda_inventory (สช ตลาด)", url: `${BASE}/upload-honda-inventory-scy07` },
       { key: "part-price", label: "ราคาอะไหล่ HONDA (Price List)", desc: "ไฟล์ XLSX ข้อมูลสินค้าคงคลัง · ใช้คอลัมน์ รหัสสินค้า/ชื่อสินค้า/ราคาPrice List · UPSERT (part_code)", db: "part_prices", url: `${BASE}/upload-part-price` },
       { key: "part-price-yamaha", label: "ราคาอะไหล่ YAMAHA (Stock)", desc: "ไฟล์ XLSX รายงาน STOCK อะไหล่ YAMAHA · ใช้คอลัมน์ รหัสอะไหล่2/ชื่ออะไหล่/ราคาขายต่อหน่วย · UPSERT (part_code) ลง part_prices เดียวกัน", db: "part_prices", url: `${BASE}/upload-part-price-yamaha` },
       { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (apc_order_no + line_no + part_number)", db: "dcs_spare_orders", url: `${BASE}/upload-dcs-orders` },
@@ -80,10 +82,50 @@ const FILE_UPLOAD_KEYS = new Set([
   "part-giveaway",        // รายการสินค้าของแถม — เลือกไฟล์เอง
   "part-price",           // ราคาอะไหล่ HONDA Price List — เลือกไฟล์เอง
   "part-price-yamaha",    // ราคาอะไหล่ YAMAHA Stock — เลือกไฟล์เอง
+  "honda-inventory-scy07", // สต๊อกอะไหล่ สช.ตลาด จากไฟล์ DMS — เลือกไฟล์เอง
 ]); // รายการที่ต้องเลือกไฟล์เอง — dcs-orders, dcs-backorders, honda-loan-parts, pending-job, yamaha-b2b-backorders ย้ายไป OneDrive
 
 // รายการที่รองรับ 2 โหมด: เลือกไฟล์เอง (default) หรือวาง OneDrive File ID ให้ n8n download มาเอง
 const ONEDRIVE_MODE_KEYS = new Set(["stock"]);
+
+// ===== สต๊อกอะไหล่ สช.ตลาด (SCY07) จากไฟล์ DMS ทุกสาขา — แปลง xlsx ในเบราว์เซอร์ แล้วส่งเฉพาะรหัสที่มีในระบบ (user 2026-09-05: ต้องเร็ว ข้อมูลส่วนใหญ่ในไฟล์ไม่ใช้) =====
+const normPartCode = (v) => String(v ?? "").trim().replace(/^'+/, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+async function uploadScy07Stock(url, file, onProgress) {
+  onProgress?.("⏳ กำลังอ่านไฟล์ Excel…");
+  const XLSX = await import("xlsx");
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  const scy = rows.filter((r) => String(r.BRANCH_CODE ?? "").trim().toUpperCase() === "SCY07");
+  if (!scy.length) throw new Error("ไม่พบแถวสาขา SCY07 ในไฟล์ (ต้องเป็นไฟล์ DMS รายงาน STOCK อะไหล่ ที่มีคอลัมน์ BRANCH_CODE)");
+  onProgress?.(`⏳ พบแถว SCY07 ${scy.length.toLocaleString()} แถว · กำลังดึงรายการรหัสในระบบ…`);
+  const cr = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_codes" }) });
+  if (!cr.ok) throw new Error(`HTTP ${cr.status} (list_codes)`);
+  const cd = await cr.json().catch(() => ({}));
+  const sysCodes = new Set((Array.isArray(cd?.codes) ? cd.codes : []).map(normPartCode).filter(Boolean));
+  if (!sysCodes.size) throw new Error("ดึงรายการรหัสในระบบไม่ได้ (ตรวจว่า import/activate workflow Upload Honda Inventory SCY07 แล้ว)");
+  const num = (v) => { const n = Number(String(v ?? "").replace(/[, ฿]/g, "")); return Number.isFinite(n) ? n : 0; };
+  const allCodes = new Set(); const agg = new Map();
+  for (const r of scy) {
+    const code = normPartCode(r["รหัสอะไหล่"]) || normPartCode(r["รหัสอะไหล่2"]);
+    if (!code) continue;
+    allCodes.add(code);
+    if (!sysCodes.has(code)) continue; // รหัสที่ไม่มีในระบบ → ไม่ส่ง
+    const cur = agg.get(code) || { code, qty: 0, price: 0, loc: "" };
+    cur.qty += num(r["จำนวน"]);
+    const price = num(r["ราคาทุนต่อหน่วย"]); if (price > 0) cur.price = price;
+    const loc = String(r["รหัสที่เก็บ"] ?? "").trim() || String(r["ชื่อที่เก็บ"] ?? "").trim(); if (!cur.loc && loc) cur.loc = loc;
+    agg.set(code, cur);
+  }
+  onProgress?.(`⏳ ส่ง ${agg.size} รหัสที่ตรงกับระบบ (จาก ${allCodes.size.toLocaleString()} รหัสในไฟล์)…`);
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "update", branch_code: "SCY07", rows: [...agg.values()], file_codes: allCodes.size, file_rows: scy.length }) });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json().catch(() => ({}));
+  if (data && data.success === false) throw new Error(data.message || "อัปเดตไม่สำเร็จ");
+  return data;
+}
 
 export default function UploadPage({ currentUser } = {}) {
   const [statuses, setStatuses] = useState({});
@@ -116,6 +158,15 @@ export default function UploadPage({ currentUser } = {}) {
         url += (url.includes("?") ? "&" : "?") + "year_month=" + encodeURIComponent(ym);
       }
       let res;
+      if (item.key === "honda-inventory-scy07") {
+        // แปลง+กรองในเบราว์เซอร์ แล้วส่ง JSON เล็ก ๆ (ไม่ส่งไฟล์ทั้งก้อนให้ n8n แตก)
+        const data = await uploadScy07Stock(url, files[item.key], (m) => setMessages(prev => ({ ...prev, [item.key]: m })));
+        setMessages(prev => ({ ...prev, [item.key]: data.message || "นำเข้าข้อมูลสำเร็จ" }));
+        setStatuses(prev => ({ ...prev, [item.key]: "ok" }));
+        const now = new Date().toISOString();
+        setLastUploads(prev => { const next = { ...prev, [item.key]: now }; try { localStorage.setItem("upload_last_times", JSON.stringify(next)); } catch {} return next; });
+        return;
+      }
       if (onedriveMode) {
         // โหมด OneDrive → บอก n8n ให้ดึงไฟล์ล่าสุดจากโฟลเดอร์ OneDrive เอง
         res = await fetch(url, {

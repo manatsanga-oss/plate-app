@@ -116,9 +116,13 @@ export function buildDepItems(depRows, ctx) {
     .filter((d) => { const dt = String(d.deposit_date || "").slice(0, 10); if (!dt || dt < dateFrom || dt > dateTo) return false; return inBranch(d.branch_code, ctx); })
     .sort((a, b) => String(a.branch_code || "").localeCompare(String(b.branch_code || "")) || String(a.deposit_no || "").localeCompare(String(b.deposit_no || "")));
 }
+/** แถวคืนเงินมัดจำระบบเก่า (DEPD-/REC) ที่บันทึกผ่าน refund_legacy_deposit — รายรับอยู่ระบบเก่า จึงไม่นับเป็นรายรับ นับแต่ "จ่ายออก" */
+export const isLegacyRefundRow = (d) => String(d?.remark || "").startsWith("[คืนมัดจำระบบเก่า]");
+
 export function buildPartDepItems(partDepRows, ctx) {
   const { dateFrom, dateTo } = ctx;
   return partDepRows
+    .filter((d) => !isLegacyRefundRow(d))
     .filter((d) => { const dt = String(d.deposit_date || "").slice(0, 10); if (!dt || dt < dateFrom || dt > dateTo) return false; return inBranch(d.branch_code, ctx); })
     .sort((a, b) => String(a.deposit_doc_no || "").localeCompare(String(b.deposit_doc_no || "")));
 }
@@ -359,7 +363,26 @@ export function buildDailyCashItems(src, ctx) {
       note: ["ป้ายแดง " + (d.plate_no || "-"), "อ้างอิง " + d.deposit_no, d.refund_account_name, d.refund_note].filter(Boolean).join(" · "),
     };
   });
-  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
+  // คืนเงินมัดจำอะไหล่ "ระบบเก่า" (ใบสั่งซื้ออะไหล่ค้างส่ง → ↩ คืนเงิน) — หักเงินสด/เงินโอน ณ วันคืน (user 2026-09-05: เฉพาะรายการนี้)
+  const legacyRefunds = partDepRows
+    .filter((d) => isLegacyRefundRow(d) && d.refunded_at && num(d.refunded_amount) > 0)
+    .filter((d) => { const dt = String(d.refunded_at).slice(0, 10); return dt >= dateFrom && dt <= dateTo; })
+    .filter((d) => inBranch(d.branch_code, ctx))
+    .map((d) => {
+      const amt = -num(d.refunded_amount);
+      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+      split[methodKey(d.refund_method || "เงินสด")] += amt;
+      const orderNo = (String(d.remark || "").match(/ใบสั่งซื้อ\s*(\S+)/) || [])[1] || "";
+      return {
+        kind: "part_dep_refund", category: "คืนเงินมัดจำอะไหล่ (จ่ายออก)",
+        doc_no: d.deposit_doc_no, date: String(d.refunded_at).slice(0, 10), ref_no: orderNo,
+        customer_name: d.customer_name, seller: d.refunded_by || "", saleAmount: 0,
+        split, received: amt,
+        branch_key: bc5(d.branch_code), branch_name: d.branch_code || "ไม่ระบุสาขา",
+        note: ["คืนเงินมัดจำระบบเก่า " + (d.brand || ""), String(d.remark || "").replace("[คืนมัดจำระบบเก่า]", "").trim()].filter(Boolean).join(" · "),
+      };
+    });
+  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds];
 }
 
 /** ยอดเงินสดรับสุทธิ (นำฝากธนาคาร) แยกตามวัน+สาขา — ใช้ในหน้าบันทึกฝากเงิน */

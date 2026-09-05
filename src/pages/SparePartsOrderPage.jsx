@@ -477,6 +477,16 @@ export default function SparePartsOrderPage({ currentUser }) {
         const d = await r.json().catch(() => null);
         const row = Array.isArray(d) ? d[0] : (d && d.listJson ? JSON.parse(d.listJson)[0] : d);
         if (!row || row.error) throw new Error(row?.error || "คืนเงินมัดจำไม่สำเร็จ (ตรวจว่า re-import Part_Deposit_Workflow แล้ว)");
+      } else if (String(o.deposit_doc_no || "").trim()) {
+        // ใบมัดจำระบบเก่า (DEPD-/REC จาก upload) — บันทึกเอกสารคืนเงินลง part_deposits เพื่อให้สรุปรายวันรับเงินหักยอด (user 2026-09-05)
+        const r = await fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "refund_legacy_deposit", deposit_doc_no: o.deposit_doc_no, refund_amount: amount, refund_method: method,
+            brand: "HONDA", branch_code: String(currentUser?.branch || o.branch || "").split(" ")[0], deposit_type: "สั่งซื้อ",
+            customer_code: o.customer_code || "", customer_name: o.customer_name || "", customer_phone: o.customer_phone || "", vin: o.vin || "",
+            refund_note: `ยกเลิกใบสั่งซื้อ ${o.order_no || o.order_id} (สินค้ายังไม่มา)${note ? " · " + note : ""}`, refunded_by: currentUser?.name || currentUser?.username || "" }) });
+        const d = await r.json().catch(() => null);
+        const row = Array.isArray(d) ? d[0] : (d && d.listJson ? JSON.parse(d.listJson)[0] : d);
+        if (!row || row.error) throw new Error(row?.error || `บันทึกคืนเงินมัดจำ ${o.deposit_doc_no} ไม่สำเร็จ (ตรวจว่า re-import Part_Deposit_Workflow แล้ว หรือใบนี้เคยบันทึกคืนแล้ว)`);
       }
       await api("update_order_status", { order_id: o.order_id, status: "ยกเลิก (คืนเงิน)" });
       setMessage(`✅ คืนเงินมัดจำ ${o.deposit_doc_no} ${Number(amount).toLocaleString("th-TH")} บาท (${method}) และยกเลิกใบสั่งซื้อแล้ว`);

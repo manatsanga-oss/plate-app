@@ -287,6 +287,12 @@ export default function ClaimPage({ currentUser }) {
     const its = Array.isArray(claim.items) ? claim.items : items;
     const thaiDate = d => d ? new Date(d).toLocaleDateString("th-TH") : "-";
     const minRows = Math.max(0, 14 - its.length);
+    // เลขที่ใบเคลม (ศูนย์) + วันที่ส่งเคลม — แสดงใต้หัวกระดาษเมื่อส่งเคลมแล้ว (user 2026-09-05)
+    const subNo = claim.submit_claim_no || form.submit_claim_no || "";
+    const subDate = claim.submit_date || form.submit_date || "";
+    const claimNoLine = subNo
+      ? `<div style="margin-top:4px; font-size:15px; font-weight:700; color:#1e3a8a">เลขที่ใบเคลม (ศูนย์): ${subNo}${subDate ? ` <span style="font-weight:400; font-size:12px; color:#374151">· ส่งเคลม ${thaiDate(subDate)}</span>` : ""}</div>`
+      : "";
     const w = window.open("", "_blank");
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบแจ้งเคลม</title>
 <style>
@@ -304,8 +310,8 @@ export default function ClaimPage({ currentUser }) {
 </style></head><body>
 <div style="display:flex; justify-content:space-between; align-items:flex-start;">
   <div style="flex:1"></div>
-  <div style="flex:1; text-align:center"><h2>ใบแจ้งเคลม</h2></div>
-  <div style="flex:1; text-align:right; font-size:12px">วันที่เอกสาร<br/>${thaiDate(claim.doc_date || form.doc_date)}</div>
+  <div style="flex:1; text-align:center"><h2>ใบแจ้งเคลม</h2>${claimNoLine}</div>
+  <div style="flex:1; text-align:right; font-size:12px">${claim.claim_no ? `เลขที่เอกสาร <b>${claim.claim_no}</b><br/>` : ""}วันที่เอกสาร<br/>${thaiDate(claim.doc_date || form.doc_date)}</div>
 </div>
 <div class="field"><label>ชื่อผู้ติดต่อ</label> <span class="val">${claim.contact_name || form.contact_name || ""}</span>
   <label style="margin-left:30px">เบอร์โทร</label> <span class="val">${claim.phone || form.phone || ""}</span></div>
