@@ -460,7 +460,27 @@ ${transferSummary.length > 0 ? `
         const m = String(no || "").match(/-CA(\d{2})/);
         return m ? Number(m[1]) >= 60 : false;
       };
-      const list = (Array.isArray(data) ? data : [])
+      const raw = Array.isArray(data) ? data : [];
+      // รถคันเดียวกันวางบิล "ค่าต่อภาษี" 2 ใบในใบส่งงาน (รอบวางบิล) เดียวกัน → บวกค่าบริการ 20 บาทแค่ใบเดียว (ใบเลขน้อยสุด) (user 2026-09-05)
+      // key = เลขใบส่งงาน + เลขตัวถัง; ถ้ามีใบที่วางบิลแล้วในกลุ่มเดียวกันซึ่งคิด 20 ไปแล้ว ใบที่ยังไม่วางก็ไม่บวกซ้ำ
+      const feeTakenBy = {}; // key → receipt_no ที่ได้ค่าบริการ 20
+      const feeKey = (r) => `${String(r.batch_code || "").trim()}|${String(r.chassis_no || "").trim().toUpperCase()}`;
+      raw
+        .filter(r => isSystemReceipt(r.receipt_no) && String(r.income_name || "").trim() === "ค่าต่อภาษี" && String(r.chassis_no || "").trim())
+        .sort((a, b) => String(a.receipt_no).localeCompare(String(b.receipt_no)))
+        .forEach(r => {
+          const k = feeKey(r);
+          if (feeTakenBy[k]) return;
+          if (r.billed_at || r.batch_billed_at) {
+            // วางบิลแล้ว: ถือว่าคิด 20 ไปแล้วเมื่อยอดบิลมากกว่ายอดรายได้ หรือรายการค่าใช้จ่ายมีคำว่า "ค่าบริการ"
+            let items = []; try { items = Array.isArray(r.bill_items) ? r.bill_items : (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : []); } catch {}
+            const took = Number(r.bill_amount || 0) > Number(r.net_price || 0) + 0.005 || items.some(it => String(it?.expense_name || "").includes("ค่าบริการ"));
+            if (took) feeTakenBy[k] = r.receipt_no;
+            return;
+          }
+          feeTakenBy[k] = r.receipt_no;
+        });
+      const list = raw
         // เฉพาะใบจากระบบ: "ค่าบริการต่อภาษี" = บรรทัดค่าบริการที่แยกจากค่าต่อภาษี (รวม VAT) — ไม่ต้องวางบิล (วางบิลที่บรรทัดค่าต่อภาษีแทน)
         // + "ค่าบริการตรวจสภาพต่อภาษี" (190) = ค่าบริการร้าน ไม่วางบิลเช่นกัน (user 2026-08-22)
         .filter(r => !(isSystemReceipt(r.receipt_no) && ["ค่าบริการต่อภาษี", "ค่าบริการตรวจสภาพต่อภาษี"].includes(String(r.income_name || "").trim())))
@@ -470,6 +490,12 @@ ${transferSummary.length > 0 ? `
           if (!isSystemReceipt(r.receipt_no) || r.billed_at || r.batch_billed_at) return r; // วางบิลแล้ว → ใช้ยอดที่บันทึกไว้ (ฟิลด์จริงคือ billed_at)
           const nm = String(r.income_name || "").trim();
           if (nm === "ค่าต่อภาษี") {
+            const owner = feeTakenBy[feeKey(r)];
+            if (owner && owner !== r.receipt_no) {
+              // คันเดียวกันในใบส่งงานเดียวกัน คิดค่าบริการ 20 ที่ใบอื่นแล้ว → ใบนี้วางบิลเท่ายอดรายได้
+              const amt = Math.round(Number(r.net_price || 0) * 100) / 100;
+              return { ...r, bill_amount: amt, bill_items: [{ expense_name: `ค่าต่อภาษี (คันเดียวกัน — 20 บาทคิดที่ ${owner} แล้ว)` /* ห้ามมีคำ "ค่าบริการ" — calcWhtBase นับเป็นฐาน WHT */, amount: amt }] };
+            }
             const amt = Math.round((Number(r.net_price || 0) + 20) * 100) / 100;
             return { ...r, bill_amount: amt, bill_items: [{ expense_name: "ค่าต่อภาษี + ค่าบริการ 20 บาท", amount: amt }] };
           }
