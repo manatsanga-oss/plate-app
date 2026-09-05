@@ -68,6 +68,12 @@ const PETTY_TYPES = [
 
 // ตารางใบกำกับขายรถแยกตามบริษัทผู้ออกใบกำกับ (ขายข้ามหน้าร้านได้ — สาขาจริงดูจาก branch_codes)
 const TAX_COMPANIES = ["PAPAO", "NAKORNLUANG", "SINGCHAI"];
+// ★ ตั้งแต่ ก.ย. 2569 รายได้ขายรถดึงจาก "ใบขาย NEW ในระบบ" (retail_sales) แทนใบกำกับภาษีที่ upload (user 2026-09-04)
+//   ยอด = ราคาสุทธิ/1.07 (ก่อน VAT) · ต้นทุน = unit_cost จากใบรับรถ · สาขาตาม branch_code ใบขาย · ไม่นับใบยกเลิก
+//   ผลเทียบ ส.ค.69: จับคู่เลขถังได้ 310/329 ใบ ยอดตรง 284 ใบ — ต่างกันเพราะ (1) ใบขายปลายเดือนออกใบกำกับเดือนถัดไป
+//   (2) ใบขายผ่านไฟแนนซ์ ใบกำกับใช้ราคาเต็มก่อนหักเงินดาวน์ออกแทน/ประกันออกแทน (3) SGF ออกใบกำกับ 2 ใบ (MC ส่วนไฟแนนซ์ + TF เงินดาวน์)
+const SYSTEM_SALES_FROM_YM = "2026-09";
+const RETAIL_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
 
 // สาขาแสดงผล (label เริ่มต้น — โหลดชื่อจริงจาก branch_master ทับตอนเปิดหน้า)
 const DEFAULT_BRANCHES = [
@@ -285,7 +291,38 @@ export default function ProfitLossReportPage() {
       const [taxByBranch, partSvcByAff, hondaJobs, partsCostRows, regLines, feeLines, billLines, insBillRows, regSumRows, delivRows, cosmosRows, specCommDetail, giveCostData, payrollCalc, hrEmployees, otherInv, incomeDocs, commNormalMonth, flowExpDocs, fuelPayRows, assetList, bookingRows, pettyDocsByType] = await Promise.all([
         // 1) ใบกำกับขายรถ — เรียกทีละบริษัท (workflow แยกตารางตาม branch)
         //    สาขาจริงดูจาก branch_codes ของใบขาย (นครหลวงไม่มี code → SCY05 ทั้งตาราง)
-        Promise.all(TAX_COMPANIES.map(async (co) => {
+        (String(targetYm) >= SYSTEM_SALES_FROM_YM ? (async () => {
+          // โหมดระบบ: ใบขาย NEW ของเดือน (ทุกสาขา) → แถวเดียวกับใบกำกับ (beforeVat/cost) · ใบขายส่งก็นับ (ราคาขายส่งสุทธิ)
+          const rows = asArray(await post(RETAIL_URL, { action: "list_retail_sales", date_from: start, date_to: end, limit: 5000 }));
+          const sysRows = rows.filter((r) => r && r.invoice_no && !["90", "cancelled", "ยกเลิก"].includes(String(r.sale_status || "")));
+          // เดือนแรกที่เปลี่ยนระบบ: ใบขายปลายเดือนก่อน (เช่น 31/08) ที่ใบกำกับออกเดือนนี้ จะไม่ถูกนับทั้ง 2 เดือน → เติมจากใบกำกับเดือนนี้ที่เลขถังไม่ตรงกับใบขายระบบเดือนนี้
+          let carry = [];
+          if (String(targetYm) === SYSTEM_SALES_FROM_YM) {
+            const norm = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+            const sysCh = new Set(sysRows.map((r) => norm(r.chassis_no)).filter(Boolean));
+            const taxAll = (await Promise.all(TAX_COMPANIES.map((co) => post(TAX_URL, { action: "list_tax_invoices", branch: co, year_month: thYm }).then(asArray).catch(() => [])))).flat();
+            carry = taxAll.filter((r) => r && !isCancelled(r.status) && r.chassis_no && !sysCh.has(norm(r.chassis_no)) && Number(r.amount_before_vat || 0) > 0).map((r) => ({
+              branch: scyOf(r) || "",
+              doc: r.tax_invoice_no || "-", date: r.invoice_date, customer: r.customer_name || "-",
+              detail: "ใบกำกับของใบขายเดือนก่อน (ช่วงเปลี่ยนมาใช้ข้อมูลระบบ)",
+              beforeVat: r2(r.amount_before_vat), vat: r2(r.vat_amount), total: r2(r.total_amount), cost: r2(r.cost_price),
+            }));
+          }
+          return [carry.concat(sysRows.map((r) => {
+            const net = Number(r.net_car_price || r.car_price || 0);
+            return {
+              branch: (String(r.branch_code || "").match(/^SCY\d{2}/) || [""])[0],
+              doc: r.invoice_no,
+              date: r.sale_date,
+              customer: r.customer_name || "-",
+              detail: `ใบขาย NEW (ระบบ)${r.finance_type === "moto" && r.finance_company_name ? " · " + r.finance_company_name : ""}`,
+              beforeVat: r2(net / 1.07),
+              vat: r2(net - net / 1.07),
+              total: r2(net),
+              cost: r2(r.unit_cost),
+            };
+          }))];
+        })() : Promise.all(TAX_COMPANIES.map(async (co) => {
           const rows = asArray(await post(TAX_URL, { action: "list_tax_invoices", branch: co, year_month: thYm }));
           return rows.filter((r) => !isCancelled(r.status)).map((r) => ({
             branch: scyOf(r) || (co === "NAKORNLUANG" ? "SCY05" : ""),
@@ -298,7 +335,7 @@ export default function ProfitLossReportPage() {
             total: r2(r.total_amount),
             cost: r2(r.cost_price),
           }));
-        })),
+        }))),
         // 2) อะไหล่+งานซ่อม + ค่าบริการรับฝากชำระ/ประกัน — ชุดเดียวกับรายงานภาษีขาย เรียกทีละสังกัด
         Promise.all(["ป.เปา", "สิงห์ชัย"].map(async (aff) => {
           const rows = asArray(await post(FLOWTAX_URL, { action: "list_part_service_sales", affiliation: aff, tax_period: targetYm }).catch(() => []));
@@ -948,6 +985,7 @@ export default function ProfitLossReportPage() {
           total: r2(r.total_amount),
         };
         const sgfSale = sgfDownSaleOf(r);
+        if (sgfSale && String(targetYm) >= SYSTEM_SALES_FROM_YM) return; // โหมดระบบ: ใบขาย SGF นับราคาเต็มจากใบขายแล้ว — ใบกำกับเงินดาวน์ TF ไม่นับซ้ำ
         if (sgfSale) {
           const m = String(sgfSale.sale_invoice_no || "").match(/^SCY\d{2}/);
           sgfDownAcc.push({
@@ -1048,7 +1086,7 @@ export default function ProfitLossReportPage() {
   const manualAgg = useMemo(() => sumByBranch(manualRows), [manualRows]);
 
   const lines = [
-    { key: "vehicle", label: "รายได้จากการขายรถ", sub: "ใบกำกับภาษีขายรถ + ใบเงินดาวน์ SGF (จับคู่ใบขาย)", color: "#1e40af", count: vehicleRows.length, agg: vehicleAgg },
+    { key: "vehicle", label: "รายได้จากการขายรถ", sub: String(ym) >= SYSTEM_SALES_FROM_YM ? "ใบขาย NEW จากระบบ (ราคาสุทธิ/1.07 · ต้นทุนจากใบรับรถ) — ตั้งแต่ ก.ย. 69" : "ใบกำกับภาษีขายรถ + ใบเงินดาวน์ SGF (จับคู่ใบขาย)", color: "#1e40af", count: vehicleRows.length, agg: vehicleAgg },
     { key: "partsvc", label: "รายได้อะไหล่+งานซ่อม", sub: "งานซ่อม+ขายอะไหล่จริง (ปรับงานซ่อมนครหลวงตามระบบซ่อม Honda)", color: "#0e7490", count: partSvcRows.length, agg: partSvcAgg },
     { key: "fee", label: "รายได้ค่าบริการรับฝากชำระ", sub: "ค่าบริการรับฝากค่างวดไฟแนนซ์", color: "#7c3aed", count: feeRows.length, agg: feeAgg },
     { key: "post", label: "รายได้ค่าไปรษณีย์", sub: "ค่าบริการส่งไปรษณีย์", color: "#4d7c0f", count: postRows.length, agg: postAgg },

@@ -956,7 +956,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="pettycashoffering" label="ค่าของไหว้" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuItem page="paydeposit" label="ชำระเงินรับฝาก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="payment" label="รับชำระเงิน (QR PromptPay)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        {/* เมนู "รับชำระเงิน (QR PromptPay)" เอาออก (user 2026-09-04) — หน้า PaymentPage ยังอยู่ในโค้ด เผื่อกลับมาใช้ */}
         <MenuItem page="bankdeposit" label="บันทึกรายการฝากเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="chequereceive" label="บันทึกผ่านเช็ครับ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="expenserecord" label="บันทึกค่าใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

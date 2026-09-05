@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { loadDailyCashSources, buildDailyCashItems, dailyCashByDate } from "../lib/dailyCash"; // ยอดเงินสดรับสุทธิรายวัน "นำฝากธนาคาร" ชุดเดียวกับสรุปรายวันรับเงิน (user 2026-09-04)
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -118,6 +119,11 @@ export default function BankDepositPage({ currentUser }) {
   const [reconBranch, setReconBranch] = useState("");
   const [reconOnlyProblem, setReconOnlyProblem] = useState(false); // เฉพาะ ไม่ตรง + ฝากโดยไม่พบยอดเงินสด
   const [detailModal, setDetailModal] = useState(null); // { kind: 'in'|'out', date, branch, expect, rows, loading }
+  // บันทึกฝากเงิน: เลือก "วันที่ฝากเงิน" จาก dropdown → ยอดเงินสดรับสุทธิของวันนั้น (จากระบบ) ใส่ให้เอง แก้ไม่ได้ (user 2026-09-04)
+  const [cashDays, setCashDays] = useState([]);       // [{date, branch, cash, count, deposited}]
+  const [cashLoading, setCashLoading] = useState(false);
+  const [cashDate, setCashDate] = useState("");
+  const [lines, setLines] = useState([{ to_account_id: "", amount: "" }]); // ฝากแยกหลายบัญชีในวันเดียว (เช่น ป.เปา เงินสดย่อย + ธนาคาร) — user 2026-09-04
 
   const isAdmin = currentUser?.role === "admin";
   // ดึง branch_code (ส่วนหน้าของ branch e.g., "SCY01 สำนักงานใหญ่" → "SCY01")
@@ -220,10 +226,49 @@ export default function BankDepositPage({ currentUser }) {
     }
   }
 
+  async function loadCashDays() {
+    setCashLoading(true);
+    try {
+      const to = todayLocal().slice(0, 10);
+      const from = addDays(to, -14) < "2026-09-01" ? "2026-09-01" : addDays(to, -14); // เริ่มใช้ 1/9/2569 (user 2026-09-04)
+      const ctx = { dateFrom: from, dateTo: to, branch: userBranchCode, isAdmin: true, myBranch: userBranchCode };
+      const [src, depRes] = await Promise.all([
+        loadDailyCashSources(from, to),
+        fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_deposits", date_from: from, date_to: addDays(to, 1), branch_code: userBranchCode }) }).then(r => r.json()).catch(() => []),
+      ]);
+      const items = buildDailyCashItems(src, ctx);
+      const days = dailyCashByDate(items).filter(d => d.branch === String(userBranchCode).toUpperCase() && d.date >= "2026-09-01" && Math.abs(d.cash) >= 0.01);
+      const depList = (Array.isArray(depRes) ? depRes : []).filter(d => d && d.status !== "cancelled");
+      // วันที่ฝากแล้วไม่ต้องขึ้น: มีใบฝากที่แหล่งที่มาอ้างวันนั้น (บันทึกจาก dropdown นี้) หรือใบฝากแบบเดิมที่ไม่ได้อ้างวัน ลงวันเดียวกัน/วันถัดไป
+      const tagged = (x) => (String(x.source || "").match(/ฝากเงินสดประจำวัน (\d{4}-\d{2}-\d{2})/) || [])[1] || "";
+      const deposited = (d) => depList.some(x => tagged(x) === d.date || (!tagged(x) && [d.date, addDays(d.date, 1)].includes(String(x.deposit_date || "").slice(0, 10))));
+      setCashDays(days.filter(d => !deposited(d)));
+    } catch { setCashDays([]); }
+    setCashLoading(false);
+  }
+  function pickCashDate(date) {
+    setCashDate(date);
+    const d = cashDays.find(x => x.date === date);
+    if (!d) return;
+    setForm(p => ({ ...p, amount: d.cash, source: `ฝากเงินสดประจำวัน ${date} (เงินสดรับสุทธิจากระบบ)` }));
+    setLines([{ to_account_id: "", amount: String(d.cash) }]); // แถวแรกรับยอดเต็ม แบ่งเพิ่มได้ด้วยปุ่ม + บัญชี
+  }
+  const linesTotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
+  const cashSel = cashDays.find(x => x.date === cashDate);
+  function setLine(i, patch) { setLines(ls => ls.map((l, k) => (k === i ? { ...l, ...patch } : l))); }
+  function addLine() {
+    const rest = Math.round(((cashSel?.cash || 0) - linesTotal) * 100) / 100; // แถวใหม่รับยอดที่เหลือให้อัตโนมัติ
+    setLines(ls => [...ls, { to_account_id: "", amount: rest > 0 ? String(rest) : "" }]);
+  }
+  function removeLine(i) { setLines(ls => (ls.length > 1 ? ls.filter((_, k) => k !== i) : ls)); }
+
   function openNew() {
-    setForm(emptyForm());
+    setForm({ ...emptyForm(), amount: "" });
     setEditTarget(null);
+    setCashDate("");
+    setLines([{ to_account_id: "", amount: "" }]);
     setShowForm(true);
+    loadCashDays();
   }
 
   function openEdit(d) {
@@ -239,6 +284,36 @@ export default function BankDepositPage({ currentUser }) {
   }
 
   async function handleSave() {
+    if (!editTarget) {
+      // บันทึกใหม่: เลือกวันจาก dropdown + แบ่งฝากได้หลายบัญชี (ยอดรวมต้องเท่ายอดเงินสดรับสุทธิของวัน)
+      if (!cashSel) { setMessage("❌ เลือกวันที่ฝากเงินก่อน"); return; }
+      const valid = lines.filter(l => l.to_account_id && Number(l.amount) > 0);
+      if (!valid.length) { setMessage("❌ เลือกบัญชีรับฝากและยอดอย่างน้อย 1 บัญชี"); return; }
+      if (lines.some(l => (l.to_account_id && !(Number(l.amount) > 0)) || (!l.to_account_id && Number(l.amount) > 0))) { setMessage("❌ แถวบัญชีต้องมีทั้งบัญชีและยอด (ลบแถวที่ไม่ใช้ออก)"); return; }
+      if (Math.abs(linesTotal - cashSel.cash) >= 0.01) { setMessage(`❌ ยอดรวมที่ฝาก ${fmt(linesTotal)} ไม่เท่ายอดเงินสดรับสุทธิของวัน ${fmt(cashSel.cash)}`); return; }
+      const accIds = valid.map(l => String(l.to_account_id));
+      if (new Set(accIds).size !== accIds.length) { setMessage("❌ เลือกบัญชีซ้ำกัน"); return; }
+      setSaving(true); setMessage("");
+      try {
+        for (let i = 0; i < valid.length; i++) {
+          const l = valid[i];
+          const body = {
+            action: "save_bank_deposit",
+            deposit_date: form.deposit_date, source: form.source,
+            note: [valid.length > 1 ? `ฝากแยกบัญชี ${i + 1}/${valid.length}` : "", form.note].filter(Boolean).join(" · "),
+            amount: Number(l.amount), to_account_id: Number(l.to_account_id),
+            created_by: currentUser?.username || currentUser?.name || "system",
+            branch_code: userBranchCode, branch_name: userBranchName,
+          };
+          await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        }
+        setShowForm(false);
+        setMessage(`✅ บันทึกฝากเงินวันที่ ${fmtDateShort(cashSel.date)} รวม ${fmt(linesTotal)} บาท (${valid.length} บัญชี)`);
+        fetchData();
+      } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
+      setSaving(false);
+      return;
+    }
     if (!form.to_account_id) { setMessage("❌ เลือกบัญชีรับฝาก"); return; }
     if (!Number(form.amount) || Number(form.amount) <= 0) { setMessage("❌ กรอกจำนวนเงิน"); return; }
     setSaving(true); setMessage("");
@@ -631,20 +706,67 @@ th { background: #f0fdf4; }
                 </div>
               </div>
               <div style={{ gridColumn: "1 / span 2" }}>
-                <label style={lbl}>วันที่/เวลา *</label>
-                <input type="datetime-local" value={form.deposit_date} onChange={e => setForm(p => ({ ...p, deposit_date: e.target.value }))} style={inp2} />
+                {editTarget ? (
+                  <>
+                    <label style={lbl}>วันที่/เวลา *</label>
+                    <input type="datetime-local" value={form.deposit_date} onChange={e => setForm(p => ({ ...p, deposit_date: e.target.value }))} style={inp2} />
+                  </>
+                ) : (
+                  <>
+                    <label style={lbl}>วันที่สรุปเงิน * <span style={{ fontWeight: 400, color: "#64748b" }}>(วันที่รับเงินสดตามสรุปรายวันรับเงิน — เฉพาะวันที่ยังไม่ได้ฝาก ตั้งแต่ 1/9/2569)</span></label>
+                    <select value={cashDate} onChange={e => pickCashDate(e.target.value)} style={inp2} disabled={cashLoading}>
+                      <option value="">{cashLoading ? "กำลังคำนวณยอดเงินสดรายวัน…" : cashDays.length ? "-- เลือกวันที่สรุปเงิน --" : "ไม่มีวันที่ยังไม่ได้ฝาก (ตั้งแต่ 1/9/2569)"}</option>
+                      {cashDays.map(d => (
+                        <option key={d.date} value={d.date}>
+                          {fmtDateShort(d.date)} · เงินสดรับสุทธิ {fmt(d.cash)} บาท ({d.count} รายการ)
+                        </option>
+                      ))}
+                    </select>
+                    <label style={{ ...lbl, marginTop: 10 }}>วันที่ฝากเงิน * <span style={{ fontWeight: 400, color: "#64748b" }}>(วัน/เวลาที่นำเงินเข้าธนาคารจริง)</span></label>
+                    <input type="datetime-local" value={form.deposit_date} onChange={e => setForm(p => ({ ...p, deposit_date: e.target.value }))} style={inp2} />
+                  </>
+                )}
               </div>
-              <div style={{ gridColumn: "1 / span 2" }}>
-                <label style={lbl}>บัญชีที่รับฝาก *</label>
-                <select value={form.to_account_id} onChange={e => setForm(p => ({ ...p, to_account_id: e.target.value }))} style={inp2}>
-                  <option value="">-- เลือกบัญชี --</option>
-                  {accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
-                </select>
-              </div>
-              <div style={{ gridColumn: "1 / span 2" }}>
-                <label style={lbl}>จำนวนเงิน *</label>
-                <input type="number" step="0.01" min="0" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} style={{ ...inp2, fontFamily: "monospace", textAlign: "right", fontSize: 16, fontWeight: 700 }} />
-              </div>
+              {editTarget ? (
+                <>
+                  <div style={{ gridColumn: "1 / span 2" }}>
+                    <label style={lbl}>บัญชีที่รับฝาก *</label>
+                    <select value={form.to_account_id} onChange={e => setForm(p => ({ ...p, to_account_id: e.target.value }))} style={inp2}>
+                      <option value="">-- เลือกบัญชี --</option>
+                      {accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ gridColumn: "1 / span 2" }}>
+                    <label style={lbl}>จำนวนเงิน *</label>
+                    <input type="number" step="0.01" min="0" value={form.amount} onChange={e => setForm(p => ({ ...p, amount: e.target.value }))}
+                      style={{ ...inp2, fontFamily: "monospace", textAlign: "right", fontSize: 16, fontWeight: 700 }} />
+                  </div>
+                </>
+              ) : (
+                <div style={{ gridColumn: "1 / span 2" }}>
+                  <label style={lbl}>ยอดเงินสดรับสุทธิของวัน (จากระบบ แก้ไขไม่ได้)</label>
+                  <div style={{ ...inp2, fontFamily: "monospace", textAlign: "right", fontSize: 18, fontWeight: 700, background: "#f1f5f9", color: "#0f766e", boxSizing: "border-box" }}>{cashSel ? fmt(cashSel.cash) : "-"}</div>
+                  <label style={{ ...lbl, marginTop: 10 }}>บัญชีที่รับฝาก * <span style={{ fontWeight: 400, color: "#64748b" }}>(แบ่งฝากได้หลายบัญชี ยอดรวมต้องเท่ายอดข้างบน)</span></label>
+                  {lines.map((l, i) => (
+                    <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                      <select value={l.to_account_id} onChange={e => setLine(i, { to_account_id: e.target.value })} style={{ ...inp2, flex: 1 }} disabled={!cashSel}>
+                        <option value="">-- เลือกบัญชี --</option>
+                        {accounts.map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
+                      </select>
+                      <input type="number" step="0.01" min="0" value={l.amount} onChange={e => setLine(i, { amount: e.target.value })} disabled={!cashSel}
+                        style={{ ...inp2, width: 150, fontFamily: "monospace", textAlign: "right", fontWeight: 700 }} />
+                      <button onClick={() => removeLine(i)} disabled={lines.length <= 1} title="ลบแถว"
+                        style={{ padding: "6px 10px", background: lines.length <= 1 ? "#f3f4f6" : "#fee2e2", color: "#b91c1c", border: "none", borderRadius: 6, cursor: lines.length <= 1 ? "default" : "pointer" }}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <button onClick={addLine} disabled={!cashSel} style={{ padding: "5px 12px", background: "#eff6ff", color: "#1d4ed8", border: "1px dashed #93c5fd", borderRadius: 6, cursor: cashSel ? "pointer" : "default", fontSize: 13 }}>＋ เพิ่มบัญชี</button>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: cashSel && Math.abs(linesTotal - cashSel.cash) < 0.01 ? "#15803d" : "#b91c1c" }}>
+                      รวม {fmt(linesTotal)}{cashSel && Math.abs(linesTotal - cashSel.cash) >= 0.01 ? ` (ขาด/เกิน ${fmt(cashSel.cash - linesTotal)})` : cashSel ? " ✓" : ""}
+                    </div>
+                  </div>
+                </div>
+              )}
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label style={lbl}>แหล่งที่มา</label>
                 <input type="text" value={form.source} onChange={e => setForm(p => ({ ...p, source: e.target.value }))} placeholder="เช่น ฝากเงินสดประจำวัน, รับเงินลูกค้า, อื่นๆ" style={inp2} />

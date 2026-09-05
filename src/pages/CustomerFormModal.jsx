@@ -22,7 +22,7 @@ const emptyForm = () => ({
 const TITLE_OPTS = ["นาย", "นาง", "นางสาว", "เด็กชาย", "เด็กหญิง", "บมจ.", "บจก.", "หจก.", "บริษัท", "ห้าง", "อื่นๆ"];
 const GROUP_OPTS = ["บุคคลทั่วไป", "บริษัทไฟแนนซ์", "บริษัทประกัน", "ตัวแทนจำหน่าย", "อื่นๆ"];
 const LEVEL_OPTS = ["VIP", "ทั่วไป", "ลูกค้าใหม่", "ลูกค้าเก่า"];
-const ID_TYPE_OPTS = ["บัตรประชาชน", "Passport", "ใบขับขี่", "บัตรนิติบุคคล", "อื่นๆ"];
+const ID_TYPE_OPTS = ["บัตรประชาชน", "บัตรชมพู", "Passport", "ใบขับขี่", "บัตรนิติบุคคล", "อื่นๆ"]; // บัตรชมพู = บัตรประจำตัวแรงงานต่างด้าว (13 หลัก ขึ้นต้น 00) — user 2026-09-04
 
 export default function CustomerFormModal({ initial, onClose, onSaved }) {
   const editTarget = initial && initial.customer_id ? initial : null;

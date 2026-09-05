@@ -73,7 +73,6 @@ const PAGE_GROUPS = [
       { key: "postage",    label: "📮 เงินสดย่อย-ค่าไปรษณีย์" },
       { key: "pettycashgeneral",  label: "💵 เงินสดย่อย-ค่าใช้จ่ายทั่วไป" },
       { key: "pettycashoffering", label: "🙏 เงินสดย่อย-ค่าของไหว้" },
-      { key: "payment",    label: "📱 รับชำระเงิน (QR PromptPay)" },
       { key: "bankdeposit", label: "🏦 บันทึกรายการฝากเงิน" },
     ],
   },
