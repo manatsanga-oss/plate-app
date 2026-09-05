@@ -12,6 +12,7 @@ const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sal
 const USED_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
+const PRICE_OVERRIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/vehicle-price-override-api"; // ราคาแก้ไขเฉพาะคัน (บันทึกก่อนขาย) — ใช้แทนราคาประกาศเป็นฐาน (user 2026-09-01)
 
 // กฎกลุ่มไฟแนนท์ที่มี note "exclude:CODE1,CODE2,BIGBIKE,YAMAHA" → ไม่ใช้กับรุ่น/แบบ/ยี่ห้อที่ระบุ (เทียบแบบขึ้นต้นด้วยรหัส เช่น ADV160 ครอบ ADV160AT) · BIGBIKE = ประเภทรถมีคำว่า BIG · HONDA/YAMAHA = ยกเว้นทั้งยี่ห้อ (2026-09-05)
 function excludedByNote(note, codes, vehicleTypeName, brandName) {
@@ -23,7 +24,9 @@ function excludedByNote(note, codes, vehicleTypeName, brandName) {
   const isBig = /BIG/i.test(String(vehicleTypeName || ""));
   const bl = String(brandName || "").toLowerCase();
   const brandKey = bl.includes("honda") || bl.includes("ฮอนด้า") ? "HONDA" : bl.includes("yamaha") || bl.includes("ยามาฮ่า") ? "YAMAHA" : "";
-  return toks.some((t) => (t === "BIGBIKE" && isBig) || (brandKey && t === brandKey) || cs.some((c) => c.startsWith(t) || t.startsWith(c)));
+  // เทียบทิศเดียว: รหัสรถขึ้นต้นด้วย token เท่านั้น (exclude ADV160 ครอบ ADV160AT) —
+  // ห้ามกลับทิศ ไม่งั้น series สั้น ๆ เช่น "WW160" ของ PCX160 ไปชน token "WW160SV" ทำให้ AV โดนตัดผิด (บั๊ก 2026-08-29)
+  return toks.some((t) => (t === "BIGBIKE" && isBig) || (brandKey && t === brandKey) || cs.some((c) => c.startsWith(t)));
 }
 
 // หัวกระดาษเอกสาร แยกบริษัท ป.เปา (HONDA) / สิงห์ชัย (YAMAHA) — fallback เมื่อโหลด branch_master ไม่ได้
@@ -200,6 +203,9 @@ export default function SaleWizardPage({ currentUser }) {
   const [useDeliveryFee, setUseDeliveryFee] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState(0);
   const [useDownPayout, setUseDownPayout] = useState(false);
+  // ซื้อประกันรถหาย COSMOS เพิ่ม (เฉพาะขายเงินสด — ไฟแนนท์ไม่ขึ้น): ใส่ค่าเบี้ยแล้วบวกเข้าราคาขายตรง ๆ ตามที่ใส่ (user 2026-09-01)
+  const [useInsAdd, setUseInsAdd] = useState(false);
+  const [insAdd, setInsAdd] = useState(0);
   const [downPayout, setDownPayout] = useState(0);
 
   // บันทึกการขาย
@@ -809,6 +815,27 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       customer_name: b.customer_name || p.customer_name,
       customer_phone: b.customer_phone || b.phone || p.customer_phone,
     }));
+    // เติม ที่อยู่/วันเกิด/รหัสลูกค้า/เลขบัตร อัตโนมัติจากฐานลูกค้า (ค้นด้วยเบอร์จากใบจอง) — user 2026-09-01
+    const phone = String(b.customer_phone || b.phone || "").replace(/[^0-9]/g, "");
+    if (phone.length >= 9) {
+      post(DEPOSIT_API, { action: "search_customers", keyword: phone }).then((d) => {
+        const list = (Array.isArray(d) ? d : []).filter((c) => c && (c.customer_name || c.customer_address));
+        if (!list.length) return;
+        const nb = text(b.customer_name).replace(/\s+/g, "");
+        // เลือกแถวชื่อตรงก่อน ไม่งั้นแถวแรกที่เบอร์ตรง — เติมเฉพาะช่องที่ยังว่าง ไม่ทับข้อมูลใบจอง
+        const c = list.find((x) => text(x.customer_name).replace(/\s+/g, "") === nb) || list[0];
+        setCust((p) => ({
+          ...p,
+          customer_code: p.customer_code || c.customer_code || c.code || "",
+          customer_address: p.customer_address || c.customer_address || c.address || "",
+          customer_tax_id: p.customer_tax_id || c.customer_tax_id || c.tax_id || "",
+          customer_province: p.customer_province || c.customer_province || c.province || "",
+          customer_birthdate: p.customer_birthdate || c.customer_birthdate || c.birth_date || c.birthdate || "",
+          customer_gender: p.customer_gender || c.customer_gender || c.gender || "",
+          customer_line_user_id: p.customer_line_user_id || c.line_user_id || "",
+        }));
+      }).catch(() => {});
+    }
   }
   // เงินมัดจำที่ใช้หัก = มัดจำคงเหลือของใบจองที่เลือก (ไม่จอง = 0)
   const depositAmt = bookingAsk === "booked" && selBooking ? Number(selBooking.remaining || 0) : 0;
@@ -1007,8 +1034,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   async function handleSaveSale() {
     if (saving || savedSale || !selUnit) return;
     const isFin = saleType === "finance";
-    const base = announcedPrice(saleType);
-    const carPrice = base == null ? null : base + (isWholesale ? 0 : markupsTotal + adjustmentsTotal);
+    const carPrice = finalCarPrice(saleType); // ราคาสุทธิเฉพาะคัน (ถ้ามี) = ราคาสุดท้าย ไม่บวกกฎใด ๆ
     if (carPrice == null) { setMessage(isWholesale ? "❌ กรอกราคาขายส่งก่อน" : "❌ ไม่พบราคาขายของรถคันนี้ — ตรวจสอบเมนูราคารถก่อน"); return; }
     if (!text(cust.customer_name)) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
     const netCar = Math.max(carPrice - downSubDiscount, 0); // หักส่วนลด "เงินดาวน์ออกแทน" (เฉพาะส่วนที่ไม่ได้แบ่งไปช่วยค่างวดล่วงหน้า)
@@ -1070,7 +1096,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         const myAff = affOf(currentUser?.branch_code || currentUser?.branch);
         const myPlate = normPlate(redPlateNo);
         const held = await post(RETAIL_API, { action: "list_red_plate_deposits", status: "held" }).catch(() => []);
-        const dup = (Array.isArray(held) ? held : []).find((d) => normPlate(d.plate_no) === myPlate && affOf(d.branch_code) === myAff);
+        // ใบ legacy = มัดจำค้างคืนที่ import จากระบบเก่า (เงินค้างคืนลูกค้า แต่ป้ายจริงถูกเวียนใช้ต่อแล้ว) — ไม่บล็อคการใช้เลขป้ายนั้นขายคันใหม่
+        const dup = (Array.isArray(held) ? held : []).find((d) => !d.legacy && normPlate(d.plate_no) === myPlate && affOf(d.branch_code) === myAff);
         if (dup) throw new Error(`ทะเบียนป้ายแดง ${text(redPlateNo)} ยังค้างคืนอยู่ (ใบรับมัดจำ ${dup.deposit_no} · ${dup.customer_name || "-"} · ใบขาย ${dup.sale_no}) — รับป้ายคืนก่อน หรือใช้ป้ายอื่น`);
         const d0 = new Date(); d0.setDate(d0.getDate() - 60);
         const recent = await post(RETAIL_API, { action: "list_retail_sales", date_from: d0.toISOString().slice(0, 10), date_to: todayStr(), limit: 2000 }).catch(() => []);
@@ -1108,9 +1135,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         advance_installment: isFin ? fc.advance : 0,
         // เงินดาวน์/ค่างวดออกแทน (ยอดฐานก่อนคูณ 1.07) — ไว้โชว์เป็นของแถมหักตอนรับชำระ
         down_payout_amount: (adjOpen && useDownPayout ? Number(downPayout || 0) : 0) + advSub,
+        // ค่านำพาที่กรอกในการ์ดราคาขายบวกเพิ่ม — เก็บลงใบขายไว้ทำรายงานค่านำพาจากระบบ (user 2026-08-29)
+        delivery_fee_amount: adjOpen && useDeliveryFee ? Number(deliveryFee || 0) : 0,
         // ประกันรถหาย: ลูกค้าจ่ายเอง (กรอกช่อง) ชนะ; ไม่กรอก = ใช้ยอดโปรโมชั่นออกแทนอัตโนมัติ (ไม่บวกเข้า total_payment)
-        theft_insurance_amount: isFin ? (custPaidTheft || promoTheft) : 0,
-        theft_insurance_source: isFin ? (custPaidTheft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : null,
+        theft_insurance_amount: isFin ? (custPaidTheft || promoTheft) : insAddTotal,
+        theft_insurance_source: isFin ? (custPaidTheft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : (insAddTotal > 0 ? "เงินสดซื้อเพิ่ม" : null),
         finance_company_code: isFin ? String(financeCo?.company_id || "") : "",
         finance_company_name: isFin ? (financeCo?.company_name || "") : "",
         interest_rate: isFin ? num(finRate) : 0,
@@ -1142,6 +1171,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       };
       setSavedSale(saleDoc);
       setStock(prev => prev.filter(r => r.engine_no !== selUnit.engine_no)); // เอาคันที่ขายออกจากลิสต์สต๊อก
+      // ใช้ราคาแก้ไขเฉพาะคันไปแล้ว → ปิดสถานะเป็น "ใช้ขายแล้ว" ผูกเลขใบขาย (กันเอาไปใช้ซ้ำ)
+      if (unitOverride) post(PRICE_OVERRIDE_API, { action: "mark_used", engine_no: selUnit.engine_no, sale_no: sale.sale_no }).catch(() => {});
       if (autoLink?.customer_line_user_id) msg += " · 🔗 ผูก LINE ลูกค้าจากเบอร์โทรให้อัตโนมัติ";
       if (custLineUserId || autoLink?.customer_line_user_id) msg += " · กำลังส่งใบขายเข้า LINE ลูกค้า...";
       setMessage(msg);
@@ -1328,6 +1359,33 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     return selBrand && brandParam(selBrand) === "HONDA" ? "ป.เปา" : "สิงห์ชัย";
   }, [currentUser, selBrand, pbgRows, bookingDateISO]);
 
+  // ราคาแก้ไขเฉพาะคัน (บันทึกจากเมนู "บันทึกแก้ไขราคาขายเฉพาะคัน" ก่อนขาย) — ใช้แทนราคาประกาศเป็นฐานก่อนบวกกฎ (user 2026-09-01)
+  const [priceOverrides, setPriceOverrides] = useState([]);
+  useEffect(() => {
+    post(PRICE_OVERRIDE_API, { action: "list_overrides", status: "active" })
+      .then((d) => { try { setPriceOverrides(typeof d?.listjson === "string" ? JSON.parse(d.listjson) : Array.isArray(d) ? d : []); } catch { setPriceOverrides([]); } })
+      .catch(() => setPriceOverrides([]));
+  }, []);
+  const unitOverride = useMemo(() => {
+    if (!selUnit?.engine_no) return null;
+    const eng = text(selUnit.engine_no).toUpperCase();
+    return priceOverrides.find((o) => o && o.status === "active" && text(o.engine_no).toUpperCase() === eng) || null;
+  }, [selUnit, priceOverrides]);
+  // ราคาสุทธิเฉพาะคัน = ราคาสุดท้าย เหนือทุกกฎ (ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ อีก) — user 2026-09-01
+  const overrideFinal = useMemo(() => (unitOverride && num(unitOverride.new_price) > 0 ? num(unitOverride.new_price) : null), [unitOverride]);
+  function basePrice(wantSaleType) {
+    if (wantSaleType === "wholesale") return announcedPrice(wantSaleType);
+    if (overrideFinal != null) return overrideFinal;
+    return announcedPrice(wantSaleType);
+  }
+  // ราคาขายรวมของคัน: ราคาสุทธิเฉพาะคันชนะทุกอย่าง ไม่งั้น ฐาน + กฎบวกเพิ่ม + ปรับแต่ง ตามปกติ
+  function finalCarPrice(wantSaleType) {
+    if (wantSaleType === "wholesale") return announcedPrice(wantSaleType);
+    if (overrideFinal != null) return overrideFinal;
+    const base = announcedPrice(wantSaleType);
+    return base == null ? null : base + markupsTotal + adjustmentsTotal;
+  }
+
   function announcedPrice(wantSaleType) {
     if (wantSaleType === "wholesale") return num(wholesalePrice) > 0 ? num(wholesalePrice) : null;
     const masterRow = findMasterRow(selUnit, selColor);
@@ -1401,14 +1459,16 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (!(adjOpen && useDownPayout)) return 0;
     const withVat = Number(downPayout || 0) * 1.07;
     if (!isSGF) return Math.ceil(withVat / 100) * 100;
-    const base = (announcedPrice(saleType) || 0) + markupsTotal + deliveryBonus;
+    const base = overrideFinal != null ? overrideFinal : (announcedPrice(saleType) || 0) + markupsTotal + deliveryBonus;
     if (!base) return Math.ceil(withVat / 1000) * 1000;
     return Math.ceil((base + withVat) / 1000) * 1000 - base;
   })();
-  const adjustmentsTotal = deliveryBonus + downPayoutCalc;
+  // ซื้อประกันรถหาย COSMOS เพิ่ม: บวกตรงตามเบี้ยที่ใส่ เฉพาะขายเงินสด
+  const insAddTotal = adjOpen && saleType === "cash" && useInsAdd ? Math.max(num(insAdd), 0) : 0;
+  const adjustmentsTotal = deliveryBonus + downPayoutCalc + insAddTotal;
 
   function resetAdjustments() {
-    setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0);
+    setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0); setUseInsAdd(false); setInsAdd(0);
   }
   const thaiDate = (iso) => {
     if (!iso) return "—";
@@ -1842,7 +1902,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
           {/* ขั้น 6: ข้อมูลรถ (ข้อมูลอยู่ข้างรูป) + การ์ดประเภทการขาย/ราคาขาย */}
           {step === 6 && (() => {
             const img = groupImage(selColor);
-            const price = saleType ? announcedPrice(saleType) : null;
+            const price = saleType ? basePrice(saleType) : null;
             const info = (label, value) => (
               <div style={{ fontSize: 14, marginBottom: 6 }}>
                 <span style={{ color: "#6b7280" }}>{label}: </span><strong>{value}</strong>
@@ -1928,16 +1988,31 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       <div style={{ padding: "14px 16px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10 }}>
                         <div style={{ fontSize: 13, color: "#166534" }}>{saleType === "cash" ? "ราคาขายเงินสด" : "ราคาขายผ่อนไฟแนนท์"}</div>
                         <div style={{ fontSize: 28, fontWeight: 700, color: "#166534", marginTop: 4 }}>
-                          {fmtBaht(price == null ? null : price + markupsTotal + adjustmentsTotal)}
+                          {fmtBaht(finalCarPrice(saleType))}
                         </div>
-                        {price != null && (markupsTotal > 0 || adjustmentsTotal > 0) && (
+                        {!unitOverride && price != null && (markupsTotal > 0 || adjustmentsTotal > 0) && (
                           <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
                             ราคาประกาศ {fmtBaht(price)}
                             {markupsTotal > 0 ? ` + บวกเพิ่ม ${Number(markupsTotal).toLocaleString("th-TH")}` : ""}
                             {adjustmentsTotal > 0 ? ` + ปรับแต่ง ${Number(adjustmentsTotal).toLocaleString("th-TH")}` : ""}
                           </div>
                         )}
-                        {applicableMarkups.length > 0 && (
+                        {/* ป้ายราคาสุทธิเฉพาะคัน (เหนือทุกกฎ — ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ): แดง = ต่ำกว่าประกาศ · ฟ้า = สูงกว่าประกาศ */}
+                        {unitOverride && (() => {
+                          const ann = announcedPrice(saleType);
+                          const ovr = num(unitOverride.new_price);
+                          const below = ann != null && ovr < num(ann);
+                          const above = ann != null && ovr > num(ann);
+                          const c = below ? "#dc2626" : above ? "#0284c7" : "#334155";
+                          return (
+                            <div style={{ marginTop: 6, padding: "6px 10px", borderRadius: 8, background: below ? "#fef2f2" : above ? "#eff6ff" : "#f8fafc", border: `1px solid ${below ? "#fecaca" : above ? "#bfdbfe" : "#e2e8f0"}`, fontSize: 12.5, color: c, textAlign: "left" }}>
+                              🏷️ <b>ราคาสุทธิเฉพาะคัน {fmtBaht(ovr)} — ราคาสุดท้าย ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ</b>
+                              {ann != null && ovr !== num(ann) ? ` (ราคาประกาศ ${fmtBaht(ann)} · ${below ? "ต่ำกว่า" : "สูงกว่า"} ${Number(Math.abs(ovr - num(ann))).toLocaleString("th-TH")})` : ""}
+                              {unitOverride.note ? <div style={{ color: "#64748b", marginTop: 2 }}>หมายเหตุ: {unitOverride.note} · โดย {unitOverride.created_by || "-"}</div> : null}
+                            </div>
+                          );
+                        })()}
+                        {!unitOverride && applicableMarkups.length > 0 && (
                           <div style={{ fontSize: 12, color: "#7c3aed", marginTop: 4, textAlign: "left" }}>
                             {applicableMarkups.map((m, i) => {
                               const label = m.markup_type === "finance" ? `ตามไฟแนนท์: ${m.finance_company || "-"}`
@@ -1974,6 +2049,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         <AdjRow label="เงินดาวน์/ค่างวดออกแทน" checked={useDownPayout} onCheck={setUseDownPayout}
                           value={downPayout} onChange={setDownPayout}
                           extra={downPayoutCalc > 0 ? (isSGF ? `(SGF ปัดราคารวมขึ้นหลักพัน = +${Number(downPayoutCalc).toLocaleString("th-TH")})` : `(× 1.07 = ${Number(downPayoutCalc).toLocaleString("th-TH")})`) : ""} />
+                        {/* ซื้อประกันรถหาย COSMOS เพิ่ม — เฉพาะขายเงินสด (ไฟแนนท์ไม่แสดง): บวกเข้าราคาตรงตามเบี้ยที่ใส่ */}
+                        {saleType === "cash" && (
+                          <AdjRow label="ซื้อประกันรถหาย COSMOS เพิ่ม" checked={useInsAdd} onCheck={setUseInsAdd}
+                            value={insAdd} onChange={setInsAdd}
+                            extra={insAddTotal > 0 ? `(บวกเข้าราคาขาย +${Number(insAddTotal).toLocaleString("th-TH")})` : "ใส่ค่าเบี้ยประกัน"} />
+                        )}
                         {adjustmentsTotal > 0 && (
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed" }}>รวมบวกเพิ่ม: +{Number(adjustmentsTotal).toLocaleString("th-TH")} บาท</div>
                         )}
@@ -2006,6 +2087,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                     <div style={{ marginTop: 12, padding: 12, background: "#eff6ff", borderRadius: 8, border: "1px solid #bfdbfe", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
                       <div style={{ fontSize: 14 }}>
                         ✓ ลูกค้าจอง: <strong>{selBooking.customer_name || "-"}</strong>
+                        {text(selBooking.line_user_id) && (
+                          <span style={{ marginLeft: 8, padding: "2px 10px", borderRadius: 10, background: "#dcfce7", color: "#15803d", fontSize: 12, fontWeight: 700 }} title="ลูกค้าผูก LINE ไว้แล้ว — ใบขายจะส่งเข้า LINE อัตโนมัติ">
+                            LINE ✓
+                          </span>
+                        )}
                         <span style={{ marginLeft: 10, padding: "2px 10px", borderRadius: 10, background: "#dcfce7", color: "#15803d", fontSize: 12, fontWeight: 700 }}>
                           🔔 คิวที่ {selBooking.queuePos}/{selBooking.stockQty}
                         </span>
@@ -2049,7 +2135,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                               return (
                                 <tr key={b.booking_id || i} style={picked ? { background: "#eff6ff" } : undefined}>
                                   <td>{i + 1}</td>
-                                  <td style={{ fontWeight: 600 }}>{b.customer_name || "-"}</td>
+                                  <td style={{ fontWeight: 600 }}>{b.customer_name || "-"}{text(b.line_user_id) ? <span style={{ marginLeft: 6, color: "#15803d", fontSize: 11.5, fontWeight: 700 }}>LINE ✓</span> : null}</td>
                                   <td>{bColor}</td>
                                   <td>{thaiDate(b.booking_date)}</td>
                                   <td style={{ textAlign: "center" }}>
@@ -2117,6 +2203,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         <div style={lbl}>ชื่อลูกค้า <span style={{ color: "#ef4444" }}>*</span></div>
                         <div style={{ ...box, textAlign: cust.customer_name ? "left" : "center" }}>
                           {cust.customer_name || "กดปุ่ม 🔍 เลือก/เพิ่ม เพื่อเลือกลูกค้า"}
+                          {cust.customer_name && custLineUserId ? <span style={{ marginLeft: 8, color: "#15803d", fontSize: 12, fontWeight: 700 }} title="ลูกค้าผูก LINE ไว้แล้ว — ใบขายจะส่งเข้า LINE อัตโนมัติ">LINE ✓</span> : null}
                         </div>
 
                         <div style={lbl}>ที่อยู่</div>
@@ -2225,8 +2312,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 {/* การ์ดรับชำระเงิน + ปุ่มบันทึก */}
                 {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (() => {
                   const isFin = saleType === "finance";
-                  const base = announcedPrice(saleType);
-                  const carPrice = base == null ? null : base + (isWholesale ? 0 : markupsTotal + adjustmentsTotal);
+                  const carPrice = finalCarPrice(saleType); // ราคาสุทธิเฉพาะคันชนะทุกกฎ
                   const netCar = carPrice == null ? null : Math.max(carPrice - downSubDiscount, 0);
                   const fc = financeCalc(netCar || 0);
                   const dep = depositAmt;

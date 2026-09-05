@@ -229,6 +229,10 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [header, setHeader] = useState(blankHeader(currentUser));
   const [lines, setLines] = useState([blankLine()]);
+  // user กดลบบรรทัดตรวจสภาพเอง (เช่น ลูกค้าตรวจสภาพมาแล้ว) → ห้าม auto เพิ่มกลับ (user 2026-09-01)
+  const [skipAutoTro, setSkipAutoTro] = useState(false);
+  // user กดลบบรรทัดค่าต่อภาษีเอง (เช่น ลูกค้าต่อ พรบ. อย่างเดียว) → ห้าม auto เพิ่มกลับ (user 2026-09-01)
+  const [skipAutoTax, setSkipAutoTax] = useState(false);
 
   // เดา "วันสิ้นอายุภาษีเดิม" จากวันครบรอบวันจดทะเบียน — ปีที่ครบล่าสุด/กำลังจะครบ (ต่อล่วงหน้าได้ไม่เกิน 90 วัน) แก้ทับได้
   useEffect(() => {
@@ -457,6 +461,30 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       });
   }, [saleExpenses, vehicleCC]);
 
+  // รุ่นที่หา CC ไม่เจอ (รุ่นเก่า/ไม่อยู่ใน master เช่น TENA) → fallback โชว์ พรบ. ทุกช่วง cc ให้เลือกเอง
+  // ไม่ auto เลือก และไม่ต้องเพิ่มรุ่น/cc ใน master — ใช้เฉพาะใบนี้ ไม่กระทบใบอื่น (user 2026-09-01)
+  const prbCodesAllCC = useMemo(() => {
+    if (vehicleCC != null) return [];
+    const today = todayISO();
+    const activeOn = (e) => {
+      if (e.status && e.status !== "active") return false;
+      const eff = e.effective_date ? String(e.effective_date).slice(0, 10) : null;
+      const end = e.end_date ? String(e.end_date).slice(0, 10) : null;
+      if (eff && eff > today) return false;
+      if (end && end < today) return false;
+      return true;
+    };
+    return saleExpenses
+      .filter((e) => e.group_by === "cc" && e.engine_cc != null && activeOn(e) && (containsPrb(e.expense_name) || containsPrb(e.category)))
+      .sort((a, b) => Number(a.engine_cc) - Number(b.engine_cc))
+      .map((e) => {
+        const paid = e.amount != null && e.amount !== "" ? Number(e.amount) : null;
+        const collect = e.income_amount != null && e.income_amount !== "" ? Number(e.income_amount) : null;
+        const fee = paid != null && collect != null && collect > paid ? Math.round((collect - paid) * 100) / 100 : 0;
+        return { _key: `prbcc-${e.expense_id}`, code: "", name: `${e.expense_name || ""} — ${e.engine_cc} cc`, amount: paid != null ? paid : collect, fee };
+      });
+  }, [saleExpenses, vehicleCC]);
+
   // งานต่อภาษี: บรรทัดประเภท "รายได้ พรบ." ที่ยังไม่เลือกชื่อ → เลือกรายการ พรบ. ตาม CC ให้อัตโนมัติ (ราคา+ค่าบริการตามมาสเตอร์)
   const emptyPrbKey = lines.map(l => (l.income_type === TYPE_PRB && !text(l.income_name) ? "1" : "0")).join("");
   useEffect(() => {
@@ -476,14 +504,14 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     if (step !== 3 || header.receipt_type !== "งานต่อภาษีและพรบ.") return;
     const regCodes = getCodesForType(TYPE_REGISTER);
     const adds = [];
-    if (!lines.some(isTaxLine)) {
+    if (!skipAutoTax && !lines.some(isTaxLine)) {
       const opt = regCodes.find(c => { const n = String(c.name || ""); return n.includes("ต่อภาษี") && !n.includes("ตรวจ"); });
       if (opt) adds.push({ ...blankLine(), income_type: TYPE_REGISTER, income_code: opt.code || "", income_name: opt.name });
     }
     // รถต้องตรวจสภาพ → เพิ่มบรรทัดตรวจสภาพให้ด้วย: เข้าเกณฑ์อายุ (ตรอ.) หรือขาดต่อเกิน 1 ปี (ตรวจที่ขนส่ง)
     // ยกเว้นขาดเกิน 3 ปี (ทะเบียนระงับ) — ต้องเปลี่ยนประเภทงานอยู่แล้ว ไม่เพิ่มให้
     const r = header.tax_paid_date ? calcMcTax(header.register_date, header.tax_paid_date, taxSubmitDate || nextThursday(header.receive_date || todayISO())) : null;
-    if ((r?.needTro || (r?.overYear && !r?.suspended)) && !lines.some(isTroLine)) {
+    if ((r?.needTro || (r?.overYear && !r?.suspended)) && !skipAutoTro && !lines.some(isTroLine)) {
       const opt = regCodes.find(c => String(c.name || "").includes("ตรวจสภาพ"));
       if (opt) adds.push({ ...blankLine(), income_type: TYPE_REGISTER, income_code: opt.code || "", income_name: opt.name });
     }
@@ -507,7 +535,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   // คืน list ชื่อรายได้ตามประเภทที่เลือก — พรบ. ดึงอัตโนมัติตาม CC, อีก 2 ประเภทดึงจาก master
   // ทุกรายการติด rtype = ประเภทจริง เพื่อให้โหมด "ทั้งหมด" stamp ประเภทลง income_type ตอนเลือกชื่อ
   function getCodesForType(label) {
-    if (label === TYPE_PRB) return prbCodes.map((c) => ({ ...c, rtype: TYPE_PRB }));
+    if (label === TYPE_PRB) return (prbCodes.length ? prbCodes : prbCodesAllCC).map((c) => ({ ...c, rtype: TYPE_PRB }));
     if (label === TYPE_DEPOSIT) return depositCodes.map((c) => ({ ...c, rtype: TYPE_DEPOSIT }));
     const typeOf = (t) => t.includes("ทะเบียน") ? TYPE_REGISTER : t.includes("ประกัน") ? TYPE_INSURANCE : normalizeIncomeType(t);
     if (label === TYPE_ALL) {
@@ -556,6 +584,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     setEditMode(false);
     setHeader(blankHeader(currentUser));
     setLines([blankLine()]);
+    setSkipAutoTro(false);
+    setSkipAutoTax(false);
     setMessage("");
     setJustSaved(false);
     setStep(1);
@@ -614,7 +644,9 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       })();
       setLines(mergedLines.length ? mergedLines : [blankLine()]);
       setJustSaved(false);
-      setStep(1);
+      // เปิดใบเก่า: บรรทัดที่บันทึกไว้คือความจริง — ปิดตัวเติมบรรทัดอัตโนมัติ (ค่าต่อภาษี/ตรวจสภาพ) ไม่ให้เพิ่มกลับ (user 2026-09-02)
+      setSkipAutoTax(true); setSkipAutoTro(true);
+      setStep(3); // โหมดแก้ไขโชว์ทุกส่วน
       setView("form");
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e.message || e).slice(0, 100));
@@ -723,7 +755,15 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
 
   function updateLine(i, patch) { setLines((arr) => arr.map((l, idx) => idx === i ? { ...l, ...patch } : l)); }
   function addLine() { setLines((arr) => [...arr, blankLine()]); }
-  function removeLine(i) { setLines((arr) => arr.length > 1 ? arr.filter((_, idx) => idx !== i) : arr); }
+  function removeLine(i) {
+    setLines((arr) => {
+      if (arr.length <= 1) return arr;
+      // ลบบรรทัดตรวจสภาพ/ค่าต่อภาษีเอง → จำไว้ไม่ให้ auto เพิ่มกลับ (ตรวจมาแล้ว / ต่อ พรบ. อย่างเดียว)
+      if (arr[i] && isTroLine(arr[i])) setSkipAutoTro(true);
+      if (arr[i] && isTaxLine(arr[i])) setSkipAutoTax(true);
+      return arr.filter((_, idx) => idx !== i);
+    });
+  }
 
   // เลือกรหัส → auto-fill ชื่อ + ราคา (จาก master service_expenses)
   function onSelectIncomeCode(i, codeKey) {
@@ -891,6 +931,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                   : step === 2 ? !!text(header.customer_name)
                   : false;
     const nextHint = step === 1 ? "ใส่เลขถังก่อน" : step === 2 ? "ใส่ชื่อลูกค้าก่อน" : "";
+    // โหมดแก้ไข: แสดงทุกส่วน (รถ/ลูกค้า/รายได้) ในหน้าเดียว ไม่ต้องกดถัดไปทีละขั้น (user 2026-09-02)
+    const showAll = editMode;
     return (
       <div style={{ padding: 20, background: "#fbf7f1", minHeight: "100%" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
@@ -899,7 +941,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         </div>
 
         {/* แถบขั้นตอน — ขั้นที่ผ่านแล้วกดย้อนได้ */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: showAll ? "none" : "flex", gap: 6, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
           {STEP_NAMES.map((name, i) => {
             const n = i + 1;
             const active = n === step, done = n < step;
@@ -945,7 +987,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         )}
 
         {/* ===== ขั้น 1b: ข้อมูลเอกสาร (เปลี่ยนประเภทได้จาก dropdown) + ข้อมูลรถ ===== */}
-        {step === 1 && header.receipt_type && (
+        {(showAll || step === 1) && header.receipt_type && (
         <div style={{ ...card, marginBottom: 14 }}>
           <div style={sec}>📌 ข้อมูลเอกสาร</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 14 }}>
@@ -1039,7 +1081,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         )}
 
         {/* ===== ขั้น 2: ข้อมูลลูกค้า ===== */}
-        {step === 2 && (
+        {(showAll || step === 2) && (
         <div style={{ ...card, marginBottom: 14 }}>
           <div style={sec}>👤 ข้อมูลลูกค้า</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
@@ -1055,7 +1097,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         )}
 
         {/* ===== ขั้น 3: รายการรายได้ + สรุป ===== */}
-        {step === 3 && (<>
+        {(showAll || step === 3) && (<>
         <div style={{ ...card, marginBottom: 14, background: "#f8fafc" }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "4px 16px", fontSize: 13 }}>
             <div><span style={{ color: "#6b7280" }}>เลขที่:</span> <b style={{ fontFamily: "monospace", color: "#0369a1" }}>{header.receipt_no || "-"}</b></div>
@@ -1138,7 +1180,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                           ))}
                         </select>
                         {l.income_type === TYPE_PRB && vehicleCC == null && (
-                          <div style={{ fontSize: 11, color: "#dc2626", marginTop: 3 }}>⚠️ ไม่พบ CC ของรุ่น "{header.model_series || "-"}" — เลือก/แก้รุ่นรถก่อน</div>
+                          <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>⚠️ ไม่พบ CC ของรุ่น "{header.model_series || "-"}" — เลือกรายการ พรบ. ตามช่วง cc ของรถเอง (เฉพาะใบนี้ ไม่ต้องเพิ่มรุ่นใน master)</div>
                         )}
                         {l.income_type === TYPE_PRB && vehicleCC != null && codes.length === 0 && (
                           <div style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>ไม่มีรายการ พรบ. สำหรับ {vehicleCC} cc</div>
@@ -1181,20 +1223,20 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         {/* ปุ่มนำทาง wizard */}
         <div style={{ display: "flex", gap: 10, justifyContent: "space-between", padding: "10px 0", flexWrap: "wrap" }}>
           <div>
-            {step > 1 && <button onClick={() => setStep(step - 1)} style={btnGray}>← ย้อนกลับ</button>}
+            {!showAll && step > 1 && <button onClick={() => setStep(step - 1)} style={btnGray}>← ย้อนกลับ</button>}
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <button onClick={() => setView("list")} style={{ ...btn, background: "transparent", color: "#6b7280" }}>ยกเลิก</button>
-            {step < 3 && (
+            {!showAll && step < 3 && (
               <button onClick={() => canNext && setStep(step + 1)} disabled={!canNext} title={canNext ? "" : nextHint}
                 style={{ ...btnPri, opacity: canNext ? 1 : 0.45, cursor: canNext ? "pointer" : "not-allowed" }}>
                 ถัดไป →
               </button>
             )}
-            {step === 3 && (justSaved || editMode) && (
+            {(showAll || step === 3) && (justSaved || editMode) && (
               <button onClick={printReceipt} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>🖨️ พิมพ์</button>
             )}
-            {step === 3 && (justSaved || editMode) && (
+            {(showAll || step === 3) && (justSaved || editMode) && (
               header.paid_at ? (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 8, background: "#d1fae5", color: "#065f46", fontSize: 13, fontWeight: 600 }}>
                   ✓ รับชำระแล้ว {baht(num(header.paid_amount))} ({header.payment_method || "-"} · {fmtBE(header.paid_date)})
@@ -1205,7 +1247,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                 <button onClick={openPayModal} style={{ ...btn, background: "#059669", color: "#fff" }}>💵 รับชำระเงิน</button>
               )
             )}
-            {step === 3 && (
+            {(showAll || step === 3) && (
               <button onClick={handleSave} disabled={saving} style={{ ...btnGreen, opacity: saving ? 0.6 : 1 }}>{saving ? "กำลังบันทึก..." : "💾 บันทึก"}</button>
             )}
           </div>

@@ -3,6 +3,11 @@ import React, { useEffect, useState, useRef } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
 const YAMAHA_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-deposit-api";
+const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api";
+const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // list_payments — ใบมัดจำที่ถูกดึงไปรับชำระแล้ว → ปิดงานซ่อมอัตโนมัติ (user 2026-09-04)
+const CLOSED_STATUSES = ["ปิดงานซ่อม", "ปิดการขาย", "ยกเลิก (คืนเงิน)"];
+const normNameY = (v) => String(v || "").replace(/\s+/g, "").replace(/^(นาย|นาง|นางสาว|น\.ส\.|MR\.?|MRS\.?|MS\.?|MISS)/i, "").toUpperCase();
+const normJobY = (v) => String(v || "").replace(/[\s\-\/]/g, "").toUpperCase(); // ระบบมัดจำอะไหล่ (PDS/PDO) สาขา SCY01 — แหล่งมัดจำหลักของใบสั่งซื้อ YAMAHA (user 2026-09-04)
 const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 
 const emptyItem = () => ({ part_code: "", part_name: "", quantity: 1 });
@@ -155,7 +160,37 @@ export default function YamahaOrderPage({ currentUser }) {
     try {
       const res = await fetch(YAMAHA_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const data = await res.json();
-      setDeposits(Array.isArray(data) ? data : []);
+      const uploadDeps = Array.isArray(data) ? data : [];
+      // มัดจำจาก "ระบบมัดจำอะไหล่" (PDS/PDO) เฉพาะสาขา SCY01 ที่ยังมีคงเหลือ → แปลงให้หน้าตาเหมือนแถว upload (receipt_no = เลข PDS) ขึ้นให้เลือกก่อน (user 2026-09-04)
+      let pdsDeps = [];
+      try {
+        const r3 = await fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposits", limit: 2000 }) });
+        const d3 = await r3.json().catch(() => []);
+        pdsDeps = (Array.isArray(d3) ? d3 : []).filter(d => d && d.deposit_doc_no && d.status === "active"
+            && String(d.branch_code || "").toUpperCase().startsWith("SCY01")) // รวมใบที่ใช้แล้ว (คงเหลือ 0) ด้วย เพื่อให้ใบสั่งซื้อเดิมยังจับคู่แสดงข้อมูลได้ — dropdown กรองคงเหลือ > 0 เอง
+          .map(d => ({ receipt_no: d.deposit_doc_no, deposit_date: d.deposit_date, customer_name: d.customer_name || "", customer_code: d.customer_code || "",
+            customer_phone: d.customer_phone || "", vin: d.vin || "", deposit_type: "เงินมัดจำอะไหล่", deposit_amount: d.deposit_amount,
+            remaining_amount: d.remaining_amount, note: d.remark || "", source: "PDS" }));
+      } catch {}
+      setDeposits([...pdsDeps, ...uploadDeps]);
+      // เหมือนหน้าสั่งซื้อ HONDA: ใบสั่งซื้อที่ "เงินมัดจำถูกดึงไปรับชำระแล้ว" (ใบรับชำระ PSR สถานะปกติ อ้างเลขมัดจำนี้ หรือเลข Job ตรงกัน) → ปิดงานซ่อมอัตโนมัติ
+      try {
+        const rp = await fetch(PART_SVC_PAY_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_payments" }) });
+        const pays = (await rp.json().catch(() => [])) || [];
+        const usedDocs = new Set(); const paidJobs = new Set();
+        for (const pay of (Array.isArray(pays) ? pays : [])) {
+          if (!pay || pay.status !== "active") continue;
+          String(pay.deposit_doc_no || "").split(" / ").forEach(x => x.trim() && usedDocs.add(x.trim()));
+          if (pay.doc_no) paidJobs.add(normJobY(pay.doc_no));
+        }
+        const cur = await api("get_yamaha_orders", { status: "all" }).then(norm).catch(() => []);
+        const toClose = cur.filter(o => o && !CLOSED_STATUSES.includes(String(o.status || "").trim())
+          && ((o.deposit_doc_no && usedDocs.has(String(o.deposit_doc_no).trim())) || (o.job_no && o.job_no !== "null" && paidJobs.has(normJobY(o.job_no)))));
+        if (toClose.length) {
+          for (const o of toClose) { try { await api("update_yamaha_order_status", { order_id: o.order_id, status: "ปิดงานซ่อม" }); } catch { /* ข้าม */ } }
+          reloadOrders();
+        }
+      } catch {}
     } catch {}
     try {
       const sRes = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposit_seizures", brand: "YAMAHA" }) });
@@ -276,6 +311,9 @@ export default function YamahaOrderPage({ currentUser }) {
     } catch { setMessage("โหลดข้อมูลไม่สำเร็จ"); }
   }
 
+  // ลูกค้าคนนี้มีใบมัดจำในระบบ (PDS/PDO) ที่ยังคงเหลือหรือไม่ — ใช้ตัดสินว่าจะเอาใบ upload NID มาโชว์ด้วยหรือไม่
+  const hasPdsFor = (name) => { const k = normNameY(name); return !!k && deposits.some(d => d.source === "PDS" && Number(d.remaining_amount || 0) > 0 && normNameY(d.customer_name) === k); };
+
   function handleDepositSelect(docNo) {
     const dep = deposits.find(d => d.receipt_no === docNo);
     if (dep) {
@@ -283,6 +321,9 @@ export default function YamahaOrderPage({ currentUser }) {
         ...prev,
         deposit_doc_no: docNo,
         customer_name: dep.customer_name || "",
+        customer_code: dep.customer_code || prev.customer_code,
+        customer_phone: dep.customer_phone || prev.customer_phone,
+        vin: dep.vin || prev.vin,
         deposit_amount: Number(dep.remaining_amount || 0),
         technician: prev.technician,
       }));
@@ -369,6 +410,27 @@ export default function YamahaOrderPage({ currentUser }) {
     });
   }
 
+  // คืนเงินมัดจำจากใบสั่งซื้อที่สินค้ายังไม่มา → สถานะ "ยกเลิก (คืนเงิน)" (user 2026-09-04)
+  const [refundOrder, setRefundOrder] = useState(null);
+  const NOT_ARRIVED = ["อะไหล่ค้างส่ง"]; // คืนมัดจำได้เฉพาะใบที่ผู้ขายแจ้ง "อะไหล่ค้างส่ง" (สั่งแล้วของไม่มา) — ใบสั่งซื้อปกติที่รอของไม่ให้คืน (user 2026-09-04)
+  async function doRefundOrder({ amount, method, note }) {
+    const o = refundOrder; if (!o) return;
+    try {
+      if (/^PD[SO]-/.test(String(o.deposit_doc_no || ""))) {
+        const r = await fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "refund_deposit", deposit_doc_no: o.deposit_doc_no, refund_amount: amount, refund_method: method, from_order: true,
+            refund_note: `ยกเลิกใบสั่งซื้อ ${o.order_no || o.order_id} (สินค้ายังไม่มา)${note ? " · " + note : ""}`, refunded_by: currentUser?.name || currentUser?.username || "" }) });
+        const d = await r.json().catch(() => null);
+        const row = Array.isArray(d) ? d[0] : (d && d.listJson ? JSON.parse(d.listJson)[0] : d);
+        if (!row || row.error) throw new Error(row?.error || "คืนเงินมัดจำไม่สำเร็จ (ตรวจว่า re-import Part_Deposit_Workflow แล้ว)");
+      }
+      await api("update_yamaha_order_status", { order_id: o.order_id, status: "ยกเลิก (คืนเงิน)" });
+      setMessage(`✅ คืนเงินมัดจำ ${o.deposit_doc_no} ${Number(amount).toLocaleString("th-TH")} บาท (${method}) และยกเลิกใบสั่งซื้อแล้ว`);
+      setRefundOrder(null);
+      loadAll();
+    } catch (e) { setMessage("❌ " + (e.message || "คืนเงินไม่สำเร็จ")); }
+  }
+
   async function handleSave() {
     if (!form.deposit_doc_no && form.order_type === "ปกติ") { setMessage("กรุณาเลือกเลขที่มัดจำ"); return; }
     if (!form.ref_order_id && form.order_type === "สั่งเพิ่ม") { setMessage("กรุณาเลือกใบสั่งซื้อเดิม"); return; }
@@ -384,6 +446,13 @@ export default function YamahaOrderPage({ currentUser }) {
       if (editId) payload.order_id = editId;
       const res = await api(action, payload);
       if (res?.success || res?.order_id) {
+        // ใบสั่งซื้อใหม่ที่ผูกมัดจำจากระบบมัดจำอะไหล่ (PDS-/PDO-) → ตัดใช้เต็มยอดเหมือนหน้าสั่งซื้อ HONDA (มัดจำ upload REC ไม่ต้อง — ตัดตอนรับชำระ)
+        if (!editId && /^PD[SO]-/.test(String(payload.deposit_doc_no || ""))) {
+          try {
+            await fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "use_deposit", deposit_doc_no: payload.deposit_doc_no, used_ref: String(res?.order_id || ""), used_by: currentUser?.name || currentUser?.username || "" }) });
+          } catch { /* ตัดมัดจำไม่สำเร็จ — ใบสั่งซื้อบันทึกแล้ว */ }
+        }
         setMessage(editId ? "แก้ไขสำเร็จ" : "บันทึกสำเร็จ");
         setEditId(null);
         setShowForm(false);
@@ -466,8 +535,9 @@ export default function YamahaOrderPage({ currentUser }) {
 
   // หมายเหตุ: การกรอง (status, parking, search, ยึดมัดจำ, ปิดซ่อม) ย้ายไปทำที่ n8n backend แล้ว
   // backend ส่ง deposit_date มาด้วย (alias จาก moto_deposit) และจัดเรียงให้แล้ว
-  const filtered = orders;
-  const sorted = orders;
+  // มุมมอง "ทั้งหมด" ไม่โชว์ใบปิดงานซ่อม — กดชิป "ปิดงานซ่อม" เพื่อดู (เหมือนหน้าสั่งซื้อ HONDA)
+  const filtered = filterStatus === "all" ? orders.filter(o => !CLOSED_STATUSES.includes(String(o.status || "").trim())) : orders;
+  const sorted = filtered;
 
   const statusCounts = {
     all: orders.length,
@@ -615,12 +685,12 @@ export default function YamahaOrderPage({ currentUser }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "มาไม่ครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ตีราคาซ่อม"].map(s => {
-          const count = s === "all" ? orders.length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
+        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "มาไม่ครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ยกเลิก (คืนเงิน)", "ตีราคาซ่อม"].map(s => {
+          const count = s === "all" ? orders.filter(o => !CLOSED_STATUSES.includes(String(o.status || "").trim())).length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
           const active = filterStatus === s;
           return (
             <button key={s} onClick={() => setFilterStatus(s)}
-              style={{ padding: "6px 16px", borderRadius: 20, fontSize: 12, fontWeight: active ? 700 : 400, cursor: "pointer", border: active ? "none" : "1px solid #d1d5db", background: active ? "#072d6b" : "#fff", color: active ? "#fff" : "#374151" }}>
+              style={{ padding: "6px 16px", borderRadius: 20, fontSize: 12, fontWeight: active ? 700 : 400, cursor: "pointer", border: active ? "none" : "1px solid #d1d5db", background: active ? (s === "ปิดงานซ่อม" ? "#dc2626" : "#072d6b") : "#fff", color: active ? "#fff" : "#374151" }}>
               {s === "all" ? "ทั้งหมด" : s} ({count})
             </button>
           );
@@ -730,12 +800,14 @@ export default function YamahaOrderPage({ currentUser }) {
                         : o.status === "มาไม่ครบ" ? "#fee2e2"
                         : o.status === "อะไหล่ค้างส่ง" ? "#fed7aa"
                         : o.status === "เปิดงาน" ? "#fce7f3"
+                        : o.status === "ปิดงานซ่อม" ? "#e5e7eb"
                         : "#fef3c7",
                       color: o.status === "สั่งซื้อแล้ว" ? "#065f46"
                         : o.status === "มาครบ" ? "#1e40af"
                         : o.status === "มาไม่ครบ" ? "#b91c1c"
                         : o.status === "อะไหล่ค้างส่ง" ? "#c2410c"
                         : o.status === "เปิดงาน" ? "#be185d"
+                        : o.status === "ปิดงานซ่อม" ? "#374151"
                         : "#92400e",
                     }}>{o.status}</span>
                   )}
@@ -745,6 +817,9 @@ export default function YamahaOrderPage({ currentUser }) {
                 <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
+                  {!isClosed && NOT_ARRIVED.includes(o.status) && (
+                    <button onClick={() => setRefundOrder(o)} title="สั่งซื้อแล้วแต่สินค้ายังไม่มา → คืนเงินมัดจำ + ยกเลิกใบสั่งซื้อ" style={{ background: "#fff", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: 4 }}>↩ คืนเงิน</button>
+                  )}
                   {!isClosed && o.status === "รอดำเนินการ" && (
                     <>
                       <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
@@ -816,7 +891,9 @@ export default function YamahaOrderPage({ currentUser }) {
                     // filter ใบมัดจำที่ใช้ได้: เงินมัดจำอะไหล่ + SCY01 + ยังไม่ถูกใช้ + ไม่ใช่ตีราคาซ่อม + ไม่ใช่ปรับปรุง + ไม่ถูกยึด
                     const eligible = deposits.filter(d =>
                       d.deposit_type === "เงินมัดจำอะไหล่"
-                      && (d.receipt_no || "").startsWith("SCY01")
+                      && (d.source === "PDS" || (d.receipt_no || "").startsWith("SCY01"))
+                      && Number(d.remaining_amount || 0) > 0 // ใบที่ถูกตัดรับชำระไปแล้ว (คงเหลือ 0) ไม่ให้เปิดใบสั่งซื้อ
+                      && (d.source === "PDS" || !hasPdsFor(d.customer_name)) // ระบบก่อน: ลูกค้าที่มีใบ PDS คงเหลือแล้ว ไม่ดึงใบ upload NID มาซ้ำ
                       && !orders.some(o => o.deposit_doc_no === d.receipt_no)
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.receipt_no)
                       && !adjustDeposits.some(ad => ad.deposit_doc_no === d.receipt_no)
@@ -824,7 +901,7 @@ export default function YamahaOrderPage({ currentUser }) {
                     );
                     return eligible;
                   })().map(d => (
-                    <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.deposit_date ? fmtDate(d.deposit_date) : "-"} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
+                    <option key={d.receipt_no} value={d.receipt_no}>{d.source === "PDS" ? "[ระบบ] " : "[upload] "}{d.receipt_no} | {d.deposit_date ? fmtDate(d.deposit_date) : "-"} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
                   ))}
                 </select>
               </div>
@@ -839,7 +916,8 @@ export default function YamahaOrderPage({ currentUser }) {
                   {deposits
                     .filter(d =>
                       d.deposit_type === "เงินมัดจำอะไหล่"
-                      && (d.receipt_no || "").startsWith("SCY01")
+                      && (d.source === "PDS" || (d.receipt_no || "").startsWith("SCY01"))
+                      && (d.source === "PDS" || !hasPdsFor(d.customer_name))
                       // ลูกค้ามีงานเดิมที่ยังไม่ปิด
                       && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")
                       // ใบมัดจำนี้ยังไม่ถูกใช้
@@ -854,7 +932,7 @@ export default function YamahaOrderPage({ currentUser }) {
                       && Number(d.remaining_amount || 0) > 0
                     )
                     .map(d => (
-                      <option key={d.receipt_no} value={d.receipt_no}>{d.receipt_no} | {d.deposit_date ? fmtDate(d.deposit_date) : "-"} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
+                      <option key={d.receipt_no} value={d.receipt_no}>{d.source === "PDS" ? "[ระบบ] " : "[upload] "}{d.receipt_no} | {d.deposit_date ? fmtDate(d.deposit_date) : "-"} | {d.customer_name} | ยอดคงเหลือ {fmt(d.remaining_amount)} | {d.note || "-"}</option>
                     ))}
                 </select>
               </div>
@@ -1142,6 +1220,9 @@ export default function YamahaOrderPage({ currentUser }) {
       )}
 
       {/* ===== Modal บันทึกเลขที่ใบรับสั่งซื้อ ===== */}
+      {refundOrder && (
+        <RefundOrderModal order={refundOrder} onClose={() => setRefundOrder(null)} onConfirm={doRefundOrder} />
+      )}
       {showPOModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
@@ -1337,4 +1418,55 @@ function fmtDate(d) {
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
   const yy = dt.getFullYear() + 543;
   return `${dd}/${mm}/${yy}`;
+}
+
+// ============================================================================
+// Modal คืนเงินมัดจำจากใบสั่งซื้อที่สินค้ายังไม่มา (user 2026-09-04): คืนเงิน + สถานะใบสั่งซื้อ → "ยกเลิก (คืนเงิน)"
+// ใบมัดจำจากระบบ (PDS/PDO) คืนจริงผ่าน part-deposit-api (from_order) · ใบ NID เดิม (DEPD/REC) บันทึกได้แค่สถานะ+หมายเหตุ (เงินคืนบันทึกใน NID)
+// ============================================================================
+function RefundOrderModal({ order, onClose, onConfirm }) {
+  const [method, setMethod] = useState("เงินสด");
+  const [amount, setAmount] = useState(String(Number(order.deposit_amount || 0)));
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const isSys = /^PD[SO]-/.test(String(order.deposit_doc_no || ""));
+  const inp = { width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box" };
+  async function ok() {
+    const amt = Number(String(amount).replace(/,/g, ""));
+    if (!(amt > 0)) { alert("กรอกจำนวนเงินคืน"); return; }
+    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${order.deposit_doc_no} ${amt.toLocaleString("th-TH")} บาท (${method})\nและเปลี่ยนสถานะใบสั่งซื้อเป็น "ยกเลิก (คืนเงิน)"?`)) return;
+    setBusy(true);
+    await onConfirm({ amount: amt, method, note });
+    setBusy(false);
+  }
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 440, maxWidth: "95vw" }}>
+        <h3 style={{ margin: "0 0 4px", color: "#b91c1c" }}>↩️ คืนเงินมัดจำ — ยกเลิกใบสั่งซื้อ</h3>
+        <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
+          {order.deposit_doc_no} · {order.customer_name} · สถานะ {order.status}{order.vendor_po_no ? ` · PO ${order.vendor_po_no}` : ""}
+        </div>
+        {!isSys && (
+          <div style={{ fontSize: 12.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
+            ใบมัดจำนี้มาจาก NID (ไม่ใช่ใบระบบ PDS/PDO) — ระบบจะบันทึกสถานะ/หมายเหตุให้ ส่วนการคืนเงินจริงต้องทำใบคืนมัดจำใน NID ด้วย
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, alignItems: "center" }}>
+          <label>วิธีคืนเงิน</label>
+          <select value={method} onChange={e => setMethod(e.target.value)} style={inp}>
+            <option value="เงินสด">เงินสด</option>
+            <option value="เงินโอน">เงินโอน</option>
+          </select>
+          <label>จำนวนเงินคืน</label>
+          <input type="number" value={amount} onChange={e => setAmount(e.target.value)} style={{ ...inp, textAlign: "right" }} />
+          <label>หมายเหตุ</label>
+          <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น สินค้าไม่มา ลูกค้าขอคืน" style={inp} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button onClick={onClose} style={{ padding: "8px 16px", border: "1px solid #d1d5db", background: "#fff", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={ok} disabled={busy} style={{ padding: "8px 16px", border: "none", background: "#dc2626", color: "#fff", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>{busy ? "..." : "↩️ ยืนยันคืนเงิน"}</button>
+        </div>
+      </div>
+    </div>
+  );
 }

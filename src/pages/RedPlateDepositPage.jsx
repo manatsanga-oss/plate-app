@@ -90,7 +90,8 @@ export default function RedPlateDepositPage({ currentUser }) {
     if (form.method === "เงินโอน" && !form.account) { setMessage("❌ เลือกบัญชีรับโอน"); return; }
     // ห้ามเลขป้ายซ้ำกับที่ยังค้างคืน (กติกาเดียวกับหน้าขาย)
     const myAff = affOf(modal.branch_code);
-    const dup = heldPlates.find((d) => normPlate(d.plate_no) === normPlate(plate) && affOf(d.branch_code) === myAff);
+    // ใบ legacy (import ระบบเก่า) = เงินค้างคืน แต่ป้ายจริงเวียนใช้ต่อแล้ว — ไม่บล็อคเลขป้าย
+    const dup = heldPlates.find((d) => !d.legacy && normPlate(d.plate_no) === normPlate(plate) && affOf(d.branch_code) === myAff);
     if (dup) { setMessage(`❌ ทะเบียนป้ายแดง ${plate} ยังค้างคืนอยู่ (${dup.deposit_no} · ${dup.customer_name || "-"}) — รับป้ายคืนก่อน หรือใช้ป้ายอื่น`); return; }
     const dup2 = pendingPlates.find((d) => normPlate(d.plate_no) === normPlate(plate) && affOf(d.branch_code) === myAff && d.invoice_no !== modal.invoice_no);
     if (dup2) { setMessage(`❌ ทะเบียนป้ายแดง ${plate} ถูกใช้ในใบขาย ${dup2.invoice_no} (${dup2.customer_name || "-"}) ที่ยังไม่รับชำระ — ใช้ป้ายอื่น`); return; }

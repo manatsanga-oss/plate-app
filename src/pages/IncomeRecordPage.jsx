@@ -931,7 +931,8 @@ export default function IncomeRecordPage({ currentUser }) {
   async function savePayment() {
     const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
     const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-    if (Math.abs(sum - totalRequired) > 0.01) {
+    // เผื่อเศษสตางค์ ≤ 0.05 — ยอดโอนไฟแนนท์ปัดสตางค์ต่างจากยอดสุทธิใบรายได้ได้ (เช่น ธนบรรณ .99 vs ใบ .98) (user 2026-08-31)
+    if (Math.abs(sum - totalRequired) > 0.05) {
       setMessage(`❌ ยอดรวมของวิธีรับเงิน (${sum.toFixed(2)}) ต้องเท่ากับยอดที่จะรับ (${totalRequired.toFixed(2)})`);
       return;
     }
@@ -1355,7 +1356,7 @@ export default function IncomeRecordPage({ currentUser }) {
               const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
               const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
               const diff = totalRequired - sum;
-              const exact = Math.abs(diff) < 0.01;
+              const exact = Math.abs(diff) <= 0.05; // เผื่อเศษสตางค์ยอดโอนไฟแนนท์
               return (
                 <div style={{ marginTop: 14, padding: 12, background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: 10 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -1380,8 +1381,12 @@ export default function IncomeRecordPage({ currentUser }) {
                       const usedCnInOtherRows = payments.filter((_, i) => i !== idx).map(x => x.credit_note_no).filter(Boolean);
                       // ใบค่าใช้จ่ายค้างจ่ายที่ชื่อผู้จำหน่ายตรงกับลูกค้าของใบรายได้ที่เลือก — exclude ที่ถูกเลือกในแถวอื่น
                       const usedExpInOtherRows = payments.filter((_, i) => i !== idx).map(x => String(x.expense_doc_id || "")).filter(Boolean);
-                      const matchedExpenseDocs = expenseDocs.filter(d =>
-                        payCustomerNames.some(n => namesMatch(n, d.vendor_name)) && !usedExpInOtherRows.includes(String(d.expense_doc_id)));
+                      // แยก 2 กลุ่ม: ชื่อตรงกันขึ้นก่อน / ใบอื่น ๆ เลือกข้ามชื่อได้เฉพาะ "ยอดเท่ากัน" (เคสคู่หักคนละชื่อ เช่น จ่าย COSMOS แต่รายได้ชื่อไทยวิวัฒน์/วิริยะ)
+                      const expFree = expenseDocs.filter(d => !usedExpInOtherRows.includes(String(d.expense_doc_id)));
+                      const matchedExpenseDocs = expFree.filter(d => payCustomerNames.some(n => namesMatch(n, d.vendor_name)));
+                      // ยอดที่แถวนี้ต้องหัก = ยอดรับทั้งหมด − ยอดที่แถวอื่นระบุแล้ว → โชว์เฉพาะใบค้างจ่ายที่ยอดเท่ากันเป๊ะ (กติกา: ยอดตรงกันจึงหักกลบได้)
+                      const rowTarget = Math.round(((Number(editPayDocNo ? editTotalRequired : selectedNet) || 0) - payments.reduce((sm, x, i2) => i2 === idx ? sm : sm + (Number(x.amount) || 0), 0)) * 100) / 100;
+                      const otherExpenseDocs = expFree.filter(d => !payCustomerNames.some(n => namesMatch(n, d.vendor_name)) && Math.abs(expenseNet(d) - rowTarget) <= 0.05);
                       const onExpSelect = (val) => {
                         const doc = expenseDocs.find(d => String(d.expense_doc_id) === val);
                         updatePayment(idx, { expense_doc_id: val, expense_doc_no: doc?.expense_doc_no || "", amount: doc ? expenseNet(doc) : 0 });
@@ -1459,13 +1464,27 @@ export default function IncomeRecordPage({ currentUser }) {
                           <select value={p.expense_doc_id || ""}
                             onChange={e => onExpSelect(e.target.value)}
                             style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #38bdf8", fontFamily: "Tahoma", fontSize: 13, background: "#f0f9ff", minWidth: 0 }}>
-                            <option value="">{matchedExpenseDocs.length === 0 ? "ไม่มีใบค่าใช้จ่ายค้างจ่ายที่ชื่อตรงกัน" : "-- เลือกใบค่าใช้จ่ายที่จะหักกลบ --"}</option>
-                            {matchedExpenseDocs.map(d => (
-                              <option key={d.expense_doc_id} value={d.expense_doc_id}
-                                title={`${d.expense_doc_no} | ${d.vendor_name || "-"} | ฿${fmt(expenseNet(d))} | ${fmtDate(d.doc_date)}`}>
-                                {d.expense_doc_no} · {d.vendor_name || "-"} · ฿{fmt(expenseNet(d))} · {fmtDate(d.doc_date)}
-                              </option>
-                            ))}
+                            <option value="">{expFree.length === 0 ? "ไม่มีใบค่าใช้จ่ายค้างจ่าย" : "-- เลือกใบค่าใช้จ่ายที่จะหักกลบ --"}</option>
+                            {matchedExpenseDocs.length > 0 && (
+                              <optgroup label="ชื่อตรงกับใบรายได้">
+                                {matchedExpenseDocs.map(d => (
+                                  <option key={d.expense_doc_id} value={d.expense_doc_id}
+                                    title={`${d.expense_doc_no} | ${d.vendor_name || "-"} | ฿${fmt(expenseNet(d))} | ${fmtDate(d.doc_date)}`}>
+                                    {d.expense_doc_no} · {d.vendor_name || "-"} · ฿{fmt(expenseNet(d))} · {fmtDate(d.doc_date)}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {otherExpenseDocs.length > 0 && (
+                              <optgroup label="ใบอื่น ๆ ยอดเท่ากัน (คู่หักคนละบริษัท เช่น COSMOS)">
+                                {otherExpenseDocs.map(d => (
+                                  <option key={d.expense_doc_id} value={d.expense_doc_id}
+                                    title={`${d.expense_doc_no} | ${d.vendor_name || "-"} | ฿${fmt(expenseNet(d))} | ${fmtDate(d.doc_date)}`}>
+                                    {d.expense_doc_no} · {d.vendor_name || "-"} · ฿{fmt(expenseNet(d))} · {fmtDate(d.doc_date)}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                           )
                         ) : p.method === "เงินโอนไฟแนนท์" ? (
@@ -1519,7 +1538,7 @@ export default function IncomeRecordPage({ currentUser }) {
               {(() => {
                 const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
                 const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-                const exact = Math.abs(sum - totalRequired) < 0.01;
+                const exact = Math.abs(sum - totalRequired) <= 0.05; // เผื่อเศษสตางค์ยอดโอนไฟแนนท์
                 const disabled = savingPay || !exact;
                 return (
               <button onClick={savePayment} disabled={disabled}

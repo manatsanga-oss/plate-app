@@ -122,7 +122,7 @@ function OcrPanel({ setMessage, currentUser }) {
       rows.forEach(r => { if (r.chassis) byChassis[r.chassis] = r; });
       setOcrItems(items => items.map(it => {
         const m = byChassis[String(it.chassis_no || "").toUpperCase().trim()];
-        return { ...it, invoice_no: m?.invoice_no || "", run_code: m?.run_code || "", customer_name: m?.customer_name || "" };
+        return { ...it, invoice_no: m?.invoice_no || "", run_code: m?.run_code || "", customer_name: m?.customer_name || "", submission_status: m?.submission_status || "", submission_plate: m?.submission_plate || "" };
       }));
       const matched = ocrItems.filter(it => byChassis[String(it.chassis_no || "").toUpperCase().trim()]?.invoice_no).length;
       if (!silent) setMessage(`🔄 Refresh สำเร็จ — จับคู่ใหม่ได้ ${matched} / ${ocrItems.length} รายการ`);
@@ -190,6 +190,12 @@ function OcrPanel({ setMessage, currentUser }) {
             it.invoice_no = m?.invoice_no || "";
             it.run_code = m?.run_code || "";
             it.customer_name = m?.customer_name || "";
+            it.submission_status = m?.submission_status || "";
+            it.submission_plate = m?.submission_plate || "";
+            // ใบส่งจดที่ "รับ" แล้วและมีเลขทะเบียนแล้ว → ไม่ติ๊กเลือกให้ กันรับซ้ำ · ถ้ารับแล้วแต่ทะเบียนยังว่าง (OCR รอบก่อนอ่านไม่ได้) ยังเลือกเพื่อเติมได้ (user 2026-09-05)
+            if (it.submission_status === "received" && it.submission_plate) it._selected = false;
+            // OCR อ่านเลขทะเบียนไม่ได้ → ไม่ติ๊กเลือก (กันกดรับแล้วใบส่งจดกลายเป็น received ทั้งที่ทะเบียนว่าง)
+            if (!String(it.plate_number || "").trim()) it._selected = false;
           });
         } catch { /* ignore preview error, continue without match info */ }
         setOcrItems(items);
@@ -218,6 +224,12 @@ function OcrPanel({ setMessage, currentUser }) {
   async function saveBatch() {
     const toSave = ocrItems.filter(it => it._selected && it.chassis_no);
     if (!toSave.length) { setMessage("ไม่มีรายการที่เลือก"); return; }
+    // ด่านกัน (user 2026-09-05): (1) ห้ามรับรายการที่ OCR ไม่มีเลขทะเบียน — จะทำให้ใบส่งจดกลายเป็น "รับแล้ว" แต่ทะเบียนว่าง
+    const noPlate = toSave.filter(it => !String(it.plate_number || "").trim());
+    if (noPlate.length) { setMessage(`❌ มี ${noPlate.length} รายการที่ไม่มีเลขทะเบียน (หน้า ${noPlate.map(it => it.page).join(", ")}) — กด ✏️ แก้ไข ใส่เลขทะเบียนก่อน หรือเอาเครื่องหมายถูกออก`); return; }
+    // (2) รับซ้ำใบที่รับแล้วและมีทะเบียนแล้ว ต้องยืนยันแยก (จะทับเลขทะเบียนเดิม)
+    const redo = toSave.filter(it => it.submission_status === "received" && it.submission_plate);
+    if (redo.length && !window.confirm(`⚠ ${redo.length} รายการเป็นใบส่งจดที่ "รับแล้ว" และมีเลขทะเบียนอยู่แล้ว\nการบันทึกจะทับเลขทะเบียนเดิม (${redo.slice(0, 5).map(it => `${it.run_code || "-"}: ${it.submission_plate} → ${it.plate_number}`).join(", ")}${redo.length > 5 ? " …" : ""})\nยืนยันทับข้อมูล?`)) return;
     if (!window.confirm(`บันทึกรับคืน ${toSave.length} รายการ?\nระบบจะ match เลขตัวถังกับตารางการขาย และอัพเดทสถานะทะเบียน`)) return;
     setSaving(true);
     setMessage("");
@@ -332,8 +344,10 @@ function OcrPanel({ setMessage, currentUser }) {
                     <td style={{ whiteSpace: "nowrap", fontSize: 12, color: "#065f46", fontWeight: 600 }} title={it.customer_name || ""}>
                       {it.invoice_no || ""}
                     </td>
-                    <td style={{ whiteSpace: "nowrap", fontSize: 12, fontFamily: "monospace", color: "#065f46", fontWeight: 600 }}>
+                    <td style={{ whiteSpace: "nowrap", fontSize: 12, fontFamily: "monospace", color: it.submission_status === "received" ? "#b45309" : "#065f46", fontWeight: 600 }}>
                       {it.run_code || ""}
+                      {it.run_code && it.submission_status === "received" && <span style={{ marginLeft: 6, fontFamily: "Tahoma", fontSize: 10.5, padding: "1px 6px", borderRadius: 8, background: it.submission_plate ? "#fef3c7" : "#fee2e2", color: it.submission_plate ? "#92400e" : "#b91c1c" }}>{it.submission_plate ? `รับแล้ว ${it.submission_plate}` : "รับแล้ว แต่ทะเบียนว่าง"}</span>}
+                      {it.invoice_no && !it.run_code && <span style={{ fontFamily: "Tahoma", fontSize: 10.5, color: "#b91c1c" }}>ยังไม่ส่งจด</span>}
                     </td>
                     <td style={{ textAlign: "center" }}>
                       <button onClick={() => setEditingRow({ ...it })}

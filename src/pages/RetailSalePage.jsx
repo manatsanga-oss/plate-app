@@ -24,7 +24,9 @@ function excludedByNote(note, codes, vehicleTypeName, brandName) {
   const isBig = /BIG/i.test(String(vehicleTypeName || ""));
   const bl = String(brandName || "").toLowerCase();
   const brandKey = bl.includes("honda") || bl.includes("ฮอนด้า") ? "HONDA" : bl.includes("yamaha") || bl.includes("ยามาฮ่า") ? "YAMAHA" : "";
-  return toks.some((t) => (t === "BIGBIKE" && isBig) || (brandKey && t === brandKey) || cs.some((c) => c.startsWith(t) || t.startsWith(c)));
+  // เทียบทิศเดียว: รหัสรถขึ้นต้นด้วย token เท่านั้น (exclude ADV160 ครอบ ADV160AT) —
+  // ห้ามกลับทิศ ไม่งั้น series สั้น ๆ เช่น "WW160" ของ PCX160 ไปชน token "WW160SV" ทำให้ AV โดนตัดผิด (บั๊ก 2026-08-29)
+  return toks.some((t) => (t === "BIGBIKE" && isBig) || (brandKey && t === brandKey) || cs.some((c) => c.startsWith(t)));
 }
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";

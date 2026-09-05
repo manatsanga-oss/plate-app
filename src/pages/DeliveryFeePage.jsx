@@ -10,7 +10,7 @@ const TABS = [
   {
     key: "delivery",
     label: "🚚 ค่านำพา",
-    title: "🚚 บันทึกค่านำพา",
+    title: "🚚 รายงานค่านำพา",
     api: ACCOUNTING_API,
     listAction: "list_delivery_fees",
     importAction: "import_delivery_fees_from_expenses",
@@ -73,7 +73,94 @@ export default function DeliveryFeePage({ currentUser }) {
       {/* remount เมื่อสลับแท็บเพื่อล้าง state */}
       {cfg.key === "referral"
         ? <ReferralDocTab key={cfg.key} currentUser={currentUser} />
-        : <FeeMatchTab key={cfg.key} cfg={cfg} currentUser={currentUser} />}
+        : <SystemDeliveryReportTab key={cfg.key} currentUser={currentUser} />}
+    </div>
+  );
+}
+
+// รายงานค่านำพาจากระบบ: ใบขาย NEW ที่กรอกค่านำพาในการ์ด "ราคาขายบวกเพิ่ม" (delivery_fee_amount > 0)
+// แทนการ import จาก daily_expenses (user 2026-08-29) — ไม่มีปุ่ม Import / จับคู่ เพราะยอดผูกใบขายตรง ๆ
+const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+function SystemDeliveryReportTab({ currentUser }) {
+  const [dateFrom, setDateFrom] = useState(firstOfMonth());
+  const [dateTo, setDateTo] = useState(todayISO());
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function fetchData() {
+    setLoading(true); setMessage("");
+    try {
+      const data = await postAPI(RETAIL_API, { action: "list_retail_sales", date_from: dateFrom, date_to: dateTo, limit: 2000 });
+      const list = (Array.isArray(data) ? data : [])
+        .filter(r => r && r.invoice_no && String(r.sale_status || "10") !== "90" && Number(r.delivery_fee_amount) > 0)
+        .sort((a, b) => String(b.sale_date || "").localeCompare(String(a.sale_date || "")) || String(b.invoice_no).localeCompare(String(a.invoice_no)));
+      setRows(list);
+      if (!list.length) setMessage("ไม่มีใบขายที่บันทึกค่านำพาในช่วงวันที่ (ค่านำพากรอกที่การ์ด \"ราคาขายบวกเพิ่ม\" ในหน้าบันทึกขาย NEW)");
+    } catch { setRows([]); setMessage("❌ โหลดข้อมูลไม่สำเร็จ (ตรวจว่า re-import retail-sale-api เวอร์ชันที่มี delivery_fee_amount แล้ว)"); }
+    setLoading(false);
+  }
+  useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, []);
+
+  // ค่านำพามีหัก ณ ที่จ่าย 3% — จ่ายจริง = ค่านำพา − ภาษีหัก (user 2026-08-29)
+  const whtOf = (v) => Math.round(Number(v || 0) * 3) / 100;
+  const total = rows.reduce((s2, r) => s2 + Number(r.delivery_fee_amount || 0), 0);
+  const totalWht = rows.reduce((s2, r) => s2 + whtOf(r.delivery_fee_amount), 0);
+  const totalNet = total - totalWht;
+  const th2 = { padding: "9px 8px", fontSize: 12.5, textAlign: "left", whiteSpace: "nowrap", background: "#072d6b", color: "#fff" };
+  const td2 = { padding: "8px", fontSize: 13, borderBottom: "1px solid #e5e7eb" };
+  const card = { flex: "1 1 160px", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "12px 16px", textAlign: "center" };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>ตั้งแต่:</span>
+        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8 }} />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>ถึง:</span>
+        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8 }} />
+        <button onClick={fetchData} disabled={loading} className="btn-primary" style={{ padding: "8px 18px" }}>{loading ? "..." : "🔄 รีเฟรช"}</button>
+        <span style={{ marginLeft: "auto", fontSize: 12, color: "#6b7280" }}>ที่มา: ใบขาย NEW (ช่องค่านำพาในการ์ดราคาขายบวกเพิ่ม)</span>
+      </div>
+      <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={card}><div style={{ fontSize: 12.5, color: "#6b7280" }}>📋 จำนวนคันที่มีค่านำพา</div><div style={{ fontSize: 22, fontWeight: 800, color: "#072d6b" }}>{rows.length}</div></div>
+        <div style={card}><div style={{ fontSize: 12.5, color: "#6b7280" }}>💰 ยอดค่านำพารวม</div><div style={{ fontSize: 22, fontWeight: 800, color: "#072d6b" }}>{fmt(total)}</div></div>
+        <div style={card}><div style={{ fontSize: 12.5, color: "#6b7280" }}>🧾 หัก ณ ที่จ่าย 3%</div><div style={{ fontSize: 22, fontWeight: 800, color: "#b91c1c" }}>{fmt(totalWht)}</div></div>
+        <div style={{ ...card, border: "2px solid #16a34a" }}><div style={{ fontSize: 12.5, color: "#6b7280" }}>💵 จ่ายจริงรวม</div><div style={{ fontSize: 22, fontWeight: 800, color: "#166534" }}>{fmt(totalNet)}</div></div>
+      </div>
+      {message && <div style={{ padding: "8px 12px", borderRadius: 8, background: "#fffbeb", border: "1px solid #fde68a", fontSize: 13.5, marginBottom: 10 }}>{message}</div>}
+      <div style={{ overflowX: "auto", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>
+            <th style={th2}>#</th><th style={th2}>เลขใบขาย</th><th style={th2}>วันที่ขาย</th><th style={th2}>สาขา</th>
+            <th style={th2}>ลูกค้า</th><th style={th2}>รถ</th><th style={th2}>เลขเครื่อง</th>
+            <th style={{ ...th2, textAlign: "right" }}>ค่านำพา</th>
+            <th style={{ ...th2, textAlign: "right" }}>หัก 3%</th>
+            <th style={{ ...th2, textAlign: "right" }}>จ่ายจริง</th>
+            <th style={th2}>การขาย</th><th style={th2}>ผู้ขาย</th>
+          </tr></thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={r.invoice_no}>
+                <td style={td2}>{i + 1}</td>
+                <td style={{ ...td2, fontFamily: "monospace", fontWeight: 700, color: "#072d6b" }}>{r.invoice_no}</td>
+                <td style={td2}>{fmtDate(r.sale_date)}</td>
+                <td style={td2}>{String(r.branch_code || "").substring(0, 5)}</td>
+                <td style={td2}>{r.customer_name}</td>
+                <td style={td2}>{[r.brand, r.model_name || r.model_code].filter(Boolean).join(" ")}</td>
+                <td style={{ ...td2, fontFamily: "monospace" }}>{r.engine_no || "-"}</td>
+                <td style={{ ...td2, textAlign: "right", fontWeight: 700, color: "#b45309" }}>{fmt(r.delivery_fee_amount)}</td>
+                <td style={{ ...td2, textAlign: "right", color: "#b91c1c" }}>{fmt(whtOf(r.delivery_fee_amount))}</td>
+                <td style={{ ...td2, textAlign: "right", fontWeight: 700, color: "#166534" }}>{fmt(Number(r.delivery_fee_amount || 0) - whtOf(r.delivery_fee_amount))}</td>
+                <td style={td2}>{r.finance_type === "moto" ? "ไฟแนนท์" : "เงินสด"}</td>
+                <td style={td2}>{r.seller || "-"}</td>
+              </tr>
+            ))}
+            {!rows.length && !loading && (
+              <tr><td colSpan={12} style={{ ...td2, textAlign: "center", color: "#9ca3af", padding: 24 }}>ไม่มีรายการ</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

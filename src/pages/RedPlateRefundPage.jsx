@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 const RETAIL_API = `${BASE}/retail-sale-api`;
 const ACC_API = `${BASE}/accounting-api`;
+// นำเข้ามัดจำป้ายแดงระบบเก่าจากข้อมูล upload เงินมัดจำคงเหลือ (มัดจำหลายประเภทปน — user เลือกเองว่าใบไหนคือป้ายแดง) (user 2026-09-01)
 
 async function post(url, body) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -162,7 +163,7 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
               const late = tab === "held" && days >= 45;
               return (
                 <tr key={r.deposit_no} style={{ background: late ? "#fff7ed" : "#fff" }}>
-                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.deposit_no}</td>
+                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.deposit_no}{r.legacy && <div style={{ fontSize: 10.5, color: "#7c3aed", fontFamily: "Tahoma" }}>📥 ระบบเก่า</div>}</td>
                   <td style={td}>{thaiDate(r.received_date)}</td>
                   {tab === "held"
                     ? <td style={{ ...td, fontWeight: 700, color: late ? "#c2410c" : "#374151" }}>{days}{late ? " ⚠️" : ""}</td>

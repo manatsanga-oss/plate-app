@@ -4,6 +4,7 @@ const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
 // เงินมัดจำจากระบบมัดจำอะไหล่ (หน้า "ระบบมัดจำอะไหล่" — ตาราง part_deposits) ใช้แทน upload NID เดิม
 const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api";
+const PART_RETURN_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-return-api"; // สถานะทำคืนสินค้า (user 2026-08-31)
 // ประวัติขายรถ (moto_sales) — ค้นรุ่น/แบบ/type ของรถลูกค้าจากเลขตัวถังในใบมัดจำ
 const SERVICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
 // ฐานลูกค้า (search_customers) — เช็คว่าลูกค้ามี LINE ผูกไว้ไหม จากเบอร์โทร 9 หลักท้าย (แบบเดียวกับหน้าบันทึกขาย NEW)
@@ -51,6 +52,19 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showDetail, setShowDetail] = useState(null);
+  // ใบคืนสินค้า (part_returns) — โชว์สถานะทำคืนในรายละเอียดใบสั่งซื้อ (จับคู่ทั้งใบใหม่ source_order_id และใบเก่าผ่านเลขมัดจำใน ref_doc)
+  const [partReturns, setPartReturns] = useState([]);
+  useEffect(() => {
+    const d0 = new Date(); d0.setFullYear(d0.getFullYear() - 1);
+    fetch(PART_RETURN_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_part_returns", date_from: d0.toISOString().slice(0, 10), date_to: new Date().toISOString().slice(0, 10) }) })
+      .then((r) => r.json()).then((d) => { try { setPartReturns(typeof d?.listjson === "string" ? JSON.parse(d.listjson) : []); } catch { setPartReturns([]); } })
+      .catch(() => {});
+  }, []);
+  const returnOf = (order, partCode) => {
+    const normC = (v) => String(v || "").replace(/[^0-9A-Za-z]/g, "").toUpperCase();
+    return partReturns.find((rr) => rr && rr.status !== "ยกเลิก" && normC(rr.part_code) === normC(partCode) &&
+      (String(rr.source_order_id || "") === String(order.order_id) || (order.deposit_doc_no && String(rr.ref_doc || "").includes(order.deposit_doc_no))));
+  };
   const [form, setForm] = useState(emptyForm());
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -450,6 +464,27 @@ export default function SparePartsOrderPage({ currentUser }) {
     });
   }
 
+  // คืนเงินมัดจำจากใบสั่งซื้อที่สินค้ายังไม่มา → สถานะ "ยกเลิก (คืนเงิน)" (user 2026-09-04)
+  const [refundOrder, setRefundOrder] = useState(null);
+  const NOT_ARRIVED = ["อะไหล่ค้างส่ง"]; // คืนมัดจำได้เฉพาะใบที่ผู้ขายแจ้ง "อะไหล่ค้างส่ง" (สั่งแล้วของไม่มา) — ใบสั่งซื้อปกติที่รอของไม่ให้คืน (user 2026-09-04)
+  async function doRefundOrder({ amount, method, note }) {
+    const o = refundOrder; if (!o) return;
+    try {
+      if (/^PD[SO]-/.test(String(o.deposit_doc_no || ""))) {
+        const r = await fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "refund_deposit", deposit_doc_no: o.deposit_doc_no, refund_amount: amount, refund_method: method, from_order: true,
+            refund_note: `ยกเลิกใบสั่งซื้อ ${o.order_no || o.order_id} (สินค้ายังไม่มา)${note ? " · " + note : ""}`, refunded_by: currentUser?.name || currentUser?.username || "" }) });
+        const d = await r.json().catch(() => null);
+        const row = Array.isArray(d) ? d[0] : (d && d.listJson ? JSON.parse(d.listJson)[0] : d);
+        if (!row || row.error) throw new Error(row?.error || "คืนเงินมัดจำไม่สำเร็จ (ตรวจว่า re-import Part_Deposit_Workflow แล้ว)");
+      }
+      await api("update_order_status", { order_id: o.order_id, status: "ยกเลิก (คืนเงิน)" });
+      setMessage(`✅ คืนเงินมัดจำ ${o.deposit_doc_no} ${Number(amount).toLocaleString("th-TH")} บาท (${method}) และยกเลิกใบสั่งซื้อแล้ว`);
+      setRefundOrder(null);
+      loadAll();
+    } catch (e) { setMessage("❌ " + (e.message || "คืนเงินไม่สำเร็จ")); }
+  }
+
   async function handleSave() {
     if (!form.deposit_doc_no) {
       setMessage(form.order_type === "สั่งเพิ่ม" ? "กรุณาเลือกใบมัดจำเพิ่ม" : "กรุณาเลือกเลขที่มัดจำ");
@@ -807,7 +842,7 @@ export default function SparePartsOrderPage({ currentUser }) {
     if (filterStatus === "ตีราคาซ่อม") {
       if (!repairDeposits.some(rd => rd.deposit_doc_no === o.deposit_doc_no)) return false;
     } else if (filterStatus === "all") {
-      if (o.status === "ปิดงานซ่อม") return false; // default ไม่โชว์ใบปิดงานซ่อม — กดชิป "ปิดงานซ่อม" เพื่อดู (user 2026-08-26)
+      if (o.status === "ปิดงานซ่อม" || o.status === "ยกเลิก (คืนเงิน)") return false; // default ไม่โชว์ใบปิดงานซ่อม/ยกเลิก — กดชิปเพื่อดู
     } else if (o.status !== filterStatus) return false;
     if (filterParking !== "all" && o.parking_status !== filterParking) return false;
     if (filterDepType === "repair" && !(o.deposit_doc_no || "").startsWith("DEPD")) return false;
@@ -1030,8 +1065,8 @@ export default function SparePartsOrderPage({ currentUser }) {
 
       {/* ===== Filter สถานะ ===== */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ตีราคาซ่อม"].map(s => {
-          const count = s === "all" ? orders.filter(o => o.status !== "ปิดงานซ่อม").length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
+        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ยกเลิก (คืนเงิน)", "ตีราคาซ่อม"].map(s => {
+          const count = s === "all" ? orders.filter(o => o.status !== "ปิดงานซ่อม" && o.status !== "ยกเลิก (คืนเงิน)").length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
           const active = filterStatus === s;
           return (
             <button key={s} onClick={() => { setFilterStatus(s); setCurrentPage(1); }}
@@ -1227,6 +1262,9 @@ export default function SparePartsOrderPage({ currentUser }) {
                 ) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
+                  {NOT_ARRIVED.includes(o.status) && (
+                    <button onClick={() => setRefundOrder(o)} title="สั่งซื้อแล้วแต่สินค้ายังไม่มา → คืนเงินมัดจำ + ยกเลิกใบสั่งซื้อ" style={{ background: "#fff", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: 4 }}>↩ คืนเงิน</button>
+                  )}
                   {(() => {
                     // ถ้าไม่พบเลขมัดจำใน deposits = ปิดซ่อม → ดูได้อย่างเดียว
                     const hasDepAct = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
@@ -1598,6 +1636,14 @@ export default function SparePartsOrderPage({ currentUser }) {
                         <div key={k} style={{ color: "#d97706" }} title={s.stock_name && s.stock_name !== "-" ? `สต๊อก: ${s.stock_name}` : ""}>{s.name || "(อะไหล่ทดแทน)"}</div>
                       ))}
                       {(() => {
+                        const ret = returnOf(showDetail, it.part_code);
+                        return ret ? (
+                          <div style={{ color: "#b45309", fontWeight: 700, fontSize: 12 }} title={ret.note || ""}>
+                            ↩️ ทำคืนแล้ว {ret.doc_no} · {ret.reason || "-"}{ret.status === "สั่งใหม่แล้ว" ? ` · 🛒 ${ret.reorder_no || "สั่งใหม่แล้ว"}` : " · ⏳ รอสั่งใหม่"}
+                          </div>
+                        ) : null;
+                      })()}
+                      {(() => {
                         // ขายแล้วรายตัว — จับคู่บิลขายปลีก DCS (honda_part_sales) ตั้งแต่วันเปิดใบ
                         const hit = pdoSoldMap[showDetail.order_id]?.items?.[(it.part_code || "").replace(/-/g, "").toUpperCase().trim()];
                         return hit ? (
@@ -1735,6 +1781,9 @@ export default function SparePartsOrderPage({ currentUser }) {
       )}
 
       {/* ===== Modal บันทึกเลขที่ใบรับสั่งซื้อ ===== */}
+      {refundOrder && (
+        <RefundOrderModal order={refundOrder} onClose={() => setRefundOrder(null)} onConfirm={doRefundOrder} />
+      )}
       {showPOModal && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 420, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
@@ -1875,4 +1924,55 @@ function fmtDate(d) {
   const mm = String(dt.getMonth() + 1).padStart(2, "0");
   const yy = dt.getFullYear() + 543;
   return `${dd}/${mm}/${yy}`;
+}
+
+// ============================================================================
+// Modal คืนเงินมัดจำจากใบสั่งซื้อที่สินค้ายังไม่มา (user 2026-09-04): คืนเงิน + สถานะใบสั่งซื้อ → "ยกเลิก (คืนเงิน)"
+// ใบมัดจำจากระบบ (PDS/PDO) คืนจริงผ่าน part-deposit-api (from_order) · ใบ NID เดิม (DEPD/REC) บันทึกได้แค่สถานะ+หมายเหตุ (เงินคืนบันทึกใน NID)
+// ============================================================================
+function RefundOrderModal({ order, onClose, onConfirm }) {
+  const [method, setMethod] = useState("เงินสด");
+  const [amount, setAmount] = useState(String(Number(order.deposit_amount || 0)));
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const isSys = /^PD[SO]-/.test(String(order.deposit_doc_no || ""));
+  const inp = { width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box" };
+  async function ok() {
+    const amt = Number(String(amount).replace(/,/g, ""));
+    if (!(amt > 0)) { alert("กรอกจำนวนเงินคืน"); return; }
+    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${order.deposit_doc_no} ${amt.toLocaleString("th-TH")} บาท (${method})\nและเปลี่ยนสถานะใบสั่งซื้อเป็น "ยกเลิก (คืนเงิน)"?`)) return;
+    setBusy(true);
+    await onConfirm({ amount: amt, method, note });
+    setBusy(false);
+  }
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1100 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 440, maxWidth: "95vw" }}>
+        <h3 style={{ margin: "0 0 4px", color: "#b91c1c" }}>↩️ คืนเงินมัดจำ — ยกเลิกใบสั่งซื้อ</h3>
+        <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>
+          {order.deposit_doc_no} · {order.customer_name} · สถานะ {order.status}{order.vendor_po_no ? ` · PO ${order.vendor_po_no}` : ""}
+        </div>
+        {!isSys && (
+          <div style={{ fontSize: 12.5, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "7px 10px", marginBottom: 10 }}>
+            ใบมัดจำนี้มาจาก NID (ไม่ใช่ใบระบบ PDS/PDO) — ระบบจะบันทึกสถานะ/หมายเหตุให้ ส่วนการคืนเงินจริงต้องทำใบคืนมัดจำใน NID ด้วย
+          </div>
+        )}
+        <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: 10, alignItems: "center" }}>
+          <label>วิธีคืนเงิน</label>
+          <select value={method} onChange={e => setMethod(e.target.value)} style={inp}>
+            <option value="เงินสด">เงินสด</option>
+            <option value="เงินโอน">เงินโอน</option>
+          </select>
+          <label>จำนวนเงินคืน</label>
+          <input type="number" value={amount} onChange={e => setAmount(e.target.value)} style={{ ...inp, textAlign: "right" }} />
+          <label>หมายเหตุ</label>
+          <input value={note} onChange={e => setNote(e.target.value)} placeholder="เช่น สินค้าไม่มา ลูกค้าขอคืน" style={inp} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+          <button onClick={onClose} style={{ padding: "8px 16px", border: "1px solid #d1d5db", background: "#fff", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
+          <button onClick={ok} disabled={busy} style={{ padding: "8px 16px", border: "none", background: "#dc2626", color: "#fff", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>{busy ? "..." : "↩️ ยืนยันคืนเงิน"}</button>
+        </div>
+      </div>
+    </div>
+  );
 }

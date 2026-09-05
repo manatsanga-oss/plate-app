@@ -1,14 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { buildDailyCashItems } from "../lib/dailyCash"; // ตรรกะสร้างแถวรายการ ย้ายไปไว้ที่เดียว ใช้ร่วมกับหน้าบันทึกฝากเงิน (user 2026-09-04)
 
 // สรุปรายวันรับเงิน: ยอดขาย + เงินที่รับ + แหล่งรับชำระ (เงินสด/โอน/บัตร/ไฟแนนซ์/มัดจำ) + รับชำระเงินมัดจำจองรถ
 // ข้อมูล: retail-sale-api list_sale_payments (ใบขายที่รับชำระแล้ว) + booking-deposit-api get_deposits (มัดจำจองรถ)
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login"; // get_users — แปลง username ผู้ขาย/ผู้รับเงิน → ชื่อ-สกุล (user 2026-09-03)
 const DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
 const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api"; // มัดจำอะไหล่/บริการ (PDS/PDO)
 const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api"; // รับชำระใบรับเรื่องงานทะเบียน
 const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api"; // รับชำระค่าอะไหล่และบริการ (ใบขาย/ใบ JOB)
 const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api"; // ขายรถมือสอง
 const DEPOSIT_INCOME_API = "https://n8n-new-project-gwf2.onrender.com/webhook/deposit-income-api"; // รับฝากค่างวดที่บันทึกจากระบบ (ไม่รวมของ upload)
+const FUEL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fuel-withdraw-api";
+const INS_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/insurance-refund-api"; // คืนเงินค่าเบี้ยประกัน (เงินสด = หักเงินสด) // เบิกค่าน้ำมันรถใช้จ่าย — หักเงินสดหน้าร้าน (user 2026-08-29)
 
 // คอลัมน์วิธีรับชำระ — เอา บัตร/QR กับ อื่นๆ ออก เพิ่ม E-คูปอง (user สั่ง 2026-08-19; เช็คแล้วไม่มีข้อมูลเก่าใช้ 2 วิธีนั้น)
 const METHOD_COLS = [
@@ -50,6 +54,17 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [dateTo, setDateTo] = useState(todayStr());
   const [branch, setBranch] = useState("");
   const [rows, setRows] = useState([]);
+  const [userMap, setUserMap] = useState({}); // USERNAME → ชื่อ-สกุล จากเมนูกำหนดผู้ใช้ (ช่องผู้ขายเก็บ username เช่น P002)
+  useEffect(() => {
+    fetch(USER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_users" }) })
+      .then((r) => r.json()).then((d) => {
+        const list = Array.isArray(d) ? d : (d?.rows || d?.data || []);
+        const m = {};
+        for (const u of list) if (u && u.username && u.name) m[String(u.username).trim().toUpperCase()] = String(u.name).trim();
+        setUserMap(m);
+      }).catch(() => {});
+  }, []);
+  const dispSeller = (v) => { const k = String(v || "").trim(); return k ? (userMap[k.toUpperCase()] || k) : "-"; };
   const [depRows, setDepRows] = useState([]); // มัดจำจองรถ (booking_deposits) — กรองช่วงวันที่ฝั่งหน้าเว็บ
   const [partDepRows, setPartDepRows] = useState([]); // มัดจำอะไหล่/บริการ (part_deposits PDS/PDO)
   const [rcptRows, setRcptRows] = useState([]);       // รับชำระใบรับเรื่องงานทะเบียน (registration_receipts.paid_*)
@@ -60,13 +75,15 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [rpRefundRows, setRpRefundRows] = useState([]); // คืนเงินมัดจำป้ายแดง (จ่ายออก) — หักจากเงินสด/โอนของวัน
   const [rpStandaloneRows, setRpStandaloneRows] = useState([]); // มัดจำป้ายแดงติดป้ายทีหลัง (standalone) — เงินรับแยกจากใบเสร็จขายรถ
   const [depIncRows, setDepIncRows] = useState([]); // รับฝากชำระค่างวด กรุ๊ปลีส/ธนบรรณ ที่บันทึกจากระบบ (RECS-)
+  const [fuelRows, setFuelRows] = useState([]); // เบิกค่าน้ำมันรถใช้จ่าย (fuel_withdrawals) — แถวหักเงินสด
+  const [insRefundRows, setInsRefundRows] = useState([]); // คืนเงินค่าเบี้ยประกัน (insurance_fee_refunds) — เงินสด = แถวหักเงินสด
 
 
   async function load() {
     setLoading(true);
     setMessage("");
     try {
-      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi] = await Promise.all([
+      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf] = await Promise.all([
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
@@ -104,9 +121,33 @@ export default function SaleMoneyReportPage({ currentUser }) {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_deposit_income", date_from: dateFrom, date_to: dateTo }),
         }).catch(() => null),
+        fetch(FUEL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_fuel_withdraws", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
+        fetch(RETAIL_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          // ใบขายที่ลูกค้าไม่ต้องชำระเงิน (ไฟแนนท์จ่ายทั้งหมด ยอดชำระ 0) ไม่มีการกดรับเงิน → ดึงมาโชว์เป็นแถวขาย ณ วันขาย (user 2026-08-29)
+          body: JSON.stringify({ action: "list_retail_sales", date_from: dateFrom, date_to: dateTo, limit: 2000 }),
+        }).catch(() => null),
+        fetch(INS_REFUND_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          // คืนเงินค่าเบี้ยประกันลูกค้า (เงินสด) = เงินจ่ายออกจากลิ้นชัก → แถวหักเงินสด (user 2026-09-01)
+          body: JSON.stringify({ action: "list_refunds", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
       ]);
       const data = await res.json().catch(() => []);
-      setRows(Array.isArray(data) ? data : []);
+      // กรองแถวว่างจาก n8n (ตอบ {} เมื่อไม่มีข้อมูล) — กันกลุ่ม "ไม่ระบุสาขา" โผล่
+      const paidRows = (Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no));
+      const zeroRaw = resZero ? await resZero.json().catch(() => []) : [];
+      const zeroDue = (Array.isArray(zeroRaw) ? zeroRaw : [])
+        .filter(r => r && r.invoice_no && String(r.payment_status || "") !== "paid" && num(r.total_payment) === 0)
+        .map(r => ({
+          ...r, sale_no: r.invoice_no, receipt_no: null, receipt_date: r.sale_date,
+          paid_amount: 0, payment_methods: [],
+          payment_received_note: "ลูกค้าไม่ต้องชำระเงิน (ยอดชำระ 0)",
+        }));
+      setRows([...paidRows, ...zeroDue]);
       const dep = resDep ? await resDep.json().catch(() => []) : [];
       setDepRows(Array.isArray(dep) ? dep.filter(d => d && d.deposit_no) : []);
       const pdep = resPartDep ? await resPartDep.json().catch(() => []) : [];
@@ -122,11 +163,20 @@ export default function SaleMoneyReportPage({ currentUser }) {
       const rp = resRp ? await resRp.json().catch(() => []) : [];
       setRpRefundRows(Array.isArray(rp) ? rp.filter(d => d && d.deposit_no && d.status === "refunded") : []);
       const rpa = resRpAll ? await resRpAll.json().catch(() => []) : [];
-      setRpStandaloneRows(Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true) : []);
+      // ใบ legacy (import มัดจำป้ายแดงระบบเก่า) ไม่ใช่เงินรับของวันนั้น — รับเงินไปนานแล้วในระบบเก่า ห้ามขึ้นสรุปรายวัน; ใบยกเลิกก็ไม่นับ
+      setRpStandaloneRows(Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true && !d.legacy && d.status !== "cancelled") : []);
       const diRaw = resDi ? await resDi.json().catch(() => []) : [];
       // list_deposit_income ตอบแถวเดียว {listjson: "[...]"} (รวมผ่าน json_agg ฝั่ง SQL)
       const di = Array.isArray(diRaw) ? diRaw : typeof diRaw?.listjson === "string" ? JSON.parse(diRaw.listjson) : [];
       setDepIncRows(Array.isArray(di) ? di.filter(x => x && x.receipt_no) : []);
+      const fuelRaw = resFuel ? await resFuel.json().catch(() => ({})) : {};
+      let fuel = [];
+      try { fuel = typeof fuelRaw?.listjson === "string" ? JSON.parse(fuelRaw.listjson) : Array.isArray(fuelRaw) ? fuelRaw : []; } catch { fuel = []; }
+      setFuelRows(fuel.filter(f => f && f.doc_no && f.status !== "ยกเลิก"));
+      const irRaw = resInsRf ? await resInsRf.json().catch(() => ({})) : {};
+      let ir = [];
+      try { ir = typeof irRaw?.listjson === "string" ? JSON.parse(irRaw.listjson) : Array.isArray(irRaw) ? irRaw : []; } catch { ir = []; }
+      setInsRefundRows(ir.filter(r => r && r.id));
 
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
@@ -225,217 +275,11 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const partDepSum = useMemo(() => partDepItems.reduce((s, d) => s + num(d.deposit_amount), 0), [partDepItems]);
 
   // ===== รวมใบขาย + มัดจำจองรถ + มัดจำอะไหล่/บริการ เป็นตารางเดียว (สไตล์รายงานรับเงิน DMS) — แต่ละแถวติดประเภทรายได้ =====
-  const allItems = useMemo(() => {
-    // มัดจำป้ายแดง (รับฝาก ไม่ใช่รายได้ค่ารถ): แยกออกจากแถวขายรถเป็นแถวของตัวเอง — หัก 200 ออกจากช่องสด (ไม่พอค่อยหักโอน) แล้วเพิ่มแถว "เงินมัดจำป้ายแดง"
-    const sales = []; const rpItems = [];
-    // RPD แบบติดป้ายทีหลัง (standalone) — เงิน 200 เก็บแยกใบ ไม่อยู่ใน paid ของใบขาย ห้ามหักออกจากแถวขาย (เคส SCY04-MCSA-2608-00065 โชว์ค่ารถขาด 200)
-    const standaloneRpDocs = new Set(rpStandaloneRows.map((d) => String(d.deposit_no)));
-    for (const it of items) {
-      const rpStandaloneAttached = standaloneRpDocs.has(String(it.red_plate_doc_no || ""));
-      const rp = rpStandaloneAttached ? 0 : Math.min(num(it.red_plate_deposit), num(it.paid_amount));
-      let split = it.split, received = it.received;
-      if (rp > 0) {
-        split = { ...split };
-        const fromCash = Math.min(split.cash, rp);
-        split.cash -= fromCash;
-        split.transfer -= Math.min(split.transfer, rp - fromCash);
-        received -= rp;
-        const rpSplit = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        rpSplit.cash = fromCash; rpSplit.transfer = rp - fromCash;
-        rpItems.push({
-          kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
-          doc_no: it.red_plate_doc_no || "RPD-" + (it.sale_no || ""), date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
-          customer_name: it.customer_name, seller: it.seller, saleAmount: 0,
-          split: rpSplit, received: rp,
-          branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
-          note: "ทะเบียนป้ายแดง " + (it.red_plate_no || "-") + " · คืนเมื่อคืนป้าย",
-        });
-      }
-      sales.push({
-        kind: "sale", category: "รายได้จากการขายรถ",
-        doc_no: it.receipt_no || "-", date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
-        customer_name: it.customer_name, seller: it.seller, saleAmount: it.saleAmount,
-        split, received,
-        branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
-        note: it.payment_received_note || "", finance: it.finance_type === "moto" ? it.finance_company_name : "",
-      });
-    }
-    const deps = depItems.map((d) => {
-      const amt = num(d.deposit_amount);
-      const m = String(d.payment_method || "");
-      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-      if (m.includes("สด")) split.cash = amt;
-      else if (m.includes("โอน")) split.transfer = amt;
-      else split.other = amt;
-      return {
-        kind: "deposit", category: "รายได้เงินมัดจำจองรถ",
-        doc_no: d.deposit_no, date: d.deposit_date, ref_no: "",
-        customer_name: d.customer_name, seller: "", saleAmount: 0,
-        split, received: amt,
-        branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
-        note: [[d.brand, d.model_series, d.color_name].filter(Boolean).join(" "), d.payment_account].filter(Boolean).join(" · "),
-        refunded: !!d.refunded_at,
-      };
-    });
-    // รับชำระใบรับเรื่องงานทะเบียน — ประเภทรายได้ตามประเภทงานรับเรื่อง (ต่อภาษี/ทะเบียนรถใหม่/โอน/ประกัน)
-    const rcpts = rcptRows
-      .filter((r2) => (isAdmin ? (!branch || bc5(r2.branch_code) === bc5(branch)) : bc5(r2.branch_code) === myBranch))
-      .map((r2) => {
-        const amt = num(r2.paid_amount) || num(r2.line_total);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        // รับได้หลายวิธีในใบเดียว — payment_breakdowns = JSON [{method, amount, account}]
-        let bks = [];
-        try { bks = JSON.parse(r2.payment_breakdowns || "[]"); } catch { bks = []; }
-        if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(r2.payment_method || ""), amount: amt }];
-        for (const b of bks) split[methodKey(b.method)] += num(b.amount); // ใช้ตัวแยกกลาง — วิธีใหม่ ๆ ไม่ตกหล่น
-        return {
-          kind: "receipt", category: `รายได้รับเรื่อง (${r2.receipt_type || "งานทะเบียน"})`,
-          doc_no: r2.receipt_no, date: r2.paid_date || r2.paid_at, ref_no: "",
-          customer_name: r2.customer_name, seller: r2.payment_received_by || "", saleAmount: 0,
-          split, received: amt,
-          branch_key: bc5(r2.branch_code), branch_name: r2.branch_code || "ไม่ระบุสาขา",
-          note: [r2.payment_account, r2.payment_note].filter(Boolean).join(" · "),
-        };
-      });
-    // รับชำระค่าอะไหล่และบริการ (ใบขาย/ใบ JOB — part_service_payments) — แตกยอดตามวิธี, มัดจำเข้าคอลัมน์เงินมัดจำ
-    const partSvcs = psRows
-      .filter((p) => (isAdmin ? (!branch || bc5(p.branch_code) === bc5(branch)) : bc5(p.branch_code) === myBranch))
-      .map((p) => {
-        const amt = num(p.paid_amount);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        let bks = [];
-        try { bks = JSON.parse(p.payment_breakdowns || "[]"); } catch { bks = []; }
-        if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(p.payment_method || ""), amount: amt }];
-        for (const b of bks) split[methodKey(b.method)] += num(b.amount); // ใช้ตัวแยกกลาง — รองรับ E-คูปอง/รถเทิร์น ครบ
-        return {
-          kind: "part_service", category: "รายได้ค่าอะไหล่/บริการ",
-          doc_no: p.receipt_no || p.doc_no, date: p.paid_date, ref_no: p.doc_no,
-          customer_name: p.customer_name, seller: p.received_by || "", saleAmount: 0,
-          split, received: amt,
-          branch_key: bc5(p.branch_code), branch_name: p.branch_code || "ไม่ระบุสาขา",
-          note: [p.doc_type, p.deposit_doc_no ? `ตัดมัดจำ ${p.deposit_doc_no}` : "", p.payment_note].filter(Boolean).join(" · "),
-        };
-      });
-    // ขายรถมือสอง (used_moto_stock) — แตกยอดตามวิธีรับเงิน
-    const usedMotos = umRows
-      .filter((u) => (isAdmin ? (!branch || bc5(u.branch_code) === bc5(branch)) : bc5(u.branch_code) === myBranch))
-      .map((u) => {
-        const amt = num(u.sold_price);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        let bks = [];
-        try { bks = JSON.parse(u.payment_breakdowns || "[]"); } catch { bks = []; }
-        if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(u.payment_method || ""), amount: amt }];
-        for (const b of bks) split[methodKey(b.method)] += num(b.amount); // ใช้ตัวแยกกลาง — รองรับ E-คูปอง/รถเทิร์น ครบ
-        return {
-          kind: "used_moto", category: "รายได้ขายรถมือสอง",
-          doc_no: u.doc_no, date: u.sold_date, ref_no: u.sold_invoice_no || "",
-          customer_name: u.sold_customer, seller: u.sold_by || "", saleAmount: amt,
-          split, received: amt,
-          branch_key: bc5(u.branch_code), branch_name: u.branch_code || "ไม่ระบุสาขา",
-          note: [[u.brand, u.model_series, u.color_name].filter(Boolean).join(" "), u.license_plate, u.payment_note].filter(Boolean).join(" · "),
-        };
-      });
-    const partDeps = partDepItems.map((d) => {
-      const amt = num(d.deposit_amount);
-      const m = String(d.payment_method || "");
-      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-      if (m.includes("สด")) split.cash = amt;
-      else if (m.includes("โอน")) split.transfer = amt;
-      else split.other = amt;
-      return {
-        kind: "part_deposit", category: "รายได้เงินมัดจำอะไหล่/บริการ",
-        doc_no: d.deposit_doc_no, date: d.deposit_date, ref_no: "",
-        customer_name: d.customer_name, seller: d.recorded_by || "", saleAmount: 0,
-        split, received: amt,
-        branch_key: bc5(d.branch_code), branch_name: d.branch_code || "ไม่ระบุสาขา",
-        note: [d.deposit_type ? `มัดจำ${d.deposit_type}` : "", d.brand].filter(Boolean).join(" · "),
-        refunded: d.status === "refunded" || !!d.refunded_at,
-      };
-    });
-    // รับฝากชำระค่างวด (กรุ๊ปลีส/ธนบรรณ) ที่บันทึกจากระบบ — เงินรับหน้าร้าน รอโอนให้ไฟแนนท์ (ของ upload ไม่รวม เพราะรายงานนี้ใช้ข้อมูลระบบล้วน)
-    const depIncs = depIncRows
-      .filter((r) => (isAdmin ? (!branch || bc5(r.branch_code) === bc5(branch)) : bc5(r.branch_code) === myBranch))
-      .map((r) => {
-        const amt = num(r.total_amount);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        split[methodKey(r.payment_method || "เงินสด")] += amt;
-        return {
-          kind: "deposit_income", category: r.income_kind === "other" ? "รายได้อื่นๆ (หน้าร้าน)" : "รายได้รับฝากชำระค่างวด",
-          doc_no: r.receipt_no, date: String(r.receipt_date || "").slice(0, 10), ref_no: "",
-          customer_name: r.customer_name, seller: r.received_by || "", saleAmount: 0,
-          split, received: amt,
-          branch_key: bc5(r.branch_code), branch_name: r.branch_code || "ไม่ระบุสาขา",
-          note: [r.description, r.payment_account].filter(Boolean).join(" · "),
-        };
-      });
-    // มัดจำป้ายแดง "ติดป้ายทีหลัง" (standalone) — เงินรับสด/โอนแยกจากใบเสร็จขายรถ (ใบขายจ่ายครบไปก่อนแล้ว)
-    const rpStandalones = rpStandaloneRows
-      .filter((d) => { const dt = String(d.received_date || "").slice(0, 10); return dt >= dateFrom && dt <= dateTo; })
-      .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
-      .map((d) => {
-        const amt = num(d.amount);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        split[methodKey(d.payment_method || "เงินสด")] += amt;
-        return {
-          kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
-          doc_no: d.deposit_no, date: String(d.received_date || "").slice(0, 10), ref_no: d.sale_no,
-          customer_name: d.customer_name, seller: d.received_by || "", saleAmount: 0,
-          split, received: amt,
-          branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
-          note: "ทะเบียนป้ายแดง " + (d.plate_no || "-") + " · ติดป้ายทีหลัง" + (d.payment_account ? " · " + d.payment_account : ""),
-        };
-      });
-    // คืนเงินมัดจำจองรถ = เงินจ่ายออก → แถวติดลบ (ยอดรับตอนจองอยู่ในแถวมัดจำวันจองแล้ว)
-    const depRefunds = depRows
-      .filter((d) => d.refunded_at && String(d.refunded_at).slice(0, 10) >= dateFrom && String(d.refunded_at).slice(0, 10) <= dateTo)
-      .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
-      .flatMap((d) => {
-        const amt = -num(d.refund_amount || d.deposit_amount);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        split[methodKey(d.refund_method || "เงินสด")] += amt;
-        // เลขใบขายจากหมายเหตุคืนเงิน ("คืนส่วนเกินมัดจำจากใบขาย XXX")
-        const saleNo = (String(d.refund_note || "").match(/ใบขาย\s*(\S+)/) || [])[1] || "";
-        const out = [{
-          kind: "dep_refund", category: "คืนเงินมัดจำจองรถ (จ่ายออก)",
-          doc_no: d.deposit_no, date: String(d.refunded_at).slice(0, 10), ref_no: saleNo,
-          customer_name: d.customer_name, seller: d.refunded_by || "", saleAmount: 0,
-          split, received: amt,
-          branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
-          note: ["คืนเงินมัดจำ", d.refund_from_account || d.refund_bank, d.refund_note].filter(Boolean).join(" · "),
-        }];
-        // ส่วนที่เหลือของมัดจำ = ใช้ชำระค่ารถ → แถวคู่ เลขที่เอกสาร = ใบขาย, ช่องเงินมัดจำ = ยอดที่ใช้ (user 2026-08-24)
-        const used = num(d.deposit_amount) - num(d.refund_amount || d.deposit_amount);
-        if (used > 0 && saleNo) {
-          const sp2 = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: used, coupon: 0, tradein: 0, other: 0 };
-          out.push({
-            kind: "deposit_applied", category: "รายได้จากการขายรถ",
-            doc_no: saleNo, date: String(d.refunded_at).slice(0, 10), ref_no: d.deposit_no,
-            customer_name: d.customer_name, seller: d.refunded_by || "", saleAmount: 0,
-            split: sp2, received: used,
-            branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
-            note: `ชำระค่ารถด้วยเงินมัดจำ (มัดจำ ${fmt(d.deposit_amount)} − คืน ${fmt(num(d.refund_amount || 0))})`,
-          });
-        }
-        return out;
-      });
-    // คืนเงินมัดจำป้ายแดง = เงินจ่ายออกจากลิ้นชัก/บัญชี → ติดลบในคอลัมน์เงินสด/โอน (ยอดรับ 200 ตอนขายอยู่ในใบขายแล้ว)
-    const rpRefunds = rpRefundRows
-      .filter((d) => (isAdmin ? (!branch || bc5(d.branch_code) === bc5(branch)) : bc5(d.branch_code) === myBranch))
-      .map((d) => {
-        const amt = -num(d.refund_amount);
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-        split[methodKey(d.refund_method || "เงินสด")] += amt;
-        return {
-          kind: "red_plate_refund", category: "คืนเงินมัดจำป้ายแดง (จ่ายออก)",
-          doc_no: d.refund_doc_no || d.deposit_no, date: d.refund_date, ref_no: d.sale_no || "",
-          customer_name: d.customer_name, seller: d.refund_by || "", saleAmount: 0,
-          split, received: amt,
-          branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
-          note: ["ป้ายแดง " + (d.plate_no || "-"), "อ้างอิง " + d.deposit_no, d.refund_account_name, d.refund_note].filter(Boolean).join(" · "),
-        };
-      });
-    return [...sales, ...rpItems, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds];
-  }, [items, depItems, partDepItems, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, depRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+  // ===== รวมทุกแหล่งเป็นตารางเดียว — ตรรกะอยู่ใน src/lib/dailyCash.js (buildDailyCashItems) ใช้ร่วมกับหน้าบันทึกฝากเงิน =====
+  const allItems = useMemo(() => buildDailyCashItems(
+    { rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows },
+    { dateFrom, dateTo, branch, isAdmin, myBranch },
+  ), [rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {
@@ -595,7 +439,8 @@ ${depSection}
                 <React.Fragment key={g.key}>
                   <tr><td colSpan={14} style={{ ...td, background: "#f1f5f9", fontWeight: 700, color: "#0f172a" }}>สาขา {g.name}</td></tr>
                   {g.rows.map((it, i) => (
-                    <tr key={it.doc_no + it.kind} style={{ background: it.kind === "deposit" ? "#fffdf2" : it.kind === "part_deposit" ? "#fdf9ff" : it.kind === "part_service" ? "#f0fdfa" : it.kind === "used_moto" ? "#fff7ed" : i % 2 ? "#fafcff" : "#fff" }}>
+                    // key ต้องไม่ซ้ำ: แถวค่านำพา/จ่ายออกไม่มีเลขเอกสาร (doc_no "-") พอสาขาเดียวมี 2 คันในวันเดียว key ชนกัน → React วาดแถวผีซ้ำ (user 2026-09-03)
+                    <tr key={`${g.key}|${it.kind}|${it.doc_no}|${it.ref_no || ""}|${i}`} style={{ background: it.kind === "deposit" ? "#fffdf2" : it.kind === "part_deposit" ? "#fdf9ff" : it.kind === "part_service" ? "#f0fdfa" : it.kind === "used_moto" ? "#fff7ed" : i % 2 ? "#fafcff" : "#fff" }}>
                       <td style={{ ...td, textAlign: "center", color: "#94a3b8" }}>{i + 1}</td>
                       <td style={{ ...td, fontFamily: "monospace" }}>{it.doc_no}
                         {it.refunded && <div style={{ fontSize: 10.5, color: "#dc2626" }}>คืนเงินแล้ว</div>}
@@ -607,7 +452,7 @@ ${depSection}
                         {it.finance && <div style={{ fontSize: 10.5, color: "#7c3aed" }}>ไฟแนนซ์: {it.finance}</div>}
                         {it.note && <div style={{ fontSize: 10.5, color: "#92400e" }}>หมายเหตุ: {it.note}</div>}
                       </td>
-                      <td style={{ ...td, textAlign: "center" }}>{it.seller || "-"}</td>
+                      <td style={{ ...td, textAlign: "center" }}>{dispSeller(it.seller)}</td>
                       <td style={tdR}>{it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
                       {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(it.split[c.key])}</td>)}
                       <td style={{ ...tdR, fontWeight: 700, color: "#15803d" }}>{fmt(it.received)}</td>
