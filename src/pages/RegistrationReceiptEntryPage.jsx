@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 
+import { THAI_PROVINCES } from "../data/thai_provinces";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const REG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api"; // lookup วันจดทะเบียนจากงานส่งจด (OCR สำเนาทะเบียน)
@@ -211,7 +212,7 @@ const blankHeader = (currentUser) => ({
   customer_name: "", customer_address: "", customer_phone: "", customer_id_card: "",
   contract_no: "", contract_date: "", contract_ref: "", contract_status: "",
   brand: "", model_series: "", model_code: "", model_type: "", product_code: "", color: "",
-  engine_no: "", chassis_no: "", plate_category: "", plate_number: "", register_date: "", tax_paid_date: "",
+  engine_no: "", chassis_no: "", plate_category: "", plate_number: "", plate_province: "", register_date: "", tax_paid_date: "",
 });
 
 export default function RegistrationReceiptEntryPage({ currentUser }) {
@@ -712,6 +713,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       color: s.color_name || s.color || h.color,
       plate_category: s.plate_category || h.plate_category,
       plate_number: s.plate_number || h.plate_number,
+      plate_province: s.plate_province || h.plate_province,
       contract_ref: s.contract_ref || h.contract_ref,
       // จากระบบขายใหม่ (retail_sales) มีข้อมูลผ่อนมาด้วย — เก็บไว้โชว์ในสรุป
       installment_amount: s.installment_amount ?? h.installment_amount,
@@ -747,6 +749,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         color: s.color_name || s.color || h.color,
         plate_category: s.plate_category || h.plate_category,
         plate_number: s.plate_number || h.plate_number,
+        plate_province: s.plate_province || h.plate_province,
         contract_ref: s.contract_ref || h.contract_ref,
       }));
       setMessage("✅ ดึงข้อมูลจาก moto_sales สำเร็จ");
@@ -802,6 +805,12 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     if (!text(header.customer_name)) { setMessage("❌ ใส่ชื่อลูกค้า"); return; }
     if (!text(header.chassis_no)) { setMessage("❌ ใส่เลขถัง"); return; }
     if (lines.length === 0 || lines.every(l => !num(l.price_before_discount) && !num(l.service_fee))) { setMessage("❌ เพิ่มรายการรายได้อย่างน้อย 1"); return; }
+    // ทะเบียนรถ = หมวด + เลข + จังหวัด — งานต่อภาษี (ที่มีบรรทัดค่าต่อภาษี/ตรวจสภาพ; ต่อ พรบ. อย่างเดียวไม่บังคับ) และงานโอนทะเบียน ต้องกรอกครบ 3 ช่อง (user 2026-09-05)
+    const hasTaxWork = lines.some(l => (isTaxLine(l) || isTroLine(l)) && (num(l.price_before_discount) || num(l.service_fee)));
+    if ((header.receipt_type === "งานต่อภาษีและพรบ." && hasTaxWork) || header.receipt_type === "งานโอนทะเบียน") {
+      const missing = [!text(header.plate_category) && "หมวด", !text(header.plate_number) && "เลขทะเบียน", !text(header.plate_province) && "จังหวัด"].filter(Boolean);
+      if (missing.length) { setMessage(`❌ ใส่ทะเบียนรถให้ครบ (ขาด: ${missing.join(", ")}) — ทะเบียนต้องมี หมวด + เลข + จังหวัด เช่น 1กน 4266 อุดรธานี`); return; }
+    }
     // งานต่อภาษี (มีบรรทัดค่าต่อภาษี/ตรวจสภาพ) ต้องรู้วันจดทะเบียนอย่างน้อย + วันสิ้นอายุภาษีเดิม — ไม่งั้นระบบแยกราคา/ค่าบริการไม่ได้ (เคส SCY01-CA690900003 ค่าบริการเป็น 0) (user 2026-09-05)
     if (header.receipt_type === "งานต่อภาษีและพรบ." && lines.some(l => (isTaxLine(l) || isTroLine(l)) && (num(l.price_before_discount) || num(l.service_fee)))) {
       if (!header.register_date) { setMessage("❌ งานต่อภาษีต้องใส่ \"วันจดทะเบียน\" (ดูจากเล่มทะเบียน) ก่อนบันทึก"); return; }
@@ -895,7 +904,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         <div><span class="muted">ลูกค้า:</span> <b>${header.customer_name || "-"}</b> ${header.customer_phone ? `(${header.customer_phone})` : ""}</div>
         <div><span class="muted">รถ:</span> <b>${[header.brand, header.model_series, header.color].filter(Boolean).join(" · ") || "-"}</b></div>
         <div><span class="muted">เลขถัง:</span> ${header.chassis_no || "-"} · <span class="muted">เลขเครื่อง:</span> ${header.engine_no || "-"}</div>
-        <div><span class="muted">ทะเบียน:</span> ${[header.plate_category, header.plate_number].filter(Boolean).join(" ") || "-"}</div>
+        <div><span class="muted">ทะเบียน:</span> ${[header.plate_category, header.plate_number, header.plate_province].filter(Boolean).join(" ") || "-"}</div>
         ${header.contract_ref ? `<div><span class="muted">ไฟแนนซ์:</span> ${header.contract_ref}${num(header.installment_amount) > 0 ? ` · ค่างวด ${baht(num(header.installment_amount))}${num(header.installments) > 0 ? ` × ${num(header.installments)} งวด` : ""}` : ""}</div>` : ""}
       </div>
       <table>
@@ -1026,10 +1035,18 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             <Field label="เลขถัง *"><input value={header.chassis_no} onChange={e => setHeader({ ...header, chassis_no: e.target.value.toUpperCase() })} style={{ ...inp, fontFamily: "monospace" }} /></Field>
             <Field label="เลขเครื่อง"><input value={header.engine_no} onChange={e => setHeader({ ...header, engine_no: e.target.value.toUpperCase() })} style={{ ...inp, fontFamily: "monospace" }} /></Field>
-            <Field label={header.receipt_type === "งานทะเบียนรถใหม่" ? "ทะเบียน (เว้นได้ — รถใหม่ยังไม่มีป้าย)" : "ทะเบียน (หมวด + เลข)"}>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input value={header.plate_category} onChange={e => setHeader({ ...header, plate_category: e.target.value })} style={{ ...inp, flex: "0 0 90px" }} placeholder="หมวด" title="หมวด เช่น 2 กช" />
-                <input value={header.plate_number} onChange={e => setHeader({ ...header, plate_number: e.target.value })} style={{ ...inp, flex: 1 }} placeholder="เลขทะเบียน" title="เลขทะเบียน เช่น 5205" />
+            <Field label={header.receipt_type === "งานทะเบียนรถใหม่" ? "ทะเบียน (เว้นได้ — รถใหม่ยังไม่มีป้าย)" : `ทะเบียน (หมวด + เลข + จังหวัด)${(header.receipt_type === "งานต่อภาษีและพรบ." || header.receipt_type === "งานโอนทะเบียน") ? " *" : ""}`}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input value={header.plate_category} onChange={e => setHeader({ ...header, plate_category: e.target.value })} style={{ ...inp, flex: "0 0 45%", minWidth: 0 }} placeholder="หมวด เช่น 1กน" title="หมวด เช่น 1กน" />
+                  <input value={header.plate_number} onChange={e => setHeader({ ...header, plate_number: e.target.value })} style={{ ...inp, flex: 1, minWidth: 0 }} placeholder="เลข เช่น 4266" title="เลขทะเบียน เช่น 4266" />
+                </div>
+                <select value={header.plate_province || ""} onChange={e => setHeader({ ...header, plate_province: e.target.value })}
+                  style={{ ...inp, width: "100%", ...(header.plate_province ? {} : { color: "#9ca3af" }) }} title="จังหวัดที่จดทะเบียน">
+                  <option value="">— เลือกจังหวัดทะเบียน —</option>
+                  {header.plate_province && !THAI_PROVINCES.includes(header.plate_province) && <option value={header.plate_province}>{header.plate_province}</option>}
+                  {THAI_PROVINCES.map(pv => <option key={pv} value={pv}>{pv}</option>)}
+                </select>
               </div>
             </Field>
             <Field label="ยี่ห้อ"><input value={header.brand} onChange={e => setHeader({ ...header, brand: e.target.value })} style={inp} /></Field>
@@ -1390,7 +1407,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                             </td>
                             <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.chassis_no || "-"}</td>
                             <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.engine_no || "-"}</td>
-                            <td style={td}>{[s.plate_category, s.plate_number].filter(Boolean).join(" ") || "-"}</td>
+                            <td style={td}>{[s.plate_category, s.plate_number, s.plate_province].filter(Boolean).join(" ") || "-"}</td>
                             <td style={td}>{s.customer_name || "-"}</td>
                             <td style={td}>{[s.brand, s.model_series, s.model_code].filter(Boolean).join(" · ") || "-"}</td>
                             <td style={td}>{fmtBE(s.ref_date)}</td>

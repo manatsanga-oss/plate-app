@@ -208,6 +208,7 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
         color: r.color,
         engine_no: r.engine_no,
         chassis_no: r.chassis_no,
+        plate_category: r.plate_category,
         plate_number: r.plate_number,
         receipt_total: r.receipt_total,
         lines: [],
@@ -521,7 +522,7 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
                       <KV label="สถานะ" value={rcpt.receive_status} />
                       <KV label="พนักงาน" value={rcpt.staff_recorder} />
                       <KV label="สัญญาเช่าซื้อ" value={rcpt.contract_no} />
-                      <KV label="เลขทะเบียน" value={rcpt.plate_number} />
+                      <KV label="เลขทะเบียน" value={[rcpt.plate_category, rcpt.plate_number].filter(Boolean).join(" ")} />
                       <KV label="เลขเครื่อง" value={rcpt.engine_no} mono />
                       <KV label="สี" value={rcpt.color} />
                       <KV label="โทร" value={rcpt.customer_phone} />
@@ -695,7 +696,7 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
                                 <td style={td}>{it.customer_name || "-"}</td>
                                 <td style={td}>{it.brand} {it.model_series}</td>
                                 <td style={{ ...td, fontFamily: "monospace" }}>{it.chassis_no || "-"}</td>
-                                <td style={td}>{it.plate_number || "-"}</td>
+                                <td style={td}>{[it.plate_category, it.plate_number].filter(Boolean).join(" ") || "-"}</td>
                                 <td style={td}>{it.income_type || "-"}</td>
                                 <td style={td}>{it.income_name || "-"}</td>
                                 <td style={tdNum}>{fmtNum(it.qty)}</td>
@@ -808,7 +809,7 @@ function buildCoverSheetHTML(batch, fmtNum, fmtDate, fmtBranch) {
     <td>${safe(l.customer_name)}</td>
     <td>${safe(l.brand)} ${safe(l.model_series)}</td>
     <td class="mono">${safe(l.chassis_no)}</td>
-    <td>${safe(l.plate_number)}</td>
+    <td>${safe([l.plate_category, l.plate_number].filter(Boolean).join(" "))}</td>
     <td>${safe(l.income_type)}</td>
     <td>${safe(l.income_name)}</td>
     <td>${safe(l.description)}</td>

@@ -1416,7 +1416,7 @@ export default function BillingPage({ currentUser }) {
                 <div><span style={{ color: "#6b7280" }}>สถานะ:</span> <b>{receiptDetail.receipt_status || "-"}</b></div>
                 <div><span style={{ color: "#6b7280" }}>พนักงาน:</span> <b>{receiptDetail.receipt_staff_recorder || "-"}</b></div>
                 <div><span style={{ color: "#6b7280" }}>สัญญาเช่าซื้อ:</span> <b>{receiptDetail.receipt_contract_no || "-"}</b></div>
-                <div><span style={{ color: "#6b7280" }}>เลขทะเบียน:</span> <b style={{ color: "#1e3a8a" }}>{receiptDetail.receipt_plate_number || "-"}</b></div>
+                <div><span style={{ color: "#6b7280" }}>เลขทะเบียน:</span> <b style={{ color: "#1e3a8a" }}>{[receiptDetail.receipt_plate_category, receiptDetail.receipt_plate_number].filter(Boolean).join(" ") || "-"}</b></div>
                 <div><span style={{ color: "#6b7280" }}>เลขเครื่อง:</span> <b style={{ fontFamily: "monospace" }}>{receiptDetail.receipt_engine_no || "-"}</b></div>
                 <div><span style={{ color: "#6b7280" }}>สี:</span> <b>{receiptDetail.receipt_color || "-"}</b></div>
                 <div><span style={{ color: "#6b7280" }}>โทร:</span> <b>{receiptDetail.receipt_customer_phone || "-"}</b></div>

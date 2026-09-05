@@ -100,7 +100,7 @@ export default function ReceiveReceiptPage({ currentUser }) {
       <td class="mono">${safe(it.receipt_no)}</td>
       <td>${safe(it.customer_name)}</td>
       <td class="mono">${safe(it.chassis_no)}</td>
-      <td>${safe(it.plate_number || "-")}</td>
+      <td>${safe([it.plate_category, it.plate_number].filter(Boolean).join(" ") || "-")}</td>
       <td>${safe(it.income_name || it.income_type || "-")}</td>
     </tr>`).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>ใบส่งคืน ${safe(batch.batch_code)}</title>
@@ -450,7 +450,7 @@ th { background: #f0f4f9; }
                               <td style={{ ...td, fontFamily: "monospace", color: "#0369a1" }}>{it.receipt_no || "-"}</td>
                               <td style={td}>{it.customer_name || "-"}</td>
                               <td style={{ ...td, fontFamily: "monospace" }}>{it.chassis_no || "-"}</td>
-                              <td style={td}>{it.plate_number || "-"}</td>
+                              <td style={td}>{[it.plate_category, it.plate_number].filter(Boolean).join(" ") || "-"}</td>
                               <td style={td}>{it.income_name || it.income_type || "-"}</td>
                               <td style={{ ...td, textAlign: "right" }}>{fmtNum(it.net_price)}</td>
                               <td style={td}>

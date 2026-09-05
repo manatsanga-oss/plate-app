@@ -139,7 +139,7 @@ export default function SearchReceiptWorkPage({ currentUser }) {
                     <td style={td}>{r.customer_name || "-"}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.engine_no || "-"}</td>
-                    <td style={{ ...td, fontFamily: "monospace" }}>{r.plate_number || "-"}</td>
+                    <td style={{ ...td, fontFamily: "monospace" }}>{[r.plate_category, r.plate_number].filter(Boolean).join(" ") || "-"}</td>
                     <td style={{ ...td, fontSize: 12 }}>
                       {r.brand && <div>{r.brand}</div>}
                       {r.model_series && <div style={{ fontSize: 11, color: "#6b7280" }}>{r.model_series}</div>}

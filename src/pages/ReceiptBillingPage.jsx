@@ -533,7 +533,7 @@ ${transferSummary.length > 0 ? `
   const filtered = rows.filter(r => {
     if (batchFilters.length > 0 && !batchFilters.includes(r.batch_code)) return false;
     if (!kw) return true;
-    const hay = [r.receipt_no, r.customer_name, r.chassis_no, r.plate_number, r.income_name, r.batch_code]
+    const hay = [r.receipt_no, r.customer_name, r.chassis_no, r.plate_number, `${r.plate_category || ""}${r.plate_number || ""}`, r.income_name, r.batch_code]
       .filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
@@ -706,7 +706,7 @@ ${transferSummary.length > 0 ? `
                           </td>
                           <td style={td}>{fmtDate(rc.receive_date)}</td>
                           <td style={td}>{rc.customer_name || "-"}</td>
-                          <td style={td}>{rc.plate_number || "-"}</td>
+                          <td style={td}>{[rc.plate_category, rc.plate_number].filter(Boolean).join(" ") || "-"}</td>
                           <td style={td}>{`${rc.brand || ""} ${rc.model_series || ""}`.trim() || "-"}</td>
                           <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(rc.total_amount)}</td>
                           <td style={{ ...td, textAlign: "center" }}>
@@ -1085,7 +1085,7 @@ ${transferSummary.length > 0 ? `
               <KV label="เลขที่รับเรื่อง" value={detailRow.receipt_no} mono />
               <KV label="ลูกค้า" value={detailRow.customer_name} />
               <KV label="เบอร์โทร" value={detailRow.customer_phone} />
-              <KV label="เลขทะเบียน" value={detailRow.plate_number} />
+              <KV label="เลขทะเบียน" value={[detailRow.plate_category, detailRow.plate_number].filter(Boolean).join(" ")} />
               <KV label="เลขตัวถัง" value={detailRow.chassis_no} mono />
               <KV label="ยี่ห้อ/รุ่น" value={`${detailRow.brand || ''} ${detailRow.model_series || ''}`} />
               <KV label="ประเภทรายได้" value={detailRow.income_type} />
