@@ -13,15 +13,17 @@ const USED_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-ap
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
 
-// กฎกลุ่มไฟแนนท์ที่มี note "exclude:CODE1,CODE2,BIGBIKE" → ไม่ใช้กับรุ่น/แบบที่ระบุ (เทียบแบบขึ้นต้นด้วยรหัส เช่น ADV160 ครอบ ADV160AT) · BIGBIKE = ประเภทรถมีคำว่า BIG (2026-08-22)
-function excludedByNote(note, codes, vehicleTypeName) {
+// กฎกลุ่มไฟแนนท์ที่มี note "exclude:CODE1,CODE2,BIGBIKE,YAMAHA" → ไม่ใช้กับรุ่น/แบบ/ยี่ห้อที่ระบุ (เทียบแบบขึ้นต้นด้วยรหัส เช่น ADV160 ครอบ ADV160AT) · BIGBIKE = ประเภทรถมีคำว่า BIG · HONDA/YAMAHA = ยกเว้นทั้งยี่ห้อ (2026-09-05)
+function excludedByNote(note, codes, vehicleTypeName, brandName) {
   const m = String(note || "").match(/^exclude:(.*)$/i);
   if (!m) return false;
   const norm = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const toks = m[1].split(",").map(norm).filter(Boolean);
   const cs = (codes || []).map(norm).filter(Boolean);
   const isBig = /BIG/i.test(String(vehicleTypeName || ""));
-  return toks.some((t) => (t === "BIGBIKE" && isBig) || cs.some((c) => c.startsWith(t) || t.startsWith(c)));
+  const bl = String(brandName || "").toLowerCase();
+  const brandKey = bl.includes("honda") || bl.includes("ฮอนด้า") ? "HONDA" : bl.includes("yamaha") || bl.includes("ยามาฮ่า") ? "YAMAHA" : "";
+  return toks.some((t) => (t === "BIGBIKE" && isBig) || (brandKey && t === brandKey) || cs.some((c) => c.startsWith(t) || t.startsWith(c)));
 }
 
 // หัวกระดาษเอกสาร แยกบริษัท ป.เปา (HONDA) / สิงห์ชัย (YAMAHA) — fallback เมื่อโหลด branch_master ไม่ได้
@@ -879,7 +881,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         return true;
       }
       if (e.group_by === "cc" && rowCC && Number(e.engine_cc) === rowCC) return true;
-      if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return !excludedByNote(e.note, [selUnit?.model, selUnit?.model_code, selSeries?.series_name, selSeries?.marketing_name], selType?.vehicle_type_name);
+      if (e.group_by === "finance" && finId && String(e.company_id) === String(finId)) return !excludedByNote(e.note, [selUnit?.model, selUnit?.model_code, selSeries?.series_name, selSeries?.marketing_name], selType?.vehicle_type_name, selBrand?.brand_name || masterRow?.brand_name);
       if (e.group_by === "series") {
         const [sid, pc] = String(e.note || "").split("|");
         if (String(sid) !== String(sel.series_id)) return false;

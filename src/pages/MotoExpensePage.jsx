@@ -550,11 +550,11 @@ export default function MotoExpensePage({ currentUser }) {
                   <option value="">-- เลือกบริษัท --</option>
                   {companies.map(c => <option key={c.company_id} value={c.company_id}>{c.company_name}</option>)}
                 </select>
-                {/* ยกเว้นรุ่น/แบบ (2026-08-22): กฎไฟแนนท์ขึ้นทุกรุ่น ยกเว้นรหัสที่ระบุ — เก็บใน note เป็น exclude:CODE1,CODE2 · BIGBIKE = ยกเว้นประเภท BIG BIKE ทั้งหมด */}
-                <label style={{ display: "block", margin: "10px 0 4px", fontWeight: 600, fontSize: 14 }}>ยกเว้นรุ่น/แบบ <span style={{ fontWeight: 400, color: "#6b7280", fontSize: 12 }}>(ไม่บังคับ — รหัสรุ่นหรือแบบ คั่นด้วยจุลภาค · พิมพ์ BIGBIKE = ยกเว้นบิ๊กไบค์ทั้งหมด)</span></label>
+                {/* ยกเว้นรุ่น/แบบ (2026-08-22): กฎไฟแนนท์ขึ้นทุกรุ่น ยกเว้นรหัสที่ระบุ — เก็บใน note เป็น exclude:CODE1,CODE2 · BIGBIKE = ยกเว้นประเภท BIG BIKE ทั้งหมด · HONDA/YAMAHA = ยกเว้นทั้งยี่ห้อ (2026-09-05) */}
+                <label style={{ display: "block", margin: "10px 0 4px", fontWeight: 600, fontSize: 14 }}>ยกเว้นรุ่น/แบบ <span style={{ fontWeight: 400, color: "#6b7280", fontSize: 12 }}>(ไม่บังคับ — รหัสรุ่นหรือแบบ คั่นด้วยจุลภาค · พิมพ์ BIGBIKE = ยกเว้นบิ๊กไบค์ทั้งหมด · พิมพ์ YAMAHA หรือ HONDA = ยกเว้นทั้งยี่ห้อ)</span></label>
                 <input value={String(form.note || "").replace(/^exclude:/i, "")}
                   onChange={e => { const v = e.target.value; setForm({ ...form, note: v.trim() ? "exclude:" + v : "" }); }}
-                  placeholder="เช่น WW160SV, ADV160, CBR150, CBF150, BIGBIKE"
+                  placeholder="เช่น WW160SV, ADV160, CBR150, CBF150, BIGBIKE, YAMAHA"
                   style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" }} />
               </div>
             )}
