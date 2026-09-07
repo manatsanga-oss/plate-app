@@ -99,6 +99,16 @@ export function depositedDaySet(days, depList, addDays) {
     }
     if (best) { for (let k = 0; k < n; k++) if (best.mask & (1 << k)) used.add(cands[k].i); done.add(d.date); }
   }
+  // 3) วันที่ยังไม่จับคู่ด้วยยอด (ใบฝากทำมือก่อนมี dropdown ยอดอาจต่างจากระบบ เช่น มีใบเสร็จบันทึกเพิ่มทีหลัง — user 2026-09-07 SCY01 วันที่ 3):
+  //    ถ้ายังมีใบฝากไม่ระบุวันที่ "ยังไม่ถูกใช้" ลงวันที่ D หรือ D+1 → ถือว่าวันนั้นฝากแล้ว (ใช้ใบที่ยอดใกล้ที่สุด 1 ใบ)
+  for (const d of sorted) {
+    if (done.has(d.date)) continue;
+    const cands = untagged.filter((x) => !used.has(x.i) && (x.date === d.date || x.date === addDays(d.date, 1)));
+    if (!cands.length) continue;
+    const target = num(d.cash);
+    const pick = cands.reduce((b, x) => (!b || Math.abs(x.amt - target) < Math.abs(b.amt - target) ? x : b), null);
+    used.add(pick.i); done.add(d.date);
+  }
   return done;
 }
 
