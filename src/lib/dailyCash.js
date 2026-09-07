@@ -66,6 +66,35 @@ export async function loadPettyRows() {
   ];
 }
 
+/** วันที่ "ฝากแล้ว" — จับคู่ใบฝาก (bank_deposits) กับวันสรุปเงิน (user 2026-09-07: วันที่ 3 ฝาก 2 ยอด 230,000 (3/9) + 7,103 (4/9) ทำให้วันที่ 4 หายจาก dropdown)
+ *  1) ใบฝากที่แหล่งที่มาระบุ "ฝากเงินสดประจำวัน YYYY-MM-DD" → วันนั้นฝากแล้ว
+ *  2) ใบฝากไม่ระบุวัน: ไล่วันจากเก่าไปใหม่ หา "ชุดใบฝากที่ลงวันที่ D หรือ D+1 และยังไม่ถูกใช้" ที่ยอดรวมเท่าเงินสดสุทธิของวัน (±2 บาท) → ใช้ชุดนั้นแล้วถือว่าวันนั้นฝากแล้ว
+ *  คืน Set ของวันที่ฝากแล้ว */
+export function depositedDaySet(days, depList, addDays) {
+  const tagged = (x) => (String(x.source || "").match(/ฝากเงินสดประจำวัน (\d{4}-\d{2}-\d{2})/) || [])[1] || "";
+  const done = new Set();
+  const used = new Set();
+  for (const x of depList) { const t = tagged(x); if (t) done.add(t); }
+  const untagged = depList.map((x, i) => ({ i, date: String(x.deposit_date || "").slice(0, 10), amt: num(x.amount) })).filter((x) => x.date && !tagged(depList[x.i]));
+  const sorted = [...days].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  for (const d of sorted) {
+    if (done.has(d.date)) continue;
+    const cands = untagged.filter((x) => !used.has(x.i) && (x.date === d.date || x.date === addDays(d.date, 1)));
+    if (!cands.length) continue;
+    const target = num(d.cash);
+    // subset-sum ขนาดเล็ก (ใบฝากต่อวันไม่กี่ใบ) — เลือกชุดที่รวมใกล้ยอดที่สุดภายใน ±2 บาท
+    let best = null;
+    const n = Math.min(cands.length, 8);
+    for (let mask = 1; mask < (1 << n); mask++) {
+      let sum = 0; for (let k = 0; k < n; k++) if (mask & (1 << k)) sum += cands[k].amt;
+      const diff = Math.abs(sum - target);
+      if (diff <= 2 && (!best || diff < best.diff)) best = { mask, diff };
+    }
+    if (best) { for (let k = 0; k < n; k++) if (best.mask & (1 << k)) used.add(cands[k].i); done.add(d.date); }
+  }
+  return done;
+}
+
 /** โหลดข้อมูลดิบทุกแหล่งของช่วงวันที่ (เหมือน load() ของ SaleMoneyReportPage) */
 export async function loadDailyCashSources(dateFrom, dateTo) {
   const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, pettyRows] = await Promise.all([

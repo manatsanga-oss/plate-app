@@ -6,6 +6,8 @@ import React, { useEffect, useMemo, useState } from "react";
 const REG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/insurance-refund-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+// เลขกรมธรรม์ 16 หลักจาก Excel เสียหลักท้ายเป็น 0 → เทียบ 15 หลักแรก (user 2026-09-07)
+const samePolicy = (a, b) => { const A = String(a || "").replace(/\s+/g, ""), B = String(b || "").replace(/\s+/g, ""); if (A === B) return true; const da = A.replace(/[^0-9]/g, ""), db = B.replace(/[^0-9]/g, ""); return da.length >= 15 && db.length >= 15 && da.slice(0, 15) === db.slice(0, 15); };
 
 async function post(url, body) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -71,7 +73,7 @@ export default function InsuranceRefundPage({ currentUser }) {
       try {
         let hit = null;
         const d = await post(REG_API, { action: "get_insurance_list", search: policy });
-        hit = (Array.isArray(d) ? d : []).find((x) => x && x.policy_no === policy);
+        hit = (Array.isArray(d) ? d : []).find((x) => x && samePolicy(x.policy_no, policy));
         if (!hit && policy.length >= 10) {
           const prefix = policy.slice(0, policy.length - 3);
           const d2 = await post(REG_API, { action: "get_insurance_list", search: prefix });

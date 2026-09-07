@@ -66,7 +66,8 @@ export default function InsuranceBillingPage({ currentUser }) {
   // จับคู่เลขกรมธรรม์ ↔ เลขที่บันทึกค่าใช้จ่าย — จากใบจ่ายค่าใช้จ่ายวิธี "วางบิลงาน พรบ."
   // (เลขกรมธรรม์เก็บใน pay_note รูปแบบ "พรบ. กรมธรรม์ X" — ปกติบันทึกค่าใช้จ่ายก่อนวางบิล)
   const [expPolicyMap, setExpPolicyMap] = useState({}); // normalize(policy_no) → expense_doc_no
-  const normPolicy = (s) => String(s || "").replace(/\s+/g, "").toUpperCase();
+  // เลขกรมธรรม์ พรบ. 16 หลักจาก Excel เสียหลักท้ายเป็น 0 (Excel เก็บได้ 15 หลัก) → เทียบด้วย 15 หลักแรกเมื่อเป็นตัวเลขยาว (user 2026-09-07)
+  const normPolicy = (s) => { const t = String(s || "").replace(/\s+/g, "").toUpperCase(); const d = t.replace(/[^0-9]/g, ""); return d.length >= 15 && d.length === t.length ? d.slice(0, 15) : t; };
   async function fetchExpPolicyMap() {
     try {
       const today = new Date();

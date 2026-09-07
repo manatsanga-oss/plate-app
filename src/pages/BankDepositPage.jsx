@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { loadDailyCashSources, buildDailyCashItems, dailyCashByDate } from "../lib/dailyCash"; // ยอดเงินสดรับสุทธิรายวัน "นำฝากธนาคาร" ชุดเดียวกับสรุปรายวันรับเงิน (user 2026-09-04)
+import { loadDailyCashSources, buildDailyCashItems, dailyCashByDate, depositedDaySet } from "../lib/dailyCash"; // ยอดเงินสดรับสุทธิรายวัน "นำฝากธนาคาร" ชุดเดียวกับสรุปรายวันรับเงิน (user 2026-09-04)
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -239,10 +239,9 @@ export default function BankDepositPage({ currentUser }) {
       const items = buildDailyCashItems(src, ctx);
       const days = dailyCashByDate(items).filter(d => d.branch === String(userBranchCode).toUpperCase() && d.date >= "2026-09-01" && Math.abs(d.cash) >= 0.01);
       const depList = (Array.isArray(depRes) ? depRes : []).filter(d => d && d.status !== "cancelled");
-      // วันที่ฝากแล้วไม่ต้องขึ้น: มีใบฝากที่แหล่งที่มาอ้างวันนั้น (บันทึกจาก dropdown นี้) หรือใบฝากแบบเดิมที่ไม่ได้อ้างวัน ลงวันเดียวกัน/วันถัดไป
-      const tagged = (x) => (String(x.source || "").match(/ฝากเงินสดประจำวัน (\d{4}-\d{2}-\d{2})/) || [])[1] || "";
-      const deposited = (d) => depList.some(x => tagged(x) === d.date || (!tagged(x) && [d.date, addDays(d.date, 1)].includes(String(x.deposit_date || "").slice(0, 10))));
-      setCashDays(days.filter(d => !deposited(d)));
+      // วันที่ฝากแล้วไม่ต้องขึ้น — จับคู่ใบฝากกับวันด้วย "ยอด" (ชุดใบฝากลงวันที่ D/D+1 รวมเท่าเงินสดสุทธิ) ไม่ใช่วันที่อย่างเดียว (user 2026-09-07: วันที่ 3 ฝาก 2 ยอดข้ามวัน ทำให้วันที่ 4 หาย)
+      const done = depositedDaySet(days, depList, addDays);
+      setCashDays(days.filter(d => !done.has(d.date)));
     } catch { setCashDays([]); }
     setCashLoading(false);
   }
