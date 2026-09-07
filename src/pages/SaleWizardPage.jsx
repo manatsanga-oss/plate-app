@@ -1378,10 +1378,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (overrideFinal != null) return overrideFinal;
     return announcedPrice(wantSaleType);
   }
-  // ราคาขายรวมของคัน: ราคาสุทธิเฉพาะคันชนะทุกอย่าง ไม่งั้น ฐาน + กฎบวกเพิ่ม + ปรับแต่ง ตามปกติ
+  // ราคาขายรวมของคัน: ราคาสุทธิเฉพาะคัน "แทน" ราคาประกาศ+กฎบวกเพิ่มไฟแนนท์ แต่รายการปรับแต่งรายคัน
+  // (โบนัสค่านำพา / ดาวน์-ค่างวดออกแทน / ประกันรถหายซื้อเพิ่ม) ยังบวกทับได้ (user 2026-09-05: ค่านำพา 500 ต้อง +2,000 แม้มีราคาเฉพาะคัน)
   function finalCarPrice(wantSaleType) {
     if (wantSaleType === "wholesale") return announcedPrice(wantSaleType);
-    if (overrideFinal != null) return overrideFinal;
+    if (overrideFinal != null) return overrideFinal + adjustmentsTotal;
     const base = announcedPrice(wantSaleType);
     return base == null ? null : base + markupsTotal + adjustmentsTotal;
   }
@@ -1459,7 +1460,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (!(adjOpen && useDownPayout)) return 0;
     const withVat = Number(downPayout || 0) * 1.07;
     if (!isSGF) return Math.ceil(withVat / 100) * 100;
-    const base = overrideFinal != null ? overrideFinal : (announcedPrice(saleType) || 0) + markupsTotal + deliveryBonus;
+    const base = (overrideFinal != null ? overrideFinal : (announcedPrice(saleType) || 0) + markupsTotal) + deliveryBonus;
     if (!base) return Math.ceil(withVat / 1000) * 1000;
     return Math.ceil((base + withVat) / 1000) * 1000 - base;
   })();
@@ -1997,7 +1998,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                             {adjustmentsTotal > 0 ? ` + ปรับแต่ง ${Number(adjustmentsTotal).toLocaleString("th-TH")}` : ""}
                           </div>
                         )}
-                        {/* ป้ายราคาสุทธิเฉพาะคัน (เหนือทุกกฎ — ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ): แดง = ต่ำกว่าประกาศ · ฟ้า = สูงกว่าประกาศ */}
+                        {unitOverride && adjustmentsTotal > 0 && (
+                          <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
+                            ราคาสุทธิเฉพาะคัน {fmtBaht(overrideFinal)} + ปรับแต่ง {Number(adjustmentsTotal).toLocaleString("th-TH")}
+                          </div>
+                        )}
+                        {/* ป้ายราคาสุทธิเฉพาะคัน (แทนราคาประกาศ+กฎบวกเพิ่มไฟแนนท์ — รายการปรับแต่งรายคันยังบวกทับ): แดง = ต่ำกว่าประกาศ · ฟ้า = สูงกว่าประกาศ */}
                         {unitOverride && (() => {
                           const ann = announcedPrice(saleType);
                           const ovr = num(unitOverride.new_price);
@@ -2006,7 +2012,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           const c = below ? "#dc2626" : above ? "#0284c7" : "#334155";
                           return (
                             <div style={{ marginTop: 6, padding: "6px 10px", borderRadius: 8, background: below ? "#fef2f2" : above ? "#eff6ff" : "#f8fafc", border: `1px solid ${below ? "#fecaca" : above ? "#bfdbfe" : "#e2e8f0"}`, fontSize: 12.5, color: c, textAlign: "left" }}>
-                              🏷️ <b>ราคาสุทธิเฉพาะคัน {fmtBaht(ovr)} — ราคาสุดท้าย ไม่บวกกฎบวกเพิ่ม/ปรับแต่งใด ๆ</b>
+                              🏷️ <b>ราคาสุทธิเฉพาะคัน {fmtBaht(ovr)} — ใช้แทนราคาประกาศ+กฎบวกเพิ่มไฟแนนท์ (ค่านำพา/ดาวน์ออกแทน/ประกันเพิ่ม ยังบวกทับได้)</b>
                               {ann != null && ovr !== num(ann) ? ` (ราคาประกาศ ${fmtBaht(ann)} · ${below ? "ต่ำกว่า" : "สูงกว่า"} ${Number(Math.abs(ovr - num(ann))).toLocaleString("th-TH")})` : ""}
                               {unitOverride.note ? <div style={{ color: "#64748b", marginTop: 2 }}>หมายเหตุ: {unitOverride.note} · โดย {unitOverride.created_by || "-"}</div> : null}
                             </div>
