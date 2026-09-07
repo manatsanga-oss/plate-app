@@ -479,8 +479,25 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
   // บันทึกชำระเงิน / คืนเงินมัดจำ — บันทึกจริงผ่าน save_payment (action เดียวกับหน้าขายปลีก) แล้วส่งใบเสร็จเข้า LINE
   // ยกเว้น: โหมดทดสอบไม่เขียน DB · ยอดติดลบ (คืนเงินมัดจำส่วนเกิน) ยังไม่เขียน DB — ให้ไปบันทึกที่เมนูมัดจำจองรถ
-  async function handleSavePayment(receiveAmt) {
-    if (!savedSale || paySending || paySaved) return;
+  // saleArg: ใบขายที่เพิ่งบันทึก (ขายเงินสดต้องออกใบเสร็จต่อทันที — state savedSale ยังไม่ทันอัปเดตใน tick เดียวกัน)
+  // ตรวจบรรทัดวิธีรับชำระเทียบยอดที่ต้องรับ — คืน error (string) หรือ null (user 2026-09-07: ขายเงินสดต้องรับครบก่อนบันทึกขาย)
+  function payLinesError(target) {
+    const filled = payLines.map((l) => ({ ...l, amt: num(l.amount) }));
+    const known = filled.filter((l) => l.amount !== "" && l.amt > 0).reduce((sum, l) => sum + l.amt, 0);
+    const blanks = filled.filter((l) => l.amount === "");
+    if (blanks.length > 1) return "❌ กรอกยอดให้ครบ (เว้นว่างได้แค่ 1 บรรทัด = ยอดที่เหลือ)";
+    const lines = filled.map((l) => ({ ...l, amt: l.amount === "" ? Math.max(target - known, 0) : l.amt })).filter((l) => l.amt > 0);
+    if (!lines.length) return "❌ ขายเงินสดต้องรับชำระให้ครบก่อนบันทึก — ใส่วิธีรับชำระอย่างน้อย 1 รายการ";
+    for (const l of lines) {
+      if (l.method === "transfer" && !bankAccounts.find(a => String(a.account_id) === String(l.account_id))) return "❌ เลือกบัญชีรับโอนเงินให้ครบทุกบรรทัด";
+    }
+    const sum = lines.reduce((acc, l) => acc + l.amt, 0);
+    if (Math.abs(sum - target) > 0.5) return `❌ ขายเงินสดต้องรับชำระให้ครบ — ยอดรวมวิธีรับชำระ ${sum.toLocaleString("th-TH")} ไม่เท่ายอดที่ต้องรับ ${target.toLocaleString("th-TH")} บาท`;
+    return null;
+  }
+  async function handleSavePayment(receiveAmt, saleArg) {
+    const sale = saleArg || savedSale;
+    if (!sale || paySending || paySaved) return;
     const target = Math.abs(Number(receiveAmt) || 0);
     // แปลงบรรทัดรับชำระ: ช่องยอดว่าง = ยอดที่เหลือ (กรอกวิธีเดียวไม่ต้องพิมพ์ยอด)
     const filled = payLines.map((l) => ({ ...l, amt: num(l.amount) }));
@@ -498,10 +515,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       const acc = l.method === "transfer" ? bankAccounts.find(a => String(a.account_id) === String(l.account_id)) : null;
       return { method: l.method, methodLabel: l.method === "cash" ? "เงินสด" : "เงินโอน", account_id: acc ? Number(acc.account_id) : null, accountName: acc?.account_name || null, amount: l.amt };
     });
-    if (savedSale.__test && !custLineUserId) { setMessage("❌ ลูกค้าไม่มี LINE ในระบบ — ส่งใบเสร็จทาง LINE ไม่ได้"); return; }
+    if (sale.__test && !custLineUserId) { setMessage("❌ ลูกค้าไม่มี LINE ในระบบ — ส่งใบเสร็จทาง LINE ไม่ได้"); return; }
     const refund = Number(receiveAmt) < 0;
     // มัดจำป้ายแดงรวมอยู่ในยอดที่เก็บ แต่แยกใบ: ใบเสร็จค่ารถ = ยอดเก็บ − มัดจำ, ใบรับมัดจำป้ายแดง = มัดจำ (เลข RPD ออกจาก save_payment)
-    const rpAmt = refund ? 0 : Math.min(Number(savedSale.red_plate_deposit) || 0, Math.abs(Number(receiveAmt) || 0));
+    const rpAmt = refund ? 0 : Math.min(Number(sale.red_plate_deposit) || 0, Math.abs(Number(receiveAmt) || 0));
     const pay = {
       refund,
       amount: Math.abs(Number(receiveAmt) || 0) - rpAmt,
@@ -512,33 +529,33 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     setPaySending(true);
     setMessage("");
     try {
-      let receiptNo = (savedSale.__test ? "TEST-RCPT-" : "RCPT-") + String(savedSale.sale_no).replace(/^TEST-/, "");
-      let saleForDoc = savedSale;
+      let receiptNo = (sale.__test ? "TEST-RCPT-" : "RCPT-") + String(sale.sale_no).replace(/^TEST-/, "");
+      let saleForDoc = sale;
 
       // บันทึกรับชำระลง DB (เฉพาะของจริง + ยอดเป็นบวก) — ได้เลขใบเสร็จจริงจาก workflow
-      if (!savedSale.__test && !refund) {
+      if (!sale.__test && !refund) {
         const row = await post(RETAIL_API, {
-          action: "save_payment", sale_no: savedSale.sale_no,
+          action: "save_payment", sale_no: sale.sale_no,
           receipt_date: todayStr(),
           payments: payLinesOut.map((l) => ({ method: l.method === "cash" ? "เงินสด" : "โอน", account_id: l.account_id, account_name: l.accountName, amount: l.amount })),
           paid_amount: pay.amount + rpAmt,
           payment_note: "",
           received_by: currentUser?.username || currentUser?.name || "",
-          branch_code: savedSale.branch_code || currentUser?.branch_code || currentUser?.branch || "",
+          branch_code: sale.branch_code || currentUser?.branch_code || currentUser?.branch || "",
         });
         const updated = row && (row.sale || row);
         if (!updated || !updated.sale_no) throw new Error(row?.__error || row?.error || "บันทึกรับชำระไม่สำเร็จ");
         receiptNo = updated.receipt_no || receiptNo;
-        // merge แถวที่อัปเดตกลับเข้า savedSale — คงชื่อรุ่น/สี/ยี่ห้อแบบแสดงผลของ wizard ไว้ใช้ในเอกสาร
-        saleForDoc = { ...savedSale, ...updated, brand: savedSale.brand, model_name: savedSale.model_name, color: savedSale.color,
+        // merge แถวที่อัปเดตกลับเข้า sale — คงชื่อรุ่น/สี/ยี่ห้อแบบแสดงผลของ wizard ไว้ใช้ในเอกสาร
+        saleForDoc = { ...sale, ...updated, brand: sale.brand, model_name: sale.model_name, color: sale.color,
           red_plate_doc_no: row.red_plate_doc_no || updated.red_plate_doc_no || null };
         setSavedSale(saleForDoc);
       }
 
       // คืนเงินมัดจำ: บันทึกลงใบมัดจำจริงเลย (refund_deposit) — จบในหน้าขาย ไม่ต้องไปเมนูมัดจำจองรถ (user 2026-08-24)
       let refundedDepNo = "";
-      if (!savedSale.__test && refund) {
-        const depNo = savedSale.deposit_no || selBooking?.deposit_no || "";
+      if (!sale.__test && refund) {
+        const depNo = sale.deposit_no || selBooking?.deposit_no || "";
         if (!depNo) throw new Error("ใบขายนี้ไม่ได้ผูกเลขใบมัดจำ — กรุณาบันทึกคืนเงินที่เมนูมัดจำจองรถ");
         const first = payLinesOut[0];
         const isTr = first.method === "transfer";
@@ -550,7 +567,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
           refund_from_account: isTr ? (first.accountName || "") : "",
           refund_bank: isTr ? refundBank.trim() : "",
           refund_account_no: isTr ? refundAcctNo.trim() : "",
-          refund_note: "คืนส่วนเกินมัดจำจากใบขาย " + savedSale.sale_no,
+          refund_note: "คืนส่วนเกินมัดจำจากใบขาย " + sale.sale_no,
           refunded_by: currentUser?.username || currentUser?.name || "system",
         });
         const rrow = rres && (rres.deposit || rres);
@@ -562,22 +579,22 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if (custLineUserId) {
         await post(RETAIL_API, {
           action: "send_receipt_flex",
-          sale_no: savedSale.sale_no, receipt_no: receiptNo, receipt_date: todayStr(),
-          customer_name: savedSale.customer_name,
+          sale_no: sale.sale_no, receipt_no: receiptNo, receipt_date: todayStr(),
+          customer_name: sale.customer_name,
           paid_amount: pay.amount,
           payment_methods: [
             ...payLinesOut.map((l) => ({ method: (refund ? "คืนเงินมัดจำ · " : "") + l.methodLabel, amount: l.amount, account_name: l.accountName })),
             ...(rpAmt > 0 ? [{ method: "หัก มัดจำป้ายแดง (แยกใบรับมัดจำ)", amount: -rpAmt }] : []),
           ],
-          red_plate_no: saleForDoc.red_plate_no || "", red_plate_deposit: rpAmt, red_plate_doc_no: saleForDoc.red_plate_doc_no || (savedSale.__test && rpAmt > 0 ? "TEST-RPD" : ""),
-          branch_name: savedSale.branch_name, branch_code: savedSale.branch_code,
+          red_plate_no: saleForDoc.red_plate_no || "", red_plate_deposit: rpAmt, red_plate_doc_no: saleForDoc.red_plate_doc_no || (sale.__test && rpAmt > 0 ? "TEST-RPD" : ""),
+          branch_name: sale.branch_name, branch_code: sale.branch_code,
           line_user_id: custLineUserId,
           doc_html: buildReceiptDocHtml(saleForDoc, receiptNo, pay, rpAmt > 0 ? { doc_no: saleForDoc.red_plate_doc_no || "TEST-RPD", plate_no: saleForDoc.red_plate_no, amount: rpAmt } : null),
           sent_by: currentUser?.name || currentUser?.username || "",
         });
       }
       setPaySaved(true);
-      if (savedSale.__test) {
+      if (sale.__test) {
         setMessage("🧪 ยังไม่บันทึกลง DB · ✅ ส่ง" + (refund ? "ใบเสร็จคืนเงินมัดจำ" : "ใบเสร็จรับเงิน") + "เข้า LINE ลูกค้าแล้ว");
       } else if (refund) {
         setMessage(`✅ บันทึกคืนเงินมัดจำ ${refundedDepNo} จำนวน ${Math.abs(Number(receiveAmt)).toLocaleString("th-TH")} บาท แล้ว` + (custLineUserId ? " · ส่งใบเสร็จคืนเงินเข้า LINE แล้ว" : ""));
@@ -801,7 +818,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       }
       sorted.forEach((b, idx) => {
         if (idx < cars.length && matchesSeries(b) && qNormColor(cn) === wantColor) {
-          out.push({ ...b, queuePos: idx + 1, stockQty: cars.length, remaining: b.deposit_no ? (depositMap[b.deposit_no] || 0) : 0 });
+          // depositFound=false = ใบจองอ้างเลขมัดจำแต่หาใบมัดจำไม่เจอ (โหลดไม่สำเร็จ/ข้อมูลหาย) → ห้ามขายโดยหักมัดจำ 0 (user 2026-09-07 เคส SCY06-DEP-2609-00003)
+          out.push({ ...b, queuePos: idx + 1, stockQty: cars.length, remaining: b.deposit_no ? (depositMap[b.deposit_no] || 0) : 0, depositFound: b.deposit_no ? depositMap[b.deposit_no] !== undefined : true });
         }
       });
     });
@@ -1111,6 +1129,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
       const dep = depositAmt;
       const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep + redPlateDep; // ติดลบ = ต้องคืนเงินมัดจำ
+      // ใบจองมีเลขมัดจำ แต่ระบบหาใบมัดจำไม่เจอ (โหลดรายการมัดจำไม่สำเร็จ) → ห้ามบันทึก กันหักมัดจำเป็น 0 แล้วรับเงินขาด (user 2026-09-07)
+      if (bookingAsk === "booked" && selBooking?.deposit_no && selBooking.depositFound === false) {
+        throw new Error(`ไม่พบข้อมูลใบมัดจำ ${selBooking.deposit_no} ของใบจองนี้ (โหลดรายการมัดจำไม่สำเร็จ) — กดรีเฟรชหน้าแล้วเลือกใบจองใหม่ ห้ามบันทึกโดยหักมัดจำ 0`);
+      }
+      // ขายเงินสด: ต้องรับชำระครบยอดพร้อมบันทึกขาย (ห้ามบันทึกขายแล้วค่อยรับทีหลัง/รับไม่ครบ) — user 2026-09-07 (เคส SCY06-MCSA-2609-00011 รับ 30,100 จาก 70,100)
+      const cashMustPay = !isWholesale && saleType === "cash" && totalPayment > 0;
+      if (cashMustPay) { const err = payLinesError(totalPayment); if (err) throw new Error(err.replace(/^❌\s*/, "")); }
       const payload = {
         action: "save_sale",
         brand: vehicle.brand, stock_table: vehicle.stock_table, stock_id: vehicle.stock_id,
@@ -1176,6 +1201,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if (autoLink?.customer_line_user_id) msg += " · 🔗 ผูก LINE ลูกค้าจากเบอร์โทรให้อัตโนมัติ";
       if (custLineUserId || autoLink?.customer_line_user_id) msg += " · กำลังส่งใบขายเข้า LINE ลูกค้า...";
       setMessage(msg);
+      // ขายเงินสด: ออกใบเสร็จรับเงินต่อทันทีด้วยวิธีรับชำระที่กรอกไว้ (ยอดครบตามที่ตรวจแล้ว)
+      if (cashMustPay) await handleSavePayment(totalPayment, saleDoc);
       sendSaleFlex(saleDoc, autoLink?.customer_line_user_id); // ส่งใบขายเข้า LINE ลูกค้าทันที (ถ้าไม่มี LINE จะขึ้นสถานะแจ้งเอง)
     } catch (e) {
       setMessage("บันทึกไม่สำเร็จ: " + (e.message || e));
@@ -2104,6 +2131,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         <span style={{ marginLeft: 10, color: "#6b7280", fontSize: 13 }}>
                           มัดจำคงเหลือ {selBooking.remaining > 0 ? Number(selBooking.remaining).toLocaleString("th-TH") + " บาท" : "-"}
                         </span>
+                        {selBooking.deposit_no && selBooking.depositFound === false && (
+                          <div style={{ marginTop: 6, padding: "6px 10px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#b91c1c", fontSize: 12.5, fontWeight: 700 }}>
+                            ⚠ ไม่พบข้อมูลใบมัดจำ {selBooking.deposit_no} — โหลดรายการมัดจำไม่สำเร็จ กดรีเฟรชหน้าแล้วลองใหม่ (ระบบจะไม่ให้บันทึกขายจนกว่าจะเจอยอดมัดจำ)
+                          </div>
+                        )}
                       </div>
                       <button onClick={() => setSelBooking(null)}
                         style={{ marginLeft: "auto", padding: "4px 14px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}>
@@ -2442,10 +2474,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                     </div>
 
                     {/* การ์ดบันทึกชำระเงิน — ข้ามได้ถ้ายังไม่รับชำระ · ยอดติดลบ = คืนเงินมัดจำ */}
-                    {savedSale && (
+                    {(savedSale || (saleType === "cash" && !isWholesale && !isRefund && (receive || 0) > 0)) && (
                       <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
-                        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>💵 บันทึกชำระเงิน</div>
-                        <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>ยังไม่รับชำระเงินตอนนี้ก็ได้ — ข้ามการ์ดนี้ไปได้เลย</div>
+                        <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>💵 {savedSale ? "บันทึกชำระเงิน" : "รับชำระเงิน (ขายเงินสด — ต้องรับครบก่อนบันทึกขาย)"}</div>
+                        {savedSale
+                          ? <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 12 }}>ยังไม่รับชำระเงินตอนนี้ก็ได้ — ข้ามการ์ดนี้แล้วไปรับชำระที่เมนูรับชำระค่ารถทีหลัง (ผ่อนไฟแนนท์)</div>
+                          : <div style={{ fontSize: 12.5, color: "#b45309", marginBottom: 12, fontWeight: 600 }}>ขายเงินสดต้องรับชำระให้ครบยอดพร้อมบันทึกขาย — กรอกวิธีรับชำระให้รวมเท่ายอดที่ต้องรับ แล้วกด "บันทึกขาย" ระบบจะออกใบเสร็จให้ทันที (รับไม่ครบ = บันทึกไม่ได้)</div>}
 
                         <div style={{ maxWidth: 460 }}>
                           {isRefund ? (
@@ -2515,6 +2549,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                             <div style={{ padding: "12px 14px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, color: "#166534", fontWeight: 700, fontSize: 14 }}>
                               ✅ {isRefund ? "บันทึกคืนเงินมัดจำแล้ว — ส่งใบเสร็จคืนเงินมัดจำ" : "บันทึกชำระเงินแล้ว — ส่งใบเสร็จรับเงิน"}เข้า LINE ลูกค้าแล้ว{savedSale.__test ? " (ยังไม่บันทึก DB)" : ""}
                             </div>
+                          ) : !savedSale ? (
+                            <div style={{ fontSize: 12.5, color: "#64748b" }}>กด "บันทึกขาย" ด้านบน — ระบบจะบันทึกใบขายและออกใบเสร็จตามวิธีรับชำระนี้ในครั้งเดียว</div>
                           ) : (
                             <button onClick={() => handleSavePayment(receive)}
                               disabled={paySending || payLines.some((l) => l.method === "transfer" && !l.account_id)}

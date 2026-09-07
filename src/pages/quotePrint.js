@@ -1,13 +1,31 @@
 // ตัวสร้าง/พิมพ์ใบประเมินราคา (ใช้ร่วม: หน้าค้นรูปอะไหล่ + หน้า public /quote-view)
 export const QUOTE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/part-quote-api";
 
-export const COMPANY = {
-  name: "บริษัท ป.เปามอเตอร์เซอร์วิส จำกัด - สำนักงานใหญ่",
-  addr: "189-191 ม.7 ตำบลลำไทร อำเภอวังน้อย จังหวัดพระนครศรีอยุธยา 13170",
-  tel: "(035)271146-7",
-  fax: "(035)272613",
-  taxid: "0145546000707",
+// หัวกระดาษแยกบริษัทตามสังกัดสาขาของผู้ใช้ (user 2026-09-07: หัวใบประเมินต้องตรงสังกัด USER LOGIN)
+// SCY01/SCY04/SCY07 = สิงห์ชัย · SCY05/SCY06 (และไม่ระบุ) = ป.เปา — ชุดเดียวกับใบเสร็จค่าอะไหล่/บริการ
+export const COMPANIES = {
+  PORPAO: {
+    name: "บริษัท ป.เปามอเตอร์เซอร์วิส จำกัด - สำนักงานใหญ่",
+    addr: "189-191 ม.7 ตำบลลำไทร อำเภอวังน้อย จังหวัดพระนครศรีอยุธยา 13170",
+    tel: "(035)271146-7",
+    fax: "(035)272613",
+    taxid: "0145546000707",
+  },
+  SINGCHAI: {
+    name: "หจก. สิงห์ชัย สยามยนต์ - สำนักงานใหญ่",
+    addr: "34 หมู่ 7 ซอย 10 ตำบลลำไทร อำเภอวังน้อย จังหวัดพระนครศรีอยุธยา 13170",
+    tel: "",
+    fax: "",
+    taxid: "0143543001310",
+  },
 };
+export const COMPANY = COMPANIES.PORPAO; // เข้ากันได้กับโค้ดเดิม
+export function companyFor(branch) {
+  const b = String(branch || "").toUpperCase();
+  const code = (b.match(/SCY\d{2}/) || [])[0] || "";
+  if (["SCY01", "SCY04", "SCY07"].includes(code) || b.includes("สิงห์ชัย")) return COMPANIES.SINGCHAI;
+  return COMPANIES.PORPAO;
+}
 
 const _m = (v) => (Number(v) || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const _e = (s) => String(s == null ? "" : s).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
@@ -36,7 +54,7 @@ export function recordToQuoteData(rec) {
   const laborNet = (Number(rec.labor) || 0) - (Number(rec.labor_discount) || 0);
   const partsNet = (Number(rec.parts_total) || 0) - (Number(rec.parts_discount) || 0);
   return {
-    quote_no: rec.quote_no || "", date: np.date, time: np.time, created_by: rec.created_by || "",
+    quote_no: rec.quote_no || "", date: np.date, time: np.time, created_by: rec.created_by || "", branch: rec.branch || "",
     customer_name: rec.customer_name, customer_address: rec.customer_address, customer_phone: rec.customer_phone, customer_tax_id: rec.customer_tax_id,
     model: rec.model || "", color: rec.color || "",
     plate_no: rec.plate_no, model_year: rec.model_year, mileage: rec.mileage, vin: rec.vin, engine_no: rec.engine_no, problem: rec.problem,
@@ -49,6 +67,7 @@ export function recordToQuoteData(rec) {
 
 // สร้าง HTML เอกสารใบประเมินราคาตามฟอร์ม SVE02015
 export function quoteDocHTML(d) {
+  const co = companyFor(d && d.branch);
   let rows = "";
   (d.items || []).forEach((it, i) => {
     rows += `<tr><td class=c>${i + 1}</td><td>${_e(it.code)}</td><td>${_e(it.name)}</td><td class=c>${Number(it.qty) || 1}</td><td class=r>${_m(it.price != null ? it.price : it.amount)}</td><td class=r>${_m(it.amount)}</td></tr>`;
@@ -72,7 +91,7 @@ export function quoteDocHTML(d) {
   @media print{body{padding:0}.noprint{display:none}}
   </style></head><body>
   <div class=hd>
-    <div class=co><b>${_e(COMPANY.name)}</b><br>${_e(COMPANY.addr)}<br>โทร: ${_e(COMPANY.tel)} แฟกซ์: ${_e(COMPANY.fax)}<br>เลขประจำตัวผู้เสียภาษีอากร: ${_e(COMPANY.taxid)}</div>
+    <div class=co><b>${_e(co.name)}</b><br>${_e(co.addr)}<br>${co.tel ? `โทร: ${_e(co.tel)}${co.fax ? ` แฟกซ์: ${_e(co.fax)}` : ""}<br>` : ""}เลขประจำตัวผู้เสียภาษีอากร: ${_e(co.taxid)}</div>
     <div class=title><b>ใบประเมินราคา</b><div>Estimate Service Job</div></div>
   </div>
   <div class=row>

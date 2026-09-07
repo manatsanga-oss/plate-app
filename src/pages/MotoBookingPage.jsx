@@ -567,7 +567,7 @@ export default function MotoBookingPage({ currentUser }) {
   // bookingDepositMap: deposit_no จากระบบ "มัดจำจองรถ" (BookingDeposit) — booking ที่มี deposit_no ตรงนี้ ไม่ต้องเช็คความถูกต้อง
   const bookingDepositMap = {};
   bookingDeposits.forEach((d) => {
-    if (d.deposit_no) bookingDepositMap[d.deposit_no] = true;
+    if (d.deposit_no) bookingDepositMap[d.deposit_no] = d; // เก็บทั้งแถว (ยอด/สถานะ) ไว้โชว์คอลัมน์เงินมัดจำ (user 2026-09-07)
   });
 
   // map: deposit_no -> line_user_id (ใช้แสดงเครื่องหมาย LINE ✓ ในคอลัมน์ลูกค้า เหมือนหน้าประวัติมัดจำ)
@@ -864,6 +864,7 @@ export default function MotoBookingPage({ currentUser }) {
                 <th>แบบ</th>
                 <th>สี</th>
                 <th>ลูกค้า</th>
+                <th style={{ textAlign: "right" }}>เงินมัดจำ</th>
                 {filterStatus === "ขาย" && <th>วันที่ขาย</th>}
                 {filterStatus === "ขาย" && <th>ชื่อผู้ซื้อ</th>}
                 {filterStatus === "ยกเลิก" && <th>เลขที่มัดจำ</th>}
@@ -898,6 +899,25 @@ export default function MotoBookingPage({ currentUser }) {
                       <div style={{ fontSize: 12, color: "#059669" }}>LINE ✓</div>
                     )}
                   </td>
+                  {/* เงินมัดจำของใบจอง: ระบบมัดจำจองรถ (DEP…) = ยอดรับ + สถานะคืน · ใบเสร็จมัดจำเก่า (REC…) = ยอดคงเหลือ (user 2026-09-07) */}
+                  <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{(() => {
+                    if (!b.deposit_no) return <span style={{ color: "#9ca3af" }}>-</span>;
+                    const bd = bookingDepositMap[b.deposit_no];
+                    if (bd && typeof bd === "object") {
+                      const amt = Number(bd.deposit_amount) || 0, ref = Number(bd.refund_amount) || 0;
+                      return <>
+                        <b style={{ color: bd.status === "refunded" ? "#9ca3af" : "#065f46" }}>{amt.toLocaleString("th-TH")}</b>
+                        {bd.status === "refunded" && <div style={{ fontSize: 10.5, color: "#dc2626" }}>คืนแล้ว {ref.toLocaleString("th-TH")}</div>}
+                        <div style={{ fontSize: 10.5, color: "#6b7280" }}>{b.deposit_no}</div>
+                      </>;
+                    }
+                    const legacy = depositMap[b.deposit_no];
+                    if (legacy) return <>
+                      <b style={{ color: legacy.remaining_amount > 0 ? "#065f46" : "#9ca3af" }}>{legacy.remaining_amount.toLocaleString("th-TH")}</b>
+                      <div style={{ fontSize: 10.5, color: "#6b7280" }}>{b.deposit_no} · คงเหลือ</div>
+                    </>;
+                    return <span style={{ color: "#ef4444", fontSize: 12 }}>ไม่พบ<div style={{ fontSize: 10.5, color: "#6b7280" }}>{b.deposit_no}</div></span>;
+                  })()}</td>
                   {filterStatus === "ขาย" && (() => {
                     const sale = b.invoice_no ? salesMap[b.invoice_no] : null;
                     if (!b.invoice_no) return <><td>-</td><td>-</td></>;

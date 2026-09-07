@@ -90,6 +90,8 @@ export default function BookingDepositPage({ currentUser }) {
   const [rows, setRows] = useState([]);
   const [bookings, setBookings] = useState([]); // ใบจองในระบบจองรถ — ใช้เช็คว่ามัดจำใบไหน "ถึงคิวแล้ว" (มีวันนัดรับรถ) ห้าม user คืน (user 2026-09-04)
   const queueReached = (r) => bookings.some((b) => b && b.deposit_no === r.deposit_no && b.status === "จอง" && b.appointment_date);
+  // ใบมัดจำที่ถูกใช้ชำระค่ารถแล้ว = คิวจองที่อ้างเลขมัดจำนี้สถานะ "ขาย" (มีเลขใบขาย) → โชว์สถานะ + ปิดปุ่มแก้ไข/คืนเงิน กันคืนซ้ำ (user 2026-09-07)
+  const soldBooking = (r) => bookings.find((b) => b && b.deposit_no === r.deposit_no && b.status === "ขาย") || null;
   const [loadingRows, setLoadingRows] = useState(false);
   const [keyword, setKeyword] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -125,7 +127,7 @@ export default function BookingDepositPage({ currentUser }) {
     try {
       const d = await postJson(DEPOSIT_API, { action: "get_deposits", keyword: kw, status: st });
       setRows(Array.isArray(d) ? d.filter((x) => x && x.deposit_no) : []);
-      postJson(MOTO_BOOKING_API, { action: "get_moto_bookings" }).then((b) => setBookings(Array.isArray(b) ? b : [])).catch(() => {});
+      postJson(MOTO_BOOKING_API, { action: "get_moto_bookings", status: "all" }).then((b) => setBookings(Array.isArray(b) ? b : [])).catch(() => {}); // รวมสถานะ "ขาย" ไว้เช็คว่ามัดจำถูกใช้ชำระค่ารถแล้ว
     } catch { setRows([]); }
     setLoadingRows(false);
   }
@@ -646,11 +648,13 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       {r.status === "refunded"
                         ? <span style={{ color: "#dc2626" }}>คืนเงินแล้ว<div style={{ fontSize: 11, color: "#9ca3af" }}>{r.refund_method || ""} {thaiDate(r.refunded_at)}</div></span>
-                        : <span style={{ color: "#059669" }}>ใช้งาน</span>}
+                        : soldBooking(r)
+                          ? <span style={{ color: "#1d4ed8", fontWeight: 600 }}>ใช้ชำระค่ารถแล้ว<div style={{ fontSize: 11, color: "#6b7280", fontWeight: 400 }}>ใบขาย {soldBooking(r).invoice_no || "-"} · {thaiDate(soldBooking(r).sold_date)}</div></span>
+                          : <span style={{ color: "#059669" }}>ใช้งาน</span>}
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       <button onClick={() => printDepositReceipt(r)} style={btnSmBlue} title="พิมพ์ใบเสร็จมัดจำ">🖨️</button>
-                      {r.status !== "refunded" && (
+                      {r.status !== "refunded" && !soldBooking(r) && (
                         <>
                           <button onClick={() => createBookingFor(r)} style={btnSmGreen} title="สร้างใบจองในระบบจองรถ">📋 สร้างใบจอง</button>
                           {(isAdmin || isSameDay(r.deposit_date)) && (
@@ -665,7 +669,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                           )}
                         </>
                       )}
-                      {r.status === "refunded" && (
+                      {(r.status === "refunded" || (r.status !== "refunded" && soldBooking(r))) && (
                         <button onClick={() => editRow({ ...r })} style={btnSmGray} title="เปิดดูอย่างเดียว">👁️ ดู</button>
                       )}
                     </td>

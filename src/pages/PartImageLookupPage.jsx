@@ -369,6 +369,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
 
   const buildPayload = () => ({
     created_by: currentUser?.name || currentUser?.username || "",
+    branch: currentUser?.branch_code || currentUser?.branch || "", // สังกัดผู้ใช้ → หัวกระดาษใบประเมิน (ป.เปา/สิงห์ชัย)
     customer_code: q.customer_code, customer_name: q.customer_name, customer_phone: q.customer_phone,
     customer_address: q.customer_address, customer_tax_id: q.customer_tax_id, customer_line_user_id: q.customer_line_user_id,
     model: model?.model || "", color: picked[0]?.color || current?.name || "",
@@ -405,6 +406,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     openQuotePrint({
       quote_no: quoteNo || savedNo || "", date: np.date, time: np.time,
       created_by: currentUser?.name || currentUser?.username || "",
+      branch: currentUser?.branch_code || currentUser?.branch || "",
       customer_name: q.customer_name, customer_address: q.customer_address, customer_phone: q.customer_phone, customer_tax_id: q.customer_tax_id,
       model: (model?.model || "") + (current?.name ? " " + current.name : ""), color: current?.code || "",
       plate_no: q.plate_no, model_year: q.model_year, mileage: q.mileage, vin: q.vin, engine_no: q.engine_no, problem: q.problem,
