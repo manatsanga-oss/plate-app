@@ -52,18 +52,25 @@ export async function loadPettyRows() {
       period_from: String(d.period_from || "").slice(0, 10), period_to: String(d.period_to || "").slice(0, 10),
     }));
   };
-  const [f, po, g, o] = await Promise.all([
-    post(PETTY_API, { action: "get_fuel_docs" }).catch(() => null),
-    post(PETTY_API, { action: "get_postage_docs" }).catch(() => null),
-    post(PETTY_API, { action: "get_general_docs" }).catch(() => null),
-    post(PETTY_API, { action: "get_offering_docs" }).catch(() => null),
-  ]);
-  return [
-    ...(await parsePetty(f, "ค่าน้ำมันรถใหม่")),
-    ...(await parsePetty(po, "ค่าไปรษณีย์")),
-    ...(await parsePetty(g, "ค่าใช้จ่ายทั่วไป")),
-    ...(await parsePetty(o, "ค่าของไหว้")),
-  ];
+  // user 2026-09-07: หักในสรุปรายวันเฉพาะ "ค่าน้ำมันรถใหม่" เท่านั้น (ค่าไปรษณีย์/ค่าใช้จ่ายทั่วไป/ค่าของไหว้ ไม่หักเงินสดหน้าร้าน)
+  const f = await post(PETTY_API, { action: "get_fuel_docs" }).catch(() => null);
+  return await parsePetty(f, "ค่าน้ำมันรถใหม่");
+}
+
+/** ยกยอดวันติดลบไปหักวันถัดไป (user 2026-09-07: วันไหนเงินสดสุทธิติดลบ ไม่ต้องขึ้นเป็นวันฝาก ให้ไปหักยอดนำฝากวันถัดไปที่เป็นบวก)
+ *  รับ days ของสาขาเดียว → คืน days ใหม่เรียงเก่า→ใหม่: วันบวกที่รับยอดยกมาจะมี cash = ยอดหลังหัก, carried = [{date, cash}] ของวันติดลบที่รวมเข้ามา
+ *  วันติดลบท้ายสุดที่ยังไม่มีวันบวกมารับ จะไม่ขึ้น (รอวันถัดไป) */
+export function carryNegativeDays(days) {
+  const sorted = [...days].sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  const out = [];
+  let carry = 0, carried = [];
+  for (const d of sorted) {
+    const amt = Math.round((num(d.cash) + carry) * 100) / 100;
+    if (amt <= 0.005) { carry = amt; carried = [...carried, { date: d.date, cash: num(d.cash) }]; continue; }
+    out.push({ ...d, cash: amt, rawCash: num(d.cash), carried });
+    carry = 0; carried = [];
+  }
+  return out;
 }
 
 /** วันที่ "ฝากแล้ว" — จับคู่ใบฝาก (bank_deposits) กับวันสรุปเงิน (user 2026-09-07: วันที่ 3 ฝาก 2 ยอด 230,000 (3/9) + 7,103 (4/9) ทำให้วันที่ 4 หายจาก dropdown)
@@ -442,9 +449,9 @@ export function buildDailyCashItems(src, ctx) {
         note: ["คืนเงินมัดจำระบบเก่า " + (d.brand || ""), String(d.remark || "").replace("[คืนมัดจำระบบเก่า]", "").trim()].filter(Boolean).join(" · "),
       };
     });
-  // เบิกเงินสดย่อย (ค่าน้ำมันรถใหม่/ค่าไปรษณีย์/ค่าใช้จ่ายทั่วไป/ค่าของไหว้) — หักเงินสด ณ วันที่ใบเบิก ทั้งที่รออนุมัติและอนุมัติแล้ว (เงินออกจากลิ้นชักตอนเบิก) (user 2026-09-07)
+  // เบิกเงินสดย่อย "ค่าน้ำมันรถใหม่" เท่านั้น — หักเงินสด ณ วันที่ใบเบิก ทั้งที่รออนุมัติและอนุมัติแล้ว (เงินออกจากลิ้นชักตอนเบิก) (user 2026-09-07)
   const pettyOuts = pettyRows
-    .filter((d) => d.doc_date && d.doc_date >= dateFrom && d.doc_date <= dateTo && d.total_amount > 0)
+    .filter((d) => d.petty_type === "ค่าน้ำมันรถใหม่" && d.doc_date && d.doc_date >= dateFrom && d.doc_date <= dateTo && d.total_amount > 0)
     .filter((d) => inBranch(d.branch_code, ctx))
     .map((d) => {
       const amt = -d.total_amount;

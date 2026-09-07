@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { loadDailyCashSources, buildDailyCashItems, dailyCashByDate, depositedDaySet } from "../lib/dailyCash"; // ยอดเงินสดรับสุทธิรายวัน "นำฝากธนาคาร" ชุดเดียวกับสรุปรายวันรับเงิน (user 2026-09-04)
+import { loadDailyCashSources, buildDailyCashItems, dailyCashByDate, depositedDaySet, carryNegativeDays } from "../lib/dailyCash"; // ยอดเงินสดรับสุทธิรายวัน "นำฝากธนาคาร" ชุดเดียวกับสรุปรายวันรับเงิน (user 2026-09-04)
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -237,7 +237,9 @@ export default function BankDepositPage({ currentUser }) {
         fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_deposits", date_from: from, date_to: addDays(to, 1), branch_code: userBranchCode }) }).then(r => r.json()).catch(() => []),
       ]);
       const items = buildDailyCashItems(src, ctx);
-      const days = dailyCashByDate(items).filter(d => d.branch === String(userBranchCode).toUpperCase() && d.date >= "2026-09-01" && Math.abs(d.cash) >= 0.01);
+      const rawDays = dailyCashByDate(items).filter(d => d.branch === String(userBranchCode).toUpperCase() && d.date >= "2026-09-01" && Math.abs(d.cash) >= 0.01);
+      // วันติดลบไม่ขึ้นเป็นวันฝาก → ยกไปหักยอดวันถัดไปที่เป็นบวก (user 2026-09-07)
+      const days = carryNegativeDays(rawDays).sort((a, b) => b.date.localeCompare(a.date));
       const depList = (Array.isArray(depRes) ? depRes : []).filter(d => d && d.status !== "cancelled");
       // วันที่ฝากแล้วไม่ต้องขึ้น — จับคู่ใบฝากกับวันด้วย "ยอด" (ชุดใบฝากลงวันที่ D/D+1 รวมเท่าเงินสดสุทธิ) ไม่ใช่วันที่อย่างเดียว (user 2026-09-07: วันที่ 3 ฝาก 2 ยอดข้ามวัน ทำให้วันที่ 4 หาย)
       const done = depositedDaySet(days, depList, addDays);
@@ -249,7 +251,8 @@ export default function BankDepositPage({ currentUser }) {
     setCashDate(date);
     const d = cashDays.find(x => x.date === date);
     if (!d) return;
-    setForm(p => ({ ...p, amount: d.cash, source: `ฝากเงินสดประจำวัน ${date} (เงินสดรับสุทธิจากระบบ)` }));
+    const carriedNote = d.carried?.length ? ` · หักยอดติดลบ ${d.carried.map(c => `${fmtDateShort(c.date)} ${fmt(c.cash)}`).join(", ")}` : "";
+    setForm(p => ({ ...p, amount: d.cash, source: `ฝากเงินสดประจำวัน ${date} (เงินสดรับสุทธิจากระบบ${carriedNote})` }));
     setLines([{ to_account_id: "", amount: String(d.cash) }]); // แถวแรกรับยอดเต็ม แบ่งเพิ่มได้ด้วยปุ่ม + บัญชี
   }
   const linesTotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -717,7 +720,7 @@ th { background: #f0fdf4; }
                       <option value="">{cashLoading ? "กำลังคำนวณยอดเงินสดรายวัน…" : cashDays.length ? "-- เลือกวันที่สรุปเงิน --" : "ไม่มีวันที่ยังไม่ได้ฝาก (ตั้งแต่ 1/9/2569)"}</option>
                       {cashDays.map(d => (
                         <option key={d.date} value={d.date}>
-                          {fmtDateShort(d.date)} · เงินสดรับสุทธิ {fmt(d.cash)} บาท ({d.count} รายการ)
+                          {fmtDateShort(d.date)} · เงินสดรับสุทธิ {fmt(d.cash)} บาท ({d.count} รายการ{d.carried?.length ? ` · หักยอดติดลบ ${d.carried.map(c => `${fmtDateShort(c.date)} ${fmt(c.cash)}`).join(", ")}` : ""})
                         </option>
                       ))}
                     </select>
