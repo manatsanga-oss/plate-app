@@ -12,6 +12,7 @@ const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-mo
 const DEPOSIT_INCOME_API = "https://n8n-new-project-gwf2.onrender.com/webhook/deposit-income-api";
 const FUEL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fuel-withdraw-api";
 const INS_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/insurance-refund-api";
+const PETTY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api"; // เบิกเงินสดย่อย 4 ประเภท → หักเงินสดในสรุปรายวัน (user 2026-09-07)
 
 export const METHOD_COLS = [
   { key: "cash", label: "เงินสด" },
@@ -37,9 +38,37 @@ export const shiftDate = (iso, days) => { const d = new Date(iso + "T00:00:00");
 const bc5 = (v) => String(v || "").substring(0, 5).toUpperCase();
 const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
+/** เบิกเงินสดย่อย 4 ประเภท (petty-cash-api คืนทุกใบ ไม่กรองวันที่) → แถวมาตรฐาน {petty_type, doc_no, doc_date, branch_code, total_amount, status, ...}
+ *  ตัดใบยกเลิก/ลบ — สาขา: fuel มี branch_code, ที่เหลือใช้ 5 ตัวแรกของ branch_name (เช่น "SCY06 ป.เปา วังน้อย") — user 2026-09-07 */
+export async function loadPettyRows() {
+  const parsePetty = async (r, label) => {
+    if (!r) return [];
+    let raw = await r.json().catch(() => []);
+    if (raw && typeof raw.listjson === "string") { try { raw = JSON.parse(raw.listjson); } catch { raw = []; } }
+    return (Array.isArray(raw) ? raw : []).filter((d) => d && d.doc_no && !/cancel|delete|reject|ยกเลิก/i.test(String(d.status || ""))).map((d) => ({
+      petty_type: label, doc_no: d.doc_no, doc_date: String(d.doc_date || "").slice(0, 10),
+      branch_code: d.branch_code || String(d.branch_name || "").slice(0, 5), branch_name: d.branch_name || "",
+      total_amount: num(d.total_amount), status: String(d.status || ""), created_by: d.created_by || "",
+      period_from: String(d.period_from || "").slice(0, 10), period_to: String(d.period_to || "").slice(0, 10),
+    }));
+  };
+  const [f, po, g, o] = await Promise.all([
+    post(PETTY_API, { action: "get_fuel_docs" }).catch(() => null),
+    post(PETTY_API, { action: "get_postage_docs" }).catch(() => null),
+    post(PETTY_API, { action: "get_general_docs" }).catch(() => null),
+    post(PETTY_API, { action: "get_offering_docs" }).catch(() => null),
+  ]);
+  return [
+    ...(await parsePetty(f, "ค่าน้ำมันรถใหม่")),
+    ...(await parsePetty(po, "ค่าไปรษณีย์")),
+    ...(await parsePetty(g, "ค่าใช้จ่ายทั่วไป")),
+    ...(await parsePetty(o, "ค่าของไหว้")),
+  ];
+}
+
 /** โหลดข้อมูลดิบทุกแหล่งของช่วงวันที่ (เหมือน load() ของ SaleMoneyReportPage) */
 export async function loadDailyCashSources(dateFrom, dateTo) {
-  const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf] = await Promise.all([
+  const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, pettyRows] = await Promise.all([
     post(RETAIL_API, { action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
     post(DEPOSIT_API, { action: "get_deposits" }).catch(() => null),
     post(PART_DEPOSIT_API, { action: "list_deposits", limit: 2000 }).catch(() => null),
@@ -52,6 +81,7 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
     post(FUEL_API, { action: "list_fuel_withdraws", date_from: dateFrom, date_to: dateTo }).catch(() => null),
     post(RETAIL_API, { action: "list_retail_sales", date_from: dateFrom, date_to: dateTo, limit: 2000 }).catch(() => null),
     post(INS_REFUND_API, { action: "list_refunds", date_from: dateFrom, date_to: dateTo }).catch(() => null),
+    loadPettyRows(),
   ]);
   const data = await res.json().catch(() => []);
   const paidRows = (Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no));
@@ -75,6 +105,7 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
   let ir = [];
   try { ir = typeof irRaw?.listjson === "string" ? JSON.parse(irRaw.listjson) : Array.isArray(irRaw) ? irRaw : []; } catch { ir = []; }
   return {
+    pettyRows,
     hasData: Array.isArray(data) && data.length > 0,
     rows: [...paidRows, ...zeroDue],
     depRows: Array.isArray(dep) ? dep.filter(d => d && d.deposit_no) : [],
@@ -130,7 +161,7 @@ export function buildPartDepItems(partDepRows, ctx) {
 /** สร้างแถวรายการทั้งหมด (allItems) — ctx = { dateFrom, dateTo, branch, isAdmin, myBranch } */
 export function buildDailyCashItems(src, ctx) {
   const { dateFrom, dateTo } = ctx;
-  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [] } = src;
+  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], pettyRows = [] } = src;
   const items = buildSaleItems(src.rows || [], depRows, ctx);
   const depItems = buildDepItems(depRows, ctx);
   const partDepItems = buildPartDepItems(partDepRows, ctx);
@@ -382,7 +413,25 @@ export function buildDailyCashItems(src, ctx) {
         note: ["คืนเงินมัดจำระบบเก่า " + (d.brand || ""), String(d.remark || "").replace("[คืนมัดจำระบบเก่า]", "").trim()].filter(Boolean).join(" · "),
       };
     });
-  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds];
+  // เบิกเงินสดย่อย (ค่าน้ำมันรถใหม่/ค่าไปรษณีย์/ค่าใช้จ่ายทั่วไป/ค่าของไหว้) — หักเงินสด ณ วันที่ใบเบิก ทั้งที่รออนุมัติและอนุมัติแล้ว (เงินออกจากลิ้นชักตอนเบิก) (user 2026-09-07)
+  const pettyOuts = pettyRows
+    .filter((d) => d.doc_date && d.doc_date >= dateFrom && d.doc_date <= dateTo && d.total_amount > 0)
+    .filter((d) => inBranch(d.branch_code, ctx))
+    .map((d) => {
+      const amt = -d.total_amount;
+      const split = { cash: amt, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+      const pending = !/approved|อนุมัติ/.test(d.status) || /รอ/.test(d.status);
+      const period = d.period_from && d.period_to ? ` · ช่วง ${d.period_from.slice(8, 10)}/${d.period_from.slice(5, 7)}–${d.period_to.slice(8, 10)}/${d.period_to.slice(5, 7)}` : "";
+      return {
+        kind: "petty_cash", category: `เบิกเงินสดย่อย — ${d.petty_type} (จ่ายออก)`,
+        doc_no: d.doc_no, date: d.doc_date, ref_no: "",
+        customer_name: d.petty_type, seller: d.created_by || "", saleAmount: 0,
+        split, received: amt,
+        branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
+        note: `หักเงินสดหน้าร้าน${period}${pending ? " · รออนุมัติ" : ""}`,
+      };
+    });
+  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds, ...pettyOuts];
 }
 
 /** ยอดเงินสดรับสุทธิ (นำฝากธนาคาร) แยกตามวัน+สาขา — ใช้ในหน้าบันทึกฝากเงิน */

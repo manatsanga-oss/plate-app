@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { buildDailyCashItems } from "../lib/dailyCash"; // ตรรกะสร้างแถวรายการ ย้ายไปไว้ที่เดียว ใช้ร่วมกับหน้าบันทึกฝากเงิน (user 2026-09-04)
+import { buildDailyCashItems, loadPettyRows } from "../lib/dailyCash"; // ตรรกะสร้างแถวรายการ ย้ายไปไว้ที่เดียว ใช้ร่วมกับหน้าบันทึกฝากเงิน (user 2026-09-04)
 
 // สรุปรายวันรับเงิน: ยอดขาย + เงินที่รับ + แหล่งรับชำระ (เงินสด/โอน/บัตร/ไฟแนนซ์/มัดจำ) + รับชำระเงินมัดจำจองรถ
 // ข้อมูล: retail-sale-api list_sale_payments (ใบขายที่รับชำระแล้ว) + booking-deposit-api get_deposits (มัดจำจองรถ)
@@ -76,7 +76,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [rpStandaloneRows, setRpStandaloneRows] = useState([]); // มัดจำป้ายแดงติดป้ายทีหลัง (standalone) — เงินรับแยกจากใบเสร็จขายรถ
   const [depIncRows, setDepIncRows] = useState([]); // รับฝากชำระค่างวด กรุ๊ปลีส/ธนบรรณ ที่บันทึกจากระบบ (RECS-)
   const [fuelRows, setFuelRows] = useState([]); // เบิกค่าน้ำมันรถใช้จ่าย (fuel_withdrawals) — แถวหักเงินสด
-  const [insRefundRows, setInsRefundRows] = useState([]); // คืนเงินค่าเบี้ยประกัน (insurance_fee_refunds) — เงินสด = แถวหักเงินสด
+  const [insRefundRows, setInsRefundRows] = useState([]);
+  const [pettyRows, setPettyRows] = useState([]); // เบิกเงินสดย่อย 4 ประเภท (ค่าน้ำมันรถใหม่/ไปรษณีย์/ทั่วไป/ของไหว้) — หักเงินสด ณ วันที่ใบเบิก (user 2026-09-07) // คืนเงินค่าเบี้ยประกัน (insurance_fee_refunds) — เงินสด = แถวหักเงินสด
 
 
   async function load() {
@@ -177,6 +178,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
       let ir = [];
       try { ir = typeof irRaw?.listjson === "string" ? JSON.parse(irRaw.listjson) : Array.isArray(irRaw) ? irRaw : []; } catch { ir = []; }
       setInsRefundRows(ir.filter(r => r && r.id));
+      setPettyRows(await loadPettyRows().catch(() => []));
 
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
     } catch {
@@ -277,9 +279,9 @@ export default function SaleMoneyReportPage({ currentUser }) {
   // ===== รวมใบขาย + มัดจำจองรถ + มัดจำอะไหล่/บริการ เป็นตารางเดียว (สไตล์รายงานรับเงิน DMS) — แต่ละแถวติดประเภทรายได้ =====
   // ===== รวมทุกแหล่งเป็นตารางเดียว — ตรรกะอยู่ใน src/lib/dailyCash.js (buildDailyCashItems) ใช้ร่วมกับหน้าบันทึกฝากเงิน =====
   const allItems = useMemo(() => buildDailyCashItems(
-    { rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows },
+    { rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, pettyRows },
     { dateFrom, dateTo, branch, isAdmin, myBranch },
-  ), [rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+  ), [rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, pettyRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {
