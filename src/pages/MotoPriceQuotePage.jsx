@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
 
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
@@ -164,7 +165,9 @@ export default function MotoPriceQuotePage({ currentUser }) {
       const mN = norm(m.finance_company);
       return mN === finN || mN.includes(finN) || finN.includes(mN);
     };
+    const markupRefDate = new Date().toISOString().slice(0, 10);
     return markups.filter(m => {
+      if (!markupActiveOn(m, markupRefDate)) return false; // กฎต้องมีผล ณ วันนี้
       if (m.markup_type === "finance") {
         if (saleType !== "ขายไฟแนนซ์") return false;
         return finMatch(m);

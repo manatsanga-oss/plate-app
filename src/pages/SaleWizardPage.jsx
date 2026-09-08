@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 import CustomerPickerModal from "./CustomerPickerModal";
 import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
 
@@ -1458,7 +1459,9 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       const mN = norm(m.finance_company);
       return mN === finN || mN.includes(finN) || finN.includes(mN);
     };
+    const markupRefDate = bookingDateISO || todayStr(); // กฎต้องมีผล ณ วันอ้างอิง (จอง = วันจอง)
     const matched = markups.filter((m) => {
+      if (!markupActiveOn(m, markupRefDate)) return false;
       if (m.markup_type === "finance") return finMatch(m);
       if (m.markup_type === "finance_cc") {
         if (!finMatch(m)) return false;

@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 import CustomerPickerModal from "./CustomerPickerModal";
 import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
 
@@ -437,7 +438,9 @@ export default function RetailSalePage({ currentUser }) {
       const mN = norm(m.finance_company);
       return mN === finN || mN.includes(finN) || finN.includes(mN);
     };
+    const markupRefDate = new Date().toISOString().slice(0, 10);
     const matched = markups.filter((m) => {
+      if (!markupActiveOn(m, markupRefDate)) return false; // กฎต้องมีผล ณ วันขาย
       if (m.markup_type === "finance") return finMatch(m);
       if (m.markup_type === "finance_cc") {
         if (!finMatch(m)) return false;

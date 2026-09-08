@@ -1,6 +1,17 @@
 // Logic สถานะรับชำระเงินรายคัน — ใช้ร่วมกันระหว่าง CarPaymentReportPage และ PayDepositPage (tab โอนเงินเกิน)
 // ข้อมูลแถว r มาจาก action list_car_payment_receipts (accounting-report-api)
 
+// กฎบวกเพิ่มมีผลตามช่วงวันที่ (effective_date/end_date) — เทียบกับวันอ้างอิง (วันขาย/วันจอง) ใบขายเก่าใช้กฎเดิม ใบใหม่ใช้กฎที่ยังมีผล (user 2026-09-08: ปิดกฎคาเธ่ย์ 2,200 ป.เปา ตั้งแต่วันนี้)
+export const markupActiveOn = (m, isoDate) => {
+  const d = String(isoDate || "").slice(0, 10);
+  if (!d) return true;
+  const eff = m?.effective_date ? String(m.effective_date).slice(0, 10) : "";
+  const end = m?.end_date ? String(m.end_date).slice(0, 10) : "";
+  if (eff && eff > d) return false;
+  if (end && end < d) return false;
+  return true;
+};
+
 // ยอดตัดรับ FT เข้าใบกำกับ = เฉพาะค่ารถ (paid_vehicle_price) ถ้ามี breakdown — ค่าส่งเสริมไม่นับเป็นค่าสินค้า
 export const ftPaid = (r) => r.paid_vehicle_price != null ? Number(r.paid_vehicle_price) : Number(r.paid_from_amount || 0);
 // ยอดรับชำระรวม = daily_receipts + FT (เฉพาะส่วนค่ารถ)
@@ -68,7 +79,9 @@ export function getMarkups(r, markups) {
     return null;
   };
   const saleCC = Number(r.sale_engine_cc) || extractCC(r.sale_model_code) || extractCC(r.model_code) || extractCC(r.model_name) || null;
+  const saleD = String(r.sale_date || r.invoice_date || "").slice(0, 10);
   return (markups || []).filter(m => {
+    if (!markupActiveOn(m, saleD)) return false; // กฎต้องมีผล ณ วันขาย
     if (m.markup_type === "finance") return finMatch(m);
     if (m.markup_type === "finance_cc") {
       if (!finMatch(m)) return false;

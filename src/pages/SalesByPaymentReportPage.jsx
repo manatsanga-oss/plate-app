@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 
 const ACCOUNTING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
@@ -112,7 +113,9 @@ export default function SalesByPaymentReportPage() {
       return null;
     };
     const saleCC = Number(r.sale_engine_cc) || extractCC(r.sale_model_code) || extractCC(r.model_code) || extractCC(r.model_name) || extractCC(r.matched_model_code) || extractCC(r.matched_model_series) || null;
+    const saleD = String(r.sale_date || r.invoice_date || "").slice(0, 10);
     return markups.filter(m => {
+      if (!markupActiveOn(m, saleD)) return false; // กฎต้องมีผล ณ วันขาย (ใบเก่าใช้กฎเดิม)
       if (m.markup_type === "finance") return finMatch(m);
       if (m.markup_type === "finance_cc") {
         if (!finMatch(m)) return false;
