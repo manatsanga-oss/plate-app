@@ -63,12 +63,34 @@ async function postJson(url, body) {
   return raw.trim() ? JSON.parse(raw) : {};
 }
 
+// แถววิธีรับชำระ → ฟิลด์ที่บันทึก: deposit_amount = ผลรวม · payment_method = "เงินสด" / "เงินโอน" / "เงินสด+เงินโอน" / "อื่นๆ" · cash_amount/transfer_amount แยกยอด · payment_account = บัญชีรับโอน (หลายบัญชีคั่น " / ")
+const payLinesToFields = (lines) => {
+  const ls = (lines || []).map((l) => ({ method: l.method || "เงินสด", amount: Number(String(l.amount ?? "").replace(/,/g, "")) || 0, account: l.account || "" })).filter((l) => l.amount > 0);
+  const cash = ls.filter((l) => l.method === "เงินสด").reduce((a, l) => a + l.amount, 0);
+  const transfer = ls.filter((l) => l.method === "เงินโอน").reduce((a, l) => a + l.amount, 0);
+  const other = ls.filter((l) => l.method === "อื่นๆ").reduce((a, l) => a + l.amount, 0);
+  const total = Math.round((cash + transfer + other) * 100) / 100;
+  const methods = [...new Set(ls.map((l) => l.method))];
+  const payment_method = methods.length === 0 ? "เงินสด" : methods.length === 1 ? methods[0] : (cash > 0 && transfer > 0 ? "เงินสด+เงินโอน" : methods.join("+"));
+  const payment_account = [...new Set(ls.filter((l) => l.method === "เงินโอน" && l.account).map((l) => l.account))].join(" / ");
+  return { deposit_amount: total ? String(total) : "", payment_method, payment_account, cash_amount: cash, transfer_amount: transfer };
+};
+// ใบเดิม → แถววิธีรับชำระ (ใบก่อนมีฟีเจอร์: วิธีเดียวยอดเต็ม)
+const fieldsToPayLines = (r) => {
+  const c = Number(r.cash_amount) || 0, t = Number(r.transfer_amount) || 0, total = Number(r.deposit_amount) || 0;
+  const m = String(r.payment_method || "");
+  if (c > 0 && t > 0) return [{ method: "เงินสด", amount: String(c), account: "" }, { method: "เงินโอน", amount: String(t), account: r.payment_account || "" }];
+  if (m.includes("โอน")) return [{ method: "เงินโอน", amount: String(t || total), account: r.payment_account || "" }];
+  if (m.includes("อื่น")) return [{ method: "อื่นๆ", amount: String(total), account: "" }];
+  return [{ method: "เงินสด", amount: String(c || total), account: "" }];
+};
 const emptyForm = {
   deposit_no: "", deposit_date: todayISO(),
   customer_source: "", customer_code: "", customer_name: "", customer_phone: "",
   customer_address: "", customer_tax_id: "", line_user_id: "",
   brand: "", model_series: "", model_code: "", model_type: "", color_name: "",
   deposit_amount: "", payment_method: "เงินสด", payment_account: "", cash_amount: "", transfer_amount: "",
+  pay_lines: [{ method: "เงินสด", amount: "", account: "" }], // วิธีรับชำระหลายแถว (+ เพิ่มวิธีรับชำระ) — user 2026-09-08
   purchase_type: "สด", finance_company: "", note: "",
 };
 
@@ -163,19 +185,18 @@ export default function BookingDepositPage({ currentUser }) {
     // บังคับเลือก Type เมื่อรุ่นที่เลือกมี type ให้เลือก — ไม่งั้นใบจองที่สร้างจะขาด type จับคิว/สต๊อกไม่ตรง
     if (typeOpts.length > 0 && !form.model_type) { setMessage("❌ เลือก Type ของรถ (เพื่อให้ระบบจองจับคิว/สต๊อกได้ถูก)"); return; }
     if (!(Number(String(form.deposit_amount).replace(/,/g, "")) > 0)) { setMessage("❌ กรอกจำนวนเงินมัดจำ"); return; }
-    if (form.payment_method === "เงินโอน" && !form.payment_account) { setMessage("❌ เลือกบัญชีรับเงิน"); return; }
-    // รับชำระผสม เงินสด+เงินโอน: ต้องกรอกทั้ง 2 ช่อง > 0 และเลือกบัญชีรับโอน (ยอดมัดจำ = ผลรวม คำนวณให้เอง) — user 2026-09-08
-    if (form.payment_method === "เงินสด+เงินโอน") {
-      const c = Number(String(form.cash_amount).replace(/,/g, "")) || 0, t = Number(String(form.transfer_amount).replace(/,/g, "")) || 0;
-      if (!(c > 0) || !(t > 0)) { setMessage("❌ รับชำระผสม: กรอกยอดเงินสดและยอดเงินโอนให้ครบทั้ง 2 ช่อง"); return; }
-      if (!form.payment_account) { setMessage("❌ เลือกบัญชีรับเงินโอน"); return; }
-    }
+    // แถววิธีรับชำระ: ทุกแถวต้องมียอด > 0 · เงินโอนต้องเลือกบัญชี (user 2026-09-08: ปุ่ม + เพิ่มวิธีรับชำระ)
+    const payLines = form.pay_lines || [];
+    if (payLines.some((l) => !(Number(String(l.amount ?? "").replace(/,/g, "")) > 0))) { setMessage("❌ กรอกยอดเงินให้ครบทุกแถววิธีรับชำระ (หรือลบแถวที่ไม่ใช้)"); return; }
+    if (payLines.some((l) => l.method === "เงินโอน" && !l.account)) { setMessage("❌ เลือกบัญชีรับเงินโอนให้ครบทุกแถว"); return; }
+    const payFields = payLinesToFields(payLines);
     setSaving(true); setMessage("");
     const isNew = !form.deposit_no; // ใบใหม่เท่านั้นที่สร้างใบจองอัตโนมัติ (กันจองซ้ำตอนแก้ไข)
     try {
       const r = await postJson(DEPOSIT_API, {
         action: "save_deposit",
         ...form,
+        ...payFields,
         branch_code: branchCode,
         branch_name: currentUser?.branch || "",
         created_by: currentUser?.username || currentUser?.name || "system",
@@ -216,8 +237,8 @@ export default function BookingDepositPage({ currentUser }) {
             customer_name: form.customer_name,
             customer_phone: form.customer_phone,
             car: carLabel(form),
-            deposit_amount: form.deposit_amount,
-            payment_method: form.payment_method,
+            deposit_amount: payFields.deposit_amount,
+            payment_method: payFields.payment_method,
             branch_name: currentUser?.branch || branchCode,
             created_by: currentUser?.username || currentUser?.name || "",
           });
@@ -236,9 +257,9 @@ export default function BookingDepositPage({ currentUser }) {
             customer_name: form.customer_name,
             line_user_id: form.line_user_id,
             car: carLabel(form),
-            deposit_amount: form.deposit_amount,
-            payment_method: form.payment_method,
-            payment_account: form.payment_account,
+            deposit_amount: payFields.deposit_amount,
+            payment_method: payFields.payment_method,
+            payment_account: payFields.payment_account,
             branch_code: branchCode,
             branch_name: currentUser?.branch || "",
           });
@@ -272,6 +293,7 @@ export default function BookingDepositPage({ currentUser }) {
       model_type: r.model_type || "", color_name: r.color_name || "",
       deposit_amount: r.deposit_amount || "", payment_method: r.payment_method || "เงินสด",
       payment_account: r.payment_account || "", cash_amount: r.cash_amount || "", transfer_amount: r.transfer_amount || "",
+      pay_lines: fieldsToPayLines(r),
       purchase_type: r.purchase_type || "สด", finance_company: r.finance_company || "",
       note: r.note || "",
     });
@@ -553,45 +575,45 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
               <Field label="วันที่มัดจำ">
                 <input type="date" value={form.deposit_date} onChange={(e) => setForm({ ...form, deposit_date: e.target.value })} style={inp} />
               </Field>
-              <Field label={form.payment_method === "เงินสด+เงินโอน" ? "จำนวนเงินมัดจำ (บาท) — รวมอัตโนมัติ" : "จำนวนเงินมัดจำ (บาท) *"}>
-                <input type="number" value={form.deposit_amount} readOnly={form.payment_method === "เงินสด+เงินโอน"}
-                  onChange={(e) => setForm({ ...form, deposit_amount: e.target.value })}
-                  style={{ ...inp, textAlign: "right", fontWeight: 700, ...(form.payment_method === "เงินสด+เงินโอน" ? { background: "#f1f5f9" } : {}) }} />
+              <Field label="จำนวนเงินมัดจำ (บาท) — รวมจากวิธีรับชำระ">
+                <input type="number" value={form.deposit_amount} readOnly style={{ ...inp, textAlign: "right", fontWeight: 700, background: "#f1f5f9" }} />
               </Field>
-              <Field label="วิธีรับชำระ *">
-                <select value={form.payment_method} onChange={(e) => setForm({ ...form, payment_method: e.target.value, payment_account: "", cash_amount: "", transfer_amount: "" })} style={inp}>
-                  <option value="เงินสด">เงินสด</option>
-                  <option value="เงินโอน">เงินโอน</option>
-                  <option value="เงินสด+เงินโอน">เงินสด + เงินโอน (ผสม)</option>
-                  <option value="อื่นๆ">อื่นๆ</option>
-                </select>
-              </Field>
-              {form.payment_method === "เงินสด+เงินโอน" && (
-                <>
-                  <Field label="ยอดเงินสด (บาท) *">
-                    <input type="number" value={form.cash_amount}
-                      onChange={(e) => { const c = e.target.value; const t = Number(String(form.transfer_amount).replace(/,/g, "")) || 0; setForm({ ...form, cash_amount: c, deposit_amount: String((Number(c) || 0) + t) }); }}
-                      style={{ ...inp, textAlign: "right" }} />
-                  </Field>
-                  <Field label="ยอดเงินโอน (บาท) *">
-                    <input type="number" value={form.transfer_amount}
-                      onChange={(e) => { const t = e.target.value; const c = Number(String(form.cash_amount).replace(/,/g, "")) || 0; setForm({ ...form, transfer_amount: t, deposit_amount: String(c + (Number(t) || 0)) }); }}
-                      style={{ ...inp, textAlign: "right" }} />
-                  </Field>
-                </>
-              )}
-              {(form.payment_method === "เงินโอน" || form.payment_method === "เงินสด+เงินโอน") && (
-                <Field label="บัญชีรับเงิน *">
-                  <select value={form.payment_account} onChange={(e) => setForm({ ...form, payment_account: e.target.value })} style={inp}>
-                    <option value="">-- เลือกบัญชี --</option>
-                    {bankAccounts.filter((a) => a.account_type !== "เงินสดย่อย" && a.account_type !== "ลูกหนี้").map((a) => (
-                      <option key={a.account_id} value={`${a.account_name}${a.account_no && a.account_no !== "-" ? ` · ${a.account_no}` : ""}${a.bank_name && a.bank_name !== "-" ? ` (${a.bank_name})` : ""}`}>
-                        {a.account_name}{a.account_no && a.account_no !== "-" ? ` · ${a.account_no}` : ""}{a.bank_name && a.bank_name !== "-" ? ` (${a.bank_name})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-              )}
+              <div style={{ gridColumn: "1 / -1" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>วิธีรับชำระ * <span style={{ fontWeight: 400, color: "#64748b" }}>(รับได้หลายวิธีในใบเดียว เช่น เงินสด + เงินโอน)</span></div>
+                {(form.pay_lines || []).map((l, idx) => {
+                  const setLine = (patch) => setForm((f) => {
+                    const lines = (f.pay_lines || []).map((x, k) => (k === idx ? { ...x, ...patch } : x));
+                    return { ...f, pay_lines: lines, deposit_amount: payLinesToFields(lines).deposit_amount };
+                  });
+                  return (
+                    <div key={idx} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                      <select value={l.method} onChange={(e) => setLine({ method: e.target.value, account: "" })} style={{ ...inp, width: 140 }}>
+                        <option value="เงินสด">💵 เงินสด</option>
+                        <option value="เงินโอน">🏦 เงินโอน</option>
+                        <option value="อื่นๆ">อื่นๆ</option>
+                      </select>
+                      <input type="number" value={l.amount} onChange={(e) => setLine({ amount: e.target.value })} placeholder="ยอด" style={{ ...inp, width: 140, textAlign: "right", fontWeight: 700 }} />
+                      {l.method === "เงินโอน" && (
+                        <select value={l.account} onChange={(e) => setLine({ account: e.target.value })} style={{ ...inp, flex: 1, minWidth: 220 }}>
+                          <option value="">-- เลือกบัญชีรับเงิน --</option>
+                          {bankAccounts.filter((a2) => a2.account_type !== "เงินสดย่อย" && a2.account_type !== "ลูกหนี้").map((a2) => {
+                            const label = `${a2.account_name}${a2.account_no && a2.account_no !== "-" ? ` · ${a2.account_no}` : ""}${a2.bank_name && a2.bank_name !== "-" ? ` (${a2.bank_name})` : ""}`;
+                            return <option key={a2.account_id} value={label}>{label}</option>;
+                          })}
+                        </select>
+                      )}
+                      {(form.pay_lines || []).length > 1 && (
+                        <button type="button" onClick={() => setForm((f) => { const lines = (f.pay_lines || []).filter((_, k) => k !== idx); return { ...f, pay_lines: lines, deposit_amount: payLinesToFields(lines).deposit_amount }; })}
+                          style={{ padding: "6px 10px", background: "#fee2e2", color: "#991b1b", border: "none", borderRadius: 6, cursor: "pointer" }} title="ลบแถว">✕</button>
+                      )}
+                    </div>
+                  );
+                })}
+                <button type="button" onClick={() => setForm((f) => ({ ...f, pay_lines: [...(f.pay_lines || []), { method: "เงินโอน", amount: "", account: "" }] }))}
+                  style={{ padding: "6px 14px", background: "#fff", color: "#0369a1", border: "1.5px dashed #0369a1", borderRadius: 8, cursor: "pointer", fontSize: 13 }}>
+                  + เพิ่มวิธีรับชำระ
+                </button>
+              </div>
               <Field label="ประเภทการซื้อ *">
                 <div style={{ display: "flex", gap: 18, paddingTop: 7 }}>
                   {["สด", "ผ่อน"].map((t) => (
