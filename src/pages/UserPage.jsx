@@ -55,6 +55,7 @@ const PAGE_GROUPS = [
       { key: "partdeposit", label: "🪙 ระบบมัดจำอะไหล่" },
       { key: "partreturn", label: "↩️ บันทึกคืนสินค้า/สั่งใหม่" },
       { key: "fastmoving", label: "⚡ รายงานอะไหล่หมุนเร็ว" },
+      { key: "rfidstock", label: "📡 นับสต๊อก RFID" },
       { key: "partwithdrawal", label: "📤 บันทึกการเบิกอะไหล่" },
     ],
   },
