@@ -22,9 +22,11 @@ const METHOD_COLS = [
   { key: "deposit", label: "เงินมัดจำ" },
   { key: "coupon", label: "E-คูปอง" },
   { key: "tradein", label: "รถเทิร์น" },
+  { key: "wht", label: "หัก ณ ที่จ่าย" }, // ภาษีหัก ณ ที่จ่ายที่ลูกค้าหัก (ยอดรับรวมเท่าบิล แต่เงินเข้าน้อยกว่า) — user 2026-09-08
 ];
 function methodKey(name) {
   const n = String(name || "");
+  if (n.includes("หัก ณ") || n.toUpperCase().includes("WHT")) return "wht";
   if (n.includes("มัดจำ")) return "deposit";
   if (n.includes("คูปอง")) return "coupon";
   if (n.includes("เทิร์น") || n.includes("เทิน")) return "tradein";
@@ -198,7 +200,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         let pms = r.payment_methods;
         if (typeof pms === "string") { try { pms = JSON.parse(pms); } catch { pms = []; } }
         if (!Array.isArray(pms)) pms = [];
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, other: 0 };
         for (const p of pms) split[methodKey(p.method)] += num(p.amount);
         const paid = num(r.paid_amount) || METHOD_COLS.reduce((s, c) => s + split[c.key], 0);
         // เงินจอง (booking_deposit) ที่หักในใบขาย — ไม่ได้อยู่ใน payment_methods ต้องบวกเข้าคอลัมน์เงินมัดจำเอง
