@@ -255,7 +255,11 @@ export function buildDailyCashItems(src, ctx) {
     const amt = num(d.deposit_amount);
     const m = String(d.payment_method || "");
     const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, other: 0 };
-    if (m.includes("สด")) split.cash = amt; else if (m.includes("โอน")) split.transfer = amt; else split.other = amt;
+    if (m.includes("สด") && m.includes("โอน")) {
+      // รับชำระผสม (user 2026-09-08): ใช้ยอดแยกที่บันทึกไว้ ถ้าไม่มีให้ถือเป็นเงินสดทั้งก้อน
+      const c = num(d.cash_amount), t = num(d.transfer_amount);
+      if (c + t > 0) { split.cash = c; split.transfer = t; } else split.cash = amt;
+    } else if (m.includes("สด")) split.cash = amt; else if (m.includes("โอน")) split.transfer = amt; else split.other = amt;
     return {
       kind: "deposit", category: "รายได้เงินมัดจำจองรถ",
       doc_no: d.deposit_no, date: d.deposit_date, ref_no: "",
