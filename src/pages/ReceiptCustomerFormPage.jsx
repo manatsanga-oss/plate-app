@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { TITLE_OPTIONS_TH, TITLE_OPTIONS_EN, hasNameTitle, withTitle } from "../utils/nameTitle";
 
 // ============================================================================
 // หน้าฟอร์มลูกค้า (เปิดผ่าน LINE LIFF) — ลูกค้าสแกน QR จากพนักงานแล้วมากรอกที่นี่
@@ -38,7 +39,7 @@ const T = {
     langName: "ไทย",
     title: "กรอกข้อมูลเพื่อออกใบเสร็จ", ref: "เลขอ้างอิง", connecting: "กำลังเชื่อมต่อ LINE…",
     doneTitle: "ส่งข้อมูลเรียบร้อยแล้ว", doneDescPre: "กรุณาแจ้งเลขอ้างอิง", doneDescPost: "กับพนักงานเพื่อรับใบเสร็จ",
-    name: "ชื่อ-นามสกุล / ชื่อบริษัท", namePh: "เช่น นายสมชาย ใจดี",
+    name: "ชื่อ-นามสกุล / ชื่อบริษัท", namePh: "เช่น สมชาย ใจดี", titleLabel: "คำนำหน้า", titlePh: "-- เลือก --", titleCompany: "บริษัท/ร้าน (ไม่ใส่คำนำหน้า)", errTitle: "กรุณาเลือกคำนำหน้าชื่อ",
     phone: "เบอร์โทรศัพท์", phonePh: "08x-xxx-xxxx",
     houseLine: "บ้านเลขที่ / หมู่ / ถนน", houseLinePh: "เช่น 189-191 หมู่ 7 ถ.พหลโยธิน",
     province: "จังหวัด", amphoe: "อำเภอ", tambon: "ตำบล", khet: "เขต", khwaeng: "แขวง",
@@ -61,7 +62,7 @@ const T = {
     langName: "EN",
     title: "Fill in details for receipt", ref: "Ref", connecting: "Connecting to LINE…",
     doneTitle: "Submitted successfully", doneDescPre: "Please show ref", doneDescPost: "to our staff to get your receipt",
-    name: "Full name / Company", namePh: "e.g. John Smith",
+    name: "Full name / Company", namePh: "e.g. John Smith", titleLabel: "Title", titlePh: "-- select --", titleCompany: "Company / Shop (no title)", errTitle: "Please select a title",
     phone: "Phone number", phonePh: "08x-xxx-xxxx",
     houseLine: "House no. / Moo / Road", houseLinePh: "e.g. 189-191 Moo 7 Phahonyothin Rd.",
     province: "Province", amphoe: "District", tambon: "Subdistrict", khet: "District", khwaeng: "Subdistrict",
@@ -84,7 +85,7 @@ const T = {
     langName: "မြန်မာ",
     title: "ပြေစာထုတ်ရန် အချက်အလက်ဖြည့်ပါ", ref: "ကိုးကားနံပါတ်", connecting: "LINE နှင့် ချိတ်ဆက်နေသည်…",
     doneTitle: "အချက်အလက် ပေးပို့ပြီးပါပြီ", doneDescPre: "ပြေစာရယူရန် ဝန်ထမ်းအား ကိုးကားနံပါတ်", doneDescPost: "ကို ပြသပါ",
-    name: "အမည် / ကုမ္ပဏီအမည်", namePh: "ဥပမာ - John Smith",
+    name: "အမည် / ကုမ္ပဏီအမည်", namePh: "ဥပမာ - John Smith", titleLabel: "ဂုဏ်ပုဒ်", titlePh: "-- ရွေးပါ --", titleCompany: "ကုမ္ပဏီ / ဆိုင် (ဂုဏ်ပုဒ်မလို)", errTitle: "ဂုဏ်ပုဒ် ရွေးပါ",
     phone: "ဖုန်းနံပါတ်", phonePh: "08x-xxx-xxxx",
     houseLine: "အိမ်အမှတ် / ရပ်ကွက် / လမ်း", houseLinePh: "ဥပမာ - 189-191 Moo 7 Phahonyothin Rd.",
     province: "ခရိုင် (จังหวัด)", amphoe: "မြို့နယ် (อำเภอ)", tambon: "ကျေးရွာအုပ်စု (ตำบล)", khet: "မြို့နယ်", khwaeng: "ရပ်ကွက်",
@@ -142,7 +143,7 @@ export default function ReceiptCustomerFormPage() {
   const [oa, setOa] = useState(""); // "singchai" = สาขา สิงห์ชัย → โชว์ปุ่มแอด สิงห์ชัย OA
   const [profile, setProfile] = useState(null);   // { userId, displayName }
   const [isFriend, setIsFriend] = useState(null); // true/false จาก liff.getFriendship() | null = ไม่ทราบ
-  const [form, setForm] = useState({ customer_name: "", phone: "", tax_id: "", gender: "", birth_date: "" });
+  const [form, setForm] = useState({ customer_name: "", phone: "", tax_id: "", gender: "", birth_date: "", title: "" }); // title: คำนำหน้า (user 2026-09-09) — "-" = นิติบุคคล ไม่ใส่
 
   // ที่อยู่: บ้านเลขที่/ถนน + จังหวัด/อำเภอ/ตำบล (id) + zip (auto)
   const [addr, setAddr] = useState({ line: "", provinceId: "", districtId: "", subdistrictId: "", zip: "" });
@@ -268,6 +269,8 @@ export default function ReceiptCustomerFormPage() {
   async function handleSubmit() {
     if (!refNo) { setErrorMsg(t.errRef); return; }
     if (!text(form.customer_name)) { setErrorMsg(t.errName); return; }
+    // คำนำหน้าชื่อบังคับเลือก (ยกเว้นนิติบุคคล หรือพิมพ์คำนำหน้ามาในชื่อแล้ว) — เอกสารงานทะเบียนต้องมี (user 2026-09-09)
+    if (!form.title && !hasNameTitle(form.customer_name)) { setErrorMsg(t.errTitle); return; }
     // ห้ามชื่อ/ที่อยู่เป็นตัวอักษรพม่า — แจ้งเป็นพม่า+อังกฤษเสมอ (คนพิมพ์พม่าอาจเปิด UI ภาษาอื่นอยู่)
     if (HAS_BURMESE.test(form.customer_name)) { setErrorMsg(`${T.my.errNameLang} / ${T.en.errNameLang}`); return; }
     if (!text(form.phone)) { setErrorMsg(t.errPhone); return; }
@@ -283,7 +286,7 @@ export default function ReceiptCustomerFormPage() {
       const payload = {
         action: "submit_customer",
         ref_no: refNo,
-        customer_name: text(form.customer_name),
+        customer_name: (form.title && form.title !== "-" && !hasNameTitle(form.customer_name)) ? withTitle(form.title, form.customer_name) : text(form.customer_name),
         address: composeAddress(),
         phone: text(form.phone),
         tax_id: text(form.tax_id),
@@ -360,6 +363,13 @@ export default function ReceiptCustomerFormPage() {
               </div>
             )}
 
+            <label style={S.label}>{t.titleLabel} *</label>
+            <select style={S.input} value={form.title} onChange={setField("title")}>
+              <option value="">{t.titlePh}</option>
+              {(lang === "th" ? TITLE_OPTIONS_TH : TITLE_OPTIONS_EN).map((x) => <option key={x} value={x}>{x}</option>)}
+              {(lang === "th" ? TITLE_OPTIONS_EN : TITLE_OPTIONS_TH).map((x) => <option key={x} value={x}>{x}</option>)}
+              <option value="-">{t.titleCompany}</option>
+            </select>
             <label style={S.label}>{t.name} *</label>
             <input style={S.input} value={form.customer_name} onChange={setField("customer_name")} placeholder={t.namePh} />
 

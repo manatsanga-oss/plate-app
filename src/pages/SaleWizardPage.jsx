@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { TITLE_OPTIONS_ALL, hasNameTitle, guessTitle, withTitle } from "../utils/nameTitle"; // คำนำหน้าชื่อลูกค้า
 import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 import CustomerPickerModal from "./CustomerPickerModal";
 import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
@@ -194,6 +195,8 @@ export default function SaleWizardPage({ currentUser }) {
   // ข้อมูลลูกค้า (แบบเดียวกับหน้าบันทึกขายปลีก — เลือกจาก CustomerPickerModal หรือพิมพ์เอง)
   const CUST_DEFAULT = { customer_code: "", customer_name: "", customer_address: "", customer_phone: "", customer_birthdate: "", customer_tax_id: "", customer_province: "", customer_gender: "", customer_line_user_id: "" };
   const [cust, setCust] = useState(CUST_DEFAULT);
+  const [custTitle, setCustTitle] = useState(""); // คำนำหน้าที่เลือกเพิ่มเมื่อชื่อลูกค้าไม่มี (user 2026-09-09)
+  useEffect(() => { setCustTitle(cust.customer_name && !hasNameTitle(cust.customer_name) ? guessTitle(cust.customer_name, cust.customer_gender) : ""); }, [cust.customer_name, cust.customer_gender]);
   const [showCustomer, setShowCustomer] = useState(false);
 
   // ราคาขายบวกเพิ่ม (รายการปรับแต่ง — logic เดียวกับบันทึกขายปลีก)
@@ -1056,6 +1059,18 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     const carPrice = finalCarPrice(saleType); // ราคาสุทธิเฉพาะคัน (ถ้ามี) = ราคาสุดท้าย ไม่บวกกฎใด ๆ
     if (carPrice == null) { setMessage(isWholesale ? "❌ กรอกราคาขายส่งก่อน" : "❌ ไม่พบราคาขายของรถคันนี้ — ตรวจสอบเมนูราคารถก่อน"); return; }
     if (!text(cust.customer_name)) { setMessage("❌ กรุณากรอกชื่อลูกค้า"); return; }
+    // ชื่อลูกค้าต้องมีคำนำหน้า (เอกสารงานทะเบียน) — เลือกจาก dropdown ข้างชื่อ; "-" = นิติบุคคล (user 2026-09-09)
+    if (!hasNameTitle(cust.customer_name) && !custTitle) { setMessage("❌ ชื่อลูกค้าไม่มีคำนำหน้า — เลือกคำนำหน้า (นาย/นาง/นางสาว/MR./MS.) ข้างชื่อลูกค้าก่อนบันทึก"); return; }
+    if (!hasNameTitle(cust.customer_name) && custTitle && custTitle !== "-") {
+      const fixed = withTitle(custTitle, cust.customer_name);
+      cust.customer_name = fixed; // ใช้ในใบขาย/ใบเสร็จ/LINE ทันที (state อัปเดตด้านล่าง)
+      setCust((p) => ({ ...p, customer_name: fixed }));
+      // เขียนกลับฐานลูกค้า LINE (receipt_requests) ให้ครั้งหน้ามีคำนำหน้าเลย — best effort
+      if (/^RC-/i.test(String(cust.customer_code || ""))) {
+        post("https://n8n-new-project-gwf2.onrender.com/webhook/receipt-requests-api", { action: "update_customer", ref_no: cust.customer_code, customer_name: fixed,
+          phone: cust.customer_phone || "", tax_id: cust.customer_tax_id || "", address: cust.customer_address || "" }).catch(() => {});
+      }
+    }
     const netCar = Math.max(carPrice - downSubDiscount, 0); // หักส่วนลด "เงินดาวน์ออกแทน" (เฉพาะส่วนที่ไม่ได้แบ่งไปช่วยค่างวดล่วงหน้า)
     const fc = financeCalc(netCar);
     if (isFin && !(fc.n > 0)) { setMessage("❌ กรอกจำนวนงวด"); return; }
@@ -2243,6 +2258,15 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         </div>
                         <div style={lbl}>ชื่อลูกค้า <span style={{ color: "#ef4444" }}>*</span></div>
                         <div style={{ ...box, textAlign: cust.customer_name ? "left" : "center" }}>
+                          {/* ชื่อจาก QR/LINE มักไม่มีคำนำหน้า → บังคับเลือกก่อนบันทึก (เดาจากเพศ) แล้วต่อเข้าชื่อ (user 2026-09-09) */}
+                          {cust.customer_name && !hasNameTitle(cust.customer_name) && (
+                            <select value={custTitle} onChange={(e) => setCustTitle(e.target.value)}
+                              style={{ marginRight: 8, padding: "4px 6px", border: "1.5px solid #ef4444", borderRadius: 6, fontFamily: "Tahoma", fontSize: 13, background: "#fef2f2" }} title="ชื่อนี้ไม่มีคำนำหน้า — เลือกคำนำหน้าก่อนบันทึก">
+                              <option value="">คำนำหน้า *</option>
+                              {TITLE_OPTIONS_ALL.map((x) => <option key={x} value={x}>{x}</option>)}
+                              <option value="-">บริษัท/ร้าน (ไม่ใส่)</option>
+                            </select>
+                          )}
                           {cust.customer_name || "กดปุ่ม 🔍 เลือก/เพิ่ม เพื่อเลือกลูกค้า"}
                           {cust.customer_name && custLineUserId ? <span style={{ marginLeft: 8, color: "#15803d", fontSize: 12, fontWeight: 700 }} title="ลูกค้าผูก LINE ไว้แล้ว — ใบขายจะส่งเข้า LINE อัตโนมัติ">LINE ✓</span> : null}
                         </div>
