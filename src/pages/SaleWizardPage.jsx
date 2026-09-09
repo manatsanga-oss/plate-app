@@ -726,14 +726,17 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   }
 
   // คำนวณยอดฝั่งไฟแนนท์จากราคาขาย (carPrice)
-  function financeCalc(carPrice) {
-    const down = num(finDown), theft = num(finTheft), rate = num(finRate) / 100, n = num(finN);
+  // downSub = "เงินดาวน์ออกแทน" (ค่าใช้จ่ายการขาย ร้านจ่ายดาวน์แทนลูกค้า) — ไม่ลดราคาขาย (user 2026-09-09: ราคาขาย/ใบกำกับคงเต็ม)
+  // ดาวน์ตามสัญญาไฟแนนซ์ = ดาวน์ที่ลูกค้าจ่าย (ช่อง) + ร้านออกแทน → ยอดจัดตรงใบอนุมัติเหมือนเดิม
+  function financeCalc(carPrice, downSub = 0) {
+    const custDown = num(finDown), theft = num(finTheft), rate = num(finRate) / 100, n = num(finN);
+    const down = custDown + (downSub || 0);
     const financeAmount = Math.max((carPrice || 0) - down, 0);
     const instRaw = n > 0 ? (financeAmount * (1 + rate * n)) / n : 0;
     const instRounded = instRaw <= 0 ? 0 : (finRound5 ? Math.ceil(instRaw / 5) * 5 : Math.ceil(instRaw));
     const inst = finInstTouched && finInstOverride !== "" ? num(finInstOverride) : instRounded;
     const advance = num(finAdvance);
-    return { down, theft, n, financeAmount, instRounded, inst, advance };
+    return { down, custDown, downSub: downSub || 0, theft, n, financeAmount, instRounded, inst, advance };
   }
 
   // รถจอง/ไม่จอง — ลิสต์ลูกค้าจองรุ่นนี้เฉพาะที่ถึงคิวแล้ว
@@ -1031,8 +1034,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   const RED_PLATE_DEPOSIT = 200;
   const [redPlateNo, setRedPlateNo] = useState("");
   const redPlateDep = text(redPlateNo) ? RED_PLATE_DEPOSIT : 0;
-  const advSub = saleType === "finance" ? Math.min(Math.max(num(advSubsidyInput), 0), downSubTotal) : 0;
-  const downSubDiscount = downSubTotal - advSub;
+  // (เปลี่ยน 2026-09-09) เงินดาวน์ออกแทนไม่ใช่ส่วนลดราคา — ราคาขาย/ใบกำกับคงเต็ม, ยอดทั้งก้อนเก็บเป็นค่าใช้จ่ายร้านออกแทน (down_payout_amount)
+  // ลูกค้าจ่ายน้อยลงเท่าเดิม (หักตอนรับชำระ: ยอดสุทธิ = total_payment − down_payout_amount) และยอดจัดไฟแนนซ์เท่าเดิม
+  const advSub = 0;
+  const downSubDiscount = 0;
 
   // ประกันรถหายจากโปรโมชั่นที่ติ๊กไว้ — ร้านออกแทน (ไฟแนนซ์หักจากยอดโอน) ไม่เก็บลูกค้า ไม่บวกเข้ายอดชำระ
   // ใช้เติม theft_insurance_amount อัตโนมัติ พนักงานไม่ต้องกรอกช่อง "ประกันรถหาย" (กรอกเองเฉพาะเคสลูกค้าจ่ายเบี้ยเอง)
@@ -1071,14 +1076,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
           phone: cust.customer_phone || "", tax_id: cust.customer_tax_id || "", address: cust.customer_address || "" }).catch(() => {});
       }
     }
-    const netCar = Math.max(carPrice - downSubDiscount, 0); // หักส่วนลด "เงินดาวน์ออกแทน" (เฉพาะส่วนที่ไม่ได้แบ่งไปช่วยค่างวดล่วงหน้า)
-    const fc = financeCalc(netCar);
+    const netCar = carPrice; // ราคาสุทธิ = ราคาเต็ม (เงินดาวน์ออกแทนไม่ลดราคา — เก็บใน down_payout_amount) (เฉพาะส่วนที่ไม่ได้แบ่งไปช่วยค่างวดล่วงหน้า)
+    const fc = financeCalc(netCar, downSubTotal);
     if (isFin && !(fc.n > 0)) { setMessage("❌ กรอกจำนวนงวด"); return; }
 
     // 🧪 โหมดทดสอบ: ไม่บันทึกลง DB — แต่ "ส่งใบขายเข้า LINE ลูกค้าจริง" ทันทีหลังบันทึก
     if (TEST_MODE) {
       const dep = depositAmt;
-      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep + redPlateDep; // ติดลบ = ต้องคืนเงินมัดจำ
+      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft : netCar) - dep + redPlateDep; // ยอดรวมก่อนหักร้านออกแทน; ติดลบ = ต้องคืนเงินมัดจำ
       const testSale = {
         __test: true,
         sale_no: "TEST-" + todayStr().replace(/-/g, "") + "-" + String(Date.now()).slice(-4),
@@ -1144,14 +1149,15 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       }
 
       const dep = depositAmt;
-      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep + redPlateDep; // ติดลบ = ต้องคืนเงินมัดจำ
+      const totalPayment = (isFin ? fc.down + fc.advance + custPaidTheft : netCar) - dep + redPlateDep; // ยอดรวมก่อนหักร้านออกแทน; ติดลบ = ต้องคืนเงินมัดจำ
+      const custPayNow = totalPayment - downSubTotal; // ลูกค้าจ่ายจริง (ร้านออกแทนหักให้)
       // ใบจองมีเลขมัดจำ แต่ระบบหาใบมัดจำไม่เจอ (โหลดรายการมัดจำไม่สำเร็จ) → ห้ามบันทึก กันหักมัดจำเป็น 0 แล้วรับเงินขาด (user 2026-09-07)
       if (bookingAsk === "booked" && selBooking?.deposit_no && selBooking.depositFound === false) {
         throw new Error(`ไม่พบข้อมูลใบมัดจำ ${selBooking.deposit_no} ของใบจองนี้ (โหลดรายการมัดจำไม่สำเร็จ) — กดรีเฟรชหน้าแล้วเลือกใบจองใหม่ ห้ามบันทึกโดยหักมัดจำ 0`);
       }
       // ขายเงินสด: ต้องรับชำระครบยอดพร้อมบันทึกขาย (ห้ามบันทึกขายแล้วค่อยรับทีหลัง/รับไม่ครบ) — user 2026-09-07 (เคส SCY06-MCSA-2609-00011 รับ 30,100 จาก 70,100)
-      const cashMustPay = !isWholesale && saleType === "cash" && totalPayment > 0;
-      if (cashMustPay) { const err = payLinesError(totalPayment); if (err) throw new Error(err.replace(/^❌\s*/, "")); }
+      const cashMustPay = !isWholesale && saleType === "cash" && custPayNow > 0;
+      if (cashMustPay) { const err = payLinesError(custPayNow); if (err) throw new Error(err.replace(/^❌\s*/, "")); }
       const payload = {
         action: "save_sale",
         brand: vehicle.brand, stock_table: vehicle.stock_table, stock_id: vehicle.stock_id,
@@ -1175,7 +1181,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         red_plate_no: text(redPlateNo), red_plate_deposit: redPlateDep,
         advance_installment: isFin ? fc.advance : 0,
         // เงินดาวน์/ค่างวดออกแทน (ยอดฐานก่อนคูณ 1.07) — ไว้โชว์เป็นของแถมหักตอนรับชำระ
-        down_payout_amount: (adjOpen && useDownPayout ? Number(downPayout || 0) : 0) + advSub,
+        down_payout_amount: (adjOpen && useDownPayout ? Number(downPayout || 0) : 0) + downSubTotal, // + เงินดาวน์ออกแทนจากกฎค่าใช้จ่ายการขาย (ไม่ลดราคา)
         // ค่านำพาที่กรอกในการ์ดราคาขายบวกเพิ่ม — เก็บลงใบขายไว้ทำรายงานค่านำพาจากระบบ (user 2026-08-29)
         delivery_fee_amount: adjOpen && useDeliveryFee ? Number(deliveryFee || 0) : 0,
         // ประกันรถหาย: ลูกค้าจ่ายเอง (กรอกช่อง) ชนะ; ไม่กรอก = ใช้ยอดโปรโมชั่นออกแทนอัตโนมัติ (ไม่บวกเข้า total_payment)
@@ -1218,7 +1224,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if (custLineUserId || autoLink?.customer_line_user_id) msg += " · กำลังส่งใบขายเข้า LINE ลูกค้า...";
       setMessage(msg);
       // ขายเงินสด: ออกใบเสร็จรับเงินต่อทันทีด้วยวิธีรับชำระที่กรอกไว้ (ยอดครบตามที่ตรวจแล้ว)
-      if (cashMustPay) await handleSavePayment(totalPayment, saleDoc);
+      if (cashMustPay) await handleSavePayment(custPayNow, saleDoc);
       sendSaleFlex(saleDoc, autoLink?.customer_line_user_id); // ส่งใบขายเข้า LINE ลูกค้าทันที (ถ้าไม่มี LINE จะขึ้นสถานะแจ้งเอง)
     } catch (e) {
       setMessage("บันทึกไม่สำเร็จ: " + (e.message || e));
@@ -2378,11 +2384,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (() => {
                   const isFin = saleType === "finance";
                   const carPrice = finalCarPrice(saleType); // ราคาสุทธิเฉพาะคันชนะทุกกฎ
-                  const netCar = carPrice == null ? null : Math.max(carPrice - downSubDiscount, 0);
-                  const fc = financeCalc(netCar || 0);
+                  const netCar = carPrice; // ราคาเต็ม (เงินดาวน์ออกแทนไม่ลดราคา)
+                  const fc = financeCalc(netCar || 0, downSubTotal);
                   const dep = depositAmt;
                   // ติดลบ = มัดจำมากกว่ายอดที่ต้องจ่าย → ต้องคืนเงินมัดจำลูกค้า
-                  const receive = carPrice == null ? null : (isFin ? fc.down + fc.advance + custPaidTheft - advSub : netCar) - dep + redPlateDep;
+                  const receive = carPrice == null ? null : (isFin ? fc.down + fc.advance + custPaidTheft : netCar) - dep + redPlateDep - downSubTotal; // ลูกค้าจ่ายจริง
                   const isRefund = receive != null && receive < 0;
                   const row = (label, val, opts = {}) => (
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: opts.big ? 18 : 14, fontWeight: opts.big ? 700 : 400, color: opts.color || "#111827", borderTop: opts.line ? "1px dashed #d1d5db" : "none" }}>
@@ -2431,7 +2437,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
                           <div style={finLbl}>ค่างวดจ่ายล่วงหน้า</div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(finAdvance, setFinAdvance)}<span>บาท</span></div>
-                          {downSubTotal > 0 ? (
+                          {false ? (
                             <>
                               <div style={{ ...finLbl, lineHeight: 1.3 }}>ใช้โปรดาวน์ออกแทน<br /><span style={{ fontWeight: 400, fontSize: 11, color: "#b45309" }}>ช่วยลดค่างวดล่วงหน้า (โปรทั้งหมด {Number(downSubTotal).toLocaleString("th-TH")})</span></div>
                               <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(advSubsidyInput, setAdvSubsidyInput)}<span>บาท</span></div>
@@ -2442,10 +2448,9 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
                       <div style={{ maxWidth: 420 }}>
                         {row("ราคาขาย", fmtBaht(carPrice))}
-                        {downSubDiscount > 0 && row("ส่วนลด (เงินดาวน์ออกแทน)", "-" + fmtBaht(downSubDiscount), { color: "#b45309" })}
-                        {isFin && row("เงินดาวน์", fmtBaht(fc.down))}
+                        {isFin && row(downSubTotal > 0 ? "เงินดาวน์ตามสัญญา" : "เงินดาวน์", fmtBaht(fc.down))}
                         {isFin && fc.advance > 0 && row("ค่างวดจ่ายล่วงหน้า", fmtBaht(fc.advance))}
-                        {isFin && advSub > 0 && row("โปรช่วยค่างวดล่วงหน้า (ออกแทน)", "-" + fmtBaht(advSub), { color: "#b45309" })}
+                        {downSubTotal > 0 && row("หัก เงินดาวน์ออกแทน (ร้านจ่ายให้)", "-" + fmtBaht(downSubTotal), { color: "#b45309" })}
                         {isFin && custPaidTheft > 0 && row(num(finTheft) > 0 ? "ประกันรถหาย (ไฟแนนซ์หัก)" : "ประกันรถหาย (ลูกค้าจ่ายเอง — เอาติ๊กของแถมออก)", fmtBaht(custPaidTheft))}
                         {row("หัก เงินมัดจำ" + (selBooking?.deposit_no ? ` (${selBooking.deposit_no})` : ""), dep > 0 ? "-" + fmtBaht(dep) : "-", { color: "#b45309" })}
                         {redPlateDep > 0 && row("มัดจำป้ายแดง (" + text(redPlateNo) + ")", "+" + fmtBaht(redPlateDep), { color: "#b91c1c" })}

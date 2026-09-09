@@ -127,9 +127,15 @@ export default function RegistrationSubmitPage({ currentUser }) {
   const selectedRows = rows.filter(r => selected[r.sale_id]);
 
   // "-" หรือว่าง = เงินสด
+  // ชื่อไฟแนนซ์จาก 2 แหล่งสะกดต่างกัน (DMS: "คาเธ่ย์ ลีสซิ่ง จำกัด" / ระบบ NEW: "บริษัท คาเธ่ย์ ลีสซิ่ง จำกัด") → รวมเป็นชื่อเดียวใน dropdown/ตัวกรอง (user 2026-09-09)
+  const financeKey = f => String(f || "").replace(/^\s*(บริษัท|บจก\.?|บมจ\.?)\s*/, "").replace(/\s*\(มหาชน\)\s*$/, "").replace(/\s*จำกัด\s*$/, "").replace(/\s+/g, " ").trim().toLowerCase();
   const normalizeFinance = f => {
-    const s = String(f || "").trim();
-    return (s === "" || s === "-") ? "เงินสด" : s;
+    const s = String(f || "").replace(/\s+/g, " ").trim();
+    if (s === "" || s === "-") return "เงินสด";
+    if (/^เงินสด/.test(s)) return "เงินสด";
+    const k = financeKey(s);
+    if (!k) return s;
+    return s.startsWith("บริษัท") ? s : `บริษัท ${s}`; // ชื่อไม่มีคำนำหน้า → เติม "บริษัท" ให้ตรงกับระบบ NEW
   };
 
   // Filter rows — search only in engine_no and chassis_no (VIN)
@@ -141,13 +147,13 @@ export default function RegistrationSubmitPage({ currentUser }) {
       const chassis = String(r.chassis_no || "").toLowerCase();
       if (!engine.includes(kw) && !chassis.includes(kw)) return false;
     }
-    if (filterFinance && normalizeFinance(r.finance_company) !== filterFinance) return false;
+    if (filterFinance && financeKey(normalizeFinance(r.finance_company)) !== financeKey(filterFinance)) return false;
     return true;
   });
 
   // Finance options — pool จากรายการที่เลือก (ถ้า toggle เปิด) หรือทั้งหมด
   const financeSource = showOnlySelected ? rows.filter(r => selected[r.sale_id]) : rows;
-  const financeOpts = [...new Set(financeSource.map(r => normalizeFinance(r.finance_company)))].filter(Boolean).sort();
+  const financeOpts = Object.values(financeSource.reduce((acc, r) => { const n = normalizeFinance(r.finance_company); const k = financeKey(n) || n; if (!acc[k]) acc[k] = n; return acc; }, {})).sort();
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pageRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

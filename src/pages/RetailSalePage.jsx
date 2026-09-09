@@ -587,14 +587,8 @@ export default function RetailSalePage({ currentUser }) {
       if (!on) continue;
       if (isDownPaymentSub(g.expense_name)) downSub += Number(g.amount || 0);
     }
-    setForm((f) => {
-      const cur = Number(f.discount || 0);
-      // ถ้าค่าเดิมยังเท่ากับยอด auto ก่อนหน้า (หรือว่าง) → update; ถ้า user แก้เอง (ไม่ตรง) → ไม่แตะ
-      if (cur === (f._discount_auto || 0) || cur === 0) {
-        return { ...f, discount: downSub > 0 ? String(downSub) : (cur === (f._discount_auto || 0) ? "" : f.discount), _discount_auto: downSub };
-      }
-      return { ...f, _discount_auto: downSub };
-    });
+    // (เปลี่ยน 2026-09-09) เงินดาวน์ออกแทนไม่ใช่ส่วนลดราคา — เก็บเป็นค่าใช้จ่ายร้านออกแทน (down_payout_amount) ราคาขายคงเต็ม
+    setForm((f) => ({ ...f, _down_sub: downSub, discount: (Number(f.discount || 0) === (f._discount_auto || 0) && (f._discount_auto || 0) > 0) ? "" : f.discount, _discount_auto: 0 }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applicableGiveaways, selectedGiveaways]);
   // default: ติ๊กเลือกของแถม-บริการที่เข้าเงื่อนไขไว้ก่อน (รายการใหม่ที่โผล่ → ติ๊กอัตโนมัติ, ที่ผู้ใช้เอาออกเองคงไว้)
@@ -741,13 +735,14 @@ export default function RetailSalePage({ currentUser }) {
     const down = num(form.down_payment);
     const booking = num(form.booking_deposit);
     const netCar = Math.max(carPrice - discount, 0);
+    const downSub = num(form._down_sub); // เงินดาวน์ออกแทน (ร้านจ่ายดาวน์แทน) — รวมในดาวน์ตามสัญญา ไม่ลดราคา
     const fin = isFinance(form.finance_type);
-    const financeAmount = fin ? Math.max(netCar - down, 0) : 0;
+    const financeAmount = fin ? Math.max(netCar - down - downSub, 0) : 0;
     const r = num(form.interest_rate) / 100;
     const n = num(form.installments);
     const installment = fin && n > 0 ? (financeAmount * (1 + r * n)) / n : 0;
-    const totalPayment = (fin ? down : netCar) + otherSale - booking;
-    return { netCar, financeAmount, installment, totalPayment, carPrice, discount, otherSale, down, booking };
+    const totalPayment = (fin ? down + downSub : netCar) + otherSale - booking; // ยอดรวมก่อนหักร้านออกแทน (หักตอนรับชำระด้วย down_payout_amount)
+    return { netCar, financeAmount, installment, totalPayment, carPrice, discount, otherSale, down: down + downSub, booking, downSub };
   }, [form]);
 
   // ปัดเศษค่างวด: ถ้าติ๊ก = ปัดขึ้นเป็นทวีคูณของ 5 (ลงท้าย 0/5)
@@ -885,6 +880,7 @@ export default function RetailSalePage({ currentUser }) {
         discount: calc.discount,
         other_sale: calc.otherSale,
         down_payment: calc.down,
+        down_payout_amount: calc.downSub, // เงินดาวน์ออกแทน (ค่าใช้จ่ายการขาย) หักตอนรับชำระ
         booking_deposit: calc.booking,
         deposit_no: form.deposit_no,
         total_payment: totalPaymentEff,

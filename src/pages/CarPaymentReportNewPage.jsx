@@ -58,14 +58,31 @@ export default function CarPaymentReportNewPage() {
   const storePaid = (r) => (r.payment_status === "paid" ? Math.max(num(r.paid_amount) - num(r.red_plate_deposit), 0) : 0);
   const depositOf = (r) => num(r.booking_deposit);          // เงินมัดจำจอง — ลูกค้าจ่ายไว้ตอนจอง หักจากยอดเก็บหน้าร้านแล้ว
   const ftPaid = (r) => num(r.ft_vehicle_paid);
+  // รับผ่านระบบเก่า (DMS): ใบเสร็จขาย/เงินดาวน์ของรถคันเดียวกัน — นับเฉพาะเมื่อใบขายระบบใหม่ยังไม่ได้บันทึกรับชำระ (กันนับซ้ำ) (user 2026-09-09)
+
   // ประกันรถหาย — นับเป็นแหล่งแยกเฉพาะ "ไฟแนนซ์หัก/โปรโมชั่นออกแทน" (หักจากยอดโอน FT)
   // ถ้า source = finance คือลูกค้าจ่ายเบี้ยเองหน้าร้าน รวมอยู่ใน paid_amount แล้ว — ห้ามนับซ้ำ
   const theftOf = (r) => {
     const s = String(r.theft_insurance_source || "");
-    return (s === "ไฟแนนซ์หัก" || s === "โปรโมชั่นออกแทน") ? num(r.theft_insurance_amount) : 0;
+    if (!(s === "ไฟแนนซ์หัก" || s === "โปรโมชั่นออกแทน")) return 0;
+    // ไฟแนนซ์โอนเต็มยอดจัด (ไม่ได้หักเบี้ย) → เบี้ยประกันรถหายไม่ใช่แหล่งรับเงินของใบนี้ (ร้านจ่ายเบี้ยเองเป็นค่าใช้จ่าย) — user 2026-09-09 คัน 00087
+    const fin = num(r.finance_amount), ft = num(r.ft_vehicle_paid);
+    if (ft > 0 && fin > 0 && ft >= fin - 1) return 0;
+    return num(r.theft_insurance_amount);
   };
   const payoutOf = (r) => num(r.down_payout_amount) + theftOf(r);
-  const receivedOf = (r) => storePaid(r) + depositOf(r) + ftPaid(r) + payoutOf(r);
+  // นับได้ไม่เกินยอดที่ยังค้างหลังหักแหล่งอื่น (หน้าร้าน/มัดจำ/FT/ออกแทน) — กันชำระเกินจากการนับซ้ำ
+  const dmsPaid = (r) => {
+    if (r.payment_status === "paid") return 0;
+    const others = storePaid(r) + depositOf(r) + ftPaid(r) + payoutOf(r); // ใช้มัดจำเต็มก่อน (มัดจำเกินไม่ทำให้ DMS นับเพิ่ม)
+    return Math.max(0, Math.min(num(r.dms_paid), saleTotal(r) - others));
+  };
+  // มัดจำจอง "ที่ใช้จริง" กับค่ารถ = ไม่เกินยอดที่ยังขาดหลังหักหน้าร้าน/FT/ออกแทน — ส่วนที่เกิน (เช่น มัดจำ 1,000 แต่ดาวน์ 700) ต้องคืนลูกค้า ไม่ใช่ชำระเกิน (user 2026-09-09)
+  // ยอดที่คืนลูกค้าแล้วจากหน้ามัดจำจอง (booking_deposits.refund_amount) — หักออกจากมัดจำก่อน ส่วนที่เกินและยังไม่คืน = ค้างคืน
+  const depositRefunded = (r) => Math.min(num(r.bd_refund_amount), depositOf(r));
+  const depositApplied = (r) => Math.max(0, Math.min(depositOf(r) - depositRefunded(r), saleTotal(r) - (storePaid(r) + ftPaid(r) + payoutOf(r))));
+  const depositSurplus = (r) => Math.max(0, Math.round((depositOf(r) - depositRefunded(r) - depositApplied(r)) * 100) / 100);
+  const receivedOf = (r) => storePaid(r) + depositApplied(r) + ftPaid(r) + payoutOf(r) + dmsPaid(r);
   const statusOf = (r) => {
     const total = saleTotal(r), got = receivedOf(r);
     if (got > total + 0.009) return "over";
@@ -196,6 +213,8 @@ export default function CarPaymentReportNewPage() {
                         {baht(store)}
                       </span>
                       {depositOf(r) > 0 && <div style={{ fontSize: 11, color: "#6b7280" }}>รวมมัดจำจอง {baht(depositOf(r))}</div>}
+                      {depositRefunded(r) > 0 && <div style={{ fontSize: 11, color: "#15803d" }} title={`${r.bd_deposit_no || ""} ${r.bd_refund_note || ""}`.trim()}>คืนส่วนเกินแล้ว {baht(depositRefunded(r))}{r.bd_refunded_at ? ` · ${thDate(r.bd_refunded_at)}` : ""}</div>}
+                      {depositSurplus(r) > 0 && <div style={{ fontSize: 11, color: "#b45309", fontWeight: 600 }} title="มัดจำมากกว่ายอดที่ต้องใช้ และยังไม่ได้ทำคืนในหน้ามัดจำจอง (ไม่นับเป็นชำระเกิน)">ค้างคืนส่วนเกินมัดจำ {baht(depositSurplus(r))}</div>}
                     </>) : "-"}
                   </td>
                   <td style={{ ...td, textAlign: "right" }}>
@@ -215,6 +234,9 @@ export default function CarPaymentReportNewPage() {
                     {r.receipt_no ? (<>
                       <span style={{ fontFamily: "monospace" }}>{r.receipt_no}</span>
                       <div style={{ fontSize: 11, color: "#6b7280" }}>{thDate(r.receipt_date)}</div>
+                    </>) : dmsPaid(r) > 0 ? (<>
+                      <span style={{ fontFamily: "monospace" }}>{r.dms_receipt_no}</span>
+                      <div style={{ fontSize: 11, color: "#7c3aed", fontWeight: 600 }}>รับผ่านระบบเก่า {baht(dmsPaid(r))} · {thDate(r.dms_receipt_date)}</div>
                     </>) : "-"}
                   </td>
                   <td style={{ ...td, textAlign: "center" }}>
@@ -254,8 +276,20 @@ export default function CarPaymentReportNewPage() {
                 ))}
                 {num(detail.booking_deposit) > 0 && (
                   <tr style={{ borderTop: "1px solid #f1f5f9" }}>
-                    <td style={{ padding: "8px 6px" }}>เงินมัดจำจอง (จ่ายไว้ตอนจอง)</td>
-                    <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(detail.booking_deposit)}</td>
+                    <td style={{ padding: "8px 6px" }}>เงินมัดจำจอง (จ่ายไว้ตอนจอง){detail.bd_deposit_no && <span style={{ fontSize: 11, color: "#6b7280" }}> · {detail.bd_deposit_no}</span>}{depositApplied(detail) < depositOf(detail) && <span style={{ fontSize: 11, color: "#6b7280" }}> · จ่ายไว้ {baht(detail.booking_deposit)} ใช้กับค่ารถ {baht(depositApplied(detail))}</span>}</td>
+                    <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(depositApplied(detail))}</td>
+                  </tr>
+                )}
+                {depositRefunded(detail) > 0 && (
+                  <tr style={{ borderTop: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "8px 6px", color: "#15803d" }}>คืนมัดจำส่วนเกินให้ลูกค้าแล้ว ({detail.bd_refund_method || "-"}{detail.bd_refunded_at ? ` · ${thDate(detail.bd_refunded_at)}` : ""}) — ไม่นับเป็นยอดรับ</td>
+                    <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700, color: "#15803d" }}>{baht(depositRefunded(detail))}</td>
+                  </tr>
+                )}
+                {depositSurplus(detail) > 0 && (
+                  <tr style={{ borderTop: "1px solid #f1f5f9", background: "#fffbeb" }}>
+                    <td style={{ padding: "8px 6px", color: "#b45309" }}>มัดจำจองส่วนเกิน — ยังไม่ได้ทำคืนในหน้ามัดจำจอง (ไม่นับเป็นชำระเกิน)</td>
+                    <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700, color: "#b45309" }}>{baht(depositSurplus(detail))}</td>
                   </tr>
                 )}
                 {theftOf(detail) > 0 && (
@@ -277,9 +311,17 @@ export default function CarPaymentReportNewPage() {
                     <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700, color: "#0369a1" }}>{baht(detail.ft_vehicle_paid)}</td>
                   </tr>
                 )}
+                {dmsPaid(detail) > 0 && (
+                  <tr style={{ borderTop: "1px solid #f1f5f9" }}>
+                    <td style={{ padding: "8px 6px" }}>รับชำระผ่านระบบเก่า (DMS)
+                      <span style={{ fontSize: 11, color: "#6b7280" }}> · ใบเสร็จ {detail.dms_receipt_no || "-"} · ใบขาย DMS {detail.dms_sale_no || "-"}{detail.dms_receipt_date ? ` · ${thDate(detail.dms_receipt_date)}` : ""}</span>
+                    </td>
+                    <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700, color: "#7c3aed" }}>{baht(dmsPaid(detail))}</td>
+                  </tr>
+                )}
                 <tr style={{ borderTop: "2px solid #e5e7eb", background: "#fefce8" }}>
                   <td style={{ padding: "8px 6px", fontWeight: 700 }}>รวมรับทุกแหล่ง</td>
-                  <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(Math.max(num(detail.paid_amount) - num(detail.red_plate_deposit), 0) + num(detail.booking_deposit) + num(detail.ft_vehicle_paid) + num(detail.down_payout_amount) + theftOf(detail))}</td>
+                  <td style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700 }}>{baht(receivedOf(detail))}</td>
                 </tr>
                 {num(detail.down_payout_amount) > 0 && (
                   <tr>
