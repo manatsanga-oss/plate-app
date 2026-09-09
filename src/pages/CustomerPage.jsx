@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { TITLE_OPTIONS_ALL, hasNameTitle, withTitle } from "../utils/nameTitle"; // คำนำหน้าชื่อลูกค้า LINE (user 2026-09-09)
 import ThaiAddressFields from "./ThaiAddressFields";
 import BirthDateField from "./BirthDateField";
 
@@ -47,7 +48,7 @@ const emptyForm = () => ({
   status: "active",
 });
 
-const TITLE_OPTS = ["นาย", "นาง", "นางสาว", "เด็กชาย", "เด็กหญิง", "บมจ.", "บจก.", "หจก.", "บริษัท", "ห้าง", "อื่นๆ"];
+const TITLE_OPTS = ["นาย", "นาง", "นางสาว", "เด็กชาย", "เด็กหญิง", "MR.", "MRS.", "MS.", "MISS", "บมจ.", "บจก.", "หจก.", "บริษัท", "ห้าง", "อื่นๆ"]; // + อังกฤษ (user 2026-09-09)
 const GROUP_OPTS = ["บุคคลทั่วไป", "บริษัทไฟแนนซ์", "บริษัทประกัน", "ตัวแทนจำหน่าย", "อื่นๆ"];
 const LEVEL_OPTS = ["VIP", "ทั่วไป", "ลูกค้าใหม่", "ลูกค้าเก่า"];
 const ID_TYPE_OPTS = ["บัตรประชาชน", "บัตรชมพู", "Passport", "ใบขับขี่", "บัตรนิติบุคคล", "อื่นๆ"]; // บัตรชมพู = บัตรประจำตัวแรงงานต่างด้าว (13 หลัก ขึ้นต้น 00) — user 2026-09-04
@@ -70,8 +71,9 @@ export default function CustomerPage({ currentUser }) {
     if (!String(lineEdit.customer_name || "").trim()) { setMessage("กรุณากรอกชื่อ"); return; }
     setLineSaving(true); setMessage("");
     try {
+      const nameOut = (lineEdit.title && lineEdit.title !== "-" && !hasNameTitle(lineEdit.customer_name)) ? withTitle(lineEdit.title, lineEdit.customer_name) : String(lineEdit.customer_name).trim();
       const res = await fetch(URL_LINE_UPDATE, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_customer", ref_no: lineEdit.ref_no, customer_name: String(lineEdit.customer_name).trim(),
+        body: JSON.stringify({ action: "update_customer", ref_no: lineEdit.ref_no, customer_name: nameOut,
           phone: String(lineEdit.phone || "").trim(), tax_id: String(lineEdit.id_number || "").trim(), address: String(lineEdit.address || "").trim() }) });
       const d = await res.json().catch(() => null);
       const row = Array.isArray(d) ? d[0] : d;
@@ -310,6 +312,16 @@ export default function CustomerPage({ currentUser }) {
             <h3 style={{ margin: "0 0 4px", color: "#166534" }}>✏️ แก้ข้อมูลลูกค้า (ลงทะเบียน LINE)</h3>
             <div style={{ fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>รหัส {lineEdit.ref_no} — บันทึกทับข้อมูลที่ลูกค้ากรอกไว้ ใช้กับใบขาย/มัดจำ/ใบเสร็จที่ดึงจาก LINE ต่อไป</div>
             <div style={{ display: "grid", gridTemplateColumns: "110px 1fr", gap: 10, alignItems: "center" }}>
+              {!hasNameTitle(lineEdit.customer_name) && (
+                <>
+                  <label>คำนำหน้า</label>
+                  <select value={lineEdit.title || ""} onChange={e => setLineEdit(v => ({ ...v, title: e.target.value }))} style={{ padding: "8px 10px", border: "1px solid #f59e0b", borderRadius: 8, background: "#fffbeb" }}>
+                    <option value="">-- เลือกคำนำหน้า (จะต่อหน้าชื่อตอนบันทึก) --</option>
+                    {TITLE_OPTIONS_ALL.map(t => <option key={t} value={t}>{t}</option>)}
+                    <option value="-">บริษัท/ร้าน (ไม่ใส่)</option>
+                  </select>
+                </>
+              )}
               <label>ชื่อ-นามสกุล *</label>
               <input value={lineEdit.customer_name || ""} onChange={e => setLineEdit(v => ({ ...v, customer_name: e.target.value }))} style={{ padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8 }} />
               <label>เบอร์โทร</label>

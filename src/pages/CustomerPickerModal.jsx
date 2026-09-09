@@ -51,7 +51,7 @@ ${branchName ? `<div class="branch">สาขา: ${esc(branchName)}</div>` : ""
 }
 
 const fullName = (c) => [c.title, c.first_name, c.last_name].filter(Boolean).join(" ").trim();
-const TITLE_OPTS = ["นาย", "นาง", "นางสาว", "บริษัท", "หจก.", "อื่นๆ"];
+const TITLE_OPTS = ["นาย", "นาง", "นางสาว", "MR.", "MRS.", "MS.", "MISS", "บริษัท", "หจก.", "อื่นๆ"]; // + อังกฤษ (user 2026-09-09)
 
 async function postJson(url, body) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
