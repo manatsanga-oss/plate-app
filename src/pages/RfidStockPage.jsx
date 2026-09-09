@@ -129,6 +129,7 @@ export default function RfidStockPage({ currentUser }) {
     if (c.status === "pending") return `รอบอร์ดมารับคำสั่ง (สั่งเมื่อ ${ago(c.requested_at)})`;
     if (c.status === "running") return `กำลังอ่าน ${c.seconds} วิ… (เริ่ม ${ago(c.started_at)})`;
     if (c.status === "done") return `นับเสร็จ ${fmtTime(c.finished_at)} เจอ ${c.tags_found ?? 0} ใบ`;
+    if (c.status === "cancelled") return `ยกเลิกแล้ว ${fmtTime(c.finished_at)}`;
     if (c.status === "expired") return `คำสั่งหมดอายุ (บอร์ดไม่มารับ) ${fmtTime(c.requested_at)}`;
     return c.status;
   };
