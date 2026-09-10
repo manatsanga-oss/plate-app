@@ -237,7 +237,7 @@ export default function PromoIncomeByVehiclePage() {
                   const amt = v.cells[c] || 0;
                   return (
                     <td key={c} style={{ ...td, textAlign: "right", color: amt ? colFg[c] : "#d1d5db", cursor: amt ? "pointer" : "default", fontWeight: amt ? 600 : 400 }}
-                      title={amt ? v.lines.filter((l) => l.col === c).map((l) => `${l.income_doc_no} ${baht(l.amount)}`).join("\n") : ""}
+                      title={amt ? v.lines.filter((l) => l.col === c).map((l) => `${l.income_doc_no}${l.campaign ? " · " + l.campaign : ""} ${baht(l.amount)}`).join("\n") : ""}
                       onClick={() => amt && setDetail({ vehicle: v, col: c, lines: v.lines.filter((l) => l.col === c) })}>
                       {amt ? baht(amt) : "-"}
                       {amt > 0 && <div style={{ fontSize: 10, color: "#9ca3af", fontWeight: 400 }}>{(v.payers[c] || []).join(", ")}</div>}
@@ -282,7 +282,7 @@ export default function PromoIncomeByVehiclePage() {
                   <tr key={l.allocation_id} style={{ borderTop: "1px solid #f1f5f9" }}>
                     <td style={{ ...td, fontFamily: "monospace" }}>{l.income_doc_no}</td>
                     <td style={td}>{thDate(l.doc_date)}</td>
-                    <td style={td}>{l.payer_name || "-"}{l.reference_no && <div style={{ fontSize: 11, color: "#6b7280" }}>อ้างอิง {l.reference_no}</div>}{l.doc_description && <div style={{ fontSize: 11, color: "#6b7280" }}>{l.doc_description}</div>}</td>
+                    <td style={td}>{l.payer_name || "-"}{l.reference_no && <div style={{ fontSize: 11, color: "#6b7280" }}>อ้างอิง {l.reference_no}</div>}{l.campaign && <div style={{ fontSize: 11, color: "#9a3412" }}>🏭 {l.campaign}</div>}{l.doc_description && <div style={{ fontSize: 11, color: "#6b7280" }}>{l.doc_description}</div>}</td>
                     <td style={td}>{l.note || "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(l.amount)}</td>
                   </tr>

@@ -70,6 +70,10 @@ export default function IncomeRecordPage({ currentUser }) {
   const [allocOpen, setAllocOpen] = useState(false);
   const [allocDoc, setAllocDoc] = useState(null);
   const [allocCategory, setAllocCategory] = useState("");
+  // ผู้จ่ายเป็นผู้ผลิต (ไทยยามาฮ่า/ไทยฮอนด้า): กรอกรายละเอียดแคมเปญ + จำนวนเงิน/คัน ค่าเริ่มต้น และบันทึกได้แม้ยอดไม่ตรงกับเงินโอน (user 2026-09-09)
+  const [allocCampaign, setAllocCampaign] = useState("");
+  const [allocDefaultAmt, setAllocDefaultAmt] = useState("");
+  const isMakerDoc = /ยามาฮ่า|yamaha|ฮอนด้า|honda/i.test(String(allocDoc?.customer_name || ""));
   const [allocSales, setAllocSales] = useState([]);
   const [allocSalesLoading, setAllocSalesLoading] = useState(false);
   const [allocSearch, setAllocSearch] = useState("");
@@ -78,7 +82,7 @@ export default function IncomeRecordPage({ currentUser }) {
   const [lineEdit, setLineEdit] = useState(null); // { sale, lineIdx, amount, note }
   const [allocSaving, setAllocSaving] = useState(false);
   const [allocShowSelectedOnly, setAllocShowSelectedOnly] = useState(false);
-  const [allocUsedInvoices, setAllocUsedInvoices] = useState(new Set());
+  const [allocUsedInvoices, setAllocUsedInvoices] = useState(new Map()); // invoice_no → [payer_name ที่ใช้แล้ว]
   const [selected, setSelected] = useState({}); // { income_doc_id: true }
   const [payDialog, setPayDialog] = useState(false);
   const [payForm, setPayForm] = useState({ paid_date: todayISO(), payment_note: "" });
@@ -100,7 +104,7 @@ export default function IncomeRecordPage({ currentUser }) {
 
   // ดึงรายการ invoice_no ที่ถูกใช้แล้วในหมวดนี้ (จาก income_allocations อื่น)
   useEffect(() => {
-    if (!allocOpen || !allocCategory || !allocDoc) { setAllocUsedInvoices(new Set()); return; }
+    if (!allocOpen || !allocCategory || !allocDoc) { setAllocUsedInvoices(new Map()); return; }
     fetch(ACCOUNTING_URL, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -110,8 +114,11 @@ export default function IncomeRecordPage({ currentUser }) {
       }),
     }).then(r => r.json()).then(data => {
       const arr = Array.isArray(data) ? data : [];
-      setAllocUsedInvoices(new Set(arr.map(x => String(x?.invoice_no || "")).filter(Boolean)));
-    }).catch(() => setAllocUsedInvoices(new Set()));
+      // เก็บเป็น Map invoice_no → ชื่อผู้จ่ายที่ใช้แล้ว (กันซ้ำเฉพาะผู้จ่ายเดียวกัน — รถคันเดียวรับได้ทั้งไฟแนนซ์และผู้ผลิต)
+      const m = new Map();
+      for (const x of arr) { const inv = String(x?.invoice_no || ""); if (!inv) continue; if (!m.has(inv)) m.set(inv, []); m.get(inv).push(String(x?.payer_name || "")); }
+      setAllocUsedInvoices(m);
+    }).catch(() => setAllocUsedInvoices(new Map()));
   }, [allocOpen, allocCategory, allocDoc]);
 
   // Backfill wht_rate ของ items เมื่อ incomeCategories โหลดเสร็จ (กันกรณีเปิด form ก่อน categories โหลดเสร็จ)
@@ -179,6 +186,7 @@ export default function IncomeRecordPage({ currentUser }) {
   function openAllocation(doc) {
     setAllocDoc(doc);
     setAllocCategory("");
+    setAllocCampaign(""); setAllocDefaultAmt("");
     setAllocLines([]);
     setAllocSales([]);
     setAllocSearch("");
@@ -192,6 +200,7 @@ export default function IncomeRecordPage({ currentUser }) {
       const arr = Array.isArray(data) ? data.filter(x => x && (x.sale_id || x.invoice_no)) : [];
       if (arr.length) {
         setAllocCategory(arr[0].category || "");
+        setAllocCampaign(arr[0].campaign || "");
         setAllocLines(arr.map(a => ({ sale_id: a.sale_id, invoice_no: a.invoice_no, customer_name: a.customer_name, model: a.model, amount: Number(a.amount || 0), note: a.note || "" })));
         setAllocShowSelectedOnly(true);
         loadMotoSales();
@@ -222,6 +231,7 @@ export default function IncomeRecordPage({ currentUser }) {
           customer_name: s.customer_name || s.sale_customer_name || s.customer || "",
           // ชื่อลูกค้าตามใบกำกับดิบ (ไม่ fallback เป็นชื่อผู้ซื้อ) — ใช้กรองให้ตรงเอกสารรับชำระ
           invoice_customer: s.customer_name || "",
+          brand: s.sale_brand || "", // ยี่ห้อจากใบขาย — ใช้กรองเมื่อผู้จ่ายเป็นผู้ผลิต (ไทยยามาฮ่า/ไทยฮอนด้า)
           model_series: s.model_name || s.sale_model_code || s.model_series || s.model || "",
           engine_no: s.engine_no || "",
           chassis_no: s.chassis_no || s.frame_no || "",
@@ -255,7 +265,7 @@ export default function IncomeRecordPage({ currentUser }) {
     if (allocLines.length === 0) { alert("เพิ่มอย่างน้อย 1 รายการ"); return; }
     const sum = allocLines.reduce((s, l) => s + Number(l.amount || 0), 0);
     const target = Number(allocDoc.total || allocDoc.net_to_pay || 0);
-    if (!asDraft && Math.abs(sum - target) > 0.01) {
+    if (!asDraft && !isMakerDoc && Math.abs(sum - target) > 0.01) { // ผู้ผลิต: บันทึกได้แม้ยอดไม่ตรงกับเงินโอน
       if (!window.confirm(`ยอดรวมที่กระจาย ${sum.toFixed(2)} ไม่ตรงกับยอดรวม VAT ${target.toFixed(2)} (ส่วนต่าง ${(sum - target).toFixed(2)}) — บันทึกต่อหรือไม่?`)) return;
     }
     setAllocSaving(true);
@@ -267,6 +277,7 @@ export default function IncomeRecordPage({ currentUser }) {
           income_doc_id: allocDoc.income_doc_id,
           income_doc_no: allocDoc.income_doc_no,
           category: allocCategory,
+          campaign: isMakerDoc ? allocCampaign.trim() : "",
           allocations: allocLines.map(l => ({
             sale_id: l.sale_id || null, invoice_no: l.invoice_no,
             customer_name: l.customer_name, model: l.model,
@@ -1685,6 +1696,19 @@ export default function IncomeRecordPage({ currentUser }) {
               </select>
             </div>
 
+            {allocCategory && isMakerDoc && (
+              <div style={{ marginBottom: 8, padding: 10, background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 8, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: 260 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>🏭 รายละเอียดแคมเปญ (ผู้ผลิต)</label>
+                  <input type="text" value={allocCampaign} onChange={e => setAllocCampaign(e.target.value)} placeholder="เช่น Pro Xmax Jan-Jul'26 #7 / ค่าส่งเสริม NMAX ส.ค.69" style={inp} />
+                </div>
+                <div style={{ width: 180 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: "block", marginBottom: 4 }}>จำนวนเงิน/คัน (ค่าเริ่มต้น)</label>
+                  <input type="number" step="0.01" value={allocDefaultAmt} onChange={e => setAllocDefaultAmt(e.target.value)} placeholder="0.00" style={{ ...inp, textAlign: "right", fontFamily: "monospace" }} />
+                </div>
+                <div style={{ fontSize: 11, color: "#9a3412", flexBasis: "100%" }}>คลิกรถแล้วช่องจำนวนรับจะเติมค่าเริ่มต้นให้ (แก้รายคันได้) · ผู้ผลิตบันทึกได้แม้ยอดรวมไม่ตรงกับเงินโอน</div>
+              </div>
+            )}
             {allocCategory && (
               <>
                 <div style={{ marginBottom: 8, display: "flex", gap: 10, alignItems: "center" }}>
@@ -1718,7 +1742,13 @@ export default function IncomeRecordPage({ currentUser }) {
                       <tbody>
                         {allocSales.filter(s => {
                           const isSel = allocLines.some(l => l.invoice_no === s.invoice_no || (s.id && l.sale_id === s.id));
-                          if (allocUsedInvoices.has(s.invoice_no) && !isSel) return false;
+                          // ใบกำกับที่ถูกใช้แล้ว: ซ่อนเฉพาะเมื่อผู้จ่ายเดียวกัน (Next ใช้แล้ว → ไทยยามาฮ่ายังเลือกได้); เอกสารผู้ผลิตไม่ซ่อนเลย (หลายแคมเปญได้)
+                          if (!isSel && !isMakerDoc && allocUsedInvoices.has(s.invoice_no)) {
+                            const nzp = v => String(v || "").replace(/บริษัท|บจก\.?|บมจ\.?|หจก\.?|จำกัด|\(มหาชน\)|มหาชน/g, " ").replace(/[ัิ-ฺ็-๎\s]/g, "").toLowerCase();
+                            const me = nzp(allocDoc?.customer_name);
+                            const samePayer = (allocUsedInvoices.get(s.invoice_no) || []).some(pn => { const x = nzp(pn); return !x || !me || x === me || x.includes(me) || me.includes(x); });
+                            if (samePayer) return false;
+                          }
                           // กรองเฉพาะที่ตรงกับลูกค้า/ไฟแนนซ์ของใบรับชำระ (เว้นรายการที่เลือกไว้แล้ว ให้คงอยู่)
                           // ตัดคำนำหน้า/ท้ายนิติบุคคลก่อน (บริษัท/บจก./บมจ./หจก./จำกัด/มหาชน) — เอกสารใช้ชื่อย่อ
                           // "บจก. ธนบรรณ" แต่ใบกำกับใช้ชื่อเต็ม "บริษัท ธนบรรณ จำกัด" ต้อง match กัน
@@ -1727,7 +1757,13 @@ export default function IncomeRecordPage({ currentUser }) {
                             .replace(/บริษัท|บจก\.?|บมจ\.?|หจก\.?|ห้างหุ้นส่วนจำกัด|จำกัด|\(มหาชน\)|มหาชน/g, " ")
                             .replace(/[ัิ-ฺ็-๎\s]/g, "").toLowerCase();
                           const docCust = nz(allocDoc?.customer_name);
-                          if (docCust && !isSel) {
+                          // ผู้จ่ายเป็นผู้ผลิต (ไทยยามาฮ่า/ไทยฮอนด้า) → ใบกำกับรถไม่มีชื่อผู้ผลิตอยู่แล้ว กรองตามยี่ห้อรถแทน (user 2026-09-09)
+                          const makerBrand = /ยามาฮ่า|yamaha/i.test(String(allocDoc?.customer_name || "")) ? "YAMAHA" : /ฮอนด้า|honda/i.test(String(allocDoc?.customer_name || "")) ? "HONDA" : "";
+                          if (makerBrand && !isSel) {
+                            const b = String(s.brand || "").toUpperCase();
+                            const isBrand = makerBrand === "YAMAHA" ? /YAMAHA|ยามาฮ่า/.test(b) : /HONDA|ฮอนด้า/.test(b);
+                            if (b && !isBrand) return false; // ยี่ห้อไม่ตรง → ซ่อน; ไม่รู้ยี่ห้อ → แสดงไว้
+                          } else if (docCust && !isSel) {
                             // เทียบชื่อตามใบกำกับดิบ (invoice_customer = คนที่ถูกเรียกเก็บ) เป็นหลัก — ขายเงินสด
                             // ใบกำกับเป็นชื่อผู้ซื้อ → ไม่ match บริษัทไฟแนนซ์ → ซ่อน (ตามเดิม)
                             // ถ้าใบกำกับไม่มีชื่อ/ยังไม่อัปโหลด → เทียบบริษัทไฟแนนซ์ของใบขายแทน
@@ -1748,7 +1784,7 @@ export default function IncomeRecordPage({ currentUser }) {
                             setLineEdit({
                               sale: s,
                               lineIdx: selected ? lineIdx : -1,
-                              amount: selected ? line.amount : "",
+                              amount: selected ? line.amount : (isMakerDoc && Number(allocDefaultAmt) > 0 ? Number(allocDefaultAmt) : ""),
                               note: selected ? line.note : "",
                             });
                           };
@@ -1790,7 +1826,7 @@ export default function IncomeRecordPage({ currentUser }) {
               <span style={{ fontSize: 13 }}>เป้าหมาย (ยอดรวม VAT): <span style={{ fontFamily: "monospace" }}>{fmt(allocDoc.total || allocDoc.net_to_pay)}</span></span>
               {Math.abs(allocLines.reduce((s, l) => s + Number(l.amount || 0), 0) - Number(allocDoc.total || allocDoc.net_to_pay || 0)) <= 0.01 ?
                 <span style={{ color: "#10b981" }}>✓ ตรงกัน</span> :
-                <span style={{ color: "#dc2626" }}>⚠ ไม่ตรง ({fmt(allocLines.reduce((s, l) => s + Number(l.amount || 0), 0) - Number(allocDoc.total || allocDoc.net_to_pay || 0))})</span>}
+                <span style={{ color: isMakerDoc ? "#b45309" : "#dc2626" }}>⚠ ไม่ตรง ({fmt(allocLines.reduce((s, l) => s + Number(l.amount || 0), 0) - Number(allocDoc.total || allocDoc.net_to_pay || 0))}){isMakerDoc ? " — ผู้ผลิต บันทึกได้" : ""}</span>}
             </div>
 
             {/* Inline amount popup */}
@@ -1886,7 +1922,7 @@ export default function IncomeRecordPage({ currentUser }) {
               {(() => {
                 const sum = allocLines.reduce((s, l) => s + Number(l.amount || 0), 0);
                 const target = Number(allocDoc.total || allocDoc.net_to_pay || 0);
-                const exceeded = sum - target > 0.01;
+                const exceeded = sum - target > 0.01 && !isMakerDoc; // ผู้ผลิต: ยอดเกิน/ขาดก็บันทึกได้
                 const disabled = allocSaving || allocLines.length === 0 || exceeded;
                 return (
                   <button onClick={() => saveAllocation(false)} disabled={disabled}

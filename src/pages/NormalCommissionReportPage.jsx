@@ -71,10 +71,29 @@ export default function NormalCommissionReportPage({ currentUser }) {
     for (const e of svcEmployees) {
       if (e.employee_name) positionByName.set(String(e.employee_name).trim(), String(e.position || "").trim());
     }
-    const isMechanic = (name) => {
-      const pos = positionByName.get(String(name || "").trim()) || "";
-      return pos.includes("ช่าง");
+    // จับคู่ชื่อแบบยืดหยุ่น: ชื่อใน DMS กับ HR สะกดต่างกันเล็กน้อย (เช่น "อั้ลค่อมิ้ช" vs "อั้ลค่อมิ้ซ") — ตัดช่องว่าง/ยศ แล้วยอมต่างได้ 1 ตัวอักษร (user 2026-09-10)
+    const normName = (v) => String(v || "").replace(/^(นาย|นาง|นางสาว|น\.ส\.)\s*/, "").replace(/\s+/g, "").trim();
+    const editDist = (a, b) => {
+      if (a === b) return 0;
+      if (Math.abs(a.length - b.length) > 1) return 9;
+      const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+      for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+      for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+        dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      return dp[a.length][b.length];
     };
+    const positionByNorm = new Map();
+    for (const [n, pos] of positionByName) positionByNorm.set(normName(n), pos);
+    const findPosition = (name) => {
+      const exact = positionByName.get(String(name || "").trim());
+      if (exact !== undefined) return exact;
+      const nn = normName(name);
+      if (!nn) return "";
+      if (positionByNorm.has(nn)) return positionByNorm.get(nn);
+      for (const [n, pos] of positionByNorm) if (n.length >= 6 && editDist(n, nn) <= 1) return pos;
+      return "";
+    };
+    const isMechanic = (name) => findPosition(name).includes("ช่าง");
     // แถวบริษัท ป.เปา มอเตอร์เซอร์วิส (code PMOTOR / ชื่อมี "ป.เปา") = ไม่ใช่ช่าง ไม่คิดค่าคอม
     const isCompanyRow = (g) => String(g?.mechanic_code || "").toUpperCase() === "PMOTOR" || String(g?.mechanic_name || "").includes("ป.เปา");
 
