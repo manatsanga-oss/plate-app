@@ -469,7 +469,10 @@ export default function SpecialCommissionReportPage({ currentUser }) {
     });
   }
 
+  // (เปลี่ยน 2026-09-10) ค่าคอมพิเศษตั้งเบิกรวมกับค่าคอมปกติในเอกสารเดียว — สร้างที่หน้า "รายงานค่าคอมปกติ" แท็บบันทึกการจ่ายเงิน
+  const COMBINED_WITH_NORMAL = true;
   async function createPayables() {
+    if (COMBINED_WITH_NORMAL) { setMessage("ค่าคอมพิเศษตั้งเบิกรวมกับค่าคอมปกติ — ไปสร้างเอกสารที่หน้า รายงานค่าคอมปกติ → บันทึกการจ่ายเงิน"); return; }
     if (!snapshotInfo?.save_group) return;
     if (selectedGroups.size === 0) { setMessage("กรุณาเลือกอย่างน้อย 1 รายการ"); return; }
     if (!window.confirm(`ยืนยันสร้างเอกสารจ่ายเงิน ${selectedGroups.size} ใบ?`)) return;
@@ -489,6 +492,7 @@ export default function SpecialCommissionReportPage({ currentUser }) {
 
   // สร้างเฉพาะใบที่ขาด — กรณีสร้างรอบแรกตอนข้อมูลยังไม่ครบทุกกลุ่ม (backend มี NOT EXISTS กันซ้ำรายกลุ่ม)
   async function createMissingPayables(groupNos) {
+    if (COMBINED_WITH_NORMAL) { setMessage("ค่าคอมพิเศษตั้งเบิกรวมกับค่าคอมปกติ — ไปสร้างเอกสารที่หน้า รายงานค่าคอมปกติ → บันทึกการจ่ายเงิน"); return; }
     if (!snapshotInfo?.save_group || !groupNos.length) return;
     if (!window.confirm(`สร้างเอกสารที่ขาด ${groupNos.length} ใบ?\n(ใบที่มีอยู่แล้วจะไม่ถูกสร้างซ้ำ)`)) return;
     setPayCreating(true);
@@ -919,6 +923,9 @@ tr.excluded td { text-decoration: line-through; }
             </div>
             {payLoading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div> : (
               <>
+                <div style={{ padding: "8px 10px", marginBottom: 8, background: "#ede9fe", borderRadius: 6, fontSize: 12, color: "#4c1d95" }}>
+                  ⭐ ตั้งแต่ 10/09/69 ค่าคอมพิเศษ<b>ตั้งเบิกรวมกับค่าคอมปกติ</b>ในเอกสารเดียว — บันทึก snapshot ที่หน้านี้ แล้วไปสร้างเอกสารที่ "รายงานค่าคอมปกติ → บันทึกการจ่ายเงิน" (เอกสารที่สร้างแล้วจะแสดงด้านล่าง)
+                </div>
                 <div style={{ padding: "8px 10px", marginBottom: 10, background: "#fef3c7", borderRadius: 6, fontSize: 12, color: "#78350f" }}>
                   💡 ระบบจะสร้างเอกสาร 4 ใบ ตามสังกัด × แบรนด์ — ใบที่ "ค่านายหน้า" จะมีหัก ณ ที่จ่าย 3%
                 </div>

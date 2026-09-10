@@ -664,7 +664,18 @@ tr.excluded td { text-decoration: line-through; }
     } catch { setMessage("❌ ยกเลิกไม่สำเร็จ"); }
   }
 
-  // ===== Combined employees (รวม sales + service + parts) =====
+  // ===== ค่าคอมพิเศษ (snapshot จากหน้ารายงานค่าคอมพิเศษ ช่วงเดียวกัน) — ตั้งเบิกรวมในเอกสารค่าคอมปกติใบเดียว (user 2026-09-10) =====
+  const [specialSnap, setSpecialSnap] = useState(null);
+  useEffect(() => {
+    if (!snapshotInfo?.save_group) { setSpecialSnap(null); return; }
+    const pf = String(snapshotInfo.period_from || dateFrom).slice(0, 10), pt = String(snapshotInfo.period_to || dateTo).slice(0, 10);
+    postAPI({ action: "commission_snapshot", mode: "check", date_from: pf, date_to: pt })
+      .then(d => { const arr = Array.isArray(d) ? d : []; setSpecialSnap(arr.length > 0 && arr[0]?.save_group ? arr[0] : null); })
+      .catch(() => setSpecialSnap(null));
+    // eslint-disable-next-line
+  }, [snapshotInfo?.save_group]);
+
+  // ===== Combined employees (รวม sales + service + parts + ค่าคอมพิเศษ) =====
   const [combinedEmployees, setCombinedEmployees] = useState([]);
   const [combinedLoading, setCombinedLoading] = useState(false);
 
@@ -678,11 +689,13 @@ tr.excluded td { text-decoration: line-through; }
       const month = dt.getMonth() + 1;
       const monthDate = `${year}-${String(month).padStart(2, "0")}-01`;
       // ดึงข้อมูล 3 sources พร้อมกัน — ใช้ detail_sales เพื่อให้รู้ brand แต่ละใบ + รายการปรับยอด (แก้ไขเอง)
-      const [salesSalesData, svcCheck, partsRows, adjRows] = await Promise.all([
+      const [salesSalesData, svcCheck, partsRows, adjRows, spRows, spAdjRows] = await Promise.all([
         postAPI({ action: "commission_normal_snapshot", mode: "detail_sales", save_group: snapshotInfo.save_group }),
         postAPI({ action: "commission_service_snapshot", mode: "check", year, month }),
         postAPI({ action: "commission_parts_manual", mode: "list", month_year: monthDate }),
         postAPI({ action: "commission_normal_payables", mode: "list_adjustments", save_group: snapshotInfo.save_group }),
+        specialSnap?.save_group ? postAPI({ action: "commission_snapshot", mode: "detail_sales", save_group: specialSnap.save_group }).catch(() => []) : Promise.resolve([]),
+        specialSnap?.save_group ? postAPI({ action: "commission_payables", mode: "list_adjustments", save_group: specialSnap.save_group }).catch(() => []) : Promise.resolve([]),
       ]);
       const salesArr = Array.isArray(salesSalesData) ? salesSalesData.filter(r => r && r.sale_id) : [];
       const partsArr = Array.isArray(partsRows) ? partsRows.filter(r => r && r.id) : [];
@@ -731,6 +744,19 @@ tr.excluded td { text-decoration: line-through; }
         const g = map.get(key);
         g.parts += Number(r.amount || 0);
       }
+      // ค่าคอมพิเศษ (per_emp_amount ต่อคน + ยอดที่แก้ในหน้าค่าคอมพิเศษ) — อ่านอย่างเดียว แก้ที่หน้ารายงานค่าคอมพิเศษ
+      for (const r of (Array.isArray(spRows) ? spRows : []).filter(r => r && r.employee_name)) {
+        const key = r.employee_name;
+        if (!map.has(key)) map.set(key, { name: r.employee_name, branch_code: r.employee_branch_code || "", sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, service_honda: 0, service_yamaha: 0, special: 0 });
+        const g = map.get(key);
+        if (!g.employee_id && r.employee_id) g.employee_id = r.employee_id;
+        g.special = (g.special || 0) + Number(r.per_emp_amount || 0);
+      }
+      for (const a of (Array.isArray(spAdjRows) ? spAdjRows : []).filter(a => a && a.adjustment_id)) {
+        if (!map.has(a.employee_name)) map.set(a.employee_name, { name: a.employee_name, branch_code: "", sales_commission: 0, sales_brokerage: 0, service: 0, parts: 0, service_honda: 0, service_yamaha: 0, special: 0 });
+        const g = map.get(a.employee_name);
+        g.special = (g.special || 0) + (Number(a.new_amount || 0) - Number(a.original_amount || 0));
+      }
       // ปรับยอดที่เคยแก้ไขเอง — overlay ลงบนยอดคำนวณ (ยอดคำนวณเดิมเก็บไว้โชว์ขีดฆ่า)
       const adjArr = Array.isArray(adjRows) ? adjRows.filter(r => r && r.adjustment_id) : [];
       for (const a of adjArr) {
@@ -743,14 +769,14 @@ tr.excluded td { text-decoration: line-through; }
       const list = [...map.values()].map(g => {
         const adj = adjByEmp[g.name] || {};
         const eff = k => (adj[k] ? Number(adj[k].new_amount) : Number(g[k] || 0));
-        return { ...g, adj, total: eff("sales_commission") + eff("sales_brokerage") + eff("service") + eff("parts") };
+        return { ...g, adj, special: Number(g.special || 0), total: eff("sales_commission") + eff("sales_brokerage") + eff("service") + eff("parts") + Number(g.special || 0) };
       });
       list.sort((a, b) => b.total - a.total);
       setCombinedEmployees(list);
     } catch { setCombinedEmployees([]); }
     setCombinedLoading(false);
   }
-  useEffect(() => { if (tab === "pay" && snapshotInfo?.save_group) fetchCombinedEmployees(); /* eslint-disable-next-line */ }, [tab, snapshotInfo?.save_group]);
+  useEffect(() => { if (tab === "pay" && snapshotInfo?.save_group) fetchCombinedEmployees(); /* eslint-disable-next-line */ }, [tab, snapshotInfo?.save_group, specialSnap?.save_group]);
 
   // ===== สลิปค่าคอมมิชั่น =====
   const [commSlip, setCommSlip] = useState(null); // { loading, rows, paidAt, periodLabel, sentLog, error }
@@ -1074,7 +1100,7 @@ tr.excluded td { text-decoration: line-through; }
         svcYamahaAmount = arr.reduce((s, r) => s + Number(r.yamaha_commission || 0), 0);
       }
     } catch { /* ignore */ }
-    return { month_year, service_honda_amount: svcHondaAmount, service_yamaha_amount: svcYamahaAmount };
+    return { month_year, service_honda_amount: svcHondaAmount, service_yamaha_amount: svcYamahaAmount, special_save_group: specialSnap?.save_group || "" };
   }
 
   async function openPayables() {
@@ -1287,12 +1313,13 @@ tr.excluded td { text-decoration: line-through; }
                   <th style={{ ...th, textAlign: "right" }}>ค่านายหน้างานขาย</th>
                   <th style={{ ...th, textAlign: "right" }}>ค่าคอมฯงานบริการ</th>
                   <th style={{ ...th, textAlign: "right" }}>ค่าคอมฯงานอะไหล่</th>
+                  <th style={{ ...th, textAlign: "right", background: "#ede9fe", color: "#5b21b6" }} title="จาก snapshot หน้ารายงานค่าคอมพิเศษ ช่วงเดียวกัน — ตั้งเบิกรวมในเอกสารเดียวกัน">ค่าคอมพิเศษ</th>
                   <th style={{ ...th, textAlign: "right" }}>รวม</th>
                 </tr>
               </thead>
               <tbody>
-                {combinedLoading && <tr><td colSpan={8} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-                {!combinedLoading && combinedEmployees.length === 0 && <tr><td colSpan={8} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+                {combinedLoading && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+                {!combinedLoading && combinedEmployees.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
                 {combinedEmployees.map((g, i) => (
                   <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
@@ -1302,6 +1329,7 @@ tr.excluded td { text-decoration: line-through; }
                     {renderAdjCell(g, "sales_brokerage")}
                     {renderAdjCell(g, "service")}
                     {renderAdjCell(g, "parts")}
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6", background: "#f5f3ff" }}>{g.special ? fmt(g.special) : "-"}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(g.total)}</td>
                   </tr>
                 ))}
@@ -1310,7 +1338,8 @@ tr.excluded td { text-decoration: line-through; }
                   const sumBrok = combinedEmployees.reduce((s, g) => s + effVal(g, "sales_brokerage"), 0);
                   const sumService = combinedEmployees.reduce((s, g) => s + effVal(g, "service"), 0);
                   const sumParts = combinedEmployees.reduce((s, g) => s + effVal(g, "parts"), 0);
-                  const sumTotal = sumComm + sumBrok + sumService + sumParts;
+                  const sumSpecial = combinedEmployees.reduce((s, g) => s + Number(g.special || 0), 0);
+                  const sumTotal = sumComm + sumBrok + sumService + sumParts + sumSpecial;
                   return (
                     <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                       <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม {combinedEmployees.length} คน</td>
@@ -1318,6 +1347,7 @@ tr.excluded td { text-decoration: line-through; }
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumBrok)}</td>
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumService)}</td>
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumParts)}</td>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6" }}>{fmt(sumSpecial)}</td>
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(sumTotal)}</td>
                     </tr>
                   );
@@ -2127,6 +2157,15 @@ tr.excluded td { text-decoration: line-through; }
             </div>
             {payLoading ? <div style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</div> : (
               <>
+                {specialSnap?.save_group ? (
+                  <div style={{ padding: "8px 10px", marginBottom: 8, background: "#ede9fe", borderRadius: 6, fontSize: 12, color: "#4c1d95" }}>
+                    ⭐ ตั้งเบิกรวม <b>ค่าคอมพิเศษ</b> ของช่วงนี้ในเอกสารเดียวกัน (snapshot ค่าคอมพิเศษ {String(specialSnap.period_from || "").slice(0, 10)} ถึง {String(specialSnap.period_to || "").slice(0, 10)}) — ชื่อเอกสารจะมี "+ ค่าคอมพิเศษ"
+                  </div>
+                ) : (
+                  <div style={{ padding: "8px 10px", marginBottom: 8, background: "#fee2e2", borderRadius: 6, fontSize: 12, color: "#991b1b" }}>
+                    ⚠️ ยังไม่มี snapshot ค่าคอมพิเศษของช่วงนี้ — เอกสารที่สร้างจะ<b>ไม่รวมค่าคอมพิเศษ</b> (ไปบันทึก snapshot ที่หน้า "รายงานค่าคอมพิเศษ" ก่อน แล้วเปิดหน้านี้ใหม่)
+                  </div>
+                )}
                 <div style={{ padding: "8px 10px", marginBottom: 10, background: "#fef3c7", borderRadius: 6, fontSize: 12, color: "#78350f" }}>
                   💡 ระบบจะสร้างเอกสาร 4 ใบ ตามสังกัด × แบรนด์ — ใบที่ "ค่านายหน้า" จะมีหัก ณ ที่จ่าย 3%
                 </div>
@@ -2136,13 +2175,14 @@ tr.excluded td { text-decoration: line-through; }
                       {payDocs.length === 0 && <th style={{ ...th, textAlign: "center", width: 60 }}>เลือก</th>}
                       <th style={th}>#</th><th style={th}>สังกัด</th><th style={th}>ขายแบรนด์</th>
                       <th style={th}>ประเภท</th><th style={{ ...th, textAlign: "right" }}>คน</th>
+                      <th style={{ ...th, textAlign: "right", background: "#ede9fe", color: "#5b21b6" }}>ในนี้ค่าคอมพิเศษ</th>
                       <th style={{ ...th, textAlign: "right" }}>ยอดรวม</th>
                       <th style={{ ...th, textAlign: "right" }}>หัก ณ ที่จ่าย</th>
                       <th style={{ ...th, textAlign: "right" }}>สุทธิจ่าย</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {payPreview.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+                    {payPreview.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
                     {payPreview.map((p, i) => {
                       const net = Number(p.subtotal || 0); // ยอดที่คำนวณ = ยอดที่ vendor ได้รับ
                       const rate = Number(p.wht_pct || 0);
@@ -2164,6 +2204,7 @@ tr.excluded td { text-decoration: line-through; }
                           <td style={td}>{p.brand}</td>
                           <td style={td}>{p.commission_type === "commission" ? "ค่าคอมมิชชั่น" : "ค่านายหน้า"}</td>
                           <td style={{ ...td, textAlign: "right" }}>{p.employee_count}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6", background: "#f5f3ff" }}>{Number(p.special_subtotal || 0) > 0 ? fmt(Number(p.special_subtotal)) : "-"}</td>
                           <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(subtotal)}</td>
                           <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{wht > 0 ? `-${fmt(wht)}` : "-"}</td>
                           <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(net)}</td>
@@ -2183,6 +2224,7 @@ tr.excluded td { text-decoration: line-through; }
                       return (
                         <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                           <td colSpan={payDocs.length === 0 ? 6 : 5} style={{ ...td, textAlign: "right" }}>รวม{payDocs.length === 0 ? " (เฉพาะที่เลือก)" : ""}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6" }}>{fmt(selectedRows.reduce((s, p) => s + Number(p.special_subtotal || 0), 0))}</td>
                           <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(grossSum)}</td>
                           <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{whtSum > 0 ? `-${fmt(whtSum)}` : "-"}</td>
                           <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(netSum)}</td>
