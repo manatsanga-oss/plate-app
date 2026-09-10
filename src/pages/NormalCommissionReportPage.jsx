@@ -2,6 +2,27 @@ import React, { useEffect, useState, useMemo } from "react";
 import { TH_MONTHS, SLIP_COMPANY, slipDateLabel, printSlips, sendSlipEmail, fetchSlipSendLog } from "../lib/payslip";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
+
+// สังกัดช่างจากทะเบียน HR (จับคู่ชื่อยืดหยุ่น: ตัดคำนำหน้า/ช่องว่าง ยอมต่าง 1 ตัวอักษร) — ใช้แยกค่าคอมงานบริการเข้าเอกสารตามสังกัดพนักงาน
+// (user 2026-09-10: อั้ลค่อมิ้ซ สังกัด ป.เปา แต่ทำงาน Yamaha — เดิมแยกตามแบรนด์งานอย่างเดียว)
+const hrNameKey = (v) => String(v || "").replace(/^(นาย|นาง|นางสาว|น\.ส\.)\s*/, "").replace(/\s+/g, "").trim();
+const hrNameDist = (a, b) => {
+  if (a === b) return 0;
+  if (Math.abs(a.length - b.length) > 1) return 9;
+  const dp = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return dp[a.length][b.length];
+};
+function hrAffiliationOf(employees, name) {
+  const nn = hrNameKey(name);
+  if (!nn || !Array.isArray(employees)) return "";
+  let best = employees.find(e => hrNameKey(e.employee_name) === nn);
+  if (!best) best = employees.find(e => { const k = hrNameKey(e.employee_name); return k.length >= 6 && hrNameDist(k, nn) <= 1; });
+  const aff = String(best?.affiliation || "");
+  return aff.includes("สิงห์ชัย") ? "สิงห์ชัย" : aff.includes("ป.เปา") ? "ป.เปา" : "";
+}
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const SERVICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-api";
 const HR_API = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
@@ -980,7 +1001,10 @@ tr.excluded td { text-decoration: line-through; }
       return { affiliation: "ป.เปา", brand: "ฮอนด้า", group_no: 1 };
     }
     if (colKey === "service") {
-      // ค่าคอมงานบริการแยกเข้าใบตามแบรนด์ — delta ตามฝั่งที่ช่างมียอดมากกว่า
+      // ค่าคอมงานบริการเข้าใบตามสังกัดช่าง (HR) ก่อน: ป.เปา → กลุ่ม 1, สิงห์ชัย → กลุ่ม 4; ไม่ทราบ → ฝั่งแบรนด์ที่ช่างมียอดมากกว่า
+      const hrAff = hrAffiliationOf(svcEmployees, g.name);
+      if (hrAff === "ป.เปา") return { affiliation: "ป.เปา", brand: "ฮอนด้า", group_no: 1 };
+      if (hrAff === "สิงห์ชัย") return { affiliation: "สิงห์ชัย", brand: "ยามาฮ่า", group_no: 4 };
       const brand = Number(g.service_yamaha || 0) > Number(g.service_honda || 0) ? "ยามาฮ่า" : "ฮอนด้า";
       const affiliation = brand === "ฮอนด้า" ? "ป.เปา" : "สิงห์ชัย";
       return { affiliation, brand, group_no: ADJ_GROUP_NO[`${affiliation}|${brand}`] };
@@ -1096,8 +1120,21 @@ tr.excluded td { text-decoration: line-through; }
       if (snap?.save_group) {
         const detail = await postAPI({ action: "commission_service_snapshot", mode: "detail", save_group: snap.save_group });
         const arr = Array.isArray(detail) ? detail.filter(r => r && r.snapshot_id) : [];
-        svcHondaAmount = arr.reduce((s, r) => s + Number(r.honda_commission || 0), 0);
-        svcYamahaAmount = arr.reduce((s, r) => s + Number(r.yamaha_commission || 0), 0);
+        // แยกเข้าเอกสารตามสังกัดช่าง (HR): ป.เปา → กลุ่ม 1 (key service_honda_amount), สิงห์ชัย → กลุ่ม 4 (key service_yamaha_amount)
+        // ไม่พบสังกัด → แยกตามแบรนด์งานเหมือนเดิม (Honda → ป.เปา, Yamaha → สิงห์ชัย)
+        let hrList = svcEmployees;
+        if (!hrList.length) {
+          try {
+            const r = await fetch(HR_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_hr_employees", include_inactive: "true" }) });
+            const d = await r.json(); hrList = Array.isArray(d) ? d : [];
+          } catch { hrList = []; }
+        }
+        for (const r of arr) {
+          const aff = hrAffiliationOf(hrList, r.mechanic_name);
+          if (aff === "ป.เปา") svcHondaAmount += Number(r.total_commission || 0);
+          else if (aff === "สิงห์ชัย") svcYamahaAmount += Number(r.total_commission || 0);
+          else { svcHondaAmount += Number(r.honda_commission || 0); svcYamahaAmount += Number(r.yamaha_commission || 0); }
+        }
       }
     } catch { /* ignore */ }
     return { month_year, service_honda_amount: svcHondaAmount, service_yamaha_amount: svcYamahaAmount, special_save_group: specialSnap?.save_group || "" };
