@@ -201,12 +201,19 @@ export default function PartServicePaymentPage({ currentUser }) {
     // เงินมัดจำคงเหลือ = ใบมัดจำที่งานยังไม่ปิด (ปิดงานซ่อม/ปิดงานขาย = ตัดออก) และยังไม่ถูกใช้รับชำระในหน้านี้
     try {
       // มัดจำตีราคาซ่อม (repair_deposits ในหน้าสั่งซื้ออะไหล่): ดึงมารับชำระได้เฉพาะใบที่กด "ลูกค้ากลับมาซ่อม" แล้ว (returned_at) — user 2026-09-11
-      const estimateHold = new Set();
+      const estimateHold = new Set(); const estimateReturned = new Set();
       try {
         const rr = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_repair_deposits" }) });
         const rd = await rr.json().catch(() => []);
-        for (const x of (Array.isArray(rd) ? rd : [])) if (x && x.deposit_doc_no && !x.returned_at) estimateHold.add(String(x.deposit_doc_no).trim());
+        for (const x of (Array.isArray(rd) ? rd : [])) { if (!x || !x.deposit_doc_no) continue; const k = String(x.deposit_doc_no).trim(); if (x.returned_at) estimateReturned.add(k); else estimateHold.add(k); }
       } catch { /* โหลดไม่ได้ → ไม่ซ่อน */ }
+      // มัดจำระบบเก่าฝั่ง Honda (DCS upload get_honda_deposits) ที่บันทึกเป็นตีราคาซ่อมและกด "ลูกค้ากลับมาซ่อม" แล้ว — ไม่มีใบสั่งซื้อ จึงต้องดึงจากรายการ upload โดยตรง
+      let hondaLegacy = [];
+      try {
+        const hr = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_honda_deposits" }) });
+        const hd = await hr.json().catch(() => []);
+        hondaLegacy = (Array.isArray(hd) ? hd : (hd?.data || [])).filter(x => x && x.deposit_doc_no && estimateReturned.has(String(x.deposit_doc_no).trim()) && num(x.remaining_amount) > 0);
+      } catch { hondaLegacy = []; }
       const [dRes, yRes, oRes, pRes] = await Promise.all([ // ลำดับต้องตรงกับ fetch ด้านล่าง: มัดจำ PDS/PDO → มัดจำ YAMAHA (REC) → ใบสั่งซื้อ → รับชำระ
         fetch(DEPOSIT_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -257,6 +264,14 @@ export default function PartServicePaymentPage({ currentUser }) {
         legacyDeps.push({ deposit_doc_no: doc, customer_name: o.customer_name || "", customer_phone: o.customer_phone || "", customer_code: o.customer_code || "",
           deposit_type: "ระบบเก่า (DCS)", deposit_amount: o.deposit_amount, remaining_amount: o.deposit_amount, status: "active", source: "DEPD",
           branch_code: String(o.branch || "").split(" ")[0], vin: o.vin || "", deposit_date: o.created_at });
+      }
+      for (const x of hondaLegacy) {
+        const doc = String(x.deposit_doc_no).trim();
+        if (knownDocs.has(doc)) continue;
+        knownDocs.add(doc);
+        legacyDeps.push({ deposit_doc_no: doc, customer_name: x.customer_name || "", customer_phone: x.customer_phone || "", customer_code: x.customer_code || "",
+          deposit_type: "ตีราคาซ่อม (ระบบเก่า)", deposit_amount: x.deposit_amount, remaining_amount: x.remaining_amount, status: "active", source: "DEPD",
+          branch_code: "SCY06", vin: x.vin || "", deposit_date: x.deposit_date });
       }
       setDeposits([...(Array.isArray(dRes) ? dRes : []), ...recOnlyNew, ...legacyDeps]
         .filter(r => r && r.deposit_doc_no && r.status === "active"
