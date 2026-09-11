@@ -108,16 +108,23 @@ export default function SparePartsOrderPage({ currentUser }) {
         if (!alive) return;
         const list = Array.isArray(d) ? d : (d?.data || []);
         const m = {};
+        // ใบมัดจำที่ถูกตัดใช้ในใบรับชำระ (active) — ใบสั่งซื้อระบบเก่า (DEPD-/REC ไม่มีเลข Job) ปิดงานอัตโนมัติเมื่อมัดจำถูกใช้แล้ว (user 2026-09-11)
+        const usedDep = new Set();
         for (const p of list) {
-          if (!p || p.status !== "active" || !p.doc_no) continue;
+          if (!p || p.status !== "active") continue;
+          if (p.deposit_doc_no) String(p.deposit_doc_no).split(" / ").forEach(x => x.trim() && usedDep.add(x.trim()));
+          if (!p.doc_no) continue;
           const k = normJob(p.doc_no);
           if (k) m[k] = [m[k], p.receipt_no].filter(Boolean).join(", ");
         }
         setPaidJobMap(m);
         // ใบ PDS ที่เปิดงานอยู่และเลข Job มีรับชำระแล้ว → ปิดงานซ่อมอัตโนมัติ (user 2026-08-25 — จ่ายเงินแล้ว = งานจบ ไม่ต้องรอ upload NID)
         (async () => {
-          const toClose = orders.filter(o => o.status === "เปิดงาน" && o.job_no && o.job_no !== "null"
-            && !String(o.deposit_doc_no || "").startsWith("PDO") && m[normJob(o.job_no)]);
+          const toClose = orders.filter(o => (o.status === "เปิดงาน" && o.job_no && o.job_no !== "null"
+            && !String(o.deposit_doc_no || "").startsWith("PDO") && m[normJob(o.job_no)])
+            // ใบระบบเก่า (DEPD-/REC): มัดจำถูกตัดใช้ในใบรับชำระแล้ว → ปิดงานซ่อม (สถานะ "อะไหล่ค้างส่ง"/"เปิดงาน"/"มาครบ" ที่ยังไม่ปิด/ไม่ยกเลิก)
+            || (!/^PD[SO]-/i.test(String(o.deposit_doc_no || "")) && usedDep.has(String(o.deposit_doc_no || "").trim())
+              && !/ปิดงาน|ปิดการขาย|ยกเลิก/.test(String(o.status || ""))));
           if (!toClose.length) return;
           const closedIds = [];
           for (const o of toClose) {
@@ -187,6 +194,30 @@ export default function SparePartsOrderPage({ currentUser }) {
     return () => { alive = false; };
     // eslint-disable-next-line
   }, [orders]);
+
+  // สถานะค้างส่งอัตโนมัติ (user 2026-09-11): กฎสั่งซื้อ = PO ไหนมีอะไหล่ค้างส่งใน DCS ต้องขึ้น "อะไหล่ค้างส่ง"
+  // (จะสั่งเฉพาะตัวค้างส่งก่อน รหัสอื่นรอจนค้างส่งหมด) — เช็คจาก search_dcs_backorders ตาม vendor_po_no ทุกครั้งที่โหลดหน้า
+  // เฉพาะใบระบบใหม่ (PDS-/PDO-) สถานะ สั่งซื้อแล้ว ↔ อะไหล่ค้างส่ง เท่านั้น (ใบเก่า DEPD/REC ไม่แตะ)
+  async function syncBackorderStatus(list) {
+    const cands = list.filter(o => o && o.vendor_po_no && /^PD[SO]-/i.test(String(o.deposit_doc_no || ""))
+      && ["สั่งซื้อแล้ว", "อะไหล่ค้างส่ง"].includes(String(o.status || "").trim()));
+    if (!cands.length) return;
+    const changed = [];
+    for (const o of cands) {
+      try {
+        const bo = norm(await api("search_dcs_backorders", { vendor_po_no: o.vendor_po_no })).filter(b => b && Number(b.backorder_qty || 0) > 0);
+        const want = bo.length > 0 ? "อะไหล่ค้างส่ง" : "สั่งซื้อแล้ว";
+        if (want === String(o.status).trim()) continue;
+        await api("update_order_status", { order_id: o.order_id, status: want });
+        changed.push({ id: o.order_id, status: want });
+      } catch { /* เช็คไม่ได้ก็ข้าม รอบหน้าเช็คใหม่ */ }
+    }
+    if (changed.length) {
+      setOrders(prev => prev.map(o => { const c = changed.find(x => x.id === o.order_id); return c ? { ...o, status: c.status } : o; }));
+      const nBo = changed.filter(c => c.status === "อะไหล่ค้างส่ง").length, nOk = changed.length - nBo;
+      setMessage(`🔄 อัปเดตสถานะจาก DCS: ค้างส่ง ${nBo} ใบ${nOk ? ` · ค้างส่งหมดแล้ว ${nOk} ใบ` : ""}`);
+    }
+  }
 
   // ปิดงานซ่อมอัตโนมัติ: ใบสถานะ "เปิดงาน" ที่มีเลข Job → เทียบใบแจ้งซ่อม NID (honda_repair_jobs)
   // ถ้า job นั้นมี close_date แล้ว = ช่างปิดงานใน NID → อัปเดตสถานะเป็น "ปิดงานซ่อม" ให้เอง
@@ -283,6 +314,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       // เช็ค DCS/ค้างส่งอัตโนมัติย้ายไปหน้า "รายการสั่งอะไหล่รายวัน" ที่เดียว (2026-07-23)
       // หน้านี้เช็คเฉพาะตอนเปิดรายละเอียดใบ / กดปุ่ม "ตรวจสอบ DCS" ในป๊อปอัพ
       autoCloseFinishedJobs(list); // ไม่ await — เช็คเบื้องหลัง เสร็จแล้วค่อยอัปเดตสถานะบนจอ
+      syncBackorderStatus(list); // ไม่ await — ใบ PDS/PDO ที่มี PO: DCS มีค้างส่ง → "อะไหล่ค้างส่ง", ค้างส่งหมดแล้ว → "สั่งซื้อแล้ว" (user 2026-09-11)
       checkPdoSales(); // ไม่ await — เช็คบิลขายปลีก DCS ของใบ PDO เบื้องหลัง (ป้าย 🛒 ขายแล้ว + ปิดการขายอัตโนมัติ)
     } catch {}
     // เงินมัดจำ: ดึงจากระบบมัดจำอะไหล่ (part_deposits — บันทึกเองหน้า "ระบบมัดจำอะไหล่") แทน upload NID เดิม (2026-07-21)
@@ -1133,11 +1165,12 @@ export default function SparePartsOrderPage({ currentUser }) {
                 <th style={th}>ลูกค้า</th>
                 <th style={th}>ผู้บันทึก</th>
                 <th style={th}>วันที่บันทึก</th>
+                <th style={th} title="กดเมื่อลูกค้ากลับมาซ่อม → มัดจำตีราคาใบนี้จะดึงไปรับชำระได้ในหน้ารับชำระเงินค่าอะไหล่/บริการ (ไม่ขึ้นในใบสั่งซื้ออะไหล่)">ลูกค้ากลับมาซ่อม</th>
               </tr>
             </thead>
             <tbody>
               {repairDeposits.length === 0 ? (
-                <tr><td colSpan={6} style={center}>ไม่พบข้อมูล</td></tr>
+                <tr><td colSpan={7} style={center}>ไม่พบข้อมูล</td></tr>
               ) : repairDeposits.map((rd, i) => (
                 <tr key={rd.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                   <td style={td}>{i + 1}</td>
@@ -1146,6 +1179,25 @@ export default function SparePartsOrderPage({ currentUser }) {
                   <td style={td}>{rd.customer_name}</td>
                   <td style={td}>{rd.created_by || "-"}</td>
                   <td style={td}>{fmtDate(rd.created_at)}</td>
+                  <td style={td}>
+                    {rd.returned_at ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ color: "#059669", fontWeight: 700 }}>✓ กลับมาซ่อม {fmtDate(rd.returned_at)}</span>
+                        <span style={{ fontSize: 11, color: "#6b7280" }}>ดึงมัดจำไปรับชำระได้</span>
+                        <button onClick={async () => {
+                            if (!window.confirm(`ยกเลิกสถานะกลับมาซ่อมของ ${rd.deposit_doc_no}?`)) return;
+                            try { await api("mark_repair_returned", { id: rd.id, undo: "true" }); loadAll(); } catch { setMessage("เกิดข้อผิดพลาด"); }
+                          }} title="ยกเลิก"
+                          style={{ background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>ยกเลิก</button>
+                      </span>
+                    ) : (
+                      <button onClick={async () => {
+                          if (!window.confirm(`ลูกค้า ${rd.customer_name || ""} กลับมาซ่อมแล้ว?\nมัดจำ ${rd.deposit_doc_no} จะดึงไปรับชำระได้ในหน้ารับชำระเงิน`)) return;
+                          try { await api("mark_repair_returned", { id: rd.id, returned_by: currentUser?.name || "" }); setMessage(`✅ ${rd.deposit_doc_no} ดึงมัดจำไปรับชำระได้แล้ว`); loadAll(); } catch { setMessage("เกิดข้อผิดพลาด"); }
+                        }}
+                        style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>🔧 ลูกค้ากลับมาซ่อม</button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1289,7 +1341,15 @@ export default function SparePartsOrderPage({ currentUser }) {
                         )}
                         {/* flow 2 ขั้น: เปิด Job (กรอกเลขใบงาน → สถานะเปิดงาน) ก่อน แล้วค่อยนัดหมายได้ */}
                         {/* ใบมัดจำสั่งซื้อ (PDO-) = ลูกค้าซื้ออะไหล่ ไม่มีงานซ่อม → ไม่มีปุ่มเปิด Job */}
-                        {["สั่งซื้อแล้ว", "มาครบ"].includes(o.status) && !(o.deposit_doc_no || "").startsWith("PDO") && (
+                        {/* "อะไหล่ค้างส่ง" ที่ของมาแล้ว (โดยเฉพาะใบระบบเก่า DEPD ที่ไม่มีรายการอะไหล่ให้เช็คสต๊อก) → กดรับว่ามาครบ หรือเปิด Job ได้เลย (user 2026-09-11) */}
+                        {o.status === "อะไหล่ค้างส่ง" && !(o.deposit_doc_no || "").startsWith("PDO") && (
+                          <button onClick={async () => {
+                              if (!window.confirm(`ยืนยันอะไหล่ของใบ ${o.deposit_doc_no || o.order_no} มาครบแล้ว?`)) return;
+                              try { await api("update_order_status", { order_id: o.order_id, status: "มาครบ" }); setMessage("✅ เปลี่ยนสถานะเป็น มาครบ แล้ว"); loadAll(); } catch { setMessage("เกิดข้อผิดพลาด"); }
+                            }}
+                            style={{ background: "#0891b2", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>✔ อะไหล่มาแล้ว</button>
+                        )}
+                        {["สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง"].includes(o.status) && !(o.deposit_doc_no || "").startsWith("PDO") && (
                           <button onClick={() => openJobModal(o, "job")}
                             style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>เปิด Job</button>
                         )}

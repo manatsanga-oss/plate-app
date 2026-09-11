@@ -200,6 +200,13 @@ export default function PartServicePaymentPage({ currentUser }) {
   async function loadDeposits() {
     // เงินมัดจำคงเหลือ = ใบมัดจำที่งานยังไม่ปิด (ปิดงานซ่อม/ปิดงานขาย = ตัดออก) และยังไม่ถูกใช้รับชำระในหน้านี้
     try {
+      // มัดจำตีราคาซ่อม (repair_deposits ในหน้าสั่งซื้ออะไหล่): ดึงมารับชำระได้เฉพาะใบที่กด "ลูกค้ากลับมาซ่อม" แล้ว (returned_at) — user 2026-09-11
+      const estimateHold = new Set();
+      try {
+        const rr = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_repair_deposits" }) });
+        const rd = await rr.json().catch(() => []);
+        for (const x of (Array.isArray(rd) ? rd : [])) if (x && x.deposit_doc_no && !x.returned_at) estimateHold.add(String(x.deposit_doc_no).trim());
+      } catch { /* โหลดไม่ได้ → ไม่ซ่อน */ }
       const [dRes, yRes, oRes, pRes] = await Promise.all([ // ลำดับต้องตรงกับ fetch ด้านล่าง: มัดจำ PDS/PDO → มัดจำ YAMAHA (REC) → ใบสั่งซื้อ → รับชำระ
         fetch(DEPOSIT_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
@@ -255,7 +262,8 @@ export default function PartServicePaymentPage({ currentUser }) {
         .filter(r => r && r.deposit_doc_no && r.status === "active"
           && depositAvail(r) > 0
           && !closedDocs.has(r.deposit_doc_no)
-          && !usedDocs.has(r.deposit_doc_no)));
+          && !usedDocs.has(r.deposit_doc_no)
+          && !estimateHold.has(String(r.deposit_doc_no).trim())));
     } catch { setDeposits([]); }
   }
 
