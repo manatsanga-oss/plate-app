@@ -40,13 +40,15 @@ export default function MotoBookingPage({ currentUser }) {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [filterDate, setFilterDate] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("จอง"); // เปิดมาแสดงเฉพาะรถที่จอง (user 2026-09-11)
   const [filterBranch, setFilterBranch] = useState("");
   const [filterBrand, setFilterBrand] = useState("");
   const [filterMarketing, setFilterMarketing] = useState("");
   const [filterModelCode, setFilterModelCode] = useState("");
   const [filterColor, setFilterColor] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  // wizard (user 2026-09-11): เปิดหน้ามาเห็น "สรุปรุ่นที่จอง" ก่อน → คลิกรุ่นค่อยเข้าหน้ารายการ (กรองยี่ห้อ+รุ่นให้)
+  const [viewStep, setViewStep] = useState("summary"); // summary | list
   const pageSize = 15;
 
   // Reset to page 1 when any filter changes — เลี่ยง slice() ตกขอบจนตารางว่าง
@@ -762,11 +764,57 @@ export default function MotoBookingPage({ currentUser }) {
     );
   }
 
+  /* ── สรุปรุ่นที่จอง (wizard step 1): ยี่ห้อ → รุ่น (ชื่อรุ่น) นับตามสถานะ + สีที่ยังจองอยู่ — กรองตามเดือน/สาขา/สถานะที่เลือก ──
+     ไม่กรองยี่ห้อ/รุ่น/แบบ/สี (ตัวกรองพวกนั้นตั้งให้ตอนคลิกการ์ด) */
+  const summaryBase = bookings.filter((b) => {
+    if (filterBranch && b.branch !== filterBranch) return false;
+    if (filterDate && b.booking_date && b.booking_date.slice(0, 7) !== filterDate) return false;
+    return true;
+  });
+  const modelSummary = (() => {
+    const map = new Map();
+    // สรุปเฉพาะรถที่ยังจองอยู่ (status จอง) — ขาย/ยกเลิกไม่นับ (user 2026-09-11)
+    const canonBrand = (v) => { const x = norm(v); return /ฮอนด้า|honda|อนด้า/i.test(x) ? "ฮอนด้า" : /ยามาฮ่า|yamaha/i.test(x) ? "ยามาฮ่า" : (x || "ไม่ระบุยี่ห้อ"); };
+    for (const b of summaryBase) {
+      if (b.status !== "จอง") continue;
+      const brand = canonBrand(b.brand);
+      const model = norm(b.marketing_name) || norm(b.new_model_code || b.model_code) || "ไม่ระบุรุ่น";
+      const key = `${brand}|${model}`;
+      if (!map.has(key)) map.set(key, { brand, model, rawBrands: new Set(), total: 0, booked: 0, queue: 0, sold: 0, cancelled: 0, colors: new Map(), types: new Set() });
+      const g = map.get(key);
+      g.total += 1; if (norm(b.brand)) g.rawBrands.add(norm(b.brand));
+      if (b.status === "จอง") {
+        g.booked += 1;
+        if (isQueueReady(b)) g.queue += 1;
+        const c = norm(b.new_color_name || b.color_name) || "-";
+        g.colors.set(c, (g.colors.get(c) || 0) + 1);
+        const t = norm(b.new_model_code || b.model_code); if (t) g.types.add(t);
+      } else if (b.status === "ขาย") g.sold += 1;
+      else if (b.status === "ยกเลิก") g.cancelled += 1;
+    }
+    const countOf = (g) => filterStatus === "รถถึงคิว" ? g.queue : g.booked;
+    return [...map.values()].map((g) => ({ ...g, shown: countOf(g), rawBrands: [...g.rawBrands], colors: [...g.colors.entries()].sort((a, b) => b[1] - a[1]), types: [...g.types] }))
+      .filter((g) => g.shown > 0)
+      .sort((a, b) => a.brand.localeCompare(b.brand, "th") || b.booked - a.booked || b.shown - a.shown || a.model.localeCompare(b.model, "th"));
+  })();
+  const summaryBrands = [...new Set(modelSummary.map((g) => g.brand))];
+  const openModelList = (g) => {
+    setFilterBrand(g.rawBrands.length === 1 ? g.rawBrands[0] : ""); // ยี่ห้อสะกดหลายแบบ → ไม่กรองยี่ห้อ ใช้รุ่นอย่างเดียว
+    if (filterStatus !== "จอง" && filterStatus !== "รถถึงคิว") setFilterStatus("จอง");
+    setFilterMarketing(g.model === "ไม่ระบุรุ่น" ? "" : g.model);
+    setFilterModelCode(""); setFilterColor(""); setCurrentPage(1);
+    setViewStep("list");
+  };
+  const backToSummary = () => { setViewStep("summary"); setFilterBrand(""); setFilterMarketing(""); setFilterModelCode(""); setFilterColor(""); setCurrentPage(1); };
+
   /* ── LIST ── */
   return (
     <div className="page-container">
       <div className="page-topbar">
-        <h2 className="page-title">🏍️ ระบบจองรถจักรยานยนต์</h2>
+        <h2 className="page-title">🏍️ ระบบจองรถจักรยานยนต์{viewStep === "list" && (filterBrand || filterMarketing) ? <span style={{ fontSize: 14, color: "#64748b", fontWeight: 400 }}> — {[filterBrand, filterMarketing].filter(Boolean).join(" · ")}</span> : null}</h2>
+        {viewStep === "list" && (
+          <button className="btn-secondary" onClick={backToSummary}>← กลับสรุปรุ่น</button>
+        )}
       </div>
 
       {/* Filters */}
@@ -789,6 +837,7 @@ export default function MotoBookingPage({ currentUser }) {
             {BRANCHES.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
 
+          {viewStep === "list" && (<>
           <select value={filterBrand} onChange={(e) => { setFilterBrand(e.target.value); setFilterMarketing(""); setFilterModelCode(""); setFilterColor(""); }}
             style={{ padding: "5px 10px", borderRadius: 10, border: "1px solid #cbd5e1", fontSize: 13, fontFamily: "Tahoma", background: "#fff" }}>
             <option value="">ทุกยี่ห้อ</option>
@@ -813,6 +862,7 @@ export default function MotoBookingPage({ currentUser }) {
             {colorOpts.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
 
+          </>)}
           {(filterDate || filterBranch || filterBrand || filterMarketing || filterModelCode || filterColor) && (
             <button onClick={() => { setFilterDate(""); setFilterBranch(""); setFilterBrand(""); setFilterMarketing(""); setFilterModelCode(""); setFilterColor(""); }}
               style={{ padding: "5px 12px", borderRadius: 10, border: "none", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}>
@@ -824,7 +874,7 @@ export default function MotoBookingPage({ currentUser }) {
         {/* Row 2: status pills */}
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span style={{ fontSize: 12, color: "#94a3b8", marginRight: 2 }}>สถานะ:</span>
-          {["all", "จอง", "รถถึงคิว", "ขาย", "ยกเลิก"].map((s) => (
+          {(viewStep === "summary" ? ["จอง", "รถถึงคิว"] : ["all", "จอง", "รถถึงคิว", "ขาย", "ยกเลิก"]).map((s) => (
             <button key={s} onClick={() => { setFilterStatus(s); setCurrentPage(1); }}
               style={{
                 padding: "4px 16px", borderRadius: 20, border: "none", cursor: "pointer",
@@ -836,7 +886,7 @@ export default function MotoBookingPage({ currentUser }) {
             </button>
           ))}
           <span style={{ marginLeft: "auto", fontSize: 12, color: "#94a3b8" }}>
-            {filtered.length} รายการ
+            {viewStep === "summary" ? `${modelSummary.length} รุ่น · ${modelSummary.reduce((t, g) => t + g.shown, 0)} รายการ` : `${filtered.length} รายการ`}
           </span>
         </div>
       </div>
@@ -847,7 +897,47 @@ export default function MotoBookingPage({ currentUser }) {
         </div>
       )}
 
-      {loading ? (
+      {viewStep === "summary" ? (
+        loading ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
+        ) : modelSummary.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>ไม่มีรายการจอง</div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 13, color: "#64748b", marginBottom: 10 }}>👉 เฉพาะรถที่ยังจองอยู่ — คลิกรุ่นเพื่อดูรายการจองของรุ่นนั้น</div>
+            {summaryBrands.map((brand) => (
+              <div key={brand} style={{ marginBottom: 18 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: "#072d6b", margin: "0 0 8px", display: "flex", alignItems: "center", gap: 8 }}>
+                  {brand}
+                  <span style={{ fontSize: 12, color: "#64748b", fontWeight: 400 }}>{modelSummary.filter((g) => g.brand === brand).reduce((t, g) => t + g.shown, 0)} รายการ</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
+                  {modelSummary.filter((g) => g.brand === brand).map((g) => (
+                    <div key={g.brand + g.model} onClick={() => openModelList(g)} title="คลิกดูรายการจองของรุ่นนี้"
+                      style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", background: "#fff", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,.04)", transition: "box-shadow .15s" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(7,45,107,.15)"; }} onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,.04)"; }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a" }}>{g.model}</div>
+                        <div style={{ fontSize: 22, fontWeight: 800, color: "#072d6b" }}>{g.shown}</div>
+                      </div>
+                      {g.types.length > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{g.types.join(" · ")}</div>}
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, fontSize: 12 }}>
+                        <span style={{ padding: "2px 8px", borderRadius: 12, background: "#fef3c7", color: "#92400e" }}>จอง {g.booked}</span>
+                        {g.queue > 0 && <span style={{ padding: "2px 8px", borderRadius: 12, background: "#dcfce7", color: "#15803d", fontWeight: 700 }}>🔔 ถึงคิว {g.queue}</span>}
+                      </div>
+                      {g.colors.length > 0 && (
+                        <div style={{ fontSize: 11, color: "#475569", marginTop: 6 }}>
+                          สี: {g.colors.map(([c, n]) => `${c} ${n}`).join(" · ")}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      ) : loading ? (
         <div style={{ textAlign: "center", padding: 40, color: "#6b7280" }}>กำลังโหลด...</div>
       ) : filtered.length === 0 ? (
         <div style={{ textAlign: "center", padding: 40, color: "#9ca3af" }}>ไม่มีรายการ</div>
