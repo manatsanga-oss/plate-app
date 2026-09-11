@@ -2696,12 +2696,15 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       {showUsedCustomer && (
         <CustomerPickerModal currentUser={currentUser}
           onSelect={(c) => {
+            // CustomerPickerModal ส่ง { code, name, phone, address, tax_id, birth_date, ... } (ไม่ใช่ customer_code/customer_name) — เดิม map ผิด key ชื่อ/รหัสจึงไม่ขึ้น (user 2026-09-11)
             setUsedSale(m => m ? {
               ...m,
-              customer_code: text(c.customer_code) || m.customer_code,
-              customer: text(c.customer_name) || m.customer,
+              customer_code: text(c.code || c.customer_code) || m.customer_code,
+              customer: text(c.name || c.customer_name) || m.customer,
               phone: text(c.phone) || m.phone,
               address: text(c.address) || m.address,
+              tax_id: text(c.tax_id) || m.tax_id,
+              line_user_id: text(c.line_user_id) || m.line_user_id,
               birthdate: text(c.birth_date) || m.birthdate,
             } : m);
             setShowUsedCustomer(false);
