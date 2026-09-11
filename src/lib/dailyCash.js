@@ -135,7 +135,8 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
   const paidRows = (Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no));
   const zeroRaw = resZero ? await resZero.json().catch(() => []) : [];
   const zeroDue = (Array.isArray(zeroRaw) ? zeroRaw : [])
-    .filter(r => r && r.invoice_no && String(r.payment_status || "") !== "paid" && num(r.total_payment) === 0)
+    // ยอดลูกค้าต้องจ่ายจริง = total_payment − เงินดาวน์/ค่างวดออกแทน (ตั้งแต่ 09/09/69 ดาวน์ออกแทนอยู่ใน total_payment ไม่ลดราคา) — ใบที่ร้านออกแทนทั้งก้อนถือว่าไม่ต้องชำระ (user 2026-09-11: ค่านำพา SCY01-MCSA-2609-00048 ไม่ถูกหัก)
+    .filter(r => r && r.invoice_no && String(r.payment_status || "") !== "paid" && (num(r.total_payment) - num(r.down_payout_amount)) <= 0.009)
     .map(r => ({ ...r, sale_no: r.invoice_no, receipt_no: null, receipt_date: r.sale_date, paid_amount: 0, payment_methods: [], payment_received_note: "ลูกค้าไม่ต้องชำระเงิน (ยอดชำระ 0)" }));
   const dep = resDep ? await resDep.json().catch(() => []) : [];
   const pdep = resPartDep ? await resPartDep.json().catch(() => []) : [];

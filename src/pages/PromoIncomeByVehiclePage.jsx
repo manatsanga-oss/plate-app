@@ -34,11 +34,38 @@ const groupOf = (payer) => {
 };
 // ชื่อผู้จ่ายแบบสั้นไว้โชว์ใต้ยอด
 const shortPayer = (name) => String(name || "").replace(/^\s*(บริษัท|บจก\.?|บมจ\.?|หจก\.?)\s*/, "").replace(/\s*จำกัด\s*(\(มหาชน\))?\s*$/, "").replace(/\s*(ลีสซิ่ง|แคปปิตอล|มอเตอร์)\s*$/, "").trim() || "-";
+// ชื่อไฟแนนซ์มาตรฐานสำหรับตัวกรอง — ใบขายสะกดต่างกัน (เอสจีเอฟ / เอส จี เอฟ / SGF ...) รวมเป็นชื่อเดียว (user 2026-09-10)
+const FINANCE_CANON = [
+  [/คาเธ่ย์|คาเธ่|cathay/i, "คาเธ่ย์"],
+  [/ธนบรรณ/i, "ธนบรรณ"],
+  [/เน็คซ์|เน็กซ์|next/i, "เน็คซ์"],
+  [/เอสจีเอฟ|sgf/i, "เอสจีเอฟ"],
+  [/กรุ๊ปลิส|กรุ๊ปลีส|grouplease/i, "กรุ๊ปลิส"],
+  [/อยุธยาแคปปิตอล|krungsri|กรุงศรี/i, "อยุธยา แคปปิตอล"],
+];
+const financeLabelOf = (name) => {
+  const raw = String(name || "").trim();
+  if (!raw || raw === "-" || /^เงินสด/.test(raw)) return "เงินสด";
+  const compact = raw.replace(/\s+/g, "");
+  for (const [re, label] of FINANCE_CANON) if (re.test(compact)) return label;
+  return shortPayer(raw);
+};
 const branchLabel = (r) => {
   const sb = String(r.sale_branch || "").trim();
   if (sb) return sb.split(" ")[0];
   const ib = String(r.invoice_branch || "");
   return ib === "PAPAO" ? "ป.เปา" : ib === "SINGCHAI" ? "สิงห์ชัย" : ib === "NAKORNLUANG" ? "นครหลวง" : "-";
+};
+// ชื่อรุ่นสำหรับตัวกรอง: Yamaha ใบกำกับเขียน "ยามาฮ่า รุ่น BJKD00(Grand Filano Hybrid) แบบ - สี ..." → ในวงเล็บ; Honda "NHX125AT (TH) GRY - LEAD125" → หลัง " - " ท้ายสุด; ไม่เข้าแบบ → รหัสรุ่นใบขาย
+const modelLabelOf = (r) => {
+  const inv = String(r.invoice_model || "").trim();
+  let m = inv.match(/รุ่น\s*[A-Z0-9-]+\s*\(([^)]+)\)/i);
+  if (m) return m[1].replace(/\s*:\s*$/, "").replace(/^[ัิ-ฺ็-๎]+/, "").trim(); // ตัดสระ/วรรณยุกต์ลอยหน้าชื่อ (ข้อมูล DMS พิมพ์ผิด เช่น "ืNMAX")
+  m = inv.match(/\s-\s([A-Za-z0-9+ .]+)\s*$/);
+  if (m && !/^สี/.test(m[1])) return m[1].trim();
+  const code = String(r.sale_model_code || "").trim();
+  if (code) return code.split(" ")[0];
+  return inv ? inv.split(" ")[0] : "-";
 };
 const parseAlloc = (v) => {
   if (Array.isArray(v)) return v;
@@ -51,6 +78,8 @@ export default function PromoIncomeByVehiclePage() {
   const [dateTo, setDateTo] = useState(todayISO());
   const [affil, setAffil] = useState("");
   const [brand, setBrand] = useState("");
+  const [modelF, setModelF] = useState(""); // ตัวกรองรุ่น (user 2026-09-10)
+  const [financeF, setFinanceF] = useState(""); // ตัวกรองไฟแนนท์ ("เงินสด" = ไม่มีไฟแนนซ์)
   const [onlyPromo, setOnlyPromo] = useState(false);
   const [kw, setKw] = useState("");
   const [rows, setRows] = useState([]);
@@ -92,6 +121,8 @@ export default function PromoIncomeByVehiclePage() {
         branch: branchLabel(r), invoice_branch: r.invoice_branch, brand: r.brand || "", sale_invoice_type: r.sale_invoice_type || "",
         customer: r.sale_customer || r.invoice_customer || "-",
         model: r.sale_model_code ? `${r.sale_model_code}${r.color_name ? " สี " + r.color_name : ""}` : (r.invoice_model || "-"),
+        model_label: modelLabelOf(r),
+        finance_label: financeLabelOf(r.finance_company),
         engine_no: r.engine_no || "-", chassis_no: r.chassis_no || "-", finance: r.finance_company || "",
         invoice_total: num(r.invoice_total),
         // ประกันรถหายออกแทน (ร้านจ่ายเบี้ยเป็นโปรโมชั่น / ไฟแนนซ์หักจากยอดโอน) จากใบขายระบบ NEW — ลูกค้าจ่ายเอง (finance) ไม่นับ
@@ -106,19 +137,35 @@ export default function PromoIncomeByVehiclePage() {
 
   const affilOpts = useMemo(() => [...new Set(vehicles.map((v) => v.branch).filter((x) => x && x !== "-"))].sort(), [vehicles]);
   const brandOpts = useMemo(() => [...new Set(vehicles.map((v) => v.brand).filter(Boolean))].sort(), [vehicles]);
+  // รายการรุ่น (ตามยี่ห้อที่เลือก) พร้อมจำนวนคัน
+  const modelOpts = useMemo(() => {
+    const cnt = {};
+    for (const v of vehicles) { if (brand && v.brand !== brand) continue; const k = v.model_label || "-"; cnt[k] = (cnt[k] || 0) + 1; }
+    return Object.keys(cnt).sort((a, b) => a.localeCompare(b, "th")).map((k) => ({ k, n: cnt[k] }));
+  }, [vehicles, brand]);
+  useEffect(() => { if (modelF && !modelOpts.some((o) => o.k === modelF)) setModelF(""); }, [modelOpts, modelF]);
+  // รายการไฟแนนท์ (ชื่อย่อ) พร้อมจำนวนคัน — ตามยี่ห้อ/รุ่นที่เลือก
+  const financeOpts = useMemo(() => {
+    const cnt = {};
+    for (const v of vehicles) { if (brand && v.brand !== brand) continue; if (modelF && v.model_label !== modelF) continue; cnt[v.finance_label] = (cnt[v.finance_label] || 0) + 1; }
+    return Object.keys(cnt).sort((a, b) => (a === "เงินสด") - (b === "เงินสด") || a.localeCompare(b, "th")).map((k) => ({ k, n: cnt[k] }));
+  }, [vehicles, brand, modelF]);
+  useEffect(() => { if (financeF && !financeOpts.some((o) => o.k === financeF)) setFinanceF(""); }, [financeOpts, financeF]);
 
   const filtered = useMemo(() => {
     const q = kw.trim().toLowerCase();
     return vehicles.filter((v) => {
       if (affil && v.branch !== affil) return false;
       if (brand && v.brand !== brand) return false;
+      if (modelF && v.model_label !== modelF) return false;
+      if (financeF && v.finance_label !== financeF) return false;
       if (onlyPromo && !(v.total > 0)) return false;
       if (!q) return true;
       const hay = [v.invoice_no, v.sale_invoice_no, v.customer, v.chassis_no, v.engine_no, v.model, v.finance, ...v.lines.map((l) => `${l.income_doc_no} ${l.payer_name} ${l.reference_no}`)]
         .map((x) => String(x || "").toLowerCase()).join(" | ");
       return hay.includes(q);
     });
-  }, [vehicles, affil, brand, onlyPromo, kw]);
+  }, [vehicles, affil, brand, modelF, financeF, onlyPromo, kw]);
 
   const colTotals = useMemo(() => {
     const t = {}; for (const v of filtered) for (const c of COLS_ALL) t[c] = (t[c] || 0) + (v.cells[c] || 0);
@@ -163,6 +210,14 @@ export default function PromoIncomeByVehiclePage() {
         <select value={brand} onChange={(e) => setBrand(e.target.value)} style={inp}>
           <option value="">ยี่ห้อ: ทั้งหมด</option>
           {brandOpts.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <select value={modelF} onChange={(e) => setModelF(e.target.value)} style={{ ...inp, maxWidth: 220 }} title="กรองตามรุ่น (ชื่อรุ่นจากใบกำกับรถ)">
+          <option value="">รุ่น: ทั้งหมด</option>
+          {modelOpts.map((o) => <option key={o.k} value={o.k}>{o.k} ({o.n})</option>)}
+        </select>
+        <select value={financeF} onChange={(e) => setFinanceF(e.target.value)} style={{ ...inp, maxWidth: 220 }} title="กรองตามบริษัทไฟแนนซ์ของใบขาย (เงินสด = ไม่ผ่านไฟแนนซ์)">
+          <option value="">ไฟแนนท์: ทั้งหมด</option>
+          {financeOpts.map((o) => <option key={o.k} value={o.k}>{o.k} ({o.n})</option>)}
         </select>
         <label style={{ fontSize: 13, display: "flex", alignItems: "center", gap: 4, padding: "6px 10px", border: "1px solid #d1d5db", borderRadius: 8, background: onlyPromo ? "#ede9fe" : "#fff" }}>
           <input type="checkbox" checked={onlyPromo} onChange={(e) => setOnlyPromo(e.target.checked)} /> เฉพาะคันที่มีค่าส่งเสริม
@@ -227,7 +282,7 @@ export default function PromoIncomeByVehiclePage() {
                 <td style={td}>{v.customer}
                   {v.finance ? <div style={{ fontSize: 11, color: "#7c3aed" }}>🏦 {v.finance}</div> : <div style={{ fontSize: 11, color: "#059669" }}>เงินสด</div>}
                 </td>
-                <td style={td}>{v.model}{v.brand && <div style={{ fontSize: 11, color: "#6b7280" }}>{v.brand}</div>}</td>
+                <td style={td}>{v.model_label && v.model_label !== "-" && !v.model.includes(v.model_label) ? <div style={{ fontWeight: 600 }}>{v.model_label}</div> : null}{v.model}{v.brand && <div style={{ fontSize: 11, color: "#6b7280" }}>{v.brand}</div>}</td>
                 <td style={{ ...td, fontFamily: "monospace", fontSize: 12 }}>{v.engine_no}<div style={{ color: "#6b7280" }}>{v.chassis_no}</div></td>
                 <td style={{ ...td, textAlign: "right" }}>{baht(v.invoice_total)}</td>
                 <td style={{ ...td, textAlign: "right", color: v.theft_promo ? "#be123c" : "#d1d5db", fontWeight: v.theft_promo ? 600 : 400 }} title={v.theft_src}>{v.theft_promo ? baht(v.theft_promo) : "-"}

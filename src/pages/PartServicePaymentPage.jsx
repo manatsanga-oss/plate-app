@@ -237,7 +237,21 @@ export default function PartServicePaymentPage({ currentUser }) {
       const nn = (v) => String(v || "").replace(/\s+/g, "").replace(/^(นาย|นาง|นางสาว|น\.ส\.|MR\.?|MRS\.?|MS\.?|MISS)/i, "").toUpperCase();
       const pdsNames = new Set(pdsList.map(r => nn(r.customer_name)).filter(Boolean));
       const recOnlyNew = recDeps.filter(r => !pdsNames.has(nn(r.customer_name)));
-      setDeposits([...(Array.isArray(dRes) ? dRes : []), ...recOnlyNew]
+      // มัดจำระบบเก่าฝั่ง Honda (DCS upload: ใบสั่งซื้ออะไหล่ที่มีเลข DEPD-/REC ไม่ใช่ PDS/PDO) — ไม่มีแถวใน part_deposits
+      // ขึ้นให้ตัดได้ตราบที่งานยังไม่ปิด/ไม่ยกเลิก และยังไม่เคยคืนเงิน (refund_legacy_deposit สร้างแถว refunded ไว้) (user 2026-09-10: นฤมล DEPD-2606-00047)
+      const knownDocs = new Set([...(Array.isArray(dRes) ? dRes : []).map(r => String(r?.deposit_doc_no || "").trim()), ...recDeps.map(r => r.deposit_doc_no)].filter(Boolean));
+      const legacyDeps = [];
+      for (const o of orders) {
+        const doc = String(o?.deposit_doc_no || "").trim();
+        if (!doc || /^PD[SO]-/i.test(doc) || knownDocs.has(doc)) continue;
+        if (/ยกเลิก|ปิดงาน|ปิดการขาย/.test(String(o.status || ""))) continue;
+        if (!(num(o.deposit_amount) > 0)) continue;
+        knownDocs.add(doc);
+        legacyDeps.push({ deposit_doc_no: doc, customer_name: o.customer_name || "", customer_phone: o.customer_phone || "", customer_code: o.customer_code || "",
+          deposit_type: "ระบบเก่า (DCS)", deposit_amount: o.deposit_amount, remaining_amount: o.deposit_amount, status: "active", source: "DEPD",
+          branch_code: String(o.branch || "").split(" ")[0], vin: o.vin || "", deposit_date: o.created_at });
+      }
+      setDeposits([...(Array.isArray(dRes) ? dRes : []), ...recOnlyNew, ...legacyDeps]
         .filter(r => r && r.deposit_doc_no && r.status === "active"
           && depositAvail(r) > 0
           && !closedDocs.has(r.deposit_doc_no)
