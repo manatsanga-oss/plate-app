@@ -144,7 +144,8 @@ export default function SaleMoneyReportPage({ currentUser }) {
       const paidRows = (Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no));
       const zeroRaw = resZero ? await resZero.json().catch(() => []) : [];
       const zeroDue = (Array.isArray(zeroRaw) ? zeroRaw : [])
-        .filter(r => r && r.invoice_no && String(r.payment_status || "") !== "paid" && num(r.total_payment) === 0)
+        // ยอดลูกค้าต้องจ่ายจริง = total_payment − ดาวน์/ค่างวดออกแทน (ร้านออกแทนทั้งก้อน = ไม่ต้องชำระ → ต้องเข้าสรุปเพื่อหักค่านำพา) — เหมือน dailyCash.js (user 2026-09-11)
+        .filter(r => r && r.invoice_no && String(r.payment_status || "") !== "paid" && (num(r.total_payment) - num(r.down_payout_amount)) <= 0.009)
         .map(r => ({
           ...r, sale_no: r.invoice_no, receipt_no: null, receipt_date: r.sale_date,
           paid_amount: 0, payment_methods: [],
