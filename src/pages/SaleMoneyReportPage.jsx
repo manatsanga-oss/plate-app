@@ -12,6 +12,7 @@ const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part
 const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api"; // ขายรถมือสอง
 const DEPOSIT_INCOME_API = "https://n8n-new-project-gwf2.onrender.com/webhook/deposit-income-api"; // รับฝากค่างวดที่บันทึกจากระบบ (ไม่รวมของ upload)
 const FUEL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fuel-withdraw-api";
+const WHT_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/wht-refund-api"; // รับคืนหัก ณ ที่จ่ายเงินสด = แถวรับเงินสด
 const INS_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/insurance-refund-api"; // คืนเงินค่าเบี้ยประกัน (เงินสด = หักเงินสด) // เบิกค่าน้ำมันรถใช้จ่าย — หักเงินสดหน้าร้าน (user 2026-08-29)
 
 // คอลัมน์วิธีรับชำระ — เอา บัตร/QR กับ อื่นๆ ออก เพิ่ม E-คูปอง (user สั่ง 2026-08-19; เช็คแล้วไม่มีข้อมูลเก่าใช้ 2 วิธีนั้น)
@@ -79,6 +80,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [depIncRows, setDepIncRows] = useState([]); // รับฝากชำระค่างวด กรุ๊ปลีส/ธนบรรณ ที่บันทึกจากระบบ (RECS-)
   const [fuelRows, setFuelRows] = useState([]); // เบิกค่าน้ำมันรถใช้จ่าย (fuel_withdrawals) — แถวหักเงินสด
   const [insRefundRows, setInsRefundRows] = useState([]);
+  const [whtRefundRows, setWhtRefundRows] = useState([]);
   const [pettyRows, setPettyRows] = useState([]); // เบิกเงินสดย่อย 4 ประเภท (ค่าน้ำมันรถใหม่/ไปรษณีย์/ทั่วไป/ของไหว้) — หักเงินสด ณ วันที่ใบเบิก (user 2026-09-07) // คืนเงินค่าเบี้ยประกัน (insurance_fee_refunds) — เงินสด = แถวหักเงินสด
 
 
@@ -86,7 +88,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
     setLoading(true);
     setMessage("");
     try {
-      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf] = await Promise.all([
+      const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, resWhtRf] = await Promise.all([
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
@@ -138,6 +140,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
           // คืนเงินค่าเบี้ยประกันลูกค้า (เงินสด) = เงินจ่ายออกจากลิ้นชัก → แถวหักเงินสด (user 2026-09-01)
           body: JSON.stringify({ action: "list_refunds", date_from: dateFrom, date_to: dateTo }),
         }).catch(() => null),
+        fetch(WHT_REFUND_API, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_refunds", date_from: dateFrom, date_to: dateTo }),
+        }).catch(() => null),
       ]);
       const data = await res.json().catch(() => []);
       // กรองแถวว่างจาก n8n (ตอบ {} เมื่อไม่มีข้อมูล) — กันกลุ่ม "ไม่ระบุสาขา" โผล่
@@ -181,6 +187,10 @@ export default function SaleMoneyReportPage({ currentUser }) {
       let ir = [];
       try { ir = typeof irRaw?.listjson === "string" ? JSON.parse(irRaw.listjson) : Array.isArray(irRaw) ? irRaw : []; } catch { ir = []; }
       setInsRefundRows(ir.filter(r => r && r.id));
+      const wrRaw = resWhtRf ? await resWhtRf.json().catch(() => ({})) : {};
+      let wr = [];
+      try { wr = typeof wrRaw?.listjson === "string" ? JSON.parse(wrRaw.listjson) : Array.isArray(wrRaw) ? wrRaw : []; } catch { wr = []; }
+      setWhtRefundRows(wr.filter(r => r && r.id));
       setPettyRows(await loadPettyRows().catch(() => []));
 
       if (!Array.isArray(data) || data.length === 0) setMessage("ไม่พบรายการรับเงินในช่วงวันที่ที่เลือก");
@@ -282,9 +292,9 @@ export default function SaleMoneyReportPage({ currentUser }) {
   // ===== รวมใบขาย + มัดจำจองรถ + มัดจำอะไหล่/บริการ เป็นตารางเดียว (สไตล์รายงานรับเงิน DMS) — แต่ละแถวติดประเภทรายได้ =====
   // ===== รวมทุกแหล่งเป็นตารางเดียว — ตรรกะอยู่ใน src/lib/dailyCash.js (buildDailyCashItems) ใช้ร่วมกับหน้าบันทึกฝากเงิน =====
   const allItems = useMemo(() => buildDailyCashItems(
-    { rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, pettyRows },
+    { rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, whtRefundRows, pettyRows },
     { dateFrom, dateTo, branch, isAdmin, myBranch },
-  ), [rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, pettyRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+  ), [rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, whtRefundRows, pettyRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {

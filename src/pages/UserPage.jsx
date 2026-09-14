@@ -75,6 +75,7 @@ const PAGE_GROUPS = [
       { key: "pettycashgeneral",  label: "💵 เงินสดย่อย-ค่าใช้จ่ายทั่วไป" },
       { key: "pettycashoffering", label: "🙏 เงินสดย่อย-ค่าของไหว้" },
       { key: "bankdeposit", label: "🏦 บันทึกรายการฝากเงิน" },
+      { key: "whtrefund",   label: "🧾 หัก ณ ที่จ่าย ค่าใช้จ่าย รอรับคืน" },
     ],
   },
   {
