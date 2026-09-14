@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import catalog from "../data/parts_catalog";
 import BIKE_HOTSPOTS from "../data/bike_hotspots";
+import partsBooks from "../data/parts_books";
+import PartsBookPanel from "./PartsBookPanel";
 import CustomerPickerModal from "./CustomerPickerModal";
 import { openQuotePrint, recordToQuoteData, quoteApi, nowParts, QUOTE_URL } from "./quotePrint";
 
@@ -23,6 +25,13 @@ const fmtMoney = (v) =>
     : Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const uniq = (arr) => [...new Set(arr)];
+// เทียบชื่อรุ่น/แบบข้ามแหล่ง (catalog ชุดสี ↔ คู่มือรายการอะไหล่) แบบไม่สนขีด/จุด/ช่องว่าง
+const normModel = (s) => String(s || "").toUpperCase().replace(/[\s\-._/]/g, "");
+// token type ของ Honda (TH/2TH/3TH...) จากค่า type ที่อาจมีวงเล็บ เช่น "7TH(TH1)"
+const typeTokOf = (t) => ((String(t || "").toUpperCase().match(/\d?TH/) || [])[0] || String(t || "").toUpperCase());
+// คู่มือรายการอะไหล่ของรุ่น (ถ้ามี) + variant (แบบ) ในเล่ม
+const bookOf = (m) => partsBooks.find((b) => (b.brand || "HONDA") === (m.brand || "HONDA") && normModel(b.model) === normModel(m.model)) || null;
+const bookVariantOf = (book, baeb) => (book ? (book.variants || []).find((v) => normModel(v.model_code) === normModel(baeb)) : null) || null;
 
 async function fetchPrice(code) {
   try {
@@ -146,6 +155,7 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   const [selBaeb, setSelBaeb] = useState("");
   const [selType, setSelType] = useState("");
   const [colorPage, setColorPage] = useState(null);
+  const [viewMode, setViewMode] = useState("color"); // "color" = แผนผังอะไหล่สี · "book" = คู่มือรายการอะไหล่ (ถ้ารุ่นนั้นมีเล่ม)
   const [picked, setPicked] = useState([]); // [{model, code, color, name, price, loading}]
   const [searchQ, setSearchQ] = useState("");
   const [searchMsg, setSearchMsg] = useState("");
@@ -186,6 +196,8 @@ export default function PartImageLookupPage({ currentUser } = {}) {
     baebs.forEach((b) => { const l = lcp(codePart, (b || "").toUpperCase()); if (l > bl) { bl = l; bb = b; } });
     // 3) เลือก "type" จาก token ในข้อความ — HONDA ใช้ \dTH, YAMAHA ใช้รหัส type ทั้งก้อน (เช่น BTF300) เทียบว่าอยู่ใน query ไหม
     const types = [...new Set(cols.filter((c) => (c.model_code || NO_BAEB) === bb).map((c) => c.type || "-"))];
+    // + type ที่มีเฉพาะในคู่มือรายการอะไหล่ของรุ่นนี้ (ให้ค้น "ADV160AS 4TH" เด้งไป 4TH ได้แม้ชุดสีไม่มี)
+    for (const t of bookVariantOf(bookOf(m), bb)?.types || []) if (!types.some((x) => typeTokOf(x) === typeTokOf(t))) types.push(t);
     let bt = types[0];
     if (typeTok) { const hit = types.find((t) => t.toUpperCase().includes(typeTok)); if (hit) bt = hit; }
     else {
@@ -260,13 +272,20 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   // --- cascade (derive-on-render: เลือกค่าที่ถูกต้องเสมอ แสดงเฉพาะที่มีรูป) ---
   const baebList = uniq(allColors.map(baebOf));
   const baeb = baebList.includes(selBaeb) ? selBaeb : baebList[0];
-  const typeList = uniq(allColors.filter((c) => baebOf(c) === baeb).map((c) => c.type || "-"));
+  // คู่มือรายการอะไหล่ของรุ่นนี้ (ถ้ามี) → ให้เลือกโหมดดูหลังเลือก แบบ/type
+  const book = bookOf(model);
+  const bookVariant = bookVariantOf(book, baeb);
+  // type จากสมุดชุดสี + type ที่มีเฉพาะในคู่มือรายการอะไหล่ (เช่น ADV160AS 4TH ที่ยังไม่มีรูปชุดสี) — เทียบด้วย token \dTH
+  const colorTypes = uniq(allColors.filter((c) => baebOf(c) === baeb).map((c) => c.type || "-"));
+  const bookOnlyTypes = (bookVariant?.types || []).filter((t) => !colorTypes.some((ct) => typeTokOf(ct) === typeTokOf(t)));
+  const typeList = [...colorTypes, ...bookOnlyTypes];
   const type = typeList.includes(selType) ? selType : typeList[0];
   const colorList = allColors.filter((c) => baebOf(c) === baeb && (c.type || "-") === type);
   const current = colorList.find((c) => String(c.page) === String(colorPage)) || colorList[0] || null;
   // รองรับสีที่มีหลายหน้า (เช่น FORZA350 = 2 หน้า/สี)
   const pageList = current ? (current.pages || [current.page]) : [];
   const imgList = current ? (current.imgs || [current.img]) : [];
+  const mode = book ? viewMode : "color";
 
   function printImages() {
     if (!current) return;
@@ -288,7 +307,8 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
 
   const isPicked = (code, m) => picked.some((x) => x.code === code && x.model === m);
 
-  const togglePart = (p) => {
+  // opts.color = ป้ายที่มา (โหมดคู่มือส่งชื่อบล็อก) · opts.name = ชื่อสำรองจากเล่มเมื่อ part-price-api ไม่มีชื่อ
+  const togglePart = (p, opts = {}) => {
     const m = model.model;
     if (isPicked(p.code, m)) {
       setPicked((prev) => prev.filter((x) => !(x.code === p.code && x.model === m)));
@@ -297,13 +317,13 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     setPicked((prev) =>
       prev.some((x) => x.code === p.code && x.model === m)
         ? prev
-        : [...prev, { model: m, code: p.code, color: current?.name || "", name: null, price: null, qty: 1, loading: true }]
+        : [...prev, { model: m, code: p.code, color: opts.color || current?.name || "", name: null, price: null, qty: 1, loading: true }]
     );
     fetchPrice(p.code).then((info) => {
       setPicked((prev) =>
         prev.map((x) =>
           x.code === p.code && x.model === m
-            ? { ...x, name: info?.name ?? "", price: info?.price ?? null, loading: false }
+            ? { ...x, name: info?.name || opts.name || "", price: info?.price ?? null, loading: false }
             : x
         )
       );
@@ -585,19 +605,50 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
               ))}
             </select>
           </div>
-          <div style={{ flex: "1 1 200px" }}>
+          {mode === "color" && <div style={{ flex: "1 1 200px" }}>
             <label style={lbl}>สี</label>
             <select value={current?.page ?? ""} onChange={(e) => setColorPage(e.target.value)} style={selStyle}>
               {colorList.map((c) => (
                 <option key={c.page} value={c.page}>{c.name} ({c.code}){c.color_code ? ` · ${c.color_code}` : ""}</option>
               ))}
             </select>
-          </div>
+          </div>}
         </div>
       </div>
 
-      {/* รูป + จุดกดทับ */}
-      {current && (
+      {/* เลือกแบบการดู (เฉพาะรุ่นที่มีคู่มือรายการอะไหล่): คู่มือรายการอะไหล่ / แผนผังอะไหล่สี */}
+      {book && (
+        <div className="form-card" style={{ paddingTop: 10, paddingBottom: 10 }}>
+          <div style={{ fontSize: 12.5, color: "#64748b", marginBottom: 8 }}>เลือกแบบการดู · {model.model} · {baeb} · {type}</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12, maxWidth: 720 }}>
+            {[
+              { key: "book", title: "คู่มือรายการอะไหล่", sub: `ทุกบล็อก E/F · ${book.blocks?.length || 0} บล็อก · ค้นด้วยรหัส/ชื่อ`, img: book.blocks?.find((b) => b.img)?.img },
+              { key: "color", title: "แผนผังอะไหล่สี", sub: `ชุดสี ${colorList.length} สี · กดรหัสบนรูป`, img: current?.img },
+            ].map((c) => {
+              const active = mode === c.key;
+              return (
+                <div key={c.key} onClick={() => setViewMode(c.key)}
+                  style={{ border: active ? "2px solid #dc2626" : "1px solid #dbe3ef", borderRadius: 10, overflow: "hidden", cursor: "pointer", background: "#fff", boxShadow: active ? "0 0 0 3px rgba(220,38,38,0.12)" : "0 1px 3px rgba(0,0,0,0.05)" }}>
+                  <div style={{ height: 110, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", borderBottom: "1px solid #eef2f8" }}>
+                    {c.img ? <img src={c.img} alt={c.title} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ color: "#94a3b8" }}>—</span>}
+                  </div>
+                  <div style={{ padding: "8px 12px" }}>
+                    <div style={{ fontWeight: 700, color: active ? "#dc2626" : "#0f172a" }}>{active ? "● " : ""}{c.title}</div>
+                    <div style={{ fontSize: 11.5, color: "#64748b" }}>{c.sub}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {mode === "book" && book && (
+        <PartsBookPanel book={book} baeb={baeb} type={type} modelName={model.model} isPicked={isPicked} togglePart={togglePart} />
+      )}
+
+      {/* รูป + จุดกดทับ (โหมดแผนผังอะไหล่สี) */}
+      {mode === "color" && current && (
         <div className="form-card">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
             <div style={{ fontWeight: 600 }}>
