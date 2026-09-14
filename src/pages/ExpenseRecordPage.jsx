@@ -736,8 +736,11 @@ export default function ExpenseRecordPage({ currentUser }) {
     // วางบิลงาน พรบ. — ดึงเลขกรมธรรม์เดิมคืนจากหมายเหตุ (save_payment ต่อเข้า expense_documents.note รูปแบบ "[จ่าย] พรบ. กรมธรรม์ X")
     const oldNote = String(g.items?.[0]?.note || g.items?.[0]?.pay_note || g.pay_note || "");
     const policyMatch = oldNote.match(/พรบ\.\s*กรมธรรม์\s*(\S+)/);
+    // หักกลบรายได้ — ใบรายได้ที่หักกลบไปแล้วเป็น paid จึงไม่อยู่ใน dropdown ใบค้างชำระ → ดึงเลขอ้างอิงจากหมายเหตุมาโชว์อ่านอย่างเดียว (user 2026-09-14)
+    const offsetRefs = [...new Set([...oldNote.matchAll(/หักกลบ(?:ใบรับเงิน)?รายได้\s*((?:IRC|INC)-[0-9-]+)/g)].map(m => m[1]))];
     setPayments([{ method, amount: total, from_bank_account_id: g.from_bank_account_id || "",
-      policy_no: method === "วางบิลงาน พรบ." && policyMatch ? policyMatch[1] : "" }]);
+      policy_no: method === "วางบิลงาน พรบ." && policyMatch ? policyMatch[1] : "",
+      offset_ref: method === "หักกลบรายได้" ? offsetRefs.join(", ") : "" }]);
     // แก้ไขใบจ่าย: breakdown เดิมถูก rebuild ใหม่ทั้งชุด — ถ้าใบเดิมมีค่าธรรมเนียม ต้องติ๊กกรอกใหม่
     setFeeOn(false); setFeeAmount("");
     setPayDialog(true);
@@ -771,7 +774,9 @@ export default function ExpenseRecordPage({ currentUser }) {
       if (p.method === "วางบิลงาน พรบ." && !String(p.policy_no || "").trim()) {
         setMessage(`❌ แถวที่ ${i + 1} (วางบิลงาน พรบ.): ใส่เลขที่กรมธรรม์`); return;
       }
-      if (p.method === "หักกลบรายได้") {
+      if (p.method === "หักกลบรายได้" && editPayDocNo && p.offset_ref && !p.income_doc_id) {
+        // แก้ไขใบจ่ายเดิมที่หักกลบไปแล้ว: คงรายการเดิม ไม่ต้องเลือกใบรายได้ใหม่ (ฝั่งรายได้ไม่ถูกยิงซ้ำตอนแก้ไขอยู่แล้ว)
+      } else if (p.method === "หักกลบรายได้") {
         if (!p.income_doc_id) { setMessage(`❌ แถวที่ ${i + 1} (รายได้ค้างชำระ): เลือกใบรายได้ที่จะหักกลบ`); return; }
         const doc = incomeDocs.find(d => String(d.income_doc_id) === String(p.income_doc_id));
         const remain = doc ? incomeRemaining(doc) : 0;
@@ -1226,6 +1231,11 @@ export default function ExpenseRecordPage({ currentUser }) {
                             onChange={e => updatePayment(idx, { policy_no: e.target.value })}
                             placeholder="เลขที่กรมธรรม์ *"
                             style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #fbbf24", background: "#fffbeb", fontFamily: "Tahoma", fontSize: 13 }} />
+                        ) : p.method === "หักกลบรายได้" && editPayDocNo && p.offset_ref && !p.income_doc_id ? (
+                          <div style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #a7f3d0", background: "#ecfdf5", fontSize: 12, color: "#065f46" }}>
+                            ✓ หักกลบแล้วกับใบรับเงินรายได้ <b style={{ fontFamily: "monospace" }}>{p.offset_ref}</b>
+                            <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>ดูรายละเอียดที่เมนู รายได้อื่น ๆ › ประวัติการรับเงิน · เปลี่ยนใบที่หักกลบไม่ได้จากที่นี่ ต้องยกเลิกใบจ่ายแล้วบันทึกใหม่</div>
+                          </div>
                         ) : p.method === "หักกลบรายได้" ? (
                           <select value={p.income_doc_id || ""}
                             onChange={e => {

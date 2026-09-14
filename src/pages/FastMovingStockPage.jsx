@@ -1,12 +1,21 @@
 import React, { useEffect, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api";
+const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-master-api"; // get_product_groups — master กลุ่มสินค้า (สถานะใช้งาน/ยกเลิก)
+const groupCodeOf = (v) => { const m = String(v || "").match(/^PG-\d+/i); return m ? m[0].toUpperCase() : ""; };
 
 export default function FastMovingStockPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
-  const [filterGroup, setFilterGroup] = useState("all");
+  const [filterGroup, setFilterGroup] = useState("all"); // รหัสกลุ่ม PG-xxx
+  // master กลุ่มสินค้า — dropdown ใช้ชื่อจาก master และซ่อนกลุ่มสถานะยกเลิก (ข้อความกลุ่มที่ติดกับสินค้าอาจเป็นชื่อเก่า/กลุ่มที่ยกเลิกแล้ว) (user 2026-09-12)
+  const [groupMaster, setGroupMaster] = useState([]);
+  useEffect(() => {
+    fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_product_groups" }) })
+      .then(r => r.json()).then(d => { const arr = Array.isArray(d) ? d : (d?.data || []); setGroupMaster(arr.filter(g => g && g.group_code)); })
+      .catch(() => setGroupMaster([]));
+  }, []);
   const [filterBrand, setFilterBrand] = useState("all");
   const [filterStock, setFilterStock] = useState("all");
   const [filterStockType, setFilterStockType] = useState("all");
@@ -83,13 +92,16 @@ export default function FastMovingStockPage() {
     return result;
   }
 
-  const groups = [...new Set(rows.map(r => r.product_group).filter(Boolean))].sort();
+  // ตัวเลือกกลุ่ม: รหัสที่มีสินค้าอยู่ ∩ master สถานะใช้งาน (ถ้าโหลด master ไม่ได้ → ใช้รหัสจากสินค้าทั้งหมด)
+  const groupCodesInRows = [...new Set(rows.map(r => groupCodeOf(r.product_group)).filter(Boolean))].sort();
+  const groupNameOf = (code) => { const g = groupMaster.find(x => String(x.group_code).toUpperCase() === code); return g ? `${code} ${g.group_name || ""}`.trim() : (rows.find(r => groupCodeOf(r.product_group) === code)?.product_group || code); };
+  const groups = groupCodesInRows.filter(code => { const g = groupMaster.find(x => String(x.group_code).toUpperCase() === code); return !g || String(g.status || "active") === "active"; });
   const brands = [...new Set(rows.map(r => r.brand).filter(Boolean))].sort();
 
   const filtered = rows.filter(r => {
     // ซ่อนอะไหล่ที่ยกเลิกผลิต (is_discontinued)
     if (r.is_discontinued) return false;
-    if (filterGroup !== "all" && r.product_group !== filterGroup) return false;
+    if (filterGroup !== "all" && groupCodeOf(r.product_group) !== filterGroup) return false;
     if (filterBrand !== "all" && r.brand !== filterBrand) return false;
     const qty = Number(r.quantity || 0);
     // "สินค้าหมด" / "มีสต๊อก" เช็คจากร้านหลักตามยี่ห้อ: HONDA = ป.เปา, YAMAHA = ห้าห้อง
@@ -163,7 +175,7 @@ export default function FastMovingStockPage() {
   function printReport() {
     const w = window.open("", "_blank", "width=1200,height=800");
     const filterLabel = [
-      filterGroup !== "all" ? `กลุ่ม: ${filterGroup}` : "",
+      filterGroup !== "all" ? `กลุ่ม: ${groupNameOf(filterGroup)}` : "",
       filterBrand !== "all" ? `ยี่ห้อ: ${filterBrand}` : "",
       filterStock !== "all" ? (filterStock === "in" ? "มีสต๊อก" : "สินค้าหมด") : "",
       filterBackorder !== "all" ? (filterBackorder === "yes" ? "มีค้างส่ง" : "ไม่มีค้างส่ง") : "",
@@ -258,7 +270,7 @@ export default function FastMovingStockPage() {
         <select value={filterGroup} onChange={e => { setFilterGroup(e.target.value); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }}>
           <option value="all">ทุกกลุ่มสินค้า</option>
-          {groups.map(g => <option key={g} value={g}>{g}</option>)}
+          {groups.map(g => <option key={g} value={g}>{groupNameOf(g)}</option>)}
         </select>
         <select value={filterBrand} onChange={e => { setFilterBrand(e.target.value); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #072d6b", borderRadius: 8, fontWeight: 600 }}>

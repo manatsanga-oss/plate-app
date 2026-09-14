@@ -1,8 +1,55 @@
 import React, { useEffect, useState } from "react";
+import { calcMcTax, MC_BILL_SERVICE_FEE } from "../utils/mcTax";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const REFUND_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-refund-api";
+const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api"; // get_receipt → วันสิ้นอายุภาษีเดิม/วันจดทะเบียน (งานต่อภาษี)
+
+const fmtBE2 = (v) => { const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${String(Number(m[1]) + 543).slice(-2)}` : String(v || "-"); };
+const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
+
+// งานต่อภาษี (ใบจากระบบ ยังไม่วางบิล): ใบรับเรื่องคิดเหมาภาษี 100/ปี ไม่คิดเงินเพิ่ม → ตอนวางบิลคำนวณยอดขนส่งเก็บจริงใหม่
+// จาก วันสิ้นอายุภาษีเดิม (registration_receipts.tax_paid_date) + วันที่ส่งเรื่องจริง (batch submission_date): เงินเพิ่ม 1%/เดือน ถ้ายื่นหลังสิ้นอายุ
+// ดึงหัวใบรับเรื่องด้วย get_receipt (receipt-entry-api) — ไม่ต้องแก้ n8n; ดึงไม่ได้/ไม่มีวันสิ้นอายุ → ใช้ยอดตามใบรับเรื่องเหมือนเดิม (user 2026-09-14)
+async function recomputeTaxRenewalRows(list, isTarget, feeOwnerOf) {
+  const targets = list.filter(isTarget);
+  const nos = [...new Set(targets.map(r => String(r.receipt_no)))];
+  if (!nos.length) return list;
+  const hdr = {};
+  for (let i = 0; i < nos.length; i += 6) {
+    await Promise.all(nos.slice(i, i + 6).map(async (no) => {
+      try {
+        const res = await fetch(RECEIPT_ENTRY_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_receipt", receipt_no: no }) });
+        const t = await res.text();
+        const d = t.trim() ? JSON.parse(t) : null;
+        const item = Array.isArray(d) ? (d[0]?.data || d[0]) : (d?.data || d);
+        hdr[no] = item?.header || null;
+      } catch { hdr[no] = null; }
+    }));
+  }
+  return list.map(r => {
+    if (!isTarget(r)) return r;
+    const h = hdr[String(r.receipt_no)];
+    const expire = h?.tax_paid_date ? String(h.tax_paid_date).slice(0, 10) : "";
+    const submit = r.submission_date ? String(r.submission_date).slice(0, 10) : "";
+    if (!expire || !submit) return r;
+    const c = calcMcTax(h.register_date ? String(h.register_date).slice(0, 10) : "", expire, submit);
+    if (!c || c.suspended) return r;
+    const years = c.lateYears || 1;
+    const dlt = round2(c.taxTotal + c.surcharge);
+    const owner = feeOwnerOf(r);
+    const feeElsewhere = owner && owner !== r.receipt_no;
+    const amt = round2(dlt + (feeElsewhere ? 0 : MC_BILL_SERVICE_FEE));
+    const base = `ค่าต่อภาษี ${years} ปี ${fmtNum2(c.taxTotal)}` + (c.surcharge > 0
+      ? ` + เงินเพิ่ม ${fmtNum2(c.surcharge)} (ยื่น ${fmtBE2(submit)} หลังสิ้นอายุ ${fmtBE2(expire)})`
+      : ` (ยื่น ${fmtBE2(submit)} ไม่มีเงินเพิ่ม)`);
+    // ⚠ ชื่อรายการที่ "ไม่คิด 20" ห้ามมีคำว่า "ค่าบริการ" (feeTakenBy/WHT base ใช้คำนี้เช็ค)
+    const name = feeElsewhere ? `${base} (คันเดียวกัน — 20 บาทคิดที่ ${owner} แล้ว)` : `${base} + ค่าบริการ ${MC_BILL_SERVICE_FEE} บาท`;
+    return { ...r, bill_amount: amt, bill_items: [{ expense_name: name, amount: amt }], tax_recalc: { dlt, receipt_amount: round2(r.net_price), submit, expire, surcharge: c.surcharge, years } };
+  });
+}
+const fmtNum2 = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 export default function ReceiptBillingPage({ currentUser }) {
   const [viewMode, setViewMode] = useState("pending");  // 'pending' | 'history' | 'paidHistory'
@@ -505,7 +552,13 @@ ${transferSummary.length > 0 ? `
           }
           return r;
         });
-      setRows(list);
+      // งานต่อภาษี (ยังไม่วางบิล): คำนวณยอดขนส่งเก็บจริงใหม่จากวันที่ส่งเรื่อง (เงินเพิ่ม 1%/เดือน) — ใบรับเรื่องคิดเหมาไว้
+      const list2 = await recomputeTaxRenewalRows(
+        list,
+        r => isSystemReceipt(r.receipt_no) && !r.billed_at && !r.batch_billed_at && String(r.income_name || "").trim() === "ค่าต่อภาษี" && !!r.submission_date,
+        r => feeTakenBy[feeKey(r)]
+      );
+      setRows(list2);
     } catch { setMessage("❌ โหลดไม่สำเร็จ"); setRows([]); }
     setLoading(false);
   }
@@ -1012,7 +1065,15 @@ ${transferSummary.length > 0 ? `
                     <td style={{ ...td, fontFamily: "monospace" }}>{r.chassis_no || "-"}</td>
                     <td style={td}>{r.income_type || "-"}</td>
                     <td style={td}>{r.income_name || "-"}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.net_price)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>
+                      {fmtNum(r.net_price)}
+                      {r.tax_recalc && Math.abs(r.tax_recalc.dlt - r.tax_recalc.receipt_amount) > 0.005 && (
+                        <div title={`ใบรับเรื่องบันทึก ${fmtNum(r.tax_recalc.receipt_amount)} — คำนวณใหม่จากวันยื่น ${fmtBE2(r.tax_recalc.submit)} (สิ้นอายุ ${fmtBE2(r.tax_recalc.expire)}) = ${fmtNum(r.tax_recalc.dlt)}`}
+                          style={{ fontSize: 10, color: r.tax_recalc.dlt > r.tax_recalc.receipt_amount ? "#dc2626" : "#2563eb", fontWeight: 700, whiteSpace: "nowrap" }}>
+                          ⇒ ขนส่งจริง {fmtNum(r.tax_recalc.dlt)}
+                        </div>
+                      )}
+                    </td>
                     <td style={{ ...td, fontSize: 11 }} onClick={e => e.stopPropagation()}>
                       {items.length === 0 ? <span style={{ color: "#9ca3af" }}>—</span> : (
                         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>

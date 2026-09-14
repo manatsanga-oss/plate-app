@@ -88,6 +88,8 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   const [payForm, setPayForm] = useState({ remit_date: todayISO(), payment_method: "โอน", from_bank_account_id: "", receipt_no: "", note: "" });
   // ค่าธรรมเนียมจ่ายเงิน (เช่น ค่าธรรมเนียมโอน) — ไม่รวมในยอดภาษี แต่ตัดจากบัญชีเพิ่ม (เก็บครั้งเดียวต่อชุดจ่าย)
   const [feeOn, setFeeOn] = useState(false);
+  // รายการตกหล่น: งวด/สังกัด/แบบนั้นเคยนำส่งแล้ว แต่เอกสารนี้ลงทีหลัง → เลือกได้ว่าจะยื่นเพิ่มเติมงวดเดิม หรือรวมเข้างวดอื่น (user 2026-09-14: ค่าเช่า มาโนช 31/07 ลงระบบ ก.ย.)
+  const [lateToPeriod, setLateToPeriod] = useState(""); // "" = งวดเดิม (ยื่นเพิ่มเติม)
   const [feeAmount, setFeeAmount] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -375,10 +377,16 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const refRows = referral.filter(b => !refDone.has(`${b.pndType}|${b.period_month}|${b.affiliation}`));
       // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = รายเอกสาร (itemized) — dedup นำส่งแล้ว + กันซ้ำ source เดียวกัน
       const seenItem = new Set();
+      // งวด/สังกัด/แบบ ที่มีใบนำส่งแล้ว (paid) → รายการที่ยังค้างในงวดนั้น = ตกหล่น (ลงระบบหลังยื่น)
+      const paidPeriod = {};
+      done.filter(h => h.status === "paid").forEach(h => { const k = `${h.tax_type}|${h.period_month}|${h.affiliation}`; if (!paidPeriod[k] || String(h.remit_date) > String(paidPeriod[k].remit_date)) paidPeriod[k] = h; });
       const itemRows = [...expense, ...registration, ...commission, ...theft, ...cosmos].filter(b => {
         const k = `${b.source_table}|${b.src_id}`;
         if (expDone.has(k) || seenItem.has(k)) return false;
         seenItem.add(k); return true;
+      }).map(b => {
+        const h = paidPeriod[`${b.pndType}|${b.period_month}|${b.affiliation}`];
+        return h ? { ...b, late_remit_doc: h.remit_doc_no, late_remit_date: h.remit_date } : b;
       });
       // ไม่กรองที่นี่ — เก็บดิบไว้ให้ useMemo กรองฝั่งจอ (เปลี่ยน filter ไม่ต้อง refetch)
       const rows = [...payroll, ...refRows, ...itemRows]
@@ -460,8 +468,13 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     if (selectedAffs.length > 1) { setMessage("❌ เลือกได้ทีละสังกัด (ป.เปา/สิงห์ชัย ยื่นแยกบริษัท)"); return; }
     setPayForm({ remit_date: todayISO(), payment_method: "โอน", from_bank_account_id: "", receipt_no: "", note: "" });
     setFeeOn(false); setFeeAmount("");
+    setLateToPeriod("");
     setPayDialog(true);
   }
+  // งวดที่เลือกได้สำหรับรายการตกหล่น: งวดอื่นที่เลือกอยู่ + งวดตามช่วงวันที่ที่กรอง
+  const lateRows = selectedRows.filter(r => r.late_remit_doc);
+  const latePeriodOpts = [...new Set([...selectedRows.map(r => r.period_month), periodOf(dateTo || todayISO()), periodOf(dateFrom || todayISO())].filter(Boolean))]
+    .filter(pm => !lateRows.every(r => r.period_month === pm)).sort();
 
   async function savePayment() {
     if (payForm.payment_method === "โอน" && !payForm.from_bank_account_id) { setMessage("❌ วิธีจ่าย 'โอน' ต้องเลือกบัญชี"); return; }
@@ -537,11 +550,13 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     }
     // ค่าใช้จ่าย: จัดกลุ่ม (ประเภท|งวด|สังกัด) → itemized 1 ใบต่อกลุ่ม (batch เดียวกันทั้งหมด)
     const groups = {};
-    expense.forEach(r => { const k = `${r.pndType}|${r.period_month}|${r.affiliation}`; (groups[k] = groups[k] || []).push(r); });
+    // รายการตกหล่น (งวดเดิมนำส่งแล้ว) → ย้ายไปงวดที่เลือกใน dialog (ถ้าเลือก) เพื่อรวมใบนำส่งกับงวดปัจจุบันตามที่สำนักงานบัญชียื่นจริง
+    const effPeriod = r => (r.late_remit_doc && lateToPeriod) ? lateToPeriod : r.period_month;
+    expense.forEach(r => { const k = `${r.pndType}|${effPeriod(r)}|${r.affiliation}`; (groups[k] = groups[k] || []).push(r); });
     for (const k of Object.keys(groups)) {
       const g = groups[k];
       const items = g.map(r => ({ source_table: r.source_table, source_id: r.src_id, amount: r.amount, vendor_name: r.vendor_name, doc_date: r.paid_at, affiliation: r.affiliation }));
-      const res = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: g[0].pndType, period_month: g[0].period_month, affiliation: g[0].affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami(), batch_no: batchNo, fee_amount: feePending });
+      const res = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: g[0].pndType, period_month: effPeriod(g[0]), affiliation: g[0].affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, items, created_by: whoami(), batch_no: batchNo, fee_amount: feePending });
       const row = Array.isArray(res) ? res[0] : res;
       if (Number(row?.updated_count || 0) > 0) { okAny = true; feePending = 0; }
     }
@@ -685,7 +700,14 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
                       <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: "#eef2ff", color: "#3730a3" }}>{r.pndType}</span>
                       <span style={{ fontSize: 11, color: "#6b7280", marginLeft: 6 }}>{r.sourceLabel}</span>
                     </td>}
-                    <td style={td}>{fmtPeriod(r.period_month)}</td>
+                    <td style={td}>{fmtPeriod(r.period_month)}
+                      {r.late_remit_doc && (
+                        <div title={`งวดนี้นำส่งไปแล้วเมื่อ ${String(r.late_remit_date || "").slice(0, 10)} ใบ ${r.late_remit_doc} — รายการนี้ลงระบบทีหลัง ยังไม่ได้นำส่ง`}
+                          style={{ marginTop: 3, fontSize: 10, fontWeight: 700, color: "#b45309", background: "#fef3c7", borderRadius: 4, padding: "1px 6px", display: "inline-block" }}>
+                          ⚠ ตกหล่น — งวดนี้นำส่งแล้ว ({r.late_remit_doc})
+                        </div>
+                      )}
+                    </td>
                     <td style={td}>{r.affiliation ? <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: r.affiliation === "ป.เปา" ? "#fee2e2" : "#dbeafe", color: r.affiliation === "ป.เปา" ? "#991b1b" : "#1e40af" }}>{r.affiliation}</span> : "-"}</td>
                     {!isWHT && <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#065f46" }}>{r.paid_doc_no || "-"}</td>}
                     <td style={td}>{r.vendor_name || "-"}</td>
@@ -810,6 +832,16 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
                 <label style={lbl}>วันที่จ่าย *</label>
                 <input type="date" value={payForm.remit_date} onChange={e => setPayForm(p => ({ ...p, remit_date: e.target.value }))} style={inp} />
               </div>
+              {isWHT && lateRows.length > 0 && (
+                <div style={{ gridColumn: "1 / -1", padding: 10, background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 8 }}>
+                  <label style={{ ...lbl, color: "#92400e" }}>⚠ รายการตกหล่น {lateRows.length} รายการ (งวดเดิมนำส่งแล้ว) — นำส่งในงวด</label>
+                  <select value={lateToPeriod} onChange={e => setLateToPeriod(e.target.value)} style={inp}>
+                    <option value="">งวดเดิม (ยื่นเพิ่มเติม — ใบนำส่งแยก)</option>
+                    {latePeriodOpts.map(pm => <option key={pm} value={pm}>รวมเข้างวด {fmtPeriod(pm)}</option>)}
+                  </select>
+                  <div style={{ fontSize: 11, color: "#92400e", marginTop: 4 }}>{lateRows.map(r => `${r.vendor_name} (${fmtPeriod(r.period_month)} · ${r.late_remit_doc})`).join(" · ")}</div>
+                </div>
+              )}
               <div>
                 <label style={lbl}>วิธีจ่าย</label>
                 <select value={payForm.payment_method}

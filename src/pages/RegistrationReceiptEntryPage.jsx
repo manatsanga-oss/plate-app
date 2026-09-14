@@ -1,3 +1,4 @@
+import { MC_TAX_PER_YEAR, MC_TRO_FEE, MC_TRO_AGE, MC_RENEW_FLAT, MC_TRO_FLAT, localISO, nextThursday, calcMcTax } from "../utils/mcTax";
 import React, { useEffect, useMemo, useState } from "react";
 
 import { THAI_PROVINCES } from "../data/thai_provinces";
@@ -123,65 +124,7 @@ function BEDateInput({ value, onChange, style, title, placeholder }) {
   );
 }
 
-// ===== งานต่อภาษี (เฉพาะมอเตอร์ไซค์) — เงินเพิ่ม 1%/เดือน + เกณฑ์ตรวจสภาพตามประกาศขนส่งฯ =====
-const MC_TAX_PER_YEAR = 100; // ภาษี จยย. ส่วนบุคคล (รย.12) ปีละ 100 บาท
-const MC_TRO_FEE = 60;       // ค่าตรวจสภาพ ตรอ. จยย.
-const MC_TRO_AGE = 5;        // จยย. อายุครบ 5 ปีขึ้นไปต้องตรวจสภาพ
-// format วันที่แบบ local (ห้ามใช้ toISOString — โซนเวลาไทยจะเลื่อนถอยหลัง 1 วัน)
-const localISO = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-// วันพฤหัสบดีถัดไปหลังวันที่ระบุ (ร้านส่งขนส่งทุกพฤหัส ภายใน 1 สัปดาห์หลังรับเรื่อง)
-function nextThursday(iso) {
-  const d = new Date(iso + "T00:00:00");
-  if (isNaN(d)) return "";
-  do { d.setDate(d.getDate() + 1); } while (d.getDay() !== 4);
-  return localISO(d);
-}
-// นับเดือนล่าช้าแบบขนส่งฯ: เศษของเดือนนับเป็น 1 เดือน
-function monthsLate(dueISO, payISO) {
-  const due = new Date(dueISO + "T00:00:00"), pay = new Date(payISO + "T00:00:00");
-  if (isNaN(due) || isNaN(pay) || pay <= due) return 0;
-  let m = (pay.getFullYear() - due.getFullYear()) * 12 + (pay.getMonth() - due.getMonth());
-  if (pay.getDate() > due.getDate()) m += 1;
-  return Math.max(m, 1);
-}
-// คำนวณภาษีค้าง + เงินเพิ่มรายปี + ธงตรวจสภาพ — registerISO=วันจดทะเบียน, expireISO=วันสิ้นอายุภาษีเดิม, payISO=วันที่คาดว่าจะยื่น
-const MC_LATE_GRACE_DAYS = 7; // ยื่นใกล้วันสิ้นอายุ (ห่างไม่เกิน 7 วัน หรือวันเดียวกัน) → เผื่อเงินเพิ่ม 1 เดือนไว้ก่อน กันยื่นจริงเลื่อนไปพฤหัสถัดไปแล้วโดน 1% (user เลือก 2026-08-22)
-function calcMcTax(registerISO, expireISO, payISO) {
-  const expire = new Date(expireISO + "T00:00:00");
-  let pay = new Date(payISO + "T00:00:00");
-  if (isNaN(expire) || isNaN(pay)) return null;
-  const daysToExpire = Math.round((expire - pay) / 86400000);
-  if (daysToExpire >= 0 && daysToExpire <= MC_LATE_GRACE_DAYS) {
-    pay = new Date(expire); pay.setDate(pay.getDate() + 1);
-    payISO = localISO(pay);
-  }
-  // ไล่ทีละปีภาษีที่ครบกำหนดแล้วยังไม่จ่าย (due < วันยื่น)
-  const years = [];
-  let due = new Date(expire);
-  while (due < pay) {
-    const dueISO2 = localISO(due);
-    years.push({ due: dueISO2, months: monthsLate(dueISO2, payISO), surcharge: MC_TAX_PER_YEAR * 0.01 * monthsLate(dueISO2, payISO) });
-    due.setFullYear(due.getFullYear() + 1);
-  }
-  const lateYears = years.length;                       // จำนวนปีภาษีที่ต้องจ่าย (ค้าง)
-  const taxTotal = (lateYears || 1) * MC_TAX_PER_YEAR;  // ไม่ค้างเลย = ต่อล่วงหน้า 1 ปี
-  const surcharge = Math.round(years.reduce((s, y) => s + y.surcharge, 0) * 100) / 100;
-  if (lateYears === 0) due.setFullYear(due.getFullYear() + 1); // ต่อล่วงหน้า → รอบใหม่ = สิ้นอายุเดิม + 1 ปี
-  const newExpire = localISO(due);                      // วันสิ้นอายุภาษีรอบใหม่หลังต่อครบ
-  // อายุรถ ณ วันสิ้นอายุภาษีรอบใหม่ (เกณฑ์ ตรอ.)
-  let age = null, needTro = false;
-  if (registerISO) {
-    const reg = new Date(registerISO + "T00:00:00");
-    if (!isNaN(reg)) {
-      age = new Date(newExpire + "T00:00:00").getFullYear() - reg.getFullYear();
-      needTro = age >= MC_TRO_AGE;
-    }
-  }
-  const overYear = lateYears >= 2 || (lateYears === 1 && monthsLate(years[0]?.due, payISO) > 12); // ขาดเกิน 1 ปี
-  const suspended = lateYears > 3;                      // ขาดเกิน 3 ปี = ทะเบียนระงับ
-  return { lateYears, taxTotal, surcharge, newExpire, age, needTro, overYear, suspended, months: years[0]?.months || 0 };
-}
-
+// งานต่อภาษี (มอเตอร์ไซค์): ค่าคงที่ + calcMcTax ย้ายไป src/utils/mcTax.js (ใช้ร่วมกับหน้าวางบิล)
 async function apiPost(payload) {
   const r = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const raw = await r.text();
@@ -257,17 +200,15 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const isTroLine = (l) => { const n = String(l.income_name || ""); return n.includes("ตรวจสภาพ") && !n.startsWith("ค่าบริการ"); };
 
   // งานต่อภาษี: เติมราคาอัตโนมัติ (ทับทุกครั้งที่เข้าขั้นสรุป/วันที่เปลี่ยน/เลือกชื่อรายได้)
-  // - "ค่าต่อภาษี": ยอดเก็บลูกค้าเหมา 200 บาท/ปี (1 ปี = 200, 2 ปี = 400, ...) — ราคา = ยอดที่กรมขนส่งเก็บจริง
-  //   (ภาษี+เงินเพิ่ม), ค่าบริการ = คำนวณกลับ (200×ปี − ราคา; ขนส่งเก็บเกินเหมา → ค่าบริการ 0)
+  // - "ค่าต่อภาษี": ยอดเก็บลูกค้าเหมา 200 บาท/ปี (1 ปี = 200, 2 ปี = 400, ...) — ราคา = ภาษี 100 × ปีที่ค้าง (ไม่คิดเงินเพิ่ม
+  //   ตอนรับเรื่อง — user 2026-09-14: เงินเพิ่ม 1%/เดือน คิดตอนวางบิลจากวันที่ส่งเรื่องขนส่งจริง), ค่าบริการ = 200×ปี − ราคา
   // - "ตรวจสภาพ...": ราคา = ค่าตรวจ ตรอ. 60, ค่าบริการ = 190 → รวม 250
-  const MC_RENEW_FLAT = 200; // ต่อปี
-  const MC_TRO_FLAT = 250;
   const taxLineKey = lines.map(l => (isTaxLine(l) ? "1" : isTroLine(l) ? "2" : "0")).join("");
   useEffect(() => {
     if (step !== 3 || header.receipt_type !== "งานต่อภาษีและพรบ." || !header.tax_paid_date || !/[12]/.test(taxLineKey)) return;
     const r = calcMcTax(header.register_date, header.tax_paid_date, taxSubmitDate || nextThursday(header.receive_date || todayISO()));
     if (!r || r.suspended) return;
-    const dltAmount = Math.round((r.taxTotal + r.surcharge) * 100) / 100;
+    const dltAmount = MC_TAX_PER_YEAR * (r.lateYears || 1); // เหมา: ภาษีอย่างเดียว ไม่รวมเงินเพิ่ม
     const flatTotal = MC_RENEW_FLAT * (r.lateYears || 1); // เหมา 200 บาท/ปี ตามจำนวนปีที่ต่อ/ค้าง
     const serviceFee = Math.max(0, Math.round((flatTotal - dltAmount) * 100) / 100);
     setLines(prev => prev.map(l =>
@@ -1062,7 +1003,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
             const r = header.tax_paid_date ? calcMcTax(header.register_date, header.tax_paid_date, submitDate) : null;
             return (
               <div style={{ marginTop: 14, padding: 12, background: "#fffbeb", border: "1px solid #fbbf24", borderRadius: 10 }}>
-                <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 10 }}>🧾 คำนวณภาษี/เงินเพิ่ม (มอเตอร์ไซค์ · ภาษีปีละ {MC_TAX_PER_YEAR} บาท)</div>
+                <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 10 }}>🧾 คำนวณภาษี (มอเตอร์ไซค์ · ภาษีปีละ {MC_TAX_PER_YEAR} บาท · เหมาเก็บลูกค้า {MC_RENEW_FLAT} บาท/ปี)</div>
+                <div style={{ fontSize: 11, color: "#92400e", marginBottom: 8 }}>ตอนรับเรื่องคิดเหมา ไม่คิดเงินเพิ่ม — เงินเพิ่ม 1%/เดือน (ถ้ายื่นหลังสิ้นอายุ) ระบบคำนวณตอนวางบิลจากวันที่ส่งเรื่องขนส่งจริง</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
                   <Field label={`วันจดทะเบียน *${regDateSource && header.register_date ? " ✓ ดึงอัตโนมัติ" : " (จากเล่ม)"}`}>
                     <BEDateInput value={header.register_date} onChange={v => { setRegDateSource(""); setHeader(h => ({ ...h, register_date: v })); }}
@@ -1089,10 +1031,10 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                       <>
                         <div>
                           💰 ภาษี {r.lateYears || 1} ปี = <b>{baht(r.taxTotal)}</b> บาท
-                          {r.surcharge > 0 && <> · เงินเพิ่ม (1%/เดือน) = <b style={{ color: "#dc2626" }}>{baht(r.surcharge)}</b> บาท{r.lateYears === 1 ? ` (ล่าช้า ${r.months} เดือน)` : ` (ค้าง ${r.lateYears} ปี)`}</>}
+                          {r.surcharge > 0 && <> · เงินเพิ่มโดยประมาณ (1%/เดือน ถ้ายื่น {fmtBE(submitDate)}) = <b style={{ color: "#dc2626" }}>{baht(r.surcharge)}</b> บาท{r.lateYears === 1 ? ` (ล่าช้า ${r.months} เดือน)` : ` (ค้าง ${r.lateYears} ปี)`} <span style={{ color: "#6b7280", fontWeight: 400 }}>— ไม่รวมในใบรับเรื่อง คิดจริงตอนวางบิล</span></>}
                           {r.needTro && <> · ค่าตรวจ ตรอ. = <b>{baht(MC_TRO_FEE)}</b> บาท</>}
                           <span style={{ marginLeft: 8, fontWeight: 700, color: "#065f46" }}>
-                            รวมประมาณ {baht(r.taxTotal + r.surcharge + (r.needTro ? MC_TRO_FEE : 0))} บาท (ยังไม่รวม พ.ร.บ. + ค่าบริการ)
+                            เก็บลูกค้าเหมา {baht(MC_RENEW_FLAT * (r.lateYears || 1) + (r.needTro ? MC_TRO_FLAT : 0))} บาท (ยังไม่รวม พ.ร.บ.)
                           </span>
                         </div>
                         <div>
