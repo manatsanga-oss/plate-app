@@ -43,8 +43,19 @@ const normModel = (s) => String(s || "").toUpperCase().replace(/[\s\-._/]/g, "")
 // token type ของ Honda (TH/2TH/3TH...) จากค่า type ที่อาจมีวงเล็บ เช่น "7TH(TH1)"
 const typeTokOf = (t) => ((String(t || "").toUpperCase().match(/\d?TH/) || [])[0] || String(t || "").toUpperCase());
 // คู่มือรายการอะไหล่ของรุ่น (ถ้ามี) + variant (แบบ) ในเล่ม
-const bookOf = (m) => partsBooks.find((b) => (b.brand || "HONDA") === (m.brand || "HONDA") && normModel(b.model) === normModel(m.model)) || null;
-const bookVariantOf = (book, baeb) => (book ? (book.variants || []).find((v) => normModel(v.model_code) === normModel(baeb)) : null) || null;
+// รุ่นหนึ่งมีได้หลายเล่ม (คนละฉบับ/คนละชุดแบบ เช่น PCX160 เล่ม 01_25 = WW160AS/SS, เล่ม K1ZP = WW160P/AP) → เลือกเล่มที่มี "แบบ" ที่เลือก ไม่มีเล่มไหนตรงใช้เล่มแรก
+const booksOf = (m) => partsBooks.filter((b) => (b.brand || "HONDA") === (m.brand || "HONDA") && (b.models || [b.model]).some((x) => normModel(x) === normModel(m.model)));
+const bookVariantOf = (book, baeb) => {
+  if (!book) return null;
+  const nb = normModel(baeb);
+  const vs = book.variants || [];
+  return vs.find((v) => normModel(v.model_code) === nb) || vs.find((v) => normModel(v.model_code).startsWith(nb) || nb.startsWith(normModel(v.model_code))) || null;
+};
+const bookOf = (m, baeb) => {
+  const list = booksOf(m);
+  if (!list.length) return null;
+  return list.find((b) => (b.variants || []).some((v) => normModel(v.model_code) === normModel(baeb))) || list.find((b) => bookVariantOf(b, baeb)) || list[0];
+};
 
 async function fetchPrice(code) {
   try {
@@ -204,6 +215,7 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   const [selType, setSelType] = useState("");
   const [colorPage, setColorPage] = useState(null);
   const [viewMode, setViewMode] = useState("color"); // "color" = แผนผังอะไหล่สี · "book" = คู่มือรายการอะไหล่ (ถ้ารุ่นนั้นมีเล่ม)
+  const [selBookSlug, setSelBookSlug] = useState(""); // เลือกเล่มเอง เมื่อรุ่นมีหลายเล่ม ("" = อัตโนมัติตามแบบ)
   const [picked, setPicked] = useState([]); // [{model, code, color, name, price, loading}]
   const [searchQ, setSearchQ] = useState("");
   const [searchMsg, setSearchMsg] = useState("");
@@ -245,7 +257,7 @@ export default function PartImageLookupPage({ currentUser } = {}) {
     // 3) เลือก "type" จาก token ในข้อความ — HONDA ใช้ \dTH, YAMAHA ใช้รหัส type ทั้งก้อน (เช่น BTF300) เทียบว่าอยู่ใน query ไหม
     const types = [...new Set(cols.filter((c) => (c.model_code || NO_BAEB) === bb).map((c) => c.type || "-"))];
     // + type ที่มีเฉพาะในคู่มือรายการอะไหล่ของรุ่นนี้ (ให้ค้น "ADV160AS 4TH" เด้งไป 4TH ได้แม้ชุดสีไม่มี)
-    for (const t of bookVariantOf(bookOf(m), bb)?.types || []) if (!types.some((x) => typeTokOf(x) === typeTokOf(t))) types.push(t);
+    for (const t of bookVariantOf(bookOf(m, bb), bb)?.types || []) if (!types.some((x) => typeTokOf(x) === typeTokOf(t))) types.push(t);
     let bt = types[0];
     if (typeTok) { const hit = types.find((t) => t.toUpperCase().includes(typeTok)); if (hit) bt = hit; }
     else {
@@ -321,7 +333,8 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   const baebList = uniq(allColors.map(baebOf));
   const baeb = baebList.includes(selBaeb) ? selBaeb : baebList[0];
   // คู่มือรายการอะไหล่ของรุ่นนี้ (ถ้ามี) → ให้เลือกโหมดดูหลังเลือก แบบ/type
-  const book = bookOf(model);
+  const bookList = booksOf(model);
+  const book = bookList.find((b) => b.slug === selBookSlug) || bookOf(model, baeb);
   const bookVariant = bookVariantOf(book, baeb);
   // type จากสมุดชุดสี + type ที่มีเฉพาะในคู่มือรายการอะไหล่ (เช่น ADV160AS 4TH ที่ยังไม่มีรูปชุดสี) — เทียบด้วย token \dTH
   const colorTypes = uniq(allColors.filter((c) => baebOf(c) === baeb).map((c) => c.type || "-"));
@@ -697,6 +710,19 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
         </div>
       )}
 
+      {mode === "book" && bookList.length > 1 && (
+        <div className="form-card" style={{ paddingTop: 8, paddingBottom: 8, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#0b2f6b" }}>📚 เล่มคู่มือ ({bookList.length} เล่ม)</span>
+          <select value={book?.slug || ""} onChange={(e) => setSelBookSlug(e.target.value)} style={{ ...selStyle, width: "auto", minWidth: 320 }}>
+            {bookList.map((b) => (
+              <option key={b.slug} value={b.slug}>
+                {b.file}{b.edition ? ` · ฉบับ ${b.edition}` : ""} · แบบ {(b.variants || []).map((v) => v.model_code).join("/") || "-"}
+              </option>
+            ))}
+          </select>
+          <span style={{ fontSize: 12, color: "#64748b" }}>เลือกอัตโนมัติจากแบบที่เลือก ถ้าแบบไม่มีในเล่มไหน ให้เลือกเล่มเอง</span>
+        </div>
+      )}
       {mode === "book" && book && (
         <PartsBookPanel book={book} baeb={baeb} type={type} modelName={model.model} isPicked={isPicked} togglePart={togglePart} />
       )}
