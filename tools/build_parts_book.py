@@ -70,7 +70,7 @@ def parse_variants(doc, base):
         toks = [x.strip() for x in re.split(r"[\t\n]+", t) if x.strip()]
         out, cur = [], None
         for tok in toks:
-            if tok.startswith(base) and re.fullmatch(r"[A-Z0-9]+", tok):
+            if tok.startswith(base[:5]) and re.fullmatch(r"[A-Z]{2,}\d+[A-Z]+", tok):
                 cur = {"model_code": tok, "types": []}
                 out.append(cur)
             elif cur and TYPE_RE.match(tok):
@@ -109,21 +109,33 @@ def parse_block_page(page, col_keys=None):
     y_hdr = hdr["code"][1]
     # หัวคอลัมน์จำนวน: base (ADV160A / ACB160) + [กลุ่ม 2-4 ตัว เช่น CAT CBT (CLICK160)] + ตัวอักษรคอลัมน์ (P S T / N R V N)
     # key ของคอลัมน์ = กลุ่ม+ตัวอักษร (CATN) หรือตัวอักษรเดี่ยว (P) → model_code = base + key
-    band = [w for w in words if y_hdr - 12 < w[1] < y_hdr + 30 and w[0] > hdr["name"][0] + 100 and w[0] < hdr["note"][0] - 5]
-    base_w = next((w for w in band if re.fullmatch(r"[A-Z]{2,}\d+[A-Z]*", w[4])), None)
-    base = base_w[4] if base_w else None
-    letters = sorted([w for w in band if re.fullmatch(r"[A-Z]", w[4])], key=lambda w: w[0])
-    groups = sorted([w for w in band if re.fullmatch(r"[A-Z]{2,4}", w[4])], key=lambda w: w[0])
+    # clean ข้อความคำก่อนเทียบ regex (บางเล่มมีอักษรขยะแฝงในคำหัวคอลัมน์ เช่น ACF125CA)
+    band = [(w[0], w[1], w[2], w[3], clean(w[4])) for w in words
+            if y_hdr - 12 < w[1] < y_hdr + 30 and w[0] > hdr["name"][0] + 100 and w[0] < hdr["note"][0] - 5]
+    # บรรทัดตัวอักษรคอลัมน์ = บรรทัดที่มีตัวอักษรเดี่ยวมากสุด (กันคำอังกฤษตัวเดียวในแถวข้อมูลแรก เช่น "PIPE B")
+    single = [w for w in band if re.fullmatch(r"[A-Z]", w[4])]
+    lines_ = {}
+    for w in single: lines_.setdefault(round(w[1] / 3), []).append(w)
+    letters = sorted(max(lines_.values(), key=len), key=lambda w: w[0]) if lines_ else []
+    y_letters = min(w[1] for w in letters) if letters else y_hdr + 30
+    above = [w for w in band if w[1] < y_letters - 2 and w not in letters]   # คำที่เริ่มเหนือบรรทัดตัวอักษร = base / กลุ่ม (บรรทัดซ้อนกันได้ เทียบ y บน)
+    # base word(s): ADV160A · ACB160 · ACF125CA+ACF125CB (GIORNO+ หลาย base ครอบคนละชุดคอลัมน์) → base จริง = common prefix
+    base_words = sorted([w for w in above if re.fullmatch(r"[A-Z]{2,}\d+[A-Z]*", w[4])], key=lambda w: w[0])
+    base = os.path.commonprefix([w[4] for w in base_words]) if base_words else None
+    groups = base_words if len(base_words) > 1 else sorted([w for w in above if re.fullmatch(r"[A-Z]{2,4}", w[4])], key=lambda w: w[0])
     def grp_of(w):
         if not groups: return ""
         xc = (w[0] + w[2]) / 2
         return min(groups, key=lambda g: 0 if g[0] <= xc <= g[2] else min(abs(xc - g[0]), abs(xc - g[2])))[4]
+    def key_of(w):
+        k = grp_of(w) + w[4]
+        return k[len(base):] if base and k.startswith(base) else k   # ACF125CA+R → "AR" (ตัด base ออกให้ตรงกับ col ของ variant)
     pst = letters
     # ถ้ารู้ลำดับ variant จากตารางรุ่น (col_keys เช่น CATN CATR CATV CBTN) และจำนวน/ตัวท้ายตรงกับตัวอักษรคอลัมน์ → ใช้ตามนั้น (แม่นกว่าการเดากลุ่มจากตำแหน่ง x)
     if col_keys and len(col_keys) == len(letters) and all(k.endswith(w[4]) for k, w in zip(col_keys, letters)):
         cols = [(k, (w[0] + w[2]) / 2) for k, w in zip(col_keys, letters)]
     else:
-        cols = [(grp_of(w) + w[4], (w[0] + w[2]) / 2) for w in letters]
+        cols = [(key_of(w), (w[0] + w[2]) / 2) for w in letters]
     x_code = hdr["code"][0] - 3
     x_qty0 = (cols[0][1] - 10) if cols else hdr["note"][0] - 120
     x_note = hdr["note"][0] - 6
