@@ -17,6 +17,11 @@ const QUOTE_LINE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/part-q
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/part-price-api";
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api"; // ค้นรถ+ข้อมูลการขายด้วยเลขเครื่อง/เลขตัวถัง
+// สต๊อกคงเหลืออะไหล่รายสาขา (action search_inventory เดียวกับหน้าคืนอะไหล่/สั่งซื้อ): HONDA=honda_inventory · YAMAHA=yamaha
+const STOCK_API = {
+  HONDA: "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api",
+  YAMAHA: "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api",
+};
 const NO_BAEB = "(ไม่ระบุแบบ)";
 
 const fmtMoney = (v) =>
@@ -45,6 +50,25 @@ async function fetchPrice(code) {
     const rows = Array.isArray(arr) ? arr : arr?.data || [];
     const row = rows.find((r) => String(r.part_code) === String(code)) || rows[0];
     return row ? { name: row.name || "", price: row.price } : { name: "", price: null };
+  } catch {
+    return null;
+  }
+}
+
+// สต๊อกคงเหลือของรหัส แยกตามสาขา (source) → { total, detail:[{source, qty}] } · null = เช็คไม่ได้
+async function fetchStock(code, brand) {
+  try {
+    const url = STOCK_API[String(brand || "HONDA").toUpperCase()] || STOCK_API.HONDA;
+    const c = String(code || "").replace(/[^0-9A-Za-z]/g, "");
+    const res = await fetch(url, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "search_inventory", code: c, keyword: c }),
+    });
+    if (!res.ok) return null;
+    const arr = await res.json().catch(() => []);
+    const rows = (Array.isArray(arr) ? arr : arr?.data || []).filter((r) => r && (r.quantity != null || r.source));
+    const detail = rows.map((r) => ({ source: r.source || "-", qty: Number(r.quantity || 0) }));
+    return { total: detail.reduce((t, d) => t + d.qty, 0), detail };
   } catch {
     return null;
   }
@@ -317,8 +341,11 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     setPicked((prev) =>
       prev.some((x) => x.code === p.code && x.model === m)
         ? prev
-        : [...prev, { model: m, code: p.code, color: opts.color || current?.name || "", name: null, price: null, qty: 1, loading: true }]
+        : [...prev, { model: m, code: p.code, color: opts.color || current?.name || "", name: null, price: null, qty: 1, loading: true, stock: undefined }]
     );
+    fetchStock(p.code, model.brand).then((st) => {
+      setPicked((prev) => prev.map((x) => (x.code === p.code && x.model === m ? { ...x, stock: st } : x)));
+    });
     fetchPrice(p.code).then((info) => {
       setPicked((prev) =>
         prev.map((x) =>
@@ -359,7 +386,10 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     const m = model.model;
     if (isPicked(code, m)) { setAddStatus("dup"); return; }
     const priceNum = addPrice === "" ? null : Number(addPrice);
-    setPicked((prev) => [...prev, { model: m, code, color: "เพิ่มเอง", name: addName.trim(), price: isNaN(priceNum) ? null : priceNum, qty: 1, loading: false }]);
+    setPicked((prev) => [...prev, { model: m, code, color: "เพิ่มเอง", name: addName.trim(), price: isNaN(priceNum) ? null : priceNum, qty: 1, loading: false, stock: undefined }]);
+    fetchStock(code, model.brand).then((st) => {
+      setPicked((prev) => prev.map((x) => (x.code === code && x.model === m ? { ...x, stock: st } : x)));
+    });
     setShowAdd(false);
   };
 
@@ -752,6 +782,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
                   <th>รุ่น</th>
                   <th>รหัสอะไหล่</th>
                   <th>ชื่ออะไหล่</th>
+                  <th style={{ width: 150, textAlign: "right" }} title="สต๊อกคงเหลือในระบบ แยกตามสาขา (search_inventory)">สต๊อกคงเหลือ</th>
                   <th style={{ width: 80, textAlign: "right" }}>จำนวน</th>
                   <th style={{ textAlign: "right" }}>ราคาขาย</th>
                   <th style={{ width: 40 }}></th>
@@ -783,6 +814,22 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
                             autoFocus
                           />
                         ) : p.loading ? <span style={{ color: "#94a3b8" }}>…</span> : (p.name || <span style={{ color: "#cbd5e1" }}>-</span>)}
+                      </td>
+                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                        {p.stock === undefined ? (
+                          <span style={{ color: "#94a3b8" }}>…</span>
+                        ) : p.stock === null ? (
+                          <span style={{ color: "#cbd5e1" }} title="เช็คสต๊อกไม่ได้">-</span>
+                        ) : (
+                          <>
+                            <b style={{ color: p.stock.total > 0 ? "#15803d" : "#b91c1c" }}>{p.stock.total > 0 ? p.stock.total : "ไม่มี"}</b>
+                            {p.stock.detail.length > 0 && (
+                              <div style={{ fontSize: 11, color: "#64748b", whiteSpace: "normal", lineHeight: 1.25 }}>
+                                {p.stock.detail.map((d) => `${d.source} ${d.qty}`).join(" · ")}
+                              </div>
+                            )}
+                          </>
+                        )}
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <input
@@ -820,7 +867,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
               </tbody>
               <tfoot>
                 <tr style={{ borderTop: "2px solid #e2e8f0", fontWeight: 700 }}>
-                  <td colSpan={5} style={{ textAlign: "right" }}>รวม</td>
+                  <td colSpan={6} style={{ textAlign: "right" }}>รวม</td>
                   <td style={{ textAlign: "right", color: "#0369a1" }}>{fmtMoney(total) ?? "0.00"}</td>
                   <td></td>
                 </tr>
