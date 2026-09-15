@@ -34,11 +34,29 @@ export default function PartsBookPanel({ book, baeb, type, modelName, isPicked, 
   const [q, setQ] = useState("");
   const [hiCode, setHiCode] = useState("");      // รหัสที่ไฮไลต์หลังค้นหา
   const [onlyApplicable, setOnlyApplicable] = useState(false);
+  const [selRef, setSelRef] = useState(null);     // หมายเลขบนรูปที่กด ("*" = ทั้งหมด) — รายการขึ้นเฉพาะเลขที่เลือก
 
   const variant = findVariant(book, baeb);
   const blocks = useMemo(() => book.blocks || [], [book]);
   const block = blocks.find((b) => b.code === selBlock) || null;
   const blockIdx = block ? blocks.indexOf(block) : -1;
+  // หมายเลขบนรูป (ลำดับ) ของบล็อกนี้ เรียงตามตัวเลข + สถานะว่าเลขนั้นมีรายการที่ใช้กับแบบ/type ที่เลือกไหม
+  const refList = useMemo(() => {
+    const m = new Map();
+    for (const p of block?.parts || []) {
+      const r = String(p.ref || "");
+      if (!m.has(r)) m.set(r, { ref: r, ok: false, n: 0 });
+      const e = m.get(r); e.n++; if (rowApplies(p, variant, type)) e.ok = true;
+    }
+    return [...m.values()].sort((a, b) => (Number(a.ref) || 0) - (Number(b.ref) || 0));
+  }, [block, variant, type]);
+  const refRows = (block?.parts || []).filter((p) => selRef === "*" || String(p.ref) === selRef);
+  const openBlock = (code, code2) => {
+    setSelBlock(code); setHiCode(code2 || "");
+    const b = blocks.find((x) => x.code === code);
+    const hit = code2 && b ? (b.parts || []).find((p) => p.code === code2) : null;
+    setSelRef(hit ? String(hit.ref) : null); // เปิดจากผลค้นหา → กดเลขของรหัสนั้นให้เลย
+  };
 
   // ค้นหา: รหัส / ชื่อไทย / ชื่ออังกฤษ / ชื่อบล็อก
   const query = q.trim();
@@ -63,7 +81,7 @@ export default function PartsBookPanel({ book, baeb, type, modelName, isPicked, 
     return blocks.filter((b) => b.code.toUpperCase() === qq || (b.name_th || "").includes(query) || (b.name_en || "").toUpperCase().includes(qq));
   }, [query, blocks]);
 
-  const openHit = (h) => { setSelBlock(h.block.code); setHiCode(h.part.code); setQ(""); };
+  const openHit = (h) => { openBlock(h.block.code, h.part.code); setQ(""); };
   const applyLabel = variant ? `${variant.model_code} ${typeTokOf(type) || type || ""}`.trim() : baeb;
 
   const printBlock = () => {
@@ -108,7 +126,7 @@ ${rows.map((p) => `<tr class="${rowApplies(p, variant, type) ? "" : "off"}"><td>
           {blockHits.length > 0 && (
             <div style={{ marginBottom: 6, display: "flex", flexWrap: "wrap", gap: 6 }}>
               {blockHits.map((b) => (
-                <button key={b.code} onClick={() => { setSelBlock(b.code); setHiCode(""); setQ(""); }}
+                <button key={b.code} onClick={() => { openBlock(b.code); setQ(""); }}
                   style={{ fontSize: 12.5, border: "1px solid #93c5fd", background: "#dbeafe", color: "#0b2f6b", borderRadius: 7, padding: "3px 10px", cursor: "pointer", fontWeight: 600 }}>
                   📂 {b.code} {b.name_th}
                 </button>
@@ -143,7 +161,7 @@ ${rows.map((p) => `<tr class="${rowApplies(p, variant, type) ? "" : "off"}"><td>
               <div style={{ fontWeight: 700, fontSize: 14, color: "#0f172a", margin: "4px 0 8px", paddingBottom: 4, borderBottom: "2px solid #0b2f6b" }}>{s.name} ({list.length} บล็อก)</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
                 {list.map((b) => (
-                  <div key={b.code} onClick={() => { setSelBlock(b.code); setHiCode(""); }}
+                  <div key={b.code} onClick={() => openBlock(b.code)}
                     style={{ border: "1px solid #dbe3ef", borderRadius: 10, overflow: "hidden", cursor: "pointer", background: "#fff", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}
                     onMouseEnter={(e) => (e.currentTarget.style.borderColor = "#2563eb")} onMouseLeave={(e) => (e.currentTarget.style.borderColor = "#dbe3ef")}>
                     <div style={{ padding: "6px 10px", fontSize: 12.5, borderBottom: "1px solid #eef2f8", display: "flex", gap: 8, alignItems: "baseline" }}>
@@ -166,10 +184,10 @@ ${rows.map((p) => `<tr class="${rowApplies(p, variant, type) ? "" : "off"}"><td>
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-              <button onClick={() => { setSelBlock(null); setHiCode(""); }} style={btnGhost}>◀ กลับไปดัชนีภาพ</button>
-              <button onClick={() => blockIdx > 0 && setSelBlock(blocks[blockIdx - 1].code)} disabled={blockIdx <= 0} style={btnGhost}>‹ ก่อนหน้า</button>
-              <button onClick={() => blockIdx < blocks.length - 1 && setSelBlock(blocks[blockIdx + 1].code)} disabled={blockIdx >= blocks.length - 1} style={btnGhost}>ถัดไป ›</button>
-              <select value={block.code} onChange={(e) => { setSelBlock(e.target.value); setHiCode(""); }} style={{ padding: "5px 8px", border: "1px solid #cbd5e1", borderRadius: 7, fontSize: 13 }}>
+              <button onClick={() => { setSelBlock(null); setHiCode(""); setSelRef(null); }} style={btnGhost}>◀ กลับไปดัชนีภาพ</button>
+              <button onClick={() => blockIdx > 0 && openBlock(blocks[blockIdx - 1].code)} disabled={blockIdx <= 0} style={btnGhost}>‹ ก่อนหน้า</button>
+              <button onClick={() => blockIdx < blocks.length - 1 && openBlock(blocks[blockIdx + 1].code)} disabled={blockIdx >= blocks.length - 1} style={btnGhost}>ถัดไป ›</button>
+              <select value={block.code} onChange={(e) => openBlock(e.target.value)} style={{ padding: "5px 8px", border: "1px solid #cbd5e1", borderRadius: 7, fontSize: 13 }}>
                 {blocks.map((b) => (<option key={b.code} value={b.code}>{b.code} {b.name_th}</option>))}
               </select>
             </div>
@@ -188,10 +206,39 @@ ${rows.map((p) => `<tr class="${rowApplies(p, variant, type) ? "" : "off"}"><td>
             <img src={block.img} alt={`${block.code} ${block.name_th}`}
               style={{ width: "100%", maxHeight: 520, objectFit: "contain", display: "block", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", marginBottom: 8 }} />
           )}
-          <div style={{ fontSize: 12, color: "#2563eb", marginBottom: 6 }}>
-            👉 ดับเบิลคลิกแถว (หรือกด +) เพื่อเพิ่มลงรายการ · แถวจาง = ไม่ใช้กับ {applyLabel}
+          {/* ปุ่มหมายเลขบนรูป → กดแล้วขึ้นรายการของเลขนั้นด้านล่าง */}
+          <div style={{ border: "1px solid #dbe3ef", borderRadius: 10, padding: "8px 10px", background: "#fbfcfe", marginBottom: 8 }}>
+            <div style={{ fontSize: 12.5, color: "#334155", marginBottom: 6 }}>
+              🔢 กดหมายเลขตามที่เห็นบนรูป <span style={{ color: "#94a3b8" }}>· เลขจาง = ไม่มีรายการที่ใช้กับ {applyLabel}</span>
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {refList.map((r) => {
+                const active = selRef === r.ref;
+                return (
+                  <button key={r.ref} onClick={() => setSelRef(active ? null : r.ref)} title={`${r.n} รายการ`}
+                    style={{
+                      minWidth: 38, height: 34, padding: "0 8px", borderRadius: 8, fontSize: 15, fontWeight: 700, cursor: "pointer",
+                      border: active ? "2px solid #d97706" : "1px solid #cbd5e1",
+                      background: active ? "#fff7e8" : r.ok ? "#fff" : "#f1f5f9", color: active ? "#b45309" : r.ok ? "#0b2f6b" : "#94a3b8",
+                      opacity: r.ok ? 1 : 0.6,
+                    }}>
+                    {r.ref || "?"}
+                  </button>
+                );
+              })}
+              <button onClick={() => setSelRef(selRef === "*" ? null : "*")}
+                style={{ height: 34, padding: "0 12px", borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: "pointer", border: selRef === "*" ? "2px solid #d97706" : "1px dashed #cbd5e1", background: "#fff", color: "#475569" }}>
+                ทั้งหมด
+              </button>
+            </div>
           </div>
+          {selRef == null ? (
+            <div style={{ color: "#94a3b8", fontSize: 13, textAlign: "center", padding: "14px 6px" }}>👆 กดหมายเลขบนแถบด้านบน เพื่อดูรายการอะไหล่ของเลขนั้น</div>
+          ) : (
           <div style={{ overflowX: "auto" }}>
+          <div style={{ fontSize: 12, color: "#2563eb", marginBottom: 6 }}>
+            {selRef === "*" ? "ทุกรายการในบล็อกนี้" : `หมายเลข ${selRef}`} · ดับเบิลคลิกแถว (หรือกด +) เพื่อเพิ่มลงรายการ · แถวจาง = ไม่ใช้กับ {applyLabel}
+          </div>
             <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr>
@@ -204,7 +251,7 @@ ${rows.map((p) => `<tr class="${rowApplies(p, variant, type) ? "" : "off"}"><td>
                 </tr>
               </thead>
               <tbody>
-                {(block.parts || []).filter((p) => !onlyApplicable || rowApplies(p, variant, type)).map((p, i) => {
+                {refRows.filter((p) => !onlyApplicable || rowApplies(p, variant, type)).map((p, i) => {
                   const ok = rowApplies(p, variant, type);
                   const sel = isPicked(p.code, modelName);
                   const hi = hiCode && p.code === hiCode;
@@ -231,6 +278,7 @@ ${rows.map((p) => `<tr class="${rowApplies(p, variant, type) ? "" : "off"}"><td>
               </tbody>
             </table>
           </div>
+          )}
         </div>
       )}
     </div>
