@@ -76,7 +76,16 @@ def parse_variants(doc, base):
             elif cur and TYPE_RE.match(tok):
                 cur["types"].append(tok)
         if out:
-            return out
+            # รวมรหัสซ้ำ (บางเล่มตารางรุ่นมี 2 ส่วน เช่น K36S/K97F) เก็บลำดับแรก + รวม type
+            merged = []
+            for v in out:
+                hit = next((m for m in merged if m["model_code"] == v["model_code"]), None)
+                if hit:
+                    for t in v["types"]:
+                        if t not in hit["types"]: hit["types"].append(t)
+                else:
+                    merged.append(v)
+            return merged
     return []
 
 
