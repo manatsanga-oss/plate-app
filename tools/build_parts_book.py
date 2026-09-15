@@ -6,7 +6,7 @@
   src/data/partsbooks/<slug>_parts_book.json   (บล็อก + ตารางอะไหล่ + จำนวนต่อแบบ + หมายเหตุ type)
   public/parts-book/<slug>/<block>.jpg          (รูป diagram ของแต่ละบล็อก WebP กว้าง 2000px)
 
-ใช้งาน:  python tools/build_parts_book.py "<path PDF>" <slug> <MODEL> [BRAND]
+ใช้งาน:  python tools/build_parts_book.py "<path PDF>" <slug> <MODEL[|MODEL2..]> [BRAND]
 ตัวอย่าง: python tools/build_parts_book.py "C:/.../PL-ADV160-02_26.PDF" adv160 ADV160
 
 หมายเหตุโครงสร้าง PDF (เล่มปี 2026):
@@ -265,8 +265,10 @@ def build(pdf_path, slug, model, brand="HONDA"):
         if s not in [x["key"] for x in sections]:
             sections.append({"key": s, "name": {"E": "หมวดเครื่องยนต์", "F": "หมวดตัวถัง"}.get(s, f"หมวด {s}")})
 
+    # MODEL คั่นด้วย | ได้เมื่อเล่มเดียวคลุมหลายรุ่นในระบบ เช่น "PCX160|PCX150-HV" (เล่ม K1ZP รวม WW150/WW160) → model = ตัวแรก, models = ทั้งหมด
+    models = [m.strip() for m in str(model).split("|") if m.strip()]
     out = {
-        "brand": brand, "model": model, "base": base, "slug": slug,
+        "brand": brand, "model": models[0], "models": models, "base": base, "slug": slug,
         "file": os.path.basename(pdf_path), "edition": edition,
         "variants": variants, "sections": sections,
         "blocks": [blocks[c] for c in order],
