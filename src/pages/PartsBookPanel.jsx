@@ -12,10 +12,17 @@ import React, { useMemo, useState } from "react";
 const normCode = (s) => String(s || "").toUpperCase().replace(/[\s\-._/()]/g, "");
 const typeTokOf = (t) => ((String(t || "").toUpperCase().match(/\d?TH/) || [])[0] || "");
 
-function findVariant(book, baeb) {
+// จับคู่ "แบบ" ของ cascade (จากสมุดชุดสี) กับ variant ในคู่มือ — ตรงตัวก่อน, ไม่ตรงลอง prefix (ชุดสี ACB160CAT vs คู่มือ ACB160CATN/CATR/CATV) เลือกตัวที่มี type ที่เลือก
+function findVariant(book, baeb, type) {
   if (!book || !baeb) return null;
   const nb = normCode(baeb);
-  return (book.variants || []).find((v) => normCode(v.model_code) === nb) || null;
+  const vs = book.variants || [];
+  const exact = vs.find((v) => normCode(v.model_code) === nb);
+  if (exact) return exact;
+  const tok = typeTokOf(type);
+  const pref = vs.filter((v) => normCode(v.model_code).startsWith(nb) || nb.startsWith(normCode(v.model_code)));
+  if (!pref.length) return null;
+  return pref.find((v) => tok && (v.types || []).some((t) => typeTokOf(t) === tok)) || pref[0];
 }
 
 // แถวนี้ใช้กับ แบบ/type ที่เลือกไหม (null = เล่มไม่ระบุ → ถือว่าใช้)
@@ -36,7 +43,7 @@ export default function PartsBookPanel({ book, baeb, type, modelName, isPicked, 
   const [onlyApplicable, setOnlyApplicable] = useState(false);
   const [selRef, setSelRef] = useState(null);     // หมายเลขบนรูปที่กด ("*" = ทั้งหมด) — รายการขึ้นเฉพาะเลขที่เลือก
 
-  const variant = findVariant(book, baeb);
+  const variant = findVariant(book, baeb, type);
   const blocks = useMemo(() => book.blocks || [], [book]);
   const block = blocks.find((b) => b.code === selBlock) || null;
   const blockIdx = block ? blocks.indexOf(block) : -1;

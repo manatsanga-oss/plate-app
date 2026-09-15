@@ -80,7 +80,7 @@ def parse_variants(doc, base):
     return []
 
 
-def parse_block_page(page):
+def parse_block_page(page, col_keys=None):
     """คืน (block_code, name_th, name_en, parts[]) หรือ None ถ้าไม่ใช่หน้าบล็อก"""
     words = page.get_text("words")
     H = page.rect.height
@@ -105,11 +105,25 @@ def parse_block_page(page):
         elif c == "หมายเลขเครื่องที่ใช้": hdr["note"] = w
         elif c == "รุ่นที่ใช้": hdr["type"] = w
     if "code" not in hdr or "note" not in hdr:
-        return (block, name_th, name_en, [])
+        return (block, name_th, name_en, [], None)
     y_hdr = hdr["code"][1]
-    pst = [w for w in words if w[4] in ("P", "S", "T", "U", "V") and y_hdr < w[1] < y_hdr + 25 and w[0] > hdr["name"][0] + 100]
-    pst.sort(key=lambda w: w[0])
-    cols = [(w[4], (w[0] + w[2]) / 2) for w in pst]
+    # หัวคอลัมน์จำนวน: base (ADV160A / ACB160) + [กลุ่ม 2-4 ตัว เช่น CAT CBT (CLICK160)] + ตัวอักษรคอลัมน์ (P S T / N R V N)
+    # key ของคอลัมน์ = กลุ่ม+ตัวอักษร (CATN) หรือตัวอักษรเดี่ยว (P) → model_code = base + key
+    band = [w for w in words if y_hdr - 12 < w[1] < y_hdr + 30 and w[0] > hdr["name"][0] + 100 and w[0] < hdr["note"][0] - 5]
+    base_w = next((w for w in band if re.fullmatch(r"[A-Z]{2,}\d+[A-Z]*", w[4])), None)
+    base = base_w[4] if base_w else None
+    letters = sorted([w for w in band if re.fullmatch(r"[A-Z]", w[4])], key=lambda w: w[0])
+    groups = sorted([w for w in band if re.fullmatch(r"[A-Z]{2,4}", w[4])], key=lambda w: w[0])
+    def grp_of(w):
+        if not groups: return ""
+        xc = (w[0] + w[2]) / 2
+        return min(groups, key=lambda g: 0 if g[0] <= xc <= g[2] else min(abs(xc - g[0]), abs(xc - g[2])))[4]
+    pst = letters
+    # ถ้ารู้ลำดับ variant จากตารางรุ่น (col_keys เช่น CATN CATR CATV CBTN) และจำนวน/ตัวท้ายตรงกับตัวอักษรคอลัมน์ → ใช้ตามนั้น (แม่นกว่าการเดากลุ่มจากตำแหน่ง x)
+    if col_keys and len(col_keys) == len(letters) and all(k.endswith(w[4]) for k, w in zip(col_keys, letters)):
+        cols = [(k, (w[0] + w[2]) / 2) for k, w in zip(col_keys, letters)]
+    else:
+        cols = [(grp_of(w) + w[4], (w[0] + w[2]) / 2) for w in letters]
     x_code = hdr["code"][0] - 3
     x_qty0 = (cols[0][1] - 10) if cols else hdr["note"][0] - 120
     x_note = hdr["note"][0] - 6
@@ -158,7 +172,7 @@ def parse_block_page(page):
                 row["name_en"] = clean(base_en + " " + row["name_en"])
         parts.append(row)
         last = row
-    return (block, name_th, name_en, parts)
+    return (block, name_th, name_en, parts, base)
 
 
 def save_block_image(doc, page, out_path):
@@ -189,17 +203,17 @@ def build(pdf_path, slug, model, brand="HONDA"):
     json_dir = os.path.join(ROOT, "src", "data", "partsbooks")
     os.makedirs(json_dir, exist_ok=True)
 
-    # base code เช่น ADV160A จากหัวคอลัมน์จำนวน (บรรทัดถัดจาก "จำนวนที่ใช้")
+    # base code เช่น ADV160A / ACB160 จากหัวคอลัมน์จำนวนของหน้าบล็อกแรก
     base = None
     for i in range(len(doc)):
-        t = clean(doc[i].get_text())
-        m = re.search(r"จำนวนที่ใช้\s+([A-Z]+\d+[A-Z]*)\s+[PSTUV](?:\s+[PSTUV])+", t)
-        if m:
-            base = m.group(1); break
+        r = parse_block_page(doc[i])
+        if r and r[4]:
+            base = r[4]; break
     variants = parse_variants(doc, base or model)
     # ผูก col letter (P/S/T) กับ model_code = base + letter
     for v in variants:
         v["col"] = v["model_code"][len(base):] if base and v["model_code"].startswith(base) else v["model_code"][-1]
+    col_keys = [v["col"] for v in variants]
 
     # วันที่พิมพ์ (หน้าคำแนะนำ)
     edition = ""
@@ -210,10 +224,10 @@ def build(pdf_path, slug, model, brand="HONDA"):
     blocks, order = {}, []
     for i in range(len(doc)):
         page = doc[i]
-        r = parse_block_page(page)
+        r = parse_block_page(page, col_keys)
         if not r:
             continue
-        code, nth, nen, parts = r
+        code, nth, nen, parts, _ = r
         if code not in blocks:
             blocks[code] = {"code": code, "name_th": nth, "name_en": nen, "page": i + 1, "img": None, "parts": []}
             order.append(code)
