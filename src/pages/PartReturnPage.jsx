@@ -34,7 +34,13 @@ export default function PartReturnPage({ currentUser }) {
   const myBranch = String(currentUser?.branch_code || currentUser?.branch || "").substring(0, 5).toUpperCase();
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
-  const [rows, setRows] = useState([]);
+  const [allRows, setAllRows] = useState([]);
+  // ตัวกรองสาขา (user 2026-09-15): เดิมพนักงานเห็นเฉพาะใบที่บันทึกในสาขาตัวเอง → พนักงาน SCY01 ไม่เห็นใบคืนอะไหล่ยามาฮ่าที่ SCY06 บันทึกไว้
+  // ตอนนี้ดึงทุกสาขา ค่าเริ่มต้นกรองสาขาตัวเอง (admin = ทุกสาขา) เปลี่ยนได้ + เตือนเมื่อสาขาอื่นมีใบ
+  const [branchFlt, setBranchFlt] = useState(isAdmin ? "" : myBranch);
+  const bc5 = (v) => String(v || "").substring(0, 5).toUpperCase();
+  const rows = useMemo(() => allRows.filter((r) => !branchFlt || bc5(r.branch_code) === branchFlt), [allRows, branchFlt]);
+  const branchOpts = useMemo(() => [...new Set([myBranch, ...allRows.map((r) => bc5(r.branch_code))].filter(Boolean))].sort(), [allRows, myBranch]);
   const [loading, setLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 2); return d.toISOString().slice(0, 10); });
   const [dateTo, setDateTo] = useState(todayStr());
@@ -82,9 +88,8 @@ export default function PartReturnPage({ currentUser }) {
     setLoading(true);
     try {
       const body = { action: "list_part_returns", date_from: dateFrom, date_to: dateTo };
-      if (!isAdmin) body.branch_code = myBranch;
-      setRows(unwrapList(await post(body)).filter((r) => r && r.doc_no));
-    } catch { setRows([]); }
+      setAllRows(unwrapList(await post(body)).filter((r) => r && r.doc_no));
+    } catch { setAllRows([]); }
     setLoading(false);
   }
   useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
@@ -307,8 +312,18 @@ export default function PartReturnPage({ currentUser }) {
         <span>ถึง</span>
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inp} />
         <button onClick={load} disabled={loading} style={{ padding: "7px 16px", background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, cursor: "pointer" }}>{loading ? "..." : "🔍 แสดง"}</button>
+        <select value={branchFlt} onChange={(e) => setBranchFlt(e.target.value)} style={inp} title="สาขาที่บันทึกใบคืน">
+          <option value="">ทุกสาขา</option>
+          {branchOpts.map((b) => <option key={b} value={b}>{b}{b === myBranch ? " (สาขาของฉัน)" : ""}</option>)}
+        </select>
         <span style={{ marginLeft: "auto", fontSize: 13 }}>{rows.length} ใบ{pending > 0 && <span style={{ color: "#b45309" }}> · ⏳ รอสั่งใหม่ {pending} ใบ</span>}</span>
       </div>
+      {branchFlt && allRows.length > rows.length && (
+        <div style={{ marginBottom: 8, fontSize: 12.5, color: "#92400e", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "6px 10px", display: "flex", gap: 10, alignItems: "center" }}>
+          มีใบคืนสินค้าของสาขาอื่นอีก {allRows.length - rows.length} ใบในช่วงวันที่นี้
+          <button onClick={() => setBranchFlt("")} style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #d97706", background: "#fff", color: "#92400e", cursor: "pointer", fontFamily: "Tahoma", fontSize: 12 }}>ดูทุกสาขา</button>
+        </div>
+      )}
       <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 10, background: "#fff" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>

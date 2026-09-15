@@ -37,7 +37,13 @@ const FORM0 = { deposit_date: todayStr(), customer_code: "", customer_name: "", 
 export default function PartDepositPage({ currentUser }) {
   const [tab, setTab] = useState("บริการ");
   const [form, setForm] = useState(FORM0);
-  const [rows, setRows] = useState([]);
+  const [allRows, setAllRows] = useState([]);
+  // แยกสาขา (user 2026-09-15 เลือกแบบ 2): ค่าเริ่มต้นเห็นเฉพาะใบมัดจำสาขาตัวเอง · admin เห็นทุกสาขา · เปลี่ยนได้จาก dropdown
+  const isAdmin = currentUser?.role === "admin";
+  const myBranch = String(currentUser?.branch_code || currentUser?.branch || "").substring(0, 5).toUpperCase();
+  const [branchFlt, setBranchFlt] = useState(isAdmin ? "" : myBranch);
+  const rows = useMemo(() => allRows.filter((r) => !branchFlt || String(r.branch_code || "").substring(0, 5).toUpperCase() === branchFlt), [allRows, branchFlt]);
+  const branchOpts = useMemo(() => [...new Set([myBranch, ...allRows.map((r) => String(r.branch_code || "").substring(0, 5).toUpperCase())].filter(Boolean))].sort(), [allRows, myBranch]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
@@ -65,8 +71,8 @@ export default function PartDepositPage({ currentUser }) {
     setLoading(true);
     try {
       const d = await post({ action: "list_deposits", limit: 1000 });
-      setRows(asArray(d).filter((r) => r && r.deposit_doc_no));
-    } catch { setRows([]); }
+      setAllRows(asArray(d).filter((r) => r && r.deposit_doc_no));
+    } catch { setAllRows([]); }
     setLoading(false);
     // ใบสั่งซื้อ HONDA + YAMAHA → map เลขมัดจำ → ใบสั่งซื้อ (ไว้เช็ค "สั่งซื้อแล้ว สินค้ายังไม่มา")
     try {
@@ -338,8 +344,8 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         <h2 className="page-title">🪙 ระบบมัดจำอะไหล่</h2>
       </div>
 
-      {/* แท็บประเภทมัดจำ */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+      {/* แท็บประเภทมัดจำ + ตัวกรองสาขา */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
         {TABS.map((t) => (
           <button key={t.key} onClick={() => switchTab(t.key)}
             style={{ padding: "10px 22px", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer",
@@ -348,6 +354,16 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
             {t.label}
           </button>
         ))}
+        <label style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#334155" }}
+          title="ใบมัดจำแยกตามสาขาที่บันทึก — ค่าเริ่มต้นสาขาของคุณ (admin เห็นทุกสาขา)">
+          🏢 สาขา
+          <select value={branchFlt} onChange={(e) => setBranchFlt(e.target.value)}
+            style={{ padding: "7px 10px", borderRadius: 8, border: "1.5px solid #cbd5e1", fontFamily: "inherit", fontSize: 13, background: branchFlt ? "#eff6ff" : "#fff" }}>
+            <option value="">ทุกสาขา</option>
+            {branchOpts.map((b) => <option key={b} value={b}>{b}{b === myBranch ? " (สาขาของฉัน)" : ""}</option>)}
+          </select>
+          {branchFlt && <span style={{ fontSize: 11, color: "#64748b" }}>{allRows.length - rows.length} ใบของสาขาอื่นถูกซ่อน</span>}
+        </label>
       </div>
 
       {/* ===== แท็บบริการ: ฟอร์มแบบ NID (เลือกรถก่อน → เพิ่มข้อมูล → ชำระโดย → ตกลง) ===== */}

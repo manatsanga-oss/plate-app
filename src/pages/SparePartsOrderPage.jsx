@@ -42,6 +42,8 @@ const emptyForm = () => ({
   items: [emptyItem()],
 });
 
+// ใบมัดจำของสาขา SCY01 (สิงห์ชัย ยามาฮ่า) ห้ามเลือกในระบบสั่งซื้อฮอนด้า — ให้ไปสั่งที่ระบบสั่งซื้อยามาฮ่า (ซึ่งกรอง SCY01 อยู่แล้ว) — user 2026-09-15
+const isYamahaBranchDeposit = (d) => String(d?.branch_code || "").toUpperCase().startsWith("SCY01") || String(d?.brand || "").toUpperCase() === "YAMAHA";
 export default function SparePartsOrderPage({ currentUser }) {
   const [orders, setOrders] = useState([]);
   const [deposits, setDeposits] = useState([]);           // มัดจำจากระบบมัดจำอะไหล่ใหม่ (part_deposits) — ใช้เลือกในใบสั่งซื้อ
@@ -1424,7 +1426,9 @@ export default function SparePartsOrderPage({ currentUser }) {
                   {(() => {
                     // filter ก่อน แล้วเลือกใบเก่าสุดต่อลูกค้า (มัดจำไม่มีรหัสลูกค้า = ไม่เช็คงานเดิมของลูกค้า)
                     const eligible = deposits.filter(d =>
-                      !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
+                      // แยกสาขา (user 2026-09-15): ใบมัดจำ SCY01 (ยามาฮ่า) สั่งได้ที่ระบบสั่งซื้อยามาฮ่าเท่านั้น
+                      !isYamahaBranchDeposit(d)
+                      && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
                       && !(d.customer_code && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
                       // คืนเงินแล้ว/ใช้หมดแล้ว (คงเหลือ 0) ไม่ให้เลือกสั่งซื้อได้อีก
@@ -1460,8 +1464,9 @@ export default function SparePartsOrderPage({ currentUser }) {
                   <option value="">-- เลือกใบมัดจำเพิ่ม --</option>
                   {deposits
                     .filter(d =>
+                      !isYamahaBranchDeposit(d)
                       // ลูกค้ามีงานเดิมที่ยังไม่ปิด (ต้องมีรหัสลูกค้าถึงจับคู่ได้)
-                      (d.customer_code && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
+                      && (d.customer_code && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
                       // ใบมัดจำนี้ยังไม่ถูกสั่งซื้อ
                       && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
                       // ไม่ใช่ตีราคาซ่อม
@@ -1928,7 +1933,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                 style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 13, boxSizing: "border-box" }}>
                 <option value="">-- เลือกใบมัดจำ --</option>
                 {deposits
-                  .filter(d => !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
+                  .filter(d => !isYamahaBranchDeposit(d)
+                    && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
                     && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
                     // คืนเงินแล้ว/ใช้หมดแล้ว (คงเหลือ 0) ไม่ให้เลือกบันทึกตีราคาซ่อม
                     && Number(d.remaining_amount || 0) > 0)
