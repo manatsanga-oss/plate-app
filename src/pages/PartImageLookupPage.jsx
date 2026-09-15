@@ -847,17 +847,15 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
                         ) : (
                           <>
                             <b style={{ color: p.stock.total > 0 ? "#15803d" : "#b91c1c" }}>{p.stock.total > 0 ? p.stock.total : "ไม่มี"}</b>
+                            {/* แสดงเฉพาะสาขาที่มีของ (ผู้ใช้: ไม่มีไม่ต้องแสดง) · ให้ยืมแสดงแบบเดียวกับสาขา */}
                             <div style={{ fontSize: 11, color: "#64748b", whiteSpace: "normal", lineHeight: 1.3 }}>
-                              {STOCK_BRANCHES.map((b) => (
-                                <span key={b.key} style={{ marginRight: 6, whiteSpace: "nowrap", color: p.stock.branches[b.key] > 0 ? "#334155" : "#b6c2d1" }}>
-                                  {b.label} <b>{p.stock.branches[b.key] > 0 ? p.stock.branches[b.key] : "-"}</b>
-                                </span>
+                              {[
+                                ...STOCK_BRANCHES.filter((b) => p.stock.branches[b.key] > 0).map((b) => ({ k: b.key, label: b.label, qty: p.stock.branches[b.key], title: "" })),
+                                ...p.stock.other.filter((d) => d.qty > 0).map((d) => ({ k: d.source, label: d.source, qty: d.qty, title: "" })),
+                                ...(p.stock.loan > 0 ? [{ k: "loan", label: "ให้ยืม", qty: p.stock.loan, title: "ใบให้ยืมยังไม่ได้รับคืน: " + p.stock.loans.map((l) => `${l.loan_no} · ${l.borrower || "-"} · ${Number(l.qty || 0)}`).join(" | ") }] : []),
+                              ].map((x) => (
+                                <span key={x.k} style={{ marginRight: 6, whiteSpace: "nowrap" }} title={x.title}>{x.label} <b>{x.qty}</b></span>
                               ))}
-                              {p.stock.other.map((d) => (<span key={d.source} style={{ marginRight: 6, whiteSpace: "nowrap" }}>{d.source} <b>{d.qty}</b></span>))}
-                              <span style={{ whiteSpace: "nowrap", color: p.stock.loan > 0 ? "#ea580c" : "#b6c2d1", fontWeight: p.stock.loan > 0 ? 700 : 400 }}
-                                title={p.stock.loan > 0 ? "ใบให้ยืมยังไม่ได้รับคืน: " + p.stock.loans.map((l) => `${l.loan_no} · ${l.borrower || "-"} · ${Number(l.qty || 0)}`).join(" | ") : "ไม่มีใบให้ยืมค้าง"}>
-                                ให้ยืม <b>{p.stock.loan > 0 ? p.stock.loan : "-"}</b>
-                              </span>
                             </div>
                           </>
                         )}
