@@ -203,13 +203,33 @@ ${rows.map((p) => `<tr class="${rowApplies(p, variant, type) ? "" : "off"}"><td>
             {block.code} · {block.name_th} <span style={{ color: "#64748b", fontWeight: 400, fontSize: 13 }}>{block.name_en}</span>
           </div>
           {block.img && (
-            <img src={block.img} alt={`${block.code} ${block.name_th}`}
-              style={{ width: "100%", maxHeight: 520, objectFit: "contain", display: "block", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", marginBottom: 8 }} />
+            /* รูป + จุดกดทับหมายเลข (hotspots จาก tools/build_parts_book_hotspots.py) — ชี้เป็นรูปมือ กดแล้วขึ้นรายการของเลขนั้นด้านล่าง */
+            <div style={{ position: "relative", width: "100%", lineHeight: 0, userSelect: "none", marginBottom: 8 }}>
+              <img src={block.img} alt={`${block.code} ${block.name_th}`}
+                style={{ width: "100%", height: "auto", display: "block", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff" }} />
+              {(block.hotspots || []).map((h, i) => {
+                const active = selRef === h.ref;
+                const okRef = refList.find((r) => r.ref === h.ref)?.ok;
+                return (
+                  <button key={i} onClick={() => { setSelRef(active ? null : h.ref); setHiCode(""); }}
+                    title={`หมายเลข ${h.ref}${okRef ? "" : " (ไม่มีรายการที่ใช้กับ " + applyLabel + ")"}`}
+                    className="pb-hot"
+                    style={{
+                      position: "absolute", left: `${h.x - h.w * 0.6}%`, top: `${h.y - h.h * 0.35}%`,
+                      width: `${h.w * 2.2}%`, height: `${h.h * 1.7}%`, minWidth: 22, minHeight: 22,
+                      padding: 0, cursor: "pointer", borderRadius: 6,
+                      background: active ? "rgba(217,119,6,0.22)" : "transparent",
+                      border: active ? "2px solid #d97706" : "2px solid transparent",
+                    }} />
+                );
+              })}
+              <style>{`.pb-hot:hover{background:rgba(37,99,235,0.16)!important;border-color:#2563eb!important}`}</style>
+            </div>
           )}
           {/* ปุ่มหมายเลขบนรูป → กดแล้วขึ้นรายการของเลขนั้นด้านล่าง */}
           <div style={{ border: "1px solid #dbe3ef", borderRadius: 10, padding: "8px 10px", background: "#fbfcfe", marginBottom: 8 }}>
             <div style={{ fontSize: 12.5, color: "#334155", marginBottom: 6 }}>
-              🔢 กดหมายเลขตามที่เห็นบนรูป <span style={{ color: "#94a3b8" }}>· เลขจาง = ไม่มีรายการที่ใช้กับ {applyLabel}</span>
+              🔢 กดหมายเลขบนรูปได้เลย หรือกดจากแถบนี้ <span style={{ color: "#94a3b8" }}>· เลขจาง = ไม่มีรายการที่ใช้กับ {applyLabel}</span>
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
               {refList.map((r) => {

@@ -27,7 +27,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMG_WIDTH = 2000
 IMG_Q = 80  # WebP (เล็กกว่า JPEG ~40% สำหรับลายเส้น)
 
-CODE_RE = re.compile(r"^\d{5}-[A-Z0-9]{2,4}-[A-Z0-9]{2,6}$")
+CODE_RE = re.compile(r"^\d{5}-[A-Z0-9]{2,5}-[A-Z0-9]{2,6}$")  # กลาง 5 ตัว = โบลต์/น็อตมาตรฐาน เช่น 95701-06018-00
 QTY_RE = re.compile(r"^\(?(\d+|-)\)?$")  # "(1)" = อะไหล่ทางเลือก/โอเวอร์ไซส์
 ENGINE_RE = re.compile(r"^(-{3,}|[A-Z]?\d{6,}~?|[A-Z0-9]{3,6}-\d{6,}~?)$")
 BLOCK_RE = re.compile(r"^([A-Z])\s*-\s*(\d+)(?:\s*-\s*(\d+))?$")

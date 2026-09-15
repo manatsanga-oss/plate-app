@@ -57,3 +57,9 @@ Claude จะทำให้ครบ (รูป + รหัส + เติม�
 ผลลัพธ์: src\data\partsbooks\<slug>_parts_book.json + public\parts-book\<slug>\*.webp
 หน้า "ค้นรูปอะไหล่" จะขึ้นการ์ดเลือก "คู่มือรายการอะไหล่ / แผนผังอะไหล่สี" ให้เองเมื่อรุ่นนั้นมีเล่ม
 รายการที่ไม่ใช้กับ แบบ/type ที่เลือก จะแสดงจาง ๆ (อิงคอลัมน์จำนวน P/S/T + หมายเหตุ type ในเล่ม)
+
+จุดกดหมายเลขบนรูป (hotspots) ของคู่มือรายการอะไหล่:
+   python tools/build_parts_book_hotspots.py <slug> apply
+   (ใช้ป้ายรูปร่างตัวเลขจาก tools/glyph_labels ของ adv160 ได้เลย ฟอนต์ Honda เหมือนกันทุกเล่ม
+    ถ้าเล่มใหม่จับเลขไม่ครบ ให้รัน "cluster" แล้วบอก Claude ติดป้ายกลุ่มใหม่)
+   ต้องมี: pip install scipy   (numpy + pillow มีอยู่แล้ว)
