@@ -22,6 +22,14 @@ const STOCK_API = {
   HONDA: "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api",
   YAMAHA: "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api",
 };
+const LOAN_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api"; // ใบให้ยืมยังไม่ได้รับคืน (honda_loan_parts) action list_part_loans
+// สาขาที่แสดงในคอลัมน์สต๊อก (ลำดับเดียวกับหน้าอะไหล่หมุนเร็ว) + วิธีจับชื่อ source จาก honda_inventory
+const STOCK_BRANCHES = [
+  { key: "ppao", label: "ป.เปา", match: (n) => n.includes("ป.เปา") || n.includes("ป เปา") },
+  { key: "haahong", label: "ห้าห้อง", match: (n) => n.includes("ห้าห้อง") || n.includes("ห้าน้อง") },
+  { key: "sachtalad", label: "สช.ตลาด", match: (n) => n.includes("สช") || n.includes("ศช") || n.includes("สิงห์ชัย") },
+  { key: "nakhonluang", label: "นครหลวง", match: (n) => n.includes("นครหลวง") },
+];
 const NO_BAEB = "(ไม่ระบุแบบ)";
 
 const fmtMoney = (v) =>
@@ -67,8 +75,24 @@ async function fetchStock(code, brand) {
     if (!res.ok) return null;
     const arr = await res.json().catch(() => []);
     const rows = (Array.isArray(arr) ? arr : arr?.data || []).filter((r) => r && (r.quantity != null || r.source));
-    const detail = rows.map((r) => ({ source: r.source || "-", qty: Number(r.quantity || 0) }));
-    return { total: detail.reduce((t, d) => t + d.qty, 0), detail };
+    const all = rows.map((r) => ({ source: String(r.source || "-"), qty: Number(r.quantity || 0) }));
+    // จัดเข้า 4 สาขา (ป.เปา/ห้าห้อง/สช.ตลาด/นครหลวง) — source ที่ไม่เข้าพวกเก็บไว้ใน other
+    const branches = {}; const other = [];
+    for (const d of all) {
+      const br = STOCK_BRANCHES.find((b) => b.match(d.source));
+      if (br) branches[br.key] = (branches[br.key] || 0) + d.qty; else other.push(d);
+    }
+    // ใบให้ยืมยังไม่ได้รับคืน (เฉพาะ HONDA) — ไม่รวมในยอดรวม
+    let loan = 0, loans = [];
+    if (String(brand || "HONDA").toUpperCase() === "HONDA") {
+      try {
+        const lr = await fetch(LOAN_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_part_loans", item_code: c }) });
+        const la = lr.ok ? await lr.json().catch(() => []) : [];
+        loans = (Array.isArray(la) ? la : []).filter((r) => r && r.loan_no);
+        loan = loans.reduce((t, r) => t + Number(r.qty || 0), 0);
+      } catch { /* เช็คใบให้ยืมไม่ได้ → แสดง - */ }
+    }
+    return { total: all.reduce((t, d) => t + d.qty, 0), branches, other, loan, loans };
   } catch {
     return null;
   }
@@ -823,11 +847,18 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
                         ) : (
                           <>
                             <b style={{ color: p.stock.total > 0 ? "#15803d" : "#b91c1c" }}>{p.stock.total > 0 ? p.stock.total : "ไม่มี"}</b>
-                            {p.stock.detail.length > 0 && (
-                              <div style={{ fontSize: 11, color: "#64748b", whiteSpace: "normal", lineHeight: 1.25 }}>
-                                {p.stock.detail.map((d) => `${d.source} ${d.qty}`).join(" · ")}
-                              </div>
-                            )}
+                            <div style={{ fontSize: 11, color: "#64748b", whiteSpace: "normal", lineHeight: 1.3 }}>
+                              {STOCK_BRANCHES.map((b) => (
+                                <span key={b.key} style={{ marginRight: 6, whiteSpace: "nowrap", color: p.stock.branches[b.key] > 0 ? "#334155" : "#b6c2d1" }}>
+                                  {b.label} <b>{p.stock.branches[b.key] > 0 ? p.stock.branches[b.key] : "-"}</b>
+                                </span>
+                              ))}
+                              {p.stock.other.map((d) => (<span key={d.source} style={{ marginRight: 6, whiteSpace: "nowrap" }}>{d.source} <b>{d.qty}</b></span>))}
+                              <span style={{ whiteSpace: "nowrap", color: p.stock.loan > 0 ? "#ea580c" : "#b6c2d1", fontWeight: p.stock.loan > 0 ? 700 : 400 }}
+                                title={p.stock.loan > 0 ? "ใบให้ยืมยังไม่ได้รับคืน: " + p.stock.loans.map((l) => `${l.loan_no} · ${l.borrower || "-"} · ${Number(l.qty || 0)}`).join(" | ") : "ไม่มีใบให้ยืมค้าง"}>
+                                ให้ยืม <b>{p.stock.loan > 0 ? p.stock.loan : "-"}</b>
+                              </span>
+                            </div>
                           </>
                         )}
                       </td>
