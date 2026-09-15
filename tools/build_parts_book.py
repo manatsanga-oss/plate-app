@@ -27,7 +27,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMG_WIDTH = 2000
 IMG_Q = 80  # WebP (เล็กกว่า JPEG ~40% สำหรับลายเส้น)
 
-CODE_RE = re.compile(r"^\d{5}-[A-Z0-9]{2,5}-[A-Z0-9]{2,6}$")  # กลาง 5 ตัว = โบลต์/น็อตมาตรฐาน เช่น 95701-06018-00
+CODE_RE = re.compile(r"^\d{5}-[A-Z0-9]{2,5}(-[A-Z0-9]{2,6})?$")  # กลาง 5 ตัว = โบลต์มาตรฐาน 95701-06018-00 · 2 ท่อน = สกรู 93903-35320
 QTY_RE = re.compile(r"^\(?(\d+|-)\)?$")  # "(1)" = อะไหล่ทางเลือก/โอเวอร์ไซส์
 ENGINE_RE = re.compile(r"^(-{3,}|[A-Z]?\d{6,}~?|[A-Z0-9]{3,6}-\d{6,}~?)$")
 BLOCK_RE = re.compile(r"^([A-Z])\s*-\s*(\d+)(?:\s*-\s*(\d+))?$")
@@ -102,47 +102,49 @@ def parse_block_page(page, col_keys=None):
         if c == "ลำดับ": hdr["ref"] = w
         elif c == "หมายเลขอะไหล่": hdr["code"] = w
         elif c == "ชื่ออะไหล่": hdr["name"] = w
-        elif c == "หมายเลขเครื่องที่ใช้": hdr["note"] = w
-        elif c == "รุ่นที่ใช้": hdr["type"] = w
-    if "code" not in hdr or "note" not in hdr:
+        elif c.startswith("หมายเลขเครื่อง"): hdr["note"] = w      # "หมายเลขเครื่องที่ใช้" หรือคำติดกัน "หมายเลขเครื่องรุ่นที่ใช้" (SUPER CUB)
+        elif c.startswith("รุ่นที่ใช้"): hdr["type"] = w
+        if "รุ่นที่ใช้" in c and c != "รุ่นที่ใช้" and "type" not in hdr: hdr["type"] = w
+    note_x = min([hdr[k][0] for k in ("note", "type") if k in hdr], default=None)  # บางเล่มไม่มี "หมายเลขเครื่องที่ใช้" มีแต่ "รุ่นที่ใช้"
+    if "code" not in hdr or note_x is None:
         return (block, name_th, name_en, [], None)
     y_hdr = hdr["code"][1]
-    # หัวคอลัมน์จำนวน: base (ADV160A / ACB160) + [กลุ่ม 2-4 ตัว เช่น CAT CBT (CLICK160)] + ตัวอักษรคอลัมน์ (P S T / N R V N)
-    # key ของคอลัมน์ = กลุ่ม+ตัวอักษร (CATN) หรือตัวอักษรเดี่ยว (P) → model_code = base + key
-    # clean ข้อความคำก่อนเทียบ regex (บางเล่มมีอักษรขยะแฝงในคำหัวคอลัมน์ เช่น ACF125CA)
+    # หัวคอลัมน์จำนวน ซ้อนกันได้หลายบรรทัด แล้วปิดท้ายด้วยบรรทัดตัวอักษรคอลัมน์ เช่น
+    #   ADV160A / P S T · ACB160 / CAT CBT / N R V N · ACF125CA ACF125CB / R S T R S T · NHX / 125 125A / S T T · WW160 / A S / S S
+    # → ประกอบรหัสแบบต่อคอลัมน์จากบนลงล่าง (เลือกคำในแต่ละบรรทัดที่ช่วง x ใกล้คอลัมน์ที่สุด) = model_code เต็ม แล้วตัด base (common prefix) เป็น key
     band = [(w[0], w[1], w[2], w[3], clean(w[4])) for w in words
-            if y_hdr - 12 < w[1] < y_hdr + 30 and w[0] > hdr["name"][0] + 100 and w[0] < hdr["note"][0] - 5]
-    # บรรทัดตัวอักษรคอลัมน์ = บรรทัดที่มีตัวอักษรเดี่ยวมากสุด (กันคำอังกฤษตัวเดียวในแถวข้อมูลแรก เช่น "PIPE B")
-    single = [w for w in band if re.fullmatch(r"[A-Z]", w[4])]
-    lines_ = {}
-    for w in single: lines_.setdefault(round(w[1] / 3), []).append(w)
-    letters = sorted(max(lines_.values(), key=len), key=lambda w: w[0]) if lines_ else []
-    y_letters = min(w[1] for w in letters) if letters else y_hdr + 30
-    above = [w for w in band if w[1] < y_letters - 2 and w not in letters]   # คำที่เริ่มเหนือบรรทัดตัวอักษร = base / กลุ่ม (บรรทัดซ้อนกันได้ เทียบ y บน)
-    # base word(s): ADV160A · ACB160 · ACF125CA+ACF125CB (GIORNO+ หลาย base ครอบคนละชุดคอลัมน์) → base จริง = common prefix
-    base_words = sorted([w for w in above if re.fullmatch(r"[A-Z]{2,}\d+[A-Z]*", w[4])], key=lambda w: w[0])
-    base = os.path.commonprefix([w[4] for w in base_words]) if base_words else None
-    groups = base_words if len(base_words) > 1 else sorted([w for w in above if re.fullmatch(r"[A-Z]{2,4}", w[4])], key=lambda w: w[0])
-    def grp_of(w):
-        if not groups: return ""
+            if y_hdr - 12 < w[1] < y_hdr + 30 and w[0] > hdr["name"][0] + 100 and w[0] < note_x - 5]
+    blines = {}
+    for w in band: blines.setdefault(round(w[1] / 3), []).append(w)
+    blines = [sorted(v, key=lambda w: w[0]) for k, v in sorted(blines.items())]
+    blines = [ln for ln in blines if not any(CODE_RE.match(w[4]) or has_thai(w[4]) for w in ln)]   # ตัดแถวข้อมูล/คำไทย
+    letter_lines = [ln for ln in blines if any(re.fullmatch(r"[A-Z]", w[4]) for w in ln)]
+    letters = [w for w in letter_lines[-1] if re.fullmatch(r"[A-Z]", w[4])] if letter_lines else []   # บรรทัดล่างสุด = ตัวอักษรคอลัมน์
+    y_letters = letters[0][1] if letters else y_hdr + 30
+    above = [ln for ln in blines if ln[0][1] < y_letters - 2 and ln is not (letter_lines[-1] if letter_lines else None)]
+    def nearest(ln, xc):
+        return min(ln, key=lambda g: 0 if g[0] <= xc <= g[2] else min(abs(xc - g[0]), abs(xc - g[2])))[4]
+    full = []
+    for w in letters:
         xc = (w[0] + w[2]) / 2
-        return min(groups, key=lambda g: 0 if g[0] <= xc <= g[2] else min(abs(xc - g[0]), abs(xc - g[2])))[4]
-    def key_of(w):
-        k = grp_of(w) + w[4]
-        return k[len(base):] if base and k.startswith(base) else k   # ACF125CA+R → "AR" (ตัด base ออกให้ตรงกับ col ของ variant)
+        full.append("".join(nearest(ln, xc) for ln in above) + w[4])
+    base = (os.path.commonprefix(full) if len(full) > 1 else (full[0][:-1] if full else None)) or None
+    if base and not re.search(r"\d", base):   # common prefix สั้นผิดปกติ (ไม่มีตัวเลขรุ่น) → ใช้คำบนสุดเป็น base
+        base = above[0][0][4] if above else base
     pst = letters
-    # ถ้ารู้ลำดับ variant จากตารางรุ่น (col_keys เช่น CATN CATR CATV CBTN) และจำนวน/ตัวท้ายตรงกับตัวอักษรคอลัมน์ → ใช้ตามนั้น (แม่นกว่าการเดากลุ่มจากตำแหน่ง x)
+    # ถ้ารู้ลำดับ variant จากตารางรุ่น (col_keys) และจำนวน/ตัวท้ายตรงกับตัวอักษรคอลัมน์ → ใช้ตามนั้น (แม่นสุด)
     if col_keys and len(col_keys) == len(letters) and all(k.endswith(w[4]) for k, w in zip(col_keys, letters)):
         cols = [(k, (w[0] + w[2]) / 2) for k, w in zip(col_keys, letters)]
     else:
-        cols = [(key_of(w), (w[0] + w[2]) / 2) for w in letters]
+        cols = [((f[len(base):] if base and f.startswith(base) else f), (w[0] + w[2]) / 2) for f, w in zip(full, letters)]
     x_code = hdr["code"][0] - 3
     x_qty0 = (cols[0][1] - 10) if cols else hdr["note"][0] - 120
-    x_note = hdr["note"][0] - 6
+    x_note = note_x - 6
     x_type = hdr["type"][0] - 6 if "type" in hdr else x_note + 70  # คอลัมน์ type (TH/3TH) · ชื่ออังกฤษยาวล้ำเข้าเขต "หมายเลขเครื่อง" ได้
     y_start = (pst[0][3] if pst else hdr["code"][3]) + 1
 
-    body = [w for w in words if w[1] > y_start and w[3] < H - 35 and w[0] > hdr["ref"][0] - 15 if "ref" in hdr]
+    # ใช้ y กลางของคำ (กล่องแถวแรกอาจซ้อนกับบรรทัดตัวอักษรคอลัมน์ 1-2pt)
+    body = [w for w in words if (w[1] + w[3]) / 2 > y_start and w[3] < H - 35 and w[0] > hdr["ref"][0] - 15 if "ref" in hdr]
     parts = []
     last = None
     for y, ws in group_lines(body):
