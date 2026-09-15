@@ -51,6 +51,20 @@ const bookVariantOf = (book, baeb) => {
   const vs = book.variants || [];
   return vs.find((v) => normModel(v.model_code) === nb) || vs.find((v) => normModel(v.model_code).startsWith(nb) || nb.startsWith(normModel(v.model_code))) || null;
 };
+// รุ่นที่มีเฉพาะคู่มือรายการอะไหล่ (ยังไม่มีสมุดภาพชุดสี เช่น PCX150) → สร้างรายการรุ่นเปล่า ๆ ให้เลือกในช่อง "รุ่น" ได้ แบบ/type ดึงจาก variants ของคู่มือ
+const bookOnlyModels = (() => {
+  const out = [];
+  for (const b of partsBooks) {
+    for (const mname of b.models || [b.model]) {
+      const brand = b.brand || "HONDA";
+      const inCatalog = catalog.some((m) => (m.brand || "HONDA") === brand && normModel(m.model) === normModel(mname));
+      const dup = out.some((m) => m.brand === brand && normModel(m.model) === normModel(mname));
+      if (!inCatalog && !dup) out.push({ brand, model: mname, series: mname, colors: [], pages: {}, bookOnly: true });
+    }
+  }
+  return out;
+})();
+const allModels = [...catalog, ...bookOnlyModels];
 const bookOf = (m, baeb) => {
   const list = booksOf(m);
   if (!list.length) return null;
@@ -234,20 +248,20 @@ export default function PartImageLookupPage({ currentUser } = {}) {
 
     // 1) หา "รุ่น" จาก series/model ที่เป็น prefix (เลือกตัวที่ยาวสุด)
     let bi = -1, bestLen = 0;
-    catalog.forEach((m, i) => {
+    allModels.forEach((m, i) => {
       const ser = normCode(m.series);
       if (ser && codePart.startsWith(ser) && ser.length > bestLen) { bi = i; bestLen = ser.length; }
       const mdl = normCode(m.model);
       if (mdl && codePart.startsWith(mdl) && mdl.length > bestLen) { bi = i; bestLen = mdl.length; }
     });
-    if (bi < 0) catalog.forEach((m, i) => {
+    if (bi < 0) allModels.forEach((m, i) => {
       const ser = normCode(m.series);
       if (ser && codePart.includes(ser) && ser.length > bestLen) { bi = i; bestLen = ser.length; }
       if (normCode(m.model) === codePart) bi = i;
     });
     if (bi < 0) return false;
 
-    const m = catalog[bi];
+    const m = allModels[bi];
     const cols = m.colors || [];
     const lcp = (a, b) => { let n = 0; while (n < a.length && n < b.length && a[n] === b[n]) n++; return n; };
     // 2) เลือก "แบบ" จาก prefix ที่ตรงยาวสุด
@@ -320,17 +334,18 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   };
 
   // ตัวกรองยี่ห้อ → กรองรุ่น
-  const brands = uniq(catalog.map((m) => m.brand || "HONDA"));
+  const brands = uniq(allModels.map((m) => m.brand || "HONDA"));
   const brand = brands.includes(selBrand) ? selBrand : brands[0];
-  const brandModels = catalog.map((m, i) => ({ m, i })).filter((x) => (x.m.brand || "HONDA") === brand);
+  const brandModels = allModels.map((m, i) => ({ m, i })).filter((x) => (x.m.brand || "HONDA") === brand);
   const modelIdxEff = brandModels.some((x) => x.i === modelIdx) ? modelIdx : (brandModels[0]?.i ?? 0);
-  const model = catalog[modelIdxEff] || catalog[0];
+  const model = allModels[modelIdxEff] || allModels[0];
   const allColors = model.colors || [];
   const pagesMap = model.pages || {};
   const baebOf = (c) => c.model_code || NO_BAEB;
 
   // --- cascade (derive-on-render: เลือกค่าที่ถูกต้องเสมอ แสดงเฉพาะที่มีรูป) ---
-  const baebList = uniq(allColors.map(baebOf));
+  const baebFromBooks = uniq(booksOf(model).flatMap((b) => (b.variants || []).map((v) => v.model_code)));
+  const baebList = allColors.length ? uniq(allColors.map(baebOf)) : baebFromBooks;  // รุ่นที่ไม่มีชุดสี → แบบจากคู่มือ
   const baeb = baebList.includes(selBaeb) ? selBaeb : baebList[0];
   // คู่มือรายการอะไหล่ของรุ่นนี้ (ถ้ามี) → ให้เลือกโหมดดูหลังเลือก แบบ/type
   const bookList = booksOf(model);
@@ -346,7 +361,7 @@ export default function PartImageLookupPage({ currentUser } = {}) {
   // รองรับสีที่มีหลายหน้า (เช่น FORZA350 = 2 หน้า/สี)
   const pageList = current ? (current.pages || [current.page]) : [];
   const imgList = current ? (current.imgs || [current.img]) : [];
-  const mode = book ? viewMode : "color";
+  const mode = !book ? "color" : (allColors.length ? viewMode : "book");  // รุ่นที่ไม่มีชุดสี บังคับโหมดคู่มือ
 
   function printImages() {
     if (!current) return;
@@ -644,7 +659,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
           <div style={{ flex: "1 1 130px" }}>
             <label style={lbl}>ยี่ห้อ</label>
-            <select value={brand} onChange={(e) => { const b = e.target.value; const first = catalog.findIndex((m) => (m.brand || "HONDA") === b); setSelBrand(b); setModelIdx(first < 0 ? 0 : first); setSelBaeb(""); setSelType(""); setColorPage(null); }} style={selStyle}>
+            <select value={brand} onChange={(e) => { const b = e.target.value; const first = allModels.findIndex((m) => (m.brand || "HONDA") === b); setSelBrand(b); setModelIdx(first < 0 ? 0 : first); setSelBaeb(""); setSelType(""); setColorPage(null); }} style={selStyle}>
               {brands.map((b) => (<option key={b} value={b}>{b}</option>))}
             </select>
           </div>

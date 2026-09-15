@@ -3051,13 +3051,13 @@
     {
      "ref": "21",
      "code": "91109-K1G-V01",
-     "name_th": "ลูกปืนเข็ม, 20x29x18 (EXEDY)",
-     "name_en": "BEARING, NEEDLE, 20X29X18 (EXEDY)",
+     "name_th": "ลูกปืนเข็ม, 20x29x15 (EXEDY)",
+     "name_en": "BEARING, NEEDLE, 20X29X15 (EXEDY)",
      "qty": {
       "BTS": "-",
       "CBTS": "1"
      },
-     "note": "TH",
+     "note": "TH · แก้ไขตามใบข่าว SCOOPY 05/26",
      "alt": true
     },
     {
