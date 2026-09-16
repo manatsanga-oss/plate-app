@@ -30,8 +30,14 @@ const normDoc = (v) => String(v || "").toUpperCase().replace(/\s+/g, "");
 const tailKey = (v) => { const m = String(v || "").match(/(\d+)\D*$/); return m ? String(Number(m[1])) : ""; };
 const refsOf = (r) => String(r.ref_no || "").split(/[,;]\s*/).map(x => x.trim()).filter(Boolean);
 const eq = (a, b) => Math.abs(num(a) - num(b)) < 0.005;
+// วันเริ่มรับชำระด้วยระบบ PSR ต่อสาขา/ประเภทงาน — ใบจากไฟล์ก่อนวันนี้ไม่เอามาเทียบ (user 2026-09-16: SCY07 งาน JOB 3 ใบ 2–4 ก.ย. ยังไม่ได้เริ่มใช้ระบบ)
+// key = "สาขา|ชนิด" ชนิด: JOB (ใบแจ้งซ่อม DMS -JOB…/NIDS 69SERV) | SALE (ใบขาย DMS -SS…/NIDS 69RTSL) | ALL
+const PSR_START = { "SCY07|JOB": "2026-09-05" };
+const kindOfRef = (ref) => /-JOB|SERV\//i.test(ref) ? "JOB" : /-SS|RTSL\/|WHSL\//i.test(ref) ? "SALE" : "ALL";
+const beforePsrStart = (r) => { const d = String(r.receipt_date || "").slice(0, 10); const br = r.branch_code || ""; const k = kindOfRef(refsOf(r)[0] || "");
+  const st = PSR_START[`${br}|${k}`] || PSR_START[`${br}|ALL`]; return !!(st && d && d < st); };
 function reconcile(uploadRows, psrRows) {
-  const ups = uploadRows.filter(r => !r.status || r.status === "ปกติ");
+  const ups = uploadRows.filter(r => (!r.status || r.status === "ปกติ") && !beforePsrStart(r));
   const psr = psrRows.filter(p => String(p.status || "active") === "active");
   const byDoc = new Map(), byTail = new Map(), byDayAmt = new Map();
   psr.forEach(p => {
@@ -42,21 +48,21 @@ function reconcile(uploadRows, psrRows) {
   });
   const used = new Set();
   const take = (arr, pred) => { const x = (arr || []).find(p => !used.has(p.payment_id) && (!pred || pred(p))); if (x) used.add(x.payment_id); return x || null; };
-  const out = ups.map(r => {
-    const br = r.branch_code || "", refs = refsOf(r), d = String(r.receipt_date || "").slice(0, 10);
-    let p = null, how = "";
-    for (const ref of refs) { p = take(byDoc.get(`${br}|${normDoc(ref)}`)); if (p) { how = "เลขอ้างอิง"; break; } }
-    if (!p) for (const ref of refs) { const t = tailKey(ref); if (!t) continue; p = take(byTail.get(`${br}|${t}`), x => eq(x.paid_amount, r.total_amount)); if (p) { how = "เลขท้าย+ยอด"; break; } }
-    if (!p) { p = take(byDayAmt.get(`${br}|${d}|${num(r.total_amount).toFixed(2)}`)); if (p) how = "วัน+ยอด"; }
+  // จับคู่เป็น 3 รอบทั้งชุด (ไม่ใช่ทีละใบ) — ไม่งั้นใบที่เลขอ้างอิงไม่ตรงจะแย่ง PSR ของใบอื่นไปด้วยกฎ วัน+ยอด ก่อน (bug 2026-09-16 SR-2609-000030)
+  const out = ups.map(r => ({ r, br: r.branch_code || "", refs: refsOf(r), d: String(r.receipt_date || "").slice(0, 10), p: null, how: "" }));
+  out.forEach(x => { for (const ref of x.refs) { x.p = take(byDoc.get(`${x.br}|${normDoc(ref)}`)); if (x.p) { x.how = "เลขอ้างอิง"; break; } } });
+  out.filter(x => !x.p).forEach(x => { for (const ref of x.refs) { const t = tailKey(ref); if (!t) continue; x.p = take(byTail.get(`${x.br}|${t}`), y => eq(y.paid_amount, x.r.total_amount)); if (x.p) { x.how = "เลขท้าย+ยอด"; break; } } });
+  out.filter(x => !x.p).forEach(x => { x.p = take(byDayAmt.get(`${x.br}|${x.d}|${num(x.r.total_amount).toFixed(2)}`)); if (x.p) x.how = "วัน+ยอด"; });
+  const result = out.map(({ r, br, refs, d, p, how }) => {
     const diff = p ? num(r.total_amount) - num(p.paid_amount) : num(r.total_amount);
     const status = !p ? "ไม่พบในระบบ" : eq(diff, 0) ? "ตรง" : "ยอดต่าง";
     return { kind: "upload", key: `U|${r.source}|${br}|${r.receipt_no}`, date: d, branch: br, source: r.source, receipt_no: r.receipt_no, ref: refs.join(", "), customer: r.customer_name || "", amount: num(r.total_amount), method_file: methodOfUpload(r),
       psr: p, how, diff, status };
   });
-  psr.filter(p => !used.has(p.payment_id)).forEach(p => out.push({ kind: "psr", key: `P|${p.payment_id}`, date: String(p.paid_date || "").slice(0, 10), branch: p.branch_code || "", source: "", receipt_no: "", ref: "", customer: "", amount: 0, method_file: "",
+  psr.filter(p => !used.has(p.payment_id)).forEach(p => result.push({ kind: "psr", key: `P|${p.payment_id}`, date: String(p.paid_date || "").slice(0, 10), branch: p.branch_code || "", source: "", receipt_no: "", ref: "", customer: "", amount: 0, method_file: "",
     psr: p, how: "", diff: -num(p.paid_amount), status: "ไม่มีในไฟล์" }));
-  out.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.branch).localeCompare(String(b.branch)) || String(a.receipt_no || a.psr?.receipt_no).localeCompare(String(b.receipt_no || b.psr?.receipt_no)));
-  return out;
+  result.sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(a.branch).localeCompare(String(b.branch)) || String(a.receipt_no || a.psr?.receipt_no).localeCompare(String(b.receipt_no || b.psr?.receipt_no)));
+  return result;
 }
 const methodOfUpload = (r) => r.source === "NIDS งานบริการ" ? "" : PAY_COLS.filter(([k]) => num(r[k]) > 0).map(([, l]) => l).join("+");
 const RECON_STATUS = { "ตรง": ["#dcfce7", "#15803d"], "ยอดต่าง": ["#fef3c7", "#b45309"], "ไม่พบในระบบ": ["#fee2e2", "#b91c1c"], "ไม่มีในไฟล์": ["#ede9fe", "#6d28d9"] };
@@ -123,6 +129,7 @@ export default function PartServiceReceiptReportPage() {
 
   // ---------- โหมดเทียบกับรับชำระในระบบ ----------
   const recon = useMemo(() => reconcile(rows, psrRows), [rows, psrRows]);
+  const skippedBeforeStart = useMemo(() => rows.filter(r => (!r.status || r.status === "ปกติ") && beforePsrStart(r) && (!fBranch || r.branch_code === fBranch)), [rows, fBranch]);
   const reconFiltered = useMemo(() => recon.filter(x => {
     if (fBranch && x.branch !== fBranch) return false;
     if (fSource && x.kind === "upload" && x.source !== fSource) return false;
@@ -224,6 +231,7 @@ export default function PartServiceReceiptReportPage() {
           <div style={{ fontSize: 12.5, color: "#475569", marginBottom: 8, padding: "8px 12px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
             เทียบใบเสร็จจากไฟล์ upload (DMS/NIDS) กับใบรับชำระ <b>PSR</b> ที่พนักงานบันทึกในหน้า "รับชำระเงินค่าอะไหล่และบริการ" ช่วงวันที่เดียวกัน · จับคู่ด้วย <b>เลขอ้างอิง</b> (JOB/ใบขาย) → <b>เลขท้าย+ยอด</b> (พิมพ์ prefix ผิด) → <b>วัน+ยอด</b> · ไม่นับใบยกเลิกทั้ง 2 ฝั่ง
             {psrRows.length === 0 && !loading && <span style={{ color: "#b91c1c", marginLeft: 8 }}>⚠ ยังไม่ได้ข้อมูล PSR ในช่วงนี้ (กด แสดง อีกครั้ง)</span>}
+            {skippedBeforeStart.length > 0 && <div style={{ marginTop: 4, color: "#6b7280" }}>ℹ ไม่นำมาเทียบ {skippedBeforeStart.length} ใบ ({baht(skippedBeforeStart.reduce((a, r) => a + num(r.total_amount), 0))}) — ก่อนวันเริ่มรับชำระด้วยระบบ: {Object.entries(PSR_START).map(([k, v]) => `${k.replace("|", " ")} ตั้งแต่ ${thaiDate(v)}`).join(", ")}</div>}
           </div>
           <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 10, background: "#fff", marginBottom: 12 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
