@@ -43,7 +43,15 @@ export default function DepositIncomePage({ currentUser }) {
     method: "เงินสด", account: "",
   });
   // การ์ดรายได้อื่นๆ: เลือกหมวดจาก master (จำนวนเงิน default เติมให้ ว่าง=กรอกเอง) — user 2026-08-25
-  const [oform, setOform] = useState({ receipt_date: todayStr(), customer_name: "", income_code: "", income_name: "", detail: "", amount: "", vat_rate: 0 });
+  const [oform, setOform] = useState({ receipt_date: todayStr(), customer_name: "", income_code: "", income_name: "", detail: "", amount: "", vat_rate: 0, method: "เงินสด", account: "" });
+  // วิธีชำระเงินโอน (user 2026-09-16): เก็บบัญชีเป็นข้อความ "ธนาคาร · เลขบัญชี · ชื่อบัญชี" แบบเดียวกับใบเสร็จค่าอะไหล่ → รายงานเคลื่อนไหวบัญชีจับคู่ด้วยเลขบัญชี
+  const [bankAccounts, setBankAccounts] = useState([]);
+  const bankLabelOf = (a) => [a.bank_name, a.account_no, a.account_name].filter(Boolean).join(" · ");
+  useEffect(() => {
+    post(ACC_API, { action: "list_bank_accounts", include_inactive: "false" })
+      .then((d) => setBankAccounts(asArray(d).filter((a) => a && a.account_id && a.account_type !== "เงินสดย่อย" && a.account_type !== "ลูกหนี้")))
+      .catch(() => {});
+  }, []);
   const [cats, setCats] = useState([]);
   useEffect(() => {
     if (card !== "other" || cats.length) return;
@@ -181,6 +189,7 @@ export default function DepositIncomePage({ currentUser }) {
     const f = oform;
     if (!f.income_name.trim()) { setMessage("❌ เลือกหมวดรายได้"); return; }
     if (!(num(f.amount) > 0)) { setMessage("❌ กรอกจำนวนเงิน"); return; }
+    if (f.method === "เงินโอน" && !f.account) { setMessage("❌ เลือกบัญชีที่รับโอน"); return; }
     if (!window.confirm(`บันทึกรายได้อื่นๆ (${myAffiliation} · ${myBranch})\n${f.income_name}${f.detail.trim() ? " - " + f.detail.trim() : ""}${f.customer_name.trim() ? "\nลูกค้า " + f.customer_name.trim() : ""}\nยอดรับ ${baht(f.amount)} บาท (เงินสด)?`)) return;
     setSaving(true); setMessage("");
     try {
@@ -191,13 +200,13 @@ export default function DepositIncomePage({ currentUser }) {
         amount: num(f.amount), fee: 0, receipt_date: f.receipt_date,
         affiliation: myAffiliation,
         branch_code: myBranch || currentUser?.branch || "",
-        payment_method: "เงินสด", payment_account: "",
+        payment_method: f.method || "เงินสด", payment_account: f.method === "เงินโอน" ? f.account : "",
         received_by: currentUser?.username || currentUser?.name || "system",
       });
       const rc = r && r.receipt;
       if (!rc || !rc.receipt_no) throw new Error(r?.__error || r?.error || "บันทึกไม่สำเร็จ (ตรวจว่า import workflow deposit-income-api เวอร์ชันล่าสุดแล้ว)");
       setMessage(`✅ บันทึกรายได้อื่นๆ แล้ว เลขที่ใบเสร็จ ${rc.receipt_no}`);
-      setOform({ receipt_date: todayStr(), customer_name: "", income_code: "", income_name: "", detail: "", amount: "" });
+      setOform({ receipt_date: todayStr(), customer_name: "", income_code: "", income_name: "", detail: "", amount: "", vat_rate: 0, method: "เงินสด", account: "" });
       load();
     } catch (e) { setMessage("❌ " + (e.message || e)); }
     finally { setSaving(false); }
@@ -318,7 +327,22 @@ export default function DepositIncomePage({ currentUser }) {
             {oform.vat_rate > 0 && <span style={{ fontSize: 12, color: "#6b7280" }}>VAT {baht(num(oform.amount) * num(oform.vat_rate) / (100 + num(oform.vat_rate)))}</span>}
           </div>
           <label>วิธีชำระ</label>
-          <div style={{ padding: "8px 14px", borderRadius: 8, fontWeight: 700, background: "#072d6b", color: "#fff", display: "inline-block", justifySelf: "start" }}>💵 เงินสด</div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            {["เงินสด", "เงินโอน"].map((k) => (
+              <button key={k} onClick={() => setOform((f) => ({ ...f, method: k, account: k === "เงินโอน" ? f.account : "" }))}
+                style={{ padding: "8px 14px", borderRadius: 8, fontWeight: 700, cursor: "pointer", fontFamily: "Tahoma",
+                  background: oform.method === k ? "#072d6b" : "#fff", color: oform.method === k ? "#fff" : "#072d6b",
+                  border: oform.method === k ? "2px solid #072d6b" : "2px solid #d1d5db" }}>
+                {k === "เงินสด" ? "💵 เงินสด" : "🏦 เงินโอน"}
+              </button>
+            ))}
+            {oform.method === "เงินโอน" && (
+              <select value={oform.account} onChange={(e) => setOform((f) => ({ ...f, account: e.target.value }))} style={{ ...inp, minWidth: 260, background: oform.account ? "#fff" : "#fffbeb" }}>
+                <option value="">— เลือกบัญชีรับโอน —</option>
+                {bankAccounts.map((a) => <option key={a.account_id} value={bankLabelOf(a)}>{bankLabelOf(a)}</option>)}
+              </select>
+            )}
+          </div>
         </div>
         <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>💡 หมวดที่ตั้ง "จำนวนเงิน" ไว้ในเมนูหมวดรายได้จะเติมยอดให้อัตโนมัติ (แก้ทับได้) · หมวดที่ว่าง = กรอกยอดเอง</div>
         <button onClick={saveOther} disabled={saving} style={{ marginTop: 14, padding: "11px 28px", background: saving ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 10, fontFamily: "Tahoma", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
