@@ -147,6 +147,8 @@ import HondaRepairReportPage from "./pages/HondaRepairReportPage";
 import MotoInsuranceExtraExpensePage from "./pages/MotoInsuranceExtraExpensePage";
 import InsuranceRefundPage from "./pages/InsuranceRefundPage";
 import WhtRefundPage from "./pages/WhtRefundPage";
+import CrmEventPage from "./pages/CrmEventPage";
+import CrmReplyPage from "./pages/CrmReplyPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
 import CosmosInsurancePage from "./pages/CosmosInsurancePage";
@@ -191,6 +193,10 @@ export default function App() {
   // หน้าเลือกวันนัดนำรถเข้ารับบริการ (เปิดจากปุ่มการ์ด LINE แจ้งอะไหล่มาถึง — หน้าสั่งซื้ออะไหล่) — public ไม่ต้อง login
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/spare-appointment")) {
     return <SpareAppointmentPage />;
+  }
+  // หน้าตอบกลับข่าวกิจกรรม CRM (ปุ่ม สนใจ/ไม่สนใจ ในการ์ด LINE) — public ไม่ต้อง login
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/crm-reply")) {
+    return <CrmReplyPage />;
   }
 
   const [activeMenu, setActiveMenu] = useState("salesoverview");
@@ -514,6 +520,9 @@ export default function App() {
         )}
         {activeMenu === "whtrefund" && canAccess("whtrefund") && (
           <WhtRefundPage currentUser={currentUser} />
+        )}
+        {activeMenu === "crmevent" && canAccess("crmevent") && (
+          <CrmEventPage currentUser={currentUser} />
         )}
         {activeMenu === "stockcheck" && canAccess("stockcheck") && (
           <StockCheckPage currentUser={currentUser} />
@@ -1079,6 +1088,10 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
       <MenuGroup title="Upload" pages={uploadPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="upload" label="Upload ข้อมูล" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="uploadaccounting" label="Upload ข้อมูลทางบัญชี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
+      <MenuGroup title="CRM" pages={["crmevent"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="crmevent" label="📣 ประชาสัมพันธ์กิจกรรม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Master Data" pages={masterPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

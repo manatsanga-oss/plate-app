@@ -101,6 +101,12 @@ const PAGE_GROUPS = [
     ],
   },
   {
+    title: "CRM",
+    items: [
+      { key: "crmevent", label: "📣 ประชาสัมพันธ์กิจกรรม (ลูกค้า LINE)" },
+    ],
+  },
+  {
     title: "Master Data",
     items: [
       { key: "users",      label: "👤 กำหนดผู้ใช้งาน" },
