@@ -6,6 +6,8 @@ const groupCodeOf = (v) => { const m = String(v || "").match(/^PG-\d+/i); return
 
 export default function FastMovingStockPage() {
   const [rows, setRows] = useState([]);
+  // เลือกแถวเพื่อพิมพ์ป้ายปิดหน้ากล่อง (สติ๊กเกอร์ A4) — user 2026-09-15
+  const [labelSel, setLabelSel] = useState(() => new Set());
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("all"); // รหัสกลุ่ม PG-xxx
@@ -172,6 +174,57 @@ export default function FastMovingStockPage() {
     return t;
   }, { qty: 0, ppao: 0, haahong: 0, sachtalad: 0, nakhonluang: 0, loan: 0, backorder: 0, pendingJob: 0 });
 
+  const toggleLabel = (code) => setLabelSel(prev => { const n = new Set(prev); n.has(code) ? n.delete(code) : n.add(code); return n; });
+  const toggleLabelPage = (checked) => setLabelSel(prev => { const n = new Set(prev); paged.forEach(r => checked ? n.add(r.part_code) : n.delete(r.part_code)); return n; });
+
+  // พิมพ์ป้ายปิดหน้ากล่อง: กระดาษสติ๊กเกอร์ A4 แบ่ง 2 คอลัมน์ × 4 แถว = 8 ป้าย/แผ่น (ป้าย ~95×62 มม. พอดีหน้ากล่อง ~12×9 ซม.)
+  // ป้าย = บาร์โค้ด Code128 ของรหัสสินค้า + รหัสตัวใหญ่ + ชื่อ + กลุ่ม (ไม่ใส่ที่เก็บ — user 2026-09-15) — มีเส้นประไว้ตัด
+  function printBoxLabels() {
+    const sel = rows.filter(r => labelSel.has(r.part_code));
+    if (!sel.length) { alert("ติ๊กเลือกรายการที่ต้องการพิมพ์ป้ายก่อน"); return; }
+    const esc = (v) => String(v == null ? "" : v).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+    const cells = sel.map((r, i) => {
+      return `<div class="lb">
+        <div class="grp">${esc(r.product_group || "")}<span class="brand">${esc(r.brand || "")}</span></div>
+        <div class="name">${esc(r.product_name || "-")}</div>
+        <svg class="bc" data-code="${esc(r.part_code)}"></svg>
+        <div class="code">${esc(r.part_code)}</div>
+      </div>`;
+    }).join("");
+    const w = window.open("", "_blank", "width=900,height=1000");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ป้ายปิดหน้ากล่อง ${sel.length} ป้าย</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<style>
+  @page { size: A4 portrait; margin: 8mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Tahoma, sans-serif; color: #111; }
+  .sheet { display: grid; grid-template-columns: repeat(2, 95mm); grid-auto-rows: 60mm; column-gap: 4mm; row-gap: 3mm; justify-content: center; padding: 2mm 0; }
+  .lb { width: 95mm; height: 60mm; border: 1px dashed #9ca3af; border-radius: 2mm; padding: 3mm 4mm; display: flex; flex-direction: column; justify-content: space-between; page-break-inside: avoid; overflow: hidden; }
+  .grp { font-size: 10pt; color: #374151; display: flex; justify-content: space-between; }
+  .brand { font-weight: 700; color: #b91c1c; }
+  .name { font-size: 12pt; font-weight: 700; line-height: 1.25; max-height: 2.6em; overflow: hidden; }
+  .bc { width: 100%; height: 17mm; }
+  .code { font-size: 20pt; font-weight: 800; letter-spacing: 1px; text-align: center; font-family: Arial, Tahoma, sans-serif; }
+  .loc { font-size: 11pt; text-align: center; color: #1f2937; }
+  .muted { color: #9ca3af; }
+  .toolbar { position: fixed; top: 6px; right: 10px; z-index: 9; }
+  .toolbar button { padding: 8px 16px; font-family: Tahoma; font-size: 14px; cursor: pointer; }
+  @media print { .toolbar { display: none; } .lb { border-color: #d1d5db; } }
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์ (${sel.length} ป้าย · ${Math.ceil(sel.length / 8)} แผ่น A4)</button></div>
+<div class="sheet">${cells}</div>
+<script>
+  function render() {
+    document.querySelectorAll("svg.bc").forEach(function (el) {
+      try { JsBarcode(el, el.getAttribute("data-code"), { format: "CODE128", displayValue: false, height: 60, width: 2, margin: 0 }); } catch (e) {}
+    });
+  }
+  if (window.JsBarcode) render(); else window.addEventListener("load", render);
+</script>
+</body></html>`);
+    w.document.close();
+  }
+
   function printReport() {
     const w = window.open("", "_blank", "width=1200,height=800");
     const filterLabel = [
@@ -279,6 +332,11 @@ export default function FastMovingStockPage() {
         </select>
         <button onClick={fetchData} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
         <button onClick={printReport} style={{ padding: "8px 16px", fontSize: 13, background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์</button>
+        <button onClick={printBoxLabels} disabled={labelSel.size === 0} title="ติ๊กเลือกแถวในตาราง แล้วพิมพ์ป้ายปิดหน้ากล่องบนกระดาษสติ๊กเกอร์ A4 (8 ป้าย/แผ่น)"
+          style={{ padding: "8px 16px", fontSize: 13, background: labelSel.size ? "#b45309" : "#d1d5db", color: "#fff", border: "none", borderRadius: 8, cursor: labelSel.size ? "pointer" : "default", fontWeight: 700 }}>
+          🏷️ พิมพ์ป้ายกล่อง{labelSel.size ? ` (${labelSel.size})` : ""}
+        </button>
+        {labelSel.size > 0 && <button onClick={() => setLabelSel(new Set())} style={{ padding: "8px 10px", fontSize: 12, background: "#fff", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, cursor: "pointer" }}>ล้างที่เลือก</button>}
       </div>
       <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <select value={filterStock} onChange={e => { setFilterStock(e.target.value); setCurrentPage(1); }}
@@ -328,6 +386,9 @@ export default function FastMovingStockPage() {
         <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
           <thead>
             <tr style={{ background: "#072d6b", color: "#fff" }}>
+              <th style={{ ...th, textAlign: "center" }} title="เลือกทั้งหน้านี้เพื่อพิมพ์ป้ายกล่อง">
+                <input type="checkbox" checked={paged.length > 0 && paged.every(r => labelSel.has(r.part_code))} onChange={e => toggleLabelPage(e.target.checked)} />
+              </th>
               <th style={th}>#</th>
               <th style={th}>กลุ่มสินค้า</th>
               <th style={th}>รหัสสินค้า</th>
@@ -349,12 +410,15 @@ export default function FastMovingStockPage() {
             {loading ? (
               <tr><td colSpan={15} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด...</td></tr>
             ) : paged.length === 0 ? (
-              <tr><td colSpan={15} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
+              <tr><td colSpan={16} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
             ) : paged.map((r, i) => {
               const qty = Number(r.quantity || 0);
               const s = parseStores(r.stores);
               return (
-                <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: qty <= 0 ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: labelSel.has(r.part_code) ? "#fef3c7" : qty <= 0 ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                  <td style={{ ...td, textAlign: "center" }}>
+                    <input type="checkbox" checked={labelSel.has(r.part_code)} onChange={() => toggleLabel(r.part_code)} title="เลือกพิมพ์ป้ายกล่อง" />
+                  </td>
                   <td style={{ ...td, textAlign: "center" }}>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
                   <td style={td}>{r.product_group || "-"}</td>
                   <td style={td}>{r.part_code}</td>
