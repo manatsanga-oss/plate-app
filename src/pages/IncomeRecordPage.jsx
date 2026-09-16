@@ -46,6 +46,10 @@ export default function IncomeRecordPage({ currentUser }) {
   const [docs, setDocs] = useState([]);
   const [customers, setCustomers] = useState([]);
   // TF import (รายงานใบกำกับภาษีรายได้อื่นๆ → income_records)
+  // ใบกำกับ TF ของบริษัทเหล่านี้ที่ลงวันที่ "ถึง" วันที่กำหนด ไม่ขึ้นในรายการค้างนำเข้า (เคลียร์นอกระบบแล้ว) ใบหลังจากนั้นยังแสดง — เพิ่มบริษัทได้ที่นี่
+  const TF_HIDE_RULES = [
+    { tax_id: "0107536001699", name_kw: "เอสจีเอฟ", until: "2026-05-31" }, // บริษัท เอสจีเอฟ แคปปิตอล จำกัด (มหาชน): ซ่อนใบถึง 05/2569, 06/2569 ขึ้นไปแสดงปกติ
+  ];
   const [tfImportOpen, setTfImportOpen] = useState(false);
   const [tfList, setTfList] = useState([]);
   const [tfSelected, setTfSelected] = useState({});
@@ -160,7 +164,15 @@ export default function IncomeRecordPage({ currentUser }) {
         body: JSON.stringify({ action: "list_tf_unimported" }),
       });
       const data = await res.json();
-      setTfList(Array.isArray(data) ? data.filter(x => x && x.tax_invoice_no) : []);
+      // ซ่อนใบกำกับ TF ค้างนำเข้าเก่าของบริษัทที่เคลียร์นอกระบบแล้ว (user 2026-09-16): เอสจีเอฟ แคปปิตอล ใบถึง 05/2569 ซ่อน — ใบ 06/2569 เป็นต้นไปยังแสดง
+      const hidden = (x) => TF_HIDE_RULES.some(rule => (rule.tax_id && String(x.customer_tax_id || "").replace(/[^0-9]/g, "") === rule.tax_id || (rule.name_kw && String(x.customer_name || "").includes(rule.name_kw))) && String(x.invoice_date || "").slice(0, 10) <= rule.until);
+      // แสดงเฉพาะลูกค้านิติบุคคล (user 2026-09-16): เลขผู้เสียภาษี 13 หลักขึ้นต้น 0 หรือชื่อมีคำบ่งนิติบุคคล — บุคคลธรรมดาไม่ต้องนำเข้าเป็นรายได้อื่น ๆ
+      const isJuristic = (x) => {
+        const tid = String(x.customer_tax_id || "").replace(/[^0-9]/g, "");
+        if (tid.length === 13) return tid[0] === "0";
+        return /บริษัท|บจก|บมจ|หจก|ห้างหุ้นส่วน|จำกัด|มหาชน|สหกรณ์|มูลนิธิ|สมาคม|องค์การ|เทศบาล|อบต|อบจ|co\.,?\s*ltd|limited|company/i.test(String(x.customer_name || ""));
+      };
+      setTfList(Array.isArray(data) ? data.filter(x => x && x.tax_invoice_no && !hidden(x) && isJuristic(x)) : []);
     } catch { setTfList([]); }
     setTfLoading(false);
   }

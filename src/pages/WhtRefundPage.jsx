@@ -33,6 +33,8 @@ export default function WhtRefundPage({ currentUser }) {
   const [modal, setModal] = useState(null); // { doc, form }
   const [saving, setSaving] = useState(false);
   const [affil, setAffil] = useState("");
+  // เพิ่มรายการรอรับคืนเอง (ยอดยกมา / เอกสารนอกระบบ) — user 2026-09-16
+  const [manual, setManual] = useState(null); // form
   const [search, setSearch] = useState("");
 
   useEffect(() => {
@@ -50,7 +52,7 @@ export default function WhtRefundPage({ currentUser }) {
       ]);
       if (pd?.__error || rf?.__error) throw new Error(pd?.__error || rf?.__error);
       // ค่าขนส่ง ไม่เอาเข้ารายการรอรับคืน (user 2026-09-14) — กรองซ้ำฝั่งนี้เผื่อ workflow เก่า
-      setPending(unwrapList(pd).filter((r) => r && r.expense_doc_id && !String(r.description || "").includes("ค่าขนส่ง")));
+      setPending(unwrapList(pd).filter((r) => r && (r.expense_doc_id || r.manual_id) && !(r.expense_doc_id && String(r.description || "").includes("ค่าขนส่ง"))));
       setRefunds(unwrapList(rf).filter((r) => r && r.id));
     } catch (e) { setMessage("❌ โหลดข้อมูลไม่สำเร็จ (ยัง import workflow wht-refund-api หรือยัง?) " + (e?.message || "")); }
     setLoading(false);
@@ -83,7 +85,7 @@ export default function WhtRefundPage({ currentUser }) {
     setSaving(true); setMessage("");
     try {
       const r = await post(WHT_REFUND_API, {
-        action: "save_refund", expense_doc_id: d.expense_doc_id,
+        action: "save_refund", expense_doc_id: d.expense_doc_id, manual_id: d.manual_id || null,
         refund_amount: amt, refund_date: f.refund_date, method: f.method,
         account_id: acc ? acc.account_id : null, account_name: acc ? acc.account_name : "",
         branch_code: myBranch, note: f.note.trim(),
@@ -94,6 +96,28 @@ export default function WhtRefundPage({ currentUser }) {
       setModal(null); load();
     } catch (err) { setMessage("❌ " + (err.message || err)); }
     setSaving(false);
+  }
+
+  async function saveManual() {
+    if (!manual || saving) return;
+    const amt = num(manual.wht_amount);
+    if (!manual.vendor_name.trim()) { setMessage("❌ กรอกชื่อผู้ขาย"); return; }
+    if (!(amt > 0)) { setMessage("❌ กรอกยอดหัก ณ ที่จ่าย"); return; }
+    setSaving(true); setMessage("");
+    try {
+      const r = await post(WHT_REFUND_API, { action: "add_manual_pending", vendor_name: manual.vendor_name.trim(), affiliation: manual.affiliation, doc_no: manual.doc_no.trim() || "ยอดยกมา", doc_date: manual.doc_date, wht_amount: amt, note: manual.note.trim(), created_by: currentUser?.username || currentUser?.name || "system" });
+      if (!r || !r.id) throw new Error(r?.__error || "บันทึกไม่สำเร็จ (ต้อง re-import WHT_Refund_API_Workflow ก่อน)");
+      setMessage(`✅ เพิ่มรายการรอรับคืน ${manual.vendor_name.trim()} ${baht(amt)} บาท แล้ว`); setManual(null); load();
+    } catch (err) { setMessage("❌ " + (err.message || err)); }
+    setSaving(false);
+  }
+  async function deleteManual(r) {
+    if (!window.confirm(`ลบรายการรอรับคืน ${r.vendor_name} ${baht(r.refund_due)} บาท (${r.expense_doc_no})?`)) return;
+    try {
+      const d = await post(WHT_REFUND_API, { action: "delete_manual_pending", id: r.manual_id, cancelled_by: currentUser?.username || currentUser?.name || "system" });
+      if (!d || !d.id) throw new Error(d?.__error || "ลบไม่สำเร็จ");
+      setMessage("✅ ลบรายการแล้ว"); load();
+    } catch (err) { setMessage("❌ " + (err.message || err)); }
   }
 
   async function cancelRefund(r) {
@@ -128,6 +152,8 @@ export default function WhtRefundPage({ currentUser }) {
               {affils.map((a) => <option key={a} value={a}>{a}</option>)}
             </select>
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="ค้นหา เลขเอกสาร / Vendor / EPAY" style={{ ...inp, width: 240 }} />
+            <button onClick={() => setManual({ vendor_name: "", affiliation: "ป.เปา", doc_no: "ยอดยกมา", doc_date: todayStr(), wht_amount: "", note: "" })}
+              style={{ padding: "7px 14px", borderRadius: 8, border: "none", background: "#1e3a8a", color: "#fff", cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>+ เพิ่มรายการยกมา</button>
             <button onClick={load} disabled={loading} style={{ padding: "7px 14px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer" }}>{loading ? "⏳" : "🔄"}</button>
           </div>
         </div>
@@ -140,27 +166,29 @@ export default function WhtRefundPage({ currentUser }) {
             </tr></thead>
             <tbody>
               {shown.map((r) => (
-                <tr key={r.expense_doc_id}>
-                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#072d6b", whiteSpace: "nowrap" }}>{r.expense_doc_no}</td>
+                <tr key={r.manual_id ? `m${r.manual_id}` : r.expense_doc_id}>
+                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#072d6b", whiteSpace: "nowrap" }}>{r.expense_doc_no}{r.manual_id ? <div style={{ fontSize: 10, color: "#b45309", fontFamily: "Tahoma" }}>บันทึกเอง</div> : null}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDate(r.doc_date)}</td>
                   <td style={td}>{affilTag(r.affiliation)}</td>
                   <td style={td}>{r.vendor_name || "-"}</td>
                   <td style={{ ...td, fontSize: 12.5, maxWidth: 260, color: "#475569" }}>{r.description || "-"}{r.reference_no ? <div style={{ fontSize: 11, color: "#94a3b8" }}>อ้างอิง {r.reference_no}</div> : null}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{baht(r.total)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{r.total != null ? baht(r.total) : "-"}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{baht(r.wht_amount)}{num(r.wht_rate) > 0 ? <div style={{ fontSize: 10, color: "#94a3b8" }}>{num(r.wht_rate)}%</div> : null}</td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{baht(r.net_to_pay)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{r.net_to_pay != null ? baht(r.net_to_pay) : "-"}</td>
                   <td style={{ ...td, fontSize: 12 }}>
-                    <div style={{ fontFamily: "monospace" }}>{r.paid_doc_no || "-"}</div>
-                    <div style={{ color: "#6b7280", fontSize: 11 }}>จ่าย {thaiDate(r.paid_at)}{r.payment_method ? ` · ${r.payment_method}` : ""}</div>
+                    {r.manual_id ? <span style={{ color: "#94a3b8" }}>—</span> : (<>
+                      <div style={{ fontFamily: "monospace" }}>{r.paid_doc_no || "-"}</div>
+                      <div style={{ color: "#6b7280", fontSize: 11 }}>จ่าย {thaiDate(r.paid_at)}{r.payment_method ? ` · ${r.payment_method}` : ""}</div>
+                    </>)}
                   </td>
-                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }} title={`ใบจ่ายนี้: จ่ายจริง ${baht(r.paid_sum)} / ยอดสุทธิรวม ${baht(r.net_sum)} → จ่ายเกิน ${baht(r.group_overpaid)}`}>
-                    {baht(r.paid_sum)}
-                    <div style={{ fontSize: 10, color: "#b45309" }}>เกิน {baht(r.group_overpaid)}</div>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }} title={r.manual_id ? "รายการบันทึกเอง" : `ใบจ่ายนี้: จ่ายจริง ${baht(r.paid_sum)} / ยอดสุทธิรวม ${baht(r.net_sum)} → จ่ายเกิน ${baht(r.group_overpaid)}`}>
+                    {r.manual_id ? "-" : (<>{baht(r.paid_sum)}<div style={{ fontSize: 10, color: "#b45309" }}>เกิน {baht(r.group_overpaid)}</div></>)}
                   </td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#b91c1c", fontFamily: "monospace" }}>{baht(r.refund_due)}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>
                     <button onClick={() => openRefund(r)}
                       style={{ padding: "6px 14px", background: "#0f766e", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>💰 บันทึกรับคืน</button>
+                    {r.manual_id && <button onClick={() => deleteManual(r)} title="ลบรายการบันทึกเอง" style={{ marginLeft: 6, padding: "6px 8px", background: "#fff", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>✖</button>}
                   </td>
                 </tr>
               ))}
@@ -211,6 +239,34 @@ export default function WhtRefundPage({ currentUser }) {
         </div>
       </div>
 
+      {manual && (
+        <div onClick={() => !saving && setManual(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 460, maxWidth: "95vw", fontFamily: "Tahoma" }}>
+            <div style={{ fontWeight: 700, fontSize: 17, color: "#1e3a8a", marginBottom: 10 }}>+ เพิ่มรายการหัก ณ ที่จ่าย รอรับคืน (ยอดยกมา)</div>
+            <div style={{ fontSize: 12.5, color: "#64748b", marginBottom: 12 }}>สำหรับยอดค้างรับคืนที่เกิดก่อนใช้ระบบ หรือเอกสารที่ไม่ได้บันทึกในระบบค่าใช้จ่าย</div>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "10px 12px", alignItems: "center", fontSize: 14 }}>
+              <label>ผู้ขาย *</label>
+              <input value={manual.vendor_name} onChange={(e) => setManual((m) => ({ ...m, vendor_name: e.target.value }))} placeholder="เช่น บริษัท วิริยะประกันภัย จำกัด (มหาชน)" style={inp} />
+              <label>สังกัด</label>
+              <select value={manual.affiliation} onChange={(e) => setManual((m) => ({ ...m, affiliation: e.target.value }))} style={inp}>
+                <option value="ป.เปา">ป.เปา</option><option value="สิงห์ชัย">สิงห์ชัย</option>
+              </select>
+              <label>เลขเอกสาร</label>
+              <input value={manual.doc_no} onChange={(e) => setManual((m) => ({ ...m, doc_no: e.target.value }))} style={inp} />
+              <label>วันที่</label>
+              <input type="date" value={manual.doc_date} onChange={(e) => setManual((m) => ({ ...m, doc_date: e.target.value }))} style={inp} />
+              <label>ยอดหัก ณ ที่จ่าย *</label>
+              <input type="number" min="0" step="0.01" value={manual.wht_amount} onChange={(e) => setManual((m) => ({ ...m, wht_amount: e.target.value }))} style={{ ...inp, textAlign: "right", fontWeight: 700 }} />
+              <label>หมายเหตุ</label>
+              <input value={manual.note} onChange={(e) => setManual((m) => ({ ...m, note: e.target.value }))} style={inp} />
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button onClick={saveManual} disabled={saving} style={{ flex: 1, padding: "11px 0", background: saving ? "#9ca3af" : "#1e3a8a", color: "#fff", border: "none", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>{saving ? "กำลังบันทึก..." : "✅ เพิ่มรายการ"}</button>
+              <button onClick={() => setManual(null)} disabled={saving} style={{ padding: "11px 18px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, fontFamily: "Tahoma", cursor: "pointer" }}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal && (
         <div onClick={() => !saving && setModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 480, maxWidth: "95vw", fontFamily: "Tahoma" }}>
@@ -218,7 +274,7 @@ export default function WhtRefundPage({ currentUser }) {
             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 12px", fontSize: 13.5, marginBottom: 12, lineHeight: 1.7 }}>
               <b style={{ fontFamily: "monospace" }}>{modal.doc.expense_doc_no}</b> · {modal.doc.vendor_name || "-"} {affilTag(modal.doc.affiliation)}<br />
               ยอดรวม {baht(modal.doc.total)} · หัก ณ ที่จ่าย <b style={{ color: "#dc2626" }}>{baht(modal.doc.wht_amount)}</b> · สุทธิ {baht(modal.doc.net_to_pay)}<br />
-              ใบจ่าย {modal.doc.paid_doc_no} จ่ายจริง {baht(modal.doc.paid_sum)} → <b style={{ color: "#b91c1c" }}>รอรับคืน {baht(modal.doc.refund_due)}</b> บาท
+              {modal.doc.manual_id ? <>รายการบันทึกเอง ({modal.doc.description || "-"}) → </> : <>ใบจ่าย {modal.doc.paid_doc_no} จ่ายจริง {baht(modal.doc.paid_sum)} → </>}<b style={{ color: "#b91c1c" }}>รอรับคืน {baht(modal.doc.refund_due)}</b> บาท
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "10px 12px", alignItems: "center", fontSize: 14 }}>
               <label>วันที่รับคืน</label>

@@ -75,6 +75,14 @@ const branchOf = (r) => {
   const m = b.match(/^(SCY\d{2})\s*(.*)$/i);
   return m ? `${m[1].toUpperCase()}${m[2] ? " " + m[2].trim() : ""}` : b;
 };
+// คนไทย/ต่างชาติ จากตัวอักษรในชื่อลูกค้า (ไทย = มีอักษรไทย, ต่างชาติ = อังกฤษล้วน) — user 2026-09-16
+const natOf = (r) => {
+  const name = String(r.customer_name || "").trim() || String(r.line_display_name || "").trim();
+  if (!name) return "";
+  if (/[฀-๿]/.test(name)) return "คนไทย";
+  if (/[A-Za-z]/.test(name)) return "ต่างชาติ";
+  return "";
+};
 const districtOf = (r) => {
   const d = stripPrefix(r.district);
   if (d) return d;
@@ -135,7 +143,7 @@ export default function CrmEventPage({ currentUser }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
-  const EMPTY = { brand: "", model: "", province: "", district: "", gender: "", age: "", branch: "" };
+  const EMPTY = { brand: "", model: "", province: "", district: "", gender: "", age: "", nat: "", branch: "" };
   const [f, setF] = useState(EMPTY);
   const setFk = (k, v) => setF(prev => ({ ...prev, [k]: v, ...(k === "brand" ? { model: "" } : {}), ...(k === "province" ? { district: "" } : {}) }));
   const [search, setSearch] = useState("");
@@ -163,7 +171,7 @@ export default function CrmEventPage({ currentUser }) {
         const seen = new Set(); const vehicles = [];
         for (const v of vs) { const k = `${v.brand}|${v.model}`; if (seen.has(k)) continue; seen.add(k); vehicles.push(v); }
         const age = ageOf(r.birth_date);
-        return { ...r, _vehicles: vehicles, _gender: genderOf(r), _age: age, _ageBand: ageBandOf(age), _province: provinceOf(r), _district: districtOf(r), _branch: branchOf(r) };
+        return { ...r, _vehicles: vehicles, _gender: genderOf(r), _age: age, _ageBand: ageBandOf(age), _province: provinceOf(r), _district: districtOf(r), _branch: branchOf(r), _nat: natOf(r) };
       });
       setRows(list);
     } catch (e) { setMessage("❌ โหลดไม่สำเร็จ (ยัง import workflow crm-api หรือยัง?) " + (e?.message || "")); setRows([]); }
@@ -196,6 +204,7 @@ export default function CrmEventPage({ currentUser }) {
     if (skip !== "district" && f.district && r._district !== f.district) return false;
     if (skip !== "gender" && f.gender && r._gender !== f.gender) return false;
     if (skip !== "age" && f.age && r._ageBand !== f.age) return false;
+    if (skip !== "nat" && f.nat && r._nat !== f.nat) return false;
     if (skip !== "branch" && f.branch && r._branch !== f.branch) return false;
     return true;
   };
@@ -211,6 +220,7 @@ export default function CrmEventPage({ currentUser }) {
     district: countBy("district", r => (!f.province || r._province === f.province) ? r._district : ""),
     gender: countBy("gender", r => r._gender),
     age: (() => { const c = countBy("age", r => r._ageBand); return AGE_BANDS.map(([b]) => [b, (c.find(x => x[0] === b) || [b, 0])[1]]).filter(x => x[1] > 0); })(),
+    nat: countBy("nat", r => r._nat),
     branch: countBy("branch", r => r._branch),
   }), [rows, f]); // eslint-disable-line
 
@@ -222,7 +232,7 @@ export default function CrmEventPage({ currentUser }) {
   }), [rows, f, search]); // eslint-disable-line
   const shown = showAll ? filtered : filtered.slice(0, 300);
   const activeCount = Object.values(f).filter(Boolean).length;
-  const criteria = [f.brand && `ยี่ห้อ ${f.brand}`, f.model && `รุ่น ${f.model}`, f.province && `จังหวัด${f.province}`, f.district && `อ.${f.district}`, f.gender && `เพศ${f.gender}`, f.age && `อายุ ${f.age} ปี`, f.branch && `สาขา ${f.branch}`].filter(Boolean);
+  const criteria = [f.brand && `ยี่ห้อ ${f.brand}`, f.model && `รุ่น ${f.model}`, f.province && `จังหวัด${f.province}`, f.district && `อ.${f.district}`, f.gender && `เพศ${f.gender}`, f.age && `อายุ ${f.age} ปี`, f.nat && f.nat, f.branch && `สาขา ${f.branch}`].filter(Boolean);
   const allFilteredSelected = filtered.length > 0 && filtered.every(r => sel.has(r.line_user_id));
   const toggleOne = (id) => setSel(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleAllFiltered = () => setSel(prev => { const n = new Set(prev); if (allFilteredSelected) filtered.forEach(r => n.delete(r.line_user_id)); else filtered.forEach(r => n.add(r.line_user_id)); return n; });
@@ -341,7 +351,7 @@ export default function CrmEventPage({ currentUser }) {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 10 }}>
             {grp("🏍️", "กลุ่มรถจักรยานยนต์", <>{selBox("brand", "ยี่ห้อ", opts.brand)}{selBox("model", "รุ่น", opts.model)}</>)}
             {grp("📍", "กลุ่มที่อยู่", <>{selBox("province", "จังหวัด", opts.province)}{selBox("district", "อำเภอ", opts.district)}</>)}
-            {grp("👤", "กลุ่มบุคคล", <>{selBox("gender", "เพศ", opts.gender)}{selBox("age", "อายุ", opts.age, " ปี")}</>)}
+            {grp("👤", "กลุ่มบุคคล", <>{selBox("gender", "เพศ", opts.gender)}{selBox("age", "อายุ", opts.age, " ปี")}{selBox("nat", "สัญชาติ", opts.nat)}</>)}
             {grp("🏢", "กลุ่มสาขา", selBox("branch", "สาขา", opts.branch))}
           </div>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
@@ -413,7 +423,7 @@ export default function CrmEventPage({ currentUser }) {
                     <td style={{ ...td, fontWeight: 700 }}>{r.customer_name || "-"}{r.address ? <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400, maxWidth: 260, whiteSpace: "normal" }}>{r.address}</div> : null}</td>
                     <td style={{ ...td, color: "#047857" }}>{r.line_display_name || <span style={{ color: "#94a3b8" }}>—</span>}</td>
                     <td style={{ ...td, fontFamily: "monospace" }}>{r.phone || "-"}</td>
-                    <td style={td}>{r._gender ? tag(r._gender, r._gender === "ชาย" ? "#dbeafe" : "#fce7f3", r._gender === "ชาย" ? "#1e40af" : "#9d174d") : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
+                    <td style={td}>{r._gender ? tag(r._gender, r._gender === "ชาย" ? "#dbeafe" : "#fce7f3", r._gender === "ชาย" ? "#1e40af" : "#9d174d") : <span style={{ color: "#cbd5e1" }}>—</span>}{r._nat === "ต่างชาติ" ? <div style={{ marginTop: 2 }}>{tag("ต่างชาติ", "#fef3c7", "#92400e")}</div> : null}</td>
                     <td style={td}>{r._age != null ? `${r._age} ปี` : <span style={{ color: "#cbd5e1" }}>—</span>}</td>
                     <td style={td}>{r._province || <span style={{ color: "#cbd5e1" }}>—</span>}{r._district ? <div style={{ fontSize: 11, color: "#6b7280" }}>อ.{r._district}</div> : null}</td>
                     <td style={{ ...td, whiteSpace: "normal", maxWidth: 260 }}>
