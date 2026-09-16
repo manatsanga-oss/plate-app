@@ -38,6 +38,13 @@ const TYPE_DEPOSIT = "รายได้รับฝากเงิน";
 const FIXED_INCOME_TYPES = [TYPE_ALL, TYPE_REGISTER, TYPE_INSURANCE, TYPE_PRB, TYPE_DEPOSIT];
 const stripDots = (s) => String(s || "").replace(/[.\s]/g, "");
 const containsPrb = (s) => stripDots(s).includes("พรบ");
+// พรบ. (user 2026-09-16): ค่าบริการ default 50 บาท · เบี้ย default = ราคาเก็บลูกค้า − 50 (แก้ช่องเบี้ยเป็นยอดจริงตามกรมธรรม์ได้)
+// ถ้า master ไม่มีราคาเก็บลูกค้า ใช้เบี้ยจ่ายจริงจาก master แทน
+const PRB_SERVICE_FEE = 50;
+const prbDefaults = (paid, collect) => {
+  const amount = collect != null ? Math.max(0, Math.round((collect - PRB_SERVICE_FEE) * 100) / 100) : (paid != null ? paid : 0);
+  return { amount, fee: PRB_SERVICE_FEE }; // ค่าบริการ fix 50 — เศษสตางค์ปัดเป็นส่วนลดใน updateLine
+};
 const normName = (s) => String(s || "").toLowerCase().replace(/\s+/g, "").trim();
 // แปลงประเภทเดิม (ก่อนแยก 3 อย่าง) ให้ match dropdown ใหม่ เวลาเปิดแก้ไขเอกสารเก่า
 const normalizeIncomeType = (t) => {
@@ -399,8 +406,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       .map((e) => {
         const paid = e.amount != null && e.amount !== "" ? Number(e.amount) : null;
         const collect = e.income_amount != null && e.income_amount !== "" ? Number(e.income_amount) : null;
-        const fee = paid != null && collect != null && collect > paid ? Math.round((collect - paid) * 100) / 100 : 0;
-        return { _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: paid != null ? paid : collect, fee };
+        const d = prbDefaults(paid, collect);
+        return { _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: d.amount, fee: d.fee };
       });
   }, [saleExpenses, vehicleCC]);
 
@@ -423,8 +430,8 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       .map((e) => {
         const paid = e.amount != null && e.amount !== "" ? Number(e.amount) : null;
         const collect = e.income_amount != null && e.income_amount !== "" ? Number(e.income_amount) : null;
-        const fee = paid != null && collect != null && collect > paid ? Math.round((collect - paid) * 100) / 100 : 0;
-        return { _key: `prbcc-${e.expense_id}`, code: "", name: `${e.expense_name || ""} — ${e.engine_cc} cc`, amount: paid != null ? paid : collect, fee };
+        const d = prbDefaults(paid, collect);
+        return { _key: `prbcc-${e.expense_id}`, code: "", name: `${e.expense_name || ""} — ${e.engine_cc} cc`, amount: d.amount, fee: d.fee };
       });
   }, [saleExpenses, vehicleCC]);
 
@@ -436,7 +443,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     const c = prbCodes[0];
     setLines(prev => prev.map(l =>
       (l.income_type === TYPE_PRB && !text(l.income_name))
-        ? { ...l, income_code: c.code || "", income_name: c.name || "", price_before_discount: c.amount ?? 0, service_fee: c.fee ?? 0 }
+        ? (() => { const nl = { ...l, income_code: c.code || "", income_name: c.name || "", price_before_discount: c.amount ?? 0, service_fee: c.fee ?? 0 }; nl.discount = prbRoundDiscount(nl); return nl; })()
         : l
     ));
     // eslint-disable-next-line
@@ -699,7 +706,20 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     }
   }
 
-  function updateLine(i, patch) { setLines((arr) => arr.map((l, idx) => idx === i ? { ...l, ...patch } : l)); }
+  // พรบ. (user 2026-09-16): ค่าบริการ fix 50 ไม่ปรับ · ยอดสุทธิต้องเป็นจำนวนเต็มบาท → เศษสตางค์ของเบี้ยตัดเป็น "ส่วนลดปัดเศษ" (discount)
+  //   เช่น เบี้ย 645.21 + 50 = 695.21 → ส่วนลด 0.21 → สุทธิ 695 (ปัดลง ส่วนลดไม่ติดลบ)
+  const prbRoundDiscount = (l) => {
+    const gross = num(l.qty || 1) * num(l.price_before_discount) + num(l.service_fee);
+    return Math.round((gross - Math.floor(gross)) * 100) / 100;
+  };
+  function updateLine(i, patch) {
+    setLines((arr) => arr.map((l, idx) => {
+      if (idx !== i) return l;
+      const nl = { ...l, ...patch };
+      if (nl.income_type === TYPE_PRB && ("price_before_discount" in patch || "qty" in patch || "service_fee" in patch || "income_name" in patch)) nl.discount = prbRoundDiscount(nl);
+      return nl;
+    }));
+  }
   function addLine() { setLines((arr) => [...arr, blankLine()]); }
   function removeLine(i) {
     setLines((arr) => {
