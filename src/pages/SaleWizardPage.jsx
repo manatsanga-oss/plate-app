@@ -1517,7 +1517,16 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   })();
   // ซื้อประกันรถหาย COSMOS เพิ่ม: บวกตรงตามเบี้ยที่ใส่ เฉพาะขายเงินสด
   const insAddTotal = adjOpen && saleType === "cash" && useInsAdd ? Math.max(num(insAdd), 0) : 0;
-  const adjustmentsTotal = deliveryBonus + downPayoutCalc + insAddTotal;
+  const adjustmentsBase = deliveryBonus + downPayoutCalc + insAddTotal;
+  // SGF (user 2026-09-16): ราคาขายรวมผ่อนไฟแนนท์ SGF ปัดขึ้นหลักพันเสมอ เช่น 56,400 → 57,000 · 57,100 → 58,000 · 86,300 → 87,000 (ลงท้ายพันอยู่แล้วไม่บวก)
+  const sgfRoundUp = (() => {
+    if (!isSGF) return 0;
+    const base = overrideFinal != null ? overrideFinal : ((announcedPrice(saleType) || 0) + markupsTotal);
+    if (!base) return 0;
+    const total = base + adjustmentsBase;
+    return Math.ceil(total / 1000) * 1000 - total;
+  })();
+  const adjustmentsTotal = adjustmentsBase + sgfRoundUp;
 
   function resetAdjustments() {
     setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0); setUseInsAdd(false); setInsAdd(0);
@@ -2046,12 +2055,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
                             ราคาประกาศ {fmtBaht(price)}
                             {markupsTotal > 0 ? ` + บวกเพิ่ม ${Number(markupsTotal).toLocaleString("th-TH")}` : ""}
-                            {adjustmentsTotal > 0 ? ` + ปรับแต่ง ${Number(adjustmentsTotal).toLocaleString("th-TH")}` : ""}
+                            {adjustmentsBase > 0 ? ` + ปรับแต่ง ${Number(adjustmentsBase).toLocaleString("th-TH")}` : ""}
+                            {sgfRoundUp > 0 ? ` + ปัดหลักพัน SGF ${Number(sgfRoundUp).toLocaleString("th-TH")}` : ""}
                           </div>
                         )}
                         {unitOverride && adjustmentsTotal > 0 && (
                           <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
-                            ราคาสุทธิเฉพาะคัน {fmtBaht(overrideFinal)} + ปรับแต่ง {Number(adjustmentsTotal).toLocaleString("th-TH")}
+                            ราคาสุทธิเฉพาะคัน {fmtBaht(overrideFinal)}{adjustmentsBase > 0 ? ` + ปรับแต่ง ${Number(adjustmentsBase).toLocaleString("th-TH")}` : ""}{sgfRoundUp > 0 ? ` + ปัดหลักพัน SGF ${Number(sgfRoundUp).toLocaleString("th-TH")}` : ""}
                           </div>
                         )}
                         {/* ป้ายราคาสุทธิเฉพาะคัน (แทนราคาประกาศ+กฎบวกเพิ่มไฟแนนท์ — รายการปรับแต่งรายคันยังบวกทับ): แดง = ต่ำกว่าประกาศ · ฟ้า = สูงกว่าประกาศ */}
