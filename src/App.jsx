@@ -26,7 +26,7 @@ import CarPaymentReportNewPage from "./pages/CarPaymentReportNewPage";
 import PromoIncomeByVehiclePage from "./pages/PromoIncomeByVehiclePage"; // รายงานค่าส่งเสริมรายคัน
 import PartOrderInquiryPage from "./pages/PartOrderInquiryPage";
 import PartDispenseReportPage from "./pages/PartDispenseReportPage";
-import PartServiceSalesReportPage from "./pages/PartServiceSalesReportPage";
+import PartServiceReceiptReportPage from "./pages/PartServiceReceiptReportPage";
 import ServiceHistorySearchPage from "./pages/ServiceHistorySearchPage";
 import ServiceRateSearchPage from "./pages/ServiceRateSearchPage";
 import ServiceRateImportPage from "./pages/ServiceRateImportPage";
@@ -303,6 +303,7 @@ export default function App() {
     if (page === "taxinvoicesalesreport") return false;
     if (page === "creditnotereport") return false;  // เฉพาะ admin (ใบลดหนี้รับ)
     if (page === "carpaymentreport") return false;   // เฉพาะ admin (รายงานรับชำระเงินรายคัน)
+    if (page === "partservicereceiptreport") return false; // เฉพาะ admin (รายงานรับชำระค่าอะไหล่/บริการ DMS·NIDS)
     if (page === "promoincomebyvehicle") return false; // เฉพาะ admin (รายงานค่าส่งเสริมรายคัน)
     if (page === "carpaymentreportnew") return false; // เฉพาะ admin (รายงานรับชำระเงินรายคัน NEW — ข้อมูลจากระบบทั้งหมด)
     if (page === "salesbypayment") return false;     // เฉพาะ admin (รายงานการขายตามการชำระเงิน)
@@ -450,6 +451,9 @@ export default function App() {
         {activeMenu === "promoincomebyvehicle" && canAccess("promoincomebyvehicle") && (
           <PromoIncomeByVehiclePage currentUser={currentUser} />
         )}
+        {activeMenu === "partservicereceiptreport" && canAccess("partservicereceiptreport") && (
+          <PartServiceReceiptReportPage currentUser={currentUser} />
+        )}
         {activeMenu === "registrationsummaryreport" && canAccess("registrationsummaryreport") && (
           <RegistrationSummaryReportPage currentUser={currentUser} />
         )}
@@ -482,9 +486,6 @@ export default function App() {
         )}
         {activeMenu === "partdispensereport" && canAccess("partdispensereport") && (
           <PartDispenseReportPage currentUser={currentUser} />
-        )}
-        {activeMenu === "partservicesales" && canAccess("partservicesales") && (
-          <PartServiceSalesReportPage currentUser={currentUser} />
         )}
         {activeMenu === "partservicepayment" && canAccess("partservicepayment") && (
           <PartServicePaymentPage currentUser={currentUser} />
@@ -902,7 +903,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 45 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","salesbypayment","otherincometaxreport","promoincomebyvehicle","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","deliveryfee","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","partservicereceiptreport","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","salesbypayment","otherincometaxreport","promoincomebyvehicle","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","deliveryfee","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -916,6 +917,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="receipttransferreport" label="รายงานสรุปรับชำระเงิน (มัดจำ)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="vehiclepurchasereport" label="รายงานรับรถจักรยานยนต์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="deliveryfee" label="รายงานค่านำพา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="partservicereceiptreport" label="รายงานรับชำระเงินค่าอะไหล่และบริการ (DMS · NIDS)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hondasalesreport" label="ส่งรายงาน HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="pricepromoadvice" label="แนะนำราคา/ค่าส่งเสริม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="priceimpact" label="วิเคราะห์ผลราคา/โปร ต่อยอดขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -1059,7 +1061,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="incometaxfiling" label="ยื่นภาษี ภ.ง.ด.50, 51" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Service" pages={["partservicesales","yamaharepairreport","hondarepairreport","partdispensereport","partservicepayment","servicehistory","servicerate","servicerateimport","partimagelookup","claim","damageassess","servicearrival"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partdispensereport","partservicepayment","servicehistory","servicerate","servicerateimport","partimagelookup","claim","damageassess","servicearrival"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="partimagelookup" label="บันทึกใบประเมินราคา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="damageassess" label="ประเมินความเสียหาย (AI)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicearrival" label="รายงานรถเข้ารับบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -1069,7 +1071,6 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="yamaharepairreport" label="รายงานใบแจ้งซ่อม YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hondarepairreport" label="รายงานใบแจ้งซ่อม HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partdispensereport" label="รายงานการจ่ายอะไหล่รายตัว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="partservicesales" label="รายงานขายอะไหล่และบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partservicepayment" label="รับชำระเงินค่าอะไหล่และบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicehistory" label="ค้นหาประวัติงานบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="servicerate" label="ค้นหาค่าบริการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

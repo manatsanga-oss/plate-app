@@ -95,7 +95,6 @@ const PAGE_GROUPS = [
       { key: "claim",      label: "🔧 ระบบการเคลม" },
       { key: "yamaharepairreport", label: "📃 ใบแจ้งซ่อม YAMAHA" },
       { key: "hondarepairreport",  label: "📃 ใบแจ้งซ่อม HONDA" },
-      { key: "partservicesales",   label: "🧾 รายงานขายอะไหล่และบริการ" },
       { key: "servicehistory",     label: "🔎 ค้นหาประวัติงานบริการ" },
       { key: "servicerate",        label: "💲 ค้นหาค่าบริการ" },
       { key: "partservicepayment", label: "💵 รับชำระเงินค่าอะไหล่และบริการ" },
