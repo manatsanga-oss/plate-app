@@ -373,6 +373,8 @@ export default function DepositSeizePage({ currentUser } = {}) {
   }
 
   async function viewOrderItems(o) {
+    // ใบมัดจำที่ไม่มีใบสั่งซื้อ (ไม่มี order_id) — ไม่ต้องยิง API (n8n ตอบ body ว่าง → res.json() พัง "Unexpected end of JSON input", user 2026-09-17)
+    if (!o.order_id) { setOrderPopup({ order: o, items: [], loading: false, noOrder: true }); return; }
     setOrderPopup({ order: o, items: [], loading: true });
     try {
       const api = o.brand === "HONDA" ? SPARE_API : YAMAHA_SPARE_API;
@@ -381,8 +383,8 @@ export default function DepositSeizePage({ currentUser } = {}) {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action, order_id: o.order_id }),
       });
-      const data = await res.json();
-      const items = Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : []);
+      const txt = (await res.text()).trim(); let data = []; try { data = txt ? JSON.parse(txt) : []; } catch { data = []; } // body ว่าง = ไม่มีรายการ
+      const items = (Array.isArray(data) ? data : (Array.isArray(data?.items) ? data.items : [])).filter(it => it && Object.keys(it).length);
       setOrderPopup({ order: o, items, loading: false });
     } catch (e) {
       setOrderPopup({ order: o, items: [], loading: false, error: e.message });
@@ -627,7 +629,7 @@ export default function DepositSeizePage({ currentUser } = {}) {
             ) : orderPopup.error ? (
               <div style={{ padding: 12, background: "#fef2f2", color: "#991b1b", borderRadius: 6 }}>❌ {orderPopup.error}</div>
             ) : orderPopup.items.length === 0 ? (
-              <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีรายการสั่งซื้อ</div>
+              <div style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>{orderPopup.noOrder ? "ใบมัดจำนี้ไม่มีใบสั่งซื้ออะไหล่ในระบบ (มัดจำอย่างเดียว ไม่ได้สั่งซื้อ)" : "ไม่มีรายการสั่งซื้อ"}</div>
             ) : (
               <>
                 <div style={{ marginBottom: 8, fontSize: 13, color: "#6b7280" }}>

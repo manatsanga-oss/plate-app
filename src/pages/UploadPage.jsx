@@ -19,7 +19,7 @@ const UPLOAD_GROUPS = [
   {
     title: "UPLOAD ข้อมูลบริการและอะไหล่",
     items: [
-      { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด — ไฟล์ HONDA (SPR08010) รวม 2 สาขา แยก ป.เปา/นครหลวง จากคอลัมน์สาขาอัตโนมัติ + ห้าห้อง + สช.ตลาด", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
+      { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด — ไฟล์ HONDA (SPR08010) รวม 2 สาขา แยก ป.เปา/นครหลวง จากคอลัมน์สาขาอัตโนมัติ + ห้าห้อง (ไม่แตะ สช.ตลาด — อัปเดตจากการ์ด DMS ด้านล่างเท่านั้น, user 2026-09-17)", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
       // สช.ตลาด (SCY07) ปรับปรุงยอดจากไฟล์ DMS "รายงาน STOCK อะไหล่" ทุกสาขา — อัปเดตเฉพาะรหัสที่มีในระบบ ไม่เพิ่มรหัสใหม่ (user 2026-09-05)
       { key: "honda-inventory-scy07", label: "สินค้าคงเหลืออะไหล่ สช.ตลาด (DMS)", desc: "เลือกไฟล์ DMS รายงาน STOCK อะไหล่ (ทุกสาขา) → อ่านในเครื่อง ใช้เฉพาะแถว SCY07 ที่รหัสมีในระบบอยู่แล้ว (ส่งแค่ ~500 รหัส เร็ว) · อัปเดตยอด/ที่เก็บ · รหัสที่ไม่มีในไฟล์ตั้งเป็น 0 · รหัสอื่นไม่นำเข้า", db: "honda_inventory (สช ตลาด)", url: `${BASE}/upload-honda-inventory-scy07` },
       { key: "part-price", label: "ราคาอะไหล่ HONDA (Price List)", desc: "ไฟล์ XLSX ข้อมูลสินค้าคงคลัง · ใช้คอลัมน์ รหัสสินค้า/ชื่อสินค้า/ราคาPrice List · UPSERT (part_code)", db: "part_prices", url: `${BASE}/upload-part-price` },

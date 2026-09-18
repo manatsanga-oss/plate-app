@@ -76,6 +76,7 @@ const PAGE_GROUPS = [
       { key: "pettycashoffering", label: "🙏 เงินสดย่อย-ค่าของไหว้" },
       { key: "bankdeposit", label: "🏦 บันทึกรายการฝากเงิน" },
       { key: "whtrefund",   label: "🧾 หัก ณ ที่จ่าย ค่าใช้จ่าย รอรับคืน" },
+      { key: "partwholesalepayment", label: "🏦 บันทึกรับชำระเงินขายส่งอะไหล่" },
     ],
   },
   {

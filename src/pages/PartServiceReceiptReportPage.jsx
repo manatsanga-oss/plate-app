@@ -6,6 +6,8 @@ import React, { useEffect, useMemo, useState } from "react";
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-receipt-upload-api";
 // โหมดเทียบ (user 2026-09-16): ใบเสร็จจากไฟล์ upload ↔ ใบรับชำระ PSR ที่พนักงานบันทึกในระบบ (part_service_payments) จับคู่ฝั่ง client ไม่ต้องแก้ n8n
 const PSR_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api";
+// รายการยึดเงินมัดจำ (spare-parts-api list_deposit_seizures) — ใบเสร็จ NIDS ที่เป็นการเคลียร์มัดจำเก่าที่ยึดแล้ว ไม่มีเงินรับจริง จึงไม่มีใบ PSR (user 2026-09-17: SR-2609-000026 ↔ DEPD-2601-00052)
+const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const BRANCH_NAME = { SCY01: "สิงห์ชัย วังน้อย", SCY04: "สิงห์ชัย สาขา 4", SCY05: "ป.เปา นครหลวง", SCY06: "ป.เปา วังน้อย", SCY07: "สิงห์ชัย ตลาด", SCY10: "สิงห์ชัย สาขา 10" };
 const branchLabel = (c) => (BRANCH_NAME[c] ? `${c} ${BRANCH_NAME[c]}` : c || "-");
 const SOURCES = ["DMS", "NIDS ขายอะไหล่", "NIDS งานบริการ"];
@@ -32,13 +34,21 @@ const refsOf = (r) => String(r.ref_no || "").split(/[,;]\s*/).map(x => x.trim())
 const eq = (a, b) => Math.abs(num(a) - num(b)) < 0.005;
 // วันเริ่มรับชำระด้วยระบบ PSR ต่อสาขา/ประเภทงาน — ใบจากไฟล์ก่อนวันนี้ไม่เอามาเทียบ (user 2026-09-16: SCY07 งาน JOB 3 ใบ 2–4 ก.ย. ยังไม่ได้เริ่มใช้ระบบ)
 // key = "สาขา|ชนิด" ชนิด: JOB (ใบแจ้งซ่อม DMS -JOB…/NIDS 69SERV) | SALE (ใบขาย DMS -SS…/NIDS 69RTSL) | ALL
-const PSR_START = { "SCY07|JOB": "2026-09-05" };
+// SCY01 เริ่มเทียบตั้งแต่ 04/09/69 ทุกประเภท (user 2026-09-17 — 1–3 ก.ย. ยังบันทึก PSR เป็นยอดรวม ไม่รายใบ)
+const PSR_START = { "SCY07|JOB": "2026-09-05", "SCY01|ALL": "2026-09-04" };
 const kindOfRef = (ref) => /-JOB|SERV\//i.test(ref) ? "JOB" : /-SS|RTSL\/|WHSL\//i.test(ref) ? "SALE" : "ALL";
 const beforePsrStart = (r) => { const d = String(r.receipt_date || "").slice(0, 10); const br = r.branch_code || ""; const k = kindOfRef(refsOf(r)[0] || "");
   const st = PSR_START[`${br}|${k}`] || PSR_START[`${br}|ALL`]; return !!(st && d && d < st); };
-function reconcile(uploadRows, psrRows) {
-  const ups = uploadRows.filter(r => (!r.status || r.status === "ปกติ") && !beforePsrStart(r));
-  const psr = psrRows.filter(p => String(p.status || "active") === "active");
+// ชื่อลูกค้าแบบตัดคำนำหน้า/ช่องว่าง ใช้เทียบใบเสร็จ NIDS กับรายการยึดมัดจำ
+const normName = (v) => String(v || "").replace(/^(นางสาว|น\.ส\.|นาย|นาง|คุณ|MR\.?|MRS\.?|MISS|MS\.?)\s*/i, "").replace(/[\s.\-]+/g, "").toUpperCase();
+// ใบขายส่ง NIDS (อ้างอิง 69WHSL/… ทุกใบ) ไม่ผ่านหน้ารับชำระ PSR — ไม่นำมาเทียบ (user 2026-09-17)
+const isWholesale = (r) => { const refs = refsOf(r); return refs.length > 0 && refs.every(x => /WHSL\//i.test(x)); };
+// ฝั่ง PSR ก็ตัดใบก่อนวันเริ่มเหมือนกัน ไม่งั้นจะโผล่เป็น "ไม่มีในไฟล์"
+const psrBeforeStart = (p) => { const d = String(p.paid_date || "").slice(0, 10); const br = p.branch_code || ""; const k = kindOfRef(p.doc_no || "");
+  const st = PSR_START[`${br}|${k}`] || PSR_START[`${br}|ALL`]; return !!(st && d && d < st); };
+function reconcile(uploadRows, psrRows, seizures = []) {
+  const ups = uploadRows.filter(r => (!r.status || r.status === "ปกติ") && !beforePsrStart(r) && !isWholesale(r));
+  const psr = psrRows.filter(p => String(p.status || "active") === "active" && !psrBeforeStart(p));
   const byDoc = new Map(), byTail = new Map(), byDayAmt = new Map();
   psr.forEach(p => {
     const br = p.branch_code || "", d = String(p.paid_date || "").slice(0, 10);
@@ -53,11 +63,16 @@ function reconcile(uploadRows, psrRows) {
   out.forEach(x => { for (const ref of x.refs) { x.p = take(byDoc.get(`${x.br}|${normDoc(ref)}`)); if (x.p) { x.how = "เลขอ้างอิง"; break; } } });
   out.filter(x => !x.p).forEach(x => { for (const ref of x.refs) { const t = tailKey(ref); if (!t) continue; x.p = take(byTail.get(`${x.br}|${t}`), y => eq(y.paid_amount, x.r.total_amount)); if (x.p) { x.how = "เลขท้าย+ยอด"; break; } } });
   out.filter(x => !x.p).forEach(x => { x.p = take(byDayAmt.get(`${x.br}|${x.d}|${num(x.r.total_amount).toFixed(2)}`)); if (x.p) x.how = "วัน+ยอด"; });
+  // ใบ NIDS ที่ไม่มี PSR: ถ้าลูกค้าคนเดียวกันมีรายการยึดมัดจำ (active) วันยึด ≤ วันใบเสร็จ และยอดใบเสร็จ ≤ ยอดมัดจำ = เคลียร์มัดจำเก่าที่ยึดแล้ว ไม่ใช่เงินรับจริง
+  const seizeOf = (r, d) => String(r.source || "").startsWith("NIDS") ? (seizures.find(z => String(z.status || "active") === "active" && normName(z.customer_name) && normName(z.customer_name) === normName(r.customer_name)
+    && String(z.seizure_date || "").slice(0, 10) <= d && num(r.total_amount) <= num(z.deposit_amount) + 0.005) || null) : null;
   const result = out.map(({ r, br, refs, d, p, how }) => {
-    const diff = p ? num(r.total_amount) - num(p.paid_amount) : num(r.total_amount);
-    const status = !p ? "ไม่พบในระบบ" : eq(diff, 0) ? "ตรง" : "ยอดต่าง";
+    const sz = p ? null : seizeOf(r, d);
+    if (sz) how = `ยึดมัดจำ ${sz.deposit_doc_no}`;
+    const diff = sz ? 0 : p ? num(r.total_amount) - num(p.paid_amount) : num(r.total_amount);
+    const status = sz ? "เคลียร์มัดจำที่ยึด" : !p ? "ไม่พบในระบบ" : eq(diff, 0) ? "ตรง" : "ยอดต่าง";
     return { kind: "upload", key: `U|${r.source}|${br}|${r.receipt_no}`, date: d, branch: br, source: r.source, receipt_no: r.receipt_no, ref: refs.join(", "), customer: r.customer_name || "", amount: num(r.total_amount), method_file: methodOfUpload(r),
-      psr: p, how, diff, status };
+      psr: p, how, diff, status, seizure: sz };
   });
   psr.filter(p => !used.has(p.payment_id)).forEach(p => result.push({ kind: "psr", key: `P|${p.payment_id}`, date: String(p.paid_date || "").slice(0, 10), branch: p.branch_code || "", source: "", receipt_no: "", ref: "", customer: "", amount: 0, method_file: "",
     psr: p, how: "", diff: -num(p.paid_amount), status: "ไม่มีในไฟล์" }));
@@ -65,7 +80,7 @@ function reconcile(uploadRows, psrRows) {
   return result;
 }
 const methodOfUpload = (r) => r.source === "NIDS งานบริการ" ? "" : PAY_COLS.filter(([k]) => num(r[k]) > 0).map(([, l]) => l).join("+");
-const RECON_STATUS = { "ตรง": ["#dcfce7", "#15803d"], "ยอดต่าง": ["#fef3c7", "#b45309"], "ไม่พบในระบบ": ["#fee2e2", "#b91c1c"], "ไม่มีในไฟล์": ["#ede9fe", "#6d28d9"] };
+const RECON_STATUS = { "เคลียร์มัดจำที่ยึด": ["#e0f2fe", "#0369a1"], "ตรง": ["#dcfce7", "#15803d"], "ยอดต่าง": ["#fef3c7", "#b45309"], "ไม่พบในระบบ": ["#fee2e2", "#b91c1c"], "ไม่มีในไฟล์": ["#ede9fe", "#6d28d9"] };
 
 export default function PartServiceReceiptReportPage() {
   const [dateFrom, setDateFrom] = useState(firstOfMonth());
@@ -79,6 +94,7 @@ export default function PartServiceReceiptReportPage() {
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState("list"); // list | recon
   const [psrRows, setPsrRows] = useState([]);
+  const [seizures, setSeizures] = useState([]);
   const [reconOnlyDiff, setReconOnlyDiff] = useState(true);
 
   async function loadPsr(from, to) {
@@ -88,6 +104,11 @@ export default function PartServiceReceiptReportPage() {
       const arr = Array.isArray(d) ? d : Array.isArray(d?.rows) ? d.rows : unwrapList(d);
       setPsrRows(arr.filter(p => p && p.payment_id));
     } catch { setPsrRows([]); }
+    try {
+      const res = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposit_seizures" }) });
+      const t = (await res.text()).trim(); const d = t ? JSON.parse(t) : [];
+      setSeizures((Array.isArray(d) ? d : []).filter(z => z && z.seizure_id));
+    } catch { setSeizures([]); }
   }
 
   async function load() {
@@ -128,12 +149,13 @@ export default function PartServiceReceiptReportPage() {
   const tot = (key) => filtered.reduce((s, r) => s + num(r[key]), 0);
 
   // ---------- โหมดเทียบกับรับชำระในระบบ ----------
-  const recon = useMemo(() => reconcile(rows, psrRows), [rows, psrRows]);
+  const recon = useMemo(() => reconcile(rows, psrRows, seizures), [rows, psrRows, seizures]);
+  const skippedWholesale = useMemo(() => rows.filter(r => (!r.status || r.status === "ปกติ") && isWholesale(r) && (!fBranch || r.branch_code === fBranch)), [rows, fBranch]);
   const skippedBeforeStart = useMemo(() => rows.filter(r => (!r.status || r.status === "ปกติ") && beforePsrStart(r) && (!fBranch || r.branch_code === fBranch)), [rows, fBranch]);
   const reconFiltered = useMemo(() => recon.filter(x => {
     if (fBranch && x.branch !== fBranch) return false;
     if (fSource && x.kind === "upload" && x.source !== fSource) return false;
-    if (reconOnlyDiff && x.status === "ตรง") return false;
+    if (reconOnlyDiff && (x.status === "ตรง" || x.status === "เคลียร์มัดจำที่ยึด")) return false;
     if (search.trim()) {
       const kw = search.trim().toLowerCase();
       if (![x.receipt_no, x.ref, x.customer, x.psr?.receipt_no, x.psr?.doc_no, x.psr?.customer_name].filter(Boolean).join(" ").toLowerCase().includes(kw)) return false;
@@ -143,10 +165,10 @@ export default function PartServiceReceiptReportPage() {
   const reconSummary = useMemo(() => {
     const m = new Map();
     recon.filter(x => !fBranch || x.branch === fBranch).forEach(x => {
-      const g = m.get(x.branch) || { branch: x.branch, up_count: 0, up_total: 0, psr_count: 0, psr_total: 0, match: 0, diff: 0, missing: 0, extra: 0 };
+      const g = m.get(x.branch) || { branch: x.branch, up_count: 0, up_total: 0, psr_count: 0, psr_total: 0, match: 0, diff: 0, missing: 0, extra: 0, seized: 0, seized_total: 0 };
       if (x.kind === "upload") { g.up_count += 1; g.up_total += x.amount; }
       if (x.psr) { g.psr_count += 1; g.psr_total += num(x.psr.paid_amount); }
-      if (x.status === "ตรง") g.match += 1; else if (x.status === "ยอดต่าง") g.diff += 1; else if (x.status === "ไม่พบในระบบ") g.missing += 1; else g.extra += 1;
+      if (x.status === "เคลียร์มัดจำที่ยึด") { g.seized += 1; g.seized_total += x.amount; } else if (x.status === "ตรง") g.match += 1; else if (x.status === "ยอดต่าง") g.diff += 1; else if (x.status === "ไม่พบในระบบ") g.missing += 1; else g.extra += 1;
       m.set(x.branch, g);
     });
     return [...m.values()].sort((a, b) => String(a.branch).localeCompare(String(b.branch)));
@@ -229,25 +251,27 @@ export default function PartServiceReceiptReportPage() {
       {mode === "recon" && (
         <>
           <div style={{ fontSize: 12.5, color: "#475569", marginBottom: 8, padding: "8px 12px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
-            เทียบใบเสร็จจากไฟล์ upload (DMS/NIDS) กับใบรับชำระ <b>PSR</b> ที่พนักงานบันทึกในหน้า "รับชำระเงินค่าอะไหล่และบริการ" ช่วงวันที่เดียวกัน · จับคู่ด้วย <b>เลขอ้างอิง</b> (JOB/ใบขาย) → <b>เลขท้าย+ยอด</b> (พิมพ์ prefix ผิด) → <b>วัน+ยอด</b> · ไม่นับใบยกเลิกทั้ง 2 ฝั่ง
+            เทียบใบเสร็จจากไฟล์ upload (DMS/NIDS) กับใบรับชำระ <b>PSR</b> ที่พนักงานบันทึกในหน้า "รับชำระเงินค่าอะไหล่และบริการ" ช่วงวันที่เดียวกัน · จับคู่ด้วย <b>เลขอ้างอิง</b> (JOB/ใบขาย) → <b>เลขท้าย+ยอด</b> (พิมพ์ prefix ผิด) → <b>วัน+ยอด</b> · ไม่นับใบยกเลิกทั้ง 2 ฝั่ง · ใบ NIDS ที่ลูกค้ามีรายการ<b>ยึดเงินมัดจำ</b>ในระบบ = เคลียร์มัดจำเก่า ไม่นับเป็นผลต่าง
             {psrRows.length === 0 && !loading && <span style={{ color: "#b91c1c", marginLeft: 8 }}>⚠ ยังไม่ได้ข้อมูล PSR ในช่วงนี้ (กด แสดง อีกครั้ง)</span>}
+            {skippedWholesale.length > 0 && <div style={{ marginTop: 4, color: "#6b7280" }}>ℹ ไม่นำมาเทียบ ใบขายส่ง (69WHSL) {skippedWholesale.length} ใบ ({baht(skippedWholesale.reduce((a, r) => a + num(r.total_amount), 0))})</div>}
             {skippedBeforeStart.length > 0 && <div style={{ marginTop: 4, color: "#6b7280" }}>ℹ ไม่นำมาเทียบ {skippedBeforeStart.length} ใบ ({baht(skippedBeforeStart.reduce((a, r) => a + num(r.total_amount), 0))}) — ก่อนวันเริ่มรับชำระด้วยระบบ: {Object.entries(PSR_START).map(([k, v]) => `${k.replace("|", " ")} ตั้งแต่ ${thaiDate(v)}`).join(", ")}</div>}
           </div>
           <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 10, background: "#fff", marginBottom: 12 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead><tr>
                 <th style={th}>สาขา</th><th style={{ ...th, textAlign: "right" }}>ใบจากไฟล์</th><th style={{ ...th, textAlign: "right" }}>ยอดไฟล์</th><th style={{ ...th, textAlign: "right" }}>ใบ PSR ในระบบ</th><th style={{ ...th, textAlign: "right" }}>ยอด PSR</th><th style={{ ...th, textAlign: "right" }}>ผลต่างยอด</th>
-                <th style={{ ...th, textAlign: "right", background: "#15803d" }}>ตรง</th><th style={{ ...th, textAlign: "right", background: "#b45309" }}>ยอดต่าง</th><th style={{ ...th, textAlign: "right", background: "#b91c1c" }}>ไม่พบในระบบ</th><th style={{ ...th, textAlign: "right", background: "#6d28d9" }}>ไม่มีในไฟล์</th>
+                <th style={{ ...th, textAlign: "right", background: "#15803d" }}>ตรง</th><th style={{ ...th, textAlign: "right", background: "#0369a1" }} title="ใบเสร็จ NIDS ที่เป็นการเคลียร์มัดจำเก่าที่ยึดแล้ว (ไม่มีเงินรับจริง) — ไม่นับในผลต่าง">เคลียร์มัดจำที่ยึด</th><th style={{ ...th, textAlign: "right", background: "#b45309" }}>ยอดต่าง</th><th style={{ ...th, textAlign: "right", background: "#b91c1c" }}>ไม่พบในระบบ</th><th style={{ ...th, textAlign: "right", background: "#6d28d9" }}>ไม่มีในไฟล์</th>
               </tr></thead>
               <tbody>
-                {reconSummary.length === 0 && <tr><td colSpan={10} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 18 }}>— ไม่มีข้อมูลในช่วงวันที่นี้ —</td></tr>}
+                {reconSummary.length === 0 && <tr><td colSpan={11} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 18 }}>— ไม่มีข้อมูลในช่วงวันที่นี้ —</td></tr>}
                 {reconSummary.map(g => (
                   <tr key={g.branch} onClick={() => setFBranch(fBranch === g.branch ? "" : g.branch)} style={{ cursor: "pointer", background: fBranch === g.branch ? "#eff6ff" : "#fff" }} title="คลิกเพื่อกรองสาขา">
                     <td style={{ ...td, fontSize: 12.5, fontWeight: 700 }}>{branchLabel(g.branch)}</td>
                     <td style={{ ...td, textAlign: "right" }}>{g.up_count}</td><td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{baht(g.up_total)}</td>
                     <td style={{ ...td, textAlign: "right" }}>{g.psr_count}</td><td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{baht(g.psr_total)}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: eq(g.up_total, g.psr_total) ? "#15803d" : "#b91c1c" }}>{eq(g.up_total, g.psr_total) ? "0.00 ✓" : baht(g.up_total - g.psr_total)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: eq(g.up_total - g.seized_total, g.psr_total) ? "#15803d" : "#b91c1c" }}>{eq(g.up_total - g.seized_total, g.psr_total) ? "0.00 ✓" : baht(g.up_total - g.seized_total - g.psr_total)}</td>
                     <td style={{ ...td, textAlign: "right", color: "#15803d", fontWeight: 700 }}>{g.match}</td>
+                    <td style={{ ...td, textAlign: "right", color: g.seized ? "#0369a1" : "#cbd5e1", fontWeight: 700 }}>{g.seized ? `${g.seized} (${baht(g.seized_total)})` : 0}</td>
                     <td style={{ ...td, textAlign: "right", color: g.diff ? "#b45309" : "#cbd5e1", fontWeight: 700 }}>{g.diff}</td>
                     <td style={{ ...td, textAlign: "right", color: g.missing ? "#b91c1c" : "#cbd5e1", fontWeight: 700 }}>{g.missing}</td>
                     <td style={{ ...td, textAlign: "right", color: g.extra ? "#6d28d9" : "#cbd5e1", fontWeight: 700 }}>{g.extra}</td>
@@ -285,7 +309,7 @@ export default function PartServiceReceiptReportPage() {
                       <td style={{ ...td, fontSize: 11.5, color: methodDiff ? "#b45309" : "#475569" }}>{p?.payment_method || "-"}{methodDiff ? <div style={{ fontSize: 10.5 }}>⚠ วิธีต่างจากไฟล์</div> : null}</td>
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#1e3a8a" }}>{p ? baht(p.paid_amount) : <span style={{ color: "#cbd5e1" }}>-</span>}</td>
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: eq(x.diff, 0) ? "#15803d" : "#b91c1c" }}>{eq(x.diff, 0) ? "0.00" : baht(x.diff)}</td>
-                      <td style={{ ...td, fontSize: 11.5, color: x.how === "เลขอ้างอิง" ? "#64748b" : "#b45309" }}>{x.how || "-"}</td>
+                      <td style={{ ...td, fontSize: 11.5, color: x.how === "เลขอ้างอิง" ? "#64748b" : x.seizure ? "#0369a1" : "#b45309" }}>{x.how || "-"}{x.seizure ? <div style={{ fontSize: 10.5 }}>ยึด {thaiDate(x.seizure.seizure_date)} · มัดจำ {baht(x.seizure.deposit_amount)}</div> : null}</td>
                       <td style={td}>{tag(x.status, bg, fg)}</td>
                     </tr>
                   );

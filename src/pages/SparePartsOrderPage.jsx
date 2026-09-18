@@ -86,6 +86,12 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [notifyingId, setNotifyingId] = useState(null); // order_id ที่กำลังส่ง LINE แจ้งลูกค้า
   const [savingJob, setSavingJob] = useState(false);
   const [filterStatus, setFilterStatus] = useState("all");
+  // โหลดเร็ว (user 2026-09-18): ดึงจาก n8n เฉพาะใบที่ยังไม่ปิด (scope=active) — ใบปิดงานซ่อม/ยกเลิก (คืนเงิน) 100+ ใบ
+  // ดึงแบบย่อ (light: ไม่ join รายการ) ไว้เช็คว่ามัดจำใบไหนถูกสั่งไปแล้ว + นับแท็บ · ดึงเต็มเมื่อกดแท็บปิดงานซ่อมเท่านั้น
+  const CLOSED_STATUSES = ["ปิดงานซ่อม", "ยกเลิก (คืนเงิน)"];
+  const [closedLite, setClosedLite] = useState([]);       // ใบปิดแล้ว (คอลัมน์หลัก ไม่มีรายการอะไหล่)
+  const [closedOrders, setClosedOrders] = useState(null); // ใบปิดแล้วแบบเต็ม — null = ยังไม่โหลด
+  const [closedLoading, setClosedLoading] = useState(false);
   const [filterParking, setFilterParking] = useState("all");
   const [editParkingId, setEditParkingId] = useState(null);
   const [filterDepType, setFilterDepType] = useState("all");
@@ -102,6 +108,27 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [paidJobMap, setPaidJobMap] = useState({}); // เลข Job (normalize) → เลขใบเสร็จ PSR- ที่รับชำระแล้ว (active) — ใส่ ✓ หลังเลข Job ใบปิดงานซ่อม
 
   useEffect(() => { loadAll(); }, []);
+  useEffect(() => {
+    if (!CLOSED_STATUSES.includes(filterStatus) || closedOrders !== null || closedLoading) return;
+    let alive = true;
+    setClosedLoading(true);
+    api("get_spare_orders", { scope: "closed" }).then(r => { if (alive) setClosedOrders(norm(r)); }).catch(() => { if (alive) setClosedOrders([]); }).finally(() => { if (alive) setClosedLoading(false); });
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [filterStatus, closedOrders]);
+  // ใบทั้งหมด (เปิด + ปิดแบบย่อ) ไว้เช็คว่ามัดจำใบไหนมีใบสั่งซื้อแล้ว / ลูกค้ามีงานค้าง — กันมัดจำของงานที่ปิดแล้วโผล่ให้สั่งซ้ำ
+  const allOrders = React.useMemo(() => {
+    const ids = new Set(orders.map(o => String(o.order_id)));
+    return [...orders, ...closedLite.filter(o => !ids.has(String(o.order_id)))];
+  }, [orders, closedLite]);
+  // แหล่งข้อมูลของตาราง: แท็บปิดงานซ่อม/ยกเลิก = ใบปิด (เต็ม) + ใบที่เพิ่งถูกปิดในรอบนี้ · แท็บอื่น = ใบเปิด
+  const tableSource = React.useMemo(() => {
+    if (!CLOSED_STATUSES.includes(filterStatus)) return orders;
+    const base = closedOrders || [];
+    const ids = new Set(base.map(o => String(o.order_id)));
+    return [...base, ...orders.filter(o => CLOSED_STATUSES.includes(String(o.status || "")) && !ids.has(String(o.order_id)))];
+  }, [filterStatus, orders, closedOrders]);
+  const countClosed = (st) => { const ids = new Set(); [...closedLite, ...orders].forEach(o => { if (String(o.status || "") === st) ids.add(String(o.order_id)); }); return ids.size; };
   // รายการรับชำระค่าอะไหล่/บริการทั้งหมด → map เลขเอกสารอ้างอิง (เลข Job) ไว้เทียบกับใบปิดงานซ่อม
   useEffect(() => {
     let alive = true;
@@ -310,46 +337,39 @@ export default function SparePartsOrderPage({ currentUser }) {
     setLoading(true);
     // แยก request แต่ละตัว ถ้าตัวใดพัง ตัวอื่นยังทำงานได้
     try {
-      const r = await api("get_spare_orders");
+      const [r, rc] = await Promise.all([api("get_spare_orders", { scope: "active" }), api("get_spare_orders", { scope: "closed", light: true }).catch(() => [])]);
       const list = norm(r);
       setOrders(list);
+      setClosedLite(norm(rc));
+      setClosedOrders(null); // รีเฟรช → ให้แท็บปิดงานซ่อมดึงใหม่เมื่อกด
       // เช็ค DCS/ค้างส่งอัตโนมัติย้ายไปหน้า "รายการสั่งอะไหล่รายวัน" ที่เดียว (2026-07-23)
       // หน้านี้เช็คเฉพาะตอนเปิดรายละเอียดใบ / กดปุ่ม "ตรวจสอบ DCS" ในป๊อปอัพ
       autoCloseFinishedJobs(list); // ไม่ await — เช็คเบื้องหลัง เสร็จแล้วค่อยอัปเดตสถานะบนจอ
       syncBackorderStatus(list); // ไม่ await — ใบ PDS/PDO ที่มี PO: DCS มีค้างส่ง → "อะไหล่ค้างส่ง", ค้างส่งหมดแล้ว → "สั่งซื้อแล้ว" (user 2026-09-11)
       checkPdoSales(); // ไม่ await — เช็คบิลขายปลีก DCS ของใบ PDO เบื้องหลัง (ป้าย 🛒 ขายแล้ว + ปิดการขายอัตโนมัติ)
     } catch {}
-    // เงินมัดจำ: ดึงจากระบบมัดจำอะไหล่ (part_deposits — บันทึกเองหน้า "ระบบมัดจำอะไหล่") แทน upload NID เดิม (2026-07-21)
-    try {
-      const res = await fetch(PART_DEPOSIT_API, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_deposits", limit: 2000 }),
-      });
-      const r = await res.json().catch(() => []);
-      setDeposits((Array.isArray(r) ? r : []).filter(d => d && d.deposit_doc_no && String(d.brand || "").toUpperCase() !== "YAMAHA"));
-    } catch { /* โหลดมัดจำใหม่ไม่ได้ — ตัวอื่นทำงานต่อ */ }
-    // มัดจำ NID เดิม — เก็บไว้จับคู่ใบสั่งซื้อเก่า (แสดงวันที่/ไม่ให้ใบเก่าหายจากตาราง) ไม่ใช้เลือกสั่งซื้อใหม่แล้ว
-    try { const r = await api("get_honda_deposits"); setLegacyDeposits(norm(r)); } catch {}
-    try { const r = await api("get_repair_deposits"); setRepairDeposits(norm(r)); } catch {}
-    try {
-      const r = await api("list_deposit_seizures", { brand: "HONDA" });
-      const seized = norm(r).filter(s => s?.deposit_doc_no);
-      setSeizedDocs(new Set(seized.map(s => s.deposit_doc_no)));
-    } catch {}
-    try { const r = await api("get_part_substitutes"); setPartSubstitutes(norm(r)); } catch {}
-    try { const r = await api("get_car_model_names"); console.log("models:", r); setModels(norm(r)); } catch (e) { console.error("models err:", e); }
-    try {
-      const r = await fetch(USER_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "get_users" }),
-      }).then(res => res.json());
-      console.log("users raw:", r);
-      const allUsers = norm(r);
-      console.log("allUsers:", allUsers.length, "role:", currentUser?.role, "branch:", currentUser?.branch);
-      const myBranch = currentUser?.branch || "";
-      setTechs(allUsers.filter(u => u.branch === myBranch && (u.position || "").includes("ช่าง")));
-    } catch (e) { console.error("users err:", e); }
+    // ข้อมูลประกอบ 7 ชุด ยิงพร้อมกัน (เดิมรอทีละตัว — user 2026-09-18 หน้าโหลดช้า) แต่ละตัวพังได้โดยไม่กระทบตัวอื่น
+    const safe = (pr, fallback = []) => pr.catch(() => fallback);
+    const [depR, legacyR, repairR, seizeR, subR, modelR, userR] = await Promise.all([
+      safe(fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposits", limit: 2000 }) }).then(res => res.json())),
+      safe(api("get_honda_deposits")),
+      safe(api("get_repair_deposits")),
+      safe(api("list_deposit_seizures", { brand: "HONDA" })),
+      safe(api("get_part_substitutes")),
+      safe(api("get_car_model_names")),
+      safe(fetch(USER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_users" }) }).then(res => res.json())),
+    ]);
+    // เงินมัดจำ: ดึงจากระบบมัดจำอะไหล่ (part_deposits — บันทึกเองหน้า "ระบบมัดจำอะไหล่") ไม่เอา YAMAHA
+    setDeposits((Array.isArray(depR) ? depR : []).filter(d => d && d.deposit_doc_no && String(d.brand || "").toUpperCase() !== "YAMAHA"));
+    // มัดจำ NID เดิม — เก็บไว้จับคู่ใบสั่งซื้อเก่า
+    setLegacyDeposits(norm(legacyR));
+    setRepairDeposits(norm(repairR));
+    setSeizedDocs(new Set(norm(seizeR).filter(x => x?.deposit_doc_no).map(x => x.deposit_doc_no)));
+    setPartSubstitutes(norm(subR));
+    setModels(norm(modelR));
+    const allUsers = norm(userR);
+    const myBranch = currentUser?.branch || "";
+    setTechs(allUsers.filter(u => u.branch === myBranch && (u.position || "").includes("ช่าง")));
     setLoading(false);
   }
 
@@ -440,7 +460,7 @@ export default function SparePartsOrderPage({ currentUser }) {
     const dep = deposits.find(d => d.deposit_doc_no === docNo);
     if (!dep) return;
     // หาใบสั่งซื้อเดิมของลูกค้าคนนี้ (ใบล่าสุด) — เทียบด้วยรหัสลูกค้าเท่านั้น
-    const prevOrder = (dep.customer_code ? orders.filter(o => o.customer_code === dep.customer_code) : [])
+    const prevOrder = (dep.customer_code ? allOrders.filter(o => o.customer_code === dep.customer_code) : [])
       .sort((a, b) => (b.order_id || 0) - (a.order_id || 0))[0];
     setForm(prev => ({
       ...prev,
@@ -872,7 +892,7 @@ export default function SparePartsOrderPage({ currentUser }) {
     );
   }
 
-  const filtered = orders.filter(o => {
+  const filtered = tableSource.filter(o => {
     // ซ่อน order ที่เงินมัดจำถูกยึดแล้ว
     if (seizedDocs.has(o.deposit_doc_no)) return false;
     // ซ่อน order ที่จับคู่กับตารางเงินมัดจำไม่ได้ (ปิด Job/ปิดซ่อม) — แสดงเฉพาะที่มีเงินมัดจำคงเหลือ
@@ -1110,7 +1130,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       {/* ===== Filter สถานะ ===== */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ยกเลิก (คืนเงิน)", "ตีราคาซ่อม"].map(s => {
-          const count = s === "all" ? orders.filter(o => o.status !== "ปิดงานซ่อม" && o.status !== "ยกเลิก (คืนเงิน)").length : s === "ตีราคาซ่อม" ? repairDeposits.length : orders.filter(o => o.status === s).length;
+          const count = s === "all" ? orders.filter(o => o.status !== "ปิดงานซ่อม" && o.status !== "ยกเลิก (คืนเงิน)").length : s === "ตีราคาซ่อม" ? repairDeposits.length : CLOSED_STATUSES.includes(s) ? countClosed(s) : orders.filter(o => o.status === s).length;
           const active = filterStatus === s;
           return (
             <button key={s} onClick={() => { setFilterStatus(s); setCurrentPage(1); }}
@@ -1118,7 +1138,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                 background: s === "ปิดงานซ่อม" ? "#dc2626" : active ? "#072d6b" : "#fff",
                 color: s === "ปิดงานซ่อม" ? "#fff" : active ? "#fff" : "#374151",
                 cursor: "pointer", fontWeight: (active || s === "ปิดงานซ่อม") ? 700 : 400 }}>
-              {s === "all" ? "ทั้งหมด" : s} ({count})
+              {s === "all" ? "ทั้งหมด" : s} ({count}){CLOSED_STATUSES.includes(s) && active && closedLoading ? " ⏳" : ""}
             </button>
           );
         })}
@@ -1127,7 +1147,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       {/* ===== Filter จอดร้าน + ประเภทมัดจำ ===== */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
         {["all", "จอดร้าน", "ไม่จอดร้าน"].map(s => {
-          const count = s === "all" ? orders.length : orders.filter(o => o.parking_status === s).length;
+          const count = s === "all" ? tableSource.length : tableSource.filter(o => o.parking_status === s).length;
           const active = filterParking === s;
           return (
             <button key={s} onClick={() => { setFilterParking(s); setCurrentPage(1); }}
@@ -1142,7 +1162,7 @@ export default function SparePartsOrderPage({ currentUser }) {
           { key: "repair", label: "มัดจำซ่อม", bg: "#7c3aed" },
           { key: "purchase", label: "มัดจำซื้อ", bg: "#3b82f6" },
         ].map(f => {
-          const count = f.key === "all" ? orders.length : f.key === "repair" ? orders.filter(o => (o.deposit_doc_no || "").startsWith("DEPD")).length : orders.filter(o => !(o.deposit_doc_no || "").startsWith("DEPD")).length;
+          const count = f.key === "all" ? tableSource.length : f.key === "repair" ? tableSource.filter(o => (o.deposit_doc_no || "").startsWith("DEPD")).length : tableSource.filter(o => !(o.deposit_doc_no || "").startsWith("DEPD")).length;
           const active = filterDepType === f.key;
           return (
             <button key={f.key} onClick={() => { setFilterDepType(f.key); setCurrentPage(1); }}
@@ -1428,8 +1448,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                     const eligible = deposits.filter(d =>
                       // แยกสาขา (user 2026-09-15): ใบมัดจำ SCY01 (ยามาฮ่า) สั่งได้ที่ระบบสั่งซื้อยามาฮ่าเท่านั้น
                       !isYamahaBranchDeposit(d)
-                      && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
-                      && !(d.customer_code && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
+                      && !allOrders.some(o => o.deposit_doc_no === d.deposit_doc_no)
+                      && !(d.customer_code && allOrders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
                       // คืนเงินแล้ว/ใช้หมดแล้ว (คงเหลือ 0) ไม่ให้เลือกสั่งซื้อได้อีก
                       && Number(d.remaining_amount || 0) > 0
@@ -1466,9 +1486,9 @@ export default function SparePartsOrderPage({ currentUser }) {
                     .filter(d =>
                       !isYamahaBranchDeposit(d)
                       // ลูกค้ามีงานเดิมที่ยังไม่ปิด (ต้องมีรหัสลูกค้าถึงจับคู่ได้)
-                      && (d.customer_code && orders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
+                      && (d.customer_code && allOrders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
                       // ใบมัดจำนี้ยังไม่ถูกสั่งซื้อ
-                      && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
+                      && !allOrders.some(o => o.deposit_doc_no === d.deposit_doc_no)
                       // ไม่ใช่ตีราคาซ่อม
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
                       // มียอดคงเหลือ
@@ -1935,7 +1955,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                 {deposits
                   .filter(d => !isYamahaBranchDeposit(d)
                     && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
-                    && !orders.some(o => o.deposit_doc_no === d.deposit_doc_no)
+                    && !allOrders.some(o => o.deposit_doc_no === d.deposit_doc_no)
                     // คืนเงินแล้ว/ใช้หมดแล้ว (คงเหลือ 0) ไม่ให้เลือกบันทึกตีราคาซ่อม
                     && Number(d.remaining_amount || 0) > 0)
                   .map(d => (

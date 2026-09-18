@@ -52,6 +52,9 @@ const T = {
     errNameLang: "กรุณาพิมพ์ชื่อเป็นภาษาอังกฤษหรือไทย (ตามบัตร/พาสปอร์ต)",
     errHouseLang: "กรุณาพิมพ์ที่อยู่เป็นภาษาอังกฤษหรือไทย",
     errHouse: "กรุณากรอกบ้านเลขที่ / หมู่ / ถนน", errAddr: "กรุณาเลือกจังหวัด / อำเภอ / ตำบล ให้ครบ",
+    blockedIssued: "ใบอ้างอิงนี้ออกใบเสร็จไปแล้ว ไม่สามารถกรอกข้อมูลซ้ำได้ — กรุณาขอ QR ใบใหม่จากพนักงาน",
+    blockedFilled: "ใบอ้างอิงนี้มีข้อมูลของลูกค้าท่านอื่นอยู่แล้ว ({name}) — กรุณาขอ QR ใบใหม่จากพนักงาน",
+    noticeOwn: "ใบอ้างอิงนี้มีข้อมูลของท่านอยู่แล้ว ({name}) — กดส่งอีกครั้งจะบันทึกทับข้อมูลเดิม",
     errRef: "ไม่พบเลขอ้างอิง — กรุณาสแกน QR ใหม่อีกครั้ง", errSubmit: "ส่งข้อมูลไม่สำเร็จ กรุณาลองใหม่อีกครั้ง",
     birth: "วันเกิด", gender: "เพศ", male: "ชาย", female: "หญิง",
     bdDay: "วัน", bdMonth: "เดือน", bdYear: "ปี (พ.ศ.)",
@@ -75,6 +78,9 @@ const T = {
     errNameLang: "Please type your name in English or Thai (as on your ID/passport)",
     errHouseLang: "Please type the address in English or Thai",
     errHouse: "Please enter house no. / Moo / Road", errAddr: "Please select Province / District / Subdistrict",
+    blockedIssued: "A receipt has already been issued for this reference — please ask staff for a new QR",
+    blockedFilled: "This reference already holds another customer's details ({name}) — please ask staff for a new QR",
+    noticeOwn: "This reference already holds your details ({name}) — submitting again will overwrite them",
     errRef: "Reference not found — please scan the QR again", errSubmit: "Submit failed, please try again",
     birth: "Date of birth", gender: "Gender", male: "Male", female: "Female",
     bdDay: "Day", bdMonth: "Month", bdYear: "Year (B.E.)",
@@ -98,6 +104,9 @@ const T = {
     errNameLang: "ကျေးဇူးပြု၍ အမည်ကို အင်္ဂလိပ်စာ သို့မဟုတ် ထိုင်းစာဖြင့် ရိုက်ထည့်ပါ (မှတ်ပုံတင်/ပတ်စ်ပို့အတိုင်း)",
     errHouseLang: "ကျေးဇူးပြု၍ လိပ်စာကို အင်္ဂလိပ်စာ သို့မဟုတ် ထိုင်းစာဖြင့် ရိုက်ထည့်ပါ",
     errHouse: "အိမ်အမှတ် / ရပ်ကွက် / လမ်း ဖြည့်ပါ", errAddr: "ခရိုင် / မြို့နယ် / ကျေးရွာအုပ်စု ရွေးပါ",
+    blockedIssued: "ဤကိုးကားနံပါတ်အတွက် ပြေစာထုတ်ပြီးပါပြီ — ဝန်ထမ်းထံ QR အသစ်တောင်းပါ",
+    blockedFilled: "ဤကိုးကားနံပါတ်တွင် အခြားဖောက်သည်၏အချက်အလက် ({name}) ရှိနေပါပြီ — ဝန်ထမ်းထံ QR အသစ်တောင်းပါ",
+    noticeOwn: "ဤကိုးကားနံပါတ်တွင် သင့်အချက်အလက် ({name}) ရှိနေပါပြီ — ထပ်ပေးပို့ပါက အဟောင်းကို အစားထိုးပါမည်",
     errRef: "ကိုးကားနံပါတ် မတွေ့ပါ — QR ကို ပြန်စကင်ဖတ်ပါ", errSubmit: "ပေးပို့မအောင်မြင်ပါ၊ ထပ်ကြိုးစားပါ",
     birth: "မွေးသက္ကရာဇ်", gender: "လိင်", male: "ကျား", female: "မ",
     bdDay: "ရက်", bdMonth: "လ", bdYear: "ခုနှစ် (พ.ศ.)",
@@ -137,7 +146,9 @@ export default function ReceiptCustomerFormPage() {
   const [lang, setLang] = useState("th");
   const t = T[lang];
 
-  const [phase, setPhase] = useState("loading"); // loading | form | submitting | done | error
+  const [phase, setPhase] = useState("loading"); // loading | form | submitting | done | error | blocked
+  const [existing, setExisting] = useState(null); // ข้อมูลเดิมของเลขอ้างอิง (จาก get_request) — กันสแกนใบเก่าของลูกค้าคนอื่น (user 2026-09-18)
+  const maskName = (v) => { const t0 = String(v || "").trim(); if (t0.length <= 4) return t0; return t0.slice(0, 3) + "***" + t0.slice(-2); };
   const [errorMsg, setErrorMsg] = useState("");
   const [refNo, setRefNo] = useState("");
   const [oa, setOa] = useState(""); // "singchai" = สาขา สิงห์ชัย → โชว์ปุ่มแอด สิงห์ชัย OA
@@ -204,6 +215,21 @@ export default function ReceiptCustomerFormPage() {
           const fs = await liff.getFriendship();
           if (!cancelled) setIsFriend(!!fs?.friendFlag);
         } catch { /* getFriendship ใช้ไม่ได้ (ไม่ได้ link bot) — ไม่ทราบสถานะ */ }
+        // ใบ QR เก่า: ออกใบเสร็จแล้ว → บล็อก · มีคนอื่นกรอกแล้ว (LINE คนละบัญชี) → บล็อก · เจ้าตัวเดิม → แจ้งว่าจะทับ
+        try {
+          const ref = new URLSearchParams(window.location.search).get("ref") || (() => { try { return new URLSearchParams((new URLSearchParams(window.location.search).get("liff.state") || "").replace(/^\?/, "")).get("ref"); } catch { return ""; } })();
+          if (ref) {
+            const rr = await fetch(RECEIPT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_request", ref_no: ref }) });
+            const rt = (await rr.text()).trim(); const rd = rt ? JSON.parse(rt) : null; const row = Array.isArray(rd) ? rd[0] : rd;
+            if (!cancelled && row && row.ref_no) {
+              setExisting(row);
+              const st = String(row.status || ""), owner = String(row.line_user_id || "");
+              if (st === "issued") { setPhase("blocked"); return; }
+              if (st === "filled" && owner && owner !== p.userId) { setPhase("blocked"); return; }
+            }
+          }
+        } catch { /* เช็คไม่ได้ → ปล่อยให้กรอก ฝั่ง n8n ยังกันอีกชั้น */ }
+        if (cancelled) return;
         setPhase("form");
       } catch (e) {
         if (cancelled) return;
@@ -305,7 +331,13 @@ export default function ReceiptCustomerFormPage() {
       const raw = await res.text();
       const data = raw.trim() ? JSON.parse(raw) : {};
       const row = Array.isArray(data) ? data[0] : data;
-      if (row && row.error) throw new Error(row.error);
+      if (row && row.error) {
+        const nm = maskName(row.existing_name);
+        if (row.error === "ALREADY_ISSUED") { setExisting(prev => ({ ...(prev || {}), status: "issued" })); setPhase("blocked"); return; }
+        if (row.error === "ALREADY_FILLED") { setExisting(prev => ({ ...(prev || {}), status: "filled", customer_name: row.existing_name || prev?.customer_name, line_user_id: "__other__" })); setPhase("blocked"); return; }
+        if (row.error === "REF_NOT_FOUND") { setErrorMsg(t.errRef); setPhase("form"); return; }
+        throw new Error(row.error + (nm ? ` (${nm})` : ""));
+      }
       setPhase("done");
     } catch (e) {
       setErrorMsg(t.errSubmit);
@@ -348,6 +380,11 @@ export default function ReceiptCustomerFormPage() {
           </div>
         )}
 
+        {(phase === "form" || phase === "submitting") && existing && String(existing.status) === "filled" && (
+          <div style={{ margin: "0 0 10px", padding: "8px 12px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, fontSize: 13, color: "#92400e" }}>
+            ⚠️ {t.noticeOwn.replace("{name}", maskName(existing.customer_name))}
+          </div>
+        )}
         {(phase === "form" || phase === "submitting") && (
           <div style={S.body}>
             {profile && <div style={S.lineInfo}>LINE: {profile.displayName}</div>}
@@ -448,6 +485,15 @@ export default function ReceiptCustomerFormPage() {
         )}
 
         {phase === "error" && <div style={S.error}>{errorMsg}</div>}
+        {phase === "blocked" && (
+          <div style={S.center}>
+            <div style={{ fontSize: 48 }}>🚫</div>
+            <div style={{ fontWeight: 700, fontSize: 16, margin: "8px 0", color: "#b91c1c" }}>
+              {String(existing?.status) === "issued" ? t.blockedIssued : t.blockedFilled.replace("{name}", maskName(existing?.customer_name))}
+            </div>
+            <div style={{ color: "#666", fontSize: 13 }}>{t.ref}: <b>{refNo}</b></div>
+          </div>
+        )}
       </div>
     </div>
   );

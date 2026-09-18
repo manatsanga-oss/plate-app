@@ -63,6 +63,7 @@ export default function MotoBookingPage({ currentUser }) {
   const [changeForm, setChangeForm] = useState({ model_code: "", color_name: "" });
   const [masterTypes, setMasterTypes] = useState([]);   // master แบบรถ (active) สำหรับ modal เปลี่ยนแบบ
   const [masterColors, setMasterColors] = useState([]); // master สี (active)
+  const [allColorRows, setAllColorRows] = useState([]);   // สีทั้งหมดจาก master (รวม inactive) — ใช้หารูปการ์ดสรุปรุ่น
   const [sellTarget, setSellTarget] = useState(null);
   const [sellInvoiceNo, setSellInvoiceNo] = useState("");
   const [editInvoiceTarget, setEditInvoiceTarget] = useState(null);
@@ -220,6 +221,7 @@ export default function MotoBookingPage({ currentUser }) {
       setMasterTypes((Array.isArray(t) ? t : []).filter(m =>
         m.status === "active" && m.model_status === "active" && m.series_status === "active" && m.brand_status === "active"));
       setMasterColors((Array.isArray(c) ? c : []).filter(x => x.status === "active"));
+      setAllColorRows(Array.isArray(c) ? c : []);
     } catch { /* ignore */ }
   }
 
@@ -798,6 +800,25 @@ export default function MotoBookingPage({ currentUser }) {
       .sort((a, b) => a.brand.localeCompare(b.brand, "th") || b.booked - a.booked || b.shown - a.shown || a.model.localeCompare(b.model, "th"));
   })();
   const summaryBrands = [...new Set(modelSummary.map((g) => g.brand))];
+
+  // ── รูปรถบนการ์ดสรุปรุ่น (user 2026-09-17): ใช้รูปสีจาก moto_color_images (master-data-api get_color_image) ──
+  // เลือกแถวสีที่มีรูป: 1) แบบ (รหัส+type) ตรงกับใบจอง + สีที่จองมากสุด 2) แบบตรง สีใดก็ได้ 3) ซีรีส์/ชื่อรุ่นตรง + สีที่จองมากสุด 4) ซีรีส์ตรง สีใดก็ได้
+  const imgRowOf = (g) => {
+    const has = (r) => String(r.has_image).toLowerCase() === "true" || r.has_image === true;
+    const nz = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9ก-๙]/g, "");
+    const typeKeys = new Set(g.types.map(nz));
+    const mk = nz(g.model);
+    const byType = allColorRows.filter((r) => has(r) && typeKeys.has(nz(`${r.model_code || ""}${r.type_name || ""}`)));
+    const bySeries = allColorRows.filter((r) => has(r) && mk && (nz(r.series_name) === mk || nz(r.model_code) === mk || nz(r.series_name).includes(mk) || mk.includes(nz(r.series_name))));
+    const mkt = masterTypes.filter((t) => nz(t.marketing_name || t.series_name) === mk).map((t) => String(t.type_id));
+    const byMarketing = allColorRows.filter((r) => has(r) && mkt.includes(String(r.type_id)));
+    for (const pool of [byType, byMarketing, bySeries]) {
+      if (!pool.length) continue;
+      for (const [c] of g.colors) { const hit = pool.find((r) => nz(r.color_name) === nz(c)); if (hit) return hit; }
+      return pool[0];
+    }
+    return null;
+  };
   const openModelList = (g) => {
     setFilterBrand(g.rawBrands.length === 1 ? g.rawBrands[0] : ""); // ยี่ห้อสะกดหลายแบบ → ไม่กรองยี่ห้อ ใช้รุ่นอย่างเดียว
     if (filterStatus !== "จอง" && filterStatus !== "รถถึงคิว") setFilterStatus("จอง");
@@ -916,10 +937,7 @@ export default function MotoBookingPage({ currentUser }) {
                     <div key={g.brand + g.model} onClick={() => openModelList(g)} title="คลิกดูรายการจองของรุ่นนี้"
                       style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", background: "#fff", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,.04)", transition: "box-shadow .15s" }}
                       onMouseEnter={(e) => { e.currentTarget.style.boxShadow = "0 4px 12px rgba(7,45,107,.15)"; }} onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,.04)"; }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-                        <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a" }}>{g.model}</div>
-                        <div style={{ fontSize: 22, fontWeight: 800, color: "#072d6b" }}>{g.shown}</div>
-                      </div>
+                      <ModelCardImg colorId={imgRowOf(g)?.color_id} model={g.model} count={g.shown} />
                       {g.types.length > 0 && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{g.types.join(" · ")}</div>}
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8, fontSize: 12 }}>
                         <span style={{ padding: "2px 8px", borderRadius: 12, background: "#fef3c7", color: "#92400e" }}>จอง {g.booked}</span>
@@ -1554,6 +1572,38 @@ export default function MotoBookingPage({ currentUser }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// รูปรถบนการ์ดสรุปรุ่น — โหลดจาก master-data-api get_color_image ครั้งเดียวต่อ color_id (cache ระดับโมดูล) · ไม่มีรูป = แสดงชื่อรุ่นแบบเดิม
+const _cardImgCache = new Map(); // color_id → data URL | "none" | Promise
+function ModelCardImg({ colorId, model, count }) {
+  const [img, setImg] = useState(() => { const v = colorId ? _cardImgCache.get(colorId) : "none"; return typeof v === "string" ? v : null; });
+  useEffect(() => {
+    if (!colorId) { setImg("none"); return; }
+    const cached = _cardImgCache.get(colorId);
+    if (typeof cached === "string") { setImg(cached); return; }
+    let alive = true;
+    const pr = cached || fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_color_image", color_id: colorId }) })
+      .then((r) => r.json()).then((res) => { const rec = Array.isArray(res) ? res[0] : res; const v = rec?.image_data || "none"; _cardImgCache.set(colorId, v); return v; })
+      .catch(() => { _cardImgCache.set(colorId, "none"); return "none"; });
+    if (!cached) _cardImgCache.set(colorId, pr);
+    setImg(null);
+    pr.then((v) => { if (alive) setImg(v); });
+    return () => { alive = false; };
+  }, [colorId]);
+  if (img && img !== "none") return (
+    <div style={{ position: "relative" }}>
+      <img src={img} alt={model} loading="lazy" style={{ width: "100%", height: 140, objectFit: "contain", display: "block", background: "#f8fafc", borderRadius: 8 }} />
+      <div style={{ position: "absolute", top: 6, right: 8, fontSize: 24, fontWeight: 800, color: "#072d6b", background: "rgba(255,255,255,.85)", borderRadius: 8, padding: "0 8px", lineHeight: 1.3 }}>{count}</div>
+      <div style={{ fontWeight: 700, fontSize: 13, color: "#334155", marginTop: 6 }}>{model}</div>
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+      <div style={{ fontWeight: 700, fontSize: 15, color: "#0f172a" }}>{model}{img === null ? <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400 }}> · โหลดรูป…</span> : null}</div>
+      <div style={{ fontSize: 22, fontWeight: 800, color: "#072d6b" }}>{count}</div>
     </div>
   );
 }

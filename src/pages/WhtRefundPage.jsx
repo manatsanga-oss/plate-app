@@ -87,7 +87,7 @@ export default function WhtRefundPage({ currentUser }) {
       const r = await post(WHT_REFUND_API, {
         action: "save_refund", expense_doc_id: d.expense_doc_id, manual_id: d.manual_id || null,
         refund_amount: amt, refund_date: f.refund_date, method: f.method,
-        account_id: acc ? acc.account_id : null, account_name: acc ? acc.account_name : "",
+        account_id: acc ? acc.account_id : null, account_name: acc ? [acc.account_name, acc.account_no].filter(Boolean).join(" · ") : "",
         branch_code: myBranch, note: f.note.trim(),
         refund_by: currentUser?.username || currentUser?.name || "system",
       });
@@ -269,23 +269,25 @@ export default function WhtRefundPage({ currentUser }) {
       )}
       {modal && (
         <div onClick={() => !saving && setModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 480, maxWidth: "95vw", fontFamily: "Tahoma" }}>
-            <div style={{ fontWeight: 700, fontSize: 17, color: "#0f766e", marginBottom: 10 }}>💰 บันทึกรับคืนหัก ณ ที่จ่าย</div>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: "22px 26px", width: 580, maxWidth: "95vw", maxHeight: "92vh", overflowY: "auto", fontFamily: "Tahoma", textAlign: "left", boxShadow: "0 20px 50px rgba(0,0,0,.25)" }}>
+            <div style={{ fontWeight: 700, fontSize: 18, color: "#0f766e", marginBottom: 12 }}>💰 บันทึกรับคืนหัก ณ ที่จ่าย</div>
             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 12px", fontSize: 13.5, marginBottom: 12, lineHeight: 1.7 }}>
               <b style={{ fontFamily: "monospace" }}>{modal.doc.expense_doc_no}</b> · {modal.doc.vendor_name || "-"} {affilTag(modal.doc.affiliation)}<br />
               ยอดรวม {baht(modal.doc.total)} · หัก ณ ที่จ่าย <b style={{ color: "#dc2626" }}>{baht(modal.doc.wht_amount)}</b> · สุทธิ {baht(modal.doc.net_to_pay)}<br />
               {modal.doc.manual_id ? <>รายการบันทึกเอง ({modal.doc.description || "-"}) → </> : <>ใบจ่าย {modal.doc.paid_doc_no} จ่ายจริง {baht(modal.doc.paid_sum)} → </>}<b style={{ color: "#b91c1c" }}>รอรับคืน {baht(modal.doc.refund_due)}</b> บาท
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "10px 12px", alignItems: "center", fontSize: 14 }}>
+            {/* คอลัมน์ป้ายกว้างคงที่ + ช่องกรอก minWidth 0 — ไม่งั้น option บัญชีที่ยาวจะดันจนป้ายตัดบรรทัด (user 2026-09-17) */}
+            <div className="wht-form" style={{ display: "grid", gridTemplateColumns: "130px minmax(0, 1fr)", gap: "12px 14px", alignItems: "center", fontSize: 14 }}>
+              <style>{`.wht-form > label { white-space: nowrap; color: #334155; font-weight: 600; text-align: right; } .wht-form input, .wht-form select { width: 100%; min-width: 0; box-sizing: border-box; }`}</style>
               <label>วันที่รับคืน</label>
               <input type="date" value={modal.form.refund_date} onChange={(e) => setModal((m) => ({ ...m, form: { ...m.form, refund_date: e.target.value } }))} style={inp} />
               <label>ยอดรับคืน (บาท)</label>
               <input type="number" min="0" value={modal.form.refund_amount} onChange={(e) => setModal((m) => ({ ...m, form: { ...m.form, refund_amount: e.target.value } }))} style={{ ...inp, textAlign: "right", fontWeight: 700 }} />
               <label>วิธีรับคืน</label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 {METHODS.map((k) => (
                   <button key={k} onClick={() => setModal((m) => ({ ...m, form: { ...m.form, method: k } }))}
-                    style={{ padding: "7px 0", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, cursor: "pointer", fontSize: 13,
+                    style={{ padding: "9px 0", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, cursor: "pointer", fontSize: 13.5, whiteSpace: "nowrap",
                       background: modal.form.method === k ? "#072d6b" : "#fff", color: modal.form.method === k ? "#fff" : "#072d6b",
                       border: modal.form.method === k ? "2px solid #072d6b" : "2px solid #d1d5db" }}>
                     {k === "เงินสด" ? "💵 เงินสด" : k === "เงินโอน" ? "🏦 เงินโอน" : k === "หักจากบิลถัดไป" ? "🧾 หักจากบิลถัดไป" : "🚫 ไม่ต้องคืน"}
@@ -296,7 +298,7 @@ export default function WhtRefundPage({ currentUser }) {
                 <label>บัญชีที่รับโอน</label>
                 <select value={modal.form.account_id} onChange={(e) => setModal((m) => ({ ...m, form: { ...m.form, account_id: e.target.value } }))} style={inp}>
                   <option value="">— เลือกบัญชี —</option>
-                  {bankAccounts.map((a) => <option key={a.account_id} value={a.account_id}>{a.account_name}{a.bank_name ? ` (${a.bank_name})` : ""}</option>)}
+                  {bankAccounts.map((a) => <option key={a.account_id} value={a.account_id}>{a.account_name}{a.bank_name ? ` (${a.bank_name})` : ""}{a.account_no ? ` · ${a.account_no}` : ""}</option>)}
                 </select>
               </>)}
               <label>หมายเหตุ</label>
