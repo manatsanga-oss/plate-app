@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { calcMcTax, MC_BILL_SERVICE_FEE } from "../utils/mcTax";
+import { calcMcTax, MC_BILL_SERVICE_FEE, localISO } from "../utils/mcTax";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
@@ -10,8 +10,16 @@ const fmtBE2 = (v) => { const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2}
 const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 
 // งานต่อภาษี (ใบจากระบบ ยังไม่วางบิล): ใบรับเรื่องคิดเหมาภาษี 100/ปี ไม่คิดเงินเพิ่ม → ตอนวางบิลคำนวณยอดขนส่งเก็บจริงใหม่
-// จาก วันสิ้นอายุภาษีเดิม (registration_receipts.tax_paid_date) + วันที่ส่งเรื่องจริง (batch submission_date): เงินเพิ่ม 1%/เดือน ถ้ายื่นหลังสิ้นอายุ
+// จาก วันสิ้นอายุภาษีเดิม (registration_receipts.tax_paid_date) + วันยื่นขนส่งจริง (= batch submission_date + 1 วัน): เงินเพิ่ม 1%/เดือน ถ้ายื่นหลังสิ้นอายุ
 // ดึงหัวใบรับเรื่องด้วย get_receipt (receipt-entry-api) — ไม่ต้องแก้ n8n; ดึงไม่ได้/ไม่มีวันสิ้นอายุ → ใช้ยอดตามใบรับเรื่องเหมือนเดิม (user 2026-09-14)
+// วันยื่นขนส่งจริง = วันที่ส่งเรื่อง (ใบส่งงาน) + 1 วัน — คีย์ส่งเรื่องก่อน แล้วไปต่อภาษีจริงวันถัดไป (user 2026-09-19)
+const TAX_FILE_LAG_DAYS = 1;
+const addDaysISO = (iso, n) => { const d = new Date(iso + "T00:00:00"); if (isNaN(d)) return iso; d.setDate(d.getDate() + n); return localISO(d); };
+// ใบที่ user สั่งไม่คิดเงินเพิ่มตอนวางบิล (ขนส่งไม่ได้เก็บค่าปรับ) — user 2026-09-19: 2 รายในใบส่งงาน TBR-2609-008
+const TAX_NO_SURCHARGE = new Set(["SCY01-CA690900012", "SCY04-CA690900007"]);
+// ใบรับเรื่องที่ไม่ได้กรอกวันสิ้นอายุภาษี + ใส่ยอดเหมา 200 ลงช่องราคาทั้งก้อน (ค่าบริการ 0) → ระบุยอดขนส่งจริงเองเฉพาะใบ (user 2026-09-19 "เฉพาะคันนี้")
+//   ใช้เฉพาะตอนใบยังไม่มีวันสิ้นอายุ — ถ้าไปกรอกวันสิ้นอายุในใบรับเรื่องภายหลัง ระบบกลับไปคำนวณตามสูตรปกติ
+const TAX_DLT_OVERRIDE = { "SCY01-CA690900004": 100 };
 async function recomputeTaxRenewalRows(list, isTarget, feeOwnerOf) {
   const targets = list.filter(isTarget);
   const nos = [...new Set(targets.map(r => String(r.receipt_no)))];
@@ -32,10 +40,22 @@ async function recomputeTaxRenewalRows(list, isTarget, feeOwnerOf) {
     if (!isTarget(r)) return r;
     const h = hdr[String(r.receipt_no)];
     const expire = h?.tax_paid_date ? String(h.tax_paid_date).slice(0, 10) : "";
-    const submit = r.submission_date ? String(r.submission_date).slice(0, 10) : "";
-    if (!expire || !submit) return r;
-    const c = calcMcTax(h.register_date ? String(h.register_date).slice(0, 10) : "", expire, submit);
-    if (!c || c.suspended) return r;
+    const sent = r.submission_date ? String(r.submission_date).slice(0, 10) : "";
+    const fixedDlt = TAX_DLT_OVERRIDE[String(r.receipt_no)];
+    if (!expire && fixedDlt != null) {
+      const owner0 = feeOwnerOf(r);
+      const elsewhere0 = owner0 && owner0 !== r.receipt_no;
+      const amt0 = round2(fixedDlt + (elsewhere0 ? 0 : MC_BILL_SERVICE_FEE));
+      const base0 = `ค่าต่อภาษี ${fmtNum2(fixedDlt)} (ใบรับเรื่องไม่ได้แยกภาษี/บริการ — กำหนดยอดขนส่งเฉพาะใบ)`;
+      const name0 = elsewhere0 ? `${base0} (คันเดียวกัน — 20 บาทคิดที่ ${owner0} แล้ว)` : `${base0} + ค่าบริการ ${MC_BILL_SERVICE_FEE} บาท`;
+      return { ...r, bill_amount: amt0, bill_items: [{ expense_name: name0, amount: amt0 }], tax_recalc: { dlt: round2(fixedDlt), receipt_amount: round2(r.net_price), submit: sent, expire: "", surcharge: 0, years: 1 } };
+    }
+    if (!expire || !sent) return r;
+    const submit = addDaysISO(sent, TAX_FILE_LAG_DAYS); // วันยื่นขนส่งจริง = วันส่งเรื่อง + 1
+    const c0 = calcMcTax(h.register_date ? String(h.register_date).slice(0, 10) : "", expire, submit);
+    if (!c0 || c0.suspended) return r;
+    const waived = TAX_NO_SURCHARGE.has(String(r.receipt_no)) && c0.surcharge > 0;
+    const c = waived ? { ...c0, surcharge: 0 } : c0;
     const years = c.lateYears || 1;
     const dlt = round2(c.taxTotal + c.surcharge);
     const owner = feeOwnerOf(r);
@@ -43,7 +63,7 @@ async function recomputeTaxRenewalRows(list, isTarget, feeOwnerOf) {
     const amt = round2(dlt + (feeElsewhere ? 0 : MC_BILL_SERVICE_FEE));
     const base = `ค่าต่อภาษี ${years} ปี ${fmtNum2(c.taxTotal)}` + (c.surcharge > 0
       ? ` + เงินเพิ่ม ${fmtNum2(c.surcharge)} (ยื่น ${fmtBE2(submit)} หลังสิ้นอายุ ${fmtBE2(expire)})`
-      : ` (ยื่น ${fmtBE2(submit)} ไม่มีเงินเพิ่ม)`);
+      : waived ? ` (ยื่น ${fmtBE2(submit)} — ไม่คิดเงินเพิ่ม ${fmtNum2(c0.surcharge)} ตามที่สั่ง)` : ` (ยื่น ${fmtBE2(submit)} ไม่มีเงินเพิ่ม)`);
     // ⚠ ชื่อรายการที่ "ไม่คิด 20" ห้ามมีคำว่า "ค่าบริการ" (feeTakenBy/WHT base ใช้คำนี้เช็ค)
     const name = feeElsewhere ? `${base} (คันเดียวกัน — 20 บาทคิดที่ ${owner} แล้ว)` : `${base} + ค่าบริการ ${MC_BILL_SERVICE_FEE} บาท`;
     return { ...r, bill_amount: amt, bill_items: [{ expense_name: name, amount: amt }], tax_recalc: { dlt, receipt_amount: round2(r.net_price), submit, expire, surcharge: c.surcharge, years } };

@@ -339,7 +339,7 @@ export default function App() {
     if (page === "damageassess") return true;                  // ประเมินความเสียหาย (AI) — เปิดให้ทุก user (คนที่กำหนดสิทธิ์รายหน้าไว้ ต้องติ๊กในหน้ากำหนดผู้ใช้งาน)
     if (page === "partimagesearch") return true;               // ค้นหาอะไหล่จากรูป (AI) — เปิดให้ทุก user
     if (page === "rfidstock") return true;                     // นับสต๊อก RFID (UHF) — เปิดให้ทุก user
-    if (page === "fastmovingstock") return false;             // เฉพาะ admin (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
+    if (page === "fastmovingstock") return false;             // admin + user ที่ติ๊กสิทธิ์รายหน้าในหน้ากำหนดผู้ใช้งาน (ระบบจัดการสต๊อกอะไหล่หมุนเร็ว)
     if (page === "depositseize") return false;                 // เฉพาะ admin (ยึดเงินมัดจำ)
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
     if (page === "whtremit") return ["admin", "WARUT"].includes(currentUser.username);  // ภ.ง.ด. หัก ณ ที่จ่าย — admin + WARUT (ภ.พ.36 ย้ายไปเป็นแท็บใน taxformmonthly)
