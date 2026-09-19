@@ -131,6 +131,11 @@ function BEDateInput({ value, onChange, style, title, placeholder }) {
   );
 }
 
+// กันใส่เลขถัง/เลขเครื่องสลับช่อง (เคส SCY01-CA690900007/008 — user 2026-09-19)
+// เลขถัง (VIN) = 17 ตัว ตัวอักษร/ตัวเลขล้วน ไม่มีขีด ไม่มี I O Q (เช่น MLHKF1287D5118410) · เลขเครื่องมักสั้นกว่า/มีขีด (เช่น KF128E-0118410, E32EE-372309)
+const vinNorm = (v) => String(v || "").toUpperCase().replace(/\s+/g, "");
+const looksVin = (v) => /^[A-HJ-NPR-Z0-9]{17}$/.test(vinNorm(v));
+const looksEngine = (v) => { const t = vinNorm(v); return !!t && !looksVin(t) && (t.includes("-") || t.length < 17); };
 // งานต่อภาษี (มอเตอร์ไซค์): ค่าคงที่ + calcMcTax ย้ายไป src/utils/mcTax.js (ใช้ร่วมกับหน้าวางบิล)
 async function apiPost(payload) {
   const r = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
@@ -765,6 +770,13 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     if (!text(header.receipt_no)) { setMessage("❌ ไม่มีเลขที่รับเรื่อง"); return; }
     if (!text(header.customer_name)) { setMessage("❌ ใส่ชื่อลูกค้า"); return; }
     if (!text(header.chassis_no)) { setMessage("❌ ใส่เลขถัง"); return; }
+    // เลขถัง/เลขเครื่องสลับช่อง: ช่องเลขเครื่องเป็น VIN 17 ตัว แต่ช่องเลขถังไม่ใช่ → ไม่ให้บันทึก (กดปุ่ม "สลับให้" ใต้ช่องได้)
+    if (looksVin(header.engine_no) && !looksVin(header.chassis_no)) {
+      setMessage(`❌ เลขถัง/เลขเครื่องน่าจะใส่สลับช่องกัน — "${text(header.engine_no)}" เป็นเลขถัง (17 ตัว) แต่อยู่ช่องเลขเครื่อง · กดปุ่ม "⇄ สลับให้" ใต้ช่องเลขถัง แล้วบันทึกใหม่`);
+      return;
+    }
+    // ช่องเลขถังหน้าตาเหมือนเลขเครื่อง (มีขีด/สั้นกว่า 17 ตัว) → ถามยืนยันก่อน (รถเก่า/รถนำเข้าบางคันเลขถังไม่ครบ 17 ตัว จึงไม่บล็อก)
+    if (looksEngine(header.chassis_no) && !window.confirm(`เลขถัง "${text(header.chassis_no)}" ไม่ใช่รูปแบบเลขถังปกติ (17 ตัว ไม่มีขีด) — อาจเป็นเลขเครื่อง\n\nตรวจกับเล่มทะเบียนแล้ว ยืนยันบันทึกตามนี้?`)) return;
     if (lines.length === 0 || lines.every(l => !num(l.price_before_discount) && !num(l.service_fee))) { setMessage("❌ เพิ่มรายการรายได้อย่างน้อย 1"); return; }
     // ทะเบียนรถ = หมวด + เลข + จังหวัด — งานต่อภาษี (ที่มีบรรทัดค่าต่อภาษี/ตรวจสภาพ; ต่อ พรบ. อย่างเดียวไม่บังคับ) และงานโอนทะเบียน ต้องกรอกครบ 3 ช่อง (user 2026-09-05)
     const hasTaxWork = lines.some(l => (isTaxLine(l) || isTroLine(l)) && (num(l.price_before_discount) || num(l.service_fee)));
@@ -994,7 +1006,19 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
             <button onClick={openSearchModal} style={{ ...btn, background: "#0ea5e9", color: "#fff", fontSize: 12, padding: "6px 12px" }}>🔍 ค้นหาข้อมูลรถ/ลูกค้า</button>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-            <Field label="เลขถัง *"><input value={header.chassis_no} onChange={e => setHeader({ ...header, chassis_no: e.target.value.toUpperCase() })} style={{ ...inp, fontFamily: "monospace" }} /></Field>
+            <Field label="เลขถัง *">
+              <input value={header.chassis_no} onChange={e => setHeader({ ...header, chassis_no: e.target.value.toUpperCase() })}
+                style={{ ...inp, fontFamily: "monospace", ...(looksEngine(header.chassis_no) ? { borderColor: "#dc2626", background: "#fef2f2" } : {}) }} />
+              {looksVin(header.engine_no) && !looksVin(header.chassis_no) ? (
+                <div style={{ marginTop: 4, fontSize: 11.5, color: "#b91c1c" }}>
+                  ⚠️ ใส่สลับช่องกับเลขเครื่อง
+                  <button type="button" onClick={() => setHeader(h => ({ ...h, chassis_no: text(h.engine_no).toUpperCase(), engine_no: text(h.chassis_no).toUpperCase() }))}
+                    style={{ marginLeft: 6, padding: "2px 10px", fontSize: 11.5, background: "#dc2626", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>⇄ สลับให้</button>
+                </div>
+              ) : looksEngine(header.chassis_no) ? (
+                <div style={{ marginTop: 4, fontSize: 11.5, color: "#b91c1c" }}>⚠️ เลขถังปกติ 17 ตัว ไม่มีขีด — ตรวจว่าไม่ใช่เลขเครื่อง</div>
+              ) : null}
+            </Field>
             <Field label="เลขเครื่อง"><input value={header.engine_no} onChange={e => setHeader({ ...header, engine_no: e.target.value.toUpperCase() })} style={{ ...inp, fontFamily: "monospace" }} /></Field>
             <Field label={header.receipt_type === "งานทะเบียนรถใหม่" ? "ทะเบียน (เว้นได้ — รถใหม่ยังไม่มีป้าย)" : `ทะเบียน (หมวด + เลข + จังหวัด)${(header.receipt_type === "งานต่อภาษีและพรบ." || header.receipt_type === "งานโอนทะเบียน") ? " *" : ""}`}>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
