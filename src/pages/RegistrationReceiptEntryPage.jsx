@@ -41,6 +41,9 @@ const containsPrb = (s) => stripDots(s).includes("พรบ");
 // พรบ. (user 2026-09-16): ค่าบริการ default 50 บาท · เบี้ย default = ราคาเก็บลูกค้า − 50 (แก้ช่องเบี้ยเป็นยอดจริงตามกรมธรรม์ได้)
 // ถ้า master ไม่มีราคาเก็บลูกค้า ใช้เบี้ยจ่ายจริงจาก master แทน
 const PRB_SERVICE_FEE = 50;
+// พรบ. เบี้ยต่ำกว่าเบี้ยปกติรายปีของ cc นั้น (พนักงานพิมพ์เบี้ยเอง เช่น กรมธรรม์ไม่เต็มปี) → บวกเพิ่ม 10 บาทในยอดสุทธิ (user 2026-09-19)
+//   เช่น เบี้ยรายปี 323.14 พิมพ์ 255 → สุทธิ 255 + 10 + ค่าบริการ 50 = 315 · เก็บเป็น discount ติดลบ (−10) ในบรรทัดเบี้ย — ฝั่ง n8n คิด net = ราคา − discount อยู่แล้ว ไม่ต้องแก้ workflow
+const PRB_SHORT_EXTRA = 10;
 const prbDefaults = (paid, collect) => {
   const amount = collect != null ? Math.max(0, Math.round((collect - PRB_SERVICE_FEE) * 100) / 100) : (paid != null ? paid : 0);
   return { amount, fee: PRB_SERVICE_FEE }; // ค่าบริการ fix 50 — เศษสตางค์ปัดเป็นส่วนลดใน updateLine
@@ -412,7 +415,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         const paid = e.amount != null && e.amount !== "" ? Number(e.amount) : null;
         const collect = e.income_amount != null && e.income_amount !== "" ? Number(e.income_amount) : null;
         const d = prbDefaults(paid, collect);
-        return { _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: d.amount, fee: d.fee };
+        return { _key: `prb-${e.expense_id}`, code: "", name: e.expense_name || "", amount: d.amount, fee: d.fee, std: paid != null ? paid : d.amount };
       });
   }, [saleExpenses, vehicleCC]);
 
@@ -436,7 +439,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         const paid = e.amount != null && e.amount !== "" ? Number(e.amount) : null;
         const collect = e.income_amount != null && e.income_amount !== "" ? Number(e.income_amount) : null;
         const d = prbDefaults(paid, collect);
-        return { _key: `prbcc-${e.expense_id}`, code: "", name: `${e.expense_name || ""} — ${e.engine_cc} cc`, amount: d.amount, fee: d.fee };
+        return { _key: `prbcc-${e.expense_id}`, code: "", name: `${e.expense_name || ""} — ${e.engine_cc} cc`, amount: d.amount, fee: d.fee, std: paid != null ? paid : d.amount };
       });
   }, [saleExpenses, vehicleCC]);
 
@@ -713,9 +716,20 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
 
   // พรบ. (user 2026-09-16): ค่าบริการ fix 50 ไม่ปรับ · ยอดสุทธิต้องเป็นจำนวนเต็มบาท → เศษสตางค์ของเบี้ยตัดเป็น "ส่วนลดปัดเศษ" (discount)
   //   เช่น เบี้ย 645.21 + 50 = 695.21 → ส่วนลด 0.21 → สุทธิ 695 (ปัดลง ส่วนลดไม่ติดลบ)
+  // เงินเพิ่มเบี้ย 10 บาท: เฉพาะเมื่อเบี้ยที่พิมพ์ < เบี้ยปกติรายปีของรายการ พรบ. ที่เลือก (และไม่ใช่ค่าตั้งต้นที่ระบบเติมให้)
+  const prbExtraOf = (l) => {
+    if (l.income_type !== TYPE_PRB) return 0;
+    const c = [...prbCodes, ...prbCodesAllCC].find(x => x.name === l.income_name);
+    const price = num(l.price_before_discount);
+    if (!c || !(num(c.std) > 0) || !(price > 0)) return 0;
+    if (Math.abs(price - num(c.amount)) < 0.005) return 0;
+    return price < num(c.std) - 0.005 ? PRB_SHORT_EXTRA * num(l.qty || 1) : 0;
+  };
   const prbRoundDiscount = (l) => {
-    const gross = num(l.qty || 1) * num(l.price_before_discount) + num(l.service_fee);
-    return Math.round((gross - Math.floor(gross)) * 100) / 100;
+    const extra = prbExtraOf(l);
+    const gross = num(l.qty || 1) * num(l.price_before_discount) + extra + num(l.service_fee);
+    const frac = Math.round((gross - Math.floor(gross)) * 100) / 100;
+    return Math.round((frac - extra) * 100) / 100; // ติดลบ = บวกเพิ่มในยอดสุทธิ
   };
   function updateLine(i, patch) {
     setLines((arr) => arr.map((l, idx) => {
@@ -1207,7 +1221,11 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                       <td style={td}><input type="number" value={l.qty} onChange={e => updateLine(i, { qty: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right", maxWidth: 70 }} /></td>
                       <td style={td}><input type="number" value={l.price_before_discount} onChange={e => updateLine(i, { price_before_discount: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right" }} /></td>
                       <td style={td}><input type="number" value={l.service_fee} onChange={e => updateLine(i, { service_fee: e.target.value })} style={{ ...inp, padding: "5px 8px", fontSize: 12, textAlign: "right", maxWidth: 80 }} title="ค่าบริการ (รวม VAT ในตัว) — ตอนบันทึกแยกเป็นบรรทัดค่าบริการให้อัตโนมัติ" /></td>
-                      <td style={{ ...td, textAlign: "right", fontWeight: 700, color: net > 0 ? "#dc2626" : "#9ca3af" }}>{baht(net)}</td>
+                      <td style={{ ...td, textAlign: "right", fontWeight: 700, color: net > 0 ? "#dc2626" : "#9ca3af" }}>{baht(net)}
+                        {l.income_type === TYPE_PRB && num(l.discount) <= -(PRB_SHORT_EXTRA - 1) && (
+                          <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", whiteSpace: "nowrap" }} title="เบี้ยที่พิมพ์ต่ำกว่าเบี้ยปกติรายปีของ cc นี้ — ระบบบวกเพิ่ม 10 บาทในยอดสุทธิ">รวมเงินเพิ่มเบี้ย +{PRB_SHORT_EXTRA}</div>
+                        )}
+                      </td>
                       <td style={{ ...td, textAlign: "center" }}><button onClick={() => removeLine(i)} style={{ ...btnSm, background: "#ef4444" }}>✕</button></td>
                     </tr>
                   );
