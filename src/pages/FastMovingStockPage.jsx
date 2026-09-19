@@ -8,6 +8,7 @@ export default function FastMovingStockPage() {
   const [rows, setRows] = useState([]);
   // เลือกแถวเพื่อพิมพ์ป้ายปิดหน้ากล่อง (สติ๊กเกอร์ A4) — user 2026-09-15
   const [labelSel, setLabelSel] = useState(() => new Set());
+  const [labelSizeOpen, setLabelSizeOpen] = useState(false); // pop up เลือกขนาดป้ายก่อนพิมพ์ (user 2026-09-19)
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("all"); // รหัสกลุ่ม PG-xxx
@@ -179,10 +180,12 @@ export default function FastMovingStockPage() {
 
   // พิมพ์ป้ายปิดหน้ากล่อง: กระดาษสติ๊กเกอร์ A4 แบ่ง 2 คอลัมน์ × 4 แถว = 8 ป้าย/แผ่น (ป้าย ~95×62 มม. พอดีหน้ากล่อง ~12×9 ซม.)
   // ป้าย = บาร์โค้ด Code128 ของรหัสสินค้า + รหัสตัวใหญ่ + ชื่อ + กลุ่ม (ไม่ใส่ที่เก็บ — user 2026-09-15) — มีเส้นประไว้ตัด
-  function printBoxLabels() {
+  // ขนาดป้าย (user 2026-09-19): box = แบบเดิมปิดหน้ากล่อง 8 ป้าย/A4 · strip = ป้ายยาว 15×2 ซม. (ติดขอบชั้น/สันกล่อง) 12 ป้าย/A4
+  function printBoxLabels(size) {
     const sel = rows.filter(r => labelSel.has(r.part_code));
     if (!sel.length) { alert("ติ๊กเลือกรายการที่ต้องการพิมพ์ป้ายก่อน"); return; }
     const esc = (v) => String(v == null ? "" : v).replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+    if (size === "strip") { printStripLabels(sel, esc); return; }
     const cells = sel.map((r, i) => {
       return `<div class="lb">
         <div class="grp">${esc(r.product_group || "")}<span class="brand">${esc(r.brand || "")}</span></div>
@@ -217,6 +220,51 @@ export default function FastMovingStockPage() {
   function render() {
     document.querySelectorAll("svg.bc").forEach(function (el) {
       try { JsBarcode(el, el.getAttribute("data-code"), { format: "CODE128", displayValue: false, height: 60, width: 2, margin: 0 }); } catch (e) {}
+    });
+  }
+  if (window.JsBarcode) render(); else window.addEventListener("load", render);
+</script>
+</body></html>`);
+    w.document.close();
+  }
+
+  // ป้ายยาว 15×2 ซม.: บาร์โค้ด Code128 ซ้าย · รหัสตัวใหญ่ + ชื่อ (บรรทัดเดียว) กลาง · กลุ่ม/ยี่ห้อ ขวา — A4 แนวตั้ง 1 คอลัมน์ × 12 แถว มีเส้นประไว้ตัด
+  function printStripLabels(sel, esc) {
+    const PER = 12;
+    const cells = sel.map((r) => `<div class="lb">
+        <svg class="bc" data-code="${esc(r.part_code)}"></svg>
+        <div class="mid">
+          <div class="code">${esc(r.part_code)}</div>
+          <div class="name">${esc(r.product_name || "-")}</div>
+        </div>
+        <div class="side"><div class="brand">${esc(r.brand || "")}</div><div class="grp">${esc(r.product_group || "")}</div></div>
+      </div>`).join("");
+    const w = window.open("", "_blank", "width=900,height=1000");
+    w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ป้าย 15×2 ซม. ${sel.length} ป้าย</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.6/JsBarcode.all.min.js"></script>
+<style>
+  @page { size: A4 portrait; margin: 8mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Tahoma, sans-serif; color: #111; }
+  .sheet { display: grid; grid-template-columns: 150mm; grid-auto-rows: 20mm; row-gap: 3mm; justify-content: center; padding: 2mm 0; }
+  .lb { width: 150mm; height: 20mm; border: 1px dashed #9ca3af; border-radius: 1.5mm; padding: 1.5mm 3mm; display: flex; align-items: center; gap: 3mm; page-break-inside: avoid; overflow: hidden; }
+  .bc { width: 52mm; height: 15mm; flex: none; }
+  .mid { flex: 1; min-width: 0; }
+  .code { font-size: 17pt; font-weight: 800; letter-spacing: .5px; font-family: Arial, Tahoma, sans-serif; line-height: 1.1; white-space: nowrap; overflow: hidden; }
+  .name { font-size: 9.5pt; font-weight: 700; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .side { flex: none; max-width: 24mm; text-align: right; font-size: 7.5pt; color: #374151; line-height: 1.25; overflow: hidden; }
+  .brand { font-weight: 700; color: #b91c1c; font-size: 8.5pt; }
+  @media screen { body { padding-top: 46px; } }
+  .toolbar { position: fixed; top: 6px; right: 10px; z-index: 9; }
+  .toolbar button { padding: 8px 16px; font-family: Tahoma; font-size: 14px; cursor: pointer; }
+  @media print { .toolbar { display: none; } .lb { border-color: #d1d5db; } }
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์ (${sel.length} ป้าย · ${Math.ceil(sel.length / PER)} แผ่น A4) — ตั้ง Scale 100%</button></div>
+<div class="sheet">${cells}</div>
+<script>
+  function render() {
+    document.querySelectorAll("svg.bc").forEach(function (el) {
+      try { JsBarcode(el, el.getAttribute("data-code"), { format: "CODE128", displayValue: false, height: 50, width: 2, margin: 0 }); el.setAttribute("preserveAspectRatio", "none"); } catch (e) {}
     });
   }
   if (window.JsBarcode) render(); else window.addEventListener("load", render);
@@ -297,6 +345,32 @@ export default function FastMovingStockPage() {
 
   return (
     <div className="page-container">
+      {labelSizeOpen && (
+        <div onClick={() => setLabelSizeOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 520, maxWidth: "94vw", fontFamily: "Tahoma" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b", marginBottom: 4 }}>🏷️ เลือกขนาดป้าย — {labelSel.size} รายการ</div>
+            <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 14 }}>พิมพ์บนกระดาษสติ๊กเกอร์ A4 มีเส้นประไว้ตัด</div>
+            <div style={{ display: "flex", gap: 12 }}>
+              {[
+                { k: "box", t: "10 × 10 ซม. (แบบเดิม)", d: "ป้ายปิดหน้ากล่อง · 8 ป้าย/แผ่น", pv: { width: 84, height: 56 } },
+                { k: "strip", t: "15 × 2 ซม.", d: "ป้ายยาวติดขอบชั้น/สันกล่อง · 12 ป้าย/แผ่น", pv: { width: 150, height: 20 } },
+              ].map(o => (
+                <button key={o.k} onClick={() => { setLabelSizeOpen(false); printBoxLabels(o.k); }}
+                  style={{ flex: 1, padding: "14px 10px", border: "2px solid #b45309", borderRadius: 10, background: "#fffbeb", cursor: "pointer", fontFamily: "Tahoma", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                  <div style={{ height: 60, display: "flex", alignItems: "center" }}>
+                    <div style={{ ...o.pv, border: "1.5px dashed #92400e", borderRadius: 3, background: "#fff" }} />
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: "#92400e" }}>{o.t}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{o.d}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ textAlign: "right", marginTop: 14 }}>
+              <button onClick={() => setLabelSizeOpen(false)} style={{ padding: "7px 16px", background: "#e5e7eb", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma" }}>ปิด</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="page-topbar">
         <div className="page-title">ระบบจัดการสต๊อกอะไหล่หมุนเร็ว</div>
       </div>
@@ -332,7 +406,7 @@ export default function FastMovingStockPage() {
         </select>
         <button onClick={fetchData} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>Refresh</button>
         <button onClick={printReport} style={{ padding: "8px 16px", fontSize: 13, background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>พิมพ์</button>
-        <button onClick={printBoxLabels} disabled={labelSel.size === 0} title="ติ๊กเลือกแถวในตาราง แล้วพิมพ์ป้ายปิดหน้ากล่องบนกระดาษสติ๊กเกอร์ A4 (8 ป้าย/แผ่น)"
+        <button onClick={() => setLabelSizeOpen(true)} disabled={labelSel.size === 0} title="ติ๊กเลือกแถวในตาราง แล้วพิมพ์ป้ายบนกระดาษสติ๊กเกอร์ A4 — เลือกขนาดป้ายได้"
           style={{ padding: "8px 16px", fontSize: 13, background: labelSel.size ? "#b45309" : "#d1d5db", color: "#fff", border: "none", borderRadius: 8, cursor: labelSel.size ? "pointer" : "default", fontWeight: 700 }}>
           🏷️ พิมพ์ป้ายกล่อง{labelSel.size ? ` (${labelSel.size})` : ""}
         </button>

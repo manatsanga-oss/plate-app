@@ -247,6 +247,51 @@ export default function PartReturnPage({ currentUser }) {
     finally { setSaving(false); }
   }
 
+  // ===== ใบลดหนี้จากผู้ขาย (user 2026-09-18): 1 ใบลดหนี้ ผูกได้หลายใบคืน — part_return_credit_notes + part_returns.cn_id =====
+  const [cn, setCn] = useState(null); // {id, cn_no, cn_date, system_brand, vendor_name, amount_before_vat, vat_amount, note, ids:Set}
+  const fmt = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  function openCn(row) {
+    // row มีใบลดหนี้แล้ว → เปิดแก้ไขใบนั้น (ติ๊กทุกใบคืนที่ผูกอยู่) · ยังไม่มี → ใบใหม่ ติ๊กแถวที่กดมาให้
+    if (row && row.cn_id && row.cn_no) {
+      setCn({
+        id: row.cn_id, cn_no: row.cn_no || "", cn_date: String(row.cn_date || "").slice(0, 10) || todayStr(), system_brand: row.system_brand || "HONDA",
+        vendor_name: row.cn_vendor_name || "", amount_before_vat: String(row.cn_amount_before_vat ?? ""), vat_amount: String(row.cn_vat_amount ?? ""), note: row.cn_note || "",
+        ids: new Set(allRows.filter((x) => String(x.cn_id) === String(row.cn_id)).map((x) => x.id)),
+      });
+      return;
+    }
+    setCn({ id: 0, cn_no: "", cn_date: todayStr(), system_brand: row?.system_brand || form.system_brand || "HONDA", vendor_name: "", amount_before_vat: "", vat_amount: "", note: "", ids: new Set(row ? [row.id] : []) });
+  }
+  const setCnAmt = (v) => setCn((c) => ({ ...c, amount_before_vat: v, vat_amount: v === "" ? "" : (Math.round(num(v) * 7) / 100).toFixed(2) }));
+  const toggleCnRow = (id) => setCn((c) => { const ids = new Set(c.ids); ids.has(id) ? ids.delete(id) : ids.add(id); return { ...c, ids }; });
+  async function saveCn() {
+    if (saving || !cn) return;
+    if (!cn.cn_no.trim()) { setMessage("❌ กรอกเลขที่ใบลดหนี้"); return; }
+    if (!cn.ids.size) { setMessage("❌ เลือกใบคืนสินค้าที่ใบลดหนี้นี้ครอบคลุมอย่างน้อย 1 ใบ"); return; }
+    const before = num(cn.amount_before_vat), vat = num(cn.vat_amount);
+    if (!(before > 0)) { setMessage("❌ กรอกมูลค่าก่อน VAT"); return; }
+    setSaving(true); setMessage("");
+    try {
+      const d = await post({
+        action: "save_credit_note", id: cn.id || 0, cn_no: cn.cn_no.trim(), cn_date: cn.cn_date, branch_code: myBranch || currentUser?.branch || "",
+        system_brand: cn.system_brand, vendor_name: cn.vendor_name.trim(), amount_before_vat: before, vat_amount: vat, total_amount: +(before + vat).toFixed(2),
+        note: cn.note.trim(), return_ids: [...cn.ids], created_by: currentUser?.username || currentUser?.name || "system",
+      });
+      if (!d || !d.id) throw new Error(d?.__error || "บันทึกไม่สำเร็จ (ตรวจว่า re-import workflow part-return-api แล้ว)");
+      setMessage(`✅ บันทึกใบลดหนี้ ${d.cn_no} แล้ว — ผูกกับใบคืน ${cn.ids.size} ใบ`);
+      setCn(null); load();
+    } catch (e) { setMessage("❌ " + (e.message || e)); }
+    finally { setSaving(false); }
+  }
+  async function cancelCn() {
+    if (!cn?.id || !window.confirm(`ยกเลิกใบลดหนี้ ${cn.cn_no}? (ใบคืนที่ผูกไว้จะกลับเป็นยังไม่มีใบลดหนี้)`)) return;
+    try {
+      const d = await post({ action: "cancel_credit_note", id: cn.id, cancelled_by: currentUser?.username || currentUser?.name || "system" });
+      if (!d || !d.id) throw new Error(d?.__error || "ยกเลิกไม่สำเร็จ");
+      setMessage(`✅ ยกเลิกใบลดหนี้ ${cn.cn_no} แล้ว`); setCn(null); load();
+    } catch (e) { setMessage("❌ " + (e.message || e)); }
+  }
+
   async function cancelRow(r) {
     if (!window.confirm(`ยกเลิกใบคืนสินค้า ${r.doc_no}?`)) return;
     try {
@@ -304,6 +349,10 @@ export default function PartReturnPage({ currentUser }) {
         <button onClick={save} disabled={saving} style={{ marginTop: 14, padding: "11px 28px", background: saving ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 10, fontFamily: "Tahoma", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
           {saving ? "กำลังบันทึก..." : "💾 บันทึกคืนสินค้า"}
         </button>
+        <button onClick={() => openCn(null)} title="บันทึกใบลดหนี้ที่ได้รับจากศูนย์/ร้านค้า แล้วผูกกับใบคืนสินค้า"
+          style={{ marginTop: 14, marginLeft: 10, padding: "11px 22px", background: "#fff", color: "#9d174d", border: "2px solid #db2777", borderRadius: 10, fontFamily: "Tahoma", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+          🧾 บันทึกเอกสารใบลดหนี้
+        </button>
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
@@ -329,10 +378,10 @@ export default function PartReturnPage({ currentUser }) {
           <thead><tr>
             <th style={th}>เลขที่ใบคืน</th><th style={th}>วันที่คืน</th><th style={th}>สาขา</th><th style={th}>ระบบ</th>
             <th style={th}>รหัส / ชื่ออะไหล่</th><th style={{ ...th, textAlign: "right" }}>จำนวน</th><th style={th}>เหตุผล</th>
-            <th style={th}>อ้างอิง</th><th style={th}>สั่งสินค้าใหม่</th><th style={th}>สถานะ</th><th style={th}></th>
+            <th style={th}>อ้างอิง</th><th style={th}>สั่งสินค้าใหม่</th><th style={th}>ใบลดหนี้</th><th style={th}>สถานะ</th><th style={th}></th>
           </tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={11} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 22 }}>{loading ? "กำลังโหลด..." : "ไม่มีรายการในช่วงวันที่"}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={12} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 22 }}>{loading ? "กำลังโหลด..." : "ไม่มีรายการในช่วงวันที่"}</td></tr>}
             {rows.map((r) => (
               <tr key={r.id} style={{ opacity: r.status === "ยกเลิก" ? 0.5 : 1 }}>
                 <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.doc_no}</td>
@@ -349,6 +398,13 @@ export default function PartReturnPage({ currentUser }) {
                       {(r.reorder_part_code || r.reorder_part_name) && <div style={{ fontSize: 11, color: "#374151" }}><span style={{ fontFamily: "monospace" }}>{r.reorder_part_code || ""}</span>{r.reorder_part_name ? " · " + r.reorder_part_name : ""} × {Number(r.reorder_qty || 0) || "-"}{String(r.reorder_part_code || "").replace(/[^0-9A-Za-z]/g, "") !== String(r.part_code || "").replace(/[^0-9A-Za-z]/g, "") && r.reorder_part_code ? <span style={{ marginLeft: 4, fontSize: 10, color: "#7c3aed", background: "#f3e8ff", padding: "1px 5px", borderRadius: 6 }}>รหัสทดแทน</span> : null}</div>}
                     </span>
                   : <span style={{ color: "#9ca3af" }}>—</span>}</td>
+                <td style={td}>{r.cn_no
+                  ? <span onClick={() => openCn(r)} title="กดเพื่อดู/แก้ไขใบลดหนี้" style={{ cursor: "pointer", color: "#9d174d" }}>🧾 <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{r.cn_no}</span>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>{thaiDate(r.cn_date)} · {fmt(r.cn_total_amount)}</div>
+                    </span>
+                  : r.status !== "ยกเลิก"
+                    ? <button onClick={() => openCn(r)} style={{ padding: "3px 8px", background: "#fdf2f8", color: "#9d174d", border: "1px solid #fbcfe8", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", fontSize: 11.5 }}>+ ใบลดหนี้</button>
+                    : <span style={{ color: "#9ca3af" }}>—</span>}</td>
                 <td style={td}>
                   <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11.5, fontWeight: 700,
                     background: r.status === "สั่งใหม่แล้ว" ? "#dcfce7" : r.status === "ยกเลิก" ? "#fee2e2" : "#fef3c7",
@@ -424,6 +480,65 @@ export default function PartReturnPage({ currentUser }) {
           </div>
         </div>
       )}
+
+      {cn && (() => {
+        const before = num(cn.amount_before_vat), vat = num(cn.vat_amount);
+        // ใบคืนที่เลือกได้: ไม่ยกเลิก + ระบบเดียวกัน + ยังไม่มีใบลดหนี้ (หรือเป็นของใบที่กำลังแก้) — จากช่วงวันที่ที่แสดงอยู่ ทุกสาขา
+        const cands = allRows.filter((x) => x.status !== "ยกเลิก" && String(x.system_brand || "") === cn.system_brand && (!x.cn_id || !x.cn_no || String(x.cn_id) === String(cn.id)));
+        return (
+        <div onClick={() => setCn(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: 680, maxWidth: "96vw", maxHeight: "90vh", overflowY: "auto", fontFamily: "Tahoma" }}>
+            <h3 style={{ margin: "0 0 4px", color: "#9d174d" }}>🧾 {cn.id ? "แก้ไข" : "บันทึก"}เอกสารใบลดหนี้</h3>
+            <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 12 }}>ใบลดหนี้ที่ได้รับจากศูนย์/ร้านค้าหลังส่งคืนอะไหล่ — 1 ใบลดหนี้ ผูกได้หลายใบคืน</div>
+            <div style={{ display: "grid", gridTemplateColumns: "130px minmax(0,1fr) 110px minmax(0,1fr)", gap: "10px 12px", alignItems: "center", fontSize: 14 }}>
+              <label>เลขที่ใบลดหนี้ *</label>
+              <input autoFocus value={cn.cn_no} onChange={(e) => setCn((c) => ({ ...c, cn_no: e.target.value }))} placeholder="เช่น C22608000281" style={{ ...inp, fontFamily: "monospace", width: "100%" }} />
+              <label>วันที่ใบลดหนี้ *</label>
+              <input type="date" value={cn.cn_date} onChange={(e) => setCn((c) => ({ ...c, cn_date: e.target.value }))} style={{ ...inp, width: "100%" }} />
+              <label>ระบบ</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                {["HONDA", "YAMAHA", "อื่นๆ"].map((b) => (
+                  <button key={b} onClick={() => setCn((c) => ({ ...c, system_brand: b, ids: c.system_brand === b ? c.ids : new Set() }))}
+                    style={{ flex: 1, padding: "7px 0", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, fontSize: 12.5, cursor: "pointer",
+                      background: cn.system_brand === b ? (b === "HONDA" ? "#dc2626" : b === "YAMAHA" ? "#1e40af" : "#374151") : "#fff",
+                      color: cn.system_brand === b ? "#fff" : "#374151", border: "1.5px solid " + (cn.system_brand === b ? "transparent" : "#d1d5db") }}>{b}</button>
+                ))}
+              </div>
+              <label>ผู้ออกใบลดหนี้</label>
+              <input value={cn.vendor_name} onChange={(e) => setCn((c) => ({ ...c, vendor_name: e.target.value }))} placeholder="ศูนย์/ร้านค้า" style={{ ...inp, width: "100%" }} />
+              <label>มูลค่าก่อน VAT *</label>
+              <input type="number" value={cn.amount_before_vat} onChange={(e) => setCnAmt(e.target.value)} placeholder="0.00" style={{ ...inp, textAlign: "right", width: "100%" }} />
+              <label>VAT 7%</label>
+              <input type="number" value={cn.vat_amount} onChange={(e) => setCn((c) => ({ ...c, vat_amount: e.target.value }))} placeholder="0.00" style={{ ...inp, textAlign: "right", width: "100%" }} />
+              <label>รวมทั้งสิ้น</label>
+              <div style={{ fontWeight: 700, fontSize: 16, color: "#9d174d" }}>{fmt(before + vat)}</div>
+              <label>หมายเหตุ</label>
+              <input value={cn.note} onChange={(e) => setCn((c) => ({ ...c, note: e.target.value }))} placeholder="ไม่บังคับ" style={{ ...inp, width: "100%" }} />
+            </div>
+            <div style={{ margin: "14px 0 6px", fontWeight: 700, fontSize: 14 }}>ใบคืนสินค้าที่ใบลดหนี้นี้ครอบคลุม * <span style={{ fontWeight: 400, fontSize: 12, color: "#6b7280" }}>({cn.system_brand} · ยังไม่มีใบลดหนี้ · ตามช่วงวันที่ที่แสดง) — เลือก {cn.ids.size} ใบ</span></div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 8, maxHeight: 230, overflowY: "auto" }}>
+              {!cands.length && <div style={{ padding: 14, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>ไม่มีใบคืนสินค้า {cn.system_brand} ที่ยังไม่มีใบลดหนี้ในช่วงวันที่นี้</div>}
+              {cands.map((x) => (
+                <label key={x.id} style={{ display: "flex", gap: 8, alignItems: "flex-start", padding: "7px 10px", borderBottom: "1px solid #f3f4f6", cursor: "pointer", fontSize: 13, background: cn.ids.has(x.id) ? "#fdf2f8" : "#fff" }}>
+                  <input type="checkbox" checked={cn.ids.has(x.id)} onChange={() => toggleCnRow(x.id)} style={{ marginTop: 3 }} />
+                  <span style={{ flex: 1 }}>
+                    <b style={{ fontFamily: "monospace" }}>{x.doc_no}</b> · {thaiDate(x.return_date)} · <span style={{ fontFamily: "monospace", color: "#0369a1" }}>{x.part_code || ""}</span>{x.part_name ? " · " + x.part_name : ""} × {Number(x.qty || 0)}
+                    <div style={{ fontSize: 11.5, color: "#6b7280" }}>{x.reason || "-"}{x.ref_doc ? " · " + x.ref_doc : ""}</div>
+                  </span>
+                </label>
+              ))}
+            </div>
+            {message.startsWith("❌") && <div style={{ marginTop: 10, padding: "7px 10px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 13 }}>{message}</div>}
+            <div style={{ display: "flex", gap: 8, marginTop: 14, alignItems: "center" }}>
+              {cn.id ? <button onClick={cancelCn} style={{ padding: "8px 14px", background: "#fee2e2", color: "#b91c1c", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 13 }}>ยกเลิกใบลดหนี้</button> : null}
+              <span style={{ flex: 1 }} />
+              <button onClick={() => setCn(null)} style={{ padding: "8px 16px", background: "#e5e7eb", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma" }}>ปิด</button>
+              <button onClick={saveCn} disabled={saving} style={{ padding: "8px 20px", background: saving ? "#9ca3af" : "#db2777", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>{saving ? "กำลังบันทึก..." : "💾 บันทึกใบลดหนี้"}</button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
 
       {reorder && (
         <div onClick={() => setReorder(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>

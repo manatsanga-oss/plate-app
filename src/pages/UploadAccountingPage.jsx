@@ -8,6 +8,7 @@ import AccountingExpenseUploadCard from "./AccountingExpenseUploadCard";
 import FlowInputTaxUploadCard from "./FlowInputTaxUploadCard";
 import VehicleDebitNoteUploadCard from "./VehicleDebitNoteUploadCard";
 import PartServiceReceiptUploadCard from "./PartServiceReceiptUploadCard";
+import DmsSalesTaxInvoiceUploadCard from "./DmsSalesTaxInvoiceUploadCard";
 
 export default function UploadAccountingPage({ currentUser } = {}) {
   return (
@@ -53,6 +54,11 @@ export default function UploadAccountingPage({ currentUser } = {}) {
           <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>💵 รายการรับชำระเงินค่าอะไหล่และบริการ (DMS · NIDS ขาย · NIDS บริการ)</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>3 ไฟล์แยกกัน — DMS รายงานสรุปรายวันรับเงิน (xlsx) · NIDS รายงานรับชำระขายอะไหล่ (XLS) · NIDS รายงานรับชำระงานบริการ (XLS) — UPSERT เลขที่ใบเสร็จ อัปโหลดทับได้</div>
           <PartServiceReceiptUploadCard currentUser={currentUser} />
+        </div>
+        <div style={{ background: "#fff", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>🧾 ใบกำกับภาษีขาย อะไหล่/บริการ (DMS ยามาฮ่า)</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>แหล่งยอดภาษีขาย อะไหล่/บริการ ของสิงห์ชัยในเมนูรายงานภาษีขาย — เดือนไหน upload แล้ว รายงานจะอ้างอิงเลขที่/วันที่ใบกำกับจริง แทนการถอด VAT จากไฟล์งานซ่อม</div>
+          <DmsSalesTaxInvoiceUploadCard currentUser={currentUser} />
         </div>
         <div style={{ background: "#fff", boxShadow: "0 2px 12px rgba(7,45,107,0.10)", overflow: "hidden", padding: "16px 20px", borderTop: "1px solid #f3f4f6" }}>
           <div style={{ fontSize: 15, fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>🚗 รับรถเข้าจากการซื้อ (HONDA ป.เปา · YAMAHA สิงห์ชัย)</div>

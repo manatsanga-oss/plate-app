@@ -149,6 +149,8 @@ export default function OutputTaxReportPage({ currentUser }) {
           customer_name: x.customer_name, customer_tax_id: x.customer_tax_id,
           amount_before_vat: Number(x.amount_before_vat || 0), vat_amount: Number(x.vat_amount || 0),
           total_amount: Number(x.total_amount || 0), cancelled: false,
+          // ใบกำกับ DMS (upload รายงานใบกำกับภาษีขาย): เอกสารอ้างอิง JOB/SS + เดือนของวันที่ใบกำกับ (user 2026-09-18)
+          ref_doc_no: x.ref_doc_no || "", ref_doc_type: x.ref_doc_type || "", invoice_period: x.invoice_period || "",
         }));
       const debitNotes = (Array.isArray(dnRes) ? dnRes : (dnRes?.rows || []))
         .filter(x => x && x.debit_note_no && branches.includes(x.branch))
@@ -340,6 +342,7 @@ export default function OutputTaxReportPage({ currentUser }) {
                 <th style={{ ...th, textAlign: "center", width: 44 }}>ลำดับ</th>
                 <th style={th}>วันที่ใบกำกับ</th>
                 <th style={th}>เลขที่ใบกำกับ</th>
+                <th style={th} title="งวดภาษีที่นำใบนี้ไปยื่น ภ.พ.30 — ปกติ = เดือนของวันที่ใบกำกับ · ถ้าย้ายงวดจะแสดงงวดที่ย้ายมา">เดือนที่ยื่น</th>
                 <th style={th}>แหล่ง</th>
                 <th style={th}>ชื่อผู้ซื้อ</th>
                 <th style={th}>เลขผู้เสียภาษี</th>
@@ -357,7 +360,12 @@ export default function OutputTaxReportPage({ currentUser }) {
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(r.invoice_date)}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: r.cancelled ? "#9ca3af" : "#1d4ed8" }}>
                     {r.tax_invoice_no || "-"}
+                    {r.ref_doc_no && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#64748b" }} title={r.ref_doc_type || ""}>อ้างอิง {r.ref_doc_no}</div>}
                     {r.cancelled && <span style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 4, background: "#fee2e2", color: "#991b1b", fontSize: 10, fontWeight: 700, textDecoration: "none", display: "inline-block" }}>ยกเลิก</span>}
+                  </td>
+                  <td style={{ ...td, whiteSpace: "nowrap", fontSize: 12 }}>
+                    {periodLabel(month)}
+                    {r.invoice_period && r.invoice_period !== ymNum(month) && <div style={{ fontSize: 10, color: "#b45309" }}>ย้ายจาก {fmtPeriod(r.invoice_period)}</div>}
                   </td>
                   <td style={td}>
                     <span style={{ padding: "1px 7px", borderRadius: 10, fontSize: 11, fontWeight: 700,
@@ -392,7 +400,7 @@ export default function OutputTaxReportPage({ currentUser }) {
             </tbody>
             <tfoot>
               <tr style={{ borderTop: "2px solid #072d6b", background: "#f8fafc", fontWeight: 700 }}>
-                <td style={td} colSpan={6}>ยอดรวมทั้งสิ้น (ไม่รวมใบยกเลิก)</td>
+                <td style={td} colSpan={7}>ยอดรวมทั้งสิ้น (ไม่รวมใบยกเลิก)</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumBase)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{fmt(sumVat)}</td>
                 <td style={td}></td>

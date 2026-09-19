@@ -18,6 +18,9 @@ const SOURCE_META = {
   expense: { label: "ค่าใช้จ่าย", color: "#065f46", bg: "#d1fae5" },
   fuel: { label: "ค่าน้ำมัน", color: "#9a3412", bg: "#ffedd5" },
   theft: { label: "ประกันรถหาย", color: "#9d174d", bg: "#fce7f3" },
+  cosmos: { label: "COSMOS", color: "#5b21b6", bg: "#ede9fe" },           // เบี้ย COSMOS (3 PLUS ไทยวิวัฒน์ · RSA · ประกันรถหาย) ลงภาษีซื้อ ป.เปา — user 2026-09-18
+  fuelwd: { label: "เบิกค่าน้ำมัน", color: "#9a3412", bg: "#fed7aa" },    // เมนูเบิกค่าน้ำมันรถใช้จ่าย แบ่งบริษัทตามทะเบียนรถ
+  office: { label: "วัสดุสำนักงาน", color: "#0f766e", bg: "#ccfbf1" },   // Office Supplies › รับวัสดุ ที่บันทึกจ่ายเงินมี VAT (receive_payments)
 };
 const NO_INVOICE_STATUS = "ยังไม่ได้รับใบกำกับภาษี";
 const RECEIVED_STATUS = "รับใบกำกับภาษีแล้ว";

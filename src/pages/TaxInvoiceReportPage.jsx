@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { expectedByRule, markupSum, deliveryFeeBonus } from "../utils/carPaymentStatus";
+import TaxInvoicePartsCompare from "./TaxInvoicePartsCompare";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-invoices";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -38,6 +39,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
   const [statusFilter, setStatusFilter] = useState(""); // active / cancelled
   const [priceFilter, setPriceFilter] = useState("");     // "" / ok / low / high — สถานะราคาขายเทียบยอดตามกฎ
   const [saleFilter, setSaleFilter] = useState("");       // "" / ok / diff / nosale — เทียบยอดใบกำกับกับใบขายในระบบ
+  const [mode, setMode] = useState("vehicle");            // vehicle = ใบกำกับขายรถ ↔ ใบขาย NEW · parts = ใบกำกับอะไหล่/บริการ (DMS) ↔ ใบรับชำระ PSR (user 2026-09-18)
   const [sysSales, setSysSales] = useState([]);           // ใบขายระบบ (retail_sales) ช่วงเดือนที่ดู
   const [showNoInvoice, setShowNoInvoice] = useState(false);
   const [allRows, setAllRows] = useState([]);             // ใบกำกับทั้ง 3 บริษัทของเดือนนี้ (ไม่ขึ้นกับตัวกรองสาขา) — ใช้เช็ค "ใบขายที่ยังไม่มีใบกำกับ"
@@ -125,6 +127,7 @@ export default function TaxInvoiceReportPage({ currentUser }) {
 
   async function fetchData() {
     setLoading(true);
+    setRows([]); setAllRows([]);
     setMessage("");
     try {
       // ถ้าเลือก "ทั้งหมด" → ดึงข้อมูล 3 สาขาพร้อมกัน
@@ -279,7 +282,24 @@ tr.off td{color:#999;text-decoration:line-through}tfoot td{background:#fde68a;fo
       <div className="page-topbar">
         <div className="page-title">📊 รายงานใบกำกับภาษี</div>
       </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <span style={{ display: "inline-flex", border: "1.5px solid #cbd5e1", borderRadius: 10, overflow: "hidden" }}>
+          {[["vehicle", "🏍️ ขายรถ — เทียบใบขายระบบ"], ["parts", "🔧 อะไหล่/บริการ — เทียบใบรับชำระระบบ"]].map(([k, l]) => (
+            <button key={k} onClick={() => setMode(k)} style={{ padding: "8px 16px", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: 13, background: mode === k ? "#072d6b" : "#fff", color: mode === k ? "#fff" : "#072d6b" }}>{l}</button>
+          ))}
+        </span>
+        {mode === "parts" && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <label style={{ fontSize: 12, color: "#475569" }}>🗓️ เดือนที่ยื่น</label>
+            <select value={yearMonth} onChange={e => setYearMonth(e.target.value)} style={{ ...inp, minWidth: 130 }}>
+              {ymOpts.map(ym => <option key={ym} value={ym}>{ym.slice(4, 6)}/{ym.slice(0, 4)}</option>)}
+            </select>
+          </span>
+        )}
+      </div>
+      {mode === "parts" && <TaxInvoicePartsCompare yearMonth={yearMonth} currentUser={currentUser} />}
 
+      {mode === "vehicle" && (<>
       {/* Filters */}
       <div style={{ background: "#fff", borderRadius: 12, padding: 14, boxShadow: "0 2px 12px rgba(7,45,107,0.10)", marginBottom: 14 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
@@ -498,6 +518,7 @@ tr.off td{color:#999;text-decoration:line-through}tfoot td{background:#fde68a;fo
           </table>
         </div>
       </div>
+      </>)}
 
     </div>
   );
