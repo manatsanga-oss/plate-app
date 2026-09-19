@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import OtherPartStockTab from "./OtherPartStockTab";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-master-api"; // get_product_groups — master กลุ่มสินค้า (สถานะใช้งาน/ยกเลิก)
@@ -28,7 +29,7 @@ export default function FastMovingStockPage() {
   const [filterStoreStock, setFilterStoreStock] = useState("all");
   const [onlyStockNakhonluang, setOnlyStockNakhonluang] = useState(false);
   const [onlyLoan, setOnlyLoan] = useState(false);
-  const [tab, setTab] = useState("stock"); // stock | loan
+  const [tab, setTab] = useState("stock"); // stock | other | loan
   const [currentPage, setCurrentPage] = useState(1);
   const [jobDetail, setJobDetail] = useState(null); // { item_code, item_name, loading, rows }
   const [loanDetail, setLoanDetail] = useState(null); // { part_code, product_name, loading, rows }
@@ -377,7 +378,7 @@ export default function FastMovingStockPage() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 6, marginBottom: 12, borderBottom: "2px solid #e5e7eb" }}>
-        {[{ k: "stock", l: "📦 สต๊อกอะไหล่หมุนเร็ว" }, { k: "loan", l: "🤝 ใบให้ยืม / รอตัดสต๊อก" }].map(t => (
+        {[{ k: "stock", l: "📦 สต๊อกอะไหล่หมุนเร็ว" }, { k: "other", l: "🗃️ สต๊อกอะไหล่อื่น (นอกหมุนเร็ว)" }, { k: "loan", l: "🤝 ใบให้ยืม / รอตัดสต๊อก" }].map(t => (
           <button key={t.k} onClick={() => setTab(t.k)}
             style={{ padding: "8px 18px", fontSize: 14, fontWeight: 700, border: "none", background: "transparent",
               borderBottom: tab === t.k ? "3px solid #072d6b" : "3px solid transparent",
@@ -388,6 +389,7 @@ export default function FastMovingStockPage() {
       </div>
 
       {tab === "loan" && <LoanWriteoffTab apiUrl={API_URL} />}
+      {tab === "other" && <OtherPartStockTab apiUrl={API_URL} />}
 
       {tab === "stock" && (<>
       <div style={{ display: "flex", gap: 10, marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
