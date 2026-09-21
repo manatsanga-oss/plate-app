@@ -143,18 +143,24 @@ export default function SparePartsOrderPage({ currentUser }) {
         const m = {};
         // ใบมัดจำที่ถูกตัดใช้ในใบรับชำระ (active) — ใบสั่งซื้อระบบเก่า (DEPD-/REC ไม่มีเลข Job) ปิดงานอัตโนมัติเมื่อมัดจำถูกใช้แล้ว (user 2026-09-11)
         const usedDep = new Set();
+        // ชื่อผู้จ่ายของแต่ละเลข Job — ปิดงานซ่อมอัตโนมัติเฉพาะเมื่อชื่อตรงกับลูกค้าในใบสั่งซื้อ (user 2026-09-21
+        // เคสใบ #345 ใส่เลข Job ผิดเป็น 69SERV/0003644 ของลูกค้าอีกคนที่จ่ายแล้ว → ใบถูกปิด + มัดจำ PDS-2609-00051 หายจากหน้ารับชำระ)
+        const payerOf = {};
+        const normPayer = (v) => String(v || "").replace(/\s+/g, "").replace(/^(นาย|นางสาว|นาง|น\.ส\.|MR\.?|MRS\.?|MS\.?|MISS)/i, "").toUpperCase();
+        const samePayer = (o) => { const a = normPayer(o.customer_name); return !a || (payerOf[normJob(o.job_no)] || []).some(b => !b || a.includes(b) || b.includes(a)); };
         for (const p of list) {
           if (!p || p.status !== "active") continue;
           if (p.deposit_doc_no) String(p.deposit_doc_no).split(" / ").forEach(x => x.trim() && usedDep.add(x.trim()));
           if (!p.doc_no) continue;
           const k = normJob(p.doc_no);
           if (k) m[k] = [m[k], p.receipt_no].filter(Boolean).join(", ");
+          if (k) (payerOf[k] = payerOf[k] || []).push(normPayer(p.customer_name));
         }
         setPaidJobMap(m);
         // ใบ PDS ที่เปิดงานอยู่และเลข Job มีรับชำระแล้ว → ปิดงานซ่อมอัตโนมัติ (user 2026-08-25 — จ่ายเงินแล้ว = งานจบ ไม่ต้องรอ upload NID)
         (async () => {
           const toClose = orders.filter(o => (o.status === "เปิดงาน" && o.job_no && o.job_no !== "null"
-            && !String(o.deposit_doc_no || "").startsWith("PDO") && m[normJob(o.job_no)])
+            && !String(o.deposit_doc_no || "").startsWith("PDO") && m[normJob(o.job_no)] && samePayer(o))
             // ใบระบบเก่า (DEPD-/REC): มัดจำถูกตัดใช้ในใบรับชำระแล้ว → ปิดงานซ่อม (สถานะ "อะไหล่ค้างส่ง"/"เปิดงาน"/"มาครบ" ที่ยังไม่ปิด/ไม่ยกเลิก)
             || (!/^PD[SO]-/i.test(String(o.deposit_doc_no || "")) && usedDep.has(String(o.deposit_doc_no || "").trim())
               && !/ปิดงาน|ปิดการขาย|ยกเลิก/.test(String(o.status || ""))));
@@ -484,6 +490,27 @@ export default function SparePartsOrderPage({ currentUser }) {
     }));
   }
 
+  // ลูกค้าชื่อเดียวกันแต่รถคนละรุ่น = งานคนละคัน → ต้องเป็น "สั่งปกติ" ไม่ใช่ "สั่งเพิ่ม" (user 2026-09-21
+  // เคส PDO-6909-00105 PCX160 ถูกบังคับเป็นสั่งเพิ่มของ GIORNO+ / PDO-6909-00104 Wave110i ของ PCX150 Hybrid)
+  const refOrderOf = (f) => (f.ref_order_id ? allOrders.find(o => String(o.order_id) === String(f.ref_order_id)) : null);
+  const normModelName = (v) => String(v || "").toLowerCase().replace(/[\s\-+.]/g, "");
+  const isOtherVehicle = (f) => {
+    const ref = refOrderOf(f);
+    return f.order_type === "สั่งเพิ่ม" && !!ref && !!f.model_name && !!ref.model_name && normModelName(f.model_name) !== normModelName(ref.model_name);
+  };
+  // เปลี่ยนใบที่กำลังกรอกเป็นสั่งปกติ: คงใบมัดจำ/ลูกค้า/รายการไว้ ตัดการอ้างใบเดิม + ล้างทะเบียน/เลขถังที่ copy มาจากรถคันเดิม
+  function switchToNormalOrder() {
+    setForm(prev => {
+      const ref = refOrderOf(prev);
+      const dep = deposits.find(d => d.deposit_doc_no === prev.deposit_doc_no);
+      return {
+        ...prev, order_type: "ปกติ", ref_order_id: "",
+        vin: dep?.vin || (ref && prev.vin === ref.vin ? "" : prev.vin),
+        license_plate: ref && prev.license_plate === ref.license_plate ? "" : prev.license_plate,
+      };
+    });
+  }
+
   function handleRefOrderSelect(orderId) {
     const ref = orders.find(o => String(o.order_id) === String(orderId));
     if (ref) {
@@ -573,11 +600,14 @@ export default function SparePartsOrderPage({ currentUser }) {
       if (inStock.length && !window.confirm(`⚠️ มีอะไหล่ที่ร้านมีของอยู่แล้ว (รหัสตรง/รหัสทดแทน):\n\n${inStock.join("\n")}\n\nยืนยันบันทึกใบสั่งซื้อตามนี้?`)) return;
     }
 
+    // ชื่อเดียวกันแต่รถคนละรุ่นกับใบเดิม → บันทึกเป็น "สั่งปกติ" (ไม่อ้างใบเดิม) อัตโนมัติ
+    const asNormal = !editId && isOtherVehicle(form);
     setSaving(true);
     setMessage("");
     try {
       const payload = {
         ...form,
+        ...(asNormal ? { order_type: "ปกติ", ref_order_id: "" } : {}),
         items: validItems,
         created_by: currentUser?.name || "",
         branch: currentUser?.branch || "",
@@ -1469,7 +1499,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                       // แยกสาขา (user 2026-09-15): ใบมัดจำ SCY01 (ยามาฮ่า) สั่งได้ที่ระบบสั่งซื้อยามาฮ่าเท่านั้น
                       !isYamahaBranchDeposit(d)
                       && !allOrders.some(o => o.deposit_doc_no === d.deposit_doc_no)
-                      && !(d.customer_code && allOrders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม"))
+                      // ลูกค้ามีงานเดิมค้าง → ปกติไปทางสั่งเพิ่ม ยกเว้นใบที่สลับมาจากสั่งเพิ่มเพราะเป็นรถคนละรุ่น (คงไว้ให้เห็นใน dropdown)
+                      && (d.deposit_doc_no === form.deposit_doc_no || !(d.customer_code && allOrders.some(o => o.customer_code === d.customer_code && o.status !== "ปิดงานซ่อม")))
                       && !repairDeposits.some(rd => rd.deposit_doc_no === d.deposit_doc_no)
                       // คืนเงินแล้ว/ใช้หมดแล้ว (คงเหลือ 0) ไม่ให้เลือกสั่งซื้อได้อีก
                       && Number(d.remaining_amount || 0) > 0
@@ -1482,7 +1513,10 @@ export default function SparePartsOrderPage({ currentUser }) {
                         byCustomer[key] = d;
                       }
                     }
-                    return Object.values(byCustomer);
+                    const picked = Object.values(byCustomer);
+                    const cur = eligible.find(d => d.deposit_doc_no === form.deposit_doc_no);
+                    if (cur && !picked.includes(cur)) picked.push(cur);
+                    return picked;
                   })().map(d => (
                     <option key={d.deposit_doc_no} value={d.deposit_doc_no}>
                       {d.deposit_doc_no} | {fmtDate(d.deposit_date)} | {d.customer_name} | คงเหลือ {fmt(d.remaining_amount)}
@@ -1596,6 +1630,17 @@ export default function SparePartsOrderPage({ currentUser }) {
                 ))}
               </select>
             </div>
+            {form.order_type === "สั่งเพิ่ม" && refOrderOf(form) && (
+              <div style={{ margin: "-4px 0 10px", padding: "8px 10px", borderRadius: 8, fontSize: 12.5, background: isOtherVehicle(form) ? "#fef2f2" : "#fffbeb", border: "1px solid " + (isOtherVehicle(form) ? "#fecaca" : "#fde68a"), color: isOtherVehicle(form) ? "#b91c1c" : "#92400e" }}>
+                {isOtherVehicle(form)
+                  ? <>⚠️ รุ่นรถ <b>{form.model_name}</b> ไม่ตรงกับใบเดิม ({refOrderOf(form).deposit_doc_no} · <b>{refOrderOf(form).model_name}</b>) — รถคนละคันต้องเป็น "สั่งซื้อปกติ" </>
+                  : <>สั่งเพิ่มของใบเดิม {refOrderOf(form).deposit_doc_no} · รุ่น <b>{refOrderOf(form).model_name || "-"}</b> — ถ้าเป็นรถคนละคัน ให้เปลี่ยนรุ่นรถ หรือ </>}
+                <button type="button" onClick={switchToNormalOrder}
+                  style={{ marginLeft: 4, padding: "3px 10px", fontSize: 12, borderRadius: 6, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, background: isOtherVehicle(form) ? "#dc2626" : "#d97706", color: "#fff" }}>
+                  เปลี่ยนเป็นสั่งซื้อปกติ
+                </button>
+              </div>
+            )}
 
             {/* สถานะจอดรถ */}
             <div style={row}>
