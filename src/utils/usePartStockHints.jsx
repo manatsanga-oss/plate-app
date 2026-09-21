@@ -5,6 +5,17 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 // - สต๊อก: action search_inventory ของ API ฝั่งนั้น (รหัสไม่มีขีด · YAMAHA เติม "00" ให้ครบ 12 ตัว)
 // - คู่ทดแทน: part_substitutes (spare-parts-api get_part_substitutes — ตารางเดียวใช้ทั้ง 2 ยี่ห้อ) ดูทั้ง 2 ทิศ (เดิม→ทดแทน และ ทดแทน→เดิม)
 const SUBS_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
+// HONDA: อะไหล่ในใบให้ยืม DCS ที่ยังไม่รับคืน/ตัดสต๊อก (คอลัมน์ "ให้ยืม" หน้าสต๊อกหมุนเร็ว) = ของอยู่ที่ สช.ตลาด
+// ไฟล์สินค้าคงเหลือไม่นับยอดนี้ → แสดงเป็นสต๊อก "สช.ตลาด (ให้ยืม)" แยกบรรทัด (user 2026-09-21)
+const LOAN_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api";
+export const LOAN_STORE = "สช.ตลาด (ให้ยืม)";
+export async function fetchLoanStock(code) {
+  const c = String(code || "").trim();
+  if (!c) return null;
+  const rows = (await postJson(LOAN_API, { action: "list_part_loans", item_code: c })).filter((r) => r && r.loan_no);
+  const qty = rows.reduce((t, r) => t + Number(r.qty || 0), 0);
+  return qty > 0 ? { source: LOAN_STORE, qty, location: [...new Set(rows.map((r) => r.loan_no))].join(", "), loan: true } : null;
+}
 const strip = (s) => String(s || "").replace(/[-\s]/g, "").toUpperCase().trim();
 // YAMAHA: รหัสในใบสั่งมักเป็น 10 ตัว (1KL-F3412-10) แต่สต๊อกเก็บ 12 ตัว (…00) → เทียบแบบตัด "00" ท้าย
 const baseKey = (s) => { const t = strip(s); return t.length === 12 && t.endsWith("00") ? t.slice(0, 10) : t; };
@@ -31,8 +42,13 @@ export default function usePartStockHints(apiUrl, system) {
     let c = strip(code);
     if (!c) return [];
     if (system === "YAMAHA" && c.length < 12) c = c + "00";
-    const rows = await postJson(apiUrl, { action: "search_inventory", code: c });
-    return rows.filter((r) => r && Number(r.quantity || 0) > 0).map((r) => ({ source: r.source || "-", qty: Number(r.quantity || 0), location: r.location || "" }));
+    const [rows, loan] = await Promise.all([
+      postJson(apiUrl, { action: "search_inventory", code: c }),
+      system === "HONDA" ? fetchLoanStock(c).catch(() => null) : Promise.resolve(null),
+    ]);
+    const out = rows.filter((r) => r && Number(r.quantity || 0) > 0).map((r) => ({ source: r.source || "-", qty: Number(r.quantity || 0), location: r.location || "" }));
+    if (loan) out.push(loan);
+    return out;
   }, [apiUrl, system]);
 
   const ensure = useCallback((code) => {

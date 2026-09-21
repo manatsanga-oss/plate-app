@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
-import usePartStockHints, { useAutoStockCheck, PartStockHintRow } from "../utils/usePartStockHints";
+import usePartStockHints, { useAutoStockCheck, PartStockHintRow, fetchLoanStock, LOAN_STORE } from "../utils/usePartStockHints";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
@@ -824,6 +824,14 @@ export default function SparePartsOrderPage({ currentUser }) {
         } catch {}
         return it;
       }));
+      // ยอดในใบให้ยืมที่ยังไม่ตัดสต๊อก = ของอยู่ที่ สช.ตลาด (ไฟล์คงเหลือไม่นับ) — แสดงแยก ไม่บวกเข้า stock_qty
+      // เพราะ stock_qty ใช้ตัดสินสถานะ "อะไหล่ครบ" ด้านล่าง (user 2026-09-21)
+      await Promise.all(itemsWithStock.map(async (it, i) => {
+        try {
+          const ln = await fetchLoanStock((it.part_code || "").replace(/-/g, "").trim());
+          if (ln) itemsWithStock[i] = { ...it, loan_qty: ln.qty, loan_docs: ln.location };
+        } catch {}
+      }));
       // อะไหล่ทดแทน: รหัสที่สั่งเคยถูกจับคู่ทดแทนไว้ในตารางอะไหล่ใช้แทนกัน (จากใบไหนก็ได้) → แนบรหัสทดแทน + สต๊อก
       const stripC = (s) => (s || "").replace(/-/g, "").toUpperCase().trim();
       const subsOf = (code) => {
@@ -1100,7 +1108,7 @@ export default function SparePartsOrderPage({ currentUser }) {
 <table>
   <thead><tr><th class="center">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th class="center">จำนวน</th><th class="stock">สต๊อก</th><th class="stock center">คงเหลือ</th><th class="stock">ที่เก็บ</th></tr></thead>
   <tbody>
-    ${items.length === 0 ? '<tr><td colspan="7" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}</td><td class="center">${it.quantity || 0}</td><td class="stock">${it.stock_name || '-'}</td><td class="stock center">${it.stock_qty != null ? it.stock_qty : '-'}</td><td class="stock">${it.stock_location || '-'}</td></tr>`).join('')}
+    ${items.length === 0 ? '<tr><td colspan="7" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}</td><td class="center">${it.quantity || 0}</td><td class="stock">${it.stock_name || '-'}${Number(it.loan_qty) > 0 ? `<br>${LOAN_STORE}(${it.loan_qty})` : ''}</td><td class="stock center">${it.stock_qty != null ? it.stock_qty : '-'}</td><td class="stock">${it.stock_location || '-'}</td></tr>`).join('')}
   </tbody>
 </table>
 <div class="footer">
@@ -1766,6 +1774,9 @@ export default function SparePartsOrderPage({ currentUser }) {
                     <td style={{ ...td, textAlign: "center", verticalAlign: "top" }}>{it.quantity}</td>
                     <td style={{ ...td, textAlign: "center" }}>
                       <div style={{ color: it.stock_qty > 0 ? "#10b981" : "#ef4444", fontWeight: 600 }}>{it.stock_qty != null ? it.stock_qty : "-"}</div>
+                      {Number(it.loan_qty) > 0 && (
+                        <div style={{ color: "#ea580c", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }} title={`ใบให้ยืม: ${it.loan_docs || "-"}`}>🤝 {LOAN_STORE} {it.loan_qty}</div>
+                      )}
                       {(it.substitutes || []).map((s, k) => (
                         <div key={k} style={{ color: Number(s.stock_qty) > 0 ? "#d97706" : "#ef4444", fontWeight: 700 }}>{s.stock_qty != null ? s.stock_qty : "-"}</div>
                       ))}
