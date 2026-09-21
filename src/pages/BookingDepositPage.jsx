@@ -96,7 +96,10 @@ const emptyForm = {
 
 export default function BookingDepositPage({ currentUser }) {
   const [view, setView] = useState("form"); // form | history
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState(() => ({ ...emptyForm, deposit_date: todayISO() }));
+  // วันที่มัดจำค้างข้ามวัน (เคส SCY01-DEP-2609-00012: เปิดหน้าไว้ 18/09 บันทึก 19/09 → ใบ+LINE ขึ้น 18/09) — user 2026-09-21
+  // ใบใหม่ที่พนักงาน "ไม่ได้แก้ช่องวันที่เอง" ให้ใช้วันที่ปัจจุบัน ณ ตอนกดบันทึกเสมอ · ตั้งใจลงย้อนหลัง = แก้ช่องวันที่เอง (dateTouched) ยังทำได้
+  const [dateTouched, setDateTouched] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [showCustomerPicker, setShowCustomerPicker] = useState(false);
@@ -192,10 +195,13 @@ export default function BookingDepositPage({ currentUser }) {
     const payFields = payLinesToFields(payLines);
     setSaving(true); setMessage("");
     const isNew = !form.deposit_no; // ใบใหม่เท่านั้นที่สร้างใบจองอัตโนมัติ (กันจองซ้ำตอนแก้ไข)
+    const depDate = isNew && !dateTouched ? todayISO() : form.deposit_date;
+    if (depDate !== form.deposit_date) setForm((f) => ({ ...f, deposit_date: depDate }));
     try {
       const r = await postJson(DEPOSIT_API, {
         action: "save_deposit",
         ...form,
+        deposit_date: depDate,
         ...payFields,
         branch_code: branchCode,
         branch_name: currentUser?.branch || "",
@@ -233,7 +239,7 @@ export default function BookingDepositPage({ currentUser }) {
           await postJson(DEPOSIT_API, {
             action: "notify_deposit_group",
             deposit_no: r.deposit_no,
-            deposit_date: thaiDate(form.deposit_date),
+            deposit_date: thaiDate(depDate),
             customer_name: form.customer_name,
             customer_phone: form.customer_phone,
             car: carLabel(form),
@@ -253,7 +259,7 @@ export default function BookingDepositPage({ currentUser }) {
           await postJson(DEPOSIT_API, {
             action: "send_deposit_flex",
             deposit_no: r.deposit_no,
-            deposit_date: thaiDate(form.deposit_date),
+            deposit_date: thaiDate(depDate),
             customer_name: form.customer_name,
             line_user_id: form.line_user_id,
             car: carLabel(form),
@@ -278,6 +284,7 @@ export default function BookingDepositPage({ currentUser }) {
 
   function startNew() {
     setForm({ ...emptyForm, deposit_date: todayISO() });
+    setDateTouched(false);
     setMessage("");
     setView("form");
   }
@@ -573,7 +580,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
             <div style={sectionHead}><span>💵 เงินมัดจำ & การรับชำระ</span></div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
               <Field label="วันที่มัดจำ">
-                <input type="date" value={form.deposit_date} onChange={(e) => setForm({ ...form, deposit_date: e.target.value })} style={inp} />
+                <input type="date" value={form.deposit_date} onChange={(e) => { setDateTouched(true); setForm({ ...form, deposit_date: e.target.value }); }} style={inp} />
               </Field>
               <Field label="จำนวนเงินมัดจำ (บาท) — รวมจากวิธีรับชำระ">
                 <input type="number" value={form.deposit_amount} readOnly style={{ ...inp, textAlign: "right", fontWeight: 700, background: "#f1f5f9" }} />

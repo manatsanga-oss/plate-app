@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import usePartStockHints, { useAutoStockCheck, PartStockHintRow } from "../utils/usePartStockHints";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
@@ -77,6 +78,10 @@ export default function YamahaOrderPage({ currentUser }) {
       setOrders(norm(r));
     } catch {}
   }
+
+  // เช็คสต๊อก + อะไหล่ทดแทนในฟอร์มสั่งซื้อ (ก่อนบันทึก) — ดู utils/usePartStockHints
+  const stockHints = usePartStockHints(API_URL, "YAMAHA");
+  useAutoStockCheck(showForm, form.items, stockHints.ensure, stockHints.reset);
 
   async function api(action, extra = {}) {
     const res = await fetch(API_URL, {
@@ -448,6 +453,14 @@ export default function YamahaOrderPage({ currentUser }) {
     if (form.parking_status === "จอดร้าน" && !form.license_plate.trim()) { setMessage("กรุณากรอกทะเบียนรถ (จอดร้าน)"); return; }
     const validItems = form.items.filter(it => (it.part_code || "").trim() || (it.part_name || "").trim());
     if (validItems.length === 0) { setMessage("กรุณาเพิ่มรายการอะไหล่อย่างน้อย 1 รายการ"); return; }
+    // ก่อนบันทึกใบใหม่: เช็คสต๊อก + อะไหล่ทดแทนทุกบรรทัด — ร้านมีของอยู่แล้วให้ถามยืนยัน (ไม่บล็อก เผื่อตั้งใจสั่งเพิ่ม) — user 2026-09-21
+    if (!editId) {
+      setSaving(true);
+      let inStock = [];
+      try { inStock = await stockHints.checkAll(validItems); } catch { inStock = []; }
+      setSaving(false);
+      if (inStock.length && !window.confirm(`⚠️ มีอะไหล่ที่ร้านมีของอยู่แล้ว (รหัสตรง/รหัสทดแทน):\n\n${inStock.join("\n")}\n\nยืนยันบันทึกใบสั่งซื้อตามนี้?`)) return;
+    }
     setSaving(true);
     setMessage("");
     try {
@@ -514,6 +527,10 @@ export default function YamahaOrderPage({ currentUser }) {
           return { ...it, stock_qty: totalQty, stock_list: parts };
         } catch { return { ...it, stock_qty: "-", stock_list: [] }; }
       }));
+      // สต๊อกของอะไหล่ทดแทน/รหัสเดิมที่รู้จัก (part_substitutes) — เหมือนหน้าสั่งซื้อ HONDA (user 2026-09-21)
+      const itemsWithSubs = await Promise.all(itemsWithStock.map(async (it) => {
+        try { const h = await stockHints.ensure(it.part_code); return h && h.subs.length ? { ...it, substitutes: h.subs } : it; } catch { return it; }
+      }));
       // ดึงอะไหล่ค้างส่งเท่านั้น ส่วน B2B check รอผู้ใช้กดปุ่ม
       let boItems = [];
       const searchKey = order.vendor_po_no;
@@ -523,7 +540,7 @@ export default function YamahaOrderPage({ currentUser }) {
           boItems = norm(boRes).filter(b => Number(b.backorder_qty || 0) > 0);
         } catch {}
       }
-      setShowDetail({ ...order, items: itemsWithStock, boItems, b2bItems: null, unmatched: null, missingInB2b: null, allMatched: null });
+      setShowDetail({ ...order, items: itemsWithSubs, boItems, b2bItems: null, unmatched: null, missingInB2b: null, allMatched: null });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
@@ -1047,13 +1064,16 @@ export default function YamahaOrderPage({ currentUser }) {
                 </thead>
                 <tbody>
                   {form.items.map((it, idx) => (
-                    <tr key={idx} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                    <React.Fragment key={idx}>
+                    <tr style={{ borderBottom: stockHints.hintOf(it.part_code) ? "none" : "1px solid #e5e7eb" }}>
                       <td style={{ padding: 4, textAlign: "center", fontSize: 12, color: "#6b7280" }}>{idx + 1}</td>
-                      <td style={{ padding: 4 }}><input value={it.part_code} onChange={e => updateItem(idx, "part_code", e.target.value.toUpperCase())} placeholder="รหัสสินค้า" style={{ ...inputStyle, width: "100%", fontSize: 12 }} /></td>
+                      <td style={{ padding: 4 }}><input value={it.part_code} onChange={e => updateItem(idx, "part_code", e.target.value.toUpperCase())} onBlur={() => stockHints.ensure(it.part_code)} placeholder="รหัสสินค้า" style={{ ...inputStyle, width: "100%", fontSize: 12 }} /></td>
                       <td style={{ padding: 4 }}><input value={it.part_name} onChange={e => updateItem(idx, "part_name", e.target.value)} placeholder="ชื่ออะไหล่" style={{ ...inputStyle, width: "100%", fontSize: 12 }} /></td>
                       <td style={{ padding: 4 }}><input type="number" min={1} value={it.quantity} onChange={e => updateItem(idx, "quantity", Number(e.target.value))} style={{ ...inputStyle, width: "100%", textAlign: "center", fontSize: 12 }} /></td>
                       <td style={{ padding: 4, textAlign: "center" }}><button onClick={() => removeItem(idx)} style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer", fontSize: 16 }}>×</button></td>
                     </tr>
+                    <PartStockHintRow hint={stockHints.hintOf(it.part_code)} colSpan={5} />
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
@@ -1116,7 +1136,14 @@ export default function YamahaOrderPage({ currentUser }) {
                   <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
                     <td style={td}>{it.part_code}</td>
-                    <td style={td}>{it.part_name}</td>
+                    <td style={td}>{it.part_name}
+                      {(it.substitutes || []).map((sb) => {
+                        const q = sb.stock.reduce((t, x) => t + x.qty, 0);
+                        return <div key={sb.code} style={{ fontSize: 11, marginTop: 2, color: q > 0 ? "#b45309" : "#6b7280", fontWeight: q > 0 ? 700 : 400 }}>
+                          🔁 {sb.rel} {sb.code}{q > 0 ? ` — มีของ ${q} ชิ้น (${sb.stock.map((x) => `${x.source} ${x.qty}${x.location ? " " + x.location : ""}`).join(", ")})` : " — ไม่มีของในสต๊อก"}
+                        </div>;
+                      })}
+                    </td>
                     <td style={{ ...td, textAlign: "center" }}>{it.quantity}</td>
                     <td style={td}>
                       {hasStock ? stocks.map((s, k) => <div key={k}>{s.source || "-"}</div>) : <span style={{ color: "#ef4444" }}>-</span>}

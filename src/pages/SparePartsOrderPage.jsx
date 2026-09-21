@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import usePartStockHints, { useAutoStockCheck, PartStockHintRow } from "../utils/usePartStockHints";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
@@ -103,6 +104,9 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [estimateNo, setEstimateNo] = useState("");
   const [savingRepair, setSavingRepair] = useState(false);
   const [partSubstitutes, setPartSubstitutes] = useState([]);
+  // เช็คสต๊อก + อะไหล่ทดแทนในฟอร์มสั่งซื้อ (ก่อนบันทึก) — ดู utils/usePartStockHints (user 2026-09-21)
+  const stockHints = usePartStockHints(API, "HONDA");
+  useAutoStockCheck(showForm, form.items, stockHints.ensure, stockHints.reset);
   const [pdoSoldMap, setPdoSoldMap] = useState({}); // order_id → ผลเช็คบิลขายปลีก DCS (honda_part_sales RTSL) ของใบ PDO
   const [vehInfo, setVehInfo] = useState(null); // รุ่น/แบบ/type ของรถลูกค้า — ค้นจากเลขตัวถังในใบมัดจำ (ประวัติขาย moto_sales)
   const [paidJobMap, setPaidJobMap] = useState({}); // เลข Job (normalize) → เลขใบเสร็จ PSR- ที่รับชำระแล้ว (active) — ใส่ ✓ หลังเลข Job ใบปิดงานซ่อม
@@ -560,6 +564,14 @@ export default function SparePartsOrderPage({ currentUser }) {
     if (!form.model_name) { setMessage("กรุณาเลือกรุ่นรถ"); return; }
     const validItems = form.items.filter(it => (it.part_code || "").trim() || (it.part_name || "").trim());
     if (validItems.length === 0) { setMessage("กรุณาเพิ่มรายการอะไหล่อย่างน้อย 1 รายการ"); return; }
+    // ก่อนบันทึกใบใหม่: เช็คสต๊อก + อะไหล่ทดแทนทุกบรรทัด — ร้านมีของอยู่แล้วให้ถามยืนยัน (ไม่บล็อก เผื่อตั้งใจสั่งเพิ่ม) — user 2026-09-21
+    if (!editId) {
+      setSaving(true);
+      let inStock = [];
+      try { inStock = await stockHints.checkAll(validItems); } catch { inStock = []; }
+      setSaving(false);
+      if (inStock.length && !window.confirm(`⚠️ มีอะไหล่ที่ร้านมีของอยู่แล้ว (รหัสตรง/รหัสทดแทน):\n\n${inStock.join("\n")}\n\nยืนยันบันทึกใบสั่งซื้อตามนี้?`)) return;
+    }
 
     setSaving(true);
     setMessage("");
@@ -1632,10 +1644,11 @@ export default function SparePartsOrderPage({ currentUser }) {
                 </thead>
                 <tbody>
                   {form.items.map((it, idx) => (
-                    <tr key={idx} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                    <React.Fragment key={idx}>
+                    <tr style={{ borderBottom: stockHints.hintOf(it.part_code) ? "none" : "1px solid #e5e7eb" }}>
                       <td style={{ padding: 4, textAlign: "center", fontSize: 12, color: "#6b7280" }}>{idx + 1}</td>
                       <td style={{ padding: 4 }}>
-                        <input value={it.part_code} onChange={e => updateItem(idx, "part_code", e.target.value.toUpperCase())} placeholder="รหัสสินค้า" style={{ ...inputStyle, width: "100%", fontSize: 12 }} />
+                        <input value={it.part_code} onChange={e => updateItem(idx, "part_code", e.target.value.toUpperCase())} onBlur={() => stockHints.ensure(it.part_code)} placeholder="รหัสสินค้า" style={{ ...inputStyle, width: "100%", fontSize: 12 }} />
                       </td>
                       <td style={{ padding: 4 }}>
                         <input value={it.part_name} onChange={e => updateItem(idx, "part_name", e.target.value)} placeholder="ชื่ออะไหล่" style={{ ...inputStyle, width: "100%", fontSize: 12 }} />
@@ -1647,6 +1660,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                         <button onClick={() => removeItem(idx)} style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer", fontSize: 16 }}>×</button>
                       </td>
                     </tr>
+                    <PartStockHintRow hint={stockHints.hintOf(it.part_code)} colSpan={5} />
+                    </React.Fragment>
                   ))}
                 </tbody>
               </table>
