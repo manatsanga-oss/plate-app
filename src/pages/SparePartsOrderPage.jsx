@@ -286,12 +286,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   }
 
   // ปิดการขายอัตโนมัติ (ใบ PDO): เช็คบิลขายปลีก DCS (honda_part_sales เลข RTSL ตั้งแต่วันเปิดใบ) ทุกใบที่ยังไม่ปิด
-  // อะไหล่ขายครบทุกรายการ + ชื่อลูกค้าบนบิลตรงกับใบสั่งซื้อ → ปิดการขายให้เอง / ชื่อไม่ตรงโชว์ป้ายให้กดปิดเอง
-  // (ข้อมูลมาจาก upload รายงานขายอะไหล่ SPR07030 — สถานะจะขยับหลัง upload รอบล่าสุด)
-  const normCustName = (s) => String(s || "").toUpperCase()
-    .replace(/^[0-9]+\s*-\s*/, "")                       // ตัดรหัสลูกค้านำหน้า เช่น "23 - "
-    .replace(/นางสาว|นาย|นาง|ด\.ช\.|ด\.ญ\.|MRS\.?|MR\.?|MISS|MS\.?/g, "")
-    .replace(/[^ก-๙A-Z0-9]/g, "");
+  // อะไหล่ขายครบทุกรายการ → ปิดการขายใบ PDO อัตโนมัติ (ข้อมูลมาจาก upload รายงานขายอะไหล่ SPR07030 — สถานะจะขยับหลัง upload รอบล่าสุด)
   async function checkPdoSales() {
     try {
       const strip = (s) => (s || "").replace(/-/g, "").toUpperCase().trim();
@@ -308,17 +303,12 @@ export default function SparePartsOrderPage({ currentUser }) {
         if (!m.lastDate || String(r.sale_date) > String(m.lastDate)) m.lastDate = r.sale_date;
       });
       setPdoSoldMap(map);
-      // ปิดอัตโนมัติเฉพาะใบที่ขายครบ + ชื่อลูกค้าตรง (กันรหัสเดียวกันที่ขายให้คนอื่น)
+      // ปิดอัตโนมัติทุกใบที่ขายครบทุกรายการ (user 2026-09-22: "ใบสั่งซื้อที่ขายแล้วไม่ต้องขึ้นอีก") — เดิมต้องชื่อลูกค้าบนบิลตรงด้วย
+      //   ทำให้ใบอย่าง PDO-6909-00096 (ขาย 1/1 แต่ชื่อบนบิล DCS ไม่ตรง) ค้างในรายการ · ขายไม่ครบ (17/19) ยังโชว์ป้ายให้กดปิดเอง
       const closedIds = [];
       for (const m of Object.values(map)) {
         if (m.status === "ปิดงานซ่อม") continue; // ปิดไปแล้ว (query รวมใบปิด 90 วันไว้โชว์เลขบิล)
         if (!m.total || m.sold < m.total) continue;
-        const oc = normCustName(m.orderCustomer);
-        const match = oc && m.customers.some(c => {
-          const sc = normCustName(c);
-          return sc && (sc.includes(oc) || oc.includes(sc));
-        });
-        if (!match) continue;
         const row = rows.find(r => map[r.order_id] === m);
         try {
           await api("update_order_status", { order_id: row.order_id, status: "ปิดงานซ่อม" });
@@ -335,7 +325,10 @@ export default function SparePartsOrderPage({ currentUser }) {
   // กดป้าย "ขายแล้ว" ปิดการขายเอง (กรณีขายครบแต่ชื่อลูกค้าบนบิลไม่ตรง ระบบไม่ปิดให้อัตโนมัติ)
   async function handleManualCloseSale(o) {
     const ps = pdoSoldMap[o.order_id];
-    if (!window.confirm(`ปิดการขายใบ ${o.order_no || o.deposit_doc_no}?\nบิลขายปลีก DCS: ${(ps?.docs || []).join(", ")}`)) return;
+    const partial = ps && ps.sold < ps.total ? `
+⚠️ ขายไปแล้ว ${ps.sold}/${ps.total} รายการ — อีก ${ps.total - ps.sold} รายการยังไม่พบบิลขาย จะปิดการขายทั้งใบ` : "";
+    if (!window.confirm(`ปิดการขายใบ ${o.order_no || o.deposit_doc_no}?
+บิลขายปลีก DCS: ${(ps?.docs || []).join(", ")}${partial}`)) return;
     try {
       await api("update_order_status", { order_id: o.order_id, status: "ปิดงานซ่อม" });
       setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, status: "ปิดงานซ่อม" } : x));
@@ -1342,7 +1335,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                   const hasDep = deposits.some(d => d.deposit_doc_no === o.deposit_doc_no) || legacyDeposits.some(d => d.deposit_doc_no === o.deposit_doc_no);
                   // ป้ายเช็คเร็ว: ใบ PDO ที่พบบิลขายปลีก DCS แล้ว (ขายครบแต่ยังไม่ปิด = กดป้ายเพื่อปิดการขายเอง)
                   const ps = isPDO ? pdoSoldMap[o.order_id] : null;
-                  const canClose = ps && ps.sold >= ps.total && o.status !== "ปิดงานซ่อม";
+                  // กดปิดเองได้ทุกใบที่มีบิลขายแล้วบางส่วน (17/19) — ของที่เหลืออาจไม่ได้ขายผ่านบิล (user 2026-09-22)
+                  const canClose = ps && ps.sold > 0 && o.status !== "ปิดงานซ่อม";
                   const saleBadge = ps && ps.sold > 0 ? (
                     <span onClick={canClose ? () => handleManualCloseSale(o) : undefined}
                       title={`บิลขายปลีก DCS: ${ps.docs.join(", ")}${ps.customers.length ? ` · ลูกค้า: ${ps.customers.join(", ")}` : ""}${canClose ? " — คลิกเพื่อปิดการขาย" : ""}`}

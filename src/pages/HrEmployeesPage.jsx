@@ -36,6 +36,7 @@ const emptyForm = () => ({
   is_executive: false,
   status: "active",
   start_date: "",
+  end_date: "",       // วันสิ้นสุดงาน (ลาออก) — บันทึกเวลาทำงานหลังวันนี้ถูกตัดทิ้ง (user 2026-09-22)
   income_bf: 0,
   wht_bf: 0,
   sso_bf: 0,
@@ -195,6 +196,7 @@ export default function HrEmployeesPage({ currentUser }) {
       is_executive: r.is_executive === true,
       status: r.status || "active",
       start_date: r.start_date ? String(r.start_date).slice(0, 10) : "",
+      end_date: r.end_date ? String(r.end_date).slice(0, 10) : "",
       income_bf: r.income_bf || 0,
       wht_bf: r.wht_bf || 0,
       sso_bf: r.sso_bf || 0,
@@ -411,6 +413,9 @@ export default function HrEmployeesPage({ currentUser }) {
               <div style={{ ...grid2, marginTop: 8 }}>
                 <Field label="📅 วันที่เริ่มงาน">
                   <input type="date" value={form.start_date || ""} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} style={inp} />
+                </Field>
+                <Field label="🚪 วันสิ้นสุดงาน (ลาออก)">
+                  <input type="date" value={form.end_date || ""} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))} style={inp} title="ใส่แล้วบันทึกเวลาทำงานหลังวันนี้จะไม่ขึ้น (ถูกลบตอน upload ครั้งถัดไป)" />
                 </Field>
                 <Field label="">
                   <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, cursor: "pointer", paddingTop: 6 }}>
