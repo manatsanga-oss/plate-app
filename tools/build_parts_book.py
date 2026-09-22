@@ -70,7 +70,7 @@ def parse_variants(doc, base):
         toks = [x.strip() for x in re.split(r"[\t\n]+", t) if x.strip()]
         out, cur = [], None
         for tok in toks:
-            if tok.startswith(base[:5]) and re.fullmatch(r"[A-Z]{2,}\d+[A-Z]+", tok):
+            if tok.startswith(base[:5]) and re.fullmatch(r"[A-Z]{2,}\d+[A-Z0-9]*[A-Z]", tok):   # รองรับ CL300A3S (ตัวเลขกลางท้ายรหัส)
                 cur = {"model_code": tok, "types": []}
                 out.append(cur)
             elif cur and TYPE_RE.match(tok):
@@ -268,6 +268,19 @@ def build(pdf_path, slug, model, brand="HONDA"):
             if (p["code"], p["ref"]) not in seen:
                 b["parts"].append(p); seen.add((p["code"], p["ref"]))
 
+    # คอลัมน์จำนวนที่ key ไม่ตรง variant (บางหน้าหัวตารางมีตัวอักษรเกิน เช่น AMN/ARN แทน AM/AR) → จับคู่กับ col ที่เป็น prefix ยาวสุด
+    col_set = {v["col"] for v in variants}
+    if col_set:
+        fixed = 0
+        for b in blocks.values():
+            for p in b["parts"]:
+                if p["qty"] and not set(p["qty"]) <= col_set:
+                    nq = {}
+                    for k, val in p["qty"].items():
+                        best = k if k in col_set else max([c for c in col_set if k.startswith(c) and len(k) - len(c) <= 1] or [k], key=len)
+                        nq[best] = val
+                    if nq != p["qty"]: p["qty"] = nq; fixed += 1
+        if fixed: print(f"  ↺ ปรับ key คอลัมน์จำนวนให้ตรง variant {fixed} แถว")
     sections = []
     for code in order:
         s = code.split("-")[0]
