@@ -70,7 +70,20 @@ export default function FastMovingStockPage() {
     try {
       const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const data = await res.json();
-      setRows(Array.isArray(data) ? data : []);
+      // อะไหล่ในใบให้ยืม DCS ที่ยังไม่ตัดสต๊อก = ของอยู่ที่ สช.ตลาด (ไฟล์คงเหลือไม่นับ) → นับเป็นสต๊อก: บวกเข้า quantity + ร้าน สช.ตลาด (user 2026-09-22)
+      //   คอลัมน์ "ให้ยืม" ยังแสดงยอดเดิม (loan_qty) ไว้ดูที่มา · quantity_base = ยอดตามไฟล์คงเหลือ
+      const withLoan = (r) => {
+        const loan = Number(r.loan_qty || 0);
+        if (!(loan > 0)) return r;
+        const parts = String(r.stores && r.stores !== "-" ? r.stores : "").split("|").map(x => x.trim()).filter(Boolean);
+        const idx = parts.findIndex(x => /^(สช|ศช)/.test(x));
+        if (idx >= 0) {
+          const m = parts[idx].match(/^(.+?)\s+(\d+(?:\.\d+)?)(.*)$/);
+          if (m) parts[idx] = `${m[1]} ${Number(m[2]) + loan}${m[3]}`;
+        } else parts.push(`สช ตลาด ${loan} (ให้ยืม)`);
+        return { ...r, quantity_base: Number(r.quantity || 0), quantity: Number(r.quantity || 0) + loan, stores: parts.join(" | ") };
+      };
+      setRows((Array.isArray(data) ? data : []).map(withLoan));
     } catch { setRows([]); }
     setLoading(false);
   }

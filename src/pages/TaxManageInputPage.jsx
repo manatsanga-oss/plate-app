@@ -35,6 +35,7 @@ const SOURCE_META = {
   cosmos: { label: "COSMOS", color: "#5b21b6", bg: "#ede9fe" },           // เบี้ย COSMOS (3 PLUS ไทยวิวัฒน์ · RSA · ประกันรถหาย) ลงภาษีซื้อ ป.เปา — user 2026-09-18
   fuelwd: { label: "เบิกค่าน้ำมัน", color: "#9a3412", bg: "#fed7aa" },    // เมนูเบิกค่าน้ำมันรถใช้จ่าย แบ่งบริษัทตามทะเบียนรถ
   office: { label: "วัสดุสำนักงาน", color: "#0f766e", bg: "#ccfbf1" },   // Office Supplies › รับวัสดุ ที่บันทึกจ่ายเงินมี VAT (receive_payments)
+  manual: { label: "บันทึกเพิ่มเอง", color: "#334155", bg: "#e2e8f0" },   // input_tax_manual_docs — ใบกำกับที่ไม่มีต้นทางในระบบ (เช่น ค่าน้ำมัน ส.ค.69 ก่อนมีเมนูเบิก)
 };
 
 const DEFAULT_STATUS = "รับใบกำกับภาษีแล้ว";
@@ -167,6 +168,32 @@ export default function TaxManageInputPage({ currentUser }) {
     });
   }, [rows, search, filterSource, filterAff]);
 
+  // ย้ายงวดยื่นของเอกสารภาษีซื้อ (user 2026-09-21 — ใบคร่อมงวดที่ สนง.บัญชียื่นคนละเดือนกับวันที่เอกสาร)
+  // เก็บใน tax_report_doc_moves ตารางเดียวกับรายงานภาษีขาย แต่ affiliation = "IN:" + สังกัด · list_input_tax อ่านไปใช้เอง
+  const MOVE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/flow-input-tax-api";
+  const shiftYm = (ym, d) => { const y = Number(ym.slice(0, 4)), m0 = Number(ym.slice(4, 6)) - 1 + d; const dt = new Date(y, m0, 1); return `${dt.getFullYear()}${String(dt.getMonth() + 1).padStart(2, "0")}`; };
+  async function moveDocPeriod(g, dir) {
+    const from = String(month || "").replace("-", "");
+    if (!/^\d{6}$/.test(from) || !g.doc_no) return;
+    const to = shiftYm(from, dir);
+    if (!window.confirm(`ย้ายเอกสาร ${g.doc_no} (${g.vendor_name || "-"})\nจากงวด ${from.slice(4)}/${from.slice(0, 4)} ไปยื่นงวด ${to.slice(4)}/${to.slice(0, 4)} ?`)) return;
+    try {
+      const res = await fetch(MOVE_API, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_tax_doc_move", affiliation: "IN:" + (g.affiliation || ""), doc_no: g.doc_no, from_period: from, to_period: to, note: "", created_by: currentUser?.name || currentUser?.username || "" }) });
+      await res.text();
+      fetchData();
+    } catch { alert("ย้ายงวดไม่สำเร็จ"); }
+  }
+  async function unmoveDocPeriod(g) {
+    if (!window.confirm(`ยกเลิกการย้ายงวดของ ${g.doc_no} ? (เอกสารจะกลับไปงวด ${String(g.moved_from).slice(4, 6)}/${String(g.moved_from).slice(0, 4)})`)) return;
+    try {
+      const res = await fetch(MOVE_API, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_tax_doc_move", affiliation: "IN:" + (g.affiliation || ""), doc_no: g.doc_no }) });
+      await res.text();
+      fetchData();
+    } catch { alert("ยกเลิกไม่สำเร็จ"); }
+  }
+
   const groups = useMemo(() => {
     const map = new Map();
     for (const { r, i } of filteredMembers) {
@@ -176,7 +203,8 @@ export default function TaxManageInputPage({ currentUser }) {
         g = { key: gk, source: r.source, brand: r.brand, affiliation: r.affiliation,
           doc_date: r.doc_date, doc_no: r.doc_no, ref_no: r.ref_no,
           vendor_name: r.vendor_name, vendor_tax_id: r.vendor_tax_id, vendor_branch: r.vendor_branch,
-          project: r.project, amount_before_vat: 0, vat_amount: 0, total_amount: 0, count: 0 };
+          project: r.project, amount_before_vat: 0, vat_amount: 0, total_amount: 0, count: 0,
+          moved_from: r.moved_from || "", moved_to: r.moved_to || "" };
         map.set(gk, g);
       }
       g.amount_before_vat += Number(r.amount_before_vat) || 0;
@@ -224,6 +252,7 @@ export default function TaxManageInputPage({ currentUser }) {
           <option value="cosmos">COSMOS</option>
           <option value="fuelwd">เบิกค่าน้ำมัน</option>
           <option value="office">วัสดุสำนักงาน</option>
+          <option value="manual">บันทึกเพิ่มเอง</option>
         </select>
         <select value={filterAff} onChange={e => setFilterAff(e.target.value)} style={inp} title="กรองตามสังกัด">
           <option value="">🏢 สังกัด: ทั้งหมด</option>
@@ -305,6 +334,7 @@ export default function TaxManageInputPage({ currentUser }) {
                         {g.count > 1 && <span style={{ padding: "1px 7px", borderRadius: 10, background: "#eef2ff", color: "#4338ca", fontSize: 11, fontWeight: 700 }}>รวม {g.count} รายการ</span>}
                       </div>
                       {g.count === 1 && ef.ref_no && <div style={{ fontSize: 11, color: "#6b7280", marginLeft: 14 }}>{ef.ref_no}</div>}
+                      {g.moved_from && <div style={{ fontSize: 10.5, color: "#b45309", fontWeight: 700, marginLeft: 14 }} title="เอกสารนี้ถูกย้ายงวดยื่น — กดเมนู ⋯ เพื่อยกเลิกการย้าย">↪ ย้ายมาจากงวด {String(g.moved_from).slice(4, 6)}/{String(g.moved_from).slice(0, 4)}</div>}
                     </td>
                     <td style={td}>
                       <div style={{ fontWeight: 600 }}>{ef.vendor_name || "-"}</div>
@@ -321,7 +351,9 @@ export default function TaxManageInputPage({ currentUser }) {
                       <StatusDropdown status={statusOf(key, ef)} onPick={a => setStatus(key, a, ef)} />
                     </td>
                     <td style={{ ...td, textAlign: "center" }}>
-                      <RowKebab onEdit={() => setEditKey(key)} onPrint={() => printDoc(ef, statusOf(key, ef))} onDownload={() => downloadDoc(ef, statusOf(key, ef))} />
+                      <RowKebab onEdit={() => setEditKey(key)} onPrint={() => printDoc(ef, statusOf(key, ef))} onDownload={() => downloadDoc(ef, statusOf(key, ef))}
+                        canMove={!!g.doc_no && g.source !== "vehicle" && g.source !== "cosmos"} movedFrom={g.moved_from}
+                        onMove={(dir) => moveDocPeriod(g, dir)} onUnmove={() => unmoveDocPeriod(g)} />
                     </td>
                   </tr>
                 );
@@ -375,7 +407,7 @@ function StatusDropdown({ status, onPick }) {
 }
 
 // ── Kebab menu (⋯) ───────────────────────────────────────────────────────────
-function RowKebab({ onEdit, onPrint, onDownload }) {
+function RowKebab({ onEdit, onPrint, onDownload, canMove, movedFrom, onMove, onUnmove }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const btnRef = useRef(null);
@@ -414,6 +446,9 @@ function RowKebab({ onEdit, onPrint, onDownload }) {
           <Item icon="✏️" label="แก้ไขใบกำกับภาษี" onClick={onEdit} />
           <Item icon="🖨️" label="พิมพ์เอกสาร" onClick={onPrint} />
           <Item icon="⬇️" label="ดาวน์โหลด" onClick={onDownload} />
+          {canMove && !movedFrom && <Item icon="⏭️" label="ย้ายไปยื่นงวดถัดไป" onClick={() => onMove(1)} />}
+          {canMove && !movedFrom && <Item icon="⏮️" label="ย้ายไปยื่นงวดก่อนหน้า" onClick={() => onMove(-1)} />}
+          {movedFrom && <Item icon="↩️" label="ยกเลิกการย้ายงวด" onClick={onUnmove} />}
         </div>
       )}
     </>
