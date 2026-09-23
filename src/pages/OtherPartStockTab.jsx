@@ -12,6 +12,19 @@ const STORES = [
 ];
 const fmtQty = (v) => { const n = Number(v) || 0; return n === 0 ? "-" : n.toLocaleString("th-TH", { maximumFractionDigits: 2 }); };
 const fmtMoney = (v) => (Number(v) || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// สีป้ายสถานะใบมัดจำ/สั่งซื้อ — ชุดเดียวกับหน้าสั่งซื้ออะไหล่ (SparePartsOrderPage)
+const orderStatusStyle = (st) => {
+  const s = String(st || "");
+  if (s === "ปิดงานซ่อม") return { background: "#dc2626", color: "#fff" };
+  if (s === "อะไหล่ค้างส่ง") return { background: "#f97316", color: "#fff" };
+  if (s === "รอยกเลิก DCS") return { background: "#7c2d12", color: "#fff" };
+  if (s === "คืนเงินมัดจำ" || s.startsWith("ยกเลิก")) return { background: "#b91c1c", color: "#fff" };
+  if (s === "เปิดงาน") return { background: "#ec4899", color: "#fff" };
+  if (s === "มาครบ") return { background: "#dbeafe", color: "#1e40af" };
+  if (s === "มาไม่ครบ") return { background: "#fee2e2", color: "#b91c1c" };
+  if (s === "สั่งซื้อแล้ว") return { background: "#d1fae5", color: "#065f46" };
+  return { background: "#fef3c7", color: "#92400e" };
+};
 const fmtDate = (v) => { const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${Number(m[3])}/${Number(m[2])}/${Number(m[1]) + 543}` : "-"; };
 
 export default function OtherPartStockTab({ apiUrl }) {
@@ -66,9 +79,9 @@ export default function OtherPartStockTab({ apiUrl }) {
   const reportDate = useMemo(() => rows.reduce((m, r) => (String(r.report_date || "") > m ? String(r.report_date) : m), ""), [rows]);
 
   function exportCsv() {
-    const head = ["กลุ่มสินค้า", "รหัสสินค้า", "ชื่อสินค้า", "หน่วย", "รวม", ...STORES.map(s => s.l), "ราคา/หน่วย", "มูลค่ารวม", "รับเข้าล่าสุด", "ที่เก็บ"];
+    const head = ["กลุ่มสินค้า", "รหัสสินค้า", "ชื่อสินค้า", "หน่วย", "รวม", ...STORES.map(s => s.l), "ราคา/หน่วย", "มูลค่ารวม", "รับเข้าล่าสุด", "มัดจำล่าสุด", "สถานะมัดจำ", "ที่เก็บ"];
     const q = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-    const lines = filtered.map(r => [r.product_group, r.part_code, r.product_name, r.unit, r.quantity, ...STORES.map(s => r[s.k]), r.unit_price, r.total_value, r.last_receipt_date ? fmtDate(r.last_receipt_date) : "", r.locations].map(q).join(","));
+    const lines = filtered.map(r => [r.product_group, r.part_code, r.product_name, r.unit, r.quantity, ...STORES.map(s => r[s.k]), r.unit_price, r.total_value, r.last_receipt_date ? fmtDate(r.last_receipt_date) : "", r.last_order_doc || "", r.last_order_status || "", r.locations].map(q).join(","));
     const blob = new Blob(["﻿" + [head.map(q).join(","), ...lines].join("\r\n")], { type: "text/csv;charset=utf-8" });
     const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "สต๊อกอะไหล่นอกหมุนเร็ว.csv"; a.click(); URL.revokeObjectURL(a.href);
   }
@@ -107,11 +120,11 @@ export default function OtherPartStockTab({ apiUrl }) {
               <th style={th}>#</th><th style={th}>กลุ่มสินค้า</th><th style={th}>รหัสสินค้า</th><th style={th}>ชื่อสินค้า</th>
               <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
               {STORES.map(s => <th key={s.k} style={{ ...th, textAlign: "right" }}>{s.l}</th>)}
-              <th style={{ ...th, textAlign: "right" }}>ราคา/หน่วย</th><th style={{ ...th, textAlign: "right" }}>มูลค่ารวม</th><th style={{ ...th, whiteSpace: "nowrap" }} title="วันที่รับอะไหล่ครั้งล่าสุด จากไฟล์รับสินค้า HONDA/YAMAHA ที่ upload (รหัสที่ไม่เคยมีใบรับในระบบจะเป็น -)">รับเข้าล่าสุด</th><th style={th}>ที่เก็บ</th>
+              <th style={{ ...th, textAlign: "right" }}>ราคา/หน่วย</th><th style={{ ...th, textAlign: "right" }}>มูลค่ารวม</th><th style={{ ...th, whiteSpace: "nowrap" }} title="วันที่รับอะไหล่ครั้งล่าสุด จากไฟล์รับสินค้า HONDA/YAMAHA ที่ upload (รหัสที่ไม่เคยมีใบรับในระบบจะเป็น -)">รับเข้าล่าสุด</th><th style={{ ...th, whiteSpace: "nowrap" }} title="ใบมัดจำ/ใบสั่งซื้ออะไหล่ล่าสุด (HONDA/YAMAHA) ที่มีรหัสนี้ พร้อมสถานะปัจจุบันของใบ">มัดจำล่าสุด</th><th style={th}>ที่เก็บ</th>
             </tr>
           </thead>
           <tbody>
-            {paged.length === 0 && <tr><td colSpan={12} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 24 }}>{loading ? "กำลังโหลด..." : "ไม่มีรายการ"}</td></tr>}
+            {paged.length === 0 && <tr><td colSpan={13} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 24 }}>{loading ? "กำลังโหลด..." : "ไม่มีรายการ"}</td></tr>}
             {paged.map((r, i) => (
               <tr key={r.part_code + i} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                 <td style={td}>{(page - 1) * PAGE_SIZE + i + 1}</td>
@@ -123,6 +136,14 @@ export default function OtherPartStockTab({ apiUrl }) {
                 <td style={tdR}>{Number(r.unit_price) > 0 ? fmtMoney(r.unit_price) : "-"}</td>
                 <td style={tdR}>{Number(r.total_value) > 0 ? fmtMoney(r.total_value) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap", color: r.last_receipt_date ? "#1e40af" : "#9ca3af" }}>{r.last_receipt_date ? fmtDate(r.last_receipt_date) : "-"}</td>
+                <td style={{ ...td, whiteSpace: "nowrap" }}>
+                  {r.last_order_doc ? (
+                    <div>
+                      <div style={{ fontFamily: "monospace", fontSize: 12 }}>{r.last_order_doc}<span style={{ color: "#6b7280", fontSize: 10.5, marginLeft: 4 }}>{r.last_order_date ? fmtDate(r.last_order_date) : ""}</span></div>
+                      <span style={{ display: "inline-block", marginTop: 2, padding: "1px 8px", borderRadius: 10, fontSize: 11, fontWeight: 700, ...orderStatusStyle(r.last_order_status) }}>{r.last_order_status || "-"}</span>
+                    </div>
+                  ) : <span style={{ color: "#9ca3af" }}>-</span>}
+                </td>
                 <td style={{ ...td, fontSize: 11.5, color: "#6b7280" }}>{r.locations || "-"}</td>
               </tr>
             ))}
@@ -131,7 +152,7 @@ export default function OtherPartStockTab({ apiUrl }) {
                 <td style={td} colSpan={4}>รวมทั้งหมด ({filtered.length.toLocaleString()} รายการ)</td>
                 <td style={tdR}>{fmtQty(sums.quantity)}</td>
                 {STORES.map(s => <td key={s.k} style={tdR}>{fmtQty(sums[s.k])}</td>)}
-                <td style={tdR}></td><td style={tdR}>{fmtMoney(sums.total_value)}</td><td style={td}></td><td style={td}></td>
+                <td style={tdR}></td><td style={tdR}>{fmtMoney(sums.total_value)}</td><td style={td}></td><td style={td}></td><td style={td}></td>
               </tr>
             )}
           </tbody>
