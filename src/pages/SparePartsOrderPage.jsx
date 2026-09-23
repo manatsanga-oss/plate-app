@@ -238,23 +238,26 @@ export default function SparePartsOrderPage({ currentUser }) {
   // (จะสั่งเฉพาะตัวค้างส่งก่อน รหัสอื่นรอจนค้างส่งหมด) — เช็คจาก search_dcs_backorders ตาม vendor_po_no ทุกครั้งที่โหลดหน้า
   // เฉพาะใบระบบใหม่ (PDS-/PDO-) สถานะ สั่งซื้อแล้ว ↔ อะไหล่ค้างส่ง เท่านั้น (ใบเก่า DEPD/REC ไม่แตะ)
   async function syncBackorderStatus(list) {
+    // (user 2026-09-23) ใบที่กด "ยกเลิกสั่งซื้อค้างส่ง" = "รอยกเลิก DCS": รอจนรายงานค้างส่ง DCS ไม่มีเลข PO นี้แล้ว (พนักงานยกเลิกใน DCS + upload รอบใหม่)
+    //   → เปลี่ยนเป็น "คืนเงินมัดจำ" ให้กดคืนเงินได้ · ระหว่างรอถ้ายังค้างส่งอยู่ก็คงสถานะไว้
     const cands = list.filter(o => o && o.vendor_po_no && /^PD[SO]-/i.test(String(o.deposit_doc_no || ""))
-      && ["สั่งซื้อแล้ว", "อะไหล่ค้างส่ง"].includes(String(o.status || "").trim()));
+      && ["สั่งซื้อแล้ว", "อะไหล่ค้างส่ง", "รอยกเลิก DCS"].includes(String(o.status || "").trim()));
     if (!cands.length) return;
     const changed = [];
     for (const o of cands) {
       try {
         const bo = norm(await api("search_dcs_backorders", { vendor_po_no: o.vendor_po_no })).filter(b => b && Number(b.backorder_qty || 0) > 0);
-        const want = bo.length > 0 ? "อะไหล่ค้างส่ง" : "สั่งซื้อแล้ว";
-        if (want === String(o.status).trim()) continue;
+        const cur = String(o.status).trim();
+        const want = cur === "รอยกเลิก DCS" ? (bo.length > 0 ? cur : "คืนเงินมัดจำ") : (bo.length > 0 ? "อะไหล่ค้างส่ง" : "สั่งซื้อแล้ว");
+        if (want === cur) continue;
         await api("update_order_status", { order_id: o.order_id, status: want });
         changed.push({ id: o.order_id, status: want });
       } catch { /* เช็คไม่ได้ก็ข้าม รอบหน้าเช็คใหม่ */ }
     }
     if (changed.length) {
       setOrders(prev => prev.map(o => { const c = changed.find(x => x.id === o.order_id); return c ? { ...o, status: c.status } : o; }));
-      const nBo = changed.filter(c => c.status === "อะไหล่ค้างส่ง").length, nOk = changed.length - nBo;
-      setMessage(`🔄 อัปเดตสถานะจาก DCS: ค้างส่ง ${nBo} ใบ${nOk ? ` · ค้างส่งหมดแล้ว ${nOk} ใบ` : ""}`);
+      const nBo = changed.filter(c => c.status === "อะไหล่ค้างส่ง").length, nRf = changed.filter(c => c.status === "คืนเงินมัดจำ").length, nOk = changed.length - nBo - nRf;
+      setMessage(`🔄 อัปเดตสถานะจาก DCS: ค้างส่ง ${nBo} ใบ${nOk ? ` · ค้างส่งหมดแล้ว ${nOk} ใบ` : ""}${nRf ? ` · ยกเลิกใน DCS แล้ว รอคืนเงินมัดจำ ${nRf} ใบ` : ""}`);
     }
   }
 
@@ -547,6 +550,22 @@ export default function SparePartsOrderPage({ currentUser }) {
   // คืนเงินมัดจำจากใบสั่งซื้อที่สินค้ายังไม่มา → สถานะ "ยกเลิก (คืนเงิน)" (user 2026-09-04)
   const [refundOrder, setRefundOrder] = useState(null);
   const NOT_ARRIVED = ["อะไหล่ค้างส่ง"]; // คืนมัดจำได้เฉพาะใบที่ผู้ขายแจ้ง "อะไหล่ค้างส่ง" (สั่งแล้วของไม่มา) — ใบสั่งซื้อปกติที่รอของไม่ให้คืน (user 2026-09-04)
+  // (user 2026-09-23) ใบระบบ PDS/PDO ที่มีเลข PO: "อะไหล่ค้างส่ง" → กด "ยกเลิกสั่งซื้อค้างส่ง" → "รอยกเลิก DCS" → ระบบเช็ครายงานค้างส่ง DCS
+  //   จนเลข PO หายไป → "คืนเงินมัดจำ" → ค่อยกด ↩ คืนเงิน (บังคับให้ยกเลิกใน DCS ก่อนคืนเงินจริง) · ใบเก่า DEPD/REC ไม่มี PO เช็คไม่ได้ คืนตรงเหมือนเดิม
+  const isDcsTracked = (o) => !!o.vendor_po_no && /^PD[SO]-/i.test(String(o.deposit_doc_no || ""));
+  const canRefundNow = (o) => o.status === "คืนเงินมัดจำ" || (NOT_ARRIVED.includes(o.status) && !isDcsTracked(o));
+  async function requestCancelBackorder(o) {
+    if (!window.confirm(`ยกเลิกสั่งซื้ออะไหล่ค้างส่ง ใบ ${o.deposit_doc_no || o.order_no} (PO ${o.vendor_po_no})?\n\nหลังกดยืนยัน ให้ไปยกเลิกรายการค้างส่งใน DCS แล้ว upload รายงานค้างส่งรอบใหม่ — ระบบจะเปลี่ยนเป็น "คืนเงินมัดจำ" ให้เองเมื่อเลข PO นี้ไม่มีค้างส่งแล้ว`)) return;
+    try {
+      await api("update_order_status", { order_id: o.order_id, status: "รอยกเลิก DCS" });
+      setMessage(`⏳ ใบ ${o.deposit_doc_no || o.order_no} รอยกเลิกใน DCS — ยกเลิกรายการค้างส่งใน DCS แล้ว upload รายงานค้างส่ง ระบบจะเปิดให้คืนเงินมัดจำเอง`);
+      loadAll();
+    } catch { setMessage("❌ เปลี่ยนสถานะไม่สำเร็จ"); }
+  }
+  async function undoCancelBackorder(o) {
+    if (!window.confirm(`ยกเลิกคำขอ — ให้ใบ ${o.deposit_doc_no || o.order_no} กลับเป็น "อะไหล่ค้างส่ง" ตามเดิม?`)) return;
+    try { await api("update_order_status", { order_id: o.order_id, status: "อะไหล่ค้างส่ง" }); loadAll(); } catch { setMessage("❌ เปลี่ยนสถานะไม่สำเร็จ"); }
+  }
   async function doRefundOrder({ amount, method, note }) {
     const o = refundOrder; if (!o) return;
     try {
@@ -1174,7 +1193,7 @@ export default function SparePartsOrderPage({ currentUser }) {
 
       {/* ===== Filter สถานะ ===== */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
-        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "เปิดงาน", "ปิดงานซ่อม", "ยกเลิก (คืนเงิน)", "ตีราคาซ่อม"].map(s => {
+        {["all", "รอดำเนินการ", "สั่งซื้อแล้ว", "มาครบ", "อะไหล่ค้างส่ง", "รอยกเลิก DCS", "คืนเงินมัดจำ", "เปิดงาน", "ปิดงานซ่อม", "ยกเลิก (คืนเงิน)", "ตีราคาซ่อม"].map(s => {
           const count = s === "all" ? orders.filter(o => o.status !== "ปิดงานซ่อม" && o.status !== "ยกเลิก (คืนเงิน)").length : s === "ตีราคาซ่อม" ? repairDeposits.length : CLOSED_STATUSES.includes(s) ? countClosed(s) : orders.filter(o => o.status === s).length;
           const active = filterStatus === s;
           return (
@@ -1354,8 +1373,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                   return <>
                     <span style={{
                       padding: "2px 8px", borderRadius: 6, fontSize: 11,
-                      background: s === "ปิดงานซ่อม" ? "#dc2626" : s === "อะไหล่ค้างส่ง" ? "#f97316" : s === "เปิดงาน" ? "#ec4899" : s === "มาครบ" ? "#dbeafe" : s === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
-                      color: s === "ปิดงานซ่อม" ? "#fff" : s === "อะไหล่ค้างส่ง" ? "#fff" : s === "เปิดงาน" ? "#fff" : s === "มาครบ" ? "#1e40af" : s === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
+                      background: s === "ปิดงานซ่อม" ? "#dc2626" : s === "อะไหล่ค้างส่ง" ? "#f97316" : s === "รอยกเลิก DCS" ? "#7c2d12" : s === "คืนเงินมัดจำ" ? "#b91c1c" : s === "เปิดงาน" ? "#ec4899" : s === "มาครบ" ? "#dbeafe" : s === "สั่งซื้อแล้ว" ? "#d1fae5" : "#fef3c7",
+                      color: s === "ปิดงานซ่อม" ? "#fff" : s === "อะไหล่ค้างส่ง" ? "#fff" : s === "รอยกเลิก DCS" ? "#fff" : s === "คืนเงินมัดจำ" ? "#fff" : s === "เปิดงาน" ? "#fff" : s === "มาครบ" ? "#1e40af" : s === "สั่งซื้อแล้ว" ? "#065f46" : "#92400e",
                     }}>{s === "ปิดงานซ่อม" && isPDO ? "ปิดการขาย" : s}</span>
                     {saleBadge}
                   </>;
@@ -1392,8 +1411,14 @@ export default function SparePartsOrderPage({ currentUser }) {
                 ) : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
-                  {NOT_ARRIVED.includes(o.status) && (
+                  {canRefundNow(o) && (
                     <button onClick={() => setRefundOrder(o)} title="สั่งซื้อแล้วแต่สินค้ายังไม่มา → คืนเงินมัดจำ + ยกเลิกใบสั่งซื้อ" style={{ background: "#fff", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: 4 }}>↩ คืนเงิน</button>
+                  )}
+                  {NOT_ARRIVED.includes(o.status) && isDcsTracked(o) && (
+                    <button onClick={() => requestCancelBackorder(o)} title="ยกเลิกสั่งซื้ออะไหล่ค้างส่ง — ระบบจะรอเช็คจากรายงานค้างส่ง DCS ว่ายกเลิกแล้ว จึงเปิดให้คืนเงินมัดจำ" style={{ background: "#fff", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: 4 }}>⛔ ยกเลิกสั่งซื้อค้างส่ง</button>
+                  )}
+                  {o.status === "รอยกเลิก DCS" && (
+                    <button onClick={() => undoCancelBackorder(o)} title="ยกเลิกคำขอ กลับเป็นอะไหล่ค้างส่ง" style={{ background: "#fff", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: 4 }}>↺ กลับเป็นค้างส่ง</button>
                   )}
                   {(() => {
                     // ถ้าไม่พบเลขมัดจำใน deposits = ปิดซ่อม → ดูได้อย่างเดียว
