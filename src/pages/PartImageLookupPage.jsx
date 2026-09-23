@@ -45,12 +45,24 @@ const typeTokOf = (t) => ((String(t || "").toUpperCase().match(/\d?TH/) || [])[0
 // คู่มือรายการอะไหล่ของรุ่น (ถ้ามี) + variant (แบบ) ในเล่ม
 // รุ่นหนึ่งมีได้หลายเล่ม (คนละฉบับ/คนละชุดแบบ เช่น PCX160 เล่ม 01_25 = WW160AS/SS, เล่ม K1ZP = WW160P/AP) → เลือกเล่มที่มี "แบบ" ที่เลือก ไม่มีเล่มไหนตรงใช้เล่มแรก
 const booksOf = (m) => partsBooks.filter((b) => (b.brand || "HONDA") === (m.brand || "HONDA") && (b.models || [b.model]).some((x) => normModel(x) === normModel(m.model)));
-const bookVariantOf = (book, baeb) => {
-  if (!book) return null;
+// ตัวอักษรปีรุ่นของ Honda (ท้ายรหัสแบบ) เรียงตามปี — ใช้หาแบบ "ใกล้เคียง" เมื่อเล่มไม่มีแบบนั้นตรง ๆ (เช่น CSFM → CSFL/CSFP)
+const YEAR_SEQ = "ABCDEFGHJKLMNPRSTVWXY";
+const yearDist = (a, b) => { const i = YEAR_SEQ.indexOf(a), j = YEAR_SEQ.indexOf(b); return i < 0 || j < 0 ? 99 : Math.abs(i - j); };
+// คืน {variant, near} — near=true เมื่อเป็นแบบใกล้เคียง (ต่างแค่ตัวอักษรปี)
+const matchVariant = (vs, baeb) => {
   const nb = normModel(baeb);
-  const vs = book.variants || [];
-  return vs.find((v) => normModel(v.model_code) === nb) || vs.find((v) => normModel(v.model_code).startsWith(nb) || nb.startsWith(normModel(v.model_code))) || null;
+  if (!nb) return null;
+  const exact = vs.find((v) => normModel(v.model_code) === nb);
+  if (exact) return { variant: exact, near: false };
+  const pref = vs.find((v) => normModel(v.model_code).startsWith(nb) || nb.startsWith(normModel(v.model_code)));
+  if (pref) return { variant: pref, near: false };
+  const stem = nb.slice(0, -1), yr = nb.slice(-1);
+  const cands = vs.filter((v) => normModel(v.model_code).slice(0, -1) === stem).map((v) => ({ v, d: yearDist(yr, normModel(v.model_code).slice(-1)) })).filter((x) => x.d < 99);
+  if (!cands.length) return null;
+  cands.sort((a, b) => a.d - b.d);
+  return { variant: cands[0].v, near: true, dist: cands[0].d };
 };
+const bookVariantOf = (book, baeb) => (book ? matchVariant(book.variants || [], baeb)?.variant || null : null);
 // รุ่นที่มีเฉพาะคู่มือรายการอะไหล่ (ยังไม่มีสมุดภาพชุดสี เช่น PCX150) → สร้างรายการรุ่นเปล่า ๆ ให้เลือกในช่อง "รุ่น" ได้ แบบ/type ดึงจาก variants ของคู่มือ
 const bookOnlyModels = (() => {
   const out = [];
@@ -65,10 +77,15 @@ const bookOnlyModels = (() => {
   return out;
 })();
 const allModels = [...catalog, ...bookOnlyModels];
+// เลือกเล่มให้ตรงแบบ: ตรงตัว > prefix > แบบใกล้เคียง (ตัวอักษรปีห่างน้อยสุด) > เล่มแรก
 const bookOf = (m, baeb) => {
   const list = booksOf(m);
   if (!list.length) return null;
-  return list.find((b) => (b.variants || []).some((v) => normModel(v.model_code) === normModel(baeb))) || list.find((b) => bookVariantOf(b, baeb)) || list[0];
+  const scored = list.map((b) => ({ b, r: matchVariant(b.variants || [], baeb) })).filter((x) => x.r);
+  const exact = scored.find((x) => !x.r.near);
+  if (exact) return exact.b;
+  if (scored.length) { scored.sort((a, b) => (a.r.dist || 0) - (b.r.dist || 0)); return scored[0].b; }
+  return list[0];
 };
 
 async function fetchPrice(code) {
@@ -279,7 +296,7 @@ export default function PartImageLookupPage({ currentUser } = {}) {
       if (hit) bt = hit;
     }
 
-    setSelBrand(m.brand || "HONDA"); setModelIdx(bi); setSelBaeb(bb); setSelType(bt); setColorPage(null);
+    setSelBrand(m.brand || "HONDA"); setModelIdx(bi); setSelBaeb(bb); setSelType(bt); setColorPage(null); setSelBookSlug("");
     // 4) เลือก "สี" ตามรหัสสีของรถ (เช่น GBR) — รหัสไม่ตรง (ยามาฮ่า DMS ใช้คนละชุดกับสมุดภาพ) ลองเทียบด้วยชื่อสีต่อ
     let colorNote = "";
     const colorPool = cols.filter((c) => (c.model_code || NO_BAEB) === bb && (c.type || "-") === bt);
@@ -673,7 +690,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
           </div>
           <div style={{ flex: "1 1 160px" }}>
             <label style={lbl}>แบบ</label>
-            <select value={baeb} onChange={(e) => { setSelBaeb(e.target.value); setSelType(""); setColorPage(null); }} style={selStyle}>
+            <select value={baeb} onChange={(e) => { setSelBaeb(e.target.value); setSelType(""); setColorPage(null); setSelBookSlug(""); }} style={selStyle}>
               {baebList.map((b) => (
                 <option key={b} value={b}>{b}</option>
               ))}
@@ -681,7 +698,7 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
           </div>
           <div style={{ flex: "1 1 120px" }}>
             <label style={lbl}>type</label>
-            <select value={type} onChange={(e) => { setSelType(e.target.value); setColorPage(null); }} style={selStyle}>
+            <select value={type} onChange={(e) => { setSelType(e.target.value); setColorPage(null); setSelBookSlug(""); }} style={selStyle}>
               {typeList.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
