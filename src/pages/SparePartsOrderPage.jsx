@@ -286,6 +286,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   }
 
   // ปิดการขายอัตโนมัติ (ใบ PDO): เช็คบิลขายปลีก DCS (honda_part_sales เลข RTSL ตั้งแต่วันเปิดใบ) ทุกใบที่ยังไม่ปิด
+  // (2026-09-23) query ฝั่ง n8n จับคู่รหัสทดแทนจาก part_substitutes ด้วย (สั่ง 12010-KZR-600 ขาย 12010KZR603 = ขายแล้ว)
   // อะไหล่ขายครบทุกรายการ → ปิดการขายใบ PDO อัตโนมัติ (ข้อมูลมาจาก upload รายงานขายอะไหล่ SPR07030 — สถานะจะขยับหลัง upload รอบล่าสุด)
   async function checkPdoSales() {
     try {
@@ -297,7 +298,8 @@ export default function SparePartsOrderPage({ currentUser }) {
         m.total += 1;
         if (!r.sale_doc_no) return;
         m.sold += 1;
-        m.items[strip(r.part_code)] = { doc: r.sale_doc_no, date: r.sale_date, customer: r.sale_customer };
+        // sold_code = รหัสบนบิลจริง — ต่างจากรหัสที่สั่งเมื่อขายด้วยรหัสทดแทน (part_substitutes) — user 2026-09-23
+        m.items[strip(r.part_code)] = { doc: r.sale_doc_no, date: r.sale_date, customer: r.sale_customer, soldCode: r.sold_code && strip(r.sold_code) !== strip(r.part_code) ? r.sold_code : "" };
         if (!m.docs.includes(r.sale_doc_no)) m.docs.push(r.sale_doc_no);
         if (r.sale_customer && !m.customers.includes(r.sale_customer)) m.customers.push(r.sale_customer);
         if (!m.lastDate || String(r.sale_date) > String(m.lastDate)) m.lastDate = r.sale_date;
@@ -1805,7 +1807,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                         const hit = pdoSoldMap[showDetail.order_id]?.items?.[(it.part_code || "").replace(/-/g, "").toUpperCase().trim()];
                         return hit ? (
                           <div style={{ color: "#b91c1c", fontWeight: 700, fontSize: 12 }} title={hit.customer ? `ลูกค้าบนบิล: ${hit.customer}` : ""}>
-                            🛒 ขายแล้ว {hit.doc}{hit.date ? ` · ${fmtDate(hit.date)}` : ""}
+                            🛒 ขายแล้ว {hit.doc}{hit.date ? ` · ${fmtDate(hit.date)}` : ""}{hit.soldCode ? ` · ขายด้วยรหัสทดแทน ${hit.soldCode}` : ""}
                           </div>
                         ) : null;
                       })()}
