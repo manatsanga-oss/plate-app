@@ -505,7 +505,28 @@ export function buildDailyCashItems(src, ctx) {
         note: `หักเงินสดหน้าร้าน${period}${pending ? " · รออนุมัติ" : ""}`,
       };
     });
-  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...whtRefundIns, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds, ...pettyOuts];
+  // คืนเงินมัดจำอะไหล่ "ใบระบบ" PDS-/PDO- (refund_deposit จากหน้ามัดจำอะไหล่ / หน้าสั่งซื้อ) — หักเงินสด/เงินโอนตามวิธีคืน ณ วันคืน (user 2026-09-23 เคส PDO-6909-00104)
+  // รายรับตอนรับมัดจำยังนับ ณ deposit_date ตามเดิม (แถว part_deposit) — แถวนี้คือเงินออกตอนคืน
+  const sysRefunds = partDepRows
+    .filter((d) => !isLegacyRefundRow(d) && d.refunded_at && num(d.refunded_amount) > 0)
+    .filter((d) => { const dt = String(d.refunded_at).slice(0, 10); return dt >= dateFrom && dt <= dateTo; })
+    .filter((d) => inBranch(d.branch_code, ctx))
+    .map((d) => {
+      const amt = -num(d.refunded_amount);
+      const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, other: 0 };
+      split[methodKey(d.refund_method || "เงินสด")] += amt;
+      const orderNo = (String(d.remark || "").match(/ใบสั่งซื้อ\s*(\S+)/) || [])[1] || "";
+      const reason = (String(d.remark || "").split("คืนเงิน:")[1] || "").trim();
+      return {
+        kind: "part_dep_refund", category: "คืนเงินมัดจำอะไหล่ (จ่ายออก)",
+        doc_no: d.deposit_doc_no, date: String(d.refunded_at).slice(0, 10), ref_no: orderNo,
+        customer_name: d.customer_name, seller: d.refunded_by || "", saleAmount: 0,
+        split, received: amt,
+        branch_key: bc5(d.branch_code), branch_name: d.branch_code || "ไม่ระบุสาขา",
+        note: ["คืนเงินมัดจำ" + (d.deposit_type ? d.deposit_type : "") + " " + (d.brand || ""), reason].filter(Boolean).join(" · "),
+      };
+    });
+  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...whtRefundIns, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds, ...sysRefunds, ...pettyOuts];
 }
 
 /** ยอดเงินสดรับสุทธิ (นำฝากธนาคาร) แยกตามวัน+สาขา — ใช้ในหน้าบันทึกฝากเงิน */
