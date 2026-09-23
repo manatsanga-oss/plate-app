@@ -1162,9 +1162,23 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
       // หาใบมัดจำ: ใช้เลขที่ผูกในใบขายก่อน ไม่มีค่อยจับคู่จากชื่อลูกค้า (ใบที่ยังไม่คืน)
       let depNo = String(sale.deposit_no || "").trim();
       if (!depNo) {
+        // (2026-09-23) retail_sales ไม่ได้เก็บ deposit_no → หาจากใบจองที่ถูกขายเป็นใบขายนี้ก่อน (moto_bookings.invoice_no = เลขใบขาย)
+        // เคส SCY06-MCSA-2609-00034: ชื่อในใบขายมีคำนำหน้า "นางสาว" (wizard เติมให้) แต่ใบมัดจำไม่มี → เทียบชื่อตรง ๆ ไม่เจอ
+        try {
+          const bks = await apiPostTo(BOOKING_API, { action: "get_moto_bookings" });
+          const bk = (Array.isArray(bks) ? bks : []).find((b) => b && b.deposit_no && String(b.invoice_no || "").trim() === String(sale.sale_no || "").trim());
+          if (bk) depNo = String(bk.deposit_no).trim();
+        } catch { /* ไปใช้วิธีเทียบชื่อ/เบอร์ต่อ */ }
+      }
+      if (!depNo) {
         const deps = await apiPostTo(DEPOSIT_REFUND_API, { action: "get_deposits" });
-        const nm = String(sale.customer_name || "").replace(/\s+/g, "");
-        const cand = (Array.isArray(deps) ? deps : []).filter((d) => d && d.deposit_no && d.status !== "refunded" && String(d.customer_name || "").replace(/\s+/g, "") === nm);
+        // เทียบชื่อแบบตัดคำนำหน้า (นาย/นาง/นางสาว/น.ส./MR./MS./MRS.) + สำรองด้วยเบอร์โทร 9 หลักท้าย
+        const normName = (v) => String(v || "").replace(/\s+/g, "").replace(/^(นางสาว|น\.ส\.|นาง|นาย|ด\.ช\.|ด\.ญ\.|MRS\.?|MS\.?|MR\.?|MISS)/i, "");
+        const phoneKey = (v) => String(v || "").replace(/\D/g, "").slice(-9);
+        const nm = normName(sale.customer_name), ph = phoneKey(sale.customer_phone);
+        const open = (Array.isArray(deps) ? deps : []).filter((d) => d && d.deposit_no && d.status !== "refunded");
+        const cand = open.filter((d) => normName(d.customer_name) === nm)
+          .concat(ph.length === 9 ? open.filter((d) => phoneKey(d.customer_phone) === ph && normName(d.customer_name) !== nm) : []);
         if (!cand.length) throw new Error("ไม่พบใบมัดจำค้างคืนของลูกค้ารายนี้ — ตรวจที่เมนูมัดจำจองรถ");
         depNo = cand[0].deposit_no;
       }

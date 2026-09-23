@@ -190,10 +190,15 @@ export function buildSaleItems(rows, depRows, ctx) {
       for (const p of pms) split[methodKey(p.method)] += num(p.amount);
       const paid = num(r.paid_amount) || METHOD_COLS.reduce((s, c) => s + split[c.key], 0);
       const refDep = depRows.find((d) => d.refunded_at && String(d.refund_note || "").includes(r.sale_no));
-      const depAdd = Math.max(num(r.booking_deposit) - (refDep ? num(refDep.deposit_amount) : 0), 0);
+      // ยอดมัดจำที่ "ใช้จริง" กับใบขาย: คืนแล้ว → หักยอดใบมัดจำออก (แถว deposit_applied เติมส่วนที่ใช้ให้แทน)
+      // ยังไม่คืนแต่ยอดต้องชำระติดลบ (มัดจำเกินยอด) → ใช้แค่ booking_deposit + total_payment ส่วนที่เหลือ "รอคืน" ไม่นับเป็นรายรับ (user 2026-09-23 เคส SCY06-MCSA-2609-00034 มัดจำ 1,000 ใช้ 200 รอคืน 800)
+      const pendingRefund = !refDep && num(r.total_payment) < 0 ? Math.min(-num(r.total_payment), num(r.booking_deposit)) : 0;
+      const depAdd = Math.max(num(r.booking_deposit) - (refDep ? num(refDep.deposit_amount) : 0) - pendingRefund, 0);
       split.deposit += depAdd;
       const received = paid + depAdd;
-      return { ...r, split, received, saleAmount: num(r.net_car_price || r.car_price) };
+      const note0 = r.payment_received_note || "";
+      const payment_received_note = pendingRefund > 0 ? [note0, `รอคืนเงินมัดจำ ${fmt(pendingRefund)} (มัดจำ ${fmt(r.booking_deposit)} ใช้ ${fmt(depAdd)})`].filter(Boolean).join(" · ") : note0;
+      return { ...r, payment_received_note, split, received, saleAmount: num(r.net_car_price || r.car_price) };
     });
 }
 export function buildDepItems(depRows, ctx) {
