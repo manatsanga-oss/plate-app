@@ -1163,6 +1163,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       // ขายเงินสด: ต้องรับชำระครบยอดพร้อมบันทึกขาย (ห้ามบันทึกขายแล้วค่อยรับทีหลัง/รับไม่ครบ) — user 2026-09-07 (เคส SCY06-MCSA-2609-00011 รับ 30,100 จาก 70,100)
       const cashMustPay = !isWholesale && saleType === "cash" && custPayNow > 0;
       if (cashMustPay) { const err = payLinesError(custPayNow); if (err) throw new Error(err.replace(/^❌\s*/, "")); }
+      // กันยอดรับชำระติดลบ (user 2026-09-23): ร้านออกแทน (โปร + ยอดที่พิมพ์) ต้องไม่เกินยอดที่ลูกค้าต้องจ่าย (เงินดาวน์ + ค่างวดล่วงหน้า + ประกัน)
+      // เคย 16 ใบ ส.ค.–ก.ย. พิมพ์ค่างวดออกแทน 1 งวดแต่ไม่กรอกค่างวดล่วงหน้า → หน้ารับชำระขึ้นติดลบ (มัดจำ/ป้ายแดงไม่นับ — มัดจำเกินคืนได้ตามปกติ)
+      const dueBeforeDep = isFin ? fc.down + fc.advance + custPaidTheft : netCar;
+      const shopPayout = downSubTotal + typedPayout;
+      if (!isWholesale && shopPayout > dueBeforeDep + 0.005) {
+        throw new Error(`ยอดร้านออกแทน ${Number(shopPayout).toLocaleString("th-TH")} บาท มากกว่ายอดที่ลูกค้าต้องจ่าย ${Number(dueBeforeDep).toLocaleString("th-TH")} บาท (เงินดาวน์ + ค่างวดล่วงหน้า) — ยอดรับชำระจะติดลบ กรอก "ค่างวดจ่ายล่วงหน้า"/"เงินดาวน์" ให้ครบ หรือลดยอดออกแทนก่อนบันทึก`);
+      }
       const payload = {
         action: "save_sale",
         brand: vehicle.brand, stock_table: vehicle.stock_table, stock_id: vehicle.stock_id,
@@ -2404,7 +2411,9 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                   const dep = depositAmt;
                   // ติดลบ = มัดจำมากกว่ายอดที่ต้องจ่าย → ต้องคืนเงินมัดจำลูกค้า
                   const receive = carPrice == null ? null : (isFin ? fc.down + fc.advance + custPaidTheft : netCar) - dep + redPlateDep - downSubTotal - typedPayout; // ลูกค้าจ่ายจริง (หักร้านออกแทนทั้งก้อนเหมือนหน้ารับชำระ)
-                  const isRefund = receive != null && receive < 0;
+                  // ออกแทนเกินยอดที่ลูกค้าต้องจ่าย (ไม่นับมัดจำ/ป้ายแดง) → ห้ามบันทึก (user 2026-09-23)
+                  const payoutOver = carPrice == null || isWholesale ? 0 : Math.max((downSubTotal + typedPayout) - (isFin ? fc.down + fc.advance + custPaidTheft : netCar), 0);
+                  const isRefund = receive != null && receive < 0 && payoutOver <= 0;
                   const row = (label, val, opts = {}) => (
                     <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", fontSize: opts.big ? 18 : 14, fontWeight: opts.big ? 700 : 400, color: opts.color || "#111827", borderTop: opts.line ? "1px dashed #d1d5db" : "none" }}>
                       <span>{label}</span><span>{val}</span>
@@ -2477,7 +2486,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         {redPlateDep > 0 && row("มัดจำป้ายแดง (" + text(redPlateNo) + ")", "+" + fmtBaht(redPlateDep), { color: "#b91c1c" })}
                         {isRefund
                           ? row("คืนเงินมัดจำลูกค้า", fmtBaht(Math.abs(receive)), { big: true, line: true, color: "#b45309" })
-                          : row(isFin ? "รวมยอดชำระ" : "รับชำระเงิน", fmtBaht(receive), { big: true, line: true, color: "#166534" })}
+                          : row(isFin ? "รวมยอดชำระ" : "รับชำระเงิน", fmtBaht(receive), { big: true, line: true, color: payoutOver > 0 ? "#b91c1c" : "#166534" })}
+                        {payoutOver > 0 && (
+                          <div style={{ marginTop: 6, padding: "8px 10px", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: 8, fontSize: 12.5, color: "#b91c1c", fontWeight: 700 }}>
+                            ⛔ ยอดร้านออกแทนเกินยอดที่ลูกค้าต้องจ่าย {fmtBaht(payoutOver)} — ยอดรับชำระจะติดลบ กรอก "ค่างวดจ่ายล่วงหน้า"/"เงินดาวน์" ให้ครบ หรือลดยอดออกแทน ก่อนบันทึก
+                          </div>
+                        )}
                         {isFin && fc.n > 0 && (
                           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>
                             ผ่อน {fc.n} งวด × {Number(fc.inst).toLocaleString("th-TH")} บาท (ดอกเบี้ย {finRate}%/เดือน)
@@ -2519,7 +2533,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           })()}
                         </div>
                       ) : (
-                        <button onClick={handleSaveSale} disabled={saving || carPrice == null}
+                        <button onClick={handleSaveSale} disabled={saving || carPrice == null || payoutOver > 0}
                           style={{ marginTop: 14, width: "100%", maxWidth: 420, padding: "13px 0", background: saving ? "#9ca3af" : "#16a34a", color: "#fff", border: "none", borderRadius: 10, cursor: saving ? "wait" : "pointer", fontSize: 17, fontWeight: 700, fontFamily: "Tahoma" }}>
                           {saving ? "กำลังบันทึก..." : receive == null ? "💾 บันทึกขาย" : isRefund ? `💾 บันทึกขาย — คืนเงินมัดจำ ${fmtBaht(Math.abs(receive))}` : `💾 บันทึกขาย — ${isFin ? "รวมยอดชำระ" : "รับชำระ"} ${fmtBaht(receive)}`}
                         </button>
