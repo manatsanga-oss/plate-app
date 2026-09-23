@@ -13,16 +13,21 @@ const normCode = (s) => String(s || "").toUpperCase().replace(/[\s\-._/()]/g, ""
 const typeTokOf = (t) => ((String(t || "").toUpperCase().match(/\d?TH/) || [])[0] || "");
 
 // จับคู่ "แบบ" ของ cascade (จากสมุดชุดสี) กับ variant ในคู่มือ — ตรงตัวก่อน, ไม่ตรงลอง prefix (ชุดสี ACB160CAT vs คู่มือ ACB160CATN/CATR/CATV) เลือกตัวที่มี type ที่เลือก
+const YEAR_SEQ = "ABCDEFGHJKLMNPRSTVWXY";   // ตัวอักษรปีรุ่น Honda ท้ายรหัสแบบ
+const yearDist = (a, b) => { const i = YEAR_SEQ.indexOf(a), j = YEAR_SEQ.indexOf(b); return i < 0 || j < 0 ? 99 : Math.abs(i - j); };
+// คืน {variant, near}: ตรงตัว → prefix (เลือกตัวที่มี type) → แบบใกล้เคียงต่างแค่ตัวอักษรปี (near=true, เช่น CSFM → CSFL)
 function findVariant(book, baeb, type) {
   if (!book || !baeb) return null;
   const nb = normCode(baeb);
   const vs = book.variants || [];
   const exact = vs.find((v) => normCode(v.model_code) === nb);
-  if (exact) return exact;
+  if (exact) return { variant: exact, near: false };
   const tok = typeTokOf(type);
   const pref = vs.filter((v) => normCode(v.model_code).startsWith(nb) || nb.startsWith(normCode(v.model_code)));
-  if (!pref.length) return null;
-  return pref.find((v) => tok && (v.types || []).some((t) => typeTokOf(t) === tok)) || pref[0];
+  if (pref.length) return { variant: pref.find((v) => tok && (v.types || []).some((t) => typeTokOf(t) === tok)) || pref[0], near: false };
+  const stem = nb.slice(0, -1), yr = nb.slice(-1);
+  const cands = vs.map((v) => ({ v, d: normCode(v.model_code).slice(0, -1) === stem ? yearDist(yr, normCode(v.model_code).slice(-1)) : 99 })).filter((x) => x.d < 99).sort((a, b) => a.d - b.d);
+  return cands.length ? { variant: cands[0].v, near: true } : null;
 }
 
 // แถวนี้ใช้กับ แบบ/type ที่เลือกไหม (null = เล่มไม่ระบุ → ถือว่าใช้)
@@ -43,7 +48,9 @@ export default function PartsBookPanel({ book, baeb, type, modelName, isPicked, 
   const [onlyApplicable, setOnlyApplicable] = useState(false);
   const [selRef, setSelRef] = useState(null);     // หมายเลขบนรูปที่กด ("*" = ทั้งหมด) — รายการขึ้นเฉพาะเลขที่เลือก
 
-  const variant = findVariant(book, baeb, type);
+  const vm = findVariant(book, baeb, type);
+  const variant = vm?.variant || null;
+  const nearVariant = !!vm?.near;
   const blocks = useMemo(() => book.blocks || [], [book]);
   const block = blocks.find((b) => b.code === selBlock) || null;
   const blockIdx = block ? blocks.indexOf(block) : -1;
@@ -118,6 +125,7 @@ ${rows.map((p) => `<tr class="${rowApplies(p, variant, type) ? "" : "off"}"><td>
           <span style={{ fontWeight: 400, color: "#64748b", marginLeft: 8, fontSize: 12.5 }}>
             {book.edition ? `ฉบับ ${book.edition} · ` : ""}แสดงสำหรับ <b style={{ color: "#0f172a" }}>{applyLabel}</b>
             {!variant && <span style={{ color: "#b45309" }}> (เล่มนี้ไม่มีแบบ {baeb} — แสดงทุกรายการ)</span>}
+            {nearVariant && <span style={{ color: "#b45309" }}> (ไม่มีแบบ {baeb} ในเล่ม — ใช้แบบใกล้เคียง {variant.model_code})</span>}
           </span>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
