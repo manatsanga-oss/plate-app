@@ -21,6 +21,7 @@ export default function OtherPartStockTab({ apiUrl }) {
   const [search, setSearch] = useState("");
   const [group, setGroup] = useState("all");
   const [store, setStore] = useState("all");
+  const [onlyReceived, setOnlyReceived] = useState(false); // แสดงเฉพาะรหัสที่มีวันที่รับเข้าล่าสุด (user 2026-09-23)
   const [page, setPage] = useState(1);
 
   async function load() {
@@ -45,13 +46,14 @@ export default function OtherPartStockTab({ apiUrl }) {
     return rows.filter(r => {
       if (group !== "all" && r.product_group !== group) return false;
       if (store !== "all" && !(Number(r[store]) > 0)) return false;
+      if (onlyReceived && !r.last_receipt_date) return false;
       if (q) {
         const code = String(r.part_code || "").toLowerCase();
         if (!(code.includes(q) || code.replace(/-/g, "").includes(qn) || String(r.product_name || "").toLowerCase().includes(q) || String(r.product_group || "").toLowerCase().includes(q))) return false;
       }
       return true;
     });
-  }, [rows, search, group, store]);
+  }, [rows, search, group, store, onlyReceived]);
   useEffect(() => { setPage(1); }, [search, group, store]);
 
   const sums = useMemo(() => filtered.reduce((t, r) => {
@@ -88,6 +90,9 @@ export default function OtherPartStockTab({ apiUrl }) {
           <option value="all">🏬 ทุกร้าน</option>
           {STORES.map(s => <option key={s.k} value={s.k}>มีของที่ {s.l}</option>)}
         </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#1e40af", cursor: "pointer", whiteSpace: "nowrap" }} title="ซ่อนรหัสที่ไม่เคยมีใบรับสินค้าในระบบ (คอลัมน์รับเข้าล่าสุดเป็น -)">
+          <input type="checkbox" checked={onlyReceived} onChange={e => { setOnlyReceived(e.target.checked); setPage(1); }} /> เฉพาะที่มีวันที่รับเข้า
+        </label>
         <button onClick={load} disabled={loading} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>{loading ? "กำลังโหลด..." : "Refresh"}</button>
         <button onClick={exportCsv} disabled={!filtered.length} style={{ padding: "8px 16px", fontSize: 13, background: filtered.length ? "#15803d" : "#d1d5db", color: "#fff", border: "none", borderRadius: 8, cursor: filtered.length ? "pointer" : "default", fontWeight: 700 }}>⬇️ Excel (CSV)</button>
         <span style={{ fontSize: 13, color: "#374151" }}>{filtered.length.toLocaleString()} รายการ · รวม {fmtQty(sums.quantity)} ชิ้น · มูลค่า {fmtMoney(sums.total_value)} บาท{reportDate ? ` · ข้อมูล ณ ${fmtDate(reportDate)}` : ""}</span>
