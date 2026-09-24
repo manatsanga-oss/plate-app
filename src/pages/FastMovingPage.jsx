@@ -4,7 +4,7 @@ const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-a
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-master-api";
 
 // แท็บ "หมวกและอะไหล่ตกแต่ง" (user 2026-09-24): กลุ่มสินค้าที่ขึ้นต้นด้วยรหัสเหล่านี้แยกออกจากรายการหมุนเร็วหลัก — เพิ่มรหัสกลุ่มที่นี่ถ้าจะย้ายกลุ่มอื่นมาด้วย
-const DECOR_TAB_GROUPS = ["PG-033"]; // PG-033 หมวกกันน๊อก
+const DECOR_TAB_GROUPS = ["PG-032", "PG-033"]; // PG-032 ACCESSORIES (อะไหล่ตกแต่ง YAMAHA 108 รหัส เพิ่ม 2026-09-24), PG-033 หมวกกันน๊อก
 const isDecorRow = (r) => DECOR_TAB_GROUPS.some((g) => String(r?.product_group || "").toUpperCase().startsWith(g));
 
 export default function FastMovingPage() {
