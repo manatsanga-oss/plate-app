@@ -14,7 +14,8 @@ const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sal
 const USED_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const GIVEAWAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/giveaway-rules-api";
-const PRICE_OVERRIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/vehicle-price-override-api"; // ราคาแก้ไขเฉพาะคัน (บันทึกก่อนขาย) — ใช้แทนราคาประกาศเป็นฐาน (user 2026-09-01)
+const PRICE_OVERRIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/vehicle-price-override-api";
+const DRESSUP_API = "https://n8n-new-project-gwf2.onrender.com/webhook/vehicle-dressup-api"; // อะไหล่แต่งรถสำหรับขาย — บวกยอดเข้าราคาขาย + ป้ายรถแต่ง + โชว์เป็นของแถม (user 2026-09-24) // ราคาแก้ไขเฉพาะคัน (บันทึกก่อนขาย) — ใช้แทนราคาประกาศเป็นฐาน (user 2026-09-01)
 
 // กฎกลุ่มไฟแนนท์ที่มี note "exclude:CODE1,CODE2,BIGBIKE,YAMAHA" → ไม่ใช้กับรุ่น/แบบ/ยี่ห้อที่ระบุ (เทียบแบบขึ้นต้นด้วยรหัส เช่น ADV160 ครอบ ADV160AT) · BIGBIKE = ประเภทรถมีคำว่า BIG · HONDA/YAMAHA = ยกเว้นทั้งยี่ห้อ (2026-09-05)
 function excludedByNote(note, codes, vehicleTypeName, brandName) {
@@ -306,6 +307,8 @@ export default function SaleWizardPage({ currentUser }) {
     }
     for (const g of (productGiveaways || []).filter((x) => selectedProductGiveaways[x.id]))
       gRows += gRow(g.part_code || g.fmp_product_code || "", g.fmp_product_name || g.part_name || g.part_code || "-", Number(g.qty || 1));
+    // อะไหล่แต่งรถ (รถแต่ง) — โชว์เป็นรายการแถมในใบขาย (user 2026-09-24)
+    for (const it of dressupItems) gRows += gRow(it.part_code || "", `${it.part_name || it.part_code || "-"} (อะไหล่แต่งรถ)`, Number(it.qty || 1));
     // เงินดาวน์/ค่างวดออกแทน — นับเป็นของแถมในใบขายด้วย (ยอดฐานเก็บใน down_payout_amount)
     const dpAmt = Number(sale.down_payout_amount ?? (adjOpen && useDownPayout ? downPayout : 0)) || 0;
     if (dpAmt > 0) gRows += gRow("", `เงินดาวน์/ค่างวดออกแทน ${money(dpAmt)} บาท`, 1);
@@ -1232,6 +1235,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       setStock(prev => prev.filter(r => r.engine_no !== selUnit.engine_no)); // เอาคันที่ขายออกจากลิสต์สต๊อก
       // ใช้ราคาแก้ไขเฉพาะคันไปแล้ว → ปิดสถานะเป็น "ใช้ขายแล้ว" ผูกเลขใบขาย (กันเอาไปใช้ซ้ำ)
       if (unitOverride) post(PRICE_OVERRIDE_API, { action: "mark_used", engine_no: selUnit.engine_no, sale_no: sale.sale_no }).catch(() => {});
+      // ใช้อะไหล่แต่งรถไปแล้ว → ปิดสถานะเป็น "ใช้ขายแล้ว" ผูกเลขใบขาย
+      if (unitDressup) { post(DRESSUP_API, { action: "mark_used", engine_no: selUnit.engine_no, sale_no: sale.sale_no }).catch(() => {}); setDressups((prev) => prev.filter((o) => o.id !== unitDressup.id)); }
       if (autoLink?.customer_line_user_id) msg += " · 🔗 ผูก LINE ลูกค้าจากเบอร์โทรให้อัตโนมัติ";
       if (custLineUserId || autoLink?.customer_line_user_id) msg += " · กำลังส่งใบขายเข้า LINE ลูกค้า...";
       setMessage(msg);
@@ -1427,6 +1432,17 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       .then((d) => { try { setPriceOverrides(typeof d?.listjson === "string" ? JSON.parse(d.listjson) : Array.isArray(d) ? d : []); } catch { setPriceOverrides([]); } })
       .catch(() => setPriceOverrides([]));
   }, []);
+  // อะไหล่แต่งรถสำหรับขาย (เมนู Sales → บันทึกอะไหล่แต่งรถสำหรับขาย) — ดึงตามเลขเครื่อง status active (user 2026-09-24)
+  const [dressups, setDressups] = useState([]);
+  useEffect(() => {
+    post(DRESSUP_API, { action: "list_dressups", status: "active" })
+      .then((d) => { try { setDressups(typeof d?.listjson === "string" ? JSON.parse(d.listjson) : Array.isArray(d) ? d : []); } catch { setDressups([]); } })
+      .catch(() => setDressups([]));
+  }, []);
+  const dressupOf = (eng) => { const e = text(eng).toUpperCase(); return e ? (dressups.find((o) => o && o.status === "active" && text(o.engine_no).toUpperCase() === e) || null) : null; };
+  const unitDressup = useMemo(() => (selUnit?.engine_no ? dressupOf(selUnit.engine_no) : null), [selUnit, dressups]); // eslint-disable-line
+  const dressupTotal = unitDressup ? num(unitDressup.total_price) : 0;       // บวกเข้าราคาขาย (ผ่าน adjustmentsBase)
+  const dressupItems = unitDressup && Array.isArray(unitDressup.items) ? unitDressup.items : [];
   const unitOverride = useMemo(() => {
     if (!selUnit?.engine_no) return null;
     const eng = text(selUnit.engine_no).toUpperCase();
@@ -1529,7 +1545,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   })();
   // ซื้อประกันรถหาย COSMOS เพิ่ม: บวกตรงตามเบี้ยที่ใส่ เฉพาะขายเงินสด
   const insAddTotal = adjOpen && saleType === "cash" && useInsAdd ? Math.max(num(insAdd), 0) : 0;
-  const adjustmentsBase = deliveryBonus + downPayoutCalc + insAddTotal;
+  const adjustmentsBase = deliveryBonus + downPayoutCalc + insAddTotal + dressupTotal; // + อะไหล่แต่งรถ (บวกทับทั้งราคาประกาศและราคาสุทธิเฉพาะคัน)
   // SGF (user 2026-09-16): ราคาขายรวมผ่อนไฟแนนท์ SGF ปัดขึ้นหลักพันเสมอ เช่น 56,400 → 57,000 · 57,100 → 58,000 · 86,300 → 87,000 (ลงท้ายพันอยู่แล้วไม่บวก)
   const sgfRoundUp = (() => {
     if (!isSGF) return 0;
@@ -1950,7 +1966,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                               onMouseEnter={(e) => { e.currentTarget.style.background = "#eff6ff"; }}
                               onMouseLeave={(e) => { e.currentTarget.style.background = ""; }}>
                               <td>{i + 1}</td>
-                              <td style={{ fontWeight: 600, color: "#1d4ed8" }}>{u.engine_no}</td>
+                              <td style={{ fontWeight: 600, color: "#1d4ed8" }}>{u.engine_no}{dressupOf(u.engine_no) && <span title={`รถแต่ง: บวกอะไหล่แต่ง ${fmtBaht(dressupOf(u.engine_no).total_price)} เข้าราคาขาย`} style={{ marginLeft: 6, padding: "1px 7px", borderRadius: 10, background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", fontSize: 11, fontWeight: 700 }}>🔧 รถแต่ง +{Number(num(dressupOf(u.engine_no).total_price)).toLocaleString("th-TH")}</span>}</td>
                               <td style={{ color: "#1d4ed8" }}>{u.chassis_no || "-"}</td>
                               <td>{u.model}{u.model_type ? ` / ${u.model_type}` : ""}</td>
                               <td>{text(u.received_date).slice(0, 10)}</td>
@@ -2002,6 +2018,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                     {info("หมายเลขตัวถัง", selUnit.chassis_no || "-")}
                     {info("รุ่น/แบบ", `${selUnit.model}${selUnit.model_type ? " / " + selUnit.model_type : ""}`)}
                     {info("รับเข้า", `${text(selUnit.received_date).slice(0, 10)} (อายุสต๊อก ${selUnit.age_days} วัน)`)}
+                    {unitDressup && info("🔧 รถแต่ง", `${dressupItems.length} รายการ · บวกราคาขาย ${fmtBaht(dressupTotal)}`)}
                     <button onClick={() => { setSelUnit(null); setSaleType(null); setFinanceCo(null); }}
                       style={{ marginTop: 6, padding: "5px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13, fontFamily: "Tahoma" }}>
                       เปลี่ยนคัน
@@ -2067,13 +2084,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
                             ราคาประกาศ {fmtBaht(price)}
                             {markupsTotal > 0 ? ` + บวกเพิ่ม ${Number(markupsTotal).toLocaleString("th-TH")}` : ""}
-                            {adjustmentsBase > 0 ? ` + ปรับแต่ง ${Number(adjustmentsBase).toLocaleString("th-TH")}` : ""}
+                            {adjustmentsBase - dressupTotal > 0 ? ` + ปรับแต่ง ${Number(adjustmentsBase - dressupTotal).toLocaleString("th-TH")}` : ""}{dressupTotal > 0 ? ` + อะไหล่แต่ง ${Number(dressupTotal).toLocaleString("th-TH")}` : ""}
                             {sgfRoundUp > 0 ? ` + ปัดหลักพัน SGF ${Number(sgfRoundUp).toLocaleString("th-TH")}` : ""}
                           </div>
                         )}
                         {unitOverride && adjustmentsTotal > 0 && (
                           <div style={{ fontSize: 12, color: "#166534", marginTop: 2 }}>
-                            ราคาสุทธิเฉพาะคัน {fmtBaht(overrideFinal)}{adjustmentsBase > 0 ? ` + ปรับแต่ง ${Number(adjustmentsBase).toLocaleString("th-TH")}` : ""}{sgfRoundUp > 0 ? ` + ปัดหลักพัน SGF ${Number(sgfRoundUp).toLocaleString("th-TH")}` : ""}
+                            ราคาสุทธิเฉพาะคัน {fmtBaht(overrideFinal)}{adjustmentsBase - dressupTotal > 0 ? ` + ปรับแต่ง ${Number(adjustmentsBase - dressupTotal).toLocaleString("th-TH")}` : ""}{dressupTotal > 0 ? ` + อะไหล่แต่ง ${Number(dressupTotal).toLocaleString("th-TH")}` : ""}{sgfRoundUp > 0 ? ` + ปัดหลักพัน SGF ${Number(sgfRoundUp).toLocaleString("th-TH")}` : ""}
                           </div>
                         )}
                         {/* ป้ายราคาสุทธิเฉพาะคัน (แทนราคาประกาศ+กฎบวกเพิ่มไฟแนนท์ — รายการปรับแต่งรายคันยังบวกทับ): แดง = ต่ำกว่าประกาศ · ฟ้า = สูงกว่าประกาศ */}
@@ -2091,6 +2108,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                             </div>
                           );
                         })()}
+                        {unitDressup && (
+                          <div style={{ marginTop: 6, padding: "6px 10px", borderRadius: 8, background: "#fff7ed", border: "1px solid #fdba74", fontSize: 12.5, color: "#9a3412", textAlign: "left" }}>
+                            🔧 <b>รถแต่ง — บวกอะไหล่แต่งเข้าราคาขาย {fmtBaht(dressupTotal)}</b> ({dressupItems.length} รายการ: {dressupItems.map((it) => it.part_name || it.part_code).join(", ")})
+                            {unitDressup.note ? <div style={{ color: "#64748b", marginTop: 2 }}>หมายเหตุ: {unitDressup.note} · โดย {unitDressup.created_by || "-"}</div> : null}
+                          </div>
+                        )}
                         {!unitOverride && applicableMarkups.length > 0 && (
                           <div style={{ fontSize: 12, color: "#7c3aed", marginTop: 4, textAlign: "left" }}>
                             {applicableMarkups.map((m, i) => {
@@ -2312,7 +2335,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                 })()}
 
                 {/* การ์ดของแถม-บริการ (จากบันทึกค่าใช้จ่ายการขาย ประเภทโปรโมชั่น) */}
-                {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (displayGiveaways.length > 0 || (adjOpen && useDownPayout && Number(downPayout) > 0)) && (
+                {(bookingAsk === "walkin" || (bookingAsk === "booked" && selBooking)) && (displayGiveaways.length > 0 || (adjOpen && useDownPayout && Number(downPayout) > 0) || dressupItems.length > 0) && (
                   <div style={{ border: "1.5px solid #e5e7eb", borderRadius: 12, padding: 16, background: "#fff", fontFamily: "Tahoma", marginTop: 16 }}>
                     <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
                       <div style={{ fontWeight: 700, fontSize: 16 }}>🎁 ของแถม-บริการ</div>
@@ -2360,6 +2383,19 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           <span style={{ fontWeight: 800, color: "#dc2626" }}>{Number(downPayout || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
                         </label>
                       )}
+                      {/* อะไหล่แต่งรถ — โชว์เป็นรายการแถมในใบขาย (ยอดบวกอยู่ในราคาขายแล้ว จึงไม่รวมในยอดของแถมฟรี) */}
+                      {dressupItems.map((it) => (
+                        <label key={"du" + it.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 10px", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 6, cursor: "default", fontSize: 13 }}>
+                          <input type="checkbox" checked readOnly disabled />
+                          <div style={{ flex: 1, textAlign: "left" }}>
+                            <div style={{ fontWeight: 700 }}>{it.part_name || it.part_code} {Number(it.qty) > 1 ? `× ${Number(it.qty)}` : ""}</div>
+                            <div style={{ fontSize: 11, color: "#64748b", marginTop: 2 }}>
+                              <span style={{ background: "#ffedd5", color: "#9a3412", padding: "1px 6px", borderRadius: 3, marginRight: 4 }}>🔧 อะไหล่แต่งรถ</span>{it.part_code} · บวกในราคาขายแล้ว
+                            </div>
+                          </div>
+                          <span style={{ fontWeight: 800, color: "#9a3412" }}>{Number(it.line_total || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span>
+                        </label>
+                      ))}
                     </div>
                     <div style={{ textAlign: "right", marginTop: 10, fontSize: 14 }}>
                       รวมของแถมที่ให้: <span style={{ fontWeight: 800, color: "#dc2626" }}>{Number(giveawaysTotal + (adjOpen && useDownPayout ? Number(downPayout || 0) : 0)).toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท</span>

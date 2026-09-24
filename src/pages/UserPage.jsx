@@ -37,6 +37,7 @@ const PAGE_GROUPS = [
       { key: "receiptqr",  label: "🔳 พิมพ์ QR ออกใบเสร็จ" },
       { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
       { key: "salewizard", label: "🛒 บันทึกขาย NEW" },
+      { key: "vehdressup", label: "🔧 บันทึกอะไหล่แต่งรถสำหรับขาย" },
       { key: "retailsale", label: "🔎 ค้นหาใบขาย (ขายปลีกเดิม)" },
       { key: "bookingdeposit", label: "🪙 มัดจำจองรถ" },
       { key: "redplatedeposit", label: "🔴 มัดจำป้ายแดง (ติดป้ายทีหลัง)" },
