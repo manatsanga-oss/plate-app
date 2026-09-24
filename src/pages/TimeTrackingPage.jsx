@@ -6,6 +6,10 @@ export default function TimeTrackingPage({ currentUser }) {
   const [tab, setTab] = useState("detail");  // 'detail' | 'summary'
   const [rows, setRows] = useState([]);
   const [summary, setSummary] = useState([]);
+  // ลาป่วยสะสมทั้งปี (1 ม.ค. ของปีที่เลือกถึงวันสิ้นสุดช่วง) รายคน — เทียบสิทธิลาป่วยได้ค่าจ้าง 30 วัน/ปี (user 2026-09-24)
+  const SICK_QUOTA = 30;
+  const [ytdSick, setYtdSick] = useState({}); // employee_name → { sick, cert, nocert }
+  const ytdOf = (name) => ytdSick[String(name || "").trim()] || { sick: 0, cert: 0, nocert: 0 };
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -137,9 +141,25 @@ export default function TimeTrackingPage({ currentUser }) {
       });
       const data = await res.json();
       setSummary(Array.isArray(data) ? data : []);
+      // สะสมทั้งปี: 1 ม.ค. ของปีวันสิ้นสุด → วันสิ้นสุด (รวมทุกทีมที่คนนั้นเคยอยู่)
+      try {
+        const yStart = `${String(dateTo).slice(0, 4)}-01-01`;
+        const r2 = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "summary_time_tracking", date_from: yStart, date_to: dateTo, affiliation: affilFilter || null }) });
+        const d2 = await r2.json();
+        const m = {};
+        (Array.isArray(d2) ? d2 : []).forEach((x) => {
+          if (!x || !x.employee_name) return;
+          const k = String(x.employee_name).trim();
+          const a = m[k] || (m[k] = { sick: 0, cert: 0, nocert: 0 });
+          a.sick += Number(x.sick_days || 0); a.cert += Number(x.sick_with_cert || 0); a.nocert += Number(x.sick_no_cert || 0);
+        });
+        setYtdSick(m);
+      } catch { setYtdSick({}); }
     } catch { setMessage("❌ โหลดข้อมูลไม่สำเร็จ"); setSummary([]); }
     setLoading(false);
   }
+  const sickQuotaText = (name) => { const y = ytdOf(name); const left = SICK_QUOTA - y.sick; return left >= 0 ? `เหลือ ${left}` : `เกิน ${-left}`; };
 
   function fmtDate(v) {
     if (!v) return "-";
@@ -200,7 +220,7 @@ export default function TimeTrackingPage({ currentUser }) {
           s.monthly_off_days || 0,
           s.personal_leave_days || 0,
           s.vacation_days || 0,
-          s.sick_days || 0, accountedDays(s), s.sick_with_cert || 0, s.sick_no_cert || 0,
+          s.sick_days || 0, accountedDays(s), s.sick_with_cert || 0, s.sick_no_cert || 0, ytdOf(s.employee_name).sick, sickQuotaText(s.employee_name),
           s.late_days, s.hide_clock_days || 0, s.early_leave_days,
         ].map(escapeHtml);
         return `<tr><td>${cells.join("</td><td>")}</td></tr>`;
@@ -208,7 +228,7 @@ export default function TimeTrackingPage({ currentUser }) {
       tableHtml = `<table><thead><tr>
         <th>พนักงาน</th><th>วันรวม</th><th>มา</th><th>ขาด</th>
         <th>วันหยุดประจำสัปดาห์</th><th>วันหยุดประจำปี</th><th>วันหยุดกลางเดือน</th><th>ลากิจ</th><th>ลาพักร้อน</th>
-        <th>ลาป่วย</th><th>รวมวัน</th><th>มีใบรับรอง</th><th>ไม่มีใบรับรอง</th>
+        <th>ลาป่วย</th><th>รวมวัน</th><th>มีใบรับรอง</th><th>ไม่มีใบรับรอง</th><th>ลาป่วยสะสมปีนี้</th><th>สิทธิ 30 วัน</th>
         <th>สาย</th><th>ไม่สแกนเข้างาน</th><th>กลับก่อน</th>
         </tr></thead><tbody>${rows}</tbody></table>`;
     }
@@ -534,6 +554,8 @@ export default function TimeTrackingPage({ currentUser }) {
                   <th style={{ ...th, textAlign: "right", color: "#fff", background: "#0a3a8a", borderLeft: "2px solid #cbd5e1", borderRight: "2px solid #cbd5e1" }}>รวมวัน</th>
                   <th style={{ ...th, textAlign: "right", color: "#86efac" }}>มีใบรับรอง</th>
                   <th style={{ ...th, textAlign: "right", color: "#fca5a5" }}>ไม่มีใบรับรอง</th>
+                  <th style={{ ...th, textAlign: "right", color: "#fbbf24" }} title="ลาป่วยสะสมตั้งแต่ 1 ม.ค. ถึงวันสิ้นสุดช่วงที่เลือก">ลาป่วยสะสมปีนี้</th>
+                  <th style={{ ...th, textAlign: "right", color: "#fff" }} title="สิทธิลาป่วยได้ค่าจ้าง 30 วัน/ปี">สิทธิ 30 วัน</th>
                   <th style={{ ...th, textAlign: "right", color: "#fdba74" }}>สาย</th>
                   <th style={{ ...th, textAlign: "right", color: "#fbbf24" }}>ไม่สแกนเข้างาน</th>
                   <th style={{ ...th, textAlign: "right", color: "#fde047" }}>กลับก่อน</th>
@@ -555,6 +577,10 @@ export default function TimeTrackingPage({ currentUser }) {
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0a3a8a", fontWeight: 700, background: "#eff4ff", borderLeft: "2px solid #cbd5e1", borderRight: "2px solid #cbd5e1" }}>{accountedDays(s)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.sick_with_cert) > 0 ? "#15803d" : "#9ca3af", fontWeight: Number(s.sick_with_cert) > 0 ? 600 : 400 }}>{s.sick_with_cert || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.sick_no_cert) > 0 ? "#b91c1c" : "#9ca3af", fontWeight: Number(s.sick_no_cert) > 0 ? 600 : 400 }}>{s.sick_no_cert || 0}</td>
+                    {(() => { const y = ytdOf(s.employee_name); const over = y.sick > SICK_QUOTA; return (<>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: y.sick > 0 ? (over ? "#b91c1c" : "#d97706") : "#9ca3af", fontWeight: y.sick > 0 ? 700 : 400 }} title={`ใบรับรอง ${y.cert} · ไม่มี ${y.nocert}`}>{y.sick}</td>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: over ? "#fff" : y.sick > 0 ? "#15803d" : "#9ca3af", background: over ? "#dc2626" : "transparent" }}>{y.sick > 0 ? sickQuotaText(s.employee_name) : "-"}</td>
+                    </>); })()}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.late_days) > 0 ? "#ea580c" : "#9ca3af", fontWeight: Number(s.late_days) > 0 ? 600 : 400 }}>{s.late_days}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.hide_clock_days) > 0 ? "#92400e" : "#9ca3af", fontWeight: Number(s.hide_clock_days) > 0 ? 600 : 400 }}>{s.hide_clock_days || 0}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: Number(s.early_leave_days) > 0 ? "#dc2626" : "#9ca3af", fontWeight: Number(s.early_leave_days) > 0 ? 600 : 400 }}>{s.early_leave_days}</td>
@@ -576,6 +602,8 @@ export default function TimeTrackingPage({ currentUser }) {
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0a3a8a", fontWeight: 800, background: "#eff4ff", borderLeft: "2px solid #cbd5e1", borderRight: "2px solid #cbd5e1" }}>{summary.reduce((s, x) => s + accountedDays(x), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#15803d" }}>{summary.reduce((s, x) => s + Number(x.sick_with_cert || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#b91c1c" }}>{summary.reduce((s, x) => s + Number(x.sick_no_cert || 0), 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#d97706" }}>{summary.reduce((s, x) => s + ytdOf(x.employee_name).sick, 0)}</td>
+                  <td style={{ ...td, textAlign: "right", fontSize: 11, color: "#b91c1c", fontWeight: 700 }}>{(() => { const n = summary.filter((x) => ytdOf(x.employee_name).sick > SICK_QUOTA).length; return n ? `เกินสิทธิ ${n} คน` : "-"; })()}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#ea580c" }}>{summary.reduce((s, x) => s + Number(x.late_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#92400e" }}>{summary.reduce((s, x) => s + Number(x.hide_clock_days || 0), 0)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{summary.reduce((s, x) => s + Number(x.early_leave_days || 0), 0)}</td>

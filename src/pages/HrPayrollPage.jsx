@@ -8,6 +8,12 @@ function firstOfMonth(d) {
 
 export default function HrPayrollPage({ currentUser }) {
   const [rows, setRows] = useState([]);
+  // ลาป่วยเกินสิทธิ 30 วัน/ปี (user 2026-09-24): งวดจ่าย = 21 เดือนก่อน → 20 เดือนนี้ (ตามช่วงบันทึกเวลาที่ calc_payroll ใช้)
+  // excess = วันลาป่วยในงวดนี้ที่อยู่เหนือสิทธิสะสม 30 วัน (สะสมถึงสิ้นงวด − max(30, สะสมก่อนเริ่มงวด)) → แนะนำหัก = เงินเดือน/30 × วัน
+  const SICK_QUOTA = 30;
+  const [sickInfo, setSickInfo] = useState({});   // employee_name → { cumEnd, cumStart, periodSick, excess }
+  const [extrasMap, setExtrasMap] = useState({}); // employee_name → แถว hr_monthly_extras ของเดือนนี้ (ไว้ merge ตอนใส่ยอดหัก)
+  const [savingSick, setSavingSick] = useState("");
   const [month, setMonth] = useState(firstOfMonth(new Date()));
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
@@ -32,6 +38,53 @@ export default function HrPayrollPage({ currentUser }) {
 
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [month]);
 
+  // โหลดลาป่วยสะสม 2 ช่วง (ต้นปี→สิ้นงวด, ต้นปี→ก่อนเริ่มงวด) + รายการเงินเพิ่ม/หักของเดือน
+  async function loadSickInfo() {
+    try {
+      const m0 = new Date(`${String(month).slice(0, 7)}-01T00:00:00`);
+      const pStart = new Date(m0.getFullYear(), m0.getMonth() - 1, 21);
+      const pEnd = new Date(m0.getFullYear(), m0.getMonth(), 20);
+      const beforeStart = new Date(m0.getFullYear(), m0.getMonth() - 1, 20);
+      const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const yStart = `${pEnd.getFullYear()}-01-01`;
+      const post = (body) => fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.json()).catch(() => []);
+      const agg = (arr) => { const m = {}; (Array.isArray(arr) ? arr : []).forEach((x) => { if (x && x.employee_name) { const k = String(x.employee_name).trim(); m[k] = (m[k] || 0) + Number(x.sick_days || 0); } }); return m; };
+      const [endArr, startArr, ex] = await Promise.all([
+        post({ action: "summary_time_tracking", date_from: yStart, date_to: iso(pEnd) }),
+        beforeStart >= new Date(`${yStart}T00:00:00`) ? post({ action: "summary_time_tracking", date_from: yStart, date_to: iso(beforeStart) }) : Promise.resolve([]),
+        post({ action: "list_monthly_extras", month_year: month }),
+      ]);
+      const cumEnd = agg(endArr), cumStart = agg(startArr), info = {};
+      Object.keys(cumEnd).forEach((k) => {
+        const e = cumEnd[k], st = cumStart[k] || 0;
+        info[k] = { cumEnd: e, cumStart: st, periodSick: e - st, excess: Math.max(0, e - Math.max(SICK_QUOTA, st)) };
+      });
+      setSickInfo(info);
+      const em = {}; (Array.isArray(ex) ? ex : []).forEach((x) => { if (x && x.employee_name) em[String(x.employee_name).trim()] = x; });
+      setExtrasMap(em);
+    } catch { setSickInfo({}); }
+  }
+  // ใส่ยอดหักลาป่วยเกินสิทธิลง hr_monthly_extras (ช่องขาด-สาย) — merge กับรายการเดิมของเดือน ไม่ทับช่องอื่น
+  async function applySickDeduction(r, info) {
+    const days = info.excess, daily = Number(r.salary || 0) / 30, amt = Math.round(daily * days * 100) / 100;
+    const ex = extrasMap[String(r.employee_name).trim()] || {};
+    const cur = Number(ex.absence_late || 0);
+    if (!window.confirm(`ใส่ยอดหักลาป่วยเกินสิทธิ ${r.employee_name}\nงวด ${monthDisplayShort(month)}: เกินสิทธิ ${days} วัน × ${daily.toFixed(2)} (เงินเดือน ${Number(r.salary).toLocaleString("th-TH")} ÷ 30) = ${amt.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท${cur ? `\n(ช่องขาด-สายเดิม ${cur.toLocaleString("th-TH")} จะถูกแทนที่)` : ""}`)) return;
+    setSavingSick(r.employee_name);
+    try {
+      const note = [ex.note, `ลาป่วยเกินสิทธิ 30 วัน/ปี ${days} วัน × ${daily.toFixed(2)} (สะสม ${info.cumEnd})`].filter(Boolean).join(" · ");
+      await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        action: "save_monthly_extra", month_year: month, employee_name: r.employee_name,
+        bonus: Number(ex.bonus || 0), ot_holiday: Number(ex.ot_holiday || 0), other_income: Number(ex.other_income || 0), tax: Number(ex.tax || 0),
+        absence_late: amt, other_expense: Number(ex.other_expense || 0), admin_expense: Number(ex.admin_expense || 0), lost_items: Number(ex.lost_items || 0),
+        note, created_by: currentUser?.username || "system" }) });
+      setMessage(`✅ ใส่ยอดหักลาป่วยเกินสิทธิ ${r.employee_name} ${amt.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท แล้ว`);
+      fetchData();
+    } catch { setMessage("❌ บันทึกยอดหักไม่สำเร็จ"); }
+    setSavingSick("");
+  }
+  const monthDisplayShort = (m) => { const d = new Date(`${String(m).slice(0, 7)}-01T00:00:00`); return `${["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."][d.getMonth()]} ${d.getFullYear() + 543}`; };
+
   async function fetchData() {
     setLoading(true); setMessage(""); setSnapshotMode(null); setPayablesCreated(0);
     try {
@@ -42,6 +95,7 @@ export default function HrPayrollPage({ currentUser }) {
       });
       const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
+      loadSickInfo(); // ไม่ await — ป้ายเตือนลาป่วยเกินสิทธิโผล่ตามหลัง
 
       // เช็ค snapshot — เพื่อ disable ปุ่มบันทึก (แต่ไม่โหลด snapshot data เข้าตาราง)
       const checkRes = await fetch(API_URL, {
@@ -633,6 +687,25 @@ th { background: #072d6b; color: #fff; font-weight: 700; white-space: nowrap; }
                   <td style={{ ...td, fontWeight: 600 }}>
                     {r.employee_name}
                     {r.is_executive && <span style={{ marginLeft: 4, fontSize: 9, padding: "1px 4px", background: "#fde68a", color: "#92400e", borderRadius: 3 }}>ผบ.</span>}
+                    {(() => {
+                      const info = sickInfo[String(r.employee_name).trim()];
+                      if (!info || !(info.excess > 0)) return null;
+                      const amt = Math.round((Number(r.salary || 0) / 30) * info.excess * 100) / 100;
+                      const cur = Number(r.absence_late || 0);
+                      const done = cur >= amt - 0.005;
+                      return (
+                        <div style={{ marginTop: 3, fontSize: 10.5, lineHeight: 1.35 }}>
+                          <div style={{ color: "#b91c1c", fontWeight: 700 }}>🤒 ลาป่วยเกินสิทธิ {info.excess} วัน (งวดนี้ {info.periodSick} · สะสมปี {info.cumEnd}/{SICK_QUOTA})</div>
+                          {done ? <span style={{ color: "#15803d" }}>✓ หักแล้ว {cur.toLocaleString("th-TH", { minimumFractionDigits: 2 })}</span> : (
+                            <button onClick={() => applySickDeduction(r, info)} disabled={savingSick === r.employee_name || !!snapshotMode}
+                              title="บันทึกยอดหักลงช่องขาด-สาย ในเงินเพิ่ม/หักรายเดือน แล้วคำนวณใหม่"
+                              style={{ padding: "1px 8px", fontSize: 10.5, borderRadius: 5, border: "1px solid #dc2626", background: "#fff", color: "#b91c1c", cursor: "pointer", fontWeight: 700 }}>
+                              {savingSick === r.employee_name ? "..." : `ใส่ยอดหัก ${amt.toLocaleString("th-TH", { minimumFractionDigits: 2 })}`}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td style={{ ...td, fontSize: 10 }}>
                     <div>{r.bank_name || "-"}</div>
