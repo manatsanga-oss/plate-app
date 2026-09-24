@@ -90,7 +90,15 @@ export default function ChequeReceivePage({ currentUser }) {
         const byNo = {}; (Array.isArray(cl) ? cl : []).forEach(c => { if (c && c.receipt_no) byNo[c.receipt_no] = c; });
         sysRows.forEach(r => { const c = byNo[r.receipt_no]; if (c) Object.assign(r, { deposit_date: c.deposit_date, bank_account_id: c.bank_account_id, bank_label: c.bank_label, clearing_note: c.clearing_note, cleared_by: c.cleared_by, cleared_at: c.cleared_at }); });
       }
-      const all = [...arr, ...sysRows].sort((a, b) => String(b.receipt_date || "").localeCompare(String(a.receipt_date || "")) || String(b.receipt_no).localeCompare(String(a.receipt_no)));
+      // ใบเดียวกันที่มีทั้งในไฟล์ใบเสร็จรายวัน (SCYxx-REC…) และในระบบ (PSR-…) → สาขา+วันที่+ยอดเช็คตรงกัน = ซ้ำ ตัดใบที่ "ยังไม่ผ่านเช็ค" ออก (user 2026-09-24; ถ้ายังไม่ผ่านทั้งคู่ เก็บใบจากไฟล์)
+      const keyOf = (r) => `${String(r.branch_code || "").slice(0, 5).toUpperCase()}|${String(r.receipt_date || "").slice(0, 10)}|${Math.round(Number(r.cheque || 0) * 100)}`;
+      const dropFile = new Set(), dropSys = new Set();
+      sysRows.forEach((sr) => {
+        const twin = arr.find((fr) => keyOf(fr) === keyOf(sr) && !dropFile.has(fr.receipt_no));
+        if (!twin) return;
+        if (sr.deposit_date && !twin.deposit_date) dropFile.add(twin.receipt_no); else dropSys.add(sr.receipt_no);
+      });
+      const all = [...arr.filter(r => !dropFile.has(r.receipt_no)), ...sysRows.filter(r => !dropSys.has(r.receipt_no))].sort((a, b) => String(b.receipt_date || "").localeCompare(String(a.receipt_date || "")) || String(b.receipt_no).localeCompare(String(a.receipt_no)));
       setRows(all);
     } catch { setMessage("❌ โหลดไม่สำเร็จ — ตรวจว่า workflow cheque-receive-api ถูก import + Active แล้ว"); setRows([]); }
     setLoading(false);
