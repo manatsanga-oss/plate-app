@@ -65,10 +65,11 @@ export default function VehicleDressupPage({ currentUser }) {
   const [partsLoading, setPartsLoading] = useState(false);
   const [pkw, setPkw] = useState("");
   const [pgroup, setPgroup] = useState("all");
-  useEffect(() => {
+  function loadParts() {
     setPartsLoading(true);
-    post(FM_API, { action: "list" }).then((d) => setParts((Array.isArray(d) ? d : []).filter((r) => r && r.id && isDressupPart(r)))).catch(() => setParts([])).finally(() => setPartsLoading(false));
-  }, []);
+    return post(FM_API, { action: "list" }).then((d) => setParts((Array.isArray(d) ? d : []).filter((r) => r && r.id && isDressupPart(r)))).catch(() => setParts([])).finally(() => setPartsLoading(false));
+  }
+  useEffect(() => { loadParts(); }, []); // eslint-disable-line
   const groups = useMemo(() => [...new Set(parts.map((p) => p.product_group).filter(Boolean))].sort(), [parts]);
   const partHits = useMemo(() => {
     const q = pkw.trim().toLowerCase(); const qn = q.replace(/-/g, "");
@@ -111,6 +112,14 @@ export default function VehicleDressupPage({ currentUser }) {
     if (saving || !veh) return;
     if (!items.length) { setMessage("❌ เลือกอะไหล่แต่งอย่างน้อย 1 รายการ"); return; }
     if (!(totalPrice > 0)) { setMessage("❌ ยอดที่บวกเข้าราคาขายต้องมากกว่า 0"); return; }
+    // สต๊อกไม่พอ → บันทึกไม่ได้ (user 2026-09-24) — คงเหลือ = ยอดตามไฟล์ − ที่เบิกใส่รถแต่งคันอื่นที่ยังไม่ขาย
+    const short = items.map((x) => { const p = parts.find((q) => q.id === x.part_id); const st = p ? num(p.quantity) : num(x.stock); return { ...x, st }; })
+      .filter((x) => (num(x.qty) || 1) > x.st);
+    if (short.length) {
+      setMessage("❌ สต๊อกไม่พอ บันทึกไม่ได้: " + short.map((x) => `${x.part_code} ต้องการ ${num(x.qty) || 1} มี ${x.st}`).join(" · "));
+      window.alert("บันทึกไม่ได้ — อะไหล่ในสต๊อกไม่พอ\n\n" + short.map((x) => `${x.part_code} ${x.part_name}\n   ต้องการ ${num(x.qty) || 1} ชิ้น · คงเหลือ ${x.st}`).join("\n"));
+      return;
+    }
     if (!window.confirm(`บันทึกอะไหล่แต่งรถ\n${veh.brand} ${veh.model_name || veh.model_code} · ${veh.engine_no}\n${items.length} รายการ · ทุนรวม ${baht(sumCost)} · บวกเข้าราคาขาย ${baht(totalPrice)} บาท\nหน้าบันทึกขาย NEW จะบวกยอดนี้เข้าราคาขายและโชว์เป็นรถแต่ง ?`)) return;
     setSaving(true); setMessage("");
     try {
@@ -124,7 +133,7 @@ export default function VehicleDressupPage({ currentUser }) {
       if (!r || !r.id) throw new Error(r?.__error || "บันทึกไม่สำเร็จ (ตรวจว่า import workflow vehicle-dressup-api และรัน DDL แล้ว)");
       setMessage(`✅ บันทึกอะไหล่แต่ง ${veh.engine_no} · ${items.length} รายการ · บวกราคาขาย ${baht(totalPrice)} บาท แล้ว`);
       setVeh(null); setKw(""); setItems([]); setTotalOverride(""); setNote("");
-      load();
+      load(); loadParts(); // สต๊อกอะไหล่ลดตามรถแต่งใบใหม่
     } catch (e) { setMessage("❌ " + (e.message || e)); }
     finally { setSaving(false); }
   }
@@ -133,7 +142,7 @@ export default function VehicleDressupPage({ currentUser }) {
     try {
       const d = await post(API, { action: "cancel_dressup", id: r.id, cancelled_by: currentUser?.username || currentUser?.name || "system" });
       if (!d || !d.id) throw new Error(d?.__error || "ยกเลิกไม่สำเร็จ (อาจถูกใช้ขายไปแล้ว)");
-      setMessage(`✅ ยกเลิกรายการแต่งรถ ${r.engine_no} แล้ว`); load();
+      setMessage(`✅ ยกเลิกรายการแต่งรถ ${r.engine_no} แล้ว — คืนสต๊อกอะไหล่แล้ว`); load(); loadParts();
     } catch (e) { setMessage("❌ " + (e.message || e)); }
   }
 
@@ -304,8 +313,9 @@ th,td{border:1px solid #999;padding:4px 6px;font-size:12px;vertical-align:top}th
                 <label style={lbl}>หมายเหตุ</label>
                 <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="เช่น ชุดแต่งโชว์หน้าร้าน / ตามที่ลูกค้าจองสั่งแต่ง" style={{ ...inp, width: "100%" }} />
               </div>
-              <button onClick={save} disabled={saving || !items.length}
-                style={{ padding: "10px 24px", background: saving || !items.length ? "#cbd5e1" : "#16a34a", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "wait" : "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>
+              <button onClick={save} disabled={saving || !items.length || items.some((x) => (num(x.qty) || 1) > num((parts.find((q) => q.id === x.part_id) || { quantity: x.stock }).quantity))}
+                title={items.some((x) => (num(x.qty) || 1) > num((parts.find((q) => q.id === x.part_id) || { quantity: x.stock }).quantity)) ? "มีอะไหล่เกินสต๊อก บันทึกไม่ได้" : ""}
+                style={{ padding: "10px 24px", background: saving || !items.length || items.some((x) => (num(x.qty) || 1) > num((parts.find((q) => q.id === x.part_id) || { quantity: x.stock }).quantity)) ? "#cbd5e1" : "#16a34a", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "wait" : "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>
                 {saving ? "⏳ กำลังบันทึก..." : `💾 บันทึกรถแต่ง (+${baht(totalPrice)})`}
               </button>
             </div>
