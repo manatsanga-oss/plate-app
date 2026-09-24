@@ -2,6 +2,15 @@ import React, { useEffect, useMemo, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/cheque-receive-api";
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api"; // list_bank_accounts
+// เช็คที่รับผ่านระบบ (ไม่ได้มาจากไฟล์ใบเสร็จรายวัน) — ใบรับชำระอะไหล่/บริการ PSR-, ใบรับเรื่อง, ขายรถมือสอง ที่เลือกวิธี "เช็ค" (user 2026-09-24)
+const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api";
+const RECEIPT_ENTRY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api";
+const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api";
+async function postTo(url, body) {
+  try { const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }); const t = await r.text(); return t ? JSON.parse(t) : []; } catch { return []; }
+}
+const parseBks = (v) => { try { const a = typeof v === "string" ? JSON.parse(v || "[]") : v; return Array.isArray(a) ? a : []; } catch { return []; } };
+const isChequeMethod = (m) => String(m || "").includes("เช็ค") || String(m || "").toUpperCase().includes("CHEQUE");
 
 const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const fmtDate = v => {
@@ -55,9 +64,34 @@ export default function ChequeReceivePage({ currentUser }) {
     setLoading(true); setMessage("");
     try {
       const data = await post({ action: "list_cheque_receipts", date_from: dateFrom, date_to: dateTo });
-      const arr = (Array.isArray(data) ? data : []).filter(r => r && r.receipt_no);
+      const arr = (Array.isArray(data) ? data : []).filter(r => r && r.receipt_no).map(r => ({ ...r, source: "file" }));
       if (data && !Array.isArray(data) && data.error) throw new Error(data.error);
-      setRows(arr);
+      // เอกสารระบบที่รับชำระเป็นเช็ค → แถวเดียวกัน (ผ่านเช็คบันทึกด้วย receipt_no เดียวกับเลขเอกสาร)
+      const [ps, rc, um] = await Promise.all([
+        postTo(PART_SVC_PAY_API, { action: "list_payments", date_from: dateFrom, date_to: dateTo }),
+        postTo(RECEIPT_ENTRY_API, { action: "list_receipt_payments", date_from: dateFrom, date_to: dateTo }),
+        postTo(USED_MOTO_API, { action: "list_sales", date_from: dateFrom, date_to: dateTo }),
+      ]);
+      const sys = [];
+      const pushSys = (docNo, date, branch, customer, bks, label) => {
+        const chq = parseBks(bks).filter(x => x && isChequeMethod(x.method) && Number(x.amount) > 0);
+        if (!docNo || !chq.length) return;
+        sys.push({ receipt_no: String(docNo), receipt_date: date, branch_code: branch || "-", customer_name: customer || "-",
+          cheque: chq.reduce((t, x) => t + Number(x.amount || 0), 0), receipt_status: "ปกติ", source: "system", source_label: label,
+          cheque_no: chq.map(x => String(x.cheque_no || "").trim()).filter(Boolean).join(", "), cheque_date: chq.map(x => String(x.cheque_date || "").slice(0, 10)).filter(Boolean).join(", ") });
+      };
+      (Array.isArray(ps) ? ps : []).forEach(p => p && !p.cancelled_at && pushSys(p.receipt_no || p.doc_no, p.paid_date, p.branch_code, p.customer_name, p.payment_breakdowns, "ค่าอะไหล่/บริการ"));
+      (Array.isArray(rc) ? rc : []).forEach(r => r && pushSys(r.receipt_no, r.paid_date || r.paid_at, r.branch_code, r.customer_name, r.payment_breakdowns, "ใบรับเรื่อง"));
+      (Array.isArray(um) ? um : []).forEach(u => u && pushSys(u.doc_no, u.sold_date, u.branch_code, u.sold_customer, u.payment_breakdowns, "รถมือสอง"));
+      const fileNos = new Set(arr.map(r => r.receipt_no));
+      const sysRows = sys.filter(r => !fileNos.has(r.receipt_no));
+      if (sysRows.length) {
+        const cl = await post({ action: "list_cheque_clearings", receipt_nos: sysRows.map(r => r.receipt_no) }).catch(() => []);
+        const byNo = {}; (Array.isArray(cl) ? cl : []).forEach(c => { if (c && c.receipt_no) byNo[c.receipt_no] = c; });
+        sysRows.forEach(r => { const c = byNo[r.receipt_no]; if (c) Object.assign(r, { deposit_date: c.deposit_date, bank_account_id: c.bank_account_id, bank_label: c.bank_label, clearing_note: c.clearing_note, cleared_by: c.cleared_by, cleared_at: c.cleared_at }); });
+      }
+      const all = [...arr, ...sysRows].sort((a, b) => String(b.receipt_date || "").localeCompare(String(a.receipt_date || "")) || String(b.receipt_no).localeCompare(String(a.receipt_no)));
+      setRows(all);
     } catch { setMessage("❌ โหลดไม่สำเร็จ — ตรวจว่า workflow cheque-receive-api ถูก import + Active แล้ว"); setRows([]); }
     setLoading(false);
   }
@@ -176,7 +210,7 @@ export default function ChequeReceivePage({ currentUser }) {
             <thead>
               <tr>
                 <th>#</th><th>วันที่ใบเสร็จ</th><th>เลขที่ใบเสร็จ</th><th>สาขา</th><th>ลูกค้า</th>
-                <th style={{ textAlign: "right" }}>ยอดเช็ค</th><th>สถานะใบเสร็จ</th><th>ผ่านเช็ค</th><th>จัดการ</th>
+                <th style={{ textAlign: "right" }}>ยอดเช็ค</th><th>เลขที่เช็ค</th><th>สถานะใบเสร็จ</th><th>ผ่านเช็ค</th><th>จัดการ</th>
               </tr>
             </thead>
             <tbody>
@@ -184,10 +218,11 @@ export default function ChequeReceivePage({ currentUser }) {
                 <tr key={r.receipt_no} style={{ background: r.deposit_date ? undefined : "#fffbeb" }}>
                   <td>{i + 1}</td>
                   <td>{fmtDate(r.receipt_date)}</td>
-                  <td style={{ fontWeight: 600, fontFamily: "monospace" }}>{r.receipt_no}</td>
+                  <td style={{ fontWeight: 600, fontFamily: "monospace" }}>{r.receipt_no}{r.source === "system" && <div style={{ fontSize: 10, color: "#0369a1", fontFamily: "Tahoma", fontWeight: 400 }}>{r.source_label} (ระบบ)</div>}</td>
                   <td>{r.branch_code || "-"}</td>
                   <td>{r.customer_name || "-"}</td>
                   <td style={{ textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{fmt(r.cheque)}</td>
+                  <td style={{ fontFamily: "monospace", fontSize: 12 }}>{r.cheque_no || "-"}{r.cheque_date ? <div style={{ fontSize: 10.5, color: "#6b7280", fontFamily: "Tahoma" }}>ลงวันที่ {r.cheque_date}</div> : null}</td>
                   <td>
                     <span style={{ padding: "2px 8px", borderRadius: 10, fontSize: 11, background: r.receipt_status === "ยกเลิก" ? "#fee2e2" : "#d1fae5", color: r.receipt_status === "ยกเลิก" ? "#991b1b" : "#065f46" }}>
                       {r.receipt_status || "ปกติ"}
