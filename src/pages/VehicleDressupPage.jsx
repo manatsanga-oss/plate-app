@@ -22,6 +22,9 @@ const thaiDate = (iso) => {
 };
 const unwrapList = (d) => { try { return typeof d?.listjson === "string" ? JSON.parse(d.listjson) : Array.isArray(d) ? d : []; } catch { return []; } };
 const STATUS_TH = { active: "รอใช้ขาย", used: "ใช้ขายแล้ว", cancelled: "ยกเลิก", replaced: "ถูกแทนที่" };
+// อะไหล่ที่ใช้แต่งรถ = เฉพาะกลุ่มในแท็บ "หมวกและอะไหล่ตกแต่ง" (user 2026-09-24)
+const DRESSUP_GROUPS = ["PG-032", "PG-033"];
+const isDressupPart = (p) => DRESSUP_GROUPS.some((g) => String(p?.product_group || "").toUpperCase().startsWith(g));
 
 export default function VehicleDressupPage({ currentUser }) {
   const isAdmin = currentUser?.role === "admin";
@@ -64,7 +67,7 @@ export default function VehicleDressupPage({ currentUser }) {
   const [pgroup, setPgroup] = useState("all");
   useEffect(() => {
     setPartsLoading(true);
-    post(FM_API, { action: "list" }).then((d) => setParts((Array.isArray(d) ? d : []).filter((r) => r && r.id))).catch(() => setParts([])).finally(() => setPartsLoading(false));
+    post(FM_API, { action: "list" }).then((d) => setParts((Array.isArray(d) ? d : []).filter((r) => r && r.id && isDressupPart(r)))).catch(() => setParts([])).finally(() => setPartsLoading(false));
   }, []);
   const groups = useMemo(() => [...new Set(parts.map((p) => p.product_group).filter(Boolean))].sort(), [parts]);
   const partHits = useMemo(() => {
@@ -175,7 +178,7 @@ export default function VehicleDressupPage({ currentUser }) {
       {veh && (
         <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 1fr) minmax(420px, 1.4fr)", gap: 14, marginBottom: 14 }}>
           <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 14 }}>
-            <label style={lbl}>2) อะไหล่ในสต๊อกหมุนเร็ว — คลิกเพื่อใส่รถ {partsLoading ? "(กำลังโหลด...)" : `(${parts.length} รหัส)`}</label>
+            <label style={lbl}>2) อะไหล่แต่ง (กลุ่ม ACCESSORIES + หมวกกันน๊อก) — คลิกเพื่อใส่รถ {partsLoading ? "(กำลังโหลด...)" : `(${parts.length} รหัส)`}</label>
             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
               <input value={pkw} onChange={(e) => setPkw(e.target.value)} placeholder="ค้นหา รหัส / ชื่ออะไหล่" style={{ ...inp, flex: 1 }} />
               <select value={pgroup} onChange={(e) => setPgroup(e.target.value)} style={{ ...inp, maxWidth: 200 }}>
