@@ -154,17 +154,15 @@ th,td{border:1px solid #999;padding:4px 6px;font-size:12px;vertical-align:top}th
   };
   function printDressup(r) {
     const its = Array.isArray(r.items) ? r.items : [];
-    const sumCostR = its.reduce((t, it) => t + num(it.qty) * num(it.unit_cost), 0);
     const sumSellR = its.reduce((t, it) => t + num(it.line_total), 0);
-    const rowsHtml = its.map((it, i) => `<tr><td class="c">${i + 1}</td><td style="font-family:monospace">${esc(it.part_code)}</td><td>${esc(it.part_name)}</td><td class="c">${num(it.qty)}</td><td class="r">${baht(it.unit_cost)}</td><td class="r">${baht(it.unit_price)}</td><td class="r b">${baht(it.line_total)}</td></tr>`).join("");
+    const rowsHtml = its.map((it, i) => `<tr><td class="c">${i + 1}</td><td style="font-family:monospace">${esc(it.part_code)}</td><td>${esc(it.part_name)}</td><td class="c">${num(it.qty)}</td><td class="r">${baht(it.unit_price)}</td><td class="r b">${baht(it.line_total)}</td></tr>`).join("");
     const body = `<h2>🔧 ใบรายการอะไหล่แต่งรถสำหรับขาย #${r.id}</h2>
 <div class="sub">สาขา ${esc(r.branch_code || "-")} · บันทึก ${esc(thaiDate(r.created_at))} โดย ${esc(r.created_by || "-")} · สถานะ <span class="badge">${esc(STATUS_TH[r.status] || r.status)}</span>${r.used_sale_no ? ` · ใบขาย ${esc(r.used_sale_no)}` : ""}</div>
 <div class="box"><b>${esc(r.brand || "")} ${esc(r.model_label || "")}</b>${r.color_name ? ` · สี${esc(r.color_name)}` : ""}<br>เลขเครื่อง <span style="font-family:monospace">${esc(r.engine_no)}</span> · เลขถัง <span style="font-family:monospace">${esc(r.chassis_no || "-")}</span>${r.note ? `<br>หมายเหตุ: ${esc(r.note)}` : ""}</div>
-<table><thead><tr><th style="width:30px">#</th><th style="width:130px">รหัสอะไหล่</th><th>รายการ</th><th style="width:50px">จำนวน</th><th style="width:90px">ทุน/หน่วย</th><th style="width:90px">ราคาขาย/หน่วย</th><th style="width:100px">รวมขาย</th></tr></thead>
-<tbody>${rowsHtml || `<tr><td colspan="7" class="c">- ไม่มีรายการ -</td></tr>`}</tbody>
-<tfoot><tr><td colspan="4" class="r b">รวม ${its.length} รายการ</td><td class="r">${baht(sumCostR)}</td><td></td><td class="r b">${baht(sumSellR)}</td></tr>
-<tr><td colspan="6" class="r b">ยอดที่บวกเข้าราคาขายรถ</td><td class="r b" style="font-size:14px">${baht(r.total_price)}</td></tr>
-<tr><td colspan="6" class="r">ทุนรวม ${baht(r.total_cost)} · กำไรจากอะไหล่แต่ง</td><td class="r">${baht(num(r.total_price) - num(r.total_cost))}</td></tr></tfoot></table>
+<table><thead><tr><th style="width:30px">#</th><th style="width:130px">รหัสอะไหล่</th><th>รายการ</th><th style="width:50px">จำนวน</th><th style="width:100px">ราคา/หน่วย</th><th style="width:110px">รวม</th></tr></thead>
+<tbody>${rowsHtml || `<tr><td colspan="6" class="c">- ไม่มีรายการ -</td></tr>`}</tbody>
+<tfoot><tr><td colspan="5" class="r b">รวม ${its.length} รายการ</td><td class="r b">${baht(sumSellR)}</td></tr>
+<tr><td colspan="5" class="r b">ยอดที่บวกเข้าราคาขายรถ</td><td class="r b" style="font-size:14px">${baht(r.total_price)}</td></tr></tfoot></table>
 <div class="foot"><div class="sg">ผู้เบิก/ติดตั้ง</div><div class="sg">ผู้ตรวจสอบ</div></div>`;
     openPrint(`อะไหล่แต่งรถ ${r.engine_no}`, body);
   }
@@ -174,12 +172,12 @@ th,td{border:1px solid #999;padding:4px 6px;font-size:12px;vertical-align:top}th
     const rowsHtml = list.map((r, i) => {
       const its = Array.isArray(r.items) ? r.items : [];
       return `<tr><td class="c">${i + 1}</td><td>${esc(thaiDate(r.created_at))}</td><td>${esc(r.branch_code || "-")}</td><td>${esc(r.brand || "")} ${esc(r.model_label || "")}${r.color_name ? ` · ${esc(r.color_name)}` : ""}</td><td style="font-family:monospace">${esc(r.engine_no)}</td>
-<td style="font-size:11px">${its.map((it) => `${esc(it.part_code)} ${esc(it.part_name)}${num(it.qty) > 1 ? ` ×${num(it.qty)}` : ""}`).join("<br>")}</td><td class="r">${baht(r.total_cost)}</td><td class="r b">${baht(r.total_price)}</td><td>${esc(r.note || "")}</td></tr>`;
+<td style="font-size:11px">${its.map((it) => `${esc(it.part_code)} ${esc(it.part_name)}${num(it.qty) > 1 ? ` ×${num(it.qty)}` : ""}`).join("<br>")}</td><td class="r b">${baht(r.total_price)}</td><td>${esc(r.note || "")}</td></tr>`;
     }).join("");
-    const tc = list.reduce((t, r) => t + num(r.total_cost), 0), tp = list.reduce((t, r) => t + num(r.total_price), 0);
+    const tp = list.reduce((t, r) => t + num(r.total_price), 0);
     const body = `<h2>🔧 สรุปรถแต่งสำหรับขาย (รอใช้ขาย ${list.length} คัน)</h2><div class="sub">พิมพ์ ${esc(thaiDate(new Date().toISOString()))}${!isAdmin ? ` · สาขา ${esc(myBranch)}` : ""}</div>
-<table><thead><tr><th>#</th><th>วันที่</th><th>สาขา</th><th>รถ</th><th>เลขเครื่อง</th><th>อะไหล่แต่ง</th><th>ทุนรวม</th><th>บวกราคาขาย</th><th>หมายเหตุ</th></tr></thead><tbody>${rowsHtml}</tbody>
-<tfoot><tr><td colspan="6" class="r b">รวม</td><td class="r b">${baht(tc)}</td><td class="r b">${baht(tp)}</td><td></td></tr></tfoot></table>`;
+<table><thead><tr><th>#</th><th>วันที่</th><th>สาขา</th><th>รถ</th><th>เลขเครื่อง</th><th>อะไหล่แต่ง</th><th>บวกราคาขาย</th><th>หมายเหตุ</th></tr></thead><tbody>${rowsHtml}</tbody>
+<tfoot><tr><td colspan="6" class="r b">รวม</td><td class="r b">${baht(tp)}</td><td></td></tr></tfoot></table>`;
     openPrint("สรุปรถแต่งสำหรับขาย", body);
   }
   const inp = { padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" };
