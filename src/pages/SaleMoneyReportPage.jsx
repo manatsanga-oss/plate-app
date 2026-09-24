@@ -19,7 +19,7 @@ const INS_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/insura
 const METHOD_COLS = [
   { key: "cash", label: "เงินสด" },
   { key: "transfer", label: "เงินโอน" },
-  { key: "finance", label: "ไฟแนนซ์" },
+  { key: "cheque", label: "เช็ค" }, // แทนไฟแนนซ์ (user 2026-09-24) — ยอด + เลขที่เช็ค
   { key: "deposit", label: "เงินมัดจำ" },
   { key: "coupon", label: "E-คูปอง" },
   { key: "tradein", label: "รถเทิร์น" },
@@ -28,13 +28,14 @@ const METHOD_COLS = [
 function methodKey(name) {
   const n = String(name || "");
   if (n.includes("หัก ณ") || n.toUpperCase().includes("WHT")) return "wht";
+  if (n.includes("เช็ค") || n.toUpperCase().includes("CHEQUE")) return "cheque";
   if (n.includes("มัดจำ")) return "deposit";
   if (n.includes("คูปอง")) return "coupon";
   if (n.includes("เทิร์น") || n.includes("เทิน")) return "tradein";
   if (n.includes("สด")) return "cash";
   // บัตร/QR (เลิกใช้แล้ว) = เงินเข้าบัญชี → รวมกับเงินโอน กันยอดเก่าหล่นหาย
   if (n.includes("โอน") || n.includes("บัตร") || n.toUpperCase().includes("QR")) return "transfer";
-  if (n.includes("ไฟแนน")) return "finance";
+  if (n.includes("ไฟแนน")) return "other";
   // วิธีอื่น (เช่น รถเทิร์น/อื่นๆ เดิม) — ไม่มีคอลัมน์แยก รวมเข้าเงินสดไม่ได้ จึงลงคอลัมน์เงินมัดจำไม่ได้เช่นกัน → คืนค่า key ที่ไม่มีคอลัมน์ (ยอดรวมยังถูกเพราะใช้ paid_amount)
   return "other";
 }
@@ -211,7 +212,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         let pms = r.payment_methods;
         if (typeof pms === "string") { try { pms = JSON.parse(pms); } catch { pms = []; } }
         if (!Array.isArray(pms)) pms = [];
-        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, other: 0 };
+        const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
         for (const p of pms) split[methodKey(p.method)] += num(p.amount);
         const paid = num(r.paid_amount) || METHOD_COLS.reduce((s, c) => s + split[c.key], 0);
         // เงินจอง (booking_deposit) ที่หักในใบขาย — ไม่ได้อยู่ใน payment_methods ต้องบวกเข้าคอลัมน์เงินมัดจำเอง
@@ -341,7 +342,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         body += `<tr>
 <td class="c">${idx}</td><td>${esc(it.doc_no || "-")}</td><td class="c">${esc(thaiDate(it.date))}</td>
 <td>${esc(it.ref_no || "-")}</td><td>${esc(it.customer_name || "")}<br><span style="font-size:9.5px;color:#555">${esc(it.category)}${it.refunded ? " · คืนเงินแล้ว" : ""}</span></td><td class="r">${it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
-${METHOD_COLS.map((c) => `<td class="r">${it.split[c.key] ? fmt(it.split[c.key]) : "-"}</td>`).join("")}
+${METHOD_COLS.map((c) => `<td class="r">${it.split[c.key] ? fmt(it.split[c.key]) : "-"}${c.key === "cheque" && it.split.cheque_nos ? `<br><span style="font-size:9px;color:#555">เลขที่ ${esc(it.split.cheque_nos)}</span>` : ""}</td>`).join("")}
 <td class="r b">${fmt(it.received)}</td></tr>`;
       }
       const t = sumOf(g.rows);
@@ -469,7 +470,7 @@ ${depSection}
                       </td>
                       <td style={{ ...td, textAlign: "center" }}>{dispSeller(it.seller)}</td>
                       <td style={tdR}>{it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
-                      {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(it.split[c.key])}</td>)}
+                      {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(it.split[c.key])}{c.key === "cheque" && it.split.cheque_nos ? <div style={{ fontSize: 10.5, color: "#7c3aed", fontFamily: "monospace", whiteSpace: "nowrap" }}>เลขที่ {it.split.cheque_nos}</div> : null}</td>)}
                       <td style={{ ...tdR, fontWeight: 700, color: "#15803d" }}>{fmt(it.received)}</td>
                     </tr>
                   ))}
