@@ -3,7 +3,12 @@ import React, { useEffect, useRef, useState } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-api";
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-master-api";
 
+// แท็บ "หมวกและอะไหล่ตกแต่ง" (user 2026-09-24): กลุ่มสินค้าที่ขึ้นต้นด้วยรหัสเหล่านี้แยกออกจากรายการหมุนเร็วหลัก — เพิ่มรหัสกลุ่มที่นี่ถ้าจะย้ายกลุ่มอื่นมาด้วย
+const DECOR_TAB_GROUPS = ["PG-033"]; // PG-033 หมวกกันน๊อก
+const isDecorRow = (r) => DECOR_TAB_GROUPS.some((g) => String(r?.product_group || "").toUpperCase().startsWith(g));
+
 export default function FastMovingPage() {
+  const [tab, setTab] = useState("main"); // main = อะไหล่หมุนเร็ว | decor = หมวกและอะไหล่ตกแต่ง
   const [rows, setRows] = useState([]);
   const [carModels, setCarModels] = useState([]);
   const [productGroups, setProductGroups] = useState([]);
@@ -400,7 +405,8 @@ export default function FastMovingPage() {
     return true;
   }
 
-  const filtered = rows.filter(r => {
+  const tabRows = rows.filter(r => (tab === "decor" ? isDecorRow(r) : !isDecorRow(r)));
+  const filtered = tabRows.filter(r => {
     if (filterProductGroup !== "all" && r.product_group !== filterProductGroup) return false;
     if (filterDiscontinued === "active" && r.is_discontinued) return false;
     if (filterDiscontinued === "discontinued" && !r.is_discontinued) return false;
@@ -494,13 +500,23 @@ export default function FastMovingPage() {
         <div className="page-title">รายงานอะไหล่หมุนเร็ว</div>
       </div>
 
+      {/* แท็บแยกหมวกกันน็อก/ของตกแต่ง ออกจากอะไหล่หมุนเร็วหลัก */}
+      <div style={{ display: "flex", gap: 0, marginBottom: 12, borderBottom: "2px solid #e5e7eb" }}>
+        {[["main", "🔩 อะไหล่หมุนเร็ว", rows.filter(r => !isDecorRow(r)).length], ["decor", "🪖 หมวกและอะไหล่ตกแต่ง", rows.filter(isDecorRow).length]].map(([k, label, n]) => (
+          <button key={k} onClick={() => { setTab(k); setFilterProductGroup("all"); setCurrentPage(1); setSelected({}); }}
+            style={{ padding: "8px 18px", fontSize: 14, fontWeight: tab === k ? 700 : 500, background: "none", border: "none", borderBottom: tab === k ? "3px solid #072d6b" : "3px solid transparent", marginBottom: -2, color: tab === k ? "#072d6b" : "#6b7280", cursor: "pointer" }}>
+            {label} <span style={{ fontSize: 12, color: "#9ca3af" }}>({n})</span>
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
           placeholder="ค้นหา รหัส / ชื่อสินค้า / รุ่น" style={{ padding: "8px 14px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, width: 260 }} />
         <select value={filterProductGroup} onChange={e => { setFilterProductGroup(e.target.value); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }}>
           <option value="all">ทุกกลุ่มสินค้า</option>
-          {[...new Set(rows.map(r => r.product_group).filter(Boolean))].sort().map(g => <option key={g} value={g}>{g}</option>)}
+          {[...new Set(tabRows.map(r => r.product_group).filter(Boolean))].sort().map(g => <option key={g} value={g}>{g}</option>)}
         </select>
         <select value={filterBrand} onChange={e => { setFilterBrand(e.target.value); setFilterRun("all"); setFilterCode("all"); setCurrentPage(1); }}
           style={{ padding: "8px 12px", fontSize: 13, border: "1px solid #072d6b", borderRadius: 8, fontWeight: 600 }}>
