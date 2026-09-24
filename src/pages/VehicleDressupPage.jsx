@@ -138,6 +138,50 @@ export default function VehicleDressupPage({ currentUser }) {
   }
 
   const visRows = useMemo(() => rows.filter((r) => isAdmin || String(r.branch_code || "").toUpperCase() === myBranch), [rows, isAdmin, myBranch]);
+
+  // ---- พิมพ์ (user 2026-09-24): ใบรายการอะไหล่แต่งรถรายคัน / สรุปรถแต่งทั้งรายการ ----
+  const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const PRINT_CSS = `*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}body{margin:0;padding:14px;color:#111;font-size:13px}
+h2{margin:0 0 2px;font-size:18px}.sub{color:#555;font-size:12px;margin-bottom:8px}table{width:100%;border-collapse:collapse;margin-top:6px}
+th,td{border:1px solid #999;padding:4px 6px;font-size:12px;vertical-align:top}th{background:#eef2f7}.r{text-align:right}.c{text-align:center}.b{font-weight:700}
+.box{border:1px solid #999;border-radius:6px;padding:8px 10px;margin-top:6px;font-size:12.5px}.foot{display:flex;justify-content:space-between;margin-top:40px;padding:0 20px}
+.sg{text-align:center;width:40%;border-top:1px dotted #777;padding-top:4px;color:#555}.badge{display:inline-block;border:1px solid #999;border-radius:10px;padding:0 8px;font-size:11px}@media print{body{padding:0}}`;
+  const openPrint = (title, body) => {
+    const w = window.open("", "_blank", "width=900,height=700");
+    if (!w) { setMessage("❌ เบราว์เซอร์บล็อกหน้าต่างพิมพ์ — อนุญาต pop-up ก่อน"); return; }
+    w.document.write(`<!doctype html><html lang="th"><head><meta charset="utf-8"><title>${esc(title)}</title><style>${PRINT_CSS}</style></head><body>${body}<script>window.onload=function(){window.print();}</script></body></html>`);
+    w.document.close();
+  };
+  function printDressup(r) {
+    const its = Array.isArray(r.items) ? r.items : [];
+    const sumCostR = its.reduce((t, it) => t + num(it.qty) * num(it.unit_cost), 0);
+    const sumSellR = its.reduce((t, it) => t + num(it.line_total), 0);
+    const rowsHtml = its.map((it, i) => `<tr><td class="c">${i + 1}</td><td style="font-family:monospace">${esc(it.part_code)}</td><td>${esc(it.part_name)}</td><td class="c">${num(it.qty)}</td><td class="r">${baht(it.unit_cost)}</td><td class="r">${baht(it.unit_price)}</td><td class="r b">${baht(it.line_total)}</td></tr>`).join("");
+    const body = `<h2>🔧 ใบรายการอะไหล่แต่งรถสำหรับขาย #${r.id}</h2>
+<div class="sub">สาขา ${esc(r.branch_code || "-")} · บันทึก ${esc(thaiDate(r.created_at))} โดย ${esc(r.created_by || "-")} · สถานะ <span class="badge">${esc(STATUS_TH[r.status] || r.status)}</span>${r.used_sale_no ? ` · ใบขาย ${esc(r.used_sale_no)}` : ""}</div>
+<div class="box"><b>${esc(r.brand || "")} ${esc(r.model_label || "")}</b>${r.color_name ? ` · สี${esc(r.color_name)}` : ""}<br>เลขเครื่อง <span style="font-family:monospace">${esc(r.engine_no)}</span> · เลขถัง <span style="font-family:monospace">${esc(r.chassis_no || "-")}</span>${r.note ? `<br>หมายเหตุ: ${esc(r.note)}` : ""}</div>
+<table><thead><tr><th style="width:30px">#</th><th style="width:130px">รหัสอะไหล่</th><th>รายการ</th><th style="width:50px">จำนวน</th><th style="width:90px">ทุน/หน่วย</th><th style="width:90px">ราคาขาย/หน่วย</th><th style="width:100px">รวมขาย</th></tr></thead>
+<tbody>${rowsHtml || `<tr><td colspan="7" class="c">- ไม่มีรายการ -</td></tr>`}</tbody>
+<tfoot><tr><td colspan="4" class="r b">รวม ${its.length} รายการ</td><td class="r">${baht(sumCostR)}</td><td></td><td class="r b">${baht(sumSellR)}</td></tr>
+<tr><td colspan="6" class="r b">ยอดที่บวกเข้าราคาขายรถ</td><td class="r b" style="font-size:14px">${baht(r.total_price)}</td></tr>
+<tr><td colspan="6" class="r">ทุนรวม ${baht(r.total_cost)} · กำไรจากอะไหล่แต่ง</td><td class="r">${baht(num(r.total_price) - num(r.total_cost))}</td></tr></tfoot></table>
+<div class="foot"><div class="sg">ผู้เบิก/ติดตั้ง</div><div class="sg">ผู้ตรวจสอบ</div></div>`;
+    openPrint(`อะไหล่แต่งรถ ${r.engine_no}`, body);
+  }
+  function printList() {
+    const list = visRows.filter((r) => r.status === "active");
+    if (!list.length) { setMessage("❌ ไม่มีรถแต่งสถานะรอใช้ขายให้พิมพ์"); return; }
+    const rowsHtml = list.map((r, i) => {
+      const its = Array.isArray(r.items) ? r.items : [];
+      return `<tr><td class="c">${i + 1}</td><td>${esc(thaiDate(r.created_at))}</td><td>${esc(r.branch_code || "-")}</td><td>${esc(r.brand || "")} ${esc(r.model_label || "")}${r.color_name ? ` · ${esc(r.color_name)}` : ""}</td><td style="font-family:monospace">${esc(r.engine_no)}</td>
+<td style="font-size:11px">${its.map((it) => `${esc(it.part_code)} ${esc(it.part_name)}${num(it.qty) > 1 ? ` ×${num(it.qty)}` : ""}`).join("<br>")}</td><td class="r">${baht(r.total_cost)}</td><td class="r b">${baht(r.total_price)}</td><td>${esc(r.note || "")}</td></tr>`;
+    }).join("");
+    const tc = list.reduce((t, r) => t + num(r.total_cost), 0), tp = list.reduce((t, r) => t + num(r.total_price), 0);
+    const body = `<h2>🔧 สรุปรถแต่งสำหรับขาย (รอใช้ขาย ${list.length} คัน)</h2><div class="sub">พิมพ์ ${esc(thaiDate(new Date().toISOString()))}${!isAdmin ? ` · สาขา ${esc(myBranch)}` : ""}</div>
+<table><thead><tr><th>#</th><th>วันที่</th><th>สาขา</th><th>รถ</th><th>เลขเครื่อง</th><th>อะไหล่แต่ง</th><th>ทุนรวม</th><th>บวกราคาขาย</th><th>หมายเหตุ</th></tr></thead><tbody>${rowsHtml}</tbody>
+<tfoot><tr><td colspan="6" class="r b">รวม</td><td class="r b">${baht(tc)}</td><td class="r b">${baht(tp)}</td><td></td></tr></tfoot></table>`;
+    openPrint("สรุปรถแต่งสำหรับขาย", body);
+  }
   const inp = { padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box" };
   const lbl = { fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4, color: "#334155" };
   const th = { padding: "8px 6px", fontSize: 12.5, textAlign: "left", whiteSpace: "nowrap", background: "#072d6b", color: "#fff" };
@@ -276,7 +320,10 @@ export default function VehicleDressupPage({ currentUser }) {
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <div style={{ fontWeight: 700 }}>📋 รถแต่งที่บันทึกไว้ ({visRows.length})</div>
-          <button onClick={load} disabled={loading} style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer" }}>{loading ? "⏳" : "🔄"}</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={printList} disabled={loading} title="พิมพ์สรุปรถแต่งที่รอใช้ขายทั้งหมด" style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid #072d6b", background: "#072d6b", color: "#fff", cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>🖨 พิมพ์รายการ</button>
+            <button onClick={load} disabled={loading} style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer" }}>{loading ? "⏳" : "🔄"}</button>
+          </div>
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -307,7 +354,9 @@ export default function VehicleDressupPage({ currentUser }) {
                         {r.status === "used" && r.used_sale_no ? <div style={{ fontSize: 10.5, color: "#15803d", fontFamily: "monospace" }}>{r.used_sale_no}</div> : null}
                       </td>
                       <td style={td}>{r.created_by || "-"}</td>
-                      <td style={{ ...td, textAlign: "center" }}>
+                      <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
+                        <button onClick={() => printDressup(r)} title="พิมพ์ใบรายการอะไหล่แต่งรถคันนี้"
+                          style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #072d6b", background: "#fff", color: "#072d6b", cursor: "pointer", fontSize: 12, marginRight: 4 }}>🖨 พิมพ์</button>
                         {r.status === "active" && (
                           <button onClick={() => cancelRow(r)} title="ยกเลิกรายการแต่ง"
                             style={{ padding: "3px 10px", borderRadius: 6, border: "1px solid #ef4444", background: "#fff", color: "#b91c1c", cursor: "pointer", fontSize: 12 }}>✖ ยกเลิก</button>
