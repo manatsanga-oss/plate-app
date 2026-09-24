@@ -74,8 +74,11 @@ export default function FastMovingStockPage() {
       //   คอลัมน์ "ให้ยืม" ยังแสดงยอดเดิม (loan_qty) ไว้ดูที่มา · quantity_base = ยอดตามไฟล์คงเหลือ
       const withLoan = (r) => {
         const loan = Number(r.loan_qty || 0);
-        if (!(loan > 0)) return r;
+        // เบิกใส่รถแต่ง (หักจาก quantity ฝั่ง n8n แล้ว) — แสดงที่มาไว้ในช่องร้าน (user 2026-09-24)
+        const du = Number(r.dressup_qty || 0);
+        if (!(loan > 0)) return du > 0 ? { ...r, stores: [r.stores && r.stores !== "-" ? r.stores : "", `🔧 เบิกใส่รถแต่ง −${du}`].filter(Boolean).join(" | ") } : r;
         const parts = String(r.stores && r.stores !== "-" ? r.stores : "").split("|").map(x => x.trim()).filter(Boolean);
+        if (du > 0) parts.push(`🔧 เบิกใส่รถแต่ง −${du}`);
         const idx = parts.findIndex(x => /^(สช|ศช)/.test(x));
         if (idx >= 0) {
           const m = parts[idx].match(/^(.+?)\s+(\d+(?:\.\d+)?)(.*)$/);

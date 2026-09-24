@@ -615,7 +615,7 @@ export default function FastMovingPage() {
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: qty <= 0 ? "#ef4444" : "#065f46" }}>{fmtQty(qty)}</td>
                   <td style={{ ...td, textAlign: "right" }}>{fmt(r.unit_price)}</td>
                   <td style={td}>{r.unit}</td>
-                  <td style={{ ...td, whiteSpace: "normal", maxWidth: 260, fontSize: 11 }}>{r.stores || r.location}</td>
+                  <td style={{ ...td, whiteSpace: "normal", maxWidth: 260, fontSize: 11 }}>{r.stores || r.location}{Number(r.dressup_qty) > 0 && <div style={{ color: "#9a3412", fontWeight: 700 }} title={`ตามไฟล์คงเหลือ ${Number(r.quantity_file || 0)} − เบิกใส่รถแต่ง ${Number(r.dressup_qty)}`}>🔧 เบิกใส่รถแต่ง −{Number(r.dressup_qty)}</div>}</td>
                 </tr>
               );
             })}
