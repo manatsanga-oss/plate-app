@@ -282,13 +282,14 @@ export default function FastMovingStockPage() {
     <div className="page-container">
       {labelSizeOpen && (
         <div onClick={() => setLabelSizeOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 520, maxWidth: "94vw", fontFamily: "Tahoma" }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 700, maxWidth: "94vw", fontFamily: "Tahoma" }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b", marginBottom: 4 }}>🏷️ เลือกขนาดป้าย — {labelSel.size} รายการ</div>
             <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 14 }}>พิมพ์บนกระดาษสติ๊กเกอร์ A4 มีเส้นประไว้ตัด</div>
             <div style={{ display: "flex", gap: 12 }}>
               {[
                 { k: "box", t: "10 × 10 ซม. (แบบเดิม)", d: "ป้ายปิดหน้ากล่อง · 8 ป้าย/แผ่น", pv: { width: 84, height: 56 } },
                 { k: "strip", t: "15 × 2 ซม.", d: "ป้ายยาวติดขอบชั้น/สันกล่อง · 12 ป้าย/แผ่น", pv: { width: 150, height: 20 } },
+                { k: "strip10", t: "10 × 2 ซม.", d: "ป้ายยาวสั้น · 24 ป้าย/แผ่น (2 คอลัมน์)", pv: { width: 100, height: 20 } },
               ].map(o => (
                 <button key={o.k} onClick={() => { setLabelSizeOpen(false); printBoxLabels(o.k); }}
                   style={{ flex: 1, padding: "14px 10px", border: "2px solid #b45309", borderRadius: 10, background: "#fffbeb", cursor: "pointer", fontFamily: "Tahoma", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
