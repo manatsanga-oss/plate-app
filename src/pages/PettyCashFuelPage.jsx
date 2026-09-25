@@ -167,53 +167,64 @@ export default function PettyCashFuelPage({ currentUser }) {
       grandAmt += amt; grandCars += cars; grandDocs += ds.length;
       return { k, ds, cars, amt };
     });
-    const sections = summaryRows.map(({ k, ds, cars, amt }) => {
-      const rows = ds.flatMap(d => (Array.isArray(d.items) ? d.items : []).map(i => `<tr>
-          <td>${thaiDate(d.doc_date)}</td><td>${esc(d.doc_no)}${d.status === "approved" ? "" : " <span class=\"pend\">(รออนุมัติ)</span>"}</td><td>${esc(d.created_by || "-")}</td>
-          <td>${thaiDate(i.sale_date)}</td><td>${esc(i.customer_name || "-")}</td><td>${esc(i.model_series || "-")}</td><td>${esc(i.engine_no || "-")}</td>
-          <td class="num">${money(i.amount)}</td></tr>`)).join("");
-      return `<h3>สาขา ${esc(branchLabel(k))} <span class="sub">— ${ds.length} ใบเบิก · ${cars} คัน · รวม ${money(amt)} บาท</span></h3>
+    // 1 หน้า = 1 สาขา ในรูปแบบใบรับรองแทนใบเสร็จรับเงิน (สรุปทั้งเดือน) — user 2026-09-25
+    const lastDay = new Date(yy, mm, 0).getDate();
+    const periodText = `${thaiDate(`${sumMonth}-01`)} ถึงวันที่ ${thaiDate(`${sumMonth}-${String(lastDay).padStart(2, "0")}`)}`;
+    const pages = summaryRows.map(({ k, ds, cars, amt }, pi) => {
+      const rows = ds.flatMap(d => (Array.isArray(d.items) ? d.items : []).map(i => ({ ...i, doc_no: d.doc_no, pending: d.status !== "approved" })))
+        .sort((a, b) => String(a.sale_date || "").localeCompare(String(b.sale_date || "")) || String(a.doc_no).localeCompare(String(b.doc_no)));
+      // ผู้เบิกจ่าย = คนที่ทำใบเบิกมากที่สุดของสาขานี้ในเดือนนี้ · บจ./หจก. = ชื่อบริษัทในหัวใบ
+      const byCount = {}; ds.forEach(d => { const n = d.created_by || ""; byCount[n] = (byCount[n] || 0) + 1; });
+      const creator = Object.keys(byCount).sort((a, b) => byCount[b] - byCount[a])[0] || "";
+      const position = (ds.find(d => d.created_by === creator && d.position) || {}).position || "";
+      const company = (ds.find(d => d.branch_name) || {}).branch_name || "";
+      const docNos = [...new Set(ds.map(d => d.doc_no))].join(", ");
+      const body = rows.map(r => `<tr><td>${thaiDate(r.sale_date)}</td><td>${esc(r.customer_name || "-")}</td><td>${esc(r.model_series || "-")}</td><td>${esc(r.engine_no || "-")}</td><td class="num">${money(r.amount)}</td></tr>`).join("")
+        + Array.from({ length: Math.max(0, 15 - rows.length) }, () => "<tr><td>&nbsp;</td><td></td><td></td><td></td><td></td></tr>").join("");
+      return `<div class="page${pi < summaryRows.length - 1 ? " brk" : ""}">
+<div class="page-num">หน้า ${pi + 1}/${summaryRows.length}</div>
+<h2>ใบรับรองแทนใบเสร็จรับเงิน</h2>
+<h3>ค่าน้ำมันรถใหม่ — สรุปประจำเดือน ${monthTitle}</h3>
+<div class="info"><div>สาขา: <b>${esc(branchLabel(k))}</b></div><div>วันที่: <b>${new Date().toLocaleDateString("th-TH")}</b></div></div>
+<div class="info"><div>บจ./หจก.: <b>${esc(company)}</b></div><div>(ผู้ชื่อ/ผู้รับบริการ)</div></div>
 <table>
-  <thead><tr><th>วันที่เบิก</th><th>เลขที่ใบเบิก</th><th>ผู้เบิก</th><th>วันที่ขาย</th><th>ชื่อลูกค้า</th><th>รุ่น</th><th>เลขเครื่อง</th><th>จำนวนเงิน</th></tr></thead>
-  <tbody>${rows}<tr class="total"><td colspan="6">รวมสาขา ${esc(branchLabel(k))}</td><td class="num">${cars} คัน</td><td class="num">${money(amt)}</td></tr></tbody>
-</table>`;
+  <thead><tr><th>วันที่ขาย</th><th>ชื่อลูกค้า</th><th>รุ่น</th><th>รายการ</th><th>จำนวนเงิน</th></tr></thead>
+  <tbody>${body}<tr class="total"><td colspan="2">รวมทั้งสิ้น (${cars} คัน · ${ds.length} ใบเบิก)</td><td colspan="2"></td><td class="num">${money(amt)}</td></tr></tbody>
+</table>
+<div class="docs">อ้างอิงใบเบิกเงินสดย่อย: ${esc(docNos)}${ds.some(d => d.status !== "approved") ? ' <span class="pend">(มีใบรออนุมัติ)</span>' : ""}</div>
+<p>ข้าพเจ้า <b>${esc(creator || "___________")}</b> (ผู้เบิกจ่าย) ตำแหน่ง <b>${esc(position || "___________")}</b></p>
+<p style="font-size:13px">ขอรับรองว่า รายจ่ายข้างต้นนี้ไม่อาจเรียกเก็บใบเสร็จรับเงินจากผู้รับได้ และข้าพเจ้าได้จ่ายไปในงานของทาง</p>
+<p>${esc(company || "บริษัท/ห้างหุ้นส่วนจำกัด")} โดยแท้ ตั้งแต่วันที่ <b>${periodText}</b></p>
+<div class="footer">
+  <div class="sig"><div class="sig-line"></div>ลงชื่อ ${esc(creator || "___________")} (ผู้เบิกจ่าย)</div>
+  <div class="sig"><div class="sig-line"></div>ลงชื่อ ___________ (ผู้อนุมัติ)</div>
+</div>
+</div>`;
     }).join("");
-    const summaryTable = `<table class="sum">
-  <thead><tr><th>สาขา</th><th>จำนวนใบเบิก</th><th>จำนวนคัน</th><th>ยอดเงิน (บาท)</th></tr></thead>
-  <tbody>${summaryRows.map(r => `<tr><td>${esc(branchLabel(r.k))}</td><td class="num">${r.ds.length}</td><td class="num">${r.cars}</td><td class="num">${money(r.amt)}</td></tr>`).join("")}
-  <tr class="total"><td>รวมทุกสาขา</td><td class="num">${grandDocs}</td><td class="num">${grandCars}</td><td class="num">${money(grandAmt)}</td></tr></tbody>
-</table>`;
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>สรุปค่าน้ำมันรถใหม่ ${monthTitle}</title>
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบรับรองแทนใบเสร็จรับเงิน ค่าน้ำมันรถใหม่ ${monthTitle}</title>
 <style>
   @page { size: A4; margin: 15mm; }
   body { font-family: 'TH Sarabun New', 'Tahoma', sans-serif; font-size: 13px; padding: 10px; color: #111; }
   h2 { text-align: center; margin: 0; font-size: 18px; }
-  .meta { text-align: center; font-size: 12px; color: #444; margin: 2px 0 10px; }
-  h3 { font-size: 14px; margin: 14px 0 4px; border-left: 4px solid #072d6b; padding-left: 6px; page-break-after: avoid; }
-  h3 .sub { font-weight: normal; font-size: 12px; color: #444; }
-  table { width: 100%; border-collapse: collapse; margin: 4px 0 8px; }
-  th, td { border: 1px solid #333; padding: 3px 5px; font-size: 11px; }
+  h3 { text-align: center; margin: 2px 0 10px; font-size: 15px; }
+  .info { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 12px; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  th, td { border: 1px solid #333; padding: 3px 5px; font-size: 11px; white-space: nowrap; }
   th { text-align: center; background: #e5e7eb; }
-  td.num { text-align: right; white-space: nowrap; }
-  tr.total td { font-weight: 700; background: #f3f4f6; }
-  .pend { color: #b45309; font-size: 10px; }
-  table.sum { width: 60%; margin: 6px auto 12px; }
-  table.sum th, table.sum td { font-size: 12px; }
-  .footer { margin-top: 30px; display: flex; justify-content: space-between; }
+  td.num { text-align: right; }
+  tr.total td { font-weight: 700; }
+  .docs { font-size: 10.5px; color: #444; margin: 2px 0 6px; white-space: normal; }
+  .pend { color: #b45309; }
+  .page-num { text-align: right; font-size: 12px; color: #666; margin-bottom: 8px; }
+  .page.brk { page-break-after: always; }
+  .footer { margin-top: 40px; display: flex; justify-content: space-between; }
   .sig { text-align: center; width: 45%; }
-  .sig-line { border-bottom: 1px solid #333; margin: 36px auto 4px; width: 200px; }
+  .sig-line { border-bottom: 1px solid #333; margin: 40px auto 4px; width: 200px; }
   .toolbar { position: fixed; top: 6px; right: 10px; }
   @media print { body { padding: 0; } .toolbar { display: none; } }
 </style></head><body>
-<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
-<h2>ใบสรุปค่าน้ำมันรถใหม่ ประจำเดือน ${monthTitle}</h2>
-<div class="meta">${sumBranch === "all" ? "ทุกสาขา แยกตามสาขา" : "สาขา " + esc(branchLabel(sumBranch))} · นับตามวันที่เบิก · พิมพ์ ${new Date().toLocaleDateString("th-TH")} โดย ${esc(currentUser?.name || "")}</div>
-${summaryTable}
-${sections}
-<div class="footer">
-  <div class="sig"><div class="sig-line"></div>ลงชื่อ ___________ (ผู้จัดทำ)</div>
-  <div class="sig"><div class="sig-line"></div>ลงชื่อ ___________ (ผู้อนุมัติ)</div>
-</div>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์ (${summaryRows.length} สาขา · ${grandCars} คัน · ${money(grandAmt)} บาท)</button></div>
+${pages}
 </body></html>`);
     win.document.close();
   }
@@ -242,15 +253,15 @@ ${sections}
   @media print { body { padding: 0; } @page { @bottom-center { content: counter(page) " / " counter(pages); } }
 </style></head><body>
 <div class="page-num">หน้า 1/1</div>
-<h2>ใบรับรองแทนใบเสร็จรับเงิน</h2>
+<h2>ใบเบิกเงินสดย่อย</h2>
 <h3>ค่าน้ำมันรถใหม่</h3>
 <div class="info">
   <div>วันที่เบิก: <b>${thaiDate(doc.doc_date)}</b></div>
-  <div>เลขที่ใบจ่าย: <b>${doc.doc_no}</b></div>
+  <div>เลขที่ใบเบิก: <b>${doc.doc_no}</b></div>
 </div>
 <div class="info">
-  <div>บจ./หจก.: <b>${doc.branch_name || ""}</b></div>
-  <div>(ผู้ชื่อ/ผู้รับบริการ)</div>
+  <div>บจ./หจก.: <b>${doc.branch_name || ""}</b>${doc.branch_code ? ` · สาขา <b>${branchLabel(doc.branch_code)}</b>` : ""}</div>
+  <div>ผู้เบิก: <b>${doc.created_by || "-"}</b> · ช่วงวันที่ขาย <b>${thaiDate(doc.period_from)}</b> – <b>${thaiDate(doc.period_to)}</b></div>
 </div>
 <table>
   <thead><tr><th>วันที่ขาย</th><th>ชื่อลูกค้า</th><th>รุ่น</th><th>รายการ</th><th>จำนวนเงิน</th></tr></thead>
@@ -260,12 +271,10 @@ ${sections}
     <tr><td colspan="2"><b>รวมทั้งสิ้น</b></td><td><b>${Number(doc.total_amount || 0).toLocaleString()}</b></td></tr>
   </tbody>
 </table>
-<p>ข้าพเจ้า <b>${doc.created_by || "___________"}</b> (ผู้เบิกจ่าย) ตำแหน่ง <b>${doc.position || "___________"}</b></p>
-<p style="font-size:13px">ขอรับรองว่า รายจ่ายข้างต้นนี้ไม่อาจเรียกเก็บใบเสร็จรับเงินจากผู้รับได้ และข้าพเจ้าได้จ่ายไปในงานของทาง</p>
-<p>${doc.branch_name || "บริษัท/ห้างหุ้นส่วนจำกัด"} โดยแท้ ตั้งแต่วันที่ <b>${thaiDate(doc.period_from)}</b> ถึงวันที่ <b>${thaiDate(doc.period_to)}</b></p>
+<p style="font-size:12px;color:#444">ใบเบิกเงินสดย่อยนี้เป็นหลักฐานการเบิกจ่ายค่าน้ำมันรถใหม่ — ใบรับรองแทนใบเสร็จรับเงินจะออกเป็นสรุปรายเดือนแยกสาขา</p>
 <div class="footer">
-  <div class="sig"><div class="sig-line"></div>ลงชื่อ ${doc.created_by || "___________"} (ผู้เบิกจ่าย)</div>
-  <div class="sig"><div class="sig-line"></div>ลงชื่อ ___________ (ผู้อนุมัติ)</div>
+  <div class="sig"><div class="sig-line"></div>ลงชื่อ ${doc.created_by || "___________"} (ผู้เบิก)</div>
+  <div class="sig"><div class="sig-line"></div>ลงชื่อ ___________ (ผู้อนุมัติ/ผู้จ่ายเงิน)</div>
 </div>
 </body></html>`);
     w.document.close();
@@ -365,16 +374,16 @@ ${sections}
       </div>
       {message && <div style={{ padding: "8px 14px", background: "#d1fae5", borderRadius: 8, marginBottom: 10, color: "#065f46" }}>{message}</div>}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10, padding: "8px 12px", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10 }}>
-        <span style={{ fontWeight: 700, color: "#072d6b", fontSize: 13 }}>📅 ใบสรุปรายเดือน (แยกสาขา)</span>
+        <span style={{ fontWeight: 700, color: "#072d6b", fontSize: 13 }}>📅 ใบรับรองแทนใบเสร็จรับเงิน สรุปรายเดือน (1 ใบต่อสาขา)</span>
         <input type="month" value={sumMonth} onChange={e => setSumMonth(e.target.value)} style={{ padding: "6px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }} />
         <select value={sumBranch} onChange={e => setSumBranch(e.target.value)} style={{ padding: "6px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }}>
           <option value="all">ทุกสาขา (แยกเป็นส่วน)</option>
           {branchOptions.map(b => <option key={b.branch_code} value={b.branch_code}>{`${b.branch_code} ${b.branch_name || ""}`.trim()}</option>)}
         </select>
         <button onClick={printMonthly} disabled={sumPrinting || !sumMonth} style={{ padding: "6px 16px", fontSize: 13, background: sumPrinting ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: sumPrinting ? "default" : "pointer", fontWeight: 700 }}>
-          {sumPrinting ? "กำลังดึงข้อมูล…" : "🖨️ พิมพ์ใบสรุปค่าน้ำมันรายเดือน"}
+          {sumPrinting ? "กำลังดึงข้อมูล…" : "🖨️ พิมพ์ใบแทนใบเสร็จรับเงิน สรุปรายเดือน"}
         </button>
-        <span style={{ fontSize: 11, color: "#6b7280" }}>นับตามวันที่เบิก · รวมใบรออนุมัติ (มีป้ายกำกับ)</span>
+        <span style={{ fontSize: 11, color: "#6b7280" }}>นับตามวันที่เบิก · รวมใบรออนุมัติ (มีหมายเหตุ) · ปุ่ม 🖨️ รายใบ = ใบเบิกเงินสดย่อย (หลักฐานการเบิก)</span>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table className="data-table" style={{ fontSize: 13 }}>
