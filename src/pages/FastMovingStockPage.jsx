@@ -130,10 +130,11 @@ export default function FastMovingStockPage() {
     const _brand = String(r.brand || "").toUpperCase();
     // "สินค้าหมด" / "มีสต๊อก" เช็คตามยี่ห้อ:
     // HONDA  = ป.เปา + สช.ตลาด (รวมกัน) เป็น 0 = หมด
-    // YAMAHA = ห้าห้อง เป็น 0 = หมด
+    // YAMAHA = ห้าห้อง + สช.ตลาด (รวมกัน) เป็น 0 = หมด
     const _toNum = v => (v === "-" || v == null) ? 0 : Number(v) || 0;
+    // (2026-09-25 user) YAMAHA นับ สช.ตลาด ด้วย — DMS สช.ตลาด มีอะไหล่ยามาฮ่า (เช่น 4FPF34111000) ถ้ามีของที่ร้านไหนก็ไม่ใช่ "สินค้าหมด"
     const mainQty = _brand.includes("YAMAHA")
-      ? _toNum(_s.haahong)
+      ? _toNum(_s.haahong) + _toNum(_s.sachtalad)
       : _toNum(_s.ppao) + _toNum(_s.sachtalad);
     if (filterStock === "in" && mainQty <= 0) return false;
     if (filterStock === "out" && mainQty > 0) return false;
