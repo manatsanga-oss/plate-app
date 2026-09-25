@@ -192,18 +192,18 @@ export default function PettyCashGeneralPage({ currentUser }) {
   async function approveDoc(id) { if (!window.confirm("ยืนยันอนุมัติ?")) return; try { await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_general_doc", id }) }); fetchDocs(); } catch {} }
   async function deleteDoc(id) { if (!window.confirm("ยืนยันลบ?")) return; try { await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "delete_general_doc", id }) }); fetchDocs(); } catch {} }
 
-  function printSummary(type, docsOverride) {
+  function printSummary(type, docsOverride, win) {
     const selDocs = docsOverride || docs.filter(d => selectedDocs.has(d.id));
     const allItems = selDocs.flatMap(d => Array.isArray(d.items) ? d.items : []);
     const filtered = type === "tax" ? allItems.filter(i => i.is_tax_invoice) : allItems.filter(i => !i.is_tax_invoice);
-    if (filtered.length === 0) { setMessage(type === "tax" ? "ไม่มีรายการใบกำกับภาษี" : "ไม่มีรายการใบแทนใบเสร็จ"); return; }
+    if (filtered.length === 0) { if (win) win.close(); setMessage(type === "tax" ? "ไม่มีรายการใบกำกับภาษี" : "ไม่มีรายการใบแทนใบเสร็จ"); return; }
     const total = filtered.reduce((s, i) => s + Number(i.amount || 0), 0);
     const thaiDate = d => d ? new Date(d).toLocaleDateString("th-TH") : "-";
     const companyName = selDocs[0]?.company_name || "";
     const createdBy = selDocs[0]?.created_by || "";
     const position = selDocs[0]?.position || "";
     const title = type === "tax" ? "ใบสรุปค่าใช้จ่ายเงินสดย่อย (ใบกำกับภาษี)" : "ใบรับรองแทนใบเสร็จรับเงิน";
-    const w = window.open("", "_blank");
+    const w = win || window.open("", "_blank");
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
 <style>
   @page { size: A4; margin: 15mm; }
@@ -243,7 +243,20 @@ export default function PettyCashGeneralPage({ currentUser }) {
 
   const fmt = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
 
-  // กด "บันทึกเบิกเงินสดย่อย + พิมพ์" → บันทึกยอดรวมค่าใช้จ่ายของใบที่เลือกเป็นใบเบิก PCW- (หักเงินสดสรุปรายวัน ณ วันนี้) แล้วพิมพ์ใบสรุป (user 2026-09-25)
+  // พิมพ์ใบสรุปของใบที่เลือกให้ครบตามชนิดรายการ: มีใบกำกับภาษี → ใบสรุป (ใบกำกับภาษี) · มีรายการไม่มีใบกำกับ → ใบรับรองแทนใบเสร็จรับเงิน (user 2026-09-25: 2 แบบต้องแยกกัน ระบบดูเองว่ามี VAT ไหม)
+  function printKindsOf(selDocs) {
+    const all = selDocs.flatMap(d => Array.isArray(d.items) ? d.items : []);
+    return { tax: all.some(i => i.is_tax_invoice), receipt: all.some(i => !i.is_tax_invoice) };
+  }
+  function printAuto(selDocs, wins = {}) {
+    const k = printKindsOf(selDocs);
+    if (k.tax) printSummary("tax", selDocs, wins.tax);
+    else if (wins.tax) wins.tax.close();
+    if (k.receipt) printSummary("receipt", selDocs, wins.receipt);
+    else if (wins.receipt) wins.receipt.close();
+    if (!k.tax && !k.receipt) setMessage("ใบที่เลือกไม่มีรายการค่าใช้จ่าย");
+  }
+  // กด "บันทึกเบิกเงินสดย่อย" → บันทึกยอดรวมค่าใช้จ่ายของใบที่เลือกเป็นใบเบิก PCW- (หักเงินสดสรุปรายวัน ณ วันนี้) แล้วพิมพ์ใบสรุป (user 2026-09-25)
   async function withdrawAndPrint() {
     const selDocs = docs.filter(d => selectedDocs.has(d.id));
     if (selDocs.length === 0) return;
@@ -253,12 +266,15 @@ export default function PettyCashGeneralPage({ currentUser }) {
     if (branches.length > 1) { alert(`ใบที่เลือกอยู่คนละสาขา (${branches.join(", ")}) — กรุณาเลือกทีละสาขา เพราะยอดหักเข้าสรุปรายวันรับเงินของสาขานั้น`); return; }
     const total = selDocs.reduce((s, d) => s + Number(d.total_amount || 0), 0);
     if (!window.confirm(`บันทึกเบิกเงินสดย่อย ${PETTY_TYPE} ${selDocs.length} ใบ รวม ${fmt(total)} บาท?\nยอดนี้จะเป็นรายการหักเงินสดในสรุปรายวันรับเงิน สาขา ${selDocs[0].branch_name || "-"} วันที่ ${new Date().toLocaleDateString("th-TH")}`)) return;
+    // เปิดหน้าต่างพิมพ์ไว้ก่อน await (กัน popup blocker) — พิมพ์ครบทั้ง 2 แบบถ้ามีทั้งใบกำกับภาษีและใบแทนใบเสร็จ
+    const kinds = printKindsOf(selDocs);
+    const wins = { tax: kinds.tax ? window.open("", "_blank") : null, receipt: kinds.receipt ? window.open("", "_blank") : null };
     try {
       const r = await savePettyWithdrawal({ pettyType: PETTY_TYPE, docs: selDocs, currentUser });
-      setMessage(`บันทึกเบิกเงินสดย่อย ${r.withdraw_no} รวม ${fmt(total)} บาท แล้ว — หักเงินสดสรุปรายวันวันนี้`);
+      setMessage(`บันทึกเบิกเงินสดย่อย ${r.withdraw_no} รวม ${fmt(total)} บาท แล้ว — หักเงินสดสรุปรายวันวันนี้${kinds.tax && kinds.receipt ? " · พิมพ์ 2 แบบ (ใบกำกับภาษี + ใบแทนใบเสร็จ)" : ""}`);
       loadWithdrawals();
-      printSummary("receipt", selDocs);
-    } catch (e) { alert(`บันทึกเบิกเงินสดย่อยไม่สำเร็จ: ${e.message || e}`); }
+      printAuto(selDocs, wins);
+    } catch (e) { Object.values(wins).forEach(w => { try { w && w.close(); } catch {} }); alert(`บันทึกเบิกเงินสดย่อยไม่สำเร็จ: ${e.message || e}`); }
   }
   const totalItems = items.reduce((s, i) => s + Number(i.amount || 0), 0);
   const totalTax = items.filter(i => i.is_tax_invoice).reduce((s, i) => s + Number(i.amount || 0), 0);
@@ -368,8 +384,9 @@ export default function PettyCashGeneralPage({ currentUser }) {
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#072d6b" }}>เลือก {selectedDocs.size} ใบ | รวม {fmt(selectedTotal)} บาท</span>
           <button onClick={() => printSummary("tax")} style={{ padding: "6px 16px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🖨️ พิมพ์ใบกำกับภาษี</button>
-          <button onClick={withdrawAndPrint} title="บันทึกยอดรวมค่าใช้จ่ายของใบที่เลือกเป็นใบเบิกเงินสดย่อย (หักเงินสดในสรุปรายวันรับเงิน ณ วันนี้) แล้วพิมพ์ใบรับรองแทนใบเสร็จรับเงิน"
-            style={{ padding: "6px 16px", fontSize: 13, background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>💰 บันทึกเบิกเงินสดย่อย + พิมพ์ใบแทนใบเสร็จรับเงิน</button>
+          <button onClick={() => printSummary("receipt")} style={{ padding: "6px 16px", fontSize: 13, background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🖨️ พิมพ์ใบแทนใบเสร็จ</button>
+          <button onClick={withdrawAndPrint} title="บันทึกยอดรวมค่าใช้จ่ายของใบที่เลือกเป็นใบเบิกเงินสดย่อย (หักเงินสดในสรุปรายวันรับเงิน ณ วันนี้) แล้วพิมพ์ให้อัตโนมัติ: มีใบกำกับภาษี → ใบสรุปใบกำกับภาษี · ไม่มี → ใบรับรองแทนใบเสร็จรับเงิน (มีทั้ง 2 แบบพิมพ์ทั้งคู่)"
+            style={{ padding: "6px 16px", fontSize: 13, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>💰 บันทึกเบิกเงินสดย่อย</button>
           <button onClick={async () => { const ids = [...selectedDocs]; if (!window.confirm(`อนุมัติ ${ids.length} ใบ?`)) return; for (const id of ids) { try { await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "approve_general_doc", id }) }); } catch {} } setSelectedDocs(new Set()); fetchDocs(); }}
             style={{ padding: "6px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>✅ อนุมัติ</button>
           <button onClick={() => setSelectedDocs(new Set())} style={{ padding: "6px 16px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>ล้าง</button>
@@ -420,7 +437,7 @@ export default function PettyCashGeneralPage({ currentUser }) {
       </div>
 
       <PettyWithdrawalPanel withdrawals={withdrawals} currentUser={currentUser} isAdmin={isAdmin} onChanged={loadWithdrawals}
-        onReprint={w => { const ids = new Set(String(w.doc_ids || "").split(",")); const sel = docs.filter(d => ids.has(String(d.id))); if (!sel.length) { alert("ไม่พบใบของรายการเบิกนี้ในตาราง (อาจเกิน 50 ใบล่าสุด)"); return; } printSummary("receipt", sel); }} />
+        onReprint={w => { const ids = new Set(String(w.doc_ids || "").split(",")); const sel = docs.filter(d => ids.has(String(d.id))); if (!sel.length) { alert("ไม่พบใบของรายการเบิกนี้ในตาราง (อาจเกิน 50 ใบล่าสุด)"); return; } printAuto(sel); }} />
 
       {/* Modal แก้ไขสาขาที่หัวใบ (เฉพาะ ADMIN) */}
       {editBranchDoc && (

@@ -469,16 +469,16 @@ export default function PettyCashPostagePage({ currentUser }) {
 
   const selectedTotal = docs.filter(d => selectedDocs.has(d.id)).reduce((s, d) => s + Number(d.total_amount || 0), 0);
 
-  function printSummary(docsOverride) {
+  function printSummary(docsOverride, win) {
     const selDocs = Array.isArray(docsOverride) ? docsOverride : docs.filter(d => selectedDocs.has(d.id));
-    if (selDocs.length === 0) return;
+    if (selDocs.length === 0) { if (win) win.close(); return; }
     const total = selDocs.reduce((s, d) => s + Number(d.total_amount || 0), 0);
     const thaiDate = d => d ? new Date(d).toLocaleDateString("th-TH") : "-";
     const companyName = selDocs[0]?.company_name || "";
     const createdBy = selDocs[0]?.created_by || "";
     const position = selDocs[0]?.position || "";
     const allItems = selDocs.flatMap(d => (Array.isArray(d.items) ? d.items : []).map(i => ({ ...i, doc_no: d.doc_no })));
-    const w = window.open("", "_blank");
+    const w = win || window.open("", "_blank");
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ใบสรุปค่าใช้จ่าย</title>
 <style>
   @page { size: A4; margin: 15mm; }
@@ -527,12 +527,13 @@ export default function PettyCashPostagePage({ currentUser }) {
     if (branches.length > 1) { alert(`ใบที่เลือกอยู่คนละสาขา (${branches.join(", ")}) — กรุณาเลือกทีละสาขา เพราะยอดหักเข้าสรุปรายวันรับเงินของสาขานั้น`); return; }
     const total = selDocs.reduce((s, d) => s + Number(d.total_amount || 0), 0);
     if (!window.confirm(`บันทึกเบิกเงินสดย่อย ${PETTY_TYPE} ${selDocs.length} ใบ รวม ${fmt(total)} บาท?\nยอดนี้จะเป็นรายการหักเงินสดในสรุปรายวันรับเงิน สาขา ${selDocs[0].branch_name || "-"} วันที่ ${new Date().toLocaleDateString("th-TH")}`)) return;
+    const win = window.open("", "_blank"); // เปิดไว้ก่อน await กัน popup blocker
     try {
       const r = await savePettyWithdrawal({ pettyType: PETTY_TYPE, docs: selDocs, currentUser });
       setMessage(`บันทึกเบิกเงินสดย่อย ${r.withdraw_no} รวม ${fmt(total)} บาท แล้ว — หักเงินสดสรุปรายวันวันนี้`);
       loadWithdrawals();
-      printSummary(selDocs);
-    } catch (e) { alert(`บันทึกเบิกเงินสดย่อยไม่สำเร็จ: ${e.message || e}`); }
+      printSummary(selDocs, win);
+    } catch (e) { try { win && win.close(); } catch {} alert(`บันทึกเบิกเงินสดย่อยไม่สำเร็จ: ${e.message || e}`); }
   }
 
   async function approveSelected() {
@@ -557,8 +558,9 @@ export default function PettyCashPostagePage({ currentUser }) {
       {selectedDocs.size > 0 && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#072d6b" }}>เลือก {selectedDocs.size} ใบ | รวม {fmt(selectedTotal)} บาท</span>
-          <button onClick={withdrawAndPrint} title="บันทึกยอดรวมค่าใช้จ่ายของใบที่เลือกเป็นใบเบิกเงินสดย่อย (หักเงินสดในสรุปรายวันรับเงิน ณ วันนี้) แล้วพิมพ์ใบสรุป"
-            style={{ padding: "6px 16px", fontSize: 13, background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>💰 บันทึกเบิกเงินสดย่อย + พิมพ์ใบแทนใบเสร็จรับเงิน</button>
+          <button onClick={() => printSummary()} style={{ padding: "6px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🖨️ พิมพ์ใบสรุป</button>
+          <button onClick={withdrawAndPrint} title="บันทึกยอดรวมค่าใช้จ่ายของใบที่เลือกเป็นใบเบิกเงินสดย่อย (หักเงินสดในสรุปรายวันรับเงิน ณ วันนี้) แล้วพิมพ์ใบสรุปให้"
+            style={{ padding: "6px 16px", fontSize: 13, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>💰 บันทึกเบิกเงินสดย่อย</button>
           <button onClick={approveSelected} style={{ padding: "6px 16px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>✅ อนุมัติทั้งหมด</button>
           <button onClick={() => setSelectedDocs(new Set())} style={{ padding: "6px 16px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>ล้างเลือก</button>
         </div>
