@@ -58,14 +58,21 @@ export async function loadPettyRows() {
       period_from: String(d.period_from || "").slice(0, 10), period_to: String(d.period_to || "").slice(0, 10),
     }));
   };
-  // user 2026-09-25: หักเงินสดในสรุปรายวันครบทั้ง 4 ประเภท (เดิม 2026-09-07 หักเฉพาะค่าน้ำมันรถใหม่) — หัก ณ วันที่ใบเบิก
-  const [f, o, pst, g] = await Promise.all([
+  // user 2026-09-25: ค่าน้ำมันรถใหม่ + ค่าของไหว้ หัก ณ วันที่ใบเบิก · ค่าไปรษณีย์/ค่าใช้จ่ายทั่วไป "ไม่หักตอนบันทึกใบ" (เบิกจากเงินสดย่อย)
+  //   แต่หักเป็นยอดรวมตอนพนักงานกด "บันทึกเบิกเงินสดย่อย + พิมพ์ใบแทนใบเสร็จ" (petty_cash_withdrawals) ณ วันที่กด
+  const [f, o, w] = await Promise.all([
     post(PETTY_API, { action: "get_fuel_docs" }).catch(() => null),
     post(PETTY_API, { action: "get_offering_docs" }).catch(() => null),
-    post(PETTY_API, { action: "get_postage_docs" }).catch(() => null),
-    post(PETTY_API, { action: "get_general_docs" }).catch(() => null),
+    post(PETTY_API, { action: "list_petty_withdrawals", limit: 2000 }).catch(() => null),
   ]);
-  return [...await parsePetty(f, "ค่าน้ำมันรถใหม่"), ...await parsePetty(o, "ค่าของไหว้"), ...await parsePetty(pst, "ค่าไปรษณีย์"), ...await parsePetty(g, "ค่าใช้จ่ายทั่วไป")];
+  let wraw = w ? await w.json().catch(() => []) : [];
+  const withdrawRows = (Array.isArray(wraw) ? wraw : []).filter((x) => x && x.withdraw_no && x.status !== "cancelled").map((x) => ({
+    petty_type: x.petty_type || "เบิกเงินสดย่อย", doc_no: x.withdraw_no, doc_date: String(x.withdraw_date || "").slice(0, 10),
+    branch_code: x.branch_code || String(x.branch_name || "").slice(0, 5), branch_name: x.branch_name || "",
+    total_amount: num(x.total_amount), status: "approved", created_by: x.created_by || "", period_from: "", period_to: "",
+    is_withdrawal: true, doc_nos: String(x.doc_nos || ""), doc_count: Number(x.doc_count) || 0,
+  }));
+  return [...await parsePetty(f, "ค่าน้ำมันรถใหม่"), ...await parsePetty(o, "ค่าของไหว้"), ...withdrawRows];
 }
 
 /** ยกยอดวันติดลบไปหักวันถัดไป (user 2026-09-07: วันไหนเงินสดสุทธิติดลบ ไม่ต้องขึ้นเป็นวันฝาก ให้ไปหักยอดนำฝากวันถัดไปที่เป็นบวก)
@@ -505,9 +512,9 @@ export function buildDailyCashItems(src, ctx) {
       };
     });
   // เบิกเงินสดย่อย 4 ประเภท (user 2026-09-25 เพิ่มค่าของไหว้/ค่าไปรษณีย์/ค่าใช้จ่ายทั่วไป) — หักเงินสด ณ วันที่ใบเบิก ทั้งที่รออนุมัติและอนุมัติแล้ว (เงินออกจากลิ้นชักตอนเบิก) (user 2026-09-07)
-  const PETTY_DEDUCT_TYPES = ["ค่าน้ำมันรถใหม่", "ค่าของไหว้", "ค่าไปรษณีย์", "ค่าใช้จ่ายทั่วไป"];
+  const PETTY_DEDUCT_TYPES = ["ค่าน้ำมันรถใหม่", "ค่าของไหว้"]; // ค่าไปรษณีย์/ค่าใช้จ่ายทั่วไป หักผ่านใบเบิก PCW- (is_withdrawal) แทน
   const pettyOuts = pettyRows
-    .filter((d) => PETTY_DEDUCT_TYPES.includes(d.petty_type) && d.doc_date && d.doc_date >= dateFrom && d.doc_date <= dateTo && d.total_amount > 0)
+    .filter((d) => (d.is_withdrawal || PETTY_DEDUCT_TYPES.includes(d.petty_type)) && d.doc_date && d.doc_date >= dateFrom && d.doc_date <= dateTo && d.total_amount > 0)
     .filter((d) => inBranch(d.branch_code, ctx))
     .map((d) => {
       const amt = -d.total_amount;
@@ -515,12 +522,12 @@ export function buildDailyCashItems(src, ctx) {
       const pending = !/approved|อนุมัติ/.test(d.status) || /รอ/.test(d.status);
       const period = d.period_from && d.period_to ? ` · ช่วง ${d.period_from.slice(8, 10)}/${d.period_from.slice(5, 7)}–${d.period_to.slice(8, 10)}/${d.period_to.slice(5, 7)}` : "";
       return {
-        kind: "petty_cash", category: `เบิกเงินสดย่อย — ${d.petty_type} (จ่ายออก)`,
+        kind: d.is_withdrawal ? "petty_withdrawal" : "petty_cash", category: `เบิกเงินสดย่อย — ${d.petty_type} (จ่ายออก)`,
         doc_no: d.doc_no, date: d.doc_date, ref_no: "",
         customer_name: d.petty_type, seller: d.created_by || "", saleAmount: 0,
         split, received: amt,
         branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
-        note: `หักเงินสดหน้าร้าน${period}${pending ? " · รออนุมัติ" : ""}`,
+        note: d.is_withdrawal ? `หักเงินสดหน้าร้าน · เบิกจากเงินสดย่อยตอนกดสรุปพิมพ์ใบแทนใบเสร็จ รวม ${d.doc_count} ใบ (${d.doc_nos})` : `หักเงินสดหน้าร้าน${period}${pending ? " · รออนุมัติ" : ""}`,
       };
     });
   // คืนเงินมัดจำอะไหล่ "ใบระบบ" PDS-/PDO- (refund_deposit จากหน้ามัดจำอะไหล่ / หน้าสั่งซื้อ) — หักเงินสด/เงินโอนตามวิธีคืน ณ วันคืน (user 2026-09-23 เคส PDO-6909-00104)

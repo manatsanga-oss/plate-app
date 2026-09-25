@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from "react";
+import { listPettyWithdrawals, withdrawnDocMap, savePettyWithdrawal } from "../lib/pettyWithdraw"; // บันทึกเบิกเงินสดย่อยตอนกดสรุปพิมพ์ → หักเงินสดสรุปรายวัน ณ วันที่กด (user 2026-09-25)
+import PettyWithdrawalPanel from "./PettyWithdrawalPanel";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api";
+const PETTY_TYPE = "ค่าไปรษณีย์";
 const MASTER_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api"; // สาขา — dropdown สาขาที่สร้างใบ
 const COMPANIES = [
   { label: "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด" },
@@ -19,6 +22,9 @@ export default function PettyCashPostagePage({ currentUser }) {
   const [periodTo, setPeriodTo] = useState("");
   const [ocrLoading, setOcrLoading] = useState(false);
   const [selectedDocs, setSelectedDocs] = useState(new Set());
+  const [withdrawals, setWithdrawals] = useState([]); // รายการเบิกเงินสดย่อยที่บันทึกแล้ว
+  const withdrawnMap = withdrawnDocMap(withdrawals); // doc_id → ใบเบิก (active)
+  async function loadWithdrawals() { try { setWithdrawals(await listPettyWithdrawals({ petty_type: PETTY_TYPE, limit: 300 })); } catch { setWithdrawals([]); } }
   const [linkOpen, setLinkOpen] = useState(false);
   const [linkIdx, setLinkIdx] = useState(null);
   const [availableReceipts, setAvailableReceipts] = useState([]);
@@ -39,7 +45,7 @@ export default function PettyCashPostagePage({ currentUser }) {
   const prevM = m === 1 ? 12 : m - 1;
   const prevY = m === 1 ? now.getFullYear() - 1 : now.getFullYear();
 
-  useEffect(() => { fetchDocs(); }, []);
+  useEffect(() => { fetchDocs(); loadWithdrawals(); }, []);
   useEffect(() => {
     fetch(MASTER_URL, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -463,8 +469,8 @@ export default function PettyCashPostagePage({ currentUser }) {
 
   const selectedTotal = docs.filter(d => selectedDocs.has(d.id)).reduce((s, d) => s + Number(d.total_amount || 0), 0);
 
-  function printSummary() {
-    const selDocs = docs.filter(d => selectedDocs.has(d.id));
+  function printSummary(docsOverride) {
+    const selDocs = Array.isArray(docsOverride) ? docsOverride : docs.filter(d => selectedDocs.has(d.id));
     if (selDocs.length === 0) return;
     const total = selDocs.reduce((s, d) => s + Number(d.total_amount || 0), 0);
     const thaiDate = d => d ? new Date(d).toLocaleDateString("th-TH") : "-";
@@ -510,6 +516,25 @@ export default function PettyCashPostagePage({ currentUser }) {
     w.print();
   }
 
+
+  // กด "บันทึกเบิกเงินสดย่อย + พิมพ์" → บันทึกยอดรวมค่าใช้จ่ายของใบที่เลือกเป็นใบเบิก PCW- (หักเงินสดสรุปรายวัน ณ วันนี้) แล้วพิมพ์ใบสรุป (user 2026-09-25)
+  async function withdrawAndPrint() {
+    const selDocs = docs.filter(d => selectedDocs.has(d.id));
+    if (selDocs.length === 0) return;
+    const dup = selDocs.filter(d => withdrawnMap.has(String(d.id)));
+    if (dup.length) { alert(`ใบต่อไปนี้บันทึกเบิกเงินสดย่อยไปแล้ว เลือกซ้ำไม่ได้:\n${dup.map(d => `${d.doc_no} → ${withdrawnMap.get(String(d.id)).withdraw_no}`).join("\n")}\n\n(ถ้าต้องการเบิกใหม่ ให้ ADMIN ยกเลิกใบเบิกเดิมในตารางด้านล่างก่อน)`); return; }
+    const branches = [...new Set(selDocs.map(d => String(d.branch_name || d.branch_code || "").split(" ")[0]))].filter(Boolean);
+    if (branches.length > 1) { alert(`ใบที่เลือกอยู่คนละสาขา (${branches.join(", ")}) — กรุณาเลือกทีละสาขา เพราะยอดหักเข้าสรุปรายวันรับเงินของสาขานั้น`); return; }
+    const total = selDocs.reduce((s, d) => s + Number(d.total_amount || 0), 0);
+    if (!window.confirm(`บันทึกเบิกเงินสดย่อย ${PETTY_TYPE} ${selDocs.length} ใบ รวม ${fmt(total)} บาท?\nยอดนี้จะเป็นรายการหักเงินสดในสรุปรายวันรับเงิน สาขา ${selDocs[0].branch_name || "-"} วันที่ ${new Date().toLocaleDateString("th-TH")}`)) return;
+    try {
+      const r = await savePettyWithdrawal({ pettyType: PETTY_TYPE, docs: selDocs, currentUser });
+      setMessage(`บันทึกเบิกเงินสดย่อย ${r.withdraw_no} รวม ${fmt(total)} บาท แล้ว — หักเงินสดสรุปรายวันวันนี้`);
+      loadWithdrawals();
+      printSummary(selDocs);
+    } catch (e) { alert(`บันทึกเบิกเงินสดย่อยไม่สำเร็จ: ${e.message || e}`); }
+  }
+
   async function approveSelected() {
     const ids = [...selectedDocs];
     if (ids.length === 0) return;
@@ -532,7 +557,8 @@ export default function PettyCashPostagePage({ currentUser }) {
       {selectedDocs.size > 0 && (
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#072d6b" }}>เลือก {selectedDocs.size} ใบ | รวม {fmt(selectedTotal)} บาท</span>
-          <button onClick={printSummary} style={{ padding: "6px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🖨️ พิมพ์ใบสรุป</button>
+          <button onClick={withdrawAndPrint} title="บันทึกยอดรวมค่าใช้จ่ายของใบที่เลือกเป็นใบเบิกเงินสดย่อย (หักเงินสดในสรุปรายวันรับเงิน ณ วันนี้) แล้วพิมพ์ใบสรุป"
+            style={{ padding: "6px 16px", fontSize: 13, background: "#f59e0b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>💰 บันทึกเบิกเงินสดย่อย + พิมพ์ใบแทนใบเสร็จรับเงิน</button>
           <button onClick={approveSelected} style={{ padding: "6px 16px", fontSize: 13, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>✅ อนุมัติทั้งหมด</button>
           <button onClick={() => setSelectedDocs(new Set())} style={{ padding: "6px 16px", fontSize: 13, background: "#ef4444", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>ล้างเลือก</button>
         </div>
@@ -570,6 +596,7 @@ export default function PettyCashPostagePage({ currentUser }) {
                         color: d.status === "approved" ? "#065f46" : "#92400e" }}>
                         {d.status === "approved" ? "อนุมัติแล้ว" : "รออนุมัติ"}
                       </span>
+                      {withdrawnMap.has(String(d.id)) && <span title={`บันทึกเบิกเงินสดย่อยแล้ว หักเงินสดสรุปรายวัน ${new Date(String(withdrawnMap.get(String(d.id)).withdraw_date).slice(0, 10)).toLocaleDateString("th-TH")}`} style={{ marginLeft: 4, padding: "2px 8px", borderRadius: 12, fontSize: 10, background: "#dbeafe", color: "#1e40af", fontWeight: 700, whiteSpace: "nowrap" }}>💰 เบิกแล้ว {withdrawnMap.get(String(d.id)).withdraw_no}</span>}
                     </td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       {isAdmin && (
@@ -589,6 +616,9 @@ export default function PettyCashPostagePage({ currentUser }) {
           </tbody>
         </table>
       </div>
+
+      <PettyWithdrawalPanel withdrawals={withdrawals} currentUser={currentUser} isAdmin={isAdmin} onChanged={loadWithdrawals}
+        onReprint={w => { const ids = new Set(String(w.doc_ids || "").split(",")); const sel = docs.filter(d => ids.has(String(d.id))); if (!sel.length) { alert("ไม่พบใบของรายการเบิกนี้ในตาราง (อาจเกิน 50 ใบล่าสุด)"); return; } printSummary(sel); }} />
 
       {/* Modal แก้ไขสาขาที่หัวใบ (เฉพาะ ADMIN) */}
       {editBranchDoc && (
