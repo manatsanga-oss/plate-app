@@ -58,13 +58,14 @@ export async function loadPettyRows() {
       period_from: String(d.period_from || "").slice(0, 10), period_to: String(d.period_to || "").slice(0, 10),
     }));
   };
-  // user 2026-09-07: หักในสรุปรายวันเฉพาะ "ค่าน้ำมันรถใหม่" (ค่าไปรษณีย์/ค่าใช้จ่ายทั่วไป ไม่หักเงินสดหน้าร้าน)
-  // user 2026-09-25: เพิ่ม "ค่าของไหว้" เป็นรายการหักด้วย (หัก ณ วันที่ใบเบิก เหมือนค่าน้ำมัน)
-  const [f, o] = await Promise.all([
+  // user 2026-09-25: หักเงินสดในสรุปรายวันครบทั้ง 4 ประเภท (เดิม 2026-09-07 หักเฉพาะค่าน้ำมันรถใหม่) — หัก ณ วันที่ใบเบิก
+  const [f, o, pst, g] = await Promise.all([
     post(PETTY_API, { action: "get_fuel_docs" }).catch(() => null),
     post(PETTY_API, { action: "get_offering_docs" }).catch(() => null),
+    post(PETTY_API, { action: "get_postage_docs" }).catch(() => null),
+    post(PETTY_API, { action: "get_general_docs" }).catch(() => null),
   ]);
-  return [...await parsePetty(f, "ค่าน้ำมันรถใหม่"), ...await parsePetty(o, "ค่าของไหว้")];
+  return [...await parsePetty(f, "ค่าน้ำมันรถใหม่"), ...await parsePetty(o, "ค่าของไหว้"), ...await parsePetty(pst, "ค่าไปรษณีย์"), ...await parsePetty(g, "ค่าใช้จ่ายทั่วไป")];
 }
 
 /** ยกยอดวันติดลบไปหักวันถัดไป (user 2026-09-07: วันไหนเงินสดสุทธิติดลบ ไม่ต้องขึ้นเป็นวันฝาก ให้ไปหักยอดนำฝากวันถัดไปที่เป็นบวก)
@@ -503,8 +504,8 @@ export function buildDailyCashItems(src, ctx) {
         note: ["คืนเงินมัดจำระบบเก่า " + (d.brand || ""), String(d.remark || "").replace("[คืนมัดจำระบบเก่า]", "").trim()].filter(Boolean).join(" · "),
       };
     });
-  // เบิกเงินสดย่อย "ค่าน้ำมันรถใหม่" + "ค่าของไหว้" (user 2026-09-25) — หักเงินสด ณ วันที่ใบเบิก ทั้งที่รออนุมัติและอนุมัติแล้ว (เงินออกจากลิ้นชักตอนเบิก) (user 2026-09-07)
-  const PETTY_DEDUCT_TYPES = ["ค่าน้ำมันรถใหม่", "ค่าของไหว้"];
+  // เบิกเงินสดย่อย 4 ประเภท (user 2026-09-25 เพิ่มค่าของไหว้/ค่าไปรษณีย์/ค่าใช้จ่ายทั่วไป) — หักเงินสด ณ วันที่ใบเบิก ทั้งที่รออนุมัติและอนุมัติแล้ว (เงินออกจากลิ้นชักตอนเบิก) (user 2026-09-07)
+  const PETTY_DEDUCT_TYPES = ["ค่าน้ำมันรถใหม่", "ค่าของไหว้", "ค่าไปรษณีย์", "ค่าใช้จ่ายทั่วไป"];
   const pettyOuts = pettyRows
     .filter((d) => PETTY_DEDUCT_TYPES.includes(d.petty_type) && d.doc_date && d.doc_date >= dateFrom && d.doc_date <= dateTo && d.total_amount > 0)
     .filter((d) => inBranch(d.branch_code, ctx))
