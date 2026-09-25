@@ -100,7 +100,8 @@ export default function FastMovingStockPage() {
     const parts = String(storesStr).split("|").map(s => s.trim()).filter(Boolean);
     for (const p of parts) {
       // อนุญาตให้ไม่มี (location) หรือมี () ว่างก็ได้
-      const m = p.match(/^(.+?)\s+(\d+(?:\.\d+)?)(?:\s*\(([^)]*)\))?\s*$/);
+      // ที่เก็บอาจมีวงเล็บซ้อน เช่น ".ROOM(FM)" — จับตั้งแต่ "(" แรกถึง ")" สุดท้าย (2026-09-25: เดิม [^)]* ทำให้แถว สช ตลาด ของ DMS ไม่ขึ้นและตัวกรองสต๊อกผิด)
+      const m = p.match(/^(.+?)\s+(\d+(?:\.\d+)?)(?:\s*\((.*)\))?\s*$/);
       if (!m) continue;
       const name = m[1].trim();
       const qty = m[2];
