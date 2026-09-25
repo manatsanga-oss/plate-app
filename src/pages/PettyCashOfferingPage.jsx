@@ -58,20 +58,50 @@ export default function PettyCashOfferingPage({ currentUser }) {
     } catch { setDocs([]); }
   }
 
-  function emptyItem(date = "") {
-    return { offering_date: date, description: DEFAULT_DESC, amount: DEFAULT_AMOUNT, note: "" };
+  function emptyItem(date = "", picked = false) {
+    return { offering_date: date, description: DEFAULT_DESC, amount: DEFAULT_AMOUNT, note: "", picked };
+  }
+
+  // วันสุดท้ายที่เคยเบิกของไหว้แล้วในใบก่อน ๆ (สาขา+บริษัทเดียวกัน) → วันที่ก่อนหน้านั้น (รวมวันที่เคยข้าม) ไม่ขึ้นให้เลือกอีก (user 2026-09-25)
+  function lastOfferedDate(branchLabel, companyLabel, excludeDocId) {
+    const code = String(branchLabel || "").split(" ")[0];
+    let last = "", lastDoc = "";
+    docs.forEach(d => {
+      if (excludeDocId && d.id === excludeDocId) return;
+      const dCode = String(d.branch_code || d.branch_name || "").split(" ")[0];
+      if (code && dCode && dCode !== code) return;
+      if (companyLabel && d.company_name && d.company_name !== companyLabel) return;
+      (Array.isArray(d.items) ? d.items : []).forEach(i => {
+        const dt = String(i.offering_date || "").slice(0, 10);
+        if (dt && dt > last) { last = dt; lastDoc = d.doc_no || ""; }
+      });
+    });
+    return { last, lastDoc };
+  }
+
+  // ติ๊กเลือกวันที่เบิก: ต้องเรียงตามลำดับวันที่ — ติ๊กวันไหน วันก่อนหน้าที่ยังไม่ติ๊กถือว่า "ข้าม" ถูกเอาออกจากรายการ ไม่ขึ้นให้เลือกอีก
+  function togglePick(idx, checked) {
+    setItems(prev => {
+      if (!checked) return prev.map((it, i) => i === idx ? { ...it, picked: false } : it);
+      const target = prev[idx];
+      const skipped = prev.filter((it, i) => i < idx && !it.picked && it.offering_date && target.offering_date && it.offering_date < target.offering_date);
+      if (skipped.length) setMessage(`ข้าม ${skipped.length} วัน (${skipped.map(x => x.offering_date.split("-").reverse().join("/")).join(", ")}) — วันที่ข้ามจะไม่ขึ้นให้เลือกอีก`);
+      return prev.filter(it => !skipped.includes(it)).map(it => it === target ? { ...it, picked: true } : it);
+    });
   }
 
   // สร้างรายการรายวันจาก period_from → period_to (กรอก default ค่าผลไม้ 50)
-  function generateDailyItems(from, to) {
+  function generateDailyItems(from, to, branchLabel = branchSel, companyLabel = company) {
     if (!from || !to) return [emptyItem()];
     const result = [];
     const d1 = new Date(from);
     const d2 = new Date(to);
     if (isNaN(d1) || isNaN(d2) || d1 > d2) return [emptyItem()];
+    const { last } = lastOfferedDate(branchLabel, companyLabel);
     const curr = new Date(d1);
     while (curr <= d2) {
-      result.push(emptyItem(curr.toISOString().slice(0, 10)));
+      const ds = curr.toISOString().slice(0, 10);
+      if (!last || ds > last) result.push(emptyItem(ds));
       curr.setDate(curr.getDate() + 1);
       if (result.length > 100) break;
     }
@@ -114,7 +144,7 @@ export default function PettyCashOfferingPage({ currentUser }) {
     const to = `${now.getFullYear()}-${pad(m)}-24`;
     setPeriodFrom(from);
     setPeriodTo(to);
-    setItems(generateDailyItems(from, to));
+    setItems(generateDailyItems(from, to, currentUser?.branch || "", COMPANIES[0].label));
     setMessage("");
   }
 
@@ -130,6 +160,7 @@ export default function PettyCashOfferingPage({ currentUser }) {
           description: i.description || DEFAULT_DESC,
           amount: Number(i.amount) || 0,
           note: i.note || "",
+          picked: true,
         }))
       : [emptyItem()];
     setItems(its); setMessage("");
@@ -144,8 +175,8 @@ export default function PettyCashOfferingPage({ currentUser }) {
   }
 
   async function saveDoc() {
-    const validItems = items.filter(it => Number(it.amount) > 0 && it.offering_date);
-    if (validItems.length === 0) { setMessage("กรุณาเพิ่มรายการอย่างน้อย 1 รายการ"); return; }
+    const validItems = items.filter(it => it.picked && Number(it.amount) > 0 && it.offering_date).map(({ picked, ...it }) => it);
+    if (validItems.length === 0) { setMessage("กรุณาติ๊กเลือกวันที่เบิกของไหว้อย่างน้อย 1 วัน"); return; }
     setSaving(true);
     try {
       let docId = editDoc?.id;
@@ -274,7 +305,9 @@ export default function PettyCashOfferingPage({ currentUser }) {
     const i = d.getDay();
     return { label: DAYS_TH[i], color: DAY_COLORS[i] };
   }
-  const totalItems = items.reduce((s, i) => s + Number(i.amount || 0), 0);
+  const totalItems = items.reduce((s, i) => s + (i.picked ? Number(i.amount || 0) : 0), 0);
+  const pickedCount = items.filter(i => i.picked && Number(i.amount) > 0).length;
+  const lastInfo = mode === "create" ? lastOfferedDate(branchSel, company, editDoc?.id) : { last: "" };
   const selectedTotal = docs.filter(d => selectedDocs.has(d.id)).reduce((s, d) => s + Number(d.total_amount || 0), 0);
 
   /* ── CREATE/EDIT ── */
@@ -314,10 +347,11 @@ export default function PettyCashOfferingPage({ currentUser }) {
 
         <div style={{ display: "flex", gap: 8, marginBottom: 10, alignItems: "center", flexWrap: "wrap" }}>
           <span style={{ fontWeight: 700, fontSize: 14 }}>
-            รายการ ({items.filter(i => Number(i.amount) > 0).length}) | รวม <span style={{ color: "#dc2626" }}>{fmt(totalItems)}</span> บาท
+            เบิก ({pickedCount}/{items.filter(i => Number(i.amount) > 0).length} วัน) | รวม <span style={{ color: "#dc2626" }}>{fmt(totalItems)}</span> บาท
           </span>
+          {!editDoc?.viewOnly && <span style={{ fontSize: 12, color: "#6b7280" }}>ติ๊กช่อง "เบิก" ตามลำดับวันที่ — วันที่ข้ามจะถูกเอาออก ไม่ขึ้นให้เลือกอีก{lastInfo.last ? ` · เบิกครั้งล่าสุดถึง ${lastInfo.last.split("-").reverse().join("/")}${lastInfo.lastDoc ? ` (${lastInfo.lastDoc})` : ""}` : ""}</span>}
           {!editDoc?.viewOnly && (
-            <button onClick={() => setItems(prev => [...prev, emptyItem()])}
+            <button onClick={() => setItems(prev => [...prev, emptyItem("", true)])}
               style={{ padding: "6px 14px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>+ เพิ่มรายการ</button>
           )}
         </div>
@@ -325,13 +359,15 @@ export default function PettyCashOfferingPage({ currentUser }) {
         <div style={{ overflowX: "auto" }}>
           <table className="data-table" style={{ fontSize: 12 }}>
             <thead><tr>
+              <th style={{ width: 44, textAlign: "center" }} title="เลือกทั้งหมด">{editDoc?.viewOnly ? "เบิก" : <label style={{ cursor: "pointer" }}><input type="checkbox" checked={items.length > 0 && items.every(i => i.picked)} onChange={e => setItems(prev => prev.map(i => ({ ...i, picked: e.target.checked })))} /> เบิก</label>}</th>
               <th>#</th><th>วันที่</th><th>วัน</th><th>รายละเอียด</th><th>จำนวนเงิน</th><th>หมายเหตุ</th>{!editDoc?.viewOnly && <th></th>}
             </tr></thead>
             <tbody>
               {items.map((it, idx) => {
                 const day = getDayLabel(it.offering_date);
                 return (
-                <tr key={idx}>
+                <tr key={idx} style={{ background: it.picked ? "#ecfdf5" : undefined, opacity: editDoc?.viewOnly || it.picked ? 1 : 0.75 }}>
+                  <td style={{ textAlign: "center" }}>{editDoc?.viewOnly ? "✓" : <input type="checkbox" checked={!!it.picked} onChange={e => togglePick(idx, e.target.checked)} title="เบิกของไหว้วันนี้" />}</td>
                   <td>{idx + 1}</td>
                   <td><input type="date" value={it.offering_date} onChange={e => updateItem(idx, "offering_date", e.target.value)} disabled={editDoc?.viewOnly} style={{ width: 130, fontSize: 12, padding: 2 }} /></td>
                   <td><span style={{ fontWeight: 600, color: day.color, fontSize: 12 }}>{day.label}</span></td>
