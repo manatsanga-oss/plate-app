@@ -25,6 +25,10 @@ export default function PettyCashFuelPage({ currentUser }) {
   const [editBranchDoc, setEditBranchDoc] = useState(null); // ใบที่กำลังแก้สาขา (null = ปิด modal)
   const [editBranchVal, setEditBranchVal] = useState("");
   const [editBranchSaving, setEditBranchSaving] = useState(false);
+  // ใบสรุปค่าน้ำมันรถใหม่รายเดือน แยกสาขา (user 2026-09-25) — เลือกเดือน + สาขา แล้วพิมพ์
+  const [sumMonth, setSumMonth] = useState(() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
+  const [sumBranch, setSumBranch] = useState("all");
+  const [sumPrinting, setSumPrinting] = useState(false);
   useEffect(() => {
     fetch(MASTER_URL, {
       method: "POST", headers: { "Content-Type": "application/json" },
@@ -126,6 +130,92 @@ export default function PettyCashFuelPage({ currentUser }) {
 
   function toggleSelect(engineNo) {
     setSelected(prev => { const n = new Set(prev); n.has(engineNo) ? n.delete(engineNo) : n.add(engineNo); return n; });
+  }
+
+  const branchLabel = (code) => { const b = branchOptions.find(x => x.branch_code === code); return b ? `${b.branch_code} ${b.branch_name || ""}`.trim() : (code || "ไม่ระบุสาขา"); };
+  const THAI_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+
+  // พิมพ์ใบสรุปค่าน้ำมันรถใหม่ประจำเดือน แยกเป็นส่วนตามสาขา (นับตามวันที่เบิก doc_date) — ดึงใบทั้งหมดด้วย limit (workflow ต้อง re-import ถึงจะเกิน 50 ใบ)
+  async function printMonthly() {
+    if (!sumMonth) return;
+    setSumPrinting(true);
+    const win = window.open("", "_blank"); // เปิดไว้ก่อน await กัน popup blocker
+    let all = docs;
+    try {
+      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_fuel_docs", limit: 2000 }) });
+      const data = await res.json();
+      if (Array.isArray(data) && data.length >= docs.length) all = data;
+    } catch { /* ใช้ docs ที่โหลดไว้ */ }
+    setSumPrinting(false);
+    const [yy, mm] = sumMonth.split("-").map(Number);
+    const inMonth = all.filter(d => d && d.doc_date && String(d.doc_date).slice(0, 7) === sumMonth && !/cancel|ยกเลิก/i.test(String(d.status || "")))
+      .filter(d => sumBranch === "all" || (d.branch_code || "") === sumBranch);
+    if (inMonth.length === 0) { win.close(); setMessage(`ไม่มีใบเบิกค่าน้ำมันรถใหม่เดือน ${THAI_MONTHS[mm - 1]} ${yy + 543}${sumBranch !== "all" ? ` สาขา ${branchLabel(sumBranch)}` : ""}`); return; }
+    const thaiDate = d => { if (!d) return "-"; const dt = new Date(d); return isNaN(dt) ? "-" : dt.toLocaleDateString("th-TH"); };
+    const money = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 });
+    const esc = v => String(v == null ? "" : v).replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
+    // จัดกลุ่มตามสาขา
+    const groups = new Map();
+    inMonth.forEach(d => { const k = d.branch_code || ""; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(d); });
+    const keys = [...groups.keys()].sort();
+    const monthTitle = `${THAI_MONTHS[mm - 1]} ${yy + 543}`;
+    let grandAmt = 0, grandCars = 0, grandDocs = 0;
+    const summaryRows = keys.map(k => {
+      const ds = groups.get(k).slice().sort((a, b) => String(a.doc_date).localeCompare(String(b.doc_date)) || String(a.doc_no).localeCompare(String(b.doc_no)));
+      const cars = ds.reduce((s, d) => s + (Array.isArray(d.items) ? d.items.length : 0), 0);
+      const amt = ds.reduce((s, d) => s + Number(d.total_amount || 0), 0);
+      grandAmt += amt; grandCars += cars; grandDocs += ds.length;
+      return { k, ds, cars, amt };
+    });
+    const sections = summaryRows.map(({ k, ds, cars, amt }) => {
+      const rows = ds.flatMap(d => (Array.isArray(d.items) ? d.items : []).map(i => `<tr>
+          <td>${thaiDate(d.doc_date)}</td><td>${esc(d.doc_no)}${d.status === "approved" ? "" : " <span class=\"pend\">(รออนุมัติ)</span>"}</td><td>${esc(d.created_by || "-")}</td>
+          <td>${thaiDate(i.sale_date)}</td><td>${esc(i.customer_name || "-")}</td><td>${esc(i.model_series || "-")}</td><td>${esc(i.engine_no || "-")}</td>
+          <td class="num">${money(i.amount)}</td></tr>`)).join("");
+      return `<h3>สาขา ${esc(branchLabel(k))} <span class="sub">— ${ds.length} ใบเบิก · ${cars} คัน · รวม ${money(amt)} บาท</span></h3>
+<table>
+  <thead><tr><th>วันที่เบิก</th><th>เลขที่ใบเบิก</th><th>ผู้เบิก</th><th>วันที่ขาย</th><th>ชื่อลูกค้า</th><th>รุ่น</th><th>เลขเครื่อง</th><th>จำนวนเงิน</th></tr></thead>
+  <tbody>${rows}<tr class="total"><td colspan="6">รวมสาขา ${esc(branchLabel(k))}</td><td class="num">${cars} คัน</td><td class="num">${money(amt)}</td></tr></tbody>
+</table>`;
+    }).join("");
+    const summaryTable = `<table class="sum">
+  <thead><tr><th>สาขา</th><th>จำนวนใบเบิก</th><th>จำนวนคัน</th><th>ยอดเงิน (บาท)</th></tr></thead>
+  <tbody>${summaryRows.map(r => `<tr><td>${esc(branchLabel(r.k))}</td><td class="num">${r.ds.length}</td><td class="num">${r.cars}</td><td class="num">${money(r.amt)}</td></tr>`).join("")}
+  <tr class="total"><td>รวมทุกสาขา</td><td class="num">${grandDocs}</td><td class="num">${grandCars}</td><td class="num">${money(grandAmt)}</td></tr></tbody>
+</table>`;
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>สรุปค่าน้ำมันรถใหม่ ${monthTitle}</title>
+<style>
+  @page { size: A4; margin: 15mm; }
+  body { font-family: 'TH Sarabun New', 'Tahoma', sans-serif; font-size: 13px; padding: 10px; color: #111; }
+  h2 { text-align: center; margin: 0; font-size: 18px; }
+  .meta { text-align: center; font-size: 12px; color: #444; margin: 2px 0 10px; }
+  h3 { font-size: 14px; margin: 14px 0 4px; border-left: 4px solid #072d6b; padding-left: 6px; page-break-after: avoid; }
+  h3 .sub { font-weight: normal; font-size: 12px; color: #444; }
+  table { width: 100%; border-collapse: collapse; margin: 4px 0 8px; }
+  th, td { border: 1px solid #333; padding: 3px 5px; font-size: 11px; }
+  th { text-align: center; background: #e5e7eb; }
+  td.num { text-align: right; white-space: nowrap; }
+  tr.total td { font-weight: 700; background: #f3f4f6; }
+  .pend { color: #b45309; font-size: 10px; }
+  table.sum { width: 60%; margin: 6px auto 12px; }
+  table.sum th, table.sum td { font-size: 12px; }
+  .footer { margin-top: 30px; display: flex; justify-content: space-between; }
+  .sig { text-align: center; width: 45%; }
+  .sig-line { border-bottom: 1px solid #333; margin: 36px auto 4px; width: 200px; }
+  .toolbar { position: fixed; top: 6px; right: 10px; }
+  @media print { body { padding: 0; } .toolbar { display: none; } }
+</style></head><body>
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์</button></div>
+<h2>ใบสรุปค่าน้ำมันรถใหม่ ประจำเดือน ${monthTitle}</h2>
+<div class="meta">${sumBranch === "all" ? "ทุกสาขา แยกตามสาขา" : "สาขา " + esc(branchLabel(sumBranch))} · นับตามวันที่เบิก · พิมพ์ ${new Date().toLocaleDateString("th-TH")} โดย ${esc(currentUser?.name || "")}</div>
+${summaryTable}
+${sections}
+<div class="footer">
+  <div class="sig"><div class="sig-line"></div>ลงชื่อ ___________ (ผู้จัดทำ)</div>
+  <div class="sig"><div class="sig-line"></div>ลงชื่อ ___________ (ผู้อนุมัติ)</div>
+</div>
+</body></html>`);
+    win.document.close();
   }
 
   function printDoc(doc) {
@@ -274,6 +364,18 @@ export default function PettyCashFuelPage({ currentUser }) {
         <button className="btn-primary" onClick={openCreate}>+ สร้างใบเบิก</button>
       </div>
       {message && <div style={{ padding: "8px 14px", background: "#d1fae5", borderRadius: 8, marginBottom: 10, color: "#065f46" }}>{message}</div>}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10, padding: "8px 12px", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10 }}>
+        <span style={{ fontWeight: 700, color: "#072d6b", fontSize: 13 }}>📅 ใบสรุปรายเดือน (แยกสาขา)</span>
+        <input type="month" value={sumMonth} onChange={e => setSumMonth(e.target.value)} style={{ padding: "6px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }} />
+        <select value={sumBranch} onChange={e => setSumBranch(e.target.value)} style={{ padding: "6px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8 }}>
+          <option value="all">ทุกสาขา (แยกเป็นส่วน)</option>
+          {branchOptions.map(b => <option key={b.branch_code} value={b.branch_code}>{`${b.branch_code} ${b.branch_name || ""}`.trim()}</option>)}
+        </select>
+        <button onClick={printMonthly} disabled={sumPrinting || !sumMonth} style={{ padding: "6px 16px", fontSize: 13, background: sumPrinting ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: sumPrinting ? "default" : "pointer", fontWeight: 700 }}>
+          {sumPrinting ? "กำลังดึงข้อมูล…" : "🖨️ พิมพ์ใบสรุปค่าน้ำมันรายเดือน"}
+        </button>
+        <span style={{ fontSize: 11, color: "#6b7280" }}>นับตามวันที่เบิก · รวมใบรออนุมัติ (มีป้ายกำกับ)</span>
+      </div>
       <div style={{ overflowX: "auto" }}>
         <table className="data-table" style={{ fontSize: 13 }}>
           <thead><tr>
