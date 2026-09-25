@@ -21,7 +21,7 @@ const UPLOAD_GROUPS = [
     items: [
       { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด — ไฟล์ HONDA (SPR08010) รวม 2 สาขา แยก ป.เปา/นครหลวง จากคอลัมน์สาขาอัตโนมัติ + ห้าห้อง (ไม่แตะ สช.ตลาด — อัปเดตจากการ์ด DMS ด้านล่างเท่านั้น, user 2026-09-17)", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
       // สช.ตลาด (SCY07) ปรับปรุงยอดจากไฟล์ DMS "รายงาน STOCK อะไหล่" ทุกสาขา — อัปเดตเฉพาะรหัสที่มีในระบบ ไม่เพิ่มรหัสใหม่ (user 2026-09-05)
-      { key: "honda-inventory-scy07", label: "สินค้าคงเหลืออะไหล่ สช.ตลาด (DMS)", desc: "เลือกไฟล์ DMS รายงาน STOCK อะไหล่ (ทุกสาขา) → อ่านในเครื่อง เอาแถว SCY07 ที่มีของ เฉพาะรหัสที่มีในสต๊อก SCY01 (ห้าห้อง) หรือรายการหมุนเร็ว → ลบสต๊อก สช.ตลาด เดิมแล้วลงใหม่ (ขึ้นทั้งแท็บหมุนเร็วและแท็บสต๊อกอะไหล่อื่น) · + แถว SCY01 ที่เป็นรหัส YAMAHA ในหมุนเร็ว → อัปเดต/เพิ่มสต๊อกห้าห้อง", db: "honda_inventory (สช ตลาด)", url: `${BASE}/upload-honda-inventory-scy07` },
+      { key: "honda-inventory-scy07", label: "สินค้าคงเหลืออะไหล่ สช.ตลาด (DMS)", desc: "เลือกไฟล์ DMS รายงาน STOCK อะไหล่ (ทุกสาขา) → อ่านในเครื่อง เอาแถว SCY07 ที่มีของ เฉพาะรหัสที่มีในสต๊อก SCY01 (ห้าห้อง) / รายการหมุนเร็ว / เคยรับเข้าที่ SCY01 → ลบสต๊อก สช.ตลาด เดิมแล้วลงใหม่ (ขึ้นทั้งแท็บหมุนเร็วและแท็บสต๊อกอะไหล่อื่น) · + แถว SCY01 ที่เป็นรหัส YAMAHA ในหมุนเร็ว → อัปเดต/เพิ่มสต๊อกห้าห้อง", db: "honda_inventory (สช ตลาด)", url: `${BASE}/upload-honda-inventory-scy07` },
       { key: "part-price", label: "ราคาอะไหล่ HONDA (Price List)", desc: "ไฟล์ XLSX ข้อมูลสินค้าคงคลัง · ใช้คอลัมน์ รหัสสินค้า/ชื่อสินค้า/ราคาPrice List · UPSERT (part_code)", db: "part_prices", url: `${BASE}/upload-part-price` },
       { key: "part-price-yamaha", label: "ราคาอะไหล่ YAMAHA (Stock)", desc: "ไฟล์ XLSX รายงาน STOCK อะไหล่ YAMAHA · ใช้คอลัมน์ รหัสอะไหล่2/ชื่ออะไหล่/ราคาขายต่อหน่วย · UPSERT (part_code) ลง part_prices เดียวกัน", db: "part_prices", url: `${BASE}/upload-part-price-yamaha` },
       { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (apc_order_no + line_no + part_number)", db: "dcs_spare_orders", url: `${BASE}/upload-dcs-orders` },
@@ -114,7 +114,7 @@ async function uploadScy07Stock(url, file, onProgress) {
     const code = normPartCode(r["รหัสอะไหล่"]) || normPartCode(r["รหัสอะไหล่2"]);
     if (!code) continue;
     allCodes.add(code);
-    if (!sysCodes.has(code)) continue; // เฉพาะรหัสที่มีในสต๊อก SCY01 (ห้าห้อง) / สช ตลาด เดิม / รายการหมุนเร็ว (user 2026-09-25: ไม่เอาทุกรหัส)
+    if (!sysCodes.has(code)) continue; // เฉพาะรหัสที่มีในสต๊อก SCY01 (ห้าห้อง) / สช ตลาด เดิม / รายการหมุนเร็ว / เคยรับเข้าที่ SCY01 (user 2026-09-25: ไม่เอาทุกรหัส)
     const cur = agg.get(code) || { code: String(r["รหัสอะไหล่"] ?? r["รหัสอะไหล่2"] ?? "").trim().replace(/^'+/, "") || code, qty: 0, price: 0, loc: "", name: String(r["ชื่ออะไหล่"] ?? "").trim(), grp: String(r["กลุ่มอะไหล่"] ?? "").trim() };
     cur.qty += num(r["จำนวน"]);
     const price = num(r["ราคาทุนต่อหน่วย"]); if (price > 0) cur.price = price;
