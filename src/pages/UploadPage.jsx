@@ -21,7 +21,7 @@ const UPLOAD_GROUPS = [
     items: [
       { key: "honda-inventory", label: "สินค้าคงเหลืออะไหล่", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด — ไฟล์ HONDA (SPR08010) รวม 2 สาขา แยก ป.เปา/นครหลวง จากคอลัมน์สาขาอัตโนมัติ + ห้าห้อง (ไม่แตะ สช.ตลาด — อัปเดตจากการ์ด DMS ด้านล่างเท่านั้น, user 2026-09-17)", db: "honda_inventory", url: `${BASE}/upload-honda-inventory` },
       // สช.ตลาด (SCY07) ปรับปรุงยอดจากไฟล์ DMS "รายงาน STOCK อะไหล่" ทุกสาขา — อัปเดตเฉพาะรหัสที่มีในระบบ ไม่เพิ่มรหัสใหม่ (user 2026-09-05)
-      { key: "honda-inventory-scy07", label: "สินค้าคงเหลืออะไหล่ สช.ตลาด (DMS)", desc: "เลือกไฟล์ DMS รายงาน STOCK อะไหล่ (ทุกสาขา) → อ่านในเครื่อง ใช้เฉพาะแถว SCY07 ที่รหัสมีในระบบอยู่แล้ว (ส่งแค่ ~500 รหัส เร็ว) · อัปเดตยอด/ที่เก็บ · รหัสที่ไม่มีในไฟล์ตั้งเป็น 0 · รหัสอื่นไม่นำเข้า", db: "honda_inventory (สช ตลาด)", url: `${BASE}/upload-honda-inventory-scy07` },
+      { key: "honda-inventory-scy07", label: "สินค้าคงเหลืออะไหล่ สช.ตลาด (DMS)", desc: "เลือกไฟล์ DMS รายงาน STOCK อะไหล่ (ทุกสาขา) → อ่านในเครื่อง ใช้เฉพาะแถว SCY07 ที่รหัสมีในระบบอยู่แล้ว (ส่งแค่ ~500 รหัส เร็ว) · อัปเดตยอด/ที่เก็บ · รหัสที่ไม่มีในไฟล์ตั้งเป็น 0 · รหัสอื่นไม่นำเข้า · + แถว SCY01 ที่เป็นรหัส YAMAHA ในหมุนเร็ว → อัปเดต/เพิ่มสต๊อกห้าห้อง", db: "honda_inventory (สช ตลาด)", url: `${BASE}/upload-honda-inventory-scy07` },
       { key: "part-price", label: "ราคาอะไหล่ HONDA (Price List)", desc: "ไฟล์ XLSX ข้อมูลสินค้าคงคลัง · ใช้คอลัมน์ รหัสสินค้า/ชื่อสินค้า/ราคาPrice List · UPSERT (part_code)", db: "part_prices", url: `${BASE}/upload-part-price` },
       { key: "part-price-yamaha", label: "ราคาอะไหล่ YAMAHA (Stock)", desc: "ไฟล์ XLSX รายงาน STOCK อะไหล่ YAMAHA · ใช้คอลัมน์ รหัสอะไหล่2/ชื่ออะไหล่/ราคาขายต่อหน่วย · UPSERT (part_code) ลง part_prices เดียวกัน", db: "part_prices", url: `${BASE}/upload-part-price-yamaha` },
       { key: "dcs-orders", label: "รายงานการสั่งอะไหล่ DCS", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · UPSERT (apc_order_no + line_no + part_number)", db: "dcs_spare_orders", url: `${BASE}/upload-dcs-orders` },
@@ -98,12 +98,15 @@ async function uploadScy07Stock(url, file, onProgress) {
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
   const scy = rows.filter((r) => String(r.BRANCH_CODE ?? "").trim().toUpperCase() === "SCY07");
-  if (!scy.length) throw new Error("ไม่พบแถวสาขา SCY07 ในไฟล์ (ต้องเป็นไฟล์ DMS รายงาน STOCK อะไหล่ ที่มีคอลัมน์ BRANCH_CODE)");
-  onProgress?.(`⏳ พบแถว SCY07 ${scy.length.toLocaleString()} แถว · กำลังดึงรายการรหัสในระบบ…`);
+  // แถวสาขา SCY01 ที่เป็นรหัส YAMAHA ในระบบ → อัปเดต/เพิ่มสต๊อก "ห้าห้อง" (SCY01) ด้วย (user 2026-09-25 เคส 4FPF34111000)
+  const scy01 = rows.filter((r) => String(r.BRANCH_CODE ?? "").trim().toUpperCase() === "SCY01");
+  if (!scy.length && !scy01.length) throw new Error("ไม่พบแถวสาขา SCY07/SCY01 ในไฟล์ (ต้องเป็นไฟล์ DMS รายงาน STOCK อะไหล่ ที่มีคอลัมน์ BRANCH_CODE)");
+  onProgress?.(`⏳ พบแถว SCY07 ${scy.length.toLocaleString()} แถว · SCY01 ${scy01.length.toLocaleString()} แถว · กำลังดึงรายการรหัสในระบบ…`);
   const cr = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_codes" }) });
   if (!cr.ok) throw new Error(`HTTP ${cr.status} (list_codes)`);
   const cd = await cr.json().catch(() => ({}));
   const sysCodes = new Set((Array.isArray(cd?.codes) ? cd.codes : []).map(normPartCode).filter(Boolean));
+  const yamahaCodes = new Set((Array.isArray(cd?.yamaha_codes) ? cd.yamaha_codes : []).map(normPartCode).filter(Boolean));
   if (!sysCodes.size) throw new Error("ดึงรายการรหัสในระบบไม่ได้ (ตรวจว่า import/activate workflow Upload Honda Inventory SCY07 แล้ว)");
   const num = (v) => { const n = Number(String(v ?? "").replace(/[, ฿]/g, "")); return Number.isFinite(n) ? n : 0; };
   const allCodes = new Set(); const agg = new Map();
@@ -118,9 +121,20 @@ async function uploadScy07Stock(url, file, onProgress) {
     const loc = String(r["รหัสที่เก็บ"] ?? "").trim() || String(r["ชื่อที่เก็บ"] ?? "").trim(); if (!cur.loc && loc) cur.loc = loc;
     agg.set(code, cur);
   }
-  onProgress?.(`⏳ ส่ง ${agg.size} รหัสที่ตรงกับระบบ (จาก ${allCodes.size.toLocaleString()} รหัสในไฟล์)…`);
+  // SCY01: เฉพาะรหัส YAMAHA ที่อยู่ในรายการอะไหล่หมุนเร็ว (ส่งชื่อ/กลุ่มไปด้วยเผื่อต้องเพิ่มแถวใหม่ในสต๊อกห้าห้อง)
+  const agg01 = new Map();
+  for (const r of scy01) {
+    const code = normPartCode(r["รหัสอะไหล่"]) || normPartCode(r["รหัสอะไหล่2"]);
+    if (!code || !yamahaCodes.has(code)) continue;
+    const cur = agg01.get(code) || { code: String(r["รหัสอะไหล่"] ?? r["รหัสอะไหล่2"] ?? "").trim().replace(/^'+/, ""), qty: 0, price: 0, loc: "", name: String(r["ชื่ออะไหล่"] ?? "").trim(), grp: String(r["กลุ่มอะไหล่"] ?? "").trim() };
+    cur.qty += num(r["จำนวน"]);
+    const price = num(r["ราคาทุนต่อหน่วย"]); if (price > 0) cur.price = price;
+    const loc = String(r["รหัสที่เก็บ"] ?? "").trim() || String(r["ชื่อที่เก็บ"] ?? "").trim(); if (!cur.loc && loc) cur.loc = loc;
+    agg01.set(code, cur);
+  }
+  onProgress?.(`⏳ ส่ง SCY07 ${agg.size} รหัส + SCY01 (YAMAHA) ${agg01.size} รหัส (จาก ${allCodes.size.toLocaleString()} รหัสในไฟล์)…`);
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "update", branch_code: "SCY07", rows: [...agg.values()], file_codes: allCodes.size, file_rows: scy.length }) });
+    body: JSON.stringify({ action: "update", branch_code: "SCY07", rows: [...agg.values()], rows_scy01: [...agg01.values()], file_codes: allCodes.size, file_rows: scy.length }) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const data = await res.json().catch(() => ({}));
   if (data && data.success === false) throw new Error(data.message || "อัปเดตไม่สำเร็จ");
