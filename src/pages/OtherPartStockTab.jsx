@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { printBoxLabels } from "../utils/boxLabels"; // ป้ายปิดหน้ากล่อง/ป้ายยาว ชุดเดียวกับแท็บหมุนเร็ว (user 2026-09-25)
 
 // แท็บ "สต๊อกอะไหล่อื่น (นอกหมุนเร็ว)" ในหน้าระบบจัดการสต๊อกอะไหล่หมุนเร็ว — user 2026-09-19
 // อะไหล่ทุกรหัสที่มียอดคงเหลือในไฟล์สินค้าคงเหลือ (honda_inventory ทุกร้าน) ยกเว้นรหัสที่อยู่ในรายการหมุนเร็ว — แสดงยอดคงเหลือแยกสาขา
@@ -35,6 +36,14 @@ export default function OtherPartStockTab({ apiUrl }) {
   const [group, setGroup] = useState("all");
   const [store, setStore] = useState("all");
   const [onlyReceived, setOnlyReceived] = useState(false); // แสดงเฉพาะรหัสที่มีวันที่รับเข้าล่าสุด (user 2026-09-23)
+  const [labelSel, setLabelSel] = useState(() => new Set()); // รหัสที่ติ๊กไว้พิมพ์ป้ายกล่อง
+  const [labelSizeOpen, setLabelSizeOpen] = useState(false);
+  const toggleLabel = (code) => setLabelSel(prev => { const n = new Set(prev); n.has(code) ? n.delete(code) : n.add(code); return n; });
+  const toggleLabelPage = (checked) => setLabelSel(prev => { const n = new Set(prev); paged.forEach(r => checked ? n.add(r.part_code) : n.delete(r.part_code)); return n; });
+  // เดายี่ห้อไว้พิมพ์บนป้าย: รูปแบบรหัส Honda 5-3-3/4 → HONDA · มีเฉพาะสต๊อกห้าห้อง (NID) → YAMAHA
+  const brandOf = (r) => /^[A-Z0-9]{5}-[A-Z0-9]{3}-[A-Z0-9]{3,4}$/i.test(String(r.part_code || "").trim()) ? "HONDA"
+    : (Number(r.qty_haahong) > 0 && !(Number(r.qty_ppao) > 0 || Number(r.qty_sachtalad) > 0 || Number(r.qty_nakhonluang) > 0)) ? "YAMAHA" : "";
+  const doPrintLabels = (size) => { setLabelSizeOpen(false); printBoxLabels(rows.filter(r => labelSel.has(r.part_code)).map(r => ({ ...r, brand: r.brand || brandOf(r) })), size); };
   const [page, setPage] = useState(1);
 
   async function load() {
@@ -93,6 +102,30 @@ export default function OtherPartStockTab({ apiUrl }) {
 
   return (
     <div>
+      {labelSizeOpen && (
+        <div onClick={() => setLabelSizeOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 520, maxWidth: "94vw", fontFamily: "Tahoma" }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#072d6b", marginBottom: 4 }}>🏷️ เลือกขนาดป้าย — {labelSel.size} รายการ</div>
+            <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 14 }}>พิมพ์บนกระดาษสติ๊กเกอร์ A4 มีเส้นประไว้ตัด</div>
+            <div style={{ display: "flex", gap: 12 }}>
+              {[
+                { k: "box", t: "10 × 10 ซม. (แบบเดิม)", d: "ป้ายปิดหน้ากล่อง · 8 ป้าย/แผ่น", pv: { width: 84, height: 56 } },
+                { k: "strip", t: "15 × 2 ซม.", d: "ป้ายยาวติดขอบชั้น/สันกล่อง · 12 ป้าย/แผ่น", pv: { width: 150, height: 20 } },
+              ].map(o => (
+                <button key={o.k} onClick={() => doPrintLabels(o.k)}
+                  style={{ flex: 1, padding: "14px 10px", border: "2px solid #b45309", borderRadius: 10, background: "#fffbeb", cursor: "pointer", fontFamily: "Tahoma", display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                  <div style={{ height: 60, display: "flex", alignItems: "center" }}>
+                    <div style={{ ...o.pv, border: "1.5px dashed #92400e", borderRadius: 3, background: "#fff" }} />
+                  </div>
+                  <div style={{ fontWeight: 700, fontSize: 15, color: "#92400e" }}>{o.t}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280" }}>{o.d}</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ textAlign: "right", marginTop: 12 }}><button onClick={() => setLabelSizeOpen(false)} style={{ padding: "6px 14px", border: "1px solid #d1d5db", borderRadius: 8, background: "#fff", cursor: "pointer" }}>ยกเลิก</button></div>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", gap: 10, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหา รหัส / ชื่อสินค้า / กลุ่ม" style={{ ...inp, width: 280 }} />
         <select value={group} onChange={e => setGroup(e.target.value)} style={{ ...inp, maxWidth: 300 }}>
@@ -108,6 +141,11 @@ export default function OtherPartStockTab({ apiUrl }) {
         </label>
         <button onClick={load} disabled={loading} style={{ padding: "8px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>{loading ? "กำลังโหลด..." : "Refresh"}</button>
         <button onClick={exportCsv} disabled={!filtered.length} style={{ padding: "8px 16px", fontSize: 13, background: filtered.length ? "#15803d" : "#d1d5db", color: "#fff", border: "none", borderRadius: 8, cursor: filtered.length ? "pointer" : "default", fontWeight: 700 }}>⬇️ Excel (CSV)</button>
+        <button onClick={() => setLabelSizeOpen(true)} disabled={labelSel.size === 0} title="ติ๊กเลือกแถวในตาราง แล้วพิมพ์ป้ายบนกระดาษสติ๊กเกอร์ A4 — เลือกขนาดป้ายได้"
+          style={{ padding: "8px 16px", fontSize: 13, background: labelSel.size ? "#b45309" : "#d1d5db", color: "#fff", border: "none", borderRadius: 8, cursor: labelSel.size ? "pointer" : "default", fontWeight: 700 }}>
+          🏷️ พิมพ์ป้ายกล่อง{labelSel.size ? ` (${labelSel.size})` : ""}
+        </button>
+        {labelSel.size > 0 && <button onClick={() => setLabelSel(new Set())} style={{ padding: "8px 10px", fontSize: 12, background: "#fff", color: "#6b7280", border: "1px solid #d1d5db", borderRadius: 8, cursor: "pointer" }}>ล้างที่เลือก</button>}
         <span style={{ fontSize: 13, color: "#374151" }}>{filtered.length.toLocaleString()} รายการ · รวม {fmtQty(sums.quantity)} ชิ้น · มูลค่า {fmtMoney(sums.total_value)} บาท{reportDate ? ` · ข้อมูล ณ ${fmtDate(reportDate)}` : ""}</span>
       </div>
       <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>อะไหล่ทุกรหัสที่มียอดคงเหลือในไฟล์สินค้าคงเหลือ ยกเว้นรหัสที่อยู่ในรายการอะไหล่หมุนเร็ว — ยอดตามไฟล์ที่ upload ล่าสุดของแต่ละร้าน</div>
@@ -117,6 +155,7 @@ export default function OtherPartStockTab({ apiUrl }) {
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "#072d6b", color: "#fff" }}>
+              <th style={{ ...th, textAlign: "center" }} title="เลือกทั้งหน้านี้เพื่อพิมพ์ป้ายกล่อง"><input type="checkbox" checked={paged.length > 0 && paged.every(r => labelSel.has(r.part_code))} onChange={e => toggleLabelPage(e.target.checked)} /></th>
               <th style={th}>#</th><th style={th}>กลุ่มสินค้า</th><th style={th}>รหัสสินค้า</th><th style={th}>ชื่อสินค้า</th>
               <th style={{ ...th, textAlign: "right" }}>จำนวน</th>
               {STORES.map(s => <th key={s.k} style={{ ...th, textAlign: "right" }}>{s.l}</th>)}
@@ -124,9 +163,10 @@ export default function OtherPartStockTab({ apiUrl }) {
             </tr>
           </thead>
           <tbody>
-            {paged.length === 0 && <tr><td colSpan={13} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 24 }}>{loading ? "กำลังโหลด..." : "ไม่มีรายการ"}</td></tr>}
+            {paged.length === 0 && <tr><td colSpan={14} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 24 }}>{loading ? "กำลังโหลด..." : "ไม่มีรายการ"}</td></tr>}
             {paged.map((r, i) => (
               <tr key={r.part_code + i} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
+                <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={labelSel.has(r.part_code)} onChange={() => toggleLabel(r.part_code)} title="เลือกพิมพ์ป้ายกล่อง" /></td>
                 <td style={td}>{(page - 1) * PAGE_SIZE + i + 1}</td>
                 <td style={td}>{r.product_group || "-"}</td>
                 <td style={{ ...td, fontFamily: "monospace", whiteSpace: "nowrap" }}>{r.part_code}</td>
@@ -149,7 +189,7 @@ export default function OtherPartStockTab({ apiUrl }) {
             ))}
             {filtered.length > 0 && page === totalPages && (
               <tr style={{ background: "#fef3c7", fontWeight: 700 }}>
-                <td style={td} colSpan={4}>รวมทั้งหมด ({filtered.length.toLocaleString()} รายการ)</td>
+                <td style={td} colSpan={5}>รวมทั้งหมด ({filtered.length.toLocaleString()} รายการ)</td>
                 <td style={tdR}>{fmtQty(sums.quantity)}</td>
                 {STORES.map(s => <td key={s.k} style={tdR}>{fmtQty(sums[s.k])}</td>)}
                 <td style={tdR}></td><td style={tdR}>{fmtMoney(sums.total_value)}</td><td style={td}></td><td style={td}></td><td style={td}></td>
