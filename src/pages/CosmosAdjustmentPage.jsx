@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 //   1) เลือกกรมธรรม์เดิมที่วางบิลแล้ว → ยกเลิก (ลดหนี้เต็มเบี้ยเดิม)
 //   2) กรอกกรมธรรม์ใหม่ + เบี้ยใหม่ → บันทึกเป็นรายการใหม่
 //   ระบบจริง = ยกเลิกใบเก่า แล้วออกใบใหม่ → ไม่คำนวณ/ไม่จัดประเภทตามส่วนต่างค่าเบี้ย (user 2026-09-28)
+//   กรมธรรม์ใหม่ใช้ "เลขกรมธรรม์เดิม + ประเภทประกันเดิม" เปลี่ยนเฉพาะค่าเบี้ย (และชื่อแผน) — user 2026-09-28
 //   ทุกใบ (เลขที่ CAJ-) มี 2 ขา: ลดหนี้ = เบี้ยกรมธรรม์เดิมเต็มจำนวน · เพิ่มหนี้ = เบี้ยกรมธรรม์ใหม่เต็มจำนวน
 //   สร้าง 2 รายการรอวางบิลรอบถัดไป (เบี้ยเดิมติดลบ + เบี้ยใหม่) · ใช้ได้ทุกแผน rsa/pa/3plus/theft/theft_renewal
 // backend: registrations-api (Registrations API (18).json) actions search_cosmos_for_adjust / list_cosmos_plan_options /
@@ -103,8 +104,9 @@ export default function CosmosAdjustmentPage({ currentUser }) {
 
   function pickOld(r) {
     setOld(r);
-    setNewPlan(r.plan || "");
-    setNewPlanName(""); setNewPremium(""); setNewAppNo("");
+    setNewPlan(r.plan || "");                 // ประเภทประกันเดิม (ล็อก)
+    setNewAppNo(String(r.app_no || "").trim()); // ใช้เลขกรมธรรม์เดิม (ล็อก)
+    setNewPlanName(r.plan_name || ""); setNewPremium("");
     setCoverStart(r.cover_start ? String(r.cover_start).slice(0, 10) : "");
     setCoverEnd(r.cover_end ? String(r.cover_end).slice(0, 10) : "");
     setFormErr("");
@@ -117,12 +119,11 @@ export default function CosmosAdjustmentPage({ currentUser }) {
 
   async function save() {
     if (!old) { setFormErr("กรุณาเลือกกรมธรรม์เดิมที่ต้องการยกเลิก"); return; }
-    if (!newPlan) { setFormErr("กรุณาเลือกประเภทประกันของกรมธรรม์ใหม่"); return; }
-    if (!newAppNo.trim()) { setFormErr("กรุณากรอกเลขกรมธรรม์ใหม่"); return; }
-    if (!hasNewPrem) { setFormErr("กรุณากรอกค่าเบี้ยกรมธรรม์ใหม่"); return; }
-    if (newPlan === old.plan && newAppNo.trim() === String(old.app_no || "").trim() && newPrem === oldPrem) { setFormErr("กรมธรรม์ใหม่เหมือนเดิมทุกอย่าง (แผน/เลขกรมธรรม์/เบี้ย) — ไม่มีอะไรให้ปรับปรุง"); return; }
+    if (!newPlan || !newAppNo.trim()) { setFormErr("กรมธรรม์เดิมไม่มีประเภทประกัน/เลขกรมธรรม์ — เลือกใบอื่น"); return; }
+    if (!hasNewPrem) { setFormErr("กรุณากรอกค่าเบี้ยใหม่"); return; }
+    if (newPrem === oldPrem) { setFormErr("ค่าเบี้ยใหม่เท่ากับค่าเบี้ยเดิม — ไม่มีอะไรให้ปรับปรุง"); return; }
     if (!reason.trim()) { setFormErr("กรุณาระบุเหตุผลการปรับปรุง"); return; }
-    if (!window.confirm(`ยืนยันบันทึกยกเลิกใบเก่า + ออกใบใหม่?\n\nลดหนี้ (ยกเลิกกรมธรรม์เดิม): ${old.app_no} (${planOf(old.plan).label}) เบี้ย ${fmt(oldPrem)}\nเพิ่มหนี้ (ออกกรมธรรม์ใหม่): ${newAppNo.trim()} (${planOf(newPlan).label}) เบี้ย ${fmt(newPrem)}\n\nระบบจะสร้างรายการรอวางบิล 2 รายการ (เบี้ยเดิมติดลบ + เบี้ยใหม่) เข้ารอบวางบิล COSMOS ถัดไป`)) return;
+    if (!window.confirm(`ยืนยันบันทึกยกเลิกใบเก่า + ออกใบใหม่ (เลขกรมธรรม์เดิม)?\n\nกรมธรรม์: ${old.app_no} (${planOf(old.plan).label})\nลดหนี้ (ยกเลิกเบี้ยเดิม): ${fmt(oldPrem)}\nเพิ่มหนี้ (เบี้ยใหม่): ${fmt(newPrem)}\n\nระบบจะสร้างรายการรอวางบิล 2 รายการ (เบี้ยเดิมติดลบ + เบี้ยใหม่) เข้ารอบวางบิล COSMOS ถัดไป`)) return;
     setSaving(true); setFormErr("");
     try {
       const res = await postJSON({
@@ -208,7 +209,7 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
         <button className="btn-primary" onClick={openForm}>+ บันทึกลดหนี้/เพิ่มหนี้</button>
       </div>
       <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 10 }}>
-        ใช้ปรับปรุงค่าเบี้ยประกันที่วางบิล/จ่ายเงินไปแล้วเพราะเลือกรายการผิด — ยกเลิกใบเก่า (ลดหนี้เต็มเบี้ยเดิม) แล้วออกใบใหม่ (เพิ่มหนี้เต็มเบี้ยใหม่) ทุกประเภทประกัน COSMOS · ทั้ง 2 รายการเข้ารอบวางบิล COSMOS ถัดไปอัตโนมัติ
+        ใช้ปรับปรุงค่าเบี้ยประกันที่วางบิล/จ่ายเงินไปแล้วเพราะเลือกรายการผิด — ยกเลิกใบเก่า (ลดหนี้เต็มเบี้ยเดิม) แล้วออกใบใหม่ด้วยเลขกรมธรรม์เดิม (เพิ่มหนี้เต็มเบี้ยใหม่) ทุกประเภทประกัน COSMOS · ทั้ง 2 รายการเข้ารอบวางบิล COSMOS ถัดไปอัตโนมัติ
       </div>
       {message && <div style={{ padding: "8px 14px", background: message.startsWith("⚠️") ? "#fef3c7" : "#d1fae5", borderRadius: 8, marginBottom: 10, color: message.startsWith("⚠️") ? "#92400e" : "#065f46" }}>{message}</div>}
 
@@ -338,18 +339,15 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
 
             {/* ขั้นที่ 2 — กรมธรรม์ใหม่ */}
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 12, opacity: old ? 1 : 0.5, pointerEvents: old ? "auto" : "none" }}>
-              <div style={{ fontWeight: 700, color: "#15803d", marginBottom: 8 }}>② กรมธรรม์ใหม่ที่ออกให้ลูกค้า</div>
+              <div style={{ fontWeight: 700, color: "#15803d", marginBottom: 8 }}>② ค่าเบี้ยใหม่ (ออกใบใหม่ด้วยเลขกรมธรรม์เดิม)</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
                 <div>
-                  <label style={labelSt}>ประเภทประกัน *</label>
-                  <select value={newPlan} onChange={e => { setNewPlan(e.target.value); setNewPlanName(""); }} style={inputSt}>
-                    <option value="">-- เลือก --</option>
-                    {PLAN_OPTS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
-                  </select>
+                  <label style={labelSt}>ประเภทประกัน (ตามใบเดิม)</label>
+                  <input value={newPlan ? planOf(newPlan).label : ""} readOnly disabled style={{ ...inputSt, background: "#f3f4f6", color: "#374151" }} />
                 </div>
                 <div>
-                  <label style={labelSt}>เลขกรมธรรม์ใหม่ *</label>
-                  <input value={newAppNo} onChange={e => setNewAppNo(e.target.value)} placeholder="เลขกรมธรรม์ / App No." style={{ ...inputSt, fontFamily: "monospace" }} />
+                  <label style={labelSt}>เลขกรมธรรม์ (ใช้เลขเดิม)</label>
+                  <input value={newAppNo} readOnly disabled style={{ ...inputSt, fontFamily: "monospace", background: "#f3f4f6", color: "#374151" }} />
                 </div>
                 <div style={{ gridColumn: "span 2" }}>
                   <label style={labelSt}>แผนประกัน (เลือกจากรายการที่เคยบันทึก หรือพิมพ์เอง)</label>
@@ -364,7 +362,7 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
                   </datalist>
                 </div>
                 <div>
-                  <label style={labelSt}>ค่าเบี้ยกรมธรรม์ใหม่ (บาท) *</label>
+                  <label style={labelSt}>ค่าเบี้ยใหม่ (บาท) *</label>
                   <input value={newPremium} onChange={e => setNewPremium(e.target.value)} inputMode="decimal" placeholder="0.00" style={{ ...inputSt, textAlign: "right", fontWeight: 700 }} />
                 </div>
                 <div>
@@ -389,7 +387,7 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
             {/* สรุป — ยกเลิกใบเก่า + ออกใบใหม่ (ไม่คำนวณส่วนต่าง) */}
             <div style={{ display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 14px", marginBottom: 10 }}>
               <div><div style={{ fontSize: 11, color: "#6b7280" }}>ลดหนี้ — ยกเลิกใบเก่า {old ? `(${old.app_no})` : ""}</div><div style={{ fontWeight: 800, fontSize: 17, color: CN_COLOR }}>{old ? `-${fmt(oldPrem)}` : "-"}</div></div>
-              <div><div style={{ fontSize: 11, color: "#6b7280" }}>เพิ่มหนี้ — ออกใบใหม่ {newAppNo.trim() ? `(${newAppNo.trim()})` : ""}</div><div style={{ fontWeight: 800, fontSize: 17, color: DN_COLOR }}>{hasNewPrem ? fmt(newPrem) : "-"}</div></div>
+              <div><div style={{ fontSize: 11, color: "#6b7280" }}>เพิ่มหนี้ — ออกใบใหม่ (เลขกรมธรรม์เดิม)</div><div style={{ fontWeight: 800, fontSize: 17, color: DN_COLOR }}>{hasNewPrem ? fmt(newPrem) : "-"}</div></div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>ทั้ง 2 รายการจะรอวางบิลในรอบ COSMOS ถัดไป</div>
             </div>
             {formErr && <div style={{ padding: "8px 12px", background: "#fee2e2", color: "#991b1b", borderRadius: 8, marginBottom: 10, fontSize: 13 }}>{formErr}</div>}
