@@ -156,6 +156,7 @@ import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
 import CosmosInsurancePage from "./pages/CosmosInsurancePage";
 import CosmosBillingPage from "./pages/CosmosBillingPage";
+import CosmosAdjustmentPage from "./pages/CosmosAdjustmentPage";
 import PaymentPage from "./pages/PaymentPage";
 import GoodsPaymentPage from "./pages/GoodsPaymentPage";
 import ReceiptCustomerFormPage from "./pages/ReceiptCustomerFormPage";
@@ -297,7 +298,7 @@ export default function App() {
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
     if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "sparedailyorders" || page === "partreturn" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "chequereceive" || page === "mymotoreport" || page === "mymotoregister" || page === "fuelwithdraw" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "redplaterefund" || page === "redplatedeposit" || page === "depositincome" || page === "salewizard" || page === "vehdressup" || page === "usedmoto" || page === "partgiveawayreport" || page === "receiptentry") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
-    if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "motoinsuranceextra" || page === "cosmosinsurance" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrtimetracking" || page === "hremployees") return false;
+    if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "motoinsuranceextra" || page === "cosmosinsurance" || page === "cosmosadjust" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrtimetracking" || page === "hremployees") return false;
     // upload, master data, convert เฉพาะ admin
     if (page === "upload") return false;
     if (page === "uploadaccounting") return false;
@@ -712,6 +713,9 @@ export default function App() {
         {activeMenu === "cosmosinsurance" && canAccess("cosmosinsurance") && (
           <CosmosInsurancePage currentUser={currentUser} />
         )}
+        {activeMenu === "cosmosadjust" && canAccess("cosmosadjust") && (
+          <CosmosAdjustmentPage currentUser={currentUser} />
+        )}
         {activeMenu === "cosmosbilling" && canAccess("cosmosbilling") && (
           <CosmosBillingPage currentUser={currentUser} />
         )}
@@ -1019,7 +1023,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="theftinsuranceinvoice" label="📑 บันทึกรับใบกำกับฯ ประกันรถหาย (ออกแทน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","receiptreceive","receiptentry","searchreceiptwork","motoinsurance","cosmosinsurance","registrationbilling","receiptbilling","insurancebilling","cosmosbilling","motoinsuranceextra","insurancerefund"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Vehicle Registration" pages={["vehicleregistration","registrationsubmit","registrationsubmitreceipt","registrationreceive","receiptreceive","receiptentry","searchreceiptwork","motoinsurance","cosmosinsurance","cosmosadjust","registrationbilling","receiptbilling","insurancebilling","cosmosbilling","motoinsuranceextra","insurancerefund"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="รับเรื่องงานทะเบียน" pages={["receiptentry"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="receiptentry" label="📥 รับเรื่องงานทะเบียน (manual)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
@@ -1027,13 +1031,14 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
           <MenuItem page="registrationsubmit" label="ส่งจดทะเบียนรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="registrationsubmitreceipt" label="ส่งงานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
-        <MenuSubGroup title="บันทึกงานทะเบียน/ประกัน" pages={["registrationreceive","receiptreceive","motoinsurance","insurancerefund","cosmosinsurance"]} activeMenu={activeMenu} canAccess={canAccess}>
+        <MenuSubGroup title="บันทึกงานทะเบียน/ประกัน" pages={["registrationreceive","receiptreceive","motoinsurance","insurancerefund","cosmosinsurance","cosmosadjust"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="registrationreceive" label="บันทึกรับ/ส่งคืนงานทะเบียนรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="receiptreceive" label="บันทึกรับ/ส่งคืน งานรับเรื่องงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="motoinsurance" label="บันทึกงาน พรบ." activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="motoinsuranceextra" label="บันทึกค่าใช้จ่ายเพิ่มเติมงาน พรบ." activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="insurancerefund" label="บันทึกคืนเงินค่าเบี้ยประกัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="cosmosinsurance" label="บันทึกประกัน COSMOS" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="cosmosadjust" label="บันทึกลดหนี้/เพิ่มหนี้ ประกัน COSMOS" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="วางบิล" pages={["registrationbilling","receiptbilling","insurancebilling","cosmosbilling"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="registrationbilling" label="วางบิลงานทะเบียน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

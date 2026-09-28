@@ -88,6 +88,7 @@ const PAGE_GROUPS = [
       { key: "searchreceiptwork",   label: "🔎 ค้นหางานทะเบียนรับเรื่อง" },
       { key: "receiptentry",        label: "📥 รับเรื่องงานทะเบียน (manual)" },
       { key: "insurancerefund",     label: "💸 บันทึกคืนเงินค่าเบี้ยประกัน" },
+      { key: "cosmosadjust",        label: "🧾 บันทึกลดหนี้/เพิ่มหนี้ ประกัน COSMOS" },
     ],
   },
   {
