@@ -237,7 +237,7 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
               filtered.length === 0 ? <tr><td colSpan={13} style={{ textAlign: "center", padding: 20, color: "#9ca3af" }}>ยังไม่มีรายการ</td></tr> :
               filtered.map((r, i) => {
                 const cancelled = r.status === "cancelled";
-                const billedAny = r.credit_billing_doc_no || (!r.new_existing && r.new_billing_doc_no);
+                const billedAny = r.credit_billing_doc_no || r.credit_paid_doc_no || (!r.new_existing && (r.new_billing_doc_no || r.new_paid_doc_no)); // จ่ายตรงโดยไม่ผ่านใบวางบิลก็นับ
                 return (
                   <tr key={r.id} style={{ opacity: cancelled ? 0.5 : 1 }}>
                     <td>{i + 1}</td>
@@ -260,7 +260,7 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button onClick={() => printAdj(r)} style={{ padding: "3px 10px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, marginRight: 4 }}>🖨️</button>
                       {!cancelled && (isAdmin || !billedAny) && (
-                        <button onClick={() => cancelAdj(r)} disabled={!!billedAny} title={billedAny ? "วางบิลแล้ว — ต้องยกเลิกใบวางบิลก่อน" : "ยกเลิกรายการนี้"}
+                        <button onClick={() => cancelAdj(r)} disabled={!!billedAny} title={billedAny ? "วางบิล/จ่ายแล้ว — ต้องยกเลิกใบวางบิล/ใบจ่ายก่อน" : "ยกเลิกรายการนี้"}
                           style={{ padding: "3px 10px", background: billedAny ? "#d1d5db" : "#ef4444", color: "#fff", border: "none", borderRadius: 6, cursor: billedAny ? "default" : "pointer", fontSize: 11 }}>ยกเลิก</button>
                       )}
                     </td>
@@ -282,7 +282,7 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
 
             {/* ขั้นที่ 1 — กรมธรรม์เดิม */}
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 12 }}>
-              <div style={{ fontWeight: 700, color: "#b91c1c", marginBottom: 8 }}>① กรมธรรม์เดิมที่ต้องการยกเลิก (ต้องวางบิลแล้ว)</div>
+              <div style={{ fontWeight: 700, color: "#b91c1c", marginBottom: 8 }}>① กรมธรรม์เดิมที่ต้องการยกเลิก (ต้องวางบิลหรือจ่ายเงินแล้ว)</div>
               {!old ? (
                 <>
                   <div style={{ display: "flex", gap: 8 }}>
@@ -311,7 +311,7 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
                                   <td><PayBadge billing={r.billing_doc_no} paid={r.paid_doc_no} /></td>
                                   <td style={{ whiteSpace: "nowrap" }}>
                                     {done ? <span style={{ fontSize: 11, color: "#b91c1c" }}>ยกเลิกแล้ว {r.adj_cancel_no}</span>
-                                      : notBilled ? <span style={{ fontSize: 11, color: "#92400e" }} title="ยังไม่วางบิล — แก้ไขที่หน้าบันทึกประกัน COSMOS ได้โดยตรง">ยังไม่วางบิล</span>
+                                      : notBilled ? <span style={{ fontSize: 11, color: "#92400e" }} title="ยังไม่วางบิล/ยังไม่จ่าย — แก้ไขที่หน้าบันทึกประกัน COSMOS ได้โดยตรง">ยังไม่วางบิล/จ่าย</span>
                                       : <button onClick={() => pickOld(r)} style={{ padding: "3px 12px", background: "#b91c1c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11.5, fontWeight: 700 }}>เลือก</button>}
                                   </td>
                                 </tr>
