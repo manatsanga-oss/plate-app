@@ -198,7 +198,7 @@ export default function PartServicePaymentPage({ currentUser }) {
   }, [deposits, customerName, autoOtherMode]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function loadDeposits() {
-    // เงินมัดจำคงเหลือ = ใบมัดจำที่งานยังไม่ปิด (ปิดงานซ่อม/ปิดงานขาย = ตัดออก) และยังไม่ถูกใช้รับชำระในหน้านี้
+    // เงินมัดจำคงเหลือ = ใบมัดจำที่ยังไม่ถูกใช้รับชำระในหน้านี้ (งานปิดแล้วก็ยังตัดได้ถ้ายังไม่มีใบรับชำระ — ยกเว้นใบก่อน 14/08/2569 ดู hiddenByClosed)
     try {
       // มัดจำตีราคาซ่อม (repair_deposits ในหน้าสั่งซื้ออะไหล่): ดึงมารับชำระได้เฉพาะใบที่กด "ลูกค้ากลับมาซ่อม" แล้ว (returned_at) — user 2026-09-11
       const estimateHold = new Set(); const estimateReturned = new Set();
@@ -236,6 +236,11 @@ export default function PartServicePaymentPage({ currentUser }) {
       const closedDocs = new Set(
         orders.filter(o => o && o.deposit_doc_no && ["ปิดงานซ่อม", "ปิดการขาย"].includes(String(o.status || "").trim())).map(o => o.deposit_doc_no)
       );
+      // (user 2026-09-28 เคส PDS-2609-00054 MR. YAN AUNG) ใบสั่งซื้อถูกปิดอัตโนมัติเมื่อปิด JOB ใน NIDS/พบบิลขาย "ก่อน" พนักงานบันทึกรับชำระ
+      //   → ใบมัดจำหายจากตัวเลือกทั้งที่ยังไม่ถูกหัก. งานปิดแล้วไม่ได้แปลว่ามัดจำถูกใช้ — ตัวตัดสินคือ "ยังไม่มีใบรับชำระมาตัด" (usedDocs)
+      //   ยกเว้นใบมัดจำก่อน 14/08/2569 ที่งานปิดแล้ว: ช่วงนั้นหักมัดจำใน NIDS อย่างเดียว ไม่มีใบรับชำระในระบบ (เทียบยอดคงเหลือ NIDS 28/09/2569 แล้ว) จึงยังซ่อนไว้
+      const CLOSED_HIDE_BEFORE = "2026-08-14";
+      const hiddenByClosed = (r) => closedDocs.has(r.deposit_doc_no) && String(r.deposit_date || "").slice(0, 10) < CLOSED_HIDE_BEFORE;
       // ใบมัดจำที่ถูกใช้รับชำระไปแล้ว (รายการ active) — กันเลือกซ้ำ
       const usedDocs = new Set();
       for (const p of (Array.isArray(pRes) ? pRes : [])) {
@@ -276,7 +281,7 @@ export default function PartServicePaymentPage({ currentUser }) {
       setDeposits([...(Array.isArray(dRes) ? dRes : []), ...recOnlyNew, ...legacyDeps]
         .filter(r => r && r.deposit_doc_no && r.status === "active"
           && depositAvail(r) > 0
-          && !closedDocs.has(r.deposit_doc_no)
+          && !hiddenByClosed(r)
           && !usedDocs.has(r.deposit_doc_no)
           && !estimateHold.has(String(r.deposit_doc_no).trim())));
     } catch { setDeposits([]); }
@@ -586,7 +591,7 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
                     </div>
                   ) : !matchedDeposits.length ? (
                     <div style={{ fontSize: 12.5, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 7, padding: "7px 10px" }}>
-                      {autoOtherMode ? "ไม่พบใบมัดจำ SCY01 ที่มียอดคงเหลือ (ทั้งระบบ PDS/PDO และ upload NID)" : `ไม่พบใบมัดจำคงเหลือของ "${customerName}" (เฉพาะงานที่ยังไม่ปิดซ่อม/ปิดขาย)`}
+                      {autoOtherMode ? "ไม่พบใบมัดจำ SCY01 ที่มียอดคงเหลือ (ทั้งระบบ PDS/PDO และ upload NID)" : `ไม่พบใบมัดจำคงเหลือของ "${customerName}" (เฉพาะใบที่ยังไม่ถูกใช้รับชำระ/ยังไม่คืนเงิน)`}
                     </div>
                   ) : (
                     <select value={r.deposit_doc_no} onChange={e => pickDeposit(i, e.target.value)}
