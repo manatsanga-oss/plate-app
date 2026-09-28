@@ -4,8 +4,9 @@ import React, { useEffect, useMemo, useState } from "react";
 // ปรับปรุงค่าเบี้ยประกันที่วางบิล/จ่ายเงินไปแล้วเพราะเลือกรายการผิด:
 //   1) เลือกกรมธรรม์เดิมที่วางบิลแล้ว → ยกเลิก (ลดหนี้เต็มเบี้ยเดิม)
 //   2) กรอกกรมธรรม์ใหม่ + เบี้ยใหม่ → บันทึกเป็นรายการใหม่
-//   ระบบสร้าง 2 รายการรอวางบิลรอบถัดไป (เบี้ยเดิมติดลบ + เบี้ยใหม่) → ยอดวางบิลสุทธิ = ส่วนต่าง
-//   เบี้ยใหม่ < เดิม = ลดหนี้ (CCN-) · เบี้ยใหม่ > เดิม = เพิ่มหนี้ (CDN-) · ใช้ได้ทุกแผน rsa/pa/3plus/theft/theft_renewal
+//   ระบบจริง = ยกเลิกใบเก่า แล้วออกใบใหม่ → ไม่คำนวณ/ไม่จัดประเภทตามส่วนต่างค่าเบี้ย (user 2026-09-28)
+//   ทุกใบ (เลขที่ CAJ-) มี 2 ขา: ลดหนี้ = เบี้ยกรมธรรม์เดิมเต็มจำนวน · เพิ่มหนี้ = เบี้ยกรมธรรม์ใหม่เต็มจำนวน
+//   สร้าง 2 รายการรอวางบิลรอบถัดไป (เบี้ยเดิมติดลบ + เบี้ยใหม่) · ใช้ได้ทุกแผน rsa/pa/3plus/theft/theft_renewal
 // backend: registrations-api (Registrations API (18).json) actions search_cosmos_for_adjust / list_cosmos_plan_options /
 //          save_cosmos_adjustment / list_cosmos_adjustments / cancel_cosmos_adjustment · ตาราง cosmos_adjustments
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
@@ -18,8 +19,8 @@ const PLAN_OPTS = [
   { key: "theft_renewal", label: "ประกันรถหายปีต่อ",        color: "#ea580c" },
 ];
 const planOf = (k) => PLAN_OPTS.find(p => p.key === k) || { key: k, label: k || "-", color: "#6b7280" };
-const TYPE_LABEL = { credit: "ลดหนี้", debit: "เพิ่มหนี้", same: "เปลี่ยนกรมธรรม์ (เบี้ยเท่าเดิม)" };
-const TYPE_COLOR = { credit: "#15803d", debit: "#b91c1c", same: "#6b7280" };
+const CN_COLOR = "#15803d"; // ลดหนี้ (ยกเลิกใบเก่า)
+const DN_COLOR = "#b91c1c"; // เพิ่มหนี้ (ออกใบใหม่)
 
 const fmt = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const thDate = (v) => { if (!v) return "-"; const d = new Date(String(v).slice(0, 10)); return isNaN(d) ? "-" : d.toLocaleDateString("th-TH"); };
@@ -54,7 +55,6 @@ export default function CosmosAdjustmentPage({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [month, setMonth] = useState("");          // กรองรายการตามเดือน (ว่าง = ทั้งหมด)
-  const [typeFilter, setTypeFilter] = useState("all");
   const [showCancelled, setShowCancelled] = useState(false);
   const [search, setSearch] = useState("");
 
@@ -114,18 +114,15 @@ export default function CosmosAdjustmentPage({ currentUser }) {
   const oldPrem = Number(old?.premium || 0);
   const newPrem = Number(String(newPremium).replace(/,/g, ""));
   const hasNewPrem = String(newPremium).trim() !== "" && isFinite(newPrem) && newPrem >= 0;
-  const diff = hasNewPrem ? Math.round((newPrem - oldPrem) * 100) / 100 : null;
-  const adjType = diff == null ? null : diff < 0 ? "credit" : diff > 0 ? "debit" : "same";
 
   async function save() {
     if (!old) { setFormErr("กรุณาเลือกกรมธรรม์เดิมที่ต้องการยกเลิก"); return; }
     if (!newPlan) { setFormErr("กรุณาเลือกประเภทประกันของกรมธรรม์ใหม่"); return; }
     if (!newAppNo.trim()) { setFormErr("กรุณากรอกเลขกรมธรรม์ใหม่"); return; }
     if (!hasNewPrem) { setFormErr("กรุณากรอกค่าเบี้ยกรมธรรม์ใหม่"); return; }
-    if (newPlan === old.plan && newAppNo.trim() === String(old.app_no || "").trim() && diff === 0) { setFormErr("กรมธรรม์ใหม่เหมือนเดิมทุกอย่าง (แผน/เลขกรมธรรม์/เบี้ย) — ไม่มีอะไรให้ปรับปรุง"); return; }
+    if (newPlan === old.plan && newAppNo.trim() === String(old.app_no || "").trim() && newPrem === oldPrem) { setFormErr("กรมธรรม์ใหม่เหมือนเดิมทุกอย่าง (แผน/เลขกรมธรรม์/เบี้ย) — ไม่มีอะไรให้ปรับปรุง"); return; }
     if (!reason.trim()) { setFormErr("กรุณาระบุเหตุผลการปรับปรุง"); return; }
-    const head = adjType === "credit" ? `ลดหนี้ ${fmt(Math.abs(diff))} บาท` : adjType === "debit" ? `เพิ่มหนี้ ${fmt(diff)} บาท` : "เบี้ยเท่าเดิม (เปลี่ยนกรมธรรม์)";
-    if (!window.confirm(`ยืนยันบันทึก${head}?\n\nยกเลิกกรมธรรม์เดิม: ${old.app_no} (${planOf(old.plan).label}) เบี้ย ${fmt(oldPrem)}\nออกกรมธรรม์ใหม่: ${newAppNo.trim()} (${planOf(newPlan).label}) เบี้ย ${fmt(newPrem)}\n\nระบบจะสร้างรายการรอวางบิล 2 รายการ (เบี้ยเดิมติดลบ + เบี้ยใหม่) เข้ารอบวางบิล COSMOS ถัดไป`)) return;
+    if (!window.confirm(`ยืนยันบันทึกยกเลิกใบเก่า + ออกใบใหม่?\n\nลดหนี้ (ยกเลิกกรมธรรม์เดิม): ${old.app_no} (${planOf(old.plan).label}) เบี้ย ${fmt(oldPrem)}\nเพิ่มหนี้ (ออกกรมธรรม์ใหม่): ${newAppNo.trim()} (${planOf(newPlan).label}) เบี้ย ${fmt(newPrem)}\n\nระบบจะสร้างรายการรอวางบิล 2 รายการ (เบี้ยเดิมติดลบ + เบี้ยใหม่) เข้ารอบวางบิล COSMOS ถัดไป`)) return;
     setSaving(true); setFormErr("");
     try {
       const res = await postJSON({
@@ -137,7 +134,7 @@ export default function CosmosAdjustmentPage({ currentUser }) {
       if (!res) throw new Error("n8n ยังไม่มี action save_cosmos_adjustment (ต้อง re-import Registrations API (18).json)");
       if (res.success !== true) throw new Error(res.error || "บันทึกไม่สำเร็จ");
       setFormOpen(false);
-      setMessage(`✅ บันทึก ${res.adj_no} (${TYPE_LABEL[res.adj_type] || ""}) แล้ว — ส่วนต่าง ${fmt(res.diff_amount)} บาท${res.new_existing ? " · กรมธรรม์ใหม่มีบันทึกอยู่แล้ว ใช้รายการเดิม ไม่สร้างซ้ำ" : ""}`);
+      setMessage(`✅ บันทึก ${res.adj_no} แล้ว — ลดหนี้ (ยกเลิกใบเก่า) ${fmt(res.old_premium)} · เพิ่มหนี้ (ออกใบใหม่) ${fmt(res.new_premium)} บาท${res.new_existing ? " · กรมธรรม์ใหม่มีบันทึกอยู่แล้ว ใช้รายการเดิม ไม่สร้างซ้ำ" : ""}`);
       load();
     } catch (e) { setFormErr(`❌ ${e.message || e}`); }
     setSaving(false);
@@ -151,7 +148,7 @@ export default function CosmosAdjustmentPage({ currentUser }) {
   }
 
   function printAdj(r) {
-    const title = r.adj_type === "credit" ? "ใบลดหนี้ ประกัน COSMOS" : r.adj_type === "debit" ? "ใบเพิ่มหนี้ ประกัน COSMOS" : "ใบปรับปรุงกรมธรรม์ ประกัน COSMOS";
+    const title = "ใบลดหนี้ / เพิ่มหนี้ ประกัน COSMOS (ยกเลิกกรมธรรม์เดิม – ออกกรมธรรม์ใหม่)";
     const w = window.open("", "_blank");
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(r.adj_no)}</title>
 <style>
@@ -176,9 +173,8 @@ export default function CosmosAdjustmentPage({ currentUser }) {
 <table>
   <thead><tr><th>รายการ</th><th>ประเภทประกัน</th><th>เลขกรมธรรม์</th><th>แผน</th><th>ค่าเบี้ย (บาท)</th></tr></thead>
   <tbody>
-    <tr><td>ยกเลิกกรมธรรม์เดิม${r.old_billing_doc_no ? ` (วางบิล ${esc(r.old_billing_doc_no)})` : ""}</td><td>${esc(planOf(r.old_plan).label)}</td><td>${esc(r.old_app_no || "-")}</td><td>${esc(r.old_plan_name || "-")}</td><td class="num">-${fmt(r.old_premium)}</td></tr>
-    <tr><td>ออกกรมธรรม์ใหม่</td><td>${esc(planOf(r.new_plan).label)}</td><td>${esc(r.new_app_no || "-")}</td><td>${esc(r.new_plan_name || "-")}</td><td class="num">${fmt(r.new_premium)}</td></tr>
-    <tr class="total"><td colspan="4">${r.adj_type === "credit" ? "ลดหนี้ (COSMOS ต้องคืน/หักกลบรอบถัดไป)" : r.adj_type === "debit" ? "เพิ่มหนี้ (จ่ายเพิ่มรอบถัดไป)" : "ส่วนต่าง"}</td><td class="num">${fmt(r.diff_amount)}</td></tr>
+    <tr><td><b>ลดหนี้</b> — ยกเลิกกรมธรรม์เดิม${r.old_billing_doc_no ? ` (วางบิล ${esc(r.old_billing_doc_no)})` : ""}</td><td>${esc(planOf(r.old_plan).label)}</td><td>${esc(r.old_app_no || "-")}</td><td>${esc(r.old_plan_name || "-")}</td><td class="num">-${fmt(r.old_premium)}</td></tr>
+    <tr><td><b>เพิ่มหนี้</b> — ออกกรมธรรม์ใหม่</td><td>${esc(planOf(r.new_plan).label)}</td><td>${esc(r.new_app_no || "-")}</td><td>${esc(r.new_plan_name || "-")}</td><td class="num">${fmt(r.new_premium)}</td></tr>
   </tbody>
 </table>
 <p>เหตุผล: ${esc(r.reason || "-")}</p>
@@ -197,14 +193,13 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
     return rows.filter(r => {
       if (!showCancelled && r.status === "cancelled") return false;
       if (month && String(r.adj_date || "").slice(0, 7) !== month) return false;
-      if (typeFilter !== "all" && r.adj_type !== typeFilter) return false;
       if (s && ![r.adj_no, r.customer_name, r.chassis_no, r.old_app_no, r.new_app_no, r.invoice_no].some(v => String(v || "").toLowerCase().includes(s))) return false;
       return true;
     });
-  }, [rows, month, typeFilter, showCancelled, search]);
+  }, [rows, month, showCancelled, search]);
   const active = filtered.filter(r => r.status !== "cancelled");
-  const sumCredit = active.filter(r => r.adj_type === "credit").reduce((t, r) => t + Math.abs(Number(r.diff_amount || 0)), 0);
-  const sumDebit = active.filter(r => r.adj_type === "debit").reduce((t, r) => t + Number(r.diff_amount || 0), 0);
+  const sumCredit = active.reduce((t, r) => t + Number(r.old_premium || 0), 0); // ลดหนี้ = เบี้ยใบเก่าที่ยกเลิก
+  const sumDebit = active.reduce((t, r) => t + Number(r.new_premium || 0), 0);  // เพิ่มหนี้ = เบี้ยใบใหม่
 
   return (
     <div className="page-container">
@@ -213,36 +208,33 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
         <button className="btn-primary" onClick={openForm}>+ บันทึกลดหนี้/เพิ่มหนี้</button>
       </div>
       <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 10 }}>
-        ใช้ปรับปรุงค่าเบี้ยประกันที่วางบิล/จ่ายเงินไปแล้วเพราะเลือกรายการผิด — ยกเลิกกรมธรรม์เดิม + ออกกรมธรรม์ใหม่ (ทุกประเภทประกัน COSMOS) · ส่วนต่างจะเข้ารอบวางบิล COSMOS ถัดไปอัตโนมัติ
+        ใช้ปรับปรุงค่าเบี้ยประกันที่วางบิล/จ่ายเงินไปแล้วเพราะเลือกรายการผิด — ยกเลิกใบเก่า (ลดหนี้เต็มเบี้ยเดิม) แล้วออกใบใหม่ (เพิ่มหนี้เต็มเบี้ยใหม่) ทุกประเภทประกัน COSMOS · ทั้ง 2 รายการเข้ารอบวางบิล COSMOS ถัดไปอัตโนมัติ
       </div>
       {message && <div style={{ padding: "8px 14px", background: message.startsWith("⚠️") ? "#fef3c7" : "#d1fae5", borderRadius: 8, marginBottom: 10, color: message.startsWith("⚠️") ? "#92400e" : "#065f46" }}>{message}</div>}
 
       <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap", alignItems: "center" }}>
         <input value={search} onChange={e => setSearch(e.target.value)} placeholder="ค้นหา เลขที่ / ลูกค้า / เลขถัง / เลขกรมธรรม์" style={{ ...inputSt, width: 280 }} />
         <input type="month" value={month} onChange={e => setMonth(e.target.value)} style={{ ...inputSt, width: 170 }} title="กรองตามเดือนที่บันทึก (ว่าง = ทั้งหมด)" />
-        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ ...inputSt, width: 150 }}>
-          <option value="all">ทุกประเภท</option><option value="credit">ลดหนี้</option><option value="debit">เพิ่มหนี้</option><option value="same">เบี้ยเท่าเดิม</option>
-        </select>
         <label style={{ fontSize: 12.5, color: "#374151", display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
           <input type="checkbox" checked={showCancelled} onChange={e => setShowCancelled(e.target.checked)} /> แสดงที่ยกเลิก
         </label>
         <button onClick={load} style={{ padding: "7px 16px", fontSize: 13, background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>Refresh</button>
         <span style={{ fontSize: 13, color: "#374151" }}>
-          {active.length} รายการ · ลดหนี้ <b style={{ color: TYPE_COLOR.credit }}>{fmt(sumCredit)}</b> · เพิ่มหนี้ <b style={{ color: TYPE_COLOR.debit }}>{fmt(sumDebit)}</b> · สุทธิ <b>{fmt(sumDebit - sumCredit)}</b>
+          {active.length} รายการ · ลดหนี้ (ยกเลิกใบเก่า) <b style={{ color: CN_COLOR }}>{fmt(sumCredit)}</b> · เพิ่มหนี้ (ออกใบใหม่) <b style={{ color: DN_COLOR }}>{fmt(sumDebit)}</b>
         </span>
       </div>
 
       <div style={{ overflowX: "auto" }}>
         <table className="data-table" style={{ fontSize: 12.5 }}>
           <thead><tr>
-            <th>#</th><th>เลขที่</th><th>วันที่</th><th>ประเภท</th><th>ลูกค้า / เลขถัง</th>
-            <th>กรมธรรม์เดิม (ยกเลิก)</th><th style={{ textAlign: "right" }}>เบี้ยเดิม</th>
-            <th>กรมธรรม์ใหม่</th><th style={{ textAlign: "right" }}>เบี้ยใหม่</th>
-            <th style={{ textAlign: "right" }}>ส่วนต่าง</th><th>สถานะวางบิลรอบใหม่</th><th>เหตุผล</th><th>ผู้บันทึก</th><th>จัดการ</th>
+            <th>#</th><th>เลขที่</th><th>วันที่</th><th>สถานะ</th><th>ลูกค้า / เลขถัง</th>
+            <th>กรมธรรม์เดิม (ยกเลิก)</th><th style={{ textAlign: "right" }}>ลดหนี้ (เบี้ยเดิม)</th>
+            <th>กรมธรรม์ใหม่</th><th style={{ textAlign: "right" }}>เพิ่มหนี้ (เบี้ยใหม่)</th>
+            <th>สถานะวางบิลรอบใหม่</th><th>เหตุผล</th><th>ผู้บันทึก</th><th>จัดการ</th>
           </tr></thead>
           <tbody>
-            {loading ? <tr><td colSpan={14} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด…</td></tr> :
-              filtered.length === 0 ? <tr><td colSpan={14} style={{ textAlign: "center", padding: 20, color: "#9ca3af" }}>ยังไม่มีรายการ</td></tr> :
+            {loading ? <tr><td colSpan={13} style={{ textAlign: "center", padding: 20 }}>กำลังโหลด…</td></tr> :
+              filtered.length === 0 ? <tr><td colSpan={13} style={{ textAlign: "center", padding: 20, color: "#9ca3af" }}>ยังไม่มีรายการ</td></tr> :
               filtered.map((r, i) => {
                 const cancelled = r.status === "cancelled";
                 const billedAny = r.credit_billing_doc_no || (!r.new_existing && r.new_billing_doc_no);
@@ -251,13 +243,12 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
                     <td>{i + 1}</td>
                     <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{r.adj_no}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{thDate(r.adj_date)}</td>
-                    <td><span style={{ padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700, color: "#fff", background: cancelled ? "#9ca3af" : TYPE_COLOR[r.adj_type] || "#6b7280", whiteSpace: "nowrap" }}>{cancelled ? "ยกเลิกแล้ว" : (r.adj_type === "same" ? "เบี้ยเท่าเดิม" : TYPE_LABEL[r.adj_type])}</span></td>
+                    <td><span style={{ padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700, color: "#fff", background: cancelled ? "#9ca3af" : "#072d6b", whiteSpace: "nowrap" }}>{cancelled ? "ยกเลิกแล้ว" : "ใช้งาน"}</span></td>
                     <td><div>{r.customer_name || "-"}</div><div style={{ fontFamily: "monospace", fontSize: 11, color: "#6b7280" }}>{r.chassis_no || ""}</div></td>
                     <td><PlanBadge plan={r.old_plan} /><div style={{ fontFamily: "monospace", fontSize: 11.5, marginTop: 2 }}>{r.old_app_no}</div><div style={{ fontSize: 11, color: "#6b7280" }}>{r.old_plan_name}</div><div style={{ fontSize: 10.5, color: "#6b7280" }}>{r.old_paid_doc_no ? `จ่ายแล้ว ${r.old_paid_doc_no}` : r.old_billing_doc_no ? `วางบิล ${r.old_billing_doc_no}` : ""}</div></td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{fmt(r.old_premium)}</td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap", fontWeight: 700, color: CN_COLOR }}>-{fmt(r.old_premium)}</td>
                     <td><PlanBadge plan={r.new_plan} /><div style={{ fontFamily: "monospace", fontSize: 11.5, marginTop: 2 }}>{r.new_app_no}</div><div style={{ fontSize: 11, color: "#6b7280" }}>{r.new_plan_name}</div></td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{fmt(r.new_premium)}</td>
-                    <td style={{ textAlign: "right", fontWeight: 700, whiteSpace: "nowrap", color: TYPE_COLOR[r.adj_type] }}>{Number(r.diff_amount) > 0 ? "+" : ""}{fmt(r.diff_amount)}</td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap", fontWeight: 700, color: DN_COLOR }}>{fmt(r.new_premium)}</td>
                     <td style={{ fontSize: 11 }}>
                       {cancelled ? "-" : (<>
                         <div>ลดหนี้เบี้ยเดิม: <PayBadge billing={r.credit_billing_doc_no} paid={r.credit_paid_doc_no} /></div>
@@ -395,17 +386,11 @@ ${r.cover_start || r.cover_end ? `<p>ระยะเวลาคุ้มคร�
               </div>
             </div>
 
-            {/* สรุป */}
-            <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 14px", marginBottom: 10 }}>
-              <div><div style={{ fontSize: 11, color: "#6b7280" }}>ยกเลิกเบี้ยเดิม</div><div style={{ fontWeight: 700, color: "#b91c1c" }}>-{fmt(oldPrem)}</div></div>
-              <div style={{ fontSize: 18, color: "#9ca3af" }}>+</div>
-              <div><div style={{ fontSize: 11, color: "#6b7280" }}>เบี้ยกรมธรรม์ใหม่</div><div style={{ fontWeight: 700, color: "#15803d" }}>{hasNewPrem ? fmt(newPrem) : "-"}</div></div>
-              <div style={{ fontSize: 18, color: "#9ca3af" }}>=</div>
-              <div>
-                <div style={{ fontSize: 11, color: "#6b7280" }}>ส่วนต่าง (เข้ารอบวางบิลถัดไป)</div>
-                {diff == null ? <div style={{ fontWeight: 700 }}>-</div> :
-                  <div style={{ fontWeight: 800, fontSize: 18, color: TYPE_COLOR[adjType] }}>{TYPE_LABEL[adjType]} {adjType === "same" ? "" : fmt(Math.abs(diff))}</div>}
-              </div>
+            {/* สรุป — ยกเลิกใบเก่า + ออกใบใหม่ (ไม่คำนวณส่วนต่าง) */}
+            <div style={{ display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 14px", marginBottom: 10 }}>
+              <div><div style={{ fontSize: 11, color: "#6b7280" }}>ลดหนี้ — ยกเลิกใบเก่า {old ? `(${old.app_no})` : ""}</div><div style={{ fontWeight: 800, fontSize: 17, color: CN_COLOR }}>{old ? `-${fmt(oldPrem)}` : "-"}</div></div>
+              <div><div style={{ fontSize: 11, color: "#6b7280" }}>เพิ่มหนี้ — ออกใบใหม่ {newAppNo.trim() ? `(${newAppNo.trim()})` : ""}</div><div style={{ fontWeight: 800, fontSize: 17, color: DN_COLOR }}>{hasNewPrem ? fmt(newPrem) : "-"}</div></div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>ทั้ง 2 รายการจะรอวางบิลในรอบ COSMOS ถัดไป</div>
             </div>
             {formErr && <div style={{ padding: "8px 12px", background: "#fee2e2", color: "#991b1b", borderRadius: 8, marginBottom: 10, fontSize: 13 }}>{formErr}</div>}
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
