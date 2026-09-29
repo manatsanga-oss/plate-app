@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // ============================================================================
 // รายงานแนะนำปรับราคา/ค่าส่งเสริม — อิงยอดขาย·อัตราหมุน·เทรนด์·สต๊อก (HONDA+YAMAHA)
@@ -111,6 +111,8 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
   const [onlyAction, setOnlyAction] = useState(false); // แสดงเฉพาะรุ่นที่มีคำแนะนำให้เปลี่ยน
   const [edits, setEdits] = useState({}); // ราคา/โปรใหม่ที่พิมพ์เอง keyed by row.key (prefill จาก DB ค่าล่าสุด)
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);   // กันกดบันทึกซ้อน (state อัปเดตช้ากว่าคลิกรัว ๆ)
+  const savedRef = useRef({});       // ค่าล่าสุดที่บันทึกใน DB ต่อ row.key — ใช้เทียบว่ารุ่นไหน "เปลี่ยนจริง" (user 2026-09-29: กดบันทึก 5 ครั้งได้ประวัติซ้ำ 5 ชุด)
   const [history, setHistory] = useState(null); // null = ปิด modal, array = เปิด
   const [histMonth, setHistMonth] = useState("ALL"); // กรองเดือนในประวัติ: "YYYY-MM" หรือ "ALL"
 
@@ -118,21 +120,30 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
 
   // บันทึกราคา/โปรใหม่ลง DB (append เป็นประวัติ — ดูย้อนหลังได้)
   async function saveEdits() {
-    const items = rows
-      .filter((r) => { const e = edits[r.key]; return e && (e.price !== "" && e.price != null || e.down !== "" && e.down != null || e.comm !== "" && e.comm != null); })
-      .map((r) => { const e = edits[r.key] || {}; return {
-        brand: r.brand, model_code: r.code, type_code: r.type, series: r.series,
-        new_price: e.price === "" ? null : e.price, new_down: e.down === "" ? null : e.down, new_comm: e.comm === "" ? null : e.comm,
-      }; });
-    if (!items.length) { setMessage("⚠️ ยังไม่มีราคา/โปรใหม่ให้บันทึก"); return; }
-    setSaving(true); setMessage("");
+    if (savingRef.current) return; // กำลังบันทึกอยู่ — ไม่รับคลิกซ้ำ
+    const nv = (v) => { if (v === "" || v == null) return null; const n = Number(String(v).replace(/,/g, "")); return isFinite(n) ? n : String(v); };
+    const filled = rows.filter((r) => { const e = edits[r.key]; return e && (nv(e.price) != null || nv(e.down) != null || nv(e.comm) != null); });
+    if (!filled.length) { setMessage("⚠️ ยังไม่มีราคา/โปรใหม่ให้บันทึก"); return; }
+    // บันทึกเฉพาะรุ่นที่ค่าเปลี่ยนจากที่บันทึกล่าสุด — ไม่เปลี่ยน = ไม่เขียนประวัติซ้ำ
+    const changed = filled.filter((r) => {
+      const e = edits[r.key] || {}; const sv = savedRef.current[r.key];
+      return !sv || nv(e.price) !== nv(sv.price) || nv(e.down) !== nv(sv.down) || nv(e.comm) !== nv(sv.comm);
+    });
+    if (!changed.length) { setMessage(`ℹ️ ไม่มีรายการเปลี่ยนแปลงจากที่บันทึกล่าสุด (${filled.length} รุ่นค่าเดิมทั้งหมด) — ไม่ได้บันทึกซ้ำ`); return; }
+    const items = changed.map((r) => { const e = edits[r.key] || {}; return {
+      brand: r.brand, model_code: r.code, type_code: r.type, series: r.series,
+      new_price: e.price === "" ? null : e.price, new_down: e.down === "" ? null : e.down, new_comm: e.comm === "" ? null : e.comm,
+    }; });
+    savingRef.current = true; setSaving(true); setMessage("⏳ กำลังบันทึก…");
     try {
       const res = await post(OVERRIDE_API, { action: "save_overrides", items, saved_at: new Date().toISOString(), created_by: (currentUser && (currentUser.name || currentUser.email)) || "" });
       const err = Array.isArray(res) ? res.find((x) => x && x.__error) : null;
       if (err) throw new Error(err.__error);
-      setMessage(`💾 บันทึกราคา/โปรใหม่ ${items.length} รายการแล้ว (ดูย้อนหลังได้)`);
+      for (const r of changed) { const e = edits[r.key] || {}; savedRef.current[r.key] = { price: e.price ?? "", down: e.down ?? "", comm: e.comm ?? "" }; }
+      const skipped = filled.length - changed.length;
+      setMessage(`✅ บันทึกสำเร็จ ${items.length} รุ่นที่มีการเปลี่ยนแปลง เวลา ${new Date().toLocaleTimeString("th-TH")}${skipped ? ` · ข้าม ${skipped} รุ่นที่ค่าเดิม` : ""} (ดูย้อนหลังได้)`);
     } catch (e) { setMessage("❌ บันทึกไม่สำเร็จ: " + (e && e.message ? e.message : String(e))); }
-    setSaving(false);
+    savingRef.current = false; setSaving(false);
   }
   // เปิดดูประวัติการบันทึกทั้งหมด
   async function openHistory() {
@@ -365,10 +376,13 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
       const stockByKey = {};
       for (const r of all) stockByKey[r.key] = r.stock;
       const ed = {};
+      const savedNow = {};
       for (const o of (Array.isArray(overrides) ? overrides : [])) {
         if (!o || o.__error) continue;
         const key = o.brand + "|" + norm(o.model_code) + "|" + norm(o.type_code);
         const outOfStock = stockByKey[key] === 0;
+        // ค่าจริงล่าสุดใน DB (ไม่ตัดโปรตามสต๊อก) — ฐานเทียบตอนกดบันทึก
+        savedNow[key] = { price: o.new_price == null ? "" : String(o.new_price), down: o.new_down == null ? "" : String(o.new_down), comm: o.new_comm == null ? "" : String(o.new_comm) };
         ed[key] = {
           price: o.new_price == null ? "" : String(o.new_price),
           down: outOfStock || o.new_down == null ? "" : String(o.new_down),
@@ -376,6 +390,7 @@ export default function PricePromoAdvicePage({ currentUser } = {}) {
         };
       }
       setEdits(ed);
+      savedRef.current = savedNow;
       const matchPrice = all.filter((r) => r.priceAdj != null).length;
       setMessage(`✅ ${all.length} รุ่น/แบบ · มีราคา ${matchPrice} · ช่วงขาย ${W.from} ถึง ${W.to} (เทียบรอบก่อน ${W.pfrom}–${W.pto})`);
     } catch (e) {
