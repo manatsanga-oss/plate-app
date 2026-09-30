@@ -151,6 +151,7 @@ import MotoInsuranceExtraExpensePage from "./pages/MotoInsuranceExtraExpensePage
 import InsuranceRefundPage from "./pages/InsuranceRefundPage";
 import WhtRefundPage from "./pages/WhtRefundPage";
 import PartWholesalePaymentPage from "./pages/PartWholesalePaymentPage";
+import CustomerRefundPage from "./pages/CustomerRefundPage";
 import CrmEventPage from "./pages/CrmEventPage";
 import CrmReplyPage from "./pages/CrmReplyPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
@@ -535,6 +536,9 @@ export default function App() {
         )}
         {activeMenu === "partwholesalepayment" && canAccess("partwholesalepayment") && (
           <PartWholesalePaymentPage currentUser={currentUser} />
+        )}
+        {activeMenu === "customerrefund" && canAccess("customerrefund") && (
+          <CustomerRefundPage currentUser={currentUser} />
         )}
         {activeMenu === "whtrefund" && canAccess("whtrefund") && (
           <WhtRefundPage currentUser={currentUser} />
@@ -1005,7 +1009,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="mailinbox" label="📬 บันทึกจดหมายเข้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "whtrefund", "partwholesalepayment", "flowexpense", "advanceexpense", "bankdeposit", "chequereceive", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment", "theftinsuranceinvoice"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "whtrefund", "partwholesalepayment", "customerrefund", "flowexpense", "advanceexpense", "bankdeposit", "chequereceive", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment", "theftinsuranceinvoice"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -1023,6 +1027,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="goodspayment" label="บันทึกชำระค่าสินค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="financepayment" label="บันทึกรับชำระเงินไฟแนนท์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partwholesalepayment" label="บันทึกรับชำระเงินขายส่งอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="customerrefund" label="💸 บันทึกคืนเงินลูกค้า (ลดหนี้/รับชำระผิด)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="otherincome" label="บันทึกรายได้อื่น ๆ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="loaninterestpayment" label="บันทึกจ่ายดอกเบี้ยธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="theftinsuranceinvoice" label="📑 บันทึกรับใบกำกับฯ ประกันรถหาย (ออกแทน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

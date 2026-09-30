@@ -80,6 +80,7 @@ const PAGE_GROUPS = [
       { key: "bankdeposit", label: "🏦 บันทึกรายการฝากเงิน" },
       { key: "whtrefund",   label: "🧾 หัก ณ ที่จ่าย ค่าใช้จ่าย รอรับคืน" },
       { key: "partwholesalepayment", label: "🏦 บันทึกรับชำระเงินขายส่งอะไหล่" },
+      { key: "customerrefund", label: "💸 บันทึกคืนเงินลูกค้า (ลดหนี้/รับชำระผิด)" },
     ],
   },
   {

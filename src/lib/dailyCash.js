@@ -12,6 +12,7 @@ const USED_MOTO_API = "https://n8n-new-project-gwf2.onrender.com/webhook/used-mo
 const DEPOSIT_INCOME_API = "https://n8n-new-project-gwf2.onrender.com/webhook/deposit-income-api";
 const FUEL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fuel-withdraw-api";
 const INS_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/insurance-refund-api";
+const CUST_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/customer-refund-api"; // คืนเงินลูกค้า ลดหนี้/รับชำระผิด (user 2026-09-30)
 const WHT_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/wht-refund-api"; // รับคืนหัก ณ ที่จ่ายจากผู้ขาย (เงินสด = แถวรับเงินสด)
 const PETTY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api"; // เบิกเงินสดย่อย 4 ประเภท → หักเงินสดในสรุปรายวัน (user 2026-09-07)
 
@@ -132,7 +133,7 @@ export function depositedDaySet(days, depList, addDays) {
 
 /** โหลดข้อมูลดิบทุกแหล่งของช่วงวันที่ (เหมือน load() ของ SaleMoneyReportPage) */
 export async function loadDailyCashSources(dateFrom, dateTo) {
-  const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, resWhtRf, pettyRows] = await Promise.all([
+  const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, resWhtRf, pettyRows, resCustRf] = await Promise.all([
     post(RETAIL_API, { action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
     post(DEPOSIT_API, { action: "get_deposits" }).catch(() => null),
     post(PART_DEPOSIT_API, { action: "list_deposits", limit: 2000 }).catch(() => null),
@@ -147,6 +148,7 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
     post(INS_REFUND_API, { action: "list_refunds", date_from: dateFrom, date_to: dateTo }).catch(() => null),
     post(WHT_REFUND_API, { action: "list_refunds", date_from: dateFrom, date_to: dateTo }).catch(() => null),
     loadPettyRows(),
+    post(CUST_REFUND_API, { action: "list_refunds", date_field: "refund_date", date_from: dateFrom, date_to: dateTo, status: "คืนเงินแล้ว", limit: 2000 }).catch(() => null),
   ]);
   const data = await res.json().catch(() => []);
   const paidRows = (Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no));
@@ -173,6 +175,9 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
   const wrRaw = resWhtRf ? await resWhtRf.json().catch(() => ({})) : {};
   let wr = [];
   try { wr = typeof wrRaw?.listjson === "string" ? JSON.parse(wrRaw.listjson) : Array.isArray(wrRaw) ? wrRaw : []; } catch { wr = []; }
+  const crRaw = resCustRf ? await resCustRf.json().catch(() => ({})) : {};
+  let cr = [];
+  try { cr = typeof crRaw?.listjson === "string" ? JSON.parse(crRaw.listjson) : Array.isArray(crRaw) ? crRaw : []; } catch { cr = []; }
   return {
     whtRefundRows: wr.filter(r => r && r.id),
     pettyRows,
@@ -188,6 +193,7 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
     depIncRows: Array.isArray(di) ? di.filter(x => x && x.receipt_no) : [],
     fuelRows: fuel.filter(f => f && f.doc_no && f.status !== "ยกเลิก"),
     insRefundRows: ir.filter(r => r && r.id),
+    custRefundRows: cr.filter(r => r && r.id && r.status === "คืนเงินแล้ว"),
   };
 }
 
@@ -237,7 +243,7 @@ export function buildPartDepItems(partDepRows, ctx) {
 /** สร้างแถวรายการทั้งหมด (allItems) — ctx = { dateFrom, dateTo, branch, isAdmin, myBranch } */
 export function buildDailyCashItems(src, ctx) {
   const { dateFrom, dateTo } = ctx;
-  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], whtRefundRows = [], pettyRows = [] } = src;
+  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], whtRefundRows = [], pettyRows = [], custRefundRows = [] } = src;
   const items = buildSaleItems(src.rows || [], depRows, ctx);
   const depItems = buildDepItems(depRows, ctx);
   const partDepItems = buildPartDepItems(partDepRows, ctx);
@@ -418,6 +424,21 @@ export function buildDailyCashItems(src, ctx) {
       note: ["คืนเงินเบี้ยประกันลูกค้า — หักเงินสดหน้าร้าน", r.note].filter(Boolean).join(" · "),
     };
   });
+  // คืนเงินลูกค้า (ลดหนี้/บันทึกรับชำระผิด) วิธีเงินสด = หักเงินสดหน้าร้าน ณ วันคืนเงิน — user 2026-09-30 (ใบเสร็จต้นทางไม่ถูกแก้ ยอดรับเดิมยังอยู่ จึงต้องหักออกที่นี่)
+  const custRefundOuts = custRefundRows.filter((r) => r.refund_method === "เงินสด" && r.status === "คืนเงินแล้ว")
+    .filter((r) => { const dt = String(r.refund_date || "").slice(0, 10); return dt >= dateFrom && dt <= dateTo; })
+    .filter((r) => inBranch(r.branch_code, ctx)).map((r) => {
+    const amt = -num(r.refund_amount);
+    const split = { cash: amt, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
+    return {
+      kind: "cust_refund", category: "คืนเงินลูกค้า ลดหนี้/รับชำระผิด (จ่ายออก)",
+      doc_no: r.refund_no || "-", date: String(r.refund_date || "").slice(0, 10), ref_no: r.receipt_no || "",
+      customer_name: r.customer_name || "-", seller: r.refunded_by || "", saleAmount: 0,
+      split, received: amt,
+      branch_key: bc5(r.branch_code), branch_name: r.branch_code || "ไม่ระบุสาขา",
+      note: [(r.reason || "ลดหนี้") + " ใบเสร็จ " + (r.receipt_no || ""), "รับไว้ " + num(r.paid_amount).toLocaleString("th-TH") + " → ถูกต้อง " + num(r.correct_amount).toLocaleString("th-TH"), r.reason_note].filter(Boolean).join(" · "),
+    };
+  });
   // รับคืนหัก ณ ที่จ่ายจากผู้ขายเป็นเงินสด (จ่ายค่าใช้จ่ายเต็มก่อนหัก) = เงินเข้าลิ้นชัก — user 2026-09-14
   const whtRefundIns = whtRefundRows.filter((r) => r.method === "เงินสด" && r.status === "ปกติ")
     .filter((r) => { const dt = String(r.refund_date || "").slice(0, 10); return dt >= dateFrom && dt <= dateTo; })
@@ -551,7 +572,7 @@ export function buildDailyCashItems(src, ctx) {
         note: ["คืนเงินมัดจำ" + (d.deposit_type ? d.deposit_type : "") + " " + (d.brand || ""), reason].filter(Boolean).join(" · "),
       };
     });
-  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...whtRefundIns, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds, ...sysRefunds, ...pettyOuts];
+  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...custRefundOuts, ...whtRefundIns, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds, ...sysRefunds, ...pettyOuts];
 }
 
 /** ยอดเงินสดรับสุทธิ (นำฝากธนาคาร) แยกตามวัน+สาขา — ใช้ในหน้าบันทึกฝากเงิน */
