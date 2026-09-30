@@ -69,8 +69,8 @@ function printEnvelope(rows, envKey) {
   <div class="method">${esc(r.method || "")}${r.tracking_no ? "<br><span class='trk'>" + esc(r.tracking_no) + "</span>" : ""}</div>
   <div class="recip">
     <div class="rlabel">กรุณาส่ง</div>
-    <div class="rname">${esc(r.recipient_name || "")}</div>
     ${r.recipient_attn ? `<div class="rattn">${esc(r.recipient_attn)}</div>` : ""}
+    <div class="rname">${esc(r.recipient_name || "")}</div>
     <div class="raddr">${esc(r.recipient_address || "")}</div>
     ${r.recipient_phone ? `<div class="rtel">โทร. ${esc(r.recipient_phone)}</div>` : ""}
   </div>
@@ -91,7 +91,7 @@ function printEnvelope(rows, envKey) {
   .recip { position: absolute; top: ${Math.round(env.h * 0.42)}mm; left: ${Math.round(env.w * 0.36)}mm; width: ${Math.round(env.w * 0.6)}mm; font-size: ${env.recip}pt; line-height: 1.35; }
   .rlabel { font-size: ${env.sender}pt; color: #333; }
   .rname { font-weight: 800; }
-  .rattn { font-weight: 600; font-size: ${env.recip - 2}pt; }
+  .rattn { font-weight: 800; }
   .raddr { white-space: pre-line; }
   .rtel { font-size: ${env.sender + 1}pt; }
   .docno { position: absolute; bottom: 2mm; left: ${env.pad}mm; font-size: 7.5pt; color: #777; }
