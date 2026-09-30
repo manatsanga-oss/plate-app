@@ -74,6 +74,7 @@ function printEnvelope(rows, envKey) {
     <div class="rname">${esc(r.recipient_name || "")}</div>
     <div class="raddr">${wrapWords(r.recipient_address)}</div>
     ${r.recipient_phone ? `<div class="rtel">โทร. ${esc(r.recipient_phone)}</div>` : ""}
+    ${String(r.note || "").trim() ? `<div class="rnote">${wrapWords(r.note)}</div>` : ""}
   </div>
   <div class="scissors">✂</div>
 </div>`).join("");
@@ -95,6 +96,7 @@ function printEnvelope(rows, envKey) {
   .raddr { white-space: normal; }
   .w { display: inline-block; white-space: nowrap; }
   .rtel { font-size: ${env.sender + 1}pt; }
+  .rnote { font-size: ${env.sender + 1}pt; margin-top: 1mm; }
   .scissors { position: absolute; top: -3.2mm; left: 4mm; font-size: 9pt; color: #777; background: #fff; padding: 0 1mm; }
   .toolbar { position: fixed; top: 6px; right: 10px; z-index: 9; font-family: Tahoma; }
   .toolbar button { padding: 8px 16px; font-size: 14px; cursor: pointer; }
