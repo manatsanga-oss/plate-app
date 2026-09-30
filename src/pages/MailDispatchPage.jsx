@@ -245,6 +245,7 @@ export default function MailDispatchPage({ currentUser }) {
 
   function openNew() { setForm(emptyForm()); setAddrChoices([]); setFormOpen(true); setMessage(""); }
   function openEdit(r) {
+    if (r.status === "จัดส่งสำเร็จ") { alert("รายการที่จัดส่งสำเร็จแล้ว แก้ไขไม่ได้"); return; } // user 2026-09-30
     setForm({ id: r.id, send_date: String(r.send_date || "").slice(0, 10), sender_affiliation: r.sender_affiliation || "ป.เปา", sender_branch_code: r.sender_branch_code || "", sender_name: r.sender_name || "",
       recipient_type: r.recipient_type || "other", recipient_code: r.recipient_code || "", recipient_name: r.recipient_name || "", recipient_attn: r.recipient_attn || "", recipient_address: r.recipient_address || "", recipient_phone: r.recipient_phone || "",
       doc_desc: r.doc_desc || "", method: r.method || "ธรรมดา", tracking_no: r.tracking_no || "", envelope: r.envelope || "dl", note: r.note || "" });
@@ -353,7 +354,7 @@ export default function MailDispatchPage({ currentUser }) {
                     </td>
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button onClick={() => printEnvelope(r, r.envelope || envKey)} title="พิมพ์ป้ายที่อยู่ (A4 ตัดแปะซอง)" style={{ ...btn("#072d6b"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>🖨️</button>
-                      {!cancelled && <button onClick={() => openEdit(r)} style={{ ...btn("#f59e0b"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>แก้ไข</button>}
+                      {!cancelled && r.status !== "จัดส่งสำเร็จ" && <button onClick={() => openEdit(r)} style={{ ...btn("#f59e0b"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>แก้ไข</button>}
                       {!cancelled && (isAdmin || r.status === "รอส่ง") && <button onClick={() => cancel(r)} style={{ ...btn("#ef4444"), padding: "3px 9px", fontSize: 11 }}>ยกเลิก</button>}
                     </td>
                   </tr>
