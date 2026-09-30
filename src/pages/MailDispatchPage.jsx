@@ -65,12 +65,13 @@ function printEnvelope(rows, envKey) {
   <div class="sender">
     <div class="sname">${esc(r.sender_company || "")}</div>
     <div>${esc(r.sender_address || "")}</div>
-    <div>${r.sender_phone ? "โทร. " + esc(r.sender_phone) : ""}${r.sender_name ? " · ผู้ส่ง " + esc(r.sender_name) : ""}</div>
+    <div>${r.sender_phone ? "โทร. " + esc(r.sender_phone) : ""}</div>
   </div>
   <div class="method">${esc(r.method || "")}${r.tracking_no ? "<br><span class='trk'>" + esc(r.tracking_no) + "</span>" : ""}</div>
   <div class="recip">
     <div class="rlabel">กรุณาส่ง</div>
     <div class="rname">${esc(r.recipient_name || "")}</div>
+    ${r.recipient_attn ? `<div class="rattn">${esc(r.recipient_attn)}</div>` : ""}
     <div class="raddr">${esc(r.recipient_address || "")}</div>
     ${r.recipient_phone ? `<div class="rtel">โทร. ${esc(r.recipient_phone)}</div>` : ""}
   </div>
@@ -91,6 +92,7 @@ function printEnvelope(rows, envKey) {
   .recip { position: absolute; top: ${Math.round(env.h * 0.42)}mm; left: ${Math.round(env.w * 0.36)}mm; width: ${Math.round(env.w * 0.6)}mm; font-size: ${env.recip}pt; line-height: 1.35; }
   .rlabel { font-size: ${env.sender}pt; color: #333; }
   .rname { font-weight: 800; }
+  .rattn { font-weight: 600; font-size: ${env.recip - 2}pt; }
   .raddr { white-space: pre-line; }
   .rtel { font-size: ${env.sender + 1}pt; }
   .docno { position: absolute; bottom: 2mm; left: ${env.pad}mm; font-size: 7.5pt; color: #777; }
@@ -121,7 +123,7 @@ export default function MailDispatchPage({ currentUser }) {
   // ฟอร์ม
   const emptyForm = () => ({
     id: 0, send_date: todayIso(), sender_affiliation: "ป.เปา", sender_branch_code: "SCY06", sender_name: currentUser?.name || "",
-    recipient_type: "customer", recipient_code: "", recipient_name: "", recipient_address: "", recipient_phone: "",
+    recipient_type: "customer", recipient_code: "", recipient_name: "", recipient_attn: "", recipient_address: "", recipient_phone: "",
     doc_desc: "", method: "EMS", tracking_no: "", envelope: "dl", note: "",
   });
   const [formOpen, setFormOpen] = useState(false);
@@ -245,7 +247,7 @@ export default function MailDispatchPage({ currentUser }) {
   function openNew() { setForm(emptyForm()); setAddrChoices([]); setFormOpen(true); setMessage(""); }
   function openEdit(r) {
     setForm({ id: r.id, send_date: String(r.send_date || "").slice(0, 10), sender_affiliation: r.sender_affiliation || "ป.เปา", sender_branch_code: r.sender_branch_code || "", sender_name: r.sender_name || "",
-      recipient_type: r.recipient_type || "other", recipient_code: r.recipient_code || "", recipient_name: r.recipient_name || "", recipient_address: r.recipient_address || "", recipient_phone: r.recipient_phone || "",
+      recipient_type: r.recipient_type || "other", recipient_code: r.recipient_code || "", recipient_name: r.recipient_name || "", recipient_attn: r.recipient_attn || "", recipient_address: r.recipient_address || "", recipient_phone: r.recipient_phone || "",
       doc_desc: r.doc_desc || "", method: r.method || "ธรรมดา", tracking_no: r.tracking_no || "", envelope: r.envelope || "dl", note: r.note || "" });
     setAddrChoices(r.recipient_address ? [r.recipient_address] : []); setFormOpen(true); setMessage("");
   }
@@ -338,7 +340,7 @@ export default function MailDispatchPage({ currentUser }) {
                     <td style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{r.doc_no}</td>
                     <td style={{ whiteSpace: "nowrap" }}>{thDate(r.send_date)}</td>
                     <td><div>{r.sender_name}</div><div style={{ fontSize: 11, color: "#6b7280" }}>{r.sender_affiliation}{r.sender_branch_code ? ` · ${r.sender_branch_code}` : ""}</div></td>
-                    <td style={{ maxWidth: 260 }}><div style={{ fontWeight: 600 }}>{r.recipient_name}</div><div style={{ fontSize: 11, color: "#6b7280", whiteSpace: "normal" }}>{r.recipient_address}</div>{r.recipient_phone && <div style={{ fontSize: 11, color: "#6b7280" }}>โทร. {r.recipient_phone}</div>}</td>
+                    <td style={{ maxWidth: 260 }}><div style={{ fontWeight: 600 }}>{r.recipient_name}</div>{r.recipient_attn && <div style={{ fontSize: 11.5 }}>{r.recipient_attn}</div>}<div style={{ fontSize: 11, color: "#6b7280", whiteSpace: "normal" }}>{r.recipient_address}</div>{r.recipient_phone && <div style={{ fontSize: 11, color: "#6b7280" }}>โทร. {r.recipient_phone}</div>}</td>
                     <td style={{ maxWidth: 200, whiteSpace: "normal" }}>{r.doc_desc || "-"}</td>
                     <td><div style={{ fontWeight: 700 }}>{r.method}</div>{r.tracking_no && <div style={{ fontFamily: "monospace", fontSize: 11 }}>{r.tracking_no}</div>}</td>
                     <td><span style={{ padding: "2px 10px", borderRadius: 12, fontSize: 11, fontWeight: 700, background: STATUS_STYLE[st]?.bg, color: STATUS_STYLE[st]?.fg, whiteSpace: "nowrap" }}>{st}</span>{r.sent_at && <div style={{ fontSize: 10.5, color: "#6b7280" }}>ส่ง {thDate(r.sent_at)}</div>}</td>
@@ -416,8 +418,9 @@ export default function MailDispatchPage({ currentUser }) {
                 <button onClick={() => { setF("recipient_type", "other"); setF("recipient_code", ""); setAddrChoices([]); }} style={btn("#6b7280")}>✏️ พิมพ์เอง</button>
                 <span style={{ fontSize: 11, color: "#6b7280" }}>{form.recipient_type === "customer" ? "ลูกค้า" : form.recipient_type === "vendor" ? "Vendor" : "พิมพ์เอง"}{form.recipient_code ? ` · ${form.recipient_code}` : ""}</span>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 10 }}>
-                <div><label style={lbl}>ชื่อผู้รับ *</label><input value={form.recipient_name} onChange={(e) => setF("recipient_name", e.target.value)} style={inp} /></div>
+              <div style={{ display: "grid", gridTemplateColumns: "2fr 2fr 1fr", gap: 10 }}>
+                <div><label style={lbl}>ชื่อผู้รับ (บริษัท/ลูกค้า) *</label><input value={form.recipient_name} onChange={(e) => setF("recipient_name", e.target.value)} style={inp} /></div>
+                <div><label style={lbl}>ชื่อบุคคล/แผนกผู้รับ (ถ้ามี)</label><input value={form.recipient_attn} onChange={(e) => setF("recipient_attn", e.target.value)} placeholder="เช่น คุณสมชาย ฝ่ายทะเบียน — เว้นว่างได้" style={inp} /></div>
                 <div><label style={lbl}>เบอร์โทรผู้รับ</label><input value={form.recipient_phone} onChange={(e) => setF("recipient_phone", e.target.value)} style={inp} /></div>
               </div>
               {addrChoices.length > 1 && (
