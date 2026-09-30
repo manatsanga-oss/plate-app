@@ -74,7 +74,6 @@ function printEnvelope(rows, envKey) {
     <div class="raddr">${esc(r.recipient_address || "")}</div>
     ${r.recipient_phone ? `<div class="rtel">โทร. ${esc(r.recipient_phone)}</div>` : ""}
   </div>
-  <div class="docno">${esc(r.doc_no || "")} · ${esc(env.label.split(" — ")[0])}</div>
   <div class="scissors">✂</div>
 </div>`).join("");
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ป้ายที่อยู่ ${env.label}</title>
@@ -94,7 +93,6 @@ function printEnvelope(rows, envKey) {
   .rattn { font-weight: 800; }
   .raddr { white-space: pre-line; }
   .rtel { font-size: ${env.sender + 1}pt; }
-  .docno { position: absolute; bottom: 2mm; left: ${env.pad}mm; font-size: 7.5pt; color: #777; }
   .scissors { position: absolute; top: -3.2mm; left: 4mm; font-size: 9pt; color: #777; background: #fff; padding: 0 1mm; }
   .toolbar { position: fixed; top: 6px; right: 10px; z-index: 9; font-family: Tahoma; }
   .toolbar button { padding: 8px 16px; font-size: 14px; cursor: pointer; }
