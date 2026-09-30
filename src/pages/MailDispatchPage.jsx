@@ -34,6 +34,7 @@ const thDate = (v) => { if (!v) return "-"; const d = new Date(String(v).slice(0
 const esc = (v) => String(v == null ? "" : v).replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
 const nn = (s) => String(s || "").replace(/^(บริษัท|บจก\.?|บจ\.?|บ\.|หจก\.?|ห้างหุ้นส่วนจำกัด|นางสาว|น\.ส\.|นาย|นาง|คุณ|MR\.?|MRS\.?|MS\.?)\s*/i, "").replace(/\s*(จำกัด\s*\(มหาชน\)|จำกัด|\(มหาชน\))\s*$/g, "").replace(/[\s\.\-]+/g, "").toUpperCase();
 const trk = (s) => String(s || "").replace(/[\s\-]/g, "").toUpperCase();
+const wrapWords = (t) => String(t || "").trim().split(/\s+/).filter(Boolean).map((w) => `<span class="w">${esc(w)}</span>`).join(" ");
 const vendorAddr = (v) => [v.address, v.sub_district, v.district, v.province, v.postal_code].filter(Boolean).join(" ");
 
 async function postJSON(url, body) {
@@ -63,7 +64,7 @@ function printEnvelope(rows, envKey) {
 <div class="lb">
   <div class="sender">
     <div class="sname">${esc(r.sender_company || "")}</div>
-    <div>${esc(r.sender_address || "")}</div>
+    <div>${wrapWords(r.sender_address)}</div>
     <div>${r.sender_phone ? "โทร. " + esc(r.sender_phone) : ""}</div>
   </div>
   <div class="method">${esc(r.method || "")}${r.tracking_no ? "<br><span class='trk'>" + esc(r.tracking_no) + "</span>" : ""}</div>
@@ -71,7 +72,7 @@ function printEnvelope(rows, envKey) {
     <div class="rlabel">กรุณาส่ง</div>
     ${r.recipient_attn ? `<div class="rattn">${esc(r.recipient_attn)}</div>` : ""}
     <div class="rname">${esc(r.recipient_name || "")}</div>
-    <div class="raddr">${esc(r.recipient_address || "")}</div>
+    <div class="raddr">${wrapWords(r.recipient_address)}</div>
     ${r.recipient_phone ? `<div class="rtel">โทร. ${esc(r.recipient_phone)}</div>` : ""}
   </div>
   <div class="scissors">✂</div>
@@ -91,7 +92,8 @@ function printEnvelope(rows, envKey) {
   .rlabel { font-size: ${env.sender}pt; color: #333; }
   .rname { font-weight: 800; }
   .rattn { font-weight: 800; }
-  .raddr { white-space: pre-line; }
+  .raddr { white-space: normal; }
+  .w { display: inline-block; white-space: nowrap; }
   .rtel { font-size: ${env.sender + 1}pt; }
   .scissors { position: absolute; top: -3.2mm; left: 4mm; font-size: 9pt; color: #777; background: #fff; padding: 0 1mm; }
   .toolbar { position: fixed; top: 6px; right: 10px; z-index: 9; font-family: Tahoma; }
