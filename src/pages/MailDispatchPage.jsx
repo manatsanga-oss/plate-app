@@ -11,7 +11,6 @@ const API = `${BASE}/mail-dispatch-api`;
 const MASTER_API = `${BASE}/master-data-api`;
 const PETTY_API = `${BASE}/petty-cash-api`;
 const SEARCH_API = `${BASE}/booking-deposit-api`; // search_customers keyword → ที่อยู่จากหลายแหล่ง
-const USER_API = `${BASE}/office-login`;
 
 const AFFIL = {
   "ป.เปา": { company: "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด", defaultBranch: "SCY06", branches: ["SCY05", "SCY06"] },
@@ -111,7 +110,6 @@ export default function MailDispatchPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [branches, setBranches] = useState([]);
   const [vendors, setVendors] = useState([]);
-  const [users, setUsers] = useState([]);
   const [postItems, setPostItems] = useState([]); // รายการค่าไปรษณีย์จากเงินสดย่อย
   const [filter, setFilter] = useState({ date_from: shiftIso(todayIso(), -30), date_to: todayIso(), status: "", keyword: "" });
   const [sel, setSel] = useState(() => new Set());
@@ -132,12 +130,11 @@ export default function MailDispatchPage({ currentUser }) {
   const setF = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   async function loadMaster() {
-    const [b, v, u] = await Promise.all([
+    const [b, v] = await Promise.all([
       listJSON(MASTER_API, { action: "get_branches", include_inactive: "true" }).catch(() => []),
       listJSON(MASTER_API, { action: "list_vendors", include_inactive: "false" }).catch(() => []),
-      listJSON(USER_API, { action: "get_users" }).catch(() => []),
     ]);
-    setBranches(b); setVendors(v); setUsers(u);
+    setBranches(b); setVendors(v);
   }
   async function loadPostage() {
     try {
@@ -221,12 +218,13 @@ export default function MailDispatchPage({ currentUser }) {
     setAddrChoices(r.recipient_address ? [r.recipient_address] : []); setFormOpen(true); setMessage("");
   }
   async function save(printAfter) {
-    if (!form.sender_name.trim()) { alert("กรุณาระบุชื่อพนักงานผู้ส่ง"); return; }
+    const senderName = (form.sender_name || currentUser?.name || currentUser?.username || "").trim();
+    if (!senderName) { alert("ไม่พบชื่อผู้ใช้ที่ล็อกอิน"); return; }
     if (!form.recipient_name.trim()) { alert("กรุณาเลือกหรือพิมพ์ชื่อผู้รับ"); return; }
     if (!form.recipient_address.trim()) { alert("กรุณาระบุที่อยู่ผู้รับ"); return; }
     setSaving(true);
     try {
-      const body = { action: "save_mail", ...form, sender_company: senderInfo.company, sender_address: senderInfo.address, sender_phone: senderInfo.phone,
+      const body = { action: "save_mail", ...form, sender_name: senderName, sender_company: senderInfo.company, sender_address: senderInfo.address, sender_phone: senderInfo.phone,
         created_by: currentUser?.name || currentUser?.username || "", updated_by: currentUser?.name || currentUser?.username || "" };
       const res = await postJSON(API, body);
       if (!res) throw new Error("n8n ยังไม่มี workflow mail-dispatch-api");
@@ -350,9 +348,8 @@ export default function MailDispatchPage({ currentUser }) {
                   <select value={form.sender_branch_code} onChange={(e) => setF("sender_branch_code", e.target.value)} style={inp}>
                     {(AFFIL[form.sender_affiliation]?.branches || []).map((bc) => { const b = branches.find((x) => x.branch_code === bc); return <option key={bc} value={bc}>{bc} {b?.branch_name || ""}</option>; })}
                   </select></div>
-                <div><label style={lbl}>พนักงานผู้ส่ง *</label>
-                  <input value={form.sender_name} list="mail-users" onChange={(e) => setF("sender_name", e.target.value)} style={inp} />
-                  <datalist id="mail-users">{users.filter((u) => u.status !== "inactive").map((u) => <option key={u.user_id || u.username} value={u.name} />)}</datalist></div>
+                <div><label style={lbl}>พนักงานผู้ส่ง (จากผู้ใช้ที่ล็อกอิน)</label>
+                  <div style={{ ...inp, background: "#f3f4f6", color: "#374151" }}>{form.sender_name || currentUser?.name || currentUser?.username || "-"}</div></div>
               </div>
               <div style={{ marginTop: 8, fontSize: 12, color: "#374151", background: "#f8fafc", padding: "6px 10px", borderRadius: 8 }}>
                 <b>{senderInfo.company}</b> · {senderInfo.address || <span style={{ color: "#b91c1c" }}>ไม่พบที่อยู่สาขาใน master</span>}{senderInfo.phone ? ` · โทร. ${senderInfo.phone}` : ""}
@@ -396,7 +393,9 @@ export default function MailDispatchPage({ currentUser }) {
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
                 <div style={{ gridColumn: "span 2" }}><label style={lbl}>เอกสารที่ส่ง</label><input value={form.doc_desc} onChange={(e) => setF("doc_desc", e.target.value)} placeholder="เช่น เล่มทะเบียน / ใบกำกับภาษี / เอกสารประกัน" style={inp} /></div>
                 <div><label style={lbl}>วิธีส่ง</label><select value={form.method} onChange={(e) => setF("method", e.target.value)} style={inp}>{METHODS.map((m) => <option key={m} value={m}>{m}</option>)}</select></div>
-                <div><label style={lbl}>เลขพัสดุ / tracking (ถ้ามี)</label><input value={form.tracking_no} onChange={(e) => setF("tracking_no", e.target.value)} placeholder="เช่น ED311935585TH" style={{ ...inp, fontFamily: "monospace" }} /></div>
+                {form.id > 0 && String(rows.find((r) => r.id === form.id)?.status || "") !== "รอส่ง" && (
+                  <div><label style={lbl}>เลขพัสดุ / tracking</label><input value={form.tracking_no} onChange={(e) => setF("tracking_no", e.target.value)} style={{ ...inp, fontFamily: "monospace" }} /></div>
+                )}
                 <div><label style={lbl}>ขนาดซอง</label><select value={form.envelope} onChange={(e) => setF("envelope", e.target.value)} style={inp}>{ENVELOPES.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}</select></div>
                 <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>หมายเหตุ</label><input value={form.note} onChange={(e) => setF("note", e.target.value)} style={inp} /></div>
               </div>
