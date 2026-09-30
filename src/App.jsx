@@ -119,6 +119,7 @@ import SalesByPaymentReportPage from "./pages/SalesByPaymentReportPage";
 import OtherIncomeTaxReportPage from "./pages/OtherIncomeTaxReportPage";
 import DeliveryFeePage from "./pages/DeliveryFeePage";
 import FuelWithdrawPage from "./pages/FuelWithdrawPage";
+import MailDispatchPage from "./pages/MailDispatchPage";
 import VehiclePriceOverridePage from "./pages/VehiclePriceOverridePage";
 import VehicleDressupPage from "./pages/VehicleDressupPage"; // บันทึกอะไหล่แต่งรถสำหรับขาย (user 2026-09-24)
 import PartReturnPage from "./pages/PartReturnPage";
@@ -296,7 +297,7 @@ export default function App() {
     const explicitPages = getExplicitUserPages(currentUser.pages);
     if (explicitPages) return explicitPages.includes(page);
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "sparedailyorders" || page === "partreturn" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "chequereceive" || page === "mymotoreport" || page === "mymotoregister" || page === "fuelwithdraw" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "redplaterefund" || page === "redplatedeposit" || page === "depositincome" || page === "salewizard" || page === "vehdressup" || page === "usedmoto" || page === "partgiveawayreport" || page === "receiptentry") return true;
+    if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "sparedailyorders" || page === "partreturn" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "chequereceive" || page === "mymotoreport" || page === "mymotoregister" || page === "fuelwithdraw" || page === "maildispatch" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "redplaterefund" || page === "redplatedeposit" || page === "depositincome" || page === "salewizard" || page === "vehdressup" || page === "usedmoto" || page === "partgiveawayreport" || page === "receiptentry") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
     if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "motoinsuranceextra" || page === "cosmosinsurance" || page === "cosmosadjust" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrtimetracking" || page === "hremployees") return false;
     // upload, master data, convert เฉพาะ admin
@@ -435,6 +436,9 @@ export default function App() {
         )}
         {activeMenu === "fuelwithdraw" && canAccess("fuelwithdraw") && (
           <FuelWithdrawPage currentUser={currentUser} />
+        )}
+        {activeMenu === "maildispatch" && canAccess("maildispatch") && (
+          <MailDispatchPage currentUser={currentUser} />
         )}
         {activeMenu === "deliveryfee" && canAccess("deliveryfee") && (
           <DeliveryFeePage currentUser={currentUser} />
@@ -896,7 +900,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 }
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
-  const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "fuelwithdraw", "pricemarkup", "vehpriceoverride", "vehdressup", "receiptqr", "receiptissue", "retailsale", "bookingdeposit", "redplaterefund", "redplatedeposit", "depositincome"];
+  const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "fuelwithdraw", "maildispatch", "pricemarkup", "vehpriceoverride", "vehdressup", "receiptqr", "receiptissue", "retailsale", "bookingdeposit", "redplaterefund", "redplatedeposit", "depositincome"];
   const sparePages = ["spareorder", "sparedailyorders", "partreturn", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "partdeposit", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "rfidstock", "partimagesearch", "productgroup", "partstatusinquiry", "partorderinquiry", "partwithdrawal", "partmodelusage"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust", "mailinbox"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "giveawayrules", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
@@ -948,6 +952,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="mototransfer" label="บันทึกโอนรถระหว่างสาขา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="customer" label="บันทึกข้อมูลลูกค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="fuelwithdraw" label="บันทึกเบิกค่าน้ำมันรถใช้จ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="maildispatch" label="บันทึกส่งเอกสารทางไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="pricemarkup" label="ราคาขายบวกเพิ่ม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="vehpriceoverride" label="บันทึกแก้ไขราคาขายเฉพาะคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="vehdressup" label="บันทึกอะไหล่แต่งรถสำหรับขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
