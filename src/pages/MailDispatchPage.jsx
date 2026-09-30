@@ -3,7 +3,7 @@ import CustomerPickerModal from "./CustomerPickerModal";
 
 // บันทึกส่งเอกสารทางไปรษณีย์ (user 2026-09-30)
 //   ผู้ส่ง = พนักงาน + สังกัด (ป.เปา / สิงห์ชัย) ที่อยู่บริษัทจาก branch master · ผู้รับ = ลูกค้า (CustomerPickerModal) / Vendor master / พิมพ์เอง
-//   วิธีส่ง ธรรมดา / ลงทะเบียน / EMS · พิมพ์หน้าซอง 2 ขนาด (ซองขาวยาว DL 220×110 มม. / ซองน้ำตาล A4 C4 324×229 มม.)
+//   วิธีส่ง ธรรมดา / ลงทะเบียน / EMS · พิมพ์ "ป้ายที่อยู่" ลง A4 มีกรอบเส้นประไว้ตัดแปะซอง 2 ขนาด (ซองขาวยาว DL / ซองน้ำตาล C4)
 //   สถานะ: รอส่ง → ส่งแล้ว → จัดส่งสำเร็จ (จับคู่รายการค่าไปรษณีย์ในเงินสดย่อยด้วยเลข tracking หรือ ชื่อผู้รับ+วันที่) · ยกเลิก
 // backend: Mail_Dispatch_API_Workflow.json (webhook mail-dispatch-api) actions save_mail / list_mails / update_mail_status / cancel_mail · ตาราง mail_dispatches
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
@@ -18,8 +18,9 @@ const AFFIL = {
 };
 const METHODS = ["ธรรมดา", "ลงทะเบียน", "EMS"];
 const ENVELOPES = [
-  { key: "dl", label: "ซองขาวยาว (DL 220×110 มม.)", w: 220, h: 110, sender: 10, recip: 15, pad: 10 },
-  { key: "c4", label: "ซองน้ำตาล A4 (C4 324×229 มม.)", w: 324, h: 229, sender: 13, recip: 22, pad: 18 },
+  // พิมพ์ลง A4 เป็น "ป้ายที่อยู่" มีกรอบเส้นประไว้ตัดแล้วแปะบนซอง (user 2026-09-30) — ขนาดป้ายย่อตามซอง
+  { key: "dl", label: "ซองขาวยาว DL — ป้าย 150×80 มม. (3 ป้าย/A4)", w: 150, h: 80, sender: 9.5, recip: 14, pad: 6, perPage: 3 },
+  { key: "c4", label: "ซองน้ำตาล A4 (C4) — ป้าย 190×120 มม. (2 ป้าย/A4)", w: 190, h: 120, sender: 12, recip: 20, pad: 9, perPage: 2 },
 ];
 const STATUS_STYLE = {
   "รอส่ง": { bg: "#fef3c7", fg: "#92400e" },
@@ -59,8 +60,8 @@ function printEnvelope(rows, envKey) {
   const env = ENVELOPES.find((e) => e.key === envKey) || ENVELOPES[0];
   const list = Array.isArray(rows) ? rows : [rows];
   const w = window.open("", "_blank");
-  const pages = list.map((r) => `
-<div class="env">
+  const cells = list.map((r) => `
+<div class="lb">
   <div class="sender">
     <div class="sname">${esc(r.sender_company || "")}</div>
     <div>${esc(r.sender_address || "")}</div>
@@ -73,32 +74,34 @@ function printEnvelope(rows, envKey) {
     <div class="raddr">${esc(r.recipient_address || "")}</div>
     ${r.recipient_phone ? `<div class="rtel">โทร. ${esc(r.recipient_phone)}</div>` : ""}
   </div>
-  <div class="docno">${esc(r.doc_no || "")}</div>
+  <div class="docno">${esc(r.doc_no || "")} · ${esc(env.label.split(" — ")[0])}</div>
+  <div class="scissors">✂</div>
 </div>`).join("");
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>หน้าซอง ${env.label}</title>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>ป้ายที่อยู่ ${env.label}</title>
 <style>
-  @page { size: ${env.w}mm ${env.h}mm; margin: 0; }
+  @page { size: A4 portrait; margin: 10mm; }
   * { box-sizing: border-box; }
   body { margin: 0; font-family: 'TH Sarabun New', Tahoma, sans-serif; color: #111; }
-  .env { position: relative; width: ${env.w}mm; height: ${env.h}mm; padding: ${env.pad}mm; page-break-after: always; overflow: hidden; }
-  .env:last-child { page-break-after: auto; }
-  .sender { position: absolute; top: ${env.pad}mm; left: ${env.pad}mm; width: ${Math.round(env.w * 0.5)}mm; font-size: ${env.sender}pt; line-height: 1.3; }
+  .sheet { display: grid; grid-template-columns: ${env.w}mm; grid-auto-rows: ${env.h}mm; row-gap: 6mm; justify-content: center; }
+  .lb { position: relative; width: ${env.w}mm; height: ${env.h}mm; border: 1px dashed #777; padding: ${env.pad}mm; page-break-inside: avoid; overflow: hidden; background: #fff; }
+  .sender { position: absolute; top: ${env.pad}mm; left: ${env.pad}mm; width: ${Math.round(env.w * 0.55)}mm; font-size: ${env.sender}pt; line-height: 1.3; }
   .sname { font-weight: 700; }
-  .method { position: absolute; top: ${env.pad}mm; right: ${env.pad}mm; font-size: ${env.sender + 2}pt; font-weight: 800; border: 1.5px solid #111; padding: 2mm 4mm; text-align: center; }
+  .method { position: absolute; top: ${env.pad}mm; right: ${env.pad}mm; font-size: ${env.sender + 2}pt; font-weight: 800; border: 1.5px solid #111; padding: 1.5mm 3mm; text-align: center; }
   .trk { font-weight: 400; font-size: ${env.sender}pt; font-family: monospace; }
-  .recip { position: absolute; top: ${Math.round(env.h * 0.42)}mm; left: ${Math.round(env.w * 0.4)}mm; width: ${Math.round(env.w * 0.56)}mm; font-size: ${env.recip}pt; line-height: 1.35; }
+  .recip { position: absolute; top: ${Math.round(env.h * 0.42)}mm; left: ${Math.round(env.w * 0.36)}mm; width: ${Math.round(env.w * 0.6)}mm; font-size: ${env.recip}pt; line-height: 1.35; }
   .rlabel { font-size: ${env.sender}pt; color: #333; }
   .rname { font-weight: 800; }
   .raddr { white-space: pre-line; }
   .rtel { font-size: ${env.sender + 1}pt; }
-  .docno { position: absolute; bottom: ${Math.max(4, env.pad - 4)}mm; left: ${env.pad}mm; font-size: 8pt; color: #666; }
+  .docno { position: absolute; bottom: 2mm; left: ${env.pad}mm; font-size: 7.5pt; color: #777; }
+  .scissors { position: absolute; top: -3.2mm; left: 4mm; font-size: 9pt; color: #777; background: #fff; padding: 0 1mm; }
   .toolbar { position: fixed; top: 6px; right: 10px; z-index: 9; font-family: Tahoma; }
   .toolbar button { padding: 8px 16px; font-size: 14px; cursor: pointer; }
-  @media print { .toolbar { display: none; } }
-  @media screen { body { background: #e5e7eb; padding: 40px 10px 10px; } .env { background: #fff; margin: 0 auto 12px; box-shadow: 0 1px 4px rgba(0,0,0,.2); } }
+  @media print { .toolbar { display: none; } .lb { border-color: #999; } }
+  @media screen { body { background: #e5e7eb; padding: 40px 10px 10px; } .sheet { background: #fff; width: 190mm; margin: 0 auto; padding: 10mm 0; box-shadow: 0 1px 4px rgba(0,0,0,.2); } }
 </style></head><body>
-<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์ (${list.length} ซอง · ${env.label})</button> <span style="font-size:12px;color:#444">ตั้งค่าเครื่องพิมพ์: ขนาดกระดาษ ${env.w}×${env.h} มม. · ไม่ย่อขยาย</span></div>
-${pages}
+<div class="toolbar"><button onclick="window.print()">🖨️ พิมพ์ (${list.length} ป้าย · ${Math.ceil(list.length / env.perPage)} แผ่น A4)</button> <span style="font-size:12px;color:#444">ตัดตามเส้นประแล้วแปะบนซอง · ตั้ง Scale 100%</span></div>
+<div class="sheet">${cells}</div>
 </body></html>`);
   w.document.close();
 }
@@ -125,7 +128,9 @@ export default function MailDispatchPage({ currentUser }) {
   const [form, setForm] = useState(emptyForm);
   const [addrChoices, setAddrChoices] = useState([]);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [vendorQ, setVendorQ] = useState("");
+  const [recQ, setRecQ] = useState("");            // ค้นหาผู้รับรวม: ลูกค้า/ผู้ซื้อรถ/ใบขายปลีก/QR-LINE + Vendor (user 2026-09-30: ต้องมีรายชื่อลูกค้าที่ซื้อรถด้วย)
+  const [recHits, setRecHits] = useState(null);
+  const [recSearching, setRecSearching] = useState(false);
   const [saving, setSaving] = useState(false);
   const setF = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -204,11 +209,38 @@ export default function MailDispatchPage({ currentUser }) {
     setAddrChoices(opts);
     setF("recipient_address", opts[0] || "");
   }
-  function pickVendor(v) {
-    setF("recipient_type", "vendor"); setF("recipient_code", String(v.vendor_id || "")); setF("recipient_name", v.vendor_name || "");
-    setF("recipient_phone", v.phone || ""); const a = vendorAddr(v); setAddrChoices(a ? [a] : []); setF("recipient_address", a); setVendorQ("");
+  const SRC_LABEL = { "ประวัติขาย": "ผู้ซื้อรถ", "ใบขายปลีก": "ใบขาย NEW", "QR/LINE": "QR/LINE", "ฐานลูกค้า": "ฐานลูกค้า" };
+  async function searchRecipients() {
+    const q = recQ.trim();
+    if (q.length < 2) { setRecHits([]); return; }
+    setRecSearching(true);
+    let out = [];
+    try {
+      const res = await listJSON(SEARCH_API, { action: "search_customers", keyword: q });
+      // รวมทุกแหล่ง (ฐานลูกค้า / ผู้ซื้อรถ=ประวัติขาย / ใบขายปลีก / QR-LINE) — รวมชื่อเดียวกันเป็น 1 แถว เก็บที่อยู่ทุกแบบไว้ให้เลือก
+      const byKey = new Map();
+      for (const x of res) {
+        if (!x || !x.customer_name) continue;
+        const key = nn(x.customer_name) + "|" + String(x.customer_phone || "").replace(/\D/g, "").slice(-9);
+        const g = byKey.get(key) || { type: "customer", code: "", name: x.customer_name, phone: x.customer_phone || "", addrs: [], sources: [], last: "" };
+        if (!g.code && x.customer_code) g.code = x.customer_code;
+        const a = String(x.customer_address || "").trim(); if (a && !g.addrs.includes(a)) g.addrs.push(a);
+        const sl = SRC_LABEL[x.source] || x.source || ""; if (sl && !g.sources.includes(sl)) g.sources.push(sl);
+        if (String(x.ref_at || "") > g.last) g.last = String(x.ref_at || "");
+        byKey.set(key, g);
+      }
+      out = [...byKey.values()].sort((a, b) => b.last.localeCompare(a.last)).slice(0, 25);
+    } catch { out = []; }
+    const ql = q.toLowerCase();
+    const vs = vendors.filter((v) => String(v.vendor_name || "").toLowerCase().includes(ql)).slice(0, 10)
+      .map((v) => ({ type: "vendor", code: String(v.vendor_id || ""), name: v.vendor_name, phone: v.phone || "", addrs: vendorAddr(v) ? [vendorAddr(v)] : [], sources: ["Vendor"], last: "" }));
+    setRecHits([...out, ...vs]);
+    setRecSearching(false);
   }
-  const vendorHits = useMemo(() => { const q = vendorQ.trim().toLowerCase(); if (!q) return []; return vendors.filter((v) => String(v.vendor_name || "").toLowerCase().includes(q)).slice(0, 12); }, [vendorQ, vendors]);
+  function pickHit(h) {
+    setF("recipient_type", h.type); setF("recipient_code", h.code || ""); setF("recipient_name", h.name || ""); setF("recipient_phone", h.phone || "");
+    setAddrChoices(h.addrs); setF("recipient_address", h.addrs[0] || ""); setRecHits(null); setRecQ("");
+  }
 
   function openNew() { setForm(emptyForm()); setAddrChoices([]); setFormOpen(true); setMessage(""); }
   function openEdit(r) {
@@ -283,9 +315,9 @@ export default function MailDispatchPage({ currentUser }) {
         </span>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10, padding: "8px 12px", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10 }}>
-        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#072d6b" }}>🖨️ พิมพ์หน้าซองที่ติ๊ก ({sel.size})</span>
+        <span style={{ fontSize: 12.5, fontWeight: 700, color: "#072d6b" }}>🖨️ พิมพ์ป้ายที่อยู่ลง A4 (ติ๊ก {sel.size})</span>
         <select value={envKey} onChange={(e) => setEnvKey(e.target.value)} style={{ ...inp, width: 260 }}>{ENVELOPES.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}</select>
-        <button disabled={!sel.size} onClick={() => printEnvelope(rows.filter((r) => sel.has(r.id)), envKey)} style={{ ...btn(sel.size ? "#b45309" : "#d1d5db"), cursor: sel.size ? "pointer" : "default" }}>พิมพ์หน้าซอง</button>
+        <button disabled={!sel.size} onClick={() => printEnvelope(rows.filter((r) => sel.has(r.id)), envKey)} style={{ ...btn(sel.size ? "#b45309" : "#d1d5db"), cursor: sel.size ? "pointer" : "default" }}>พิมพ์ป้ายที่อยู่</button>
         <span style={{ fontSize: 11.5, color: "#6b7280" }}>สถานะ "จัดส่งสำเร็จ" ขึ้นอัตโนมัติเมื่อพบรายการค่าไปรษณีย์ในเงินสดย่อยที่ tracking ตรง หรือชื่อผู้รับตรงในช่วง 10 วันหลังวันส่ง</span>
       </div>
 
@@ -315,7 +347,7 @@ export default function MailDispatchPage({ currentUser }) {
                         : r.postage_doc_no ? <div>{r.postage_doc_no} · {Number(r.postage_amount || 0).toLocaleString()} บาท</div> : <span style={{ color: "#9ca3af" }}>ยังไม่พบ</span>}
                     </td>
                     <td style={{ whiteSpace: "nowrap" }}>
-                      <button onClick={() => printEnvelope(r, r.envelope || envKey)} title="พิมพ์หน้าซอง" style={{ ...btn("#072d6b"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>🖨️</button>
+                      <button onClick={() => printEnvelope(r, r.envelope || envKey)} title="พิมพ์ป้ายที่อยู่ (A4 ตัดแปะซอง)" style={{ ...btn("#072d6b"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>🖨️</button>
                       {!cancelled && <button onClick={() => openEdit(r)} style={{ ...btn("#f59e0b"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>แก้ไข</button>}
                       {!cancelled && r.status === "รอส่ง" && <button onClick={() => markSent(r)} style={{ ...btn("#2563eb"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>ส่งแล้ว</button>}
                       {!cancelled && r.status !== "จัดส่งสำเร็จ" && m && <button onClick={() => confirmDelivered(r)} style={{ ...btn("#15803d"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>ยืนยันสำเร็จ</button>}
@@ -359,17 +391,28 @@ export default function MailDispatchPage({ currentUser }) {
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 12 }}>
               <div style={{ fontWeight: 700, color: "#15803d", marginBottom: 8 }}>ผู้รับ</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                <button onClick={() => setPickerOpen(true)} style={btn("#0369a1")}>🔍 เลือกจากรายชื่อลูกค้า</button>
-                <div style={{ position: "relative", flex: 1, minWidth: 260 }}>
-                  <input value={vendorQ} onChange={(e) => setVendorQ(e.target.value)} placeholder="🏢 ค้นหา Vendor / บริษัท (พิมพ์ชื่อ)" style={inp} />
-                  {vendorHits.length > 0 && (
-                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, zIndex: 5, maxHeight: 240, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.12)" }}>
-                      {vendorHits.map((v) => (
-                        <div key={v.vendor_id} onClick={() => pickVendor(v)} style={{ padding: "6px 10px", cursor: "pointer", borderBottom: "1px solid #f3f4f6", fontSize: 12.5 }}>
-                          <div style={{ fontWeight: 600 }}>{v.vendor_name}</div><div style={{ fontSize: 11, color: "#6b7280" }}>{vendorAddr(v) || "ไม่มีที่อยู่ใน master"}</div>
-                        </div>))}
+                <div style={{ position: "relative", flex: 1, minWidth: 320 }}>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input value={recQ} onChange={(e) => setRecQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && searchRecipients()} autoFocus
+                      placeholder="🔍 ค้นหาผู้รับ: ชื่อลูกค้า / ผู้ซื้อรถ / เบอร์โทร / บริษัท-Vendor แล้วกด Enter" style={inp} />
+                    <button onClick={searchRecipients} disabled={recSearching} style={btn("#0369a1")}>{recSearching ? "กำลังค้น…" : "ค้นหา"}</button>
+                  </div>
+                  {recHits && (
+                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #d1d5db", borderRadius: 8, zIndex: 5, maxHeight: 300, overflowY: "auto", boxShadow: "0 4px 12px rgba(0,0,0,.12)" }}>
+                      {recHits.length === 0 ? <div style={{ padding: 10, color: "#9ca3af", fontSize: 12.5 }}>ไม่พบ — พิมพ์เองได้ที่ช่องด้านล่าง</div> :
+                        recHits.map((h, i) => (
+                          <div key={i} onClick={() => pickHit(h)} style={{ padding: "6px 10px", cursor: "pointer", borderBottom: "1px solid #f3f4f6", fontSize: 12.5 }}>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                              <span style={{ fontWeight: 600 }}>{h.name}</span>
+                              {h.phone && <span style={{ fontFamily: "monospace", fontSize: 11, color: "#6b7280" }}>{h.phone}</span>}
+                              {h.sources.map((sl) => <span key={sl} style={{ fontSize: 10, padding: "1px 6px", borderRadius: 8, background: sl === "Vendor" ? "#ede9fe" : sl === "ผู้ซื้อรถ" ? "#dcfce7" : "#e0f2fe", color: sl === "Vendor" ? "#5b21b6" : sl === "ผู้ซื้อรถ" ? "#166534" : "#075985", fontWeight: 700 }}>{sl}</span>)}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#6b7280" }}>{h.addrs.length ? h.addrs[0] + (h.addrs.length > 1 ? ` (+อีก ${h.addrs.length - 1} ที่อยู่)` : "") : "ไม่มีที่อยู่ — พิมพ์เอง"}</div>
+                          </div>))}
+                      <div onClick={() => setRecHits(null)} style={{ padding: "5px 10px", textAlign: "right", fontSize: 11, color: "#6b7280", cursor: "pointer" }}>ปิด</div>
                     </div>)}
                 </div>
+                <button onClick={() => setPickerOpen(true)} style={btn("#6b7280")} title="ตัวเลือกลูกค้าแบบเต็ม (เพิ่มลูกค้าใหม่ / QR)">👤 รายชื่อลูกค้า</button>
                 <button onClick={() => { setF("recipient_type", "other"); setF("recipient_code", ""); setAddrChoices([]); }} style={btn("#6b7280")}>✏️ พิมพ์เอง</button>
                 <span style={{ fontSize: 11, color: "#6b7280" }}>{form.recipient_type === "customer" ? "ลูกค้า" : form.recipient_type === "vendor" ? "Vendor" : "พิมพ์เอง"}{form.recipient_code ? ` · ${form.recipient_code}` : ""}</span>
               </div>
@@ -396,7 +439,7 @@ export default function MailDispatchPage({ currentUser }) {
                 {form.id > 0 && String(rows.find((r) => r.id === form.id)?.status || "") !== "รอส่ง" && (
                   <div><label style={lbl}>เลขพัสดุ / tracking</label><input value={form.tracking_no} onChange={(e) => setF("tracking_no", e.target.value)} style={{ ...inp, fontFamily: "monospace" }} /></div>
                 )}
-                <div><label style={lbl}>ขนาดซอง</label><select value={form.envelope} onChange={(e) => setF("envelope", e.target.value)} style={inp}>{ENVELOPES.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}</select></div>
+                <div><label style={lbl}>ขนาดซอง (กำหนดขนาดป้าย)</label><select value={form.envelope} onChange={(e) => setF("envelope", e.target.value)} style={inp}>{ENVELOPES.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}</select></div>
                 <div style={{ gridColumn: "1 / -1" }}><label style={lbl}>หมายเหตุ</label><input value={form.note} onChange={(e) => setF("note", e.target.value)} style={inp} /></div>
               </div>
             </div>
@@ -404,7 +447,7 @@ export default function MailDispatchPage({ currentUser }) {
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <button onClick={() => setFormOpen(false)} disabled={saving} style={{ padding: "8px 18px", border: "1px solid #d1d5db", background: "#fff", borderRadius: 8, cursor: "pointer" }}>ปิด</button>
               <button onClick={() => save(false)} disabled={saving} style={btn(saving ? "#9ca3af" : "#072d6b")}>{saving ? "กำลังบันทึก…" : "บันทึก"}</button>
-              <button onClick={() => save(true)} disabled={saving} style={btn(saving ? "#9ca3af" : "#b45309")}>บันทึก + พิมพ์หน้าซอง</button>
+              <button onClick={() => save(true)} disabled={saving} style={btn(saving ? "#9ca3af" : "#b45309")}>บันทึก + พิมพ์ป้ายที่อยู่</button>
             </div>
           </div>
         </div>
