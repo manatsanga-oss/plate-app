@@ -4,7 +4,7 @@ import CustomerPickerModal from "./CustomerPickerModal";
 // บันทึกส่งเอกสารทางไปรษณีย์ (user 2026-09-30)
 //   ผู้ส่ง = พนักงาน + สังกัด (ป.เปา / สิงห์ชัย) ที่อยู่บริษัทจาก branch master · ผู้รับ = ลูกค้า (CustomerPickerModal) / Vendor master / พิมพ์เอง
 //   วิธีส่ง ธรรมดา / ลงทะเบียน / EMS · พิมพ์ "ป้ายที่อยู่" ลง A4 มีกรอบเส้นประไว้ตัดแปะซอง 2 ขนาด (ซองขาวยาว DL / ซองน้ำตาล C4)
-//   สถานะ: รอส่ง → ส่งแล้ว → จัดส่งสำเร็จ (จับคู่รายการค่าไปรษณีย์ในเงินสดย่อยด้วยเลข tracking หรือ ชื่อผู้รับ+วันที่) · ยกเลิก
+//   สถานะ: รอส่ง → จัดส่งสำเร็จ อัตโนมัติ (จับคู่รายการค่าไปรษณีย์ในเงินสดย่อยด้วยเลข tracking หรือ ชื่อผู้รับ+วันที่ แล้วบันทึกลง DB เอง) · ยกเลิก
 // backend: Mail_Dispatch_API_Workflow.json (webhook mail-dispatch-api) actions save_mail / list_mails / update_mail_status / cancel_mail · ตาราง mail_dispatches
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 const API = `${BASE}/mail-dispatch-api`;
@@ -24,7 +24,6 @@ const ENVELOPES = [
 ];
 const STATUS_STYLE = {
   "รอส่ง": { bg: "#fef3c7", fg: "#92400e" },
-  "ส่งแล้ว": { bg: "#dbeafe", fg: "#1e40af" },
   "จัดส่งสำเร็จ": { bg: "#d1fae5", fg: "#065f46" },
   "ยกเลิก": { bg: "#fee2e2", fg: "#991b1b" },
 };
@@ -271,20 +270,24 @@ export default function MailDispatchPage({ currentUser }) {
     } catch (e) { alert(`❌ ${e.message || e}`); }
     setSaving(false);
   }
-  async function markSent(r) {
-    const m = postMatchOf(r);
-    const trkIn = window.prompt(`เลขพัสดุ / tracking ของ ${r.doc_no} (เว้นว่างได้)`, r.tracking_no || (m && m.tracking_no) || "");
-    if (trkIn === null) return;
-    const res = await postJSON(API, { action: "update_mail_status", id: r.id, status: m ? "จัดส่งสำเร็จ" : "ส่งแล้ว", tracking_no: trkIn.trim(), sent_at: todayIso(),
-      ...(m ? { postage_doc_no: m.doc_no, postage_amount: m.amount, postage_date: m.post_date } : {}), updated_by: currentUser?.name || "" }).catch(() => null);
-    if (res?.doc_no) { setMessage(`✅ ${r.doc_no} → ${res.status}`); load(); } else alert("อัปเดตไม่สำเร็จ");
-  }
-  async function confirmDelivered(r) {
-    const m = postMatchOf(r);
-    if (!m) { alert("ยังไม่พบรายการค่าไปรษณีย์ที่ตรงกันในเงินสดย่อย"); return; }
-    const res = await postJSON(API, { action: "update_mail_status", id: r.id, status: "จัดส่งสำเร็จ", tracking_no: r.tracking_no || m.tracking_no || "", sent_at: r.sent_at || m.post_date, postage_doc_no: m.doc_no, postage_amount: m.amount, postage_date: m.post_date, updated_by: currentUser?.name || "" }).catch(() => null);
-    if (res?.doc_no) { setMessage(`✅ ${r.doc_no} จัดส่งสำเร็จ (ค่าไปรษณีย์ ${m.doc_no} ${Number(m.amount || 0).toLocaleString()} บาท)`); load(); } else alert("อัปเดตไม่สำเร็จ");
-  }
+  // จับคู่กับรายการค่าไปรษณีย์ในเงินสดย่อยอัตโนมัติ (user 2026-09-30: ไม่มีปุ่ม "ส่งแล้ว") — พบคู่แล้วบันทึกสถานะ จัดส่งสำเร็จ + tracking + ค่าส่ง ลง DB
+  useEffect(() => {
+    if (!rows.length || !postItems.length) return;
+    const todo = rows.filter((r) => r.status !== "ยกเลิก" && r.status !== "จัดส่งสำเร็จ" && postMatchOf(r));
+    if (!todo.length) return;
+    let alive = true;
+    (async () => {
+      let n = 0;
+      for (const r of todo) {
+        const m = postMatchOf(r);
+        const res = await postJSON(API, { action: "update_mail_status", id: r.id, status: "จัดส่งสำเร็จ", tracking_no: r.tracking_no || m.tracking_no || "", sent_at: m.post_date, postage_doc_no: m.doc_no, postage_amount: m.amount, postage_date: m.post_date, updated_by: "auto:เงินสดย่อยค่าไปรษณีย์" }).catch(() => null);
+        if (res?.doc_no) n += 1;
+      }
+      if (alive && n) { setMessage(`✅ จับคู่ค่าไปรษณีย์ในเงินสดย่อยอัตโนมัติ ${n} รายการ → จัดส่งสำเร็จ`); load(); }
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [rows, postItems]);
   async function cancel(r) {
     const reason = window.prompt(`ยกเลิก ${r.doc_no}? ระบุเหตุผล`, "");
     if (reason === null) return;
@@ -320,7 +323,7 @@ export default function MailDispatchPage({ currentUser }) {
         <span style={{ fontSize: 12.5, fontWeight: 700, color: "#072d6b" }}>🖨️ พิมพ์ป้ายที่อยู่ลง A4 (ติ๊ก {sel.size})</span>
         <select value={envKey} onChange={(e) => setEnvKey(e.target.value)} style={{ ...inp, width: 260 }}>{ENVELOPES.map((e) => <option key={e.key} value={e.key}>{e.label}</option>)}</select>
         <button disabled={!sel.size} onClick={() => printEnvelope(rows.filter((r) => sel.has(r.id)), envKey)} style={{ ...btn(sel.size ? "#b45309" : "#d1d5db"), cursor: sel.size ? "pointer" : "default" }}>พิมพ์ป้ายที่อยู่</button>
-        <span style={{ fontSize: 11.5, color: "#6b7280" }}>สถานะ "จัดส่งสำเร็จ" ขึ้นอัตโนมัติเมื่อพบรายการค่าไปรษณีย์ในเงินสดย่อยที่ tracking ตรง หรือชื่อผู้รับตรงในช่วง 10 วันหลังวันส่ง</span>
+        <span style={{ fontSize: 11.5, color: "#6b7280" }}>สถานะ "จัดส่งสำเร็จ" บันทึกให้อัตโนมัติเมื่อพบรายการค่าไปรษณีย์ในเงินสดย่อยที่ tracking ตรง หรือชื่อผู้รับตรงในช่วง 10 วันหลังวันส่ง (ไม่ต้องกดอะไร)</span>
       </div>
 
       <div style={{ overflowX: "auto" }}>
@@ -351,8 +354,6 @@ export default function MailDispatchPage({ currentUser }) {
                     <td style={{ whiteSpace: "nowrap" }}>
                       <button onClick={() => printEnvelope(r, r.envelope || envKey)} title="พิมพ์ป้ายที่อยู่ (A4 ตัดแปะซอง)" style={{ ...btn("#072d6b"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>🖨️</button>
                       {!cancelled && <button onClick={() => openEdit(r)} style={{ ...btn("#f59e0b"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>แก้ไข</button>}
-                      {!cancelled && r.status === "รอส่ง" && <button onClick={() => markSent(r)} style={{ ...btn("#2563eb"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>ส่งแล้ว</button>}
-                      {!cancelled && r.status !== "จัดส่งสำเร็จ" && m && <button onClick={() => confirmDelivered(r)} style={{ ...btn("#15803d"), padding: "3px 9px", fontSize: 11, marginRight: 4 }}>ยืนยันสำเร็จ</button>}
                       {!cancelled && (isAdmin || r.status === "รอส่ง") && <button onClick={() => cancel(r)} style={{ ...btn("#ef4444"), padding: "3px 9px", fontSize: 11 }}>ยกเลิก</button>}
                     </td>
                   </tr>
