@@ -6,7 +6,7 @@ import React, { useEffect, useMemo, useState } from "react";
 // props: form, setForm, Field (component), inp (style)
 // ใช้ชุดข้อมูลเดียวกับหน้า LIFF ออกใบเสร็จ (kongvut/thai-province-data)
 // ============================================================================
-const GEO_URL = "https://cdn.jsdelivr.net/gh/kongvut/thai-province-data@master/api/latest/province_with_district_and_sub_district.json";
+const GEO_URL = "/thai-geo.json"; // เก็บข้อมูลจังหวัด/อำเภอ/ตำบลไว้ในแอปเอง (public/thai-geo.json) — เดิมดึงจาก CDN @master แล้วต้นทางเปลี่ยนโครงสร้างชื่อ ทำให้ dropdown ว่าง (2026-10-01)
 
 // cache ระดับโมดูล — โหลดครั้งเดียวต่อ session, แชร์ทุกฟอร์ม
 let GEO_CACHE = null;

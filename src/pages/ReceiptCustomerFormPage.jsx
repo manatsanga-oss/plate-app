@@ -24,7 +24,7 @@ const OA_ADD_FRIEND = {
 const oaInfo = (oa) => (oa === "singchai" ? OA_ADD_FRIEND.singchai : OA_ADD_FRIEND.porpao);
 const LIFF_SDK_URL = "https://static.line-scdn.net/liff/edge/2/sdk.js";
 // ข้อมูลที่อยู่ไทย (จังหวัด/อำเภอ/ตำบล + รหัสไปรษณีย์) — โหลดจาก CDN (gzip)
-const GEO_URL = "https://cdn.jsdelivr.net/gh/kongvut/thai-province-data@master/api/latest/province_with_district_and_sub_district.json";
+const GEO_URL = "/thai-geo.json"; // เก็บข้อมูลจังหวัด/อำเภอ/ตำบลไว้ในแอปเอง (public/thai-geo.json) — เดิมดึงจาก CDN @master แล้วต้นทางเปลี่ยนโครงสร้างชื่อ ทำให้ dropdown ว่าง (2026-10-01)
 // ชื่อผู้ควบคุมข้อมูล (แสดงในข้อความยินยอม PDPA) — แก้ได้ตามจริง
 const COMPANY = "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด";
 
