@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 // ค่านำพา ใช้ accounting-api (จับคู่ moto_sales) · ค่าแนะนำ ใช้ referral-fee-api (จับคู่ expense_documents)
 const ACCOUNTING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const REFERRAL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/referral-fee-api";
+const engKey = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 // config ของแต่ละแท็บ — โครงเดียวกัน (ใบจ่ายเงินสดย่อย ↔ เป้าหมาย) แต่คนละ API/เป้าหมายจับคู่
 //   matchKind 'sale' = จับกับใบขาย moto_sales · 'doc' = จับกับเอกสารค่าใช้จ่าย expense_documents
@@ -489,6 +490,8 @@ function ReferralDocTab({ currentUser }) {
   const [candLoading, setCandLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [affFilter, setAffFilter] = useState("");
+  const [brandFilter, setBrandFilter] = useState(""); // กรองยี่ห้อ (user 2026-10-01) — ยี่ห้อหาจากเลขเครื่องในหมายเหตุ
+  const [engineBrand, setEngineBrand] = useState({}); // เลขเครื่อง (ตัดขีด/ช่องว่าง) → ยี่ห้อ จากใบขาย NEW
 
   // ช่วงค้นหา = วันจ่าย ถึง +3 วันหลัง (ไม่ดูยอด/ชื่อ — ดูแค่ประเภทค่าแนะนำเดียวกัน)
   function searchRange(dateStr) {
@@ -528,7 +531,16 @@ function ReferralDocTab({ currentUser }) {
   async function fetchData() {
     setLoading(true); setMessage("");
     try {
-      const data = await postAPI(REFERRAL_API, { action: "list_referral_fees", date_from: dateFrom, date_to: dateTo });
+      // ใบขาย NEW ย้อนหลัง 120 วันก่อนช่วงที่เลือก → แมปเลขเครื่อง → ยี่ห้อ (ค่าแนะนำจ่ายหลังขาย)
+      const back = new Date(dateFrom); back.setDate(back.getDate() - 120);
+      const backISO = `${back.getFullYear()}-${String(back.getMonth() + 1).padStart(2, "0")}-${String(back.getDate()).padStart(2, "0")}`;
+      const [data, sales] = await Promise.all([
+        postAPI(REFERRAL_API, { action: "list_referral_fees", date_from: dateFrom, date_to: dateTo }),
+        postAPI(RETAIL_API, { action: "list_retail_sales", date_from: backISO, date_to: dateTo, limit: 5000 }).catch(() => []),
+      ]);
+      const m = {};
+      for (const x of (Array.isArray(sales) ? sales : [])) { const k = engKey(x && x.engine_no); if (k && x.brand) m[k] = String(x.brand).toUpperCase(); }
+      setEngineBrand(m);
       setRows(Array.isArray(data) ? data.filter(r => r && r.id) : []);
     } catch { setRows([]); setMessage("❌ โหลดไม่สำเร็จ"); }
     setLoading(false);
@@ -537,9 +549,20 @@ function ReferralDocTab({ currentUser }) {
 
   // ตัวเลือกสังกัดจากข้อมูลที่โหลดมา (ปกติ = ป.เปา / สิงห์ชัย)
   const affOptions = [...new Set(rows.map(r => r.affiliation).filter(Boolean))].sort();
-  const shownRows = affFilter ? rows.filter(r => (r.affiliation || "") === affFilter) : rows;
+  // ยี่ห้อของรายการ: 1) เลขเครื่องในหมายเหตุตรงกับใบขาย NEW 2) ไม่พบ → เดาจากรูปแบบเลขเครื่อง (HONDA = อักษร 2 + เลข 2 + E เช่น KF50E/JK04E, นอกนั้น YAMAHA)
+  const brandOf = (r) => {
+    const mt = String(r.note || "").toUpperCase().match(/([A-Z0-9]{3,6})\s*-\s*([0-9]{5,8})/);
+    if (!mt) return "";
+    const hit = engineBrand[mt[1] + mt[2]];
+    if (hit) return hit;
+    return /^[A-Z]{2}[0-9]{2}E$/.test(mt[1]) ? "HONDA" : "YAMAHA";
+  };
+  const brandOptions = [...new Set(rows.map(brandOf).filter(Boolean))].sort();
+  const shownRows = rows.filter(r => (!affFilter || (r.affiliation || "") === affFilter) && (!brandFilter || (brandFilter === "-" ? !brandOf(r) : brandOf(r) === brandFilter)));
 
   const total = shownRows.reduce((s, r) => s + Number(r.total_amount || 0), 0);
+  const totalCash = shownRows.reduce((s, r) => s + Number(r.cash_amount || 0), 0);
+  const totalWht = shownRows.reduce((s, r) => s + Number(r.withholding_tax || 0), 0);
   const matched = shownRows.filter(r => r.matched_doc_no).length;
   const unmatched = shownRows.length - matched;
 
@@ -555,6 +578,12 @@ function ReferralDocTab({ currentUser }) {
           <option value="">ทั้งหมด</option>
           {affOptions.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
+        <span>ยี่ห้อ:</span>
+        <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={inp}>
+          <option value="">ทั้งหมด</option>
+          {brandOptions.map(a => <option key={a} value={a}>{a}</option>)}
+          <option value="-">ไม่ระบุ (ไม่มีเลขเครื่อง)</option>
+        </select>
         <button onClick={fetchData} disabled={loading} style={btnBlue}>{loading ? "..." : "🔄 รีเฟรช"}</button>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#6b7280" }}>📄 daily_expenses → จับคู่ expense_documents (วันที่+ผู้รับ+จำนวนเงิน)</span>
       </div>
@@ -562,7 +591,7 @@ function ReferralDocTab({ currentUser }) {
       {message && <div style={{ padding: 10, marginBottom: 10, color: message.startsWith("✅") ? "#15803d" : "#b91c1c", background: message.startsWith("✅") ? "#dcfce7" : "#fef2f2", borderRadius: 6 }}>{message}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px,1fr))", gap: 10, marginBottom: 12 }}>
-        <Card label="📋 รายการค่านำพา" value={shownRows.length} color="#1e40af" />
+        <Card label="📋 รายการค่าแนะนำ" value={shownRows.length} color="#1e40af" />
         <Card label="✅ จับคู่ได้" value={`${matched}/${shownRows.length}`} color="#059669" />
         <Card label="⚠️ ยังไม่จับคู่" value={unmatched} color="#b91c1c" />
         <Card label="💰 ยอดรวม" value={fmt(total)} color="#059669" highlight />
@@ -577,6 +606,7 @@ function ReferralDocTab({ currentUser }) {
               <th style={th}>วันที่จ่าย</th>
               <th style={th}>ผู้รับ</th>
               <th style={th}>สังกัด</th>
+              <th style={th}>ยี่ห้อ / หมายเหตุ</th>
               <th style={{ ...th, textAlign: "right" }}>ยอดเงิน</th>
               <th style={{ ...th, textAlign: "right" }}>ยอดจ่ายจริง</th>
               <th style={{ ...th, textAlign: "right" }}>หัก ณ ที่จ่าย</th>
@@ -585,10 +615,11 @@ function ReferralDocTab({ currentUser }) {
             </tr>
           </thead>
           <tbody>
-            {loading && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-            {!loading && shownRows.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+            {loading && <tr><td colSpan={11} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+            {!loading && shownRows.length === 0 && <tr><td colSpan={11} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
             {shownRows.map((r, i) => {
               const isMatched = !!r.matched_doc_no;
+              const br = brandOf(r);
               return (
               <tr key={r.id} style={{ borderTop: "1px solid #e5e7eb", background: isMatched ? "#ecfdf5" : "#fef2f2" }}>
                 <td style={td}>{i + 1}</td>
@@ -596,6 +627,7 @@ function ReferralDocTab({ currentUser }) {
                 <td style={td}>{fmtDate(r.payment_date)}</td>
                 <td style={td}>{r.pay_to || "-"}</td>
                 <td style={{ ...td, fontSize: 11 }}>{r.affiliation ? <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: r.affiliation === "ป.เปา" ? "#fee2e2" : "#dbeafe", color: r.affiliation === "ป.เปา" ? "#991b1b" : "#1e40af" }}>{r.affiliation}</span> : "-"}</td>
+                <td style={{ ...td, fontSize: 11 }}>{br ? <span style={{ padding: "2px 8px", borderRadius: 4, fontWeight: 700, background: br === "HONDA" ? "#fee2e2" : "#dbeafe", color: br === "HONDA" ? "#b91c1c" : "#1d4ed8" }}>{br}</span> : "-"}{r.note ? <div style={{ color: "#6b7280", marginTop: 2 }}>{r.note}</div> : null}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontWeight: 700 }}>{fmt(r.total_amount)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0f766e", fontWeight: 600 }}>{fmt(r.cash_amount)}</td>
                 <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#7c3aed" }}>{fmt(r.withholding_tax)}</td>
@@ -613,6 +645,17 @@ function ReferralDocTab({ currentUser }) {
               );
             })}
           </tbody>
+          {!loading && shownRows.length > 0 && (
+            <tfoot>
+              <tr style={{ background: "#f1f5f9", borderTop: "2px solid #072d6b", fontWeight: 700 }}>
+                <td style={td} colSpan={6}>รวม {shownRows.length} รายการ{brandFilter && brandFilter !== "-" ? ` · ${brandFilter}` : ""}{affFilter ? ` · ${affFilter}` : ""}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626" }}>{fmt(total)}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0f766e" }}>{fmt(totalCash)}</td>
+                <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#7c3aed" }}>{fmt(totalWht)}</td>
+                <td style={td} colSpan={2}></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
