@@ -88,6 +88,8 @@ function SystemDeliveryReportTab({ currentUser }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [affFilter, setAffFilter] = useState("");
+  const [brandFilter, setBrandFilter] = useState("");
 
   async function fetchData() {
     setLoading(true); setMessage("");
@@ -105,8 +107,14 @@ function SystemDeliveryReportTab({ currentUser }) {
 
   // ค่านำพามีหัก ณ ที่จ่าย 3% — จ่ายจริง = ค่านำพา − ภาษีหัก (user 2026-08-29)
   const whtOf = (v) => Math.round(Number(v || 0) * 3) / 100;
-  const total = rows.reduce((s2, r) => s2 + Number(r.delivery_fee_amount || 0), 0);
-  const totalWht = rows.reduce((s2, r) => s2 + whtOf(r.delivery_fee_amount), 0);
+  // ตัวกรอง สังกัด (จากสาขา: SCY05/06 = ป.เปา, นอกนั้น = สิงห์ชัย) + ยี่ห้อ — user 2026-10-01
+  const affOf = (r) => { const b5 = String(r.branch_code || "").substring(0, 5).toUpperCase(); return b5 === "SCY05" || b5 === "SCY06" ? "ป.เปา" : b5 ? "สิงห์ชัย" : ""; };
+  const brandOfRow = (r) => String(r.brand || "").toUpperCase();
+  const affOptions = [...new Set(rows.map(affOf).filter(Boolean))].sort();
+  const brandOptions = [...new Set(rows.map(brandOfRow).filter(Boolean))].sort();
+  const shown = rows.filter(r => (!affFilter || affOf(r) === affFilter) && (!brandFilter || brandOfRow(r) === brandFilter));
+  const total = shown.reduce((s2, r) => s2 + Number(r.delivery_fee_amount || 0), 0);
+  const totalWht = shown.reduce((s2, r) => s2 + whtOf(r.delivery_fee_amount), 0);
   const totalNet = total - totalWht;
   const th2 = { padding: "9px 8px", fontSize: 12.5, textAlign: "left", whiteSpace: "nowrap", background: "#072d6b", color: "#fff" };
   const td2 = { padding: "8px", fontSize: 13, borderBottom: "1px solid #e5e7eb" };
@@ -119,11 +127,21 @@ function SystemDeliveryReportTab({ currentUser }) {
         <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8 }} />
         <span style={{ fontSize: 13, fontWeight: 600 }}>ถึง:</span>
         <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8 }} />
+        <span style={{ fontSize: 13, fontWeight: 600 }}>สังกัด:</span>
+        <select value={affFilter} onChange={e => setAffFilter(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8 }}>
+          <option value="">ทั้งหมด</option>
+          {affOptions.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>ยี่ห้อ:</span>
+        <select value={brandFilter} onChange={e => setBrandFilter(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #cbd5e1", borderRadius: 8 }}>
+          <option value="">ทั้งหมด</option>
+          {brandOptions.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
         <button onClick={fetchData} disabled={loading} className="btn-primary" style={{ padding: "8px 18px" }}>{loading ? "..." : "🔄 รีเฟรช"}</button>
         <span style={{ marginLeft: "auto", fontSize: 12, color: "#6b7280" }}>ที่มา: ใบขาย NEW (ช่องค่านำพาในการ์ดราคาขายบวกเพิ่ม)</span>
       </div>
       <div style={{ display: "flex", gap: 12, marginBottom: 14, flexWrap: "wrap" }}>
-        <div style={card}><div style={{ fontSize: 12.5, color: "#6b7280" }}>📋 จำนวนคันที่มีค่านำพา</div><div style={{ fontSize: 22, fontWeight: 800, color: "#072d6b" }}>{rows.length}</div></div>
+        <div style={card}><div style={{ fontSize: 12.5, color: "#6b7280" }}>📋 จำนวนคันที่มีค่านำพา</div><div style={{ fontSize: 22, fontWeight: 800, color: "#072d6b" }}>{shown.length}</div></div>
         <div style={card}><div style={{ fontSize: 12.5, color: "#6b7280" }}>💰 ยอดค่านำพารวม</div><div style={{ fontSize: 22, fontWeight: 800, color: "#072d6b" }}>{fmt(total)}</div></div>
         <div style={card}><div style={{ fontSize: 12.5, color: "#6b7280" }}>🧾 หัก ณ ที่จ่าย 3%</div><div style={{ fontSize: 22, fontWeight: 800, color: "#b91c1c" }}>{fmt(totalWht)}</div></div>
         <div style={{ ...card, border: "2px solid #16a34a" }}><div style={{ fontSize: 12.5, color: "#6b7280" }}>💵 จ่ายจริงรวม</div><div style={{ fontSize: 22, fontWeight: 800, color: "#166534" }}>{fmt(totalNet)}</div></div>
@@ -140,7 +158,7 @@ function SystemDeliveryReportTab({ currentUser }) {
             <th style={th2}>การขาย</th><th style={th2}>ผู้ขาย</th>
           </tr></thead>
           <tbody>
-            {rows.map((r, i) => (
+            {shown.map((r, i) => (
               <tr key={r.invoice_no}>
                 <td style={td2}>{i + 1}</td>
                 <td style={{ ...td2, fontFamily: "monospace", fontWeight: 700, color: "#072d6b" }}>{r.invoice_no}</td>
@@ -156,10 +174,21 @@ function SystemDeliveryReportTab({ currentUser }) {
                 <td style={td2}>{r.seller || "-"}</td>
               </tr>
             ))}
-            {!rows.length && !loading && (
+            {!shown.length && !loading && (
               <tr><td colSpan={12} style={{ ...td2, textAlign: "center", color: "#9ca3af", padding: 24 }}>ไม่มีรายการ</td></tr>
             )}
           </tbody>
+          {shown.length > 0 && (
+            <tfoot>
+              <tr style={{ background: "#f1f5f9", fontWeight: 800 }}>
+                <td style={{ ...td2, borderTop: "2px solid #072d6b" }} colSpan={7}>รวม {shown.length} คัน{affFilter ? ` · ${affFilter}` : ""}{brandFilter ? ` · ${brandFilter}` : ""}</td>
+                <td style={{ ...td2, borderTop: "2px solid #072d6b", textAlign: "right", color: "#b45309" }}>{fmt(total)}</td>
+                <td style={{ ...td2, borderTop: "2px solid #072d6b", textAlign: "right", color: "#b91c1c" }}>{fmt(totalWht)}</td>
+                <td style={{ ...td2, borderTop: "2px solid #072d6b", textAlign: "right", color: "#166534" }}>{fmt(totalNet)}</td>
+                <td style={{ ...td2, borderTop: "2px solid #072d6b" }} colSpan={2}></td>
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
