@@ -36,7 +36,7 @@ function visemeOf(ch) {
 function Face({ mouth, blink, mood }) {
   const d = MOUTHS[mouth];
   return (
-    <svg viewBox="0 0 860 940" style={{ width: "min(52vh, 84vw)", height: "auto", filter: "drop-shadow(0 14px 26px rgba(0,0,0,.35))", animation: mood === "speaking" ? "mascotTalk 1.6s ease-in-out infinite" : "mascotIdle 4s ease-in-out infinite" }}>
+    <svg viewBox="0 0 860 940" className="air-face" style={{ height: "auto", filter: "drop-shadow(0 14px 26px rgba(0,0,0,.35))", animation: mood === "speaking" ? "mascotTalk 1.6s ease-in-out infinite" : "mascotIdle 4s ease-in-out infinite" }}>
       <defs>
         <clipPath id="mouthClip">{d && <path d={d} />}</clipPath>
         <radialGradient id="lid" cx="50%" cy="35%" r="70%"><stop offset="0" stopColor="#f0b98c" /><stop offset="1" stopColor="#dc9c6c" /></radialGradient>
@@ -67,8 +67,11 @@ function Face({ mouth, blink, mood }) {
 
 export default function AiReceptionPage() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
-  const branch = (params.get("branch") || "SCY06").toUpperCase();
-  const info = BRANCH_INFO[branch] || { shop: "ร้านของเรา", name: "น้องใจดี" };
+  // branch อาจมาเป็นรหัส (SCY06) หรือชื่อสาขา/ค่าที่ไม่รู้จัก → จัดเข้าร้านให้ถูก (ไม่รู้จัก = ป.เปา)
+  const rawBranch = (params.get("branch") || "").trim().toUpperCase();
+  const isCode = /^SCY\d+$/.test(rawBranch);
+  const branch = isCode ? rawBranch : (/สิงห์|SING/.test(rawBranch) ? "SCY01" : "SCY06");
+  const info = BRANCH_INFO[branch] || (/^SCY0[56]$/.test(branch) || !isCode ? BRANCH_INFO.SCY06 : BRANCH_INFO.SCY01);
   const aiName = params.get("name") || info.name;
 
   const [started, setStarted] = useState(false);
@@ -177,38 +180,40 @@ export default function AiReceptionPage() {
 
   return (
     <div style={{ height: "100dvh", background: "radial-gradient(circle at 50% 30%, #1e4d8f 0%, #0b2447 60%, #061528 100%)", color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", overflow: "hidden", fontFamily: "'Sarabun','Leelawadee UI',sans-serif", userSelect: "none" }}>
-      <style>{"@keyframes mascotIdle{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}@keyframes mascotTalk{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-4px) rotate(-1deg)}75%{transform:translateY(-2px) rotate(1deg)}}"}</style>
-      <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px 22px", boxSizing: "border-box" }}>
-        <div style={{ fontSize: 22, fontWeight: 700 }}>{info.shop}</div>
-        <div style={{ fontSize: 16, opacity: .8 }}>{aiName} · ผู้ช่วยต้อนรับ{demo ? " (โหมดสาธิต)" : ""}</div>
+      <style>{".air-face{width:min(52vh,84vw)}.air-shop{font-size:22px}.air-sub{font-size:16px}.air-heard,.air-status{font-size:20px}.air-answer{font-size:26px}.air-chips{flex-wrap:wrap;justify-content:center}.air-chip{font-size:18px;padding:10px 18px}.air-mic{width:92px;height:92px;font-size:40px}.air-start{font-size:30px;padding:16px 36px}"
+        + "@media (max-width:640px),(max-height:560px){.air-face{width:min(42dvh,76vw)}.air-shop{font-size:17px}.air-sub{font-size:12px}.air-heard,.air-status{font-size:15px}.air-answer{font-size:17px}.air-chips{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;width:100%;scrollbar-width:none}.air-chips::-webkit-scrollbar{display:none}.air-chip{font-size:15px;padding:8px 14px}.air-mic{width:68px;height:68px;font-size:30px}.air-start{font-size:20px;padding:14px 24px}}"
+        + "@keyframes mascotIdle{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}@keyframes mascotTalk{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-4px) rotate(-1deg)}75%{transform:translateY(-2px) rotate(1deg)}}"}</style>
+      <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", gap: 10, boxSizing: "border-box", flexShrink: 0 }}>
+        <div className="air-shop" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{info.shop}</div>
+        <div className="air-sub" style={{ opacity: .8, textAlign: "right" }}>{aiName} · ผู้ช่วยต้อนรับ{demo ? " (โหมดสาธิต)" : ""}</div>
       </div>
 
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", position: "relative" }}>
-        <div style={{ transform: mood === "listening" ? "scale(1.03)" : "scale(1)", transition: "transform .3s" }}>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", position: "relative" }}>
+        <div style={{ flexShrink: 0, transform: mood === "listening" ? "scale(1.03)" : "scale(1)", transition: "transform .3s" }}>
           <Face mouth={mouth} blink={blink} mood={mood} />
         </div>
         {/* กล่องข้อความ: สิ่งที่ได้ยิน + คำตอบ */}
-        <div style={{ width: "min(900px, 92vw)", minHeight: 84, marginTop: 6, textAlign: "center" }}>
-          {heard && <div style={{ fontSize: 20, opacity: .75, marginBottom: 6 }}>“{heard}”</div>}
-          {answer && <div style={{ fontSize: 26, lineHeight: 1.45, background: "rgba(255,255,255,.1)", borderRadius: 18, padding: "12px 20px", display: "inline-block" }}>{answer}</div>}
-          {!answer && statusText && <div style={{ fontSize: 20, opacity: .7 }}>{statusText}</div>}
+        <div style={{ width: "min(900px, 92vw)", minHeight: 48, flex: "0 1 auto", overflowY: "auto", marginTop: 6, textAlign: "center" }}>
+          {heard && <div className="air-heard" style={{ opacity: .75, marginBottom: 6 }}>“{heard}”</div>}
+          {answer && <div className="air-answer" style={{ lineHeight: 1.45, background: "rgba(255,255,255,.1)", borderRadius: 18, padding: "12px 20px", display: "inline-block" }}>{answer}</div>}
+          {!answer && statusText && <div className="air-status" style={{ opacity: .7 }}>{statusText}</div>}
         </div>
       </div>
 
-      <div style={{ width: "100%", padding: "8px 18px 22px", boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 10, justifyContent: "center" }}>
+      <div style={{ width: "100%", padding: "8px 14px calc(14px + env(safe-area-inset-bottom))", boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        <div className="air-chips" style={{ display: "flex", gap: 10 }}>
           {QUICK.map(q => (
-            <button key={q} onClick={() => ask(q)} disabled={mood === "thinking"} style={{ ...btn, padding: "10px 18px", fontSize: 18, background: "rgba(255,255,255,.14)", color: "#fff" }}>{q}</button>
+            <button key={q} onClick={() => ask(q)} disabled={mood === "thinking"} className="air-chip" style={{ ...btn, whiteSpace: "nowrap", flexShrink: 0, background: "rgba(255,255,255,.14)", color: "#fff" }}>{q}</button>
           ))}
         </div>
-        <button onClick={listen} disabled={mood === "thinking"} style={{ ...btn, width: 92, height: 92, fontSize: 40, color: "#fff", background: mood === "listening" ? "#e53935" : "#2e7d32", boxShadow: mood === "listening" ? "0 0 0 12px rgba(229,57,53,.25)" : "0 6px 18px rgba(0,0,0,.4)", transition: "all .2s" }} title="กดแล้วพูด">
+        <button onClick={listen} disabled={mood === "thinking"} className="air-mic" style={{ ...btn, flexShrink: 0, color: "#fff", background: mood === "listening" ? "#e53935" : "#2e7d32", boxShadow: mood === "listening" ? "0 0 0 12px rgba(229,57,53,.25)" : "0 6px 18px rgba(0,0,0,.4)", transition: "all .2s" }} title="กดแล้วพูด">
           {mood === "listening" ? "■" : "🎤"}
         </button>
       </div>
 
       {!started && (
         <div onClick={start} style={{ position: "fixed", inset: 0, background: "rgba(6,21,40,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: "12vh", cursor: "pointer" }}>
-          <div style={{ fontSize: 30, fontWeight: 700, background: "#2e7d32", padding: "16px 36px", borderRadius: 999, boxShadow: "0 8px 24px rgba(0,0,0,.45)" }}>แตะหน้าจอเพื่อเริ่มคุยกับ{aiName}</div>
+          <div className="air-start" style={{ fontWeight: 700, background: "#2e7d32", borderRadius: 999, textAlign: "center", margin: "0 16px", boxShadow: "0 8px 24px rgba(0,0,0,.45)" }}>แตะหน้าจอเพื่อเริ่มคุยกับ{aiName}</div>
         </div>
       )}
     </div>
