@@ -270,11 +270,31 @@ export default function FastMovingPage() {
     });
   }
 
+  // รูปย่อ JPEG กว้าง/สูงไม่เกิน 360px สำหรับจอคีออสเบิกอะไหล่ (ESP32 ถอดรหัสรูปใหญ่ไม่ไหว)
+  function makeThumb(dataUrl) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onerror = () => resolve(null);
+      img.onload = () => {
+        const scale = Math.min(1, 360 / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(img.width * scale));
+        canvas.height = Math.max(1, Math.round(img.height * scale));
+        const ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height); // PNG โปร่งใส → พื้นขาว
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.8));
+      };
+      img.src = dataUrl;
+    });
+  }
+
   async function savePartImageData(dataUrl, mime) {
     if (!dataUrl || !imgPopup) return;
     setImgPopup(m => ({ ...m, saving: true, msg: "" }));
     try {
-      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save_part_image", id: imgPopup.id, image_data: dataUrl, mime_type: mime }) });
+      const thumb = await makeThumb(dataUrl);
+      const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "save_part_image", id: imgPopup.id, image_data: dataUrl, mime_type: mime, thumb_data: thumb }) });
       const data = await res.json().catch(() => null);
       if (!data || (Array.isArray(data) && data.length === 0)) throw new Error("no response");
       setImgPopup(m => m ? { ...m, saving: false, has_image: true, image_data: dataUrl } : m);
