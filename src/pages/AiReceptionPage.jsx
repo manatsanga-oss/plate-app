@@ -81,6 +81,8 @@ export default function AiReceptionPage() {
   const [heard, setHeard] = useState("");
   const [answer, setAnswer] = useState("");
   const [demo, setDemo] = useState(false);
+  const [showType, setShowType] = useState(false);   // ช่องพิมพ์คำถาม (เมื่อไมค์ใช้ไม่ได้)
+  const [typed, setTyped] = useState("");
   const recRef = useRef(null);
   const lipTimer = useRef(null);
   const historyRef = useRef([]);
@@ -156,17 +158,27 @@ export default function AiReceptionPage() {
 
   function listen() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setAnswer("เบราว์เซอร์นี้ไม่รองรับการฟังเสียง กรุณาใช้ Chrome หรือแตะคำถามด้านล่างครับ"); return; }
+    if (!SR) { setShowType(true); setAnswer("เบราว์เซอร์นี้ไม่รองรับการฟังเสียง (เช่น เปิดจากในแอป LINE) กรุณาเปิดลิงก์ด้วย Chrome หรือพิมพ์คำถามด้านล่างครับ"); return; }
     if (mood === "listening") { try { recRef.current?.stop(); } catch { /* ignore */ } return; }
     window.speechSynthesis?.cancel(); stopLip();
     const rec = new SR(); recRef.current = rec;
     rec.lang = "th-TH"; rec.interimResults = true; rec.maxAlternatives = 1;
-    let finalText = "";
+    let finalText = ""; let lastText = ""; let failed = false;
     rec.onstart = () => { setMood("listening"); setHeard(""); setAnswer(""); };
-    rec.onresult = (e) => { let s = ""; for (const r of e.results) s += r[0].transcript; setHeard(s); if (e.results[e.results.length - 1].isFinal) finalText = s; };
-    rec.onerror = () => { setMood("idle"); };
-    rec.onend = () => { if (finalText.trim()) ask(finalText); else setMood("idle"); };
-    rec.start();
+    rec.onresult = (e) => { let s = ""; for (const r of e.results) s += r[0].transcript; lastText = s; setHeard(s); if (e.results[e.results.length - 1].isFinal) finalText = s; };
+    rec.onerror = (e) => {
+      const code = e?.error || "";
+      if (code === "aborted") return;
+      failed = true; setMood("idle");
+      if (code === "no-speech") { setAnswer("ไม่ได้ยินเสียงครับ กดไมค์แล้วพูดอีกครั้งนะครับ"); return; }
+      setShowType(true);
+      if (code === "not-allowed" || code === "service-not-allowed") setAnswer("ยังไม่ได้อนุญาตให้ใช้ไมโครโฟน กรุณากดอนุญาตไมค์ของเว็บนี้ในเบราว์เซอร์ หรือพิมพ์คำถามด้านล่างครับ");
+      else if (code === "audio-capture") setAnswer("ไม่พบไมโครโฟนในเครื่องนี้ พิมพ์คำถามด้านล่างได้เลยครับ");
+      else if (code === "network") setAnswer("ระบบฟังเสียงเชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง หรือพิมพ์คำถามด้านล่างครับ");
+      else setAnswer(`ใช้ไมค์ไม่ได้ (${code || "ไม่ทราบสาเหตุ"}) พิมพ์คำถามด้านล่างได้เลยครับ`);
+    };
+    rec.onend = () => { const t = (finalText || lastText).trim(); if (failed) return; if (t) ask(t); else setMood("idle"); };
+    try { rec.start(); } catch (err) { setMood("idle"); setShowType(true); setAnswer(`เปิดไมค์ไม่ได้ (${err?.name || "error"}) พิมพ์คำถามด้านล่างได้เลยครับ`); }
   }
 
   async function start() {
@@ -206,6 +218,12 @@ export default function AiReceptionPage() {
             <button key={q} onClick={() => ask(q)} disabled={mood === "thinking"} className="air-chip" style={{ ...btn, whiteSpace: "nowrap", flexShrink: 0, background: "rgba(255,255,255,.14)", color: "#fff" }}>{q}</button>
           ))}
         </div>
+        {showType && (
+          <form onSubmit={(e) => { e.preventDefault(); const t = typed; setTyped(""); ask(t); }} style={{ display: "flex", gap: 8, width: "min(560px, 100%)" }}>
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="พิมพ์คำถามที่นี่..." style={{ flex: 1, minWidth: 0, fontSize: 16, padding: "10px 14px", borderRadius: 999, border: "none", fontFamily: "inherit", userSelect: "text" }} />
+            <button type="submit" disabled={mood === "thinking" || !typed.trim()} style={{ ...btn, padding: "10px 18px", fontSize: 16, background: "#2e7d32", color: "#fff" }}>ถาม</button>
+          </form>
+        )}
         <button onClick={listen} disabled={mood === "thinking"} className="air-mic" style={{ ...btn, flexShrink: 0, color: "#fff", background: mood === "listening" ? "#e53935" : "#2e7d32", boxShadow: mood === "listening" ? "0 0 0 12px rgba(229,57,53,.25)" : "0 6px 18px rgba(0,0,0,.4)", transition: "all .2s" }} title="กดแล้วพูด">
           {mood === "listening" ? "■" : "🎤"}
         </button>
