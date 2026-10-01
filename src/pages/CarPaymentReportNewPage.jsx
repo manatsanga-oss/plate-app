@@ -6,6 +6,7 @@ import React, { useEffect, useMemo, useState } from "react";
 // ไม่เกี่ยวกับข้อมูล upload DMS (รายงานรายคันตัวเดิมดูฝั่ง upload)
 // ============================================================================
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+const CUST_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/customer-refund-api";
 
 const START_DEFAULT = "2026-08-01"; // เริ่มใช้รายงาน = ขายตั้งแต่เดือน 8 ปี 69
 
@@ -38,7 +39,14 @@ export default function CarPaymentReportNewPage() {
         body: JSON.stringify({ action: "list_retail_sales", date_from: dateFrom, date_to: dateTo, limit: 2000 }),
       });
       const data = await r.json();
-      setRows(Array.isArray(data) ? data : []);
+      // คืนเงินลูกค้า (เมนูบันทึกคืนเงินลูกค้า ลดหนี้/รับชำระผิด/คืนส่วนต่างรถเทิร์น) ที่คืนแล้ว → หักจากยอดรับหน้าร้าน กันขึ้น "ชำระเกิน" (user 2026-10-01)
+      const rfMap = new Map();
+      try {
+        const rr = await fetch(CUST_REFUND_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_refunds", source_type: "vehicle", status: "คืนเงินแล้ว", limit: 5000 }) });
+        const rd = await rr.json(); const arr = typeof rd?.listjson === "string" ? JSON.parse(rd.listjson) : [];
+        for (const x of arr) rfMap.set(String(x.ref_doc_no), (rfMap.get(String(x.ref_doc_no)) || 0) + Number(x.refund_amount || 0));
+      } catch { /* ไม่มี workflow ก็ข้าม */ }
+      setRows(Array.isArray(data) ? data.map((x) => ({ ...x, cust_refund_amount: rfMap.get(String(x.invoice_no)) || 0 })) : []);
       if (!Array.isArray(data) || !data.length) setMessage("ไม่พบใบขายในช่วงวันที่ที่เลือก");
     } catch (e) {
       setRows([]); setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e.message || e).slice(0, 100));
@@ -55,7 +63,7 @@ export default function CarPaymentReportNewPage() {
   //   3) เงินดาวน์/ค่างวดออกแทน (ของแถมร้านออกให้ = ถือว่าเคลียร์ยอดส่วนนั้นแล้ว)
   const saleTotal = (r) => num(r.net_car_price || r.car_price);
   // มัดจำป้ายแดง (red_plate_deposit) รวมอยู่ใน paid_amount แต่ไม่ใช่ค่ารถ (คืนลูกค้าภายหลัง) → หักออกก่อนเทียบยอดขาย
-  const storePaid = (r) => (r.payment_status === "paid" ? Math.max(num(r.paid_amount) - num(r.red_plate_deposit), 0) : 0);
+  const storePaid = (r) => (r.payment_status === "paid" ? Math.max(num(r.paid_amount) - num(r.red_plate_deposit) - num(r.cust_refund_amount), 0) : 0);
   const depositOf = (r) => num(r.booking_deposit);          // เงินมัดจำจอง — ลูกค้าจ่ายไว้ตอนจอง หักจากยอดเก็บหน้าร้านแล้ว
   const ftPaid = (r) => num(r.ft_vehicle_paid);
   // รับผ่านระบบเก่า (DMS): ใบเสร็จขาย/เงินดาวน์ของรถคันเดียวกัน — นับเฉพาะเมื่อใบขายระบบใหม่ยังไม่ได้บันทึกรับชำระ (กันนับซ้ำ) (user 2026-09-09)

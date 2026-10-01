@@ -105,11 +105,16 @@ export default function CustomerRefundPage({ currentUser }) {
     try {
       let rows = [];
       if (sourceType === "vehicle") {
-        const d = await post(RETAIL_API, { action: "list_sale_payments", date_from: rcFrom, date_to: rcTo });
+        const [d, sl] = await Promise.all([
+          post(RETAIL_API, { action: "list_sale_payments", date_from: rcFrom, date_to: rcTo }),
+          post(RETAIL_API, { action: "list_retail_sales", date_from: shiftDate(rcFrom, -120), limit: 5000 }).catch(() => []),
+        ]);
+        // ยอดที่ลูกค้าต้องชำระจริง = total_payment − เงินดาวน์/ค่างวดออกแทน (สูตรเดียวกับหน้ารับชำระใบขาย)
+        const payoutMap = new Map((Array.isArray(sl) ? sl : []).filter((x) => x && x.invoice_no).map((x) => [String(x.invoice_no), num(x.down_payout_amount)]));
         rows = (Array.isArray(d) ? d : []).filter((r) => r && r.receipt_no).map((r) => ({
           source_type: "vehicle", receipt_no: r.receipt_no, ref_doc_no: r.sale_no, receipt_date: String(r.receipt_date || r.sale_date || "").slice(0, 10),
           branch_code: r.branch_code, customer_name: r.customer_name, customer_phone: "", paid_amount: num(r.paid_amount),
-          bill_amount: num(r.total_payment), methods: methodsText(r), extra: [r.finance_type, r.finance_company_name].filter(Boolean).join(" "),
+          bill_amount: Math.max(0, num(r.total_payment) - (payoutMap.get(String(r.sale_no)) || 0)), methods: methodsText(r), extra: [r.finance_type, r.finance_company_name].filter(Boolean).join(" "),
         }));
       } else {
         const d = await post(PART_SVC_PAY_API, { action: "list_payments", date_from: rcFrom, date_to: rcTo });
@@ -136,12 +141,20 @@ export default function CustomerRefundPage({ currentUser }) {
   }, [receipts, rcKeyword, isAdmin, myBranch]);
 
   const refundAmount = picked ? Math.round((num(picked.paid_amount) - num(correctAmount)) * 100) / 100 : 0;
+  // ยอดที่ต้องชำระตามใบขาย/บิล (0 = ไม่ทราบ) — ยอดที่ถูกต้องต่ำกว่านี้ = คืนเงินเกินกว่าที่ควร → เตือน + ยืนยันอีกชั้น (user 2026-10-01)
+  const dueAmount = picked ? num(picked.bill_amount) : 0;
+  const belowDue = picked && correctAmount !== "" && dueAmount > 0 && num(correctAmount) < dueAmount - 0.009;
+  const aboveDue = picked && correctAmount !== "" && dueAmount > 0 && num(correctAmount) > dueAmount + 0.009;
   const correctValid = picked && correctAmount !== "" && num(correctAmount) >= 0 && refundAmount > 0;
 
   async function saveRefund() {
     if (!picked) { setMessage("❌ เลือกเลขที่ใบเสร็จรับชำระก่อน"); return; }
     if (!correctValid) { setMessage("❌ ยอดที่ถูกต้องต้องไม่ติดลบ และน้อยกว่ายอดที่รับไว้ (ยอดคืนต้องมากกว่า 0)"); return; }
     if (refundedReceiptSet.has(`${picked.source_type}|${picked.receipt_no}`)) { setMessage(`❌ ใบเสร็จ ${picked.receipt_no} มีรายการคืนเงินอยู่แล้ว (ดูในตารางด้านล่าง)`); return; }
+    if (belowDue && !window.confirm(`⚠️ ยอดที่ถูกต้อง ${baht(correctAmount)} ต่ำกว่ายอดที่ต้องชำระตามเอกสาร ${baht(dueAmount)} บาท
+จะคืนเงินเกินกว่าที่ควร ${baht(dueAmount - num(correctAmount))} บาท
+
+ตรวจสอบแล้วและต้องการบันทึกต่อ?`)) return;
     if (!window.confirm(`บันทึกคืนเงินใบเสร็จ ${picked.receipt_no}\nลูกค้า ${picked.customer_name || "-"}\nรับไว้ ${baht(picked.paid_amount)} → ยอดที่ถูกต้อง ${baht(correctAmount)}\nยอดคืน ${baht(refundAmount)} บาท (${reason})\n\nยืนยัน?`)) return;
     setSaving(true); setMessage("");
     try {
@@ -297,6 +310,7 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
               <div><div style={lbl}>วันที่รับชำระ</div><div>{thaiDate(picked.receipt_date)} · {picked.branch_code}</div></div>
               <div><div style={lbl}>เอกสารอ้างอิง</div><div style={{ fontFamily: "monospace" }}>{picked.ref_doc_no || "-"}</div></div>
               <div><div style={lbl}>ลูกค้า</div><div style={{ fontWeight: 600 }}>{picked.customer_name || "-"}</div></div>
+              <div><div style={lbl}>ยอดที่ต้องชำระตามเอกสาร</div><div style={{ fontWeight: 700, color: "#0369a1" }}>{dueAmount > 0 ? baht(dueAmount) : "-"}{dueAmount > 0 && Math.abs(dueAmount - num(picked.paid_amount)) > 0.009 && <button onClick={() => setCorrectAmount(String(dueAmount))} style={{ marginLeft: 8, fontSize: 11, padding: "2px 8px", border: "1px solid #0369a1", background: "#fff", color: "#0369a1", borderRadius: 6, cursor: "pointer" }}>ใช้ยอดนี้</button>}</div></div>
               <div><div style={lbl}>วิธีชำระเดิม</div><div style={{ fontSize: 12 }}>{picked.methods}</div></div>
             </div>
             <div style={{ fontWeight: 700, marginBottom: 8 }}>3️⃣ ยอดเงินที่ถูกต้อง</div>
@@ -308,6 +322,8 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
               <div style={{ flex: 1, minWidth: 220 }}><label style={lbl}>รายละเอียด (ถ้ามี)</label><input value={reasonNote} onChange={(e) => setReasonNote(e.target.value)} placeholder="เช่น ลดค่าบริการ 200 / คีย์ยอดเกิน" style={inp} /></div>
               <button onClick={saveRefund} disabled={saving || !correctValid} style={btn(correctValid ? "#16a34a" : "#9ca3af")}>{saving ? "กำลังบันทึก…" : "💾 บันทึก (รอคืนเงิน)"}</button>
             </div>
+            {belowDue && <div style={{ fontSize: 12.5, color: "#b91c1c", fontWeight: 700, marginTop: 6, background: "#fee2e2", padding: "6px 10px", borderRadius: 6 }}>⚠️ ยอดที่ถูกต้องต่ำกว่ายอดที่ต้องชำระตามเอกสาร ({baht(dueAmount)}) — จะคืนเงินเกินกว่าที่ควร {baht(dueAmount - num(correctAmount))} บาท ตรวจสอบก่อนบันทึก</div>}
+            {aboveDue && refundAmount > 0 && <div style={{ fontSize: 12, color: "#92400e", marginTop: 6 }}>หมายเหตุ: ยอดที่ถูกต้องสูงกว่ายอดที่ต้องชำระตามเอกสาร ({baht(dueAmount)})</div>}
             {correctAmount !== "" && refundAmount <= 0 && <div style={{ fontSize: 12, color: "#b91c1c", marginTop: 6 }}>ยอดที่ถูกต้องต้องน้อยกว่ายอดที่รับไว้ จึงมียอดคืน</div>}
           </div>)}
       </div>
