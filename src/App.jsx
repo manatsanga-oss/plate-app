@@ -154,6 +154,7 @@ import PartWholesalePaymentPage from "./pages/PartWholesalePaymentPage";
 import CustomerRefundPage from "./pages/CustomerRefundPage";
 import CrmEventPage from "./pages/CrmEventPage";
 import CrmReplyPage from "./pages/CrmReplyPage";
+import AiReceptionPage from "./pages/AiReceptionPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
 import MotoInsurancePage from "./pages/MotoInsurancePage";
 import CosmosInsurancePage from "./pages/CosmosInsurancePage";
@@ -199,6 +200,10 @@ export default function App() {
   // หน้าเลือกวันนัดนำรถเข้ารับบริการ (เปิดจากปุ่มการ์ด LINE แจ้งอะไหล่มาถึง — หน้าสั่งซื้ออะไหล่) — public ไม่ต้อง login
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/spare-appointment")) {
     return <SpareAppointmentPage />;
+  }
+  // พนักงานต้อนรับ AI สำหรับลูกค้า (แท็บเล็ตหน้าร้าน: หน้าคนขยับปาก ฟัง-พูดไทย) — public ไม่ต้อง login
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/ai-reception")) {
+    return <AiReceptionPage />;
   }
   // หน้าตอบกลับข่าวกิจกรรม CRM (ปุ่ม สนใจ/ไม่สนใจ ในการ์ด LINE) — public ไม่ต้อง login
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/crm-reply")) {
@@ -1123,6 +1128,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
 
       <MenuGroup title="CRM" pages={["crmevent"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="crmevent" label="📣 ประชาสัมพันธ์กิจกรรม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        {/* ลิงก์เปิดหน้าพนักงานต้อนรับ AI (มาสคอตตอบคำถามลูกค้า) ในแท็บใหม่ — ใช้สิทธิ์เดียวกับเมนู CRM */}
+        {canAccess("crmevent") && (
+          <button className="menu-item" onClick={() => window.open(`/ai-reception?branch=${encodeURIComponent(currentUser?.branch_code || currentUser?.branch || "SCY06")}`, "_blank")}>
+            🤖 พนักงานต้อนรับ AI
+          </button>
+        )}
       </MenuGroup>
 
       <MenuGroup title="Master Data" pages={masterPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
