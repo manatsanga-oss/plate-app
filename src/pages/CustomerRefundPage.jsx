@@ -11,7 +11,7 @@ const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const BRANCH_NAME = { SCY01: "สิงห์ชัย อยุธยา", SCY04: "สิงห์ชัย เสนา", SCY05: "ป.เปา นครหลวง", SCY06: "ป.เปา วังน้อย", SCY07: "สิงห์ชัย ตลาด" };
 const SOURCE_LABEL = { vehicle: "ขายรถ", partsvc: "รับชำระอะไหล่/บริการ" };
-const REASONS = ["ลดหนี้", "บันทึกรับชำระผิด"];
+const REASONS = ["ลดหนี้", "บันทึกรับชำระผิด", "คืนส่วนต่างรถเทิร์น"]; // คืนส่วนต่างรถเทิร์น = ตีเทิร์นเกินยอดดาวน์ ลูกค้ารับเงินส่วนเกินกลับ (user 2026-10-01)
 const STATUS_STYLE = { "รอคืนเงิน": { bg: "#fef3c7", fg: "#92400e" }, "คืนเงินแล้ว": { bg: "#dcfce7", fg: "#166534" }, "ยกเลิก": { bg: "#f3f4f6", fg: "#6b7280" } };
 
 async function post(url, body) {
