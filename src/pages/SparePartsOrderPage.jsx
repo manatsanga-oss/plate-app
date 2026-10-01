@@ -873,7 +873,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       await Promise.all(itemsWithStock.map(async (it, i) => {
         try {
           const ln = await fetchLoanStock((it.part_code || "").replace(/-/g, "").trim());
-          if (ln) itemsWithStock[i] = { ...it, loan_qty: ln.qty, loan_docs: ln.location };
+          if (ln) itemsWithStock[i] = { ...it, loan_qty: ln.qty, loan_docs: ln.location, loan_dates: ln.dates || "" };
         } catch {}
       }));
       // อะไหล่ทดแทน: รหัสที่สั่งเคยถูกจับคู่ทดแทนไว้ในตารางอะไหล่ใช้แทนกัน (จากใบไหนก็ได้) → แนบรหัสทดแทน + สต๊อก
@@ -1841,7 +1841,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                     <td style={{ ...td, textAlign: "center" }}>
                       <div style={{ color: it.stock_qty > 0 ? "#10b981" : "#ef4444", fontWeight: 600 }}>{it.stock_qty != null ? it.stock_qty : "-"}</div>
                       {Number(it.loan_qty) > 0 && (
-                        <div style={{ color: "#ea580c", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }} title={`ใบให้ยืม: ${it.loan_docs || "-"}`}>🤝 {LOAN_STORE} {it.loan_qty}</div>
+                        <div style={{ color: "#ea580c", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }} title={`ใบให้ยืม: ${it.loan_docs || "-"}`}>🤝 {LOAN_STORE} {it.loan_qty}
+                          {it.loan_dates ? <div style={{ fontWeight: 500, fontSize: 11 }}>ยืม {it.loan_dates}</div> : null}</div>
                       )}
                       {(it.substitutes || []).map((s, k) => (
                         <div key={k} style={{ color: Number(s.stock_qty) > 0 ? "#d97706" : "#ef4444", fontWeight: 700 }}>{s.stock_qty != null ? s.stock_qty : "-"}</div>

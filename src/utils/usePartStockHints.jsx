@@ -14,7 +14,10 @@ export async function fetchLoanStock(code) {
   if (!c) return null;
   const rows = (await postJson(LOAN_API, { action: "list_part_loans", item_code: c })).filter((r) => r && r.loan_no);
   const qty = rows.reduce((t, r) => t + Number(r.qty || 0), 0);
-  return qty > 0 ? { source: LOAN_STORE, qty, location: [...new Set(rows.map((r) => r.loan_no))].join(", "), loan: true } : null;
+  // วันที่ให้ยืม (dd/mm/พ.ศ. 2 หลัก) ของใบที่ยังค้าง เรียงเก่า→ใหม่ — โชว์ในใบสั่งซื้ออะไหล่ (user 2026-10-01)
+  const thDate = (iso) => { const m = String(iso || "").slice(0, 10).split("-"); return m.length === 3 ? `${m[2]}/${m[1]}/${String(Number(m[0]) + 543).slice(-2)}` : ""; };
+  const dates = [...new Set(rows.map((r) => String(r.loan_date || "").slice(0, 10)).filter(Boolean))].sort().map(thDate).join(", ");
+  return qty > 0 ? { source: LOAN_STORE, qty, location: [...new Set(rows.map((r) => r.loan_no))].join(", "), dates, loan: true } : null;
 }
 const strip = (s) => String(s || "").replace(/[-\s]/g, "").toUpperCase().trim();
 // YAMAHA: รหัสในใบสั่งมักเป็น 10 ตัว (1KL-F3412-10) แต่สต๊อกเก็บ 12 ตัว (…00) → เทียบแบบตัด "00" ท้าย
