@@ -18,7 +18,21 @@ const FIELDS = [
   { key: "total_premium",  label: "เบี้ยรวม",       type: "number", width: 80 },
   { key: "commission",     label: "ค่าคอม",         type: "number", width: 70 },
   { key: "premium_remit",  label: "เบี้ยนำส่ง",     type: "number", width: 80 },
+  { key: "short_term_fee", label: "ค่าพรบ.ซื้อไม่เต็มปี", type: "number", width: 90 },
 ];
+
+// ค่าพรบ.ซื้อไม่เต็มปี (user 2026-10-02): กรมธรรม์ที่ระยะคุ้มครอง < 1 ปี บริษัทประกันเก็บเพิ่ม 10 บาท/กรมธรรม์
+//   หน้าตรวจ (ก่อนบันทึก): เบี้ยรวม/เบี้ยนำส่ง = ยอดตามไฟล์ (ยังไม่รวม) · short_term_fee แยกคอลัมน์ · ตอนบันทึกบวกเข้าทั้งเบี้ยรวมและเบี้ยนำส่ง (ค่าคอมไม่เปลี่ยน)
+//   ฐานข้อมูล: total_premium / premium_remit = รวม 10 บาทแล้ว · short_term_fee = ส่วนที่บวก (ไว้แสดงแยก)
+const SHORT_TERM_FEE = 10;
+const autoShortFee = (start, end) => {
+  const a = new Date(String(start || "").slice(0, 10)), b = new Date(String(end || "").slice(0, 10));
+  if (isNaN(a) || isNaN(b)) return 0;
+  const days = Math.round((b - a) / 86400000);
+  return days > 0 && days < 360 ? SHORT_TERM_FEE : 0; // เต็มปี = 365/366 วัน (เผื่อคลาดเคลื่อนเล็กน้อย)
+};
+const withShortFee = (it) => ({ ...it, short_term_fee: it.short_term_fee != null && it.short_term_fee !== "" ? Number(it.short_term_fee) || 0 : autoShortFee(it.coverage_start, it.coverage_end) });
+const feeOf = (it) => Number(it.short_term_fee || 0);
 
 export default function MotoInsurancePage({ currentUser }) {
   const [mode, setMode] = useState("ocr"); // ocr | history
@@ -358,7 +372,7 @@ function OcrPanel({ setMessage }) {
           customer_name: "",
           invoice_no: "",
           match_source: "",
-        }));
+        })).map(withShortFee);
 
       if (arr.length === 0) {
         setMessage("❌ ไม่พบข้อมูลในไฟล์ Excel นี้");
@@ -424,7 +438,7 @@ function OcrPanel({ setMessage }) {
       const data = await res.json();
       const arr = (Array.isArray(data) ? data : data.items || []).map((r, i) => ({
         ...r, _key: `ocr-${i}`, _selected: true, customer_name: "", invoice_no: "", match_source: "",
-      }));
+      })).map(withShortFee);
       if (arr.length === 0) {
         setMessage("❌ OCR ไม่พบข้อมูลใน PDF นี้");
       } else {
@@ -513,7 +527,11 @@ function OcrPanel({ setMessage }) {
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "save_insurance_batch", items: toSave.map(({ _key, _selected, customer_name, invoice_no, ...rest }) => rest) }),
+        body: JSON.stringify({ action: "save_insurance_batch", items: toSave.map(({ _key, _selected, customer_name, invoice_no, ...rest }) => ({
+          ...rest, short_term_fee: feeOf(rest),
+          total_premium: Math.round((Number(rest.total_premium || 0) + feeOf(rest)) * 100) / 100,   // บวกค่าพรบ.ซื้อไม่เต็มปีเข้าเบี้ยรวม
+          premium_remit: Math.round((Number(rest.premium_remit || 0) + feeOf(rest)) * 100) / 100,   // และเบี้ยนำส่ง (จ่ายบริษัทประกัน)
+        })) }),
       });
       const data = await res.json();
       const rows = Array.isArray(data) ? data : (data?.rows || []);
@@ -537,12 +555,13 @@ function OcrPanel({ setMessage }) {
   const summary = items.reduce((s, it) => {
     if (it._selected) {
       s.premium += Number(it.premium || 0);
-      s.total += Number(it.total_premium || 0);
+      s.total += Number(it.total_premium || 0) + feeOf(it);
       s.commission += Number(it.commission || 0);
-      s.remit += Number(it.premium_remit || 0);
+      s.remit += Number(it.premium_remit || 0) + feeOf(it);
+      s.fee += feeOf(it); if (feeOf(it) > 0) s.feeCount += 1;
     }
     return s;
-  }, { premium: 0, total: 0, commission: 0, remit: 0 });
+  }, { premium: 0, total: 0, commission: 0, remit: 0, fee: 0, feeCount: 0 });
 
   return (
     <div>
@@ -578,7 +597,7 @@ function OcrPanel({ setMessage }) {
         <>
           <div style={{ padding: "12px 16px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <strong style={{ fontSize: 14 }}>ขั้นตอนที่ 2 — ตรวจสอบ ({selCount}/{items.length} เลือก)</strong>
-            <span style={{ fontSize: 12, color: "#6b7280" }}>เบี้ยรวม {summary.total.toLocaleString()} · เบี้ยนำส่ง {summary.remit.toLocaleString()}</span>
+            <span style={{ fontSize: 12, color: "#6b7280" }}>เบี้ยรวม {summary.total.toLocaleString()} · เบี้ยนำส่ง {summary.remit.toLocaleString()}{summary.fee > 0 ? ` · รวมค่าพรบ.ซื้อไม่เต็มปี ${summary.fee.toLocaleString()} (${summary.feeCount} กรมธรรม์)` : ""}</span>
             <button onClick={() => {
                 const newRow = {
                   _key: `manual-${Date.now()}`,
@@ -597,6 +616,7 @@ function OcrPanel({ setMessage }) {
                   total_premium: 0,
                   commission: 0,
                   premium_remit: 0,
+                  short_term_fee: 0,
                   customer_name: "",
                   invoice_no: "",
                   match_source: "",
@@ -626,7 +646,10 @@ function OcrPanel({ setMessage }) {
                   <th>เลขตัวถัง</th>
                   <th>เลขทะเบียน</th>
                   <th>เลขที่กรมธรรม์</th>
-                  <th>เบี้ยรวม</th>
+                  <th>คุ้มครอง</th>
+                  <th>เบี้ยรวม (ไฟล์)</th>
+                  <th style={{ background: "#b45309" }}>ค่าพรบ.ซื้อไม่เต็มปี</th>
+                  <th>รวมทั้งสิ้น</th>
                   <th>เลขที่ใบขาย</th>
                   <th>ลูกค้า</th>
                   <th style={{ width: 90 }}>จัดการ</th>
@@ -642,7 +665,13 @@ function OcrPanel({ setMessage }) {
                     <td style={{ fontFamily: "monospace", fontSize: 11 }}>{it.chassis_no || "-"}</td>
                     <td>{it.plate_number || "-"}</td>
                     <td style={{ fontFamily: "monospace", fontSize: 11 }}>{it.policy_no || "-"}</td>
-                    <td style={{ textAlign: "right", fontWeight: 600 }}>{Number(it.total_premium || 0).toLocaleString()}</td>
+                    <td style={{ fontSize: 11, whiteSpace: "nowrap" }}>{it.coverage_start || "-"} → {it.coverage_end || "-"}</td>
+                    <td style={{ textAlign: "right" }}>{Number(it.total_premium || 0).toLocaleString()}</td>
+                    <td style={{ textAlign: "right", background: feeOf(it) > 0 ? "#fef3c7" : undefined }}>
+                      <input type="number" value={it.short_term_fee ?? 0} onChange={e => setItems(items.map(x => x._key === it._key ? { ...x, short_term_fee: e.target.value === "" ? 0 : Number(e.target.value) } : x))}
+                        title="ระบบใส่ 10 บาทให้เมื่อระยะคุ้มครองไม่เต็มปี — แก้ได้" style={{ width: 60, textAlign: "right", padding: "3px 6px", border: "1px solid #d1d5db", borderRadius: 4, fontWeight: feeOf(it) > 0 ? 700 : 400, color: feeOf(it) > 0 ? "#b45309" : "#9ca3af" }} />
+                    </td>
+                    <td style={{ textAlign: "right", fontWeight: 700 }}>{(Number(it.total_premium || 0) + feeOf(it)).toLocaleString()}</td>
                     <td style={{ color: it.invoice_no ? "#065f46" : "#9ca3af", fontWeight: it.invoice_no ? 600 : 400, fontSize: 11 }}>
                       {it.invoice_no || ""}
                     </td>
@@ -700,7 +729,14 @@ function OcrPanel({ setMessage }) {
               <button onClick={() => setEditingRow(null)}
                 style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
               <button onClick={() => {
-                  setItems(items.map(x => x._key === editingRow._key ? { ...x, ...editingRow } : x));
+                  setItems(items.map(x => {
+                    if (x._key !== editingRow._key) return x;
+                    const datesChanged = x.coverage_start !== editingRow.coverage_start || x.coverage_end !== editingRow.coverage_end;
+                    const feeTouched = Number(x.short_term_fee || 0) !== Number(editingRow.short_term_fee || 0);
+                    const nx = { ...x, ...editingRow };
+                    if (datesChanged && !feeTouched) nx.short_term_fee = autoShortFee(nx.coverage_start, nx.coverage_end);
+                    return nx;
+                  }));
                   setEditingRow(null);
                 }}
                 style={{ padding: "8px 20px", background: "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>💾 บันทึก</button>
@@ -1065,7 +1101,8 @@ function HistoryPanel({ setMessage }) {
                   <td>{r.policy_no || "-"}</td>
                   <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                   <td>{r.insured_name || "-"}</td>
-                  <td style={{ textAlign: "right", fontWeight: 600 }}>{Number(r.total_premium || 0).toLocaleString()}</td>
+                  <td style={{ textAlign: "right", fontWeight: 600 }}>{Number(r.total_premium || 0).toLocaleString()}
+                    {Number(r.short_term_fee || 0) > 0 && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", whiteSpace: "nowrap" }}>รวมค่าพรบ.ซื้อไม่เต็มปี +{Number(r.short_term_fee)}</div>}</td>
                   <td>
                     {r.invoice_no && <div style={{ color: "#065f46", fontWeight: 600 }}>{r.invoice_no}</div>}
                     {r.customer_name && <div style={{ fontSize: 11, color: "#6b7280", marginTop: r.invoice_no ? 2 : 0 }}>{r.customer_name}</div>}
@@ -1200,7 +1237,8 @@ function BatchDetailDialog({ batch, onClose, onEdit, onAddRow, onDelete, onCance
                     <td>{r.policy_no || "-"}</td>
                     <td style={{ fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                     <td>{r.insured_name || "-"}</td>
-                    <td style={{ textAlign: "right", fontWeight: 600, color: "#dc2626" }}>{Number(r.total_premium || 0).toLocaleString()}</td>
+                    <td style={{ textAlign: "right", fontWeight: 600, color: "#dc2626" }}>{Number(r.total_premium || 0).toLocaleString()}
+                      {Number(r.short_term_fee || 0) > 0 && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", whiteSpace: "nowrap" }}>รวมค่าพรบ.ซื้อไม่เต็มปี +{Number(r.short_term_fee)}</div>}</td>
                     <td>
                       {r.invoice_no && <div style={{ color: "#065f46", fontWeight: 600 }}>{r.invoice_no}</div>}
                       {r.customer_name && <div style={{ fontSize: 11, color: "#6b7280" }}>{r.customer_name}</div>}
@@ -1253,6 +1291,7 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
     total_premium: record.total_premium || 0,
     commission: record.commission || 0,
     premium_remit: record.premium_remit || 0,
+    short_term_fee: Number(record.short_term_fee || 0),
     // Manual link override
     receipt_no: record.receipt_no || "",
     invoice_no: record.invoice_no || "",
@@ -1508,6 +1547,14 @@ function InsuranceEditDialog({ record, onClose, onSaved }) {
             <input type="number" value={form.commission} onChange={e => setForm(p => ({ ...p, commission: e.target.value }))} style={inp} /></div>
           <div><label style={lbl}>เบี้ยนำส่ง</label>
             <input type="number" value={form.premium_remit} onChange={e => setForm(p => ({ ...p, premium_remit: e.target.value }))} style={inp} /></div>
+          <div><label style={{ ...lbl, color: "#b45309" }}>ค่าพรบ.ซื้อไม่เต็มปี (รวมในเบี้ยรวม/นำส่งแล้ว)</label>
+            <input type="number" value={form.short_term_fee} title="แก้ยอดนี้แล้ว เบี้ยรวมและเบี้ยนำส่งจะปรับตามส่วนต่างให้อัตโนมัติ"
+              onChange={e => setForm(p => {
+                const nv = e.target.value === "" ? 0 : Number(e.target.value) || 0;
+                const delta = nv - (Number(p.short_term_fee) || 0);
+                const r2 = (v) => Math.round((Number(v || 0) + delta) * 100) / 100;
+                return { ...p, short_term_fee: nv, total_premium: r2(p.total_premium), premium_remit: r2(p.premium_remit) };
+              })} style={inp} /></div>
         </div>
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 14 }}>

@@ -799,7 +799,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                     })()}
                   </td>
                   <td style={{ ...tdNum, color: "#0369a1", fontWeight: 700 }}>{r.amount_received ? fmtNum(r.amount_received) : "-"}</td>
-                  <td style={{ ...tdNum, color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}</td>
+                  <td style={{ ...tdNum, color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}{Number(r.short_term_fee || 0) > 0 && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", fontFamily: "Tahoma", whiteSpace: "nowrap" }}>รวมค่าพรบ.ซื้อไม่เต็มปี +{Number(r.short_term_fee)}</div>}</td>
                   <td style={td}>
                     <button onClick={() => setDetailRow(r)}
                       style={{ padding: "3px 10px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 11 }}>
@@ -875,7 +875,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                         </td>
                         <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                         <td style={td}>{r.insured_name || "-"}</td>
-                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}{Number(r.short_term_fee || 0) > 0 && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", fontFamily: "Tahoma", whiteSpace: "nowrap" }}>รวมค่าพรบ.ซื้อไม่เต็มปี +{Number(r.short_term_fee)}</div>}</td>
                         <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmtNum(r.commission)}</td>
                         <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{fmtNum(r.premium_remit)}</td>
                         <td style={td}>
@@ -1038,7 +1038,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                               <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.policy_no || "-"}</td>
                               <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.chassis_no || "-"}</td>
                               <td style={td}>{r.insured_name || "-"}</td>
-                              <td style={{ ...tdNum, color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}</td>
+                              <td style={{ ...tdNum, color: "#dc2626", fontWeight: 600 }}>{fmtNum(r.total_premium)}{Number(r.short_term_fee || 0) > 0 && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", fontFamily: "Tahoma", whiteSpace: "nowrap" }}>รวมค่าพรบ.ซื้อไม่เต็มปี +{Number(r.short_term_fee)}</div>}</td>
                               <td style={{ ...tdNum, color: "#0369a1", fontWeight: 600 }}>{fmtNum(r.premium_remit)}</td>
                             </tr>
                           ))}
