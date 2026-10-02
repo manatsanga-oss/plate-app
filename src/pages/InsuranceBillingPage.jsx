@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+// ใบรับชำระค่าแก้ไข พรบ. ให้เลือกเฉพาะใบตั้งแต่ ต.ค.69 (หมวดรายได้ 007 ค่าแก้ไข พรบ.) ใบเก่าไม่ต้องขึ้น — user 2026-10-02
+const REC_PICK_FROM = "2026-10-01";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 
@@ -1225,7 +1227,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                 <button onClick={async () => {
                   setPicker(p => ({ ...p, open: true, loading: true }));
                   try {
-                    const d = await post({ action: "list_other_income_receipts", search: picker.search || "พรบ" });
+                    const d = await post({ action: "list_other_income_receipts", search: picker.search || "พรบ", date_from: REC_PICK_FROM });
                     setPicker(p => ({ ...p, rows: Array.isArray(d) ? d.filter(r => r && r.receipt_no) : [], loading: false }));
                   } catch { setPicker(p => ({ ...p, rows: [], loading: false })); }
                 }} style={{ padding: "8px 14px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>🔍 เลือก</button>
@@ -1289,7 +1291,7 @@ export default function InsuranceBillingPage({ currentUser }) {
               <button onClick={async () => {
                 setPicker(p => ({ ...p, loading: true }));
                 try {
-                  const d = await post({ action: "list_other_income_receipts", search: picker.search });
+                  const d = await post({ action: "list_other_income_receipts", search: picker.search, date_from: REC_PICK_FROM });
                   setPicker(p => ({ ...p, rows: Array.isArray(d) ? d.filter(r => r && r.receipt_no) : [], loading: false }));
                 } catch { setPicker(p => ({ ...p, rows: [], loading: false })); }
               }} style={{ padding: "8px 16px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer" }}>ค้นหา</button>

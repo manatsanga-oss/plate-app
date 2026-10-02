@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from "react";
+// ใบรับชำระค่าแก้ไข พรบ. ให้เลือกเฉพาะใบตั้งแต่ ต.ค.69 (หมวดรายได้ 007 ค่าแก้ไข พรบ.) ใบเก่าไม่ต้องขึ้น — user 2026-10-02
+const REC_PICK_FROM = "2026-10-01";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 
@@ -98,7 +100,7 @@ export default function MotoInsuranceExtraExpensePage({ currentUser }) {
     setPickerSearch(q);
     setPickerLoading(true);
     try {
-      const d = await postAPI({ action: "list_other_income_receipts", search: q });
+      const d = await postAPI({ action: "list_other_income_receipts", search: q, date_from: REC_PICK_FROM });
       setPickerRows(Array.isArray(d) ? d.filter(r => r && r.receipt_no) : []);
     } catch { setPickerRows([]); }
     setPickerLoading(false);
@@ -106,7 +108,7 @@ export default function MotoInsuranceExtraExpensePage({ currentUser }) {
   async function searchPicker() {
     setPickerLoading(true);
     try {
-      const d = await postAPI({ action: "list_other_income_receipts", search: pickerSearch });
+      const d = await postAPI({ action: "list_other_income_receipts", search: pickerSearch, date_from: REC_PICK_FROM });
       setPickerRows(Array.isArray(d) ? d.filter(r => r && r.receipt_no) : []);
     } catch { setPickerRows([]); }
     setPickerLoading(false);
