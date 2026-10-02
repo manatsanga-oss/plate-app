@@ -1126,14 +1126,19 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="uploadaccounting" label="Upload ข้อมูลทางบัญชี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
+      {/* ฝึกตอบลูกค้ากับ AI ลูกค้าจำลอง (น้องเปาเปา) — เปิดให้พนักงานทุกคนที่ login (user 2026-10-02) ไม่ผูกสิทธิ์เมนู · เปิดแท็บใหม่ */}
+      <MenuGroup title="ฝึกตอบลูกค้า (AI)" pages={[]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <button className="menu-item" onClick={() => {
+          // ชื่อพนักงานที่ตอบ = ผู้ใช้ที่ login (ส่งผ่าน localStorage ให้หน้า /ai-reception ซึ่งเป็นหน้า public)
+          try { localStorage.setItem("air_staff", currentUser?.name || currentUser?.username || ""); } catch { /* ignore */ }
+          window.open(`/ai-reception?branch=${encodeURIComponent(currentUser?.branch_code || currentUser?.branch || "SCY06")}`, "_blank");
+        }}>
+          🤖 ฝึกตอบลูกค้า (AI ลูกค้าจำลอง)
+        </button>
+      </MenuGroup>
+
       <MenuGroup title="CRM" pages={["crmevent"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="crmevent" label="📣 ประชาสัมพันธ์กิจกรรม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        {/* ลิงก์เปิดหน้าพนักงานต้อนรับ AI (มาสคอตตอบคำถามลูกค้า) ในแท็บใหม่ — ใช้สิทธิ์เดียวกับเมนู CRM */}
-        {canAccess("crmevent") && (
-          <button className="menu-item" onClick={() => window.open(`/ai-reception?branch=${encodeURIComponent(currentUser?.branch_code || currentUser?.branch || "SCY06")}`, "_blank")}>
-            🤖 พนักงานต้อนรับ AI
-          </button>
-        )}
       </MenuGroup>
 
       <MenuGroup title="Master Data" pages={masterPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

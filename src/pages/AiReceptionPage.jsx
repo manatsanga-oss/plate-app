@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 
 // พนักงานต้อนรับ AI สำหรับลูกค้า (public ไม่ต้อง login) — เปิดบนแท็บเล็ตหน้าร้าน: /ai-reception?branch=SCY06
 // เปิดมาเป็นมาสคอตร้าน (ภาพ public/mascot-pp.webp) เต็มจอ ขยับปาก/กะพริบตาตามที่พูด · ลูกค้ากดไมค์แล้วพูด (Chrome แปลงเสียงไทย) หรือแตะคำถามยอดนิยม
-// คำตอบมาจาก n8n webhook ai-reception-api (Claude + ข้อมูลร้าน) — ถ้ายังไม่เชื่อมต่อ จะตอบแบบสาธิต
+// คำตอบมาจาก n8n webhook ai-reception-api (OpenAI + ข้อมูลร้าน) — ถ้ายังไม่เชื่อมต่อ จะตอบแบบสาธิต
+// โหมดเริ่มต้น (user 2026-10-02) = "ลูกค้าจำลอง": น้องเปาเปาสวมบทลูกค้า ถามพนักงานขายทีละคำถาม (action sim_next) แล้วเก็บคำตอบพนักงานลง ai_reception_sim_logs
+// โหมดเดิม (ตอบคำถามลูกค้า) เปิดด้วย ?mode=answer
+const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const AI_API = "https://n8n-new-project-gwf2.onrender.com/webhook/ai-reception-api";
 
 const BRANCH_INFO = {
   SCY01: { shop: "สิงห์ชัย", name: "น้องสิงห์" },
-  SCY06: { shop: "ป.เปา มอเตอร์", name: "น้องปอเปา" },
+  SCY06: { shop: "ป.เปา มอเตอร์", name: "น้องเปาเปา" },
 };
 const QUICK = ["ราคารถรุ่นใหม่", "โปรโมชั่นเดือนนี้", "เช็กสถานะรถซ่อม", "ร้านเปิดกี่โมง", "ออกรถใช้เอกสารอะไร"];
 
@@ -33,10 +36,10 @@ function visemeOf(ch) {
 }
 
 // มาสคอตร้าน (ภาพจริง) + ปากขยับ/กะพริบตาวาดทับ — พิกัดตามภาพ 860x940
-function Face({ mouth, blink, mood }) {
+function Face({ mouth, blink, mood, small }) {
   const d = MOUTHS[mouth];
   return (
-    <svg viewBox="0 0 860 940" className="air-face" style={{ height: "auto", filter: "drop-shadow(0 14px 26px rgba(0,0,0,.35))", animation: mood === "speaking" ? "mascotTalk 1.6s ease-in-out infinite" : "mascotIdle 4s ease-in-out infinite" }}>
+    <svg viewBox="0 0 860 940" className={"air-face" + (small ? " small" : "")} style={{ height: "auto", filter: "drop-shadow(0 14px 26px rgba(0,0,0,.35))", animation: mood === "speaking" ? "mascotTalk 1.6s ease-in-out infinite" : "mascotIdle 4s ease-in-out infinite" }}>
       <defs>
         <clipPath id="mouthClip">{d && <path d={d} />}</clipPath>
         <radialGradient id="lid" cx="50%" cy="35%" r="70%"><stop offset="0" stopColor="#f0b98c" /><stop offset="1" stopColor="#dc9c6c" /></radialGradient>
@@ -65,6 +68,35 @@ function Face({ mouth, blink, mood }) {
   );
 }
 
+// ภาพรุ่นย่อย: ใช้รูปสีรถจาก moto_color_images (master-data-api get_color_image) โหลดครั้งเดียวต่อ color_id
+const _imgCache = new Map(); // color_id → data URL | "none" | Promise
+function VariantCard({ item, onPick, disabled }) {
+  const [img, setImg] = useState(() => { const v = item.color_id ? _imgCache.get(item.color_id) : "none"; return typeof v === "string" ? v : null; });
+  useEffect(() => {
+    let alive = true;
+    if (!item.color_id) return;
+    const cached = _imgCache.get(item.color_id);
+    if (typeof cached === "string") return;
+    const pr = cached || fetch(MASTER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_color_image", color_id: item.color_id }) })
+      .then(r => r.json()).then(res => { const rec = Array.isArray(res) ? res[0] : res; const v = rec?.image_data || "none"; _imgCache.set(item.color_id, v); return v; })
+      .catch(() => { _imgCache.set(item.color_id, "none"); return "none"; });
+    if (!cached) _imgCache.set(item.color_id, pr);
+    pr.then(v => { if (alive) setImg(v); });
+    return () => { alive = false; };
+  }, [item.color_id]);
+  const price = item.price === null || item.price === undefined ? "" : Number(item.price).toLocaleString("en-US", { maximumFractionDigits: 0 }) + " บาท";
+  return (
+    <button onClick={() => onPick(item)} disabled={disabled} className="air-card" style={{ border: "none", cursor: "pointer", fontFamily: "inherit", flexShrink: 0, background: "#fff", color: "#0b2447", borderRadius: 16, padding: 8, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, boxShadow: "0 6px 16px rgba(0,0,0,.35)" }}>
+      <div className="air-card-img" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#f3f5f8", borderRadius: 10, overflow: "hidden" }}>
+        {img && img !== "none" ? <img src={img} alt={item.type} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 13, opacity: .5 }}>{img === "none" ? "ไม่มีรูป" : "กำลังโหลด..."}</span>}
+      </div>
+      <div className="air-card-name" style={{ fontWeight: 700, lineHeight: 1.2 }}>{item.type}</div>
+      {item.colors && <div style={{ fontSize: 11, opacity: .7, lineHeight: 1.2, maxHeight: 27, overflow: "hidden" }}>สี: {item.colors}</div>}
+      {price && <div className="air-card-price" style={{ color: "#c62828", fontWeight: 700 }}>{price}</div>}
+    </button>
+  );
+}
+
 export default function AiReceptionPage() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   // branch อาจมาเป็นรหัส (SCY06) หรือชื่อสาขา/ค่าที่ไม่รู้จัก → จัดเข้าร้านให้ถูก (ไม่รู้จัก = ป.เปา)
@@ -73,6 +105,7 @@ export default function AiReceptionPage() {
   const branch = isCode ? rawBranch : (/สิงห์|SING/.test(rawBranch) ? "SCY01" : "SCY06");
   const info = BRANCH_INFO[branch] || (/^SCY0[56]$/.test(branch) || !isCode ? BRANCH_INFO.SCY06 : BRANCH_INFO.SCY01);
   const aiName = params.get("name") || info.name;
+  const sim = (params.get("mode") || "sim") !== "answer";   // sim = น้องเปาเปาเป็นลูกค้า ถามพนักงาน
 
   const [started, setStarted] = useState(false);
   const [mood, setMood] = useState("idle");          // idle | listening | thinking | speaking
@@ -81,12 +114,21 @@ export default function AiReceptionPage() {
   const [heard, setHeard] = useState("");
   const [answer, setAnswer] = useState("");
   const [demo, setDemo] = useState(false);
+  const [items, setItems] = useState([]);            // รุ่นย่อยที่ AI ให้โชว์ภาพ
   const [showType, setShowType] = useState(false);   // ช่องพิมพ์คำถาม (เมื่อไมค์ใช้ไม่ได้)
   const [typed, setTyped] = useState("");
   const recRef = useRef(null);
   const lipTimer = useRef(null);
   const historyRef = useRef([]);
   const sessionId = useMemo(() => "s" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), []);
+  // ── โหมดลูกค้าจำลอง ──
+  // ชื่อพนักงานที่ตอบ = ผู้ใช้ที่ login (เมนู CRM เขียน localStorage air_staff ก่อนเปิดหน้านี้) — ไม่ให้พิมพ์เอง
+  const [staffName] = useState(() => { let v = params.get("staff") || ""; try { v = v || localStorage.getItem("air_staff") || ""; } catch { /* ignore */ } return v; });
+  const [simDone, setSimDone] = useState(false);
+  const [simTurn, setSimTurn] = useState(0);         // ลำดับคำถามของลูกค้าคนปัจจุบัน
+  const [simCount, setSimCount] = useState(1);       // ลูกค้าคนที่เท่าไร
+  const simRef = useRef({ session: "", scenario: "", history: [], lastQ: "" });
+  const stopRef = useRef(false);
 
   // กะพริบตาแบบสุ่ม
   useEffect(() => {
@@ -138,7 +180,7 @@ export default function AiReceptionPage() {
     const question = (q || "").trim(); if (!question) return;
     window.speechSynthesis?.cancel(); stopLip();
     setHeard(question); setAnswer(""); setMood("thinking"); setMouth("closed");
-    let text = "";
+    let text = ""; let its = [];
     try {
       const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 25000);
       const res = await fetch(AI_API, { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
@@ -148,15 +190,79 @@ export default function AiReceptionPage() {
       const data = await res.json(); const row = Array.isArray(data) ? data[0] : data;
       text = String(row?.answer || "").trim();
       if (!text) throw new Error("empty");
+      its = Array.isArray(row?.items) ? row.items : [];
       setDemo(false);
     } catch {
       text = demoAnswer(question); setDemo(true);
     }
+    setItems(its);
     historyRef.current.push({ role: "user", content: question }, { role: "assistant", content: text });
     await speak(text);
   }
 
+  // ── โหมดลูกค้าจำลอง: ส่งคำตอบพนักงาน (ถ้ามี) → รับคำถามถัดไปของลูกค้า ──
+  async function simNext(staffAnswer, source) {
+    const st = simRef.current; const ans = (staffAnswer || "").trim();
+    window.speechSynthesis?.cancel(); stopLip();
+    setMood("thinking"); setMouth("closed"); setAnswer(""); if (ans) setHeard(ans);
+    const history = ans ? [...st.history, { role: "staff", content: ans }] : st.history;
+    try {
+      const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 30000);
+      const res = await fetch(AI_API, { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
+        body: JSON.stringify({ action: "sim_next", branch_code: branch, session_id: st.session, staff_name: staffName.trim(), scenario: st.scenario, history, last_question: st.lastQ, staff_answer: ans, answer_source: source || "" }) });
+      clearTimeout(to);
+      if (!res.ok) throw new Error("http " + res.status);
+      const data = await res.json(); const row = Array.isArray(data) ? data[0] : data;
+      const say = String(row?.say || "").trim();
+      if (!say) throw new Error("empty");
+      st.scenario = row.scenario || st.scenario; st.history = [...history, { role: "customer", content: say }]; st.lastQ = say;
+      setSimDone(!!row.done); setSimTurn(st.history.filter(h => h.role === "customer").length); setHeard("");
+      await speak(say);
+    } catch {
+      setMood("idle");
+      setAnswer(ans ? "ส่งคำตอบไม่สำเร็จ (เชื่อมต่อระบบไม่ได้) กรุณาตอบอีกครั้งครับ" : "เชื่อมต่อระบบไม่ได้ กด \"ลูกค้าคนใหม่\" เพื่อลองอีกครั้งครับ");
+    }
+  }
+  function simNewCustomer(first) {
+    try { recRef.current?.abort(); } catch { /* ignore */ }
+    simRef.current = { session: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), scenario: "", history: [], lastQ: "" };
+    setSimDone(false); setSimTurn(0); setHeard(""); if (!first) setSimCount(c => c + 1);
+    simNext("", "");
+  }
+  // ฟังคำตอบพนักงาน: พูดยาว/เว้นจังหวะได้ — เครื่องตัดเสียงเองเมื่อเงียบ จึงเปิดฟังต่ออัตโนมัติและสะสมข้อความ จนกว่าพนักงานจะกดปุ่มหยุด
+  function listenSim() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { setAnswer("เบราว์เซอร์นี้ไม่รองรับการฟังเสียง (เช่น เปิดจากในแอป LINE) กรุณาเปิดด้วย Chrome หรือพิมพ์คำตอบด้านล่างครับ"); return; }
+    if (mood === "listening") { stopRef.current = true; try { recRef.current?.stop(); } catch { /* ignore */ } return; }
+    window.speechSynthesis?.cancel(); stopLip();
+    stopRef.current = false; let accum = "";
+    const question = simRef.current.lastQ;
+    const run = () => {
+      const rec = new SR(); recRef.current = rec;
+      rec.lang = "th-TH"; rec.interimResults = true; rec.maxAlternatives = 1;
+      let finalText = ""; let lastText = ""; let fatal = false;
+      rec.onstart = () => { setMood("listening"); setAnswer(question); };
+      rec.onresult = (e) => { let t = ""; for (const r of e.results) t += r[0].transcript; lastText = t; setHeard((accum + " " + t).trim()); if (e.results[e.results.length - 1].isFinal) finalText = t; };
+      rec.onerror = (e) => {
+        const code = e?.error || "";
+        if (code === "no-speech" || code === "aborted") return;
+        fatal = true; setMood("idle");
+        if (code === "not-allowed" || code === "service-not-allowed") setAnswer("ยังไม่ได้อนุญาตให้ใช้ไมโครโฟน กรุณากดอนุญาตไมค์ของเว็บนี้ หรือพิมพ์คำตอบด้านล่างครับ");
+        else setAnswer(`ใช้ไมค์ไม่ได้ (${code || "ไม่ทราบสาเหตุ"}) พิมพ์คำตอบด้านล่างได้เลยครับ`);
+      };
+      rec.onend = () => {
+        if (fatal) return;
+        accum = (accum + " " + (finalText || lastText)).trim(); setHeard(accum);
+        if (!stopRef.current) { try { run(); } catch { setMood("idle"); } return; }
+        if (accum) simNext(accum, "voice"); else setMood("idle");
+      };
+      rec.start();
+    };
+    try { setHeard(""); run(); } catch (err) { setMood("idle"); setAnswer(`เปิดไมค์ไม่ได้ (${err?.name || "error"}) พิมพ์คำตอบด้านล่างได้เลยครับ`); }
+  }
+
   function listen() {
+    if (sim) { listenSim(); return; }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setShowType(true); setAnswer("เบราว์เซอร์นี้ไม่รองรับการฟังเสียง (เช่น เปิดจากในแอป LINE) กรุณาเปิดลิงก์ด้วย Chrome หรือพิมพ์คำถามด้านล่างครับ"); return; }
     if (mood === "listening") { try { recRef.current?.stop(); } catch { /* ignore */ } return; }
@@ -164,7 +270,7 @@ export default function AiReceptionPage() {
     const rec = new SR(); recRef.current = rec;
     rec.lang = "th-TH"; rec.interimResults = true; rec.maxAlternatives = 1;
     let finalText = ""; let lastText = ""; let failed = false;
-    rec.onstart = () => { setMood("listening"); setHeard(""); setAnswer(""); };
+    rec.onstart = () => { setMood("listening"); setHeard(""); setAnswer(""); setItems([]); };
     rec.onresult = (e) => { let s = ""; for (const r of e.results) s += r[0].transcript; lastText = s; setHeard(s); if (e.results[e.results.length - 1].isFinal) finalText = s; };
     rec.onerror = (e) => {
       const code = e?.error || "";
@@ -182,54 +288,91 @@ export default function AiReceptionPage() {
   }
 
   async function start() {
+    if (sim) {
+      if (!staffName.trim()) return;
+      setStarted(true); window.speechSynthesis?.getVoices();
+      simNewCustomer(true); return;
+    }
     setStarted(true);
     window.speechSynthesis?.getVoices();
     await speak(`สวัสดีครับ ${aiName} ยินดีต้อนรับสู่ ${info.shop} ครับ มีอะไรให้ช่วยไหมครับ กดปุ่มไมค์แล้วพูดได้เลยครับ`);
   }
 
-  const statusText = mood === "listening" ? "กำลังฟัง... พูดได้เลยครับ" : mood === "thinking" ? "กำลังหาคำตอบ..." : mood === "speaking" ? "" : "กดไมค์แล้วพูด หรือแตะคำถามด้านล่าง";
+  const simStatus = mood === "listening" ? "กำลังฟังคำตอบ... ตอบจบแล้วกดปุ่มสีแดง" : mood === "thinking" ? "ลูกค้ากำลังคิด..." : mood === "speaking" ? "" : simDone ? "จบการสนทนากับลูกค้าคนนี้แล้ว กด \"ลูกค้าคนต่อไป\"" : "กดไมค์แล้วตอบลูกค้า (หรือพิมพ์คำตอบ)";
+  const statusText = sim ? simStatus : mood === "listening" ? "กำลังฟัง... พูดได้เลยครับ" : mood === "thinking" ? "กำลังหาคำตอบ..." : mood === "speaking" ? "" : "กดไมค์แล้วพูด หรือแตะคำถามด้านล่าง";
   const btn = { border: "none", borderRadius: 999, cursor: "pointer", fontFamily: "inherit" };
 
   return (
     <div style={{ height: "100dvh", background: "radial-gradient(circle at 50% 30%, #1e4d8f 0%, #0b2447 60%, #061528 100%)", color: "#fff", display: "flex", flexDirection: "column", alignItems: "center", overflow: "hidden", fontFamily: "'Sarabun','Leelawadee UI',sans-serif", userSelect: "none" }}>
-      <style>{".air-face{width:min(52vh,84vw)}.air-shop{font-size:22px}.air-sub{font-size:16px}.air-heard,.air-status{font-size:20px}.air-answer{font-size:26px}.air-chips{flex-wrap:wrap;justify-content:center}.air-chip{font-size:18px;padding:10px 18px}.air-mic{width:92px;height:92px;font-size:40px}.air-start{font-size:30px;padding:16px 36px}"
-        + "@media (max-width:640px),(max-height:560px){.air-face{width:min(42dvh,76vw)}.air-shop{font-size:17px}.air-sub{font-size:12px}.air-heard,.air-status{font-size:15px}.air-answer{font-size:17px}.air-chips{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;width:100%;scrollbar-width:none}.air-chips::-webkit-scrollbar{display:none}.air-chip{font-size:15px;padding:8px 14px}.air-mic{width:68px;height:68px;font-size:30px}.air-start{font-size:20px;padding:14px 24px}}"
+      <style>{".air-face{width:min(52vh,84vw);transition:width .3s}.air-face.small{width:min(26vh,44vw)}.air-cards{display:flex;gap:12px;overflow-x:auto;max-width:96vw;padding:6px 8px;scrollbar-width:none}.air-cards::-webkit-scrollbar{display:none}.air-card{width:190px}.air-card-img{height:130px}.air-card-name{font-size:16px}.air-card-price{font-size:17px}.air-shop{font-size:22px}.air-sub{font-size:16px}.air-heard,.air-status{font-size:20px}.air-answer{font-size:26px}.air-chips{flex-wrap:wrap;justify-content:center}.air-chip{font-size:18px;padding:10px 18px}.air-mic{width:92px;height:92px;font-size:40px}.air-start{font-size:30px;padding:16px 36px}"
+        + "@media (max-width:640px),(max-height:560px){.air-face{width:min(42dvh,76vw)}.air-face.small{width:min(20dvh,40vw)}.air-card{width:138px}.air-card-img{height:92px}.air-card-name{font-size:13px}.air-card-price{font-size:14px}.air-shop{font-size:17px}.air-sub{font-size:12px}.air-heard,.air-status{font-size:15px}.air-answer{font-size:17px}.air-chips{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;width:100%;scrollbar-width:none}.air-chips::-webkit-scrollbar{display:none}.air-chip{font-size:15px;padding:8px 14px}.air-mic{width:68px;height:68px;font-size:30px}.air-start{font-size:20px;padding:14px 24px}}"
         + "@keyframes mascotIdle{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}@keyframes mascotTalk{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-4px) rotate(-1deg)}75%{transform:translateY(-2px) rotate(1deg)}}"}</style>
       <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", gap: 10, boxSizing: "border-box", flexShrink: 0 }}>
         <div className="air-shop" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{info.shop}</div>
-        <div className="air-sub" style={{ opacity: .8, textAlign: "right" }}>{aiName} · ผู้ช่วยต้อนรับ{demo ? " (โหมดสาธิต)" : ""}</div>
+        <div className="air-sub" style={{ opacity: .8, textAlign: "right" }}>{sim ? `ฝึกตอบลูกค้า · ${staffName || "-"}${started ? ` · ลูกค้าคนที่ ${simCount} · คำถามที่ ${simTurn}` : ""}` : `${aiName} · ผู้ช่วยต้อนรับ${demo ? " (โหมดสาธิต)" : ""}`}</div>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", position: "relative" }}>
         <div style={{ flexShrink: 0, transform: mood === "listening" ? "scale(1.03)" : "scale(1)", transition: "transform .3s" }}>
-          <Face mouth={mouth} blink={blink} mood={mood} />
+          <Face mouth={mouth} blink={blink} mood={mood} small={items.length > 0} />
         </div>
+        {items.length > 0 && (
+          <div className="air-cards">
+            {items.map(it => <VariantCard key={it.type_id} item={it} disabled={mood === "thinking"} onPick={(x) => ask(`สนใจ ${x.series} รุ่นย่อย ${x.type}`)} />)}
+          </div>
+        )}
         {/* กล่องข้อความ: สิ่งที่ได้ยิน + คำตอบ */}
         <div style={{ width: "min(900px, 92vw)", minHeight: 48, flex: "0 1 auto", overflowY: "auto", marginTop: 6, textAlign: "center" }}>
-          {heard && <div className="air-heard" style={{ opacity: .75, marginBottom: 6 }}>“{heard}”</div>}
+          {!sim && heard && <div className="air-heard" style={{ opacity: .75, marginBottom: 6 }}>“{heard}”</div>}
           {answer && <div className="air-answer" style={{ lineHeight: 1.45, background: "rgba(255,255,255,.1)", borderRadius: 18, padding: "12px 20px", display: "inline-block" }}>{answer}</div>}
-          {!answer && statusText && <div className="air-status" style={{ opacity: .7 }}>{statusText}</div>}
+          {sim && heard && <div className="air-heard" style={{ marginTop: 8, color: "#c8f7c5" }}>คำตอบของคุณ: “{heard}”</div>}
+          {(sim || !answer) && statusText && <div className="air-status" style={{ opacity: .7, marginTop: sim ? 6 : 0 }}>{statusText}</div>}
         </div>
       </div>
 
       <div style={{ width: "100%", padding: "8px 14px calc(14px + env(safe-area-inset-bottom))", boxSizing: "border-box", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, flexShrink: 0 }}>
+        {sim ? (
+          <>
+            <div className="air-chips" style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => simRef.current.lastQ && speak(simRef.current.lastQ)} disabled={mood === "thinking" || mood === "listening" || !simTurn} className="air-chip" style={{ ...btn, whiteSpace: "nowrap", flexShrink: 0, background: "rgba(255,255,255,.14)", color: "#fff" }}>🔁 ฟังคำถามอีกครั้ง</button>
+              <button onClick={() => simNewCustomer(false)} disabled={mood === "thinking" || mood === "listening"} className="air-chip" style={{ ...btn, whiteSpace: "nowrap", flexShrink: 0, background: simDone ? "#f9a825" : "rgba(255,255,255,.14)", color: simDone ? "#1b1b1b" : "#fff", fontWeight: simDone ? 700 : 400 }}>{simDone ? "➡ ลูกค้าคนต่อไป" : "⏭ ลูกค้าคนใหม่"}</button>
+            </div>
+            {!simDone && (
+              <form onSubmit={(e) => { e.preventDefault(); const t = typed; if (!t.trim()) return; setTyped(""); simNext(t, "text"); }} style={{ display: "flex", gap: 8, width: "min(640px, 100%)" }}>
+                <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="หรือพิมพ์คำตอบที่นี่..." disabled={mood === "listening"} style={{ flex: 1, minWidth: 0, fontSize: 16, padding: "10px 14px", borderRadius: 999, border: "none", fontFamily: "inherit", userSelect: "text" }} />
+                <button type="submit" disabled={mood === "thinking" || mood === "listening" || !typed.trim()} style={{ ...btn, padding: "10px 18px", fontSize: 16, background: "#2e7d32", color: "#fff" }}>ส่งคำตอบ</button>
+              </form>
+            )}
+          </>
+        ) : (
         <div className="air-chips" style={{ display: "flex", gap: 10 }}>
           {QUICK.map(q => (
             <button key={q} onClick={() => ask(q)} disabled={mood === "thinking"} className="air-chip" style={{ ...btn, whiteSpace: "nowrap", flexShrink: 0, background: "rgba(255,255,255,.14)", color: "#fff" }}>{q}</button>
           ))}
         </div>
-        {showType && (
+        )}
+        {!sim && showType && (
           <form onSubmit={(e) => { e.preventDefault(); const t = typed; setTyped(""); ask(t); }} style={{ display: "flex", gap: 8, width: "min(560px, 100%)" }}>
             <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="พิมพ์คำถามที่นี่..." style={{ flex: 1, minWidth: 0, fontSize: 16, padding: "10px 14px", borderRadius: 999, border: "none", fontFamily: "inherit", userSelect: "text" }} />
             <button type="submit" disabled={mood === "thinking" || !typed.trim()} style={{ ...btn, padding: "10px 18px", fontSize: 16, background: "#2e7d32", color: "#fff" }}>ถาม</button>
           </form>
         )}
-        <button onClick={listen} disabled={mood === "thinking"} className="air-mic" style={{ ...btn, flexShrink: 0, color: "#fff", background: mood === "listening" ? "#e53935" : "#2e7d32", boxShadow: mood === "listening" ? "0 0 0 12px rgba(229,57,53,.25)" : "0 6px 18px rgba(0,0,0,.4)", transition: "all .2s" }} title="กดแล้วพูด">
+        <button onClick={listen} disabled={mood === "thinking" || (sim && (simDone || !simTurn))} className="air-mic" style={{ ...btn, flexShrink: 0, color: "#fff", background: mood === "listening" ? "#e53935" : "#2e7d32", boxShadow: mood === "listening" ? "0 0 0 12px rgba(229,57,53,.25)" : "0 6px 18px rgba(0,0,0,.4)", transition: "all .2s", opacity: sim && (simDone || !simTurn) ? .4 : 1 }} title="กดแล้วพูด">
           {mood === "listening" ? "■" : "🎤"}
         </button>
       </div>
 
-      {!started && (
+      {!started && sim && (
+        <div onClick={start} style={{ position: "fixed", inset: 0, background: "rgba(6,21,40,.55)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", gap: 10, paddingBottom: "12vh", cursor: staffName.trim() ? "pointer" : "default" }}>
+          {staffName.trim()
+            ? <>
+                <div className="air-start" style={{ fontWeight: 700, background: "#2e7d32", borderRadius: 999, textAlign: "center", margin: "0 16px", boxShadow: "0 8px 24px rgba(0,0,0,.45)" }}>แตะหน้าจอเพื่อเริ่มรับลูกค้า</div>
+                <div className="air-status" style={{ opacity: .85 }}>พนักงาน: {staffName}</div>
+              </>
+            : <div className="air-start" style={{ fontWeight: 700, background: "#c62828", borderRadius: 20, textAlign: "center", margin: "0 16px" }}>ไม่พบชื่อผู้ใช้ กรุณาเข้าสู่ระบบ แล้วเปิดหน้านี้จากเมนู CRM</div>}
+        </div>
+      )}
+      {!started && !sim && (
         <div onClick={start} style={{ position: "fixed", inset: 0, background: "rgba(6,21,40,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: "12vh", cursor: "pointer" }}>
           <div className="air-start" style={{ fontWeight: 700, background: "#2e7d32", borderRadius: 999, textAlign: "center", margin: "0 16px", boxShadow: "0 8px 24px rgba(0,0,0,.45)" }}>แตะหน้าจอเพื่อเริ่มคุยกับ{aiName}</div>
         </div>
