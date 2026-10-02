@@ -2,6 +2,7 @@
 # v1 (2026-10-01): ถาม → ดึงตารางราคารถของกลุ่มราคาสาขา + FAQ ของร้าน → OpenAI ตอบสั้น ๆ แบบพูด → เก็บ log
 # v2 (2026-10-01): ตอบเป็น JSON {answer, show:[type_id]} → ส่ง items (รุ่นย่อย+ราคา+color_id ที่มีรูป) ให้หน้าเว็บโชว์ภาพรุ่นย่อย
 # v3 (2026-10-02): action sim_next — น้องเปาเปาสวมบท "ลูกค้า" ถามพนักงานขาย (แนวคำถามจากข้อความลูกค้าจริง AI_Reception_Customer_Samples.json) แล้วเก็บคำตอบพนักงานลง ai_reception_sim_logs
+# v4 (2026-10-02): ให้คะแนนคำตอบพนักงาน (score 0-10 + score_comment ในการเรียก sim_next ครั้งถัดไป) + action sim_report (รายงานการเข้าใช้/คะแนน → IF แยกออกไม่ผ่าน OpenAI)
 # ใช้: python build_ai_reception_workflow.py  → เขียนไฟล์ลง OneDrive\New folder\AI_Reception_API_Workflow.json + AI_Reception_DDL.sql
 import json, os, uuid
 
@@ -11,7 +12,9 @@ OPENAI = {"openAiApi": {"id": "odRg3D1h42QKDeOx", "name": "OpenAi account"}}
 
 DDL = """CREATE TABLE IF NOT EXISTS ai_reception_faq (id SERIAL PRIMARY KEY, branch_code TEXT, topic TEXT NOT NULL, content TEXT NOT NULL, status TEXT DEFAULT 'active', updated_at TIMESTAMPTZ DEFAULT now());
 CREATE TABLE IF NOT EXISTS ai_reception_logs (id BIGSERIAL PRIMARY KEY, branch_code TEXT, session_id TEXT, question TEXT, answer TEXT, model TEXT, created_at TIMESTAMPTZ DEFAULT now());
-CREATE TABLE IF NOT EXISTS ai_reception_sim_logs (id BIGSERIAL PRIMARY KEY, branch_code TEXT, session_id TEXT, staff_name TEXT, scenario TEXT, turn_no INT, customer_question TEXT, staff_answer TEXT, answer_source TEXT, created_at TIMESTAMPTZ DEFAULT now());"""
+CREATE TABLE IF NOT EXISTS ai_reception_sim_logs (id BIGSERIAL PRIMARY KEY, branch_code TEXT, session_id TEXT, staff_name TEXT, scenario TEXT, turn_no INT, customer_question TEXT, staff_answer TEXT, answer_source TEXT, created_at TIMESTAMPTZ DEFAULT now());
+ALTER TABLE ai_reception_sim_logs ADD COLUMN IF NOT EXISTS score INT;
+ALTER TABLE ai_reception_sim_logs ADD COLUMN IF NOT EXISTS score_comment TEXT;"""
 
 # ตัวอย่างคำถามลูกค้าจริง แยกหัวข้อ (สร้างด้วย tools/extract_ai_customer_samples.py — เก็บนอก repo)
 SAMPLES_PATH = os.path.join(OUT_DIR, "AI_Reception_Customer_Samples.json")
@@ -24,6 +27,19 @@ const b = $input.first().json.body || {};
 const branch = String(b.branch_code || 'SCY06').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'SCY06';
 const question = String(b.question || '').slice(0, 500);
 const DDL = `__DDL__`;
+// รายงานการเข้าใช้ + คะแนน (หน้า AiSimReportPage): ดึงแถวดิบตามช่วงวันที่ แล้วให้หน้าเว็บสรุปรายพนักงานเอง
+if (String(b.action || '') === 'sim_report') {
+  const isDate = (v) => String(v || '').length === 10 && String(v).split('-').length === 3 && String(v).split('-').every(x => x !== '' && !isNaN(Number(x)));
+  const from = isDate(b.date_from) ? String(b.date_from) : '';
+  const to = isDate(b.date_to) ? String(b.date_to) : '';
+  const rq = `${DDL}
+SELECT id, branch_code, session_id, staff_name, scenario, turn_no, customer_question, staff_answer, answer_source, score, score_comment,
+  to_char(created_at AT TIME ZONE 'Asia/Bangkok', 'YYYY-MM-DD HH24:MI') AS created_at
+FROM ai_reception_sim_logs
+WHERE 1 = 1 ${from ? `AND (created_at AT TIME ZONE 'Asia/Bangkok')::date >= '${from}'` : ''} ${to ? `AND (created_at AT TIME ZONE 'Asia/Bangkok')::date <= '${to}'` : ''}
+ORDER BY id DESC LIMIT 5000;`;
+  return [{ json: { query: rq, action: 'sim_report' } }];
+}
 const query = `${DDL}
 WITH g AS (
   SELECT COALESCE(
@@ -92,18 +108,32 @@ if (ctx.action === 'sim_next') {
   const main = shuffle(SAMPLES[topicKey] || []).slice(0, 14);
   const others = shuffle(Object.keys(SAMPLES).filter(k => k !== topicKey).flatMap(k => shuffle(SAMPLES[k]).slice(0, 2))).slice(0, 14);
   const turn = (ctx.history || []).filter(h => h && h.role === 'customer').length;
+  // ข้อมูลอ้างอิงของร้าน (ราคารุ่นที่ลูกค้าสนใจ + FAQ) ใช้ตรวจความถูกต้องของคำตอบพนักงานตอนให้คะแนนเท่านั้น
+  const refPrices = prices.filter(p => scenario.includes(`รถที่สนใจ: ${p.brand} ${p.series}`)).slice(0, 30);
+  const refLines = refPrices.map(p => `${p.series} รุ่นย่อย ${p.type}${p.model ? ' [' + p.model + ']' : ''} | ราคาเงินสด ${fmt(p.cash_price !== null ? p.cash_price : p.list_price)} บาท | สี: ${p.colors || '-'}`).join(NL);
   const simSystem = `นี่คือแบบฝึกหัดของร้าน${shop} (ร้านจำหน่ายและศูนย์บริการรถจักรยานยนต์) คุณสวมบทเป็น "ลูกค้า" ที่เดินเข้ามาในร้าน คุยด้วยเสียงกับ "พนักงานขาย" ของร้าน (ข้อความฝั่ง user คือคำตอบของพนักงาน) เป้าหมายคือให้พนักงานได้ตอบคำถามแบบที่ลูกค้าจริงถาม เพื่อเก็บคำตอบของพนักงานไว้
 สถานการณ์ของคุณ: ${scenario}
 
 กติกา (สำคัญ):
 - พูดเป็นลูกค้าเท่านั้น ถามครั้งละ 1 คำถาม สั้น ๆ แบบภาษาพูด 1-2 ประโยค ลงท้าย "ครับ" ห้ามใช้ markdown หรืออีโมจิ
 - ใช้แนวคำถามและสำนวนแบบลูกค้าจริงตามตัวอย่างด้านล่าง (ปรับให้เข้ากับสถานการณ์ของคุณ ไม่ต้องลอกทั้งประโยค) ห้ามเอ่ยชื่อบุคคล เบอร์โทร หรือเลขทะเบียนที่อยู่ในตัวอย่าง
-- ประโยคแรกของการสนทนา: ทักทายและแนะนำตัวว่าเป็นลูกค้าสั้น ๆ ตามลักษณะลูกค้าในสถานการณ์ (เช่น "สวัสดีครับ ผมเป็นลูกค้าครับ ทำงานโรงงานแถวนี้ สนใจ...") แล้วถามคำถามแรกต่อเลยในคราวเดียว ครั้งต่อ ๆ ไปไม่ต้องแนะนำตัวซ้ำ
+- ประโยคแรกของการสนทนา: ทักทายและแนะนำตัวว่าเป็นลูกค้าสั้น ๆ ตามลักษณะลูกค้าในสถานการณ์ (เช่น "สวัสดีครับ ผมเป็นลูกค้าครับ..." ตามด้วยอาชีพหรือสถานะตามสถานการณ์เท่านั้น ห้ามแต่งอาชีพอื่นเพิ่ม) แล้วถามคำถามแรกต่อเลยในคราวเดียว ครั้งต่อ ๆ ไปไม่ต้องแนะนำตัวซ้ำ
 - เริ่มจากหัวข้อหลัก แล้วถามต่อยอดจากคำตอบของพนักงาน ถ้าพนักงานตอบไม่ชัด ไม่ครบ หรือเลี่ยง ให้ถามซ้ำให้ชัดขึ้นแบบลูกค้าที่อยากรู้จริง แล้วค่อยขยับไปเรื่องใกล้เคียงที่ลูกค้ามักถามต่อ เช่น เงินดาวน์ ค่างวด เอกสาร ของแถม สี มีรถพร้อมส่งไหม วันรับรถ ป้ายทะเบียน
 - ถ้าพนักงานถามกลับ (เช่น อาชีพ รายได้ งบประมาณ) ให้ตอบสั้น ๆ ตามลักษณะลูกค้าในสถานการณ์ แล้วถามคำถามถัดไปในประโยคเดียวกัน
 - ห้ามตอบคำถามแทนพนักงาน ห้ามให้ข้อมูลร้าน ห้ามสอน ชม ติ หรือให้คะแนนพนักงาน ห้ามออกนอกบทลูกค้า
 - ตอนนี้ถามไปแล้ว ${turn} คำถาม: เมื่อถามครบประมาณ 5-6 คำถาม หรือได้ข้อมูลพอแล้ว ให้กล่าวขอบคุณปิดการสนทนาแบบลูกค้า (เช่น ขอกลับไปคิดดูก่อน หรือเดี๋ยวเข้ามาใหม่) แล้วตั้ง done เป็น true${turn >= 7 ? ' — ครั้งนี้ต้องปิดการสนทนาเลย' : ''}
-- ตอบกลับเป็น JSON เท่านั้น รูปแบบ {"say": "ประโยคที่ลูกค้าพูด", "done": false}
+- ตอบกลับเป็น JSON เท่านั้น รูปแบบ {"say": "ประโยคที่ลูกค้าพูด", "done": false, "score": null, "comment": ""}
+
+การให้คะแนน (ระบบเก็บไว้เบื้องหลัง ลูกค้าไม่รู้ ห้ามพูดถึงคะแนนหรือข้อมูลอ้างอิงใน say):
+- score = คะแนน 0-10 (จำนวนเต็ม) ของ "คำตอบล่าสุดของพนักงาน" ต่อคำถามก่อนหน้าของลูกค้า ถ้ายังไม่มีคำตอบของพนักงาน (ประโยคแรก) ให้ใส่ null
+- เกณฑ์: ตอบตรงคำถาม 4 คะแนน, ข้อมูลครบและชัดเจน (ตัวเลข/เงื่อนไข/ขั้นตอน) 3 คะแนน, สุภาพเป็นมิตร 1 คะแนน, ชวนคุยต่อหรือพยายามปิดการขาย (ถามความต้องการ เสนอทางเลือก ชวนจอง/ทดลอง) 2 คะแนน
+- ตอบไม่ตรงคำถาม เลี่ยง หรือตอบสั้นจนลูกค้าไม่ได้ข้อมูล ให้ไม่เกิน 3 คะแนน ถ้าคำตอบขัดกับ "ข้อมูลอ้างอิงของร้าน" อย่างชัดเจน (เช่น ราคาผิด) ให้หักคะแนนและระบุใน comment เรื่องที่ไม่มีในข้อมูลอ้างอิง (เช่น ดาวน์ ค่างวด ของแถม) ไม่ต้องตรวจความถูกต้อง ให้ดูแค่ความชัดเจน
+- คำตอบมาจากการแปลงเสียงเป็นข้อความ อาจสะกดเพี้ยน ไม่ต้องหักคะแนนเรื่องตัวสะกด
+- comment = เหตุผลสั้น ๆ 1 ประโยค บอกจุดเด่นหรือสิ่งที่ควรเพิ่ม (ถ้า score เป็น null ให้เว้นว่าง)
+
+ข้อมูลอ้างอิงของร้าน (ใช้ตรวจคำตอบเท่านั้น ลูกค้าไม่รู้ข้อมูลนี้):
+${refLines || '(ไม่มีข้อมูลราคาของรุ่นนี้)'}
+${faqLines ? 'เรื่องทั่วไป:' + NL + faqLines : ''}
 
 ตัวอย่างคำถามจากลูกค้าจริง — หัวข้อหลัก (${topicKey || '-'}):
 ${main.map(m => '- ' + m).join(NL) || '-'}
@@ -117,7 +147,7 @@ ${others.map(m => '- ' + m).join(NL) || '-'}`;
     else if (h.role === 'staff') msgs.push({ role: 'user', content: String(h.content).slice(0, 2000) });
   }
   const simModel = 'gpt-4.1-mini';
-  return [{ json: { payload: { model: simModel, temperature: 0.9, max_tokens: 250, response_format: { type: 'json_object' }, messages: msgs }, model: simModel, scenario, turn } }];
+  return [{ json: { payload: { model: simModel, temperature: 0.8, max_tokens: 350, response_format: { type: 'json_object' }, messages: msgs }, model: simModel, scenario, turn } }];
 }
 const system = `คุณคือ "${aiName}" มาสคอตเด็กผู้ชายใส่หมวกกันน็อก เป็นพนักงานต้อนรับ AI ของ${shop} (ร้านจำหน่ายและศูนย์บริการรถจักรยานยนต์) ยืนอยู่หน้าร้าน คุยกับลูกค้าด้วยเสียง
 วันนี้: ${today}
@@ -159,14 +189,19 @@ const q = (s) => "'" + String(s || '').split(String.fromCharCode(36)).join('').r
 if (ctx.action === 'sim_next') {
   const bp = $('Build Payload').first().json;
   let say = ''; let done = false;
-  try { const j = JSON.parse(String(res.choices[0].message.content || '').trim()); say = String(j.say || '').trim(); done = j.done === true || j.done === 'true'; } catch (e) { say = ''; }
+  let score = null; let comment = '';
+  try {
+    const j = JSON.parse(String(res.choices[0].message.content || '').trim()); say = String(j.say || '').trim(); done = j.done === true || j.done === 'true';
+    const n = Number(j.score); if (ctx.staff_answer && j.score !== null && j.score !== '' && !isNaN(n)) score = Math.max(0, Math.min(10, Math.round(n)));
+    comment = score === null ? '' : String(j.comment || '').trim().slice(0, 500);
+  } catch (e) { say = ''; }
   say = say.replace(/[*#_`]/g, '').split(' ').filter(Boolean).join(' ');
   const error = !say;
   if (bp.turn >= 8) done = true;
   const query = ctx.staff_answer
-    ? `INSERT INTO ai_reception_sim_logs (branch_code, session_id, staff_name, scenario, turn_no, customer_question, staff_answer, answer_source) VALUES (${q(ctx.branch)}, ${q(ctx.session_id)}, ${q(ctx.staff_name)}, ${q(bp.scenario)}, ${Math.max(1, Math.floor(bp.turn))}, ${q(ctx.last_question)}, ${q(ctx.staff_answer)}, ${q(ctx.answer_source)}) RETURNING id;`
+    ? `INSERT INTO ai_reception_sim_logs (branch_code, session_id, staff_name, scenario, turn_no, customer_question, staff_answer, answer_source, score, score_comment) VALUES (${q(ctx.branch)}, ${q(ctx.session_id)}, ${q(ctx.staff_name)}, ${q(bp.scenario)}, ${Math.max(1, Math.floor(bp.turn))}, ${q(ctx.last_question)}, ${q(ctx.staff_answer)}, ${q(ctx.answer_source)}, ${score === null ? 'NULL' : score}, ${q(comment)}) RETURNING id;`
     : 'SELECT 1 AS id;';
-  return [{ json: { out: { say, done, scenario: bp.scenario, error }, query } }];
+  return [{ json: { out: { say, done, scenario: bp.scenario, error, score, comment }, query } }];
 }
 let answer = ''; let show = [];
 try {
@@ -199,6 +234,12 @@ nodes = [
     {"parameters": {"jsCode": BUILD_SQL}, "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [220, 0], "id": nid(), "name": "Build Context SQL"},
     {"parameters": {"operation": "executeQuery", "query": "{{ $json.query }}", "options": {}}, "type": "n8n-nodes-base.postgres", "typeVersion": 2.5,
      "position": [440, 0], "id": nid(), "name": "PG Context", "alwaysOutputData": True, "credentials": PG},
+    {"parameters": {"conditions": {"options": {"caseSensitive": True, "leftValue": "", "typeValidation": "loose", "version": 2},
+                                   "conditions": [{"id": "is-sim-report", "leftValue": "={{ $('Build Context SQL').first().json.action }}", "rightValue": "sim_report", "operator": {"type": "string", "operation": "equals"}}],
+                                   "combinator": "and"}, "options": {}},
+     "type": "n8n-nodes-base.if", "typeVersion": 2.2, "position": [550, 0], "id": nid(), "name": "Is Report"},
+    {"parameters": {"respondWith": "json", "responseBody": "={{ JSON.stringify($input.all().map(i => i.json)) }}", "options": CORS},
+     "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [660, -200], "id": nid(), "name": "Respond Report", "executeOnce": True},
     {"parameters": {"jsCode": BUILD_PAYLOAD}, "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [660, 0], "id": nid(), "name": "Build Payload"},
     {"parameters": {"method": "POST", "url": "https://api.openai.com/v1/chat/completions", "authentication": "predefinedCredentialType", "nodeCredentialType": "openAiApi",
                     "sendBody": True, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.payload) }}", "options": {"timeout": 30000}},
@@ -211,6 +252,9 @@ nodes = [
 ]
 chain = ["Webhook AI Reception", "Build Context SQL", "PG Context", "Build Payload", "OpenAI Chat", "Parse Answer", "PG Log", "Respond Answer"]
 connections = {a: {"main": [[{"node": b, "type": "main", "index": 0}]]} for a, b in zip(chain, chain[1:])}
+# PG Context → Is Report → (true) Respond Report / (false) Build Payload
+connections["PG Context"] = {"main": [[{"node": "Is Report", "type": "main", "index": 0}]]}
+connections["Is Report"] = {"main": [[{"node": "Respond Report", "type": "main", "index": 0}], [{"node": "Build Payload", "type": "main", "index": 0}]]}
 wf = {"name": "AI Reception API", "nodes": nodes, "connections": connections, "active": False, "settings": {"executionOrder": "v1"}, "pinData": {}}
 
 with open(os.path.join(OUT_DIR, "AI_Reception_API_Workflow.json"), "w", encoding="utf-8") as f:
@@ -225,4 +269,7 @@ with open(os.path.join(OUT_DIR, "AI_Reception_DDL.sql"), "w", encoding="utf-8") 
 # ตรวจ: ต้องไม่มีตัวอักษร dollar ใน SQL ที่ generate (นอก template ของ JS)
 sql_part = BUILD_SQL.split("const query = `")[1].split("`;")[0].replace("${DDL}", "").replace("${branch}", "")
 assert "$" not in sql_part, "พบ $ ใน SQL"
+rq_part = BUILD_SQL.split("const rq = `")[1].split("`;")[0]
+import re as _re
+assert "$" not in _re.sub(r"\$\{[^}]*`[^`]*`[^}]*\}|\$\{DDL\}|\$\{from\}|\$\{to\}", "", rq_part), "พบ $ ใน SQL รายงาน"
 print("written:", os.path.join(OUT_DIR, "AI_Reception_API_Workflow.json"), len(json.dumps(wf, ensure_ascii=False)), "bytes")

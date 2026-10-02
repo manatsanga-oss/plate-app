@@ -153,6 +153,7 @@ import WhtRefundPage from "./pages/WhtRefundPage";
 import PartWholesalePaymentPage from "./pages/PartWholesalePaymentPage";
 import CustomerRefundPage from "./pages/CustomerRefundPage";
 import CrmEventPage from "./pages/CrmEventPage";
+import AiSimReportPage from "./pages/AiSimReportPage";
 import CrmReplyPage from "./pages/CrmReplyPage";
 import AiReceptionPage from "./pages/AiReceptionPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
@@ -285,6 +286,8 @@ export default function App() {
     if (HR_PAGES.includes(page)) {
       return HR_USERS.includes(currentUser.username);
     }
+    // รายงานฝึกตอบลูกค้า (AI ลูกค้าจำลอง) — เฉพาะผู้ดูแลระบบ + วรุฒ (user 2026-10-02)
+    if (page === "aisimreport") return ["admin", "WARUT"].includes(currentUser.username);
     // เมนู Accounting — เห็นเฉพาะ admin + WARUT เท่านั้น
     const ACC_USERS = ["admin", "WARUT"];
     if (page === "accounting" || page.startsWith("acc")) {
@@ -547,6 +550,9 @@ export default function App() {
         )}
         {activeMenu === "whtrefund" && canAccess("whtrefund") && (
           <WhtRefundPage currentUser={currentUser} />
+        )}
+        {activeMenu === "aisimreport" && canAccess("aisimreport") && (
+          <AiSimReportPage currentUser={currentUser} />
         )}
         {activeMenu === "crmevent" && canAccess("crmevent") && (
           <CrmEventPage currentUser={currentUser} />
@@ -1135,6 +1141,8 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         }}>
           🤖 ฝึกตอบลูกค้า (AI ลูกค้าจำลอง)
         </button>
+        {/* รายงานการเข้าใช้ + คะแนนการตอบ — เฉพาะ admin + WARUT (กำหนดใน canAccess) */}
+        <MenuItem page="aisimreport" label="📊 รายงานฝึกตอบลูกค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="CRM" pages={["crmevent"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

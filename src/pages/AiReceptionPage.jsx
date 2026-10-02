@@ -90,7 +90,7 @@ function VariantCard({ item, onPick, disabled }) {
       <div className="air-card-img" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#f3f5f8", borderRadius: 10, overflow: "hidden" }}>
         {img && img !== "none" ? <img src={img} alt={item.type} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 13, opacity: .5 }}>{img === "none" ? "ไม่มีรูป" : "กำลังโหลด..."}</span>}
       </div>
-      <div className="air-card-name" style={{ fontWeight: 700, lineHeight: 1.2 }}>{item.type}</div>
+      <div className="air-card-name" style={{ fontWeight: 700, lineHeight: 1.2 }}>{[item.model, item.type].filter(Boolean).join(" ")}</div>
       {item.colors && <div style={{ fontSize: 11, opacity: .7, lineHeight: 1.2, maxHeight: 27, overflow: "hidden" }}>สี: {item.colors}</div>}
       {price && <div className="air-card-price" style={{ color: "#c62828", fontWeight: 700 }}>{price}</div>}
     </button>
@@ -129,6 +129,7 @@ export default function AiReceptionPage() {
   const [simCount, setSimCount] = useState(1);       // ลูกค้าคนที่เท่าไร
   const simRef = useRef({ session: "", scenario: "", history: [], lastQ: "" });
   const stopRef = useRef(false);
+  const [lastScore, setLastScore] = useState(null);  // { score, comment } ของคำตอบล่าสุด (AI ให้คะแนน)
 
   // กะพริบตาแบบสุ่ม
   useEffect(() => {
@@ -216,6 +217,7 @@ export default function AiReceptionPage() {
       const say = String(row?.say || "").trim();
       if (!say) throw new Error("empty");
       st.scenario = row.scenario || st.scenario; st.history = [...history, { role: "customer", content: say }]; st.lastQ = say;
+      setLastScore(ans && row.score !== null && row.score !== undefined ? { score: Number(row.score), comment: String(row.comment || "") } : null);
       setSimDone(!!row.done); setSimTurn(st.history.filter(h => h.role === "customer").length); setHeard("");
       await speak(say);
     } catch {
@@ -226,7 +228,7 @@ export default function AiReceptionPage() {
   function simNewCustomer(first) {
     try { recRef.current?.abort(); } catch { /* ignore */ }
     simRef.current = { session: "m" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7), scenario: "", history: [], lastQ: "" };
-    setSimDone(false); setSimTurn(0); setHeard(""); if (!first) setSimCount(c => c + 1);
+    setSimDone(false); setSimTurn(0); setHeard(""); setLastScore(null); if (!first) setSimCount(c => c + 1);
     simNext("", "");
   }
   // ฟังคำตอบพนักงาน: พูดยาว/เว้นจังหวะได้ — เครื่องตัดเสียงเองเมื่อเงียบ จึงเปิดฟังต่ออัตโนมัติและสะสมข้อความ จนกว่าพนักงานจะกดปุ่มหยุด
@@ -326,6 +328,12 @@ export default function AiReceptionPage() {
           {!sim && heard && <div className="air-heard" style={{ opacity: .75, marginBottom: 6 }}>“{heard}”</div>}
           {answer && <div className="air-answer" style={{ lineHeight: 1.45, background: "rgba(255,255,255,.1)", borderRadius: 18, padding: "12px 20px", display: "inline-block" }}>{answer}</div>}
           {sim && heard && <div className="air-heard" style={{ marginTop: 8, color: "#c8f7c5" }}>คำตอบของคุณ: “{heard}”</div>}
+          {sim && lastScore && mood !== "listening" && (
+            <div className="air-status" style={{ marginTop: 8 }}>
+              <span style={{ background: lastScore.score >= 8 ? "#2e7d32" : lastScore.score >= 5 ? "#ef6c00" : "#c62828", borderRadius: 999, padding: "2px 12px", fontWeight: 700 }}>คะแนนคำตอบที่แล้ว {lastScore.score}/10</span>
+              {lastScore.comment && <span style={{ opacity: .85 }}> {lastScore.comment}</span>}
+            </div>
+          )}
           {(sim || !answer) && statusText && <div className="air-status" style={{ opacity: .7, marginTop: sim ? 6 : 0 }}>{statusText}</div>}
         </div>
       </div>
