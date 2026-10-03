@@ -274,13 +274,27 @@ export function buildDailyCashItems(src, ctx) {
       const exactLine = (Array.isArray(pmsRaw) ? pmsRaw : []).find((p) => Math.abs(num(p.amount) - rp) < 0.01);
       const exactKey = exactLine ? methodKey(exactLine.method) : null;
       const rpSplit = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
+      // ย้ายยอดเงินโอนของมัดจำป้ายแดงออกจาก transfer_by ของใบขาย พร้อมพกชื่อบัญชีไปด้วย (user 2026-10-03: รายงานสรุปรับชำระขึ้น "ไม่ระบุบัญชี" ทั้งที่ใบเสร็จระบุบัญชีของบรรทัดโอน 200)
+      const moveTransfer = (amt, preferLbl) => {
+        if (!(amt > 0)) return;
+        const tb = { ...(split.transfer_by || {}) }; const out = {};
+        let left = amt;
+        const take = (lbl) => { if (left <= 0.004 || !(tb[lbl] > 0)) return; const v = Math.min(tb[lbl], left); tb[lbl] -= v; left -= v; out[lbl] = (out[lbl] || 0) + v; if (tb[lbl] < 0.005) delete tb[lbl]; };
+        if (preferLbl) take(preferLbl);
+        for (const lbl of Object.keys(tb)) take(lbl);
+        if (left > 0.004) out["ไม่ระบุบัญชี"] = (out["ไม่ระบุบัญชี"] || 0) + left;
+        if (Object.keys(tb).length) split.transfer_by = tb; else delete split.transfer_by;
+        rpSplit.transfer_by = out;
+      };
       if (exactKey && (exactKey === "cash" || exactKey === "transfer") && split[exactKey] >= rp) {
         split[exactKey] -= rp; rpSplit[exactKey] = rp;
+        if (exactKey === "transfer") moveTransfer(rp, String(exactLine.account_name || exactLine.account || "").trim() || "ไม่ระบุบัญชี");
       } else {
         const fromCash = Math.min(split.cash, rp);
         split.cash -= fromCash;
         split.transfer -= Math.min(split.transfer, rp - fromCash);
         rpSplit.cash = fromCash; rpSplit.transfer = rp - fromCash;
+        moveTransfer(rp - fromCash, "");
       }
       received -= rp;
       rpItems.push({
