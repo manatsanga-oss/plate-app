@@ -200,7 +200,8 @@ export default function RedPlateDepositPage({ currentUser }) {
                 <label>บัญชีรับโอน</label>
                 <select value={form.account} onChange={(e) => setForm((f) => ({ ...f, account: e.target.value }))} style={inp}>
                   <option value="">— เลือกบัญชี —</option>
-                  {bankAccounts.map((a) => <option key={a.account_id} value={a.account_name}>{a.account_name}{a.bank_name ? ` (${a.bank_name})` : ""}</option>)}
+                  {/* เก็บ "ธนาคาร · เลขที่บัญชี · ชื่อบัญชี" (รูปแบบเดียวกับรับชำระอะไหล่/บริการ) — เดิมเก็บแค่ชื่อบัญชี ซึ่งซ้ำหลายธนาคาร รายงานสรุปรับชำระระบุเลขบัญชีไม่ได้ (user 2026-10-04) */}
+                  {bankAccounts.map((a) => { const v = [a.bank_name, a.account_no, a.account_name].filter(Boolean).join(" · "); return <option key={a.account_id} value={v}>{v}</option>; })}
                 </select>
               </>)}
               <span></span>
