@@ -337,6 +337,22 @@ export function buildDailyCashItems(src, ctx) {
         note: "ทะเบียนป้ายแดง " + (it.red_plate_no || "-") + " · คืนเมื่อคืนป้าย",
       });
     }
+    // มัดจำป้ายแดงที่ชำระด้วย "เงินมัดจำจองรถ" (ยอดชำระ ≤ 0 จึงไม่มีใบเสร็จ/ไม่มี paid_amount) — แยกออกจากยอดมัดจำที่ใช้กับใบขาย
+    //   user 2026-10-04: SCY06-MCSA-2609-00034 มัดจำจอง 1,000 − ป้ายแดง 200 = คืน 800 แต่รายงานไม่มีแถวมัดจำป้ายแดงวิธี "เงินมัดจำ"
+    const rpDep = rpStandaloneAttached ? 0 : Math.min(Math.max(num(it.red_plate_deposit) - rp, 0), Math.max(num(split.deposit), 0));
+    if (rpDep > 0) {
+      split = { ...split, deposit: num(split.deposit) - rpDep };
+      received -= rpDep;
+      const rpSplit2 = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: rpDep, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
+      rpItems.push({
+        kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
+        doc_no: it.red_plate_doc_no || "RPD-" + (it.sale_no || ""), date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
+        customer_name: it.customer_name, seller: it.seller, saleAmount: 0,
+        split: rpSplit2, received: rpDep,
+        branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
+        note: "ทะเบียนป้ายแดง " + (it.red_plate_no || "-") + " · ชำระด้วยเงินมัดจำจองรถ · คืนเมื่อคืนป้าย",
+      });
+    }
     sales.push({
       kind: "sale", category: "รายได้จากการขายรถ",
       doc_no: it.receipt_no || "-", date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
@@ -552,7 +568,23 @@ export function buildDailyCashItems(src, ctx) {
         branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
         note: ["คืนเงินมัดจำ", d.refund_from_account || d.refund_bank, d.refund_note].filter(Boolean).join(" · "),
       }];
-      const used = num(d.deposit_amount) - num(d.refund_amount || d.deposit_amount);
+      let used = num(d.deposit_amount) - num(d.refund_amount || d.deposit_amount);
+      // ส่วนของมัดจำที่ใช้ไปกับ "มัดจำป้ายแดง" ของใบขายนั้น (ใบที่ไม่มีใบ RPD แยก และ paid_amount ไม่ครอบคลุม) → แถวมัดจำป้ายแดง วิธีเงินมัดจำ
+      const sl = saleNo ? items.find((x) => String(x.sale_no) === saleNo) : null;
+      if (sl && used > 0 && num(sl.red_plate_deposit) > 0 && !standaloneRpDocs.has(String(sl.red_plate_doc_no || ""))) {
+        const rpPart = Math.min(used, Math.max(num(sl.red_plate_deposit) - Math.min(num(sl.red_plate_deposit), num(sl.paid_amount)), 0));
+        if (rpPart > 0) {
+          used -= rpPart;
+          out.push({
+            kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
+            doc_no: sl.red_plate_doc_no || "RPD-" + saleNo, date: String(d.refunded_at).slice(0, 10), ref_no: saleNo,
+            customer_name: d.customer_name, seller: d.refunded_by || "", saleAmount: 0,
+            split: { cash: 0, transfer: 0, card: 0, finance: 0, deposit: rpPart, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 }, received: rpPart,
+            branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
+            note: "ทะเบียนป้ายแดง " + (sl.red_plate_no || "-") + ` · ชำระด้วยเงินมัดจำจองรถ ${d.deposit_no} · คืนเมื่อคืนป้าย`,
+          });
+        }
+      }
       if (used > 0 && saleNo) {
         const sp2 = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: used, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
         out.push({
