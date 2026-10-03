@@ -807,13 +807,26 @@ export default function RetailSalePage({ currentUser }) {
   }
 
   async function lookup(kwOverride) {
-    const kw = text(kwOverride != null ? kwOverride : keyword);
+    let kw = text(kwOverride != null ? kwOverride : keyword);
     setShowSuggest(false);
-    if (!kw) { setMessage("❌ กรอกหมายเลขเครื่อง / หมายเลขตัวถัง"); return; }
+    if (!kw) { setMessage("❌ กรอกหมายเลขเครื่อง / หมายเลขตัวถัง / เลขที่ใบขาย"); return; }
     setLoading(true);
     setMessage("");
     reset();
     try {
+      // ค้นด้วยเลขที่ใบขาย (เช่น SCY01-MCSA-2609-00004) — user 2026-10-03: หาใบขายในเดือนตามเลข YYMM แล้วใช้เลขเครื่องไปค้นต่อ (ไม่ต้องแก้ workflow)
+      const mSale = kw.toUpperCase().match(/^([A-Z0-9]+)-MCSA-(\d{2})(\d{2})-(\d+)$/);
+      if (mSale) {
+        const saleNo = kw.toUpperCase();
+        const y = 2000 + Number(mSale[2]), m = Number(mSale[3]);
+        const from = `${y}-${String(m).padStart(2, "0")}-01`;
+        const to = `${y}-${String(m).padStart(2, "0")}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
+        const list = await apiPost({ action: "list_retail_sales", date_from: from, date_to: to, limit: 5000 });
+        const hit = (Array.isArray(list) ? list : []).find((x) => String(x.invoice_no || "").toUpperCase() === saleNo);
+        if (!hit || !(hit.engine_no || hit.chassis_no)) { setMessage(`ไม่พบใบขาย ${saleNo} (ตรวจเลขที่ หรือใบขายอาจอยู่คนละเดือนกับเลข)`); setLoading(false); return; }
+        kw = text(hit.engine_no || hit.chassis_no);
+        setKeyword(kw);
+      }
       const row = await apiPost({ action: "get_vehicle", keyword: kw });
       if (!row || (!row.stock_id && !row.engine_no)) {
         setMessage("ไม่พบรถคันนี้ในสต๊อก (อาจขายไปแล้ว หรือยังไม่ได้รับเข้า)");
@@ -1497,7 +1510,7 @@ ${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หม�
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
             style={{ flex: 1, padding: "10px 12px", fontSize: 15, border: "1px solid #d0d5dd", borderRadius: 8 }}
-            placeholder="พิมพ์บางส่วนของเลขเครื่อง/เลขถัง แล้วเลือกจากรายการ"
+            placeholder="เลขเครื่อง / เลขถัง (พิมพ์บางส่วนแล้วเลือก) หรือเลขที่ใบขาย เช่น SCY01-MCSA-2609-00004"
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && lookup()}
