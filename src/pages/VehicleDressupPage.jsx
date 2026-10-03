@@ -146,7 +146,10 @@ export default function VehicleDressupPage({ currentUser }) {
     } catch (e) { setMessage("❌ " + (e.message || e)); }
   }
 
-  const visRows = useMemo(() => rows.filter((r) => isAdmin || String(r.branch_code || "").toUpperCase() === myBranch), [rows, isAdmin, myBranch]);
+  // ค่าเริ่มต้นซ่อนรายการที่ยกเลิก/ถูกแทนที่ (user 2026-10-03) — ติ๊ก "แสดงที่ยกเลิก" เพื่อดู
+  const [showCancelled, setShowCancelled] = useState(false);
+  const visRows = useMemo(() => rows.filter((r) => (isAdmin || String(r.branch_code || "").toUpperCase() === myBranch) && (showCancelled || !["cancelled", "replaced"].includes(r.status))), [rows, isAdmin, myBranch, showCancelled]);
+  const hiddenCount = useMemo(() => rows.filter((r) => (isAdmin || String(r.branch_code || "").toUpperCase() === myBranch) && ["cancelled", "replaced"].includes(r.status)).length, [rows, isAdmin, myBranch]);
 
   // ---- พิมพ์ (user 2026-09-24): ใบรายการอะไหล่แต่งรถรายคัน / สรุปรถแต่งทั้งรายการ ----
   const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -328,7 +331,10 @@ th,td{border:1px solid #999;padding:4px 6px;font-size:12px;vertical-align:top}th
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <div style={{ fontWeight: 700 }}>📋 รถแต่งที่บันทึกไว้ ({visRows.length})</div>
-          <div style={{ display: "flex", gap: 6 }}>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <label style={{ fontSize: 12, color: "#6b7280", cursor: "pointer", marginRight: 6 }}>
+              <input type="checkbox" checked={showCancelled} onChange={(e) => setShowCancelled(e.target.checked)} style={{ marginRight: 4 }} />แสดงที่ยกเลิก{hiddenCount ? ` (${hiddenCount})` : ""}
+            </label>
             <button onClick={printList} disabled={loading} title="พิมพ์สรุปรถแต่งที่รอใช้ขายทั้งหมด" style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid #072d6b", background: "#072d6b", color: "#fff", cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>🖨 พิมพ์รายการ</button>
             <button onClick={load} disabled={loading} style={{ padding: "5px 14px", borderRadius: 8, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer" }}>{loading ? "⏳" : "🔄"}</button>
           </div>
