@@ -714,11 +714,24 @@ export default function ExpenseRecordPage({ currentUser }) {
     setFeeOn(false); setFeeAmount("");
     setPayDialog(true);
   }
-  function openEditPayDialog(g) {
-    if (!g.paid_doc_no) return;
+  async function openEditPayDialog(g0) {
+    if (!g0.paid_doc_no) return;
+    // ⚠️ กลุ่มบนหน้าจอมีเฉพาะใบที่อยู่ในช่วงวันที่ที่โหลด — ใบจ่ายเดียวกันอาจมีใบลงวันที่อื่นที่ไม่ได้โหลด
+    //   ถ้าใช้ยอดจากกลุ่มบนจอ breakdown จะถูกเขียนทับด้วยยอดบางส่วน (2026-10-03: EPAY-260905-002 3 ใบ 2,247.28 กลายเป็น 967.28)
+    //   → ดึงทุกใบของใบจ่ายนี้จาก backend ก่อน (op list + paid_doc_no) แล้วใช้ยอดรวมจริง
+    let g = g0;
+    try {
+      const r = await fetch(ACC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "expense_record", op: "list", paid_doc_no: g0.paid_doc_no }) });
+      const d = await r.json();
+      const docs = (Array.isArray(d) ? d : []).filter(x => x && x.paid_doc_no === g0.paid_doc_no && x.status === "paid");
+      if (docs.length) {
+        g = { ...g0, items: docs, total: docs.reduce((s2, x) => s2 + Number(x.total || 0), 0), net: docs.reduce((s2, x) => s2 + Number(x.net_to_pay || x.total || 0), 0), wht: docs.reduce((s2, x) => s2 + Number(x.wht_amount || 0), 0) };
+        if (docs.length !== (g0.items || []).length) setMessage(`ℹ️ ใบจ่าย ${g0.paid_doc_no} มี ${docs.length} ใบ (บนจอเห็น ${(g0.items || []).length} ใบ เพราะช่วงวันที่) — ใช้ยอดรวมจริง ${fmt(g.net)} บาท`);
+      }
+    } catch { /* workflow เก่ายังไม่รองรับ paid_doc_no → ใช้กลุ่มบนจอ */ }
     const total = Number(g.net || g.total || 0);
     setEditPayDocNo(g.paid_doc_no);
-    setEditTotalRequired(total);  // ใช้ยอดของใบจ่ายที่กำลังแก้
+    setEditTotalRequired(total);  // ใช้ยอดของใบจ่ายที่กำลังแก้ (ทุกใบในใบจ่าย)
     // แปลงเป็น YYYY-MM-DD โดยใช้ local timezone (กัน UTC shift)
     const toLocalISO = (v) => {
       if (!v) return todayISO();
