@@ -69,6 +69,7 @@ export default function GeneralReceiptPivotPage() {
   const [accounts, setAccounts] = useState([]);
   const [open, setOpen] = useState({}); // key → bool (collapsed when false); default เปิดถึงระดับสาขา
   const [showDetail, setShowDetail] = useState(false);
+  const [viewMode, setViewMode] = useState("detail"); // detail = กลุ่ม→ประเภท→สาขา→วิธีรับ · method = กลุ่ม→วิธีรับชำระ (user 2026-10-04: สรุปเป็นวิธีการรับชำระ)
   const [drill, setDrill] = useState(null); // { title, rows } — กดแถววิธีรับเงินเพื่อดูรายการ (user 2026-10-03)
 
   useEffect(() => {
@@ -140,12 +141,29 @@ export default function GeneralReceiptPivotPage() {
   const grand = useMemo(() => Object.values(tree).reduce((s, g) => s + g.amount, 0), [tree]);
   const grandIn = useMemo(() => Object.entries(tree).filter(([g]) => !g.startsWith("จ่ายออก")).reduce((s, [, g]) => s + g.amount, 0), [tree]);
 
+  // สรุปตามวิธีรับชำระ: กลุ่ม → วิธีรับเงิน (รวมทุกประเภท/สาขา) + แถวบนสุด "รวมรับเข้าทุกกลุ่ม" (ไม่รวมจ่ายออก)
+  const methodTree = useMemo(() => {
+    const mt = {}; const ALL = "รวมรับเข้าทุกกลุ่ม (ไม่รวมจ่ายออก)";
+    const add = (g, m, M) => { const G = (mt[g] = mt[g] || { amount: 0, count: 0, children: {} }); const X = (G.children[m] = G.children[m] || { amount: 0, count: 0, rows: [] }); G.amount += M.amount; X.amount += M.amount; X.count += M.count; G.count += M.count; X.rows.push(...M.rows); };
+    for (const [g, G] of Object.entries(tree)) for (const T of Object.values(G.children)) for (const B of Object.values(T.children)) for (const [m, M] of Object.entries(B.children)) { add(g, m, M); if (!g.startsWith("จ่ายออก")) add(ALL, m, M); }
+    return { mt, ALL };
+  }, [tree]);
   const isOpen = (key, depth) => (open[key] === undefined ? depth < 2 : open[key]);
   const toggle = (key) => setOpen((o) => ({ ...o, [key]: !isOpen(key, 9) }));
   const sortedGroups = Object.keys(tree).sort((a, b) => (GROUP_ORDER.indexOf(a) + 100) % 100 - (GROUP_ORDER.indexOf(b) + 100) % 100 || a.localeCompare(b, "th"));
 
   function rowsFlat() {
     const out = [];
+    if (viewMode === "method") {
+      const { mt, ALL } = methodTree;
+      for (const g of [ALL, ...sortedGroups]) {
+        const G = mt[g]; if (!G) continue;
+        const kG = "M|" + g; out.push({ depth: 0, key: kG, label: g, amount: G.amount, count: G.count });
+        if (!isOpen(kG, 0)) continue;
+        for (const m of Object.keys(G.children).sort((a, b2) => a.localeCompare(b2, "th"))) { const M = G.children[m]; out.push({ depth: 1, key: kG + "|" + m, label: m, amount: M.amount, count: M.count, leaf: true, rows: M.rows, path: g }); }
+      }
+      return out;
+    }
     for (const g of sortedGroups) {
       const G = tree[g]; out.push({ depth: 0, key: g, label: g, ...G });
       if (!isOpen(g, 0)) continue;
@@ -164,6 +182,14 @@ export default function GeneralReceiptPivotPage() {
   const flat = rowsFlat();
 
   function exportCsv() {
+    if (viewMode === "method") {
+      const { mt, ALL } = methodTree;
+      const ls = [["กลุ่มรับชำระ", "วิธีรับเงิน", "จำนวนรายการ", "ยอดเงิน"]];
+      for (const g of [ALL, ...sortedGroups]) if (mt[g]) for (const [m, M] of Object.entries(mt[g].children).sort()) ls.push([g, m, M.count, M.amount.toFixed(2)]);
+      const csv2 = "\uFEFF" + ls.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+      const a2 = document.createElement("a"); a2.href = URL.createObjectURL(new Blob([csv2], { type: "text/csv;charset=utf-8" })); a2.download = `สรุปรับชำระตามวิธีรับเงิน_${ym}${branch ? "_" + branch : ""}.csv`; a2.click();
+      return;
+    }
     const lines = [["กลุ่มรับชำระ", "ประเภท", "สาขา", "วิธีรับเงิน", "จำนวนรายการ", "ยอดเงิน"]];
     for (const g of sortedGroups) for (const [ty, T] of Object.entries(tree[g].children)) for (const [b, B] of Object.entries(T.children)) for (const [m, M] of Object.entries(B.children)) lines.push([g, ty, b, m, M.count, M.amount.toFixed(2)]);
     const csv = "﻿" + lines.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
@@ -173,6 +199,14 @@ export default function GeneralReceiptPivotPage() {
     const w = window.open("", "_blank"); if (!w) return;
     const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
     const rows = [];
+    if (viewMode === "method") {
+      const { mt, ALL } = methodTree;
+      for (const g of [ALL, ...sortedGroups]) {
+        const G = mt[g]; if (!G) continue;
+        rows.push(`<tr class="g"><td colspan="3">${esc(g)}</td><td class="r">${fmt(G.amount)}</td></tr>`);
+        for (const [m, M] of Object.entries(G.children).sort()) rows.push(`<tr class="m"><td></td><td colspan="2">${esc(m)}</td><td class="r">${fmt(M.amount)}</td></tr>`);
+      }
+    } else
     for (const g of sortedGroups) {
       const G = tree[g]; rows.push(`<tr class="g"><td>${esc(g)}</td><td></td><td></td><td class="r">${fmt(G.amount)}</td></tr>`);
       for (const [ty, T] of Object.entries(G.children).sort()) {
@@ -209,6 +243,11 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
         <div><div style={{ fontSize: 12, color: "#4b5563", fontWeight: 600 }}>สาขา</div>
           <select value={branch} onChange={(e) => setBranch(e.target.value)} style={inp}><option value="">ทุกสาขา</option>{branches.map((b) => <option key={b} value={b}>{b}</option>)}</select></div>
         <button onClick={load} disabled={loading} style={btn("#0369a1")}>{loading ? "กำลังโหลด…" : "🔄 แสดง"}</button>
+        <div><div style={{ fontSize: 12, color: "#4b5563", fontWeight: 600 }}>มุมมอง</div>
+          <select value={viewMode} onChange={(e) => { setViewMode(e.target.value); setOpen({}); }} style={inp}>
+            <option value="detail">ละเอียด (ประเภท → สาขา → วิธีรับเงิน)</option>
+            <option value="method">สรุปตามวิธีรับชำระ</option>
+          </select></div>
         <button onClick={() => setOpen({})} style={btn("#6b7280")}>ย่อ/ขยายค่าเริ่มต้น</button>
         <button onClick={() => { const o = {}; for (const r of flat) o[r.key] = true; for (const g of sortedGroups) { o[g] = true; for (const [ty, T] of Object.entries(tree[g].children)) { o[g + "|" + ty] = true; for (const b of Object.keys(T.children)) o[g + "|" + ty + "|" + b] = true; } } setOpen(o); }} style={btn("#6b7280")}>ขยายทั้งหมด</button>
         <button onClick={exportCsv} disabled={!flat.length} style={btn("#16a34a")}>⬇️ CSV</button>
