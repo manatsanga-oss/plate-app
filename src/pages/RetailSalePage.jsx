@@ -821,7 +821,9 @@ export default function RetailSalePage({ currentUser }) {
         const y = 2000 + Number(mSale[2]), m = Number(mSale[3]);
         const from = `${y}-${String(m).padStart(2, "0")}-01`;
         const to = `${y}-${String(m).padStart(2, "0")}-${String(new Date(y, m, 0).getDate()).padStart(2, "0")}`;
-        const list = await apiPost({ action: "list_retail_sales", date_from: from, date_to: to, limit: 5000 });
+        // ⚠️ apiPost คืนเฉพาะแถวแรกของ array — รายการใบขายต้อง fetch ตรงเพื่อให้ได้ทั้งชุด
+        const listRes = await fetch(RETAIL_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_retail_sales", date_from: from, date_to: to, limit: 5000 }) });
+        const list = await listRes.json().catch(() => []);
         const hit = (Array.isArray(list) ? list : []).find((x) => String(x.invoice_no || "").toUpperCase() === saleNo);
         if (!hit || !(hit.engine_no || hit.chassis_no)) { setMessage(`ไม่พบใบขาย ${saleNo} (ตรวจเลขที่ หรือใบขายอาจอยู่คนละเดือนกับเลข)`); setLoading(false); return; }
         kw = text(hit.engine_no || hit.chassis_no);
