@@ -46,7 +46,14 @@ export default function CarPaymentReportNewPage() {
         const rd = await rr.json(); const arr = typeof rd?.listjson === "string" ? JSON.parse(rd.listjson) : [];
         for (const x of arr) rfMap.set(String(x.ref_doc_no), (rfMap.get(String(x.ref_doc_no)) || 0) + Number(x.refund_amount || 0));
       } catch { /* ไม่มี workflow ก็ข้าม */ }
-      setRows(Array.isArray(data) ? data.map((x) => ({ ...x, cust_refund_amount: rfMap.get(String(x.invoice_no)) || 0 })) : []);
+      // มัดจำป้ายแดงแบบ "ติดป้ายทีหลัง" (standalone) เก็บเงินแยกใบ ไม่อยู่ใน paid_amount ของใบขาย → ห้ามหัก 200 ซ้ำ (user 2026-10-03: SCY01-MCSA-2608-00145 / SCY04-MCSA-2609-00001 ขึ้นไม่ครบ 200)
+      const standaloneRp = new Set();
+      try {
+        const rr2 = await fetch(RETAIL_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_red_plate_deposits", status: "all", date_from: dateFrom, date_to: todayISO() }) });
+        const rd2 = await rr2.json();
+        for (const d of (Array.isArray(rd2) ? rd2 : [])) if (d && d.deposit_no && d.standalone === true && d.status !== "cancelled") standaloneRp.add(String(d.deposit_no));
+      } catch { /* โหลดไม่ได้ → หักตามเดิม */ }
+      setRows(Array.isArray(data) ? data.map((x) => ({ ...x, cust_refund_amount: rfMap.get(String(x.invoice_no)) || 0, rp_standalone: standaloneRp.has(String(x.red_plate_doc_no || "")) })) : []);
       if (!Array.isArray(data) || !data.length) setMessage("ไม่พบใบขายในช่วงวันที่ที่เลือก");
     } catch (e) {
       setRows([]); setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e.message || e).slice(0, 100));
@@ -63,7 +70,7 @@ export default function CarPaymentReportNewPage() {
   //   3) เงินดาวน์/ค่างวดออกแทน (ของแถมร้านออกให้ = ถือว่าเคลียร์ยอดส่วนนั้นแล้ว)
   const saleTotal = (r) => num(r.net_car_price || r.car_price);
   // มัดจำป้ายแดง (red_plate_deposit) รวมอยู่ใน paid_amount แต่ไม่ใช่ค่ารถ (คืนลูกค้าภายหลัง) → หักออกก่อนเทียบยอดขาย
-  const storePaid = (r) => (r.payment_status === "paid" ? Math.max(num(r.paid_amount) - num(r.red_plate_deposit) - num(r.cust_refund_amount), 0) : 0);
+  const storePaid = (r) => (r.payment_status === "paid" ? Math.max(num(r.paid_amount) - (r.rp_standalone ? 0 : num(r.red_plate_deposit)) - num(r.cust_refund_amount), 0) : 0);
   const depositOf = (r) => num(r.booking_deposit);          // เงินมัดจำจอง — ลูกค้าจ่ายไว้ตอนจอง หักจากยอดเก็บหน้าร้านแล้ว
   const ftPaid = (r) => num(r.ft_vehicle_paid);
   // รับผ่านระบบเก่า (DMS): ใบเสร็จขาย/เงินดาวน์ของรถคันเดียวกัน — นับเฉพาะเมื่อใบขายระบบใหม่ยังไม่ได้บันทึกรับชำระ (กันนับซ้ำ) (user 2026-09-09)
