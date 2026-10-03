@@ -101,25 +101,38 @@ export default function GeneralReceiptPivotPage() {
       const [g, ty] = classify(it);
       const b = it.branch_key || "ไม่ระบุสาขา";
       const total = num(it.received);
-      // ใบรับฝากค่างวด: ยอดรวม = ค่างวด + ค่าบริการ → แยกค่าบริการเป็นประเภทของตัวเอง (เหมือน Excel "ค่าบริการ") ตามสัดส่วนของแต่ละวิธีรับเงิน
-      const fee = it.kind === "deposit_income" && total > 0 ? Math.min(Math.max(num(it.service_fee), 0), total) : 0;
-      const parts = fee > 0 ? [[ty, (total - fee) / total], ["ค่าบริการ (รับฝากค่างวด)", fee / total]] : [[ty, 1]];
+      // รายการเดียวแตกได้หลายประเภท [ประเภท, ยอด] รวมกันเท่ายอดรับ:
+      //   · ใบรับฝากค่างวด = ค่างวด + ค่าบริการ · ใบรับเรื่อง = งานทะเบียน (ต่อภาษี/ทะเบียนรถใหม่) + งานพรบ. + งานประกัน ตามยอดรายบรรทัด (user 2026-10-04)
+      let parts = [[ty, total]];
+      if (it.kind === "deposit_income" && total > 0) {
+        const fee = Math.min(Math.max(num(it.service_fee), 0), total);
+        if (fee > 0) parts = [[ty, total - fee], ["ค่าบริการ (รับฝากค่างวด)", fee]];
+      } else if (it.kind === "receipt" && total > 0 && it.prb_total != null) {
+        const base = num(it.line_total) > 0 ? num(it.line_total) : total;
+        const k = total / base; // เผื่อยอดรับชำระต่างจากยอดรายบรรทัด
+        const prb = Math.min(Math.round(num(it.prb_total) * k * 100) / 100, total);
+        const ins = Math.min(Math.round(num(it.ins_total) * k * 100) / 100, total - prb);
+        const reg = Math.round((total - prb - ins) * 100) / 100;
+        parts = [["งานทะเบียน (ต่อภาษี/ทะเบียนรถใหม่)", reg], ["งานพรบ.", prb], ["งานประกัน", ins]].filter(([, v]) => Math.abs(v) > 0.004);
+        if (!parts.length) parts = [[ty, total]];
+      }
       const methods = methodRows(it, acctNo);
-      parts.forEach(([pty, ratio], pi) => {
-        const G = (t[g] = t[g] || { amount: 0, count: 0, children: {} });
+      const used = methods.map(() => 0); // ยอดของแต่ละวิธีที่จัดสรรไปแล้ว (ส่วนสุดท้ายรับเศษปัด)
+      const G = (t[g] = t[g] || { amount: 0, count: 0, children: {} });
+      G.count++;
+      parts.forEach(([pty, pamt], pi) => {
         const T = (G.children[pty] = G.children[pty] || { amount: 0, count: 0, children: {} });
         const B = (T.children[b] = T.children[b] || { amount: 0, count: 0, children: {} });
-        if (pi === 0) G.count++;
         T.count++; B.count++;
-        for (const [m, v0] of methods) {
-          // ส่วนแรกรับเศษปัด เพื่อให้สองส่วนรวมกันเท่ายอดเดิมพอดี
-          const feePart = fee > 0 ? Math.round(v0 * (fee / total) * 100) / 100 : 0;
-          const v = fee > 0 ? (pi === 0 ? Math.round((v0 - feePart) * 100) / 100 : feePart) : v0;
-          if (Math.abs(v) < 0.005) continue;
+        const ratio = total !== 0 ? pamt / total : 1;
+        methods.forEach(([m, v0], mi) => {
+          const v = pi === parts.length - 1 ? Math.round((v0 - used[mi]) * 100) / 100 : Math.round(v0 * ratio * 100) / 100;
+          used[mi] += v;
+          if (Math.abs(v) < 0.005) return;
           G.amount += v; T.amount += v; B.amount += v;
           const M = (B.children[m] = B.children[m] || { amount: 0, count: 0, rows: [] }); M.amount += v; M.count++;
           M.rows.push({ date: String(it.date || "").slice(0, 10), doc_no: it.doc_no || "-", ref_no: it.ref_no || "", customer: it.customer_name || "-", seller: it.seller || "", note: it.note || "", amount: v, kind: it.kind });
-        }
+        });
       });
     }
     return t;
@@ -281,7 +294,7 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
           <li>Excel แถว "ขายรถจักรยานยนต์" คือมูลค่าขายตามใบกำกับ (รวมส่วนที่ไฟแนนซ์จ่าย) — รายงานนี้แสดงเฉพาะเงินที่รับหน้าร้านจริง</li>
           <li>Excel "เงินมัดจำรถ สาขา SCY10" คือยอดไฟแนนซ์โอนเข้าบัญชี ไม่ใช่เงินรับหน้าร้าน — ไม่อยู่ในรายงานนี้ (ดูที่รายงานรับชำระไฟแนนซ์)</li>
           <li>มัดจำป้ายแดง 200 ระบบแยกเป็นประเภทของตัวเอง — Excel รวมอยู่ใน "เงินมัดจำทั่วไป" ร่วมกับมัดจำจองรถบางใบของระบบเก่า</li>
-          <li>งานทะเบียน/งานพรบ. ระบบแยกตามประเภทใบรับเรื่อง (ใบเดียวมีทั้งต่อภาษีและพรบ.) — Excel แยกตามรายการย่อยในใบ</li>
+          <li>งานทะเบียน (ต่อภาษี+ทะเบียนรถใหม่) / งานพรบ. / งานประกัน แยกตามรายการย่อยในใบรับเรื่องเหมือน Excel (ต้อง import Receipt Entry API เวอร์ชันที่คืนยอดแยก ไม่อย่างนั้นจะแยกตามประเภทใบ)</li>
           <li>E-คูปอง และยอดที่ตัดจากเงินมัดจำแสดงเป็นวิธีรับเงินแยก (Excel ไม่นับ E-คูปอง)</li>
           <li>รายการจ่ายออก/คืนเงิน (ค่านำพา เบิกเงินสดย่อย คืนมัดจำ ฯลฯ) ไม่มีใน Excel — แสดงท้ายตารางเป็นกลุ่มแยก ไม่รวมใน "รวมรับเข้า"</li>
         </ul>

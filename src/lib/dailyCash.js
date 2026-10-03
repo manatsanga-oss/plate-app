@@ -398,6 +398,7 @@ export function buildDailyCashItems(src, ctx) {
       split, received: amt,
       branch_key: bc5(r2.branch_code), branch_name: r2.branch_code || "ไม่ระบุสาขา",
       note: [r2.payment_account, r2.payment_note].filter(Boolean).join(" · "),
+      prb_total: r2.prb_total != null ? num(r2.prb_total) : null, ins_total: r2.ins_total != null ? num(r2.ins_total) : null, line_total: num(r2.line_total), // ยอดแยกรายบรรทัด (list_receipts) — รายงาน pivot แยก งานทะเบียน/งานพรบ./งานประกัน (user 2026-10-04)
     };
   });
   const partSvcs = psRows.filter((p) => inBranch(p.branch_code, ctx)).map((p) => {
