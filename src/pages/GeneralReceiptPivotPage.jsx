@@ -35,7 +35,7 @@ function methodRows(it, acctNo) {
   const tb = s.transfer_by;
   if (tb && Object.keys(tb).length) {
     let sum = 0;
-    for (const [lbl, v] of Object.entries(tb)) { const no = acctNo(lbl); out.push([`เงินโอน ${no ? no + " " : ""}${lbl}`.trim(), num(v)]); sum += num(v); }
+    for (const [lbl, v] of Object.entries(tb)) { const no = acctNo(lbl); out.push([no === "?" ? `เงินโอน ${lbl} (ชื่อบัญชีซ้ำหลายธนาคาร — ระบุไม่ได้)` : `เงินโอน ${no ? no + " " : ""}${lbl}`.trim(), num(v)]); sum += num(v); }
     const rest = Math.round((num(s.transfer) - sum) * 100) / 100;
     if (Math.abs(rest) > 0.004) out.push(["เงินโอน (ไม่ระบุบัญชี)", rest]);
   } else if (num(s.transfer)) out.push(["เงินโอน (ไม่ระบุบัญชี)", num(s.transfer)]);
@@ -65,14 +65,27 @@ export default function GeneralReceiptPivotPage() {
   const [accounts, setAccounts] = useState([]);
   const [open, setOpen] = useState({}); // key → bool (collapsed when false); default เปิดถึงระดับสาขา
   const [showDetail, setShowDetail] = useState(false);
+  const [drill, setDrill] = useState(null); // { title, rows } — กดแถววิธีรับเงินเพื่อดูรายการ (user 2026-10-03)
 
   useEffect(() => {
     fetch(ACC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "true" }) })
       .then((r) => r.json()).then((d) => setAccounts(Array.isArray(d) ? d.filter((a) => a && a.account_id) : [])).catch(() => {});
   }, []);
   const acctNo = useMemo(() => {
-    const byName = new Map(accounts.map((a) => [String(a.account_name || "").trim(), String(a.account_no || "").trim()]));
-    return (lbl) => { const l = String(lbl || "").trim(); if (byName.has(l)) return byName.get(l); const hit = accounts.find((a) => l && (l.includes(String(a.account_name || "")) || String(a.account_name || "").includes(l))); return hit ? String(hit.account_no || "") : ""; };
+    // เติมเลขบัญชีให้เฉพาะเมื่อชื่อที่เก็บมาชี้ไปที่บัญชีเดียวแน่ ๆ — ชื่อบริษัทเฉย ๆ (เช่น "หจก.สิงห์ชัยสยามยนต์" มีหลายธนาคาร) ไม่เดา (2026-10-03)
+    const norm = (v) => String(v || "").replace(/\s+/g, "").trim();
+    const byName = new Map();
+    for (const a of accounts) { const k = norm(a.account_name); if (!k) continue; if (!byName.has(k)) byName.set(k, new Set()); byName.get(k).add(String(a.account_no || "").trim()); }
+    return (lbl) => {
+      const l = norm(lbl); if (!l) return "";
+      if (/\d{6,}/.test(l)) return ""; // ฉลากมีเลขบัญชีอยู่แล้ว
+      const set = byName.get(l);
+      if (set && set.size === 1) return [...set][0];
+      if (set && set.size > 1) return "?"; // ชื่อซ้ำหลายบัญชี
+      const hits = accounts.filter((a) => l.includes(norm(a.account_name)) || norm(a.account_name).includes(l));
+      const nos = new Set(hits.map((a) => String(a.account_no || "").trim()).filter(Boolean));
+      return nos.size === 1 ? [...nos][0] : nos.size > 1 ? "?" : "";
+    };
   }, [accounts]);
 
   async function load() {
@@ -102,7 +115,10 @@ export default function GeneralReceiptPivotPage() {
       const B = (T.children[b] = T.children[b] || { amount: 0, count: 0, children: {} });
       const amt = num(it.received);
       G.amount += amt; T.amount += amt; B.amount += amt; G.count++; T.count++; B.count++;
-      for (const [m, v] of methodRows(it, acctNo)) { const M = (B.children[m] = B.children[m] || { amount: 0, count: 0 }); M.amount += v; M.count++; }
+      for (const [m, v] of methodRows(it, acctNo)) {
+        const M = (B.children[m] = B.children[m] || { amount: 0, count: 0, rows: [] }); M.amount += v; M.count++;
+        M.rows.push({ date: String(it.date || "").slice(0, 10), doc_no: it.doc_no || "-", ref_no: it.ref_no || "", customer: it.customer_name || "-", seller: it.seller || "", note: it.note || "", amount: v, kind: it.kind });
+      }
     }
     return t;
   }, [items, branch, acctNo]);
@@ -124,7 +140,7 @@ export default function GeneralReceiptPivotPage() {
         for (const b of Object.keys(T.children).sort()) {
           const B = T.children[b]; const kB = kT + "|" + b; out.push({ depth: 2, key: kB, label: b, ...B });
           if (!isOpen(kB, 2)) continue;
-          for (const m of Object.keys(B.children).sort((a, b2) => a.localeCompare(b2, "th"))) { const M = B.children[m]; out.push({ depth: 3, key: kB + "|" + m, label: m, amount: M.amount, count: M.count, leaf: true }); }
+          for (const m of Object.keys(B.children).sort((a, b2) => a.localeCompare(b2, "th"))) { const M = B.children[m]; out.push({ depth: 3, key: kB + "|" + m, label: m, amount: M.amount, count: M.count, leaf: true, rows: M.rows, path: `${g} › ${ty} › ${b}` }); }
         }
       }
     }
@@ -210,9 +226,9 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
               const color = r.depth === 0 ? "#0f172a" : r.depth === 1 ? "#1e3a8a" : r.depth === 2 ? "#334155" : "#64748b";
               const weight = r.depth === 0 ? 800 : r.depth === 1 ? 700 : r.depth === 2 ? 600 : 400;
               return (
-                <tr key={r.key} onClick={() => !r.leaf && toggle(r.key)} style={{ background: bg, cursor: r.leaf ? "default" : "pointer" }}>
+                <tr key={r.key} onClick={() => r.leaf ? setDrill({ title: `${r.path} › ${r.label}`, rows: [...r.rows].sort((a, b2) => a.date.localeCompare(b2.date) || String(a.doc_no).localeCompare(String(b2.doc_no))) }) : toggle(r.key)} style={{ background: bg, cursor: "pointer" }} title={r.leaf ? "คลิกดูรายการ" : undefined}>
                   <td style={{ ...cell, paddingLeft: 10 + r.depth * 24, color, fontWeight: weight }}>
-                    {!r.leaf && <span style={{ display: "inline-block", width: 14, color: "#94a3b8" }}>{isOpen(r.key, r.depth) ? "▾" : "▸"}</span>}{r.label}
+                    {!r.leaf && <span style={{ display: "inline-block", width: 14, color: "#94a3b8" }}>{isOpen(r.key, r.depth) ? "▾" : "▸"}</span>}{r.label}{r.leaf && <span style={{ marginLeft: 6, fontSize: 11, color: "#94a3b8" }}>🔍 {r.count} รายการ</span>}
                   </td>
                   {showDetail && <td style={{ ...numCell, color: "#94a3b8" }}>{r.count}</td>}
                   <td style={{ ...numCell, color: r.amount < 0 ? "#b91c1c" : color, fontWeight: weight }}>{fmt(r.amount)}</td>
@@ -229,6 +245,34 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
         </table>
       </div>
 
+      {drill && (
+        <div onClick={() => setDrill(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, width: 900, maxWidth: "96vw", maxHeight: "86vh", display: "flex", flexDirection: "column", boxShadow: "0 10px 30px rgba(0,0,0,.25)" }}>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ fontWeight: 700, flex: 1 }}>🔍 {drill.title}</div>
+              <div style={{ fontSize: 13, color: "#374151" }}>{drill.rows.length} รายการ · รวม <b>{fmt(drill.rows.reduce((a, r) => a + r.amount, 0))}</b></div>
+              <button onClick={() => setDrill(null)} style={{ border: "none", background: "#e5e7eb", borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>ปิด</button>
+            </div>
+            <div style={{ overflow: "auto", padding: "0 0 8px" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead style={{ background: "#f1f5f9", position: "sticky", top: 0 }}><tr>
+                  <th style={{ ...cell, textAlign: "left" }}>วันที่</th><th style={{ ...cell, textAlign: "left" }}>เลขที่เอกสาร</th><th style={{ ...cell, textAlign: "left" }}>อ้างอิง</th><th style={{ ...cell, textAlign: "left" }}>ลูกค้า</th><th style={{ ...cell, textAlign: "left" }}>หมายเหตุ</th><th style={numCell}>ยอด</th>
+                </tr></thead>
+                <tbody>
+                  {drill.rows.map((r, i) => (
+                    <tr key={i} style={{ background: i % 2 ? "#fafcff" : "#fff" }}>
+                      <td style={{ ...cell, whiteSpace: "nowrap" }}>{r.date ? `${r.date.slice(8, 10)}/${r.date.slice(5, 7)}/${Number(r.date.slice(0, 4)) + 543}` : "-"}</td>
+                      <td style={{ ...cell, fontFamily: "monospace" }}>{r.doc_no}</td>
+                      <td style={{ ...cell, fontFamily: "monospace", color: "#6b7280" }}>{r.ref_no}</td>
+                      <td style={cell}>{r.customer}{r.seller ? <div style={{ fontSize: 11, color: "#9ca3af" }}>{r.seller}</div> : null}</td>
+                      <td style={{ ...cell, fontSize: 12, color: "#6b7280" }}>{r.note}</td>
+                      <td style={{ ...numCell, fontWeight: 600, color: r.amount < 0 ? "#b91c1c" : "#111" }}>{fmt(r.amount)}</td>
+                    </tr>))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>)}
       <div style={{ marginTop: 14, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#78350f" }}>
         <b>ข้อแตกต่างจาก pivot ใน Excel ของบัญชี</b>
         <ul style={{ margin: "6px 0 0 18px", padding: 0, lineHeight: 1.6 }}>
