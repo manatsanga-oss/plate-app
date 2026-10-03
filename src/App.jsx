@@ -129,6 +129,7 @@ import BankDepositPage from "./pages/BankDepositPage";
 import MyMotoReportPage from "./pages/MyMotoReportPage";
 import MyMotorRegisterPage from "./pages/MyMotorRegisterPage";
 import ReportAdminPage from "./pages/ReportAdminPage";
+import GeneralReceiptPivotPage from "./pages/GeneralReceiptPivotPage";
 import ProfitLossReportPage from "./pages/ProfitLossReportPage";
 import MotoStockOnHandReportPage from "./pages/MotoStockOnHandReportPage";
 import MotoTransferPage from "./pages/MotoTransferPage";
@@ -324,6 +325,7 @@ export default function App() {
     if (page === "otherincometaxreport") return false;  // เฉพาะ admin (รายงานใบกำกับรายได้อื่นๆ)
     if (page === "registrationsummaryreport") return false;  // เฉพาะ admin (รายงานสรุปใบปะหน้า คชจ. ขายรถ)
     if (page === "retailsalereport") return false;  // เฉพาะ admin (รายงานใบขายปลีก)
+    if (page === "generalreceiptpivot") return false;         // เฉพาะ admin (สรุปรับชำระเงินทั่วไปรายเดือน — แทน pivot Excel ของบัญชี 2026-10-03)
     if (page === "receipttransferreport") return false;       // เฉพาะ admin (รายงานสรุปรับชำระเงิน)
     if (page === "vehiclepurchasereport") return false;       // เฉพาะ admin (รายงานรับรถจักรยานยนต์)
     if (page === "hondasalesreport") return false;            // เฉพาะ admin (ส่งรายงาน HONDA)
@@ -466,6 +468,9 @@ export default function App() {
         )}
         {activeMenu === "carpaymentreportnew" && canAccess("carpaymentreportnew") && (
           <CarPaymentReportNewPage currentUser={currentUser} />
+        )}
+        {activeMenu === "generalreceiptpivot" && canAccess("generalreceiptpivot") && (
+          <GeneralReceiptPivotPage currentUser={currentUser} />
         )}
         {activeMenu === "promoincomebyvehicle" && canAccess("promoincomebyvehicle") && (
           <PromoIncomeByVehiclePage currentUser={currentUser} />
@@ -934,13 +939,14 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 45 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","partservicereceiptreport","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","salesbypayment","otherincometaxreport","promoincomebyvehicle","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","deliveryfee","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","partservicereceiptreport","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","generalreceiptpivot","salesbypayment","otherincometaxreport","promoincomebyvehicle","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","deliveryfee","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="creditnotereport" label="รายงานใบลดหนี้รับ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="carpaymentreport" label="รายงานรับชำระเงินรายคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="carpaymentreportnew" label="รายงานรับชำระเงินรายคัน NEW" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="generalreceiptpivot" label="สรุปรับชำระเงินทั่วไป (รายเดือน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="salesbypayment" label="รายงานการขายตามการชำระเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="otherincometaxreport" label="รายงานใบกำกับภาษีรายได้อื่นๆ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="promoincomebyvehicle" label="รายงานค่าส่งเสริมรายคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

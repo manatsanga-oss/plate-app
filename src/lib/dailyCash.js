@@ -40,6 +40,19 @@ export function methodKey(name) {
 export const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
 // เลขที่เช็ค (+วันที่ลงเช็ค) จาก breakdown วิธี "เช็ค" — โชว์ใต้ยอดในคอลัมน์เช็ค
 export const chequeNos = (arr) => (Array.isArray(arr) ? arr : []).filter((x) => x && methodKey(x.method) === "cheque" && String(x.cheque_no || "").trim()).map((x) => String(x.cheque_no).trim() + (x.cheque_date ? ` (${String(x.cheque_date).slice(0, 10)})` : "")).join(", ");
+/** แยกยอด "เงินโอน" ตามบัญชีที่รับ (ใช้ในรายงานสรุปรับชำระเงินทั่วไปรายเดือน — เทียบ Excel pivot ของบัญชี 2026-10-03)
+ *  bks = breakdown [{method, amount, account|account_name}] · fallbackAcct = ชื่อบัญชีของทั้งใบ (แถวที่เก็บวิธีเดียว) */
+export function addTransferBy(split, bks, fallbackAcct) {
+  const m = {};
+  for (const b of (Array.isArray(bks) ? bks : [])) {
+    if (!b || methodKey(b.method) !== "transfer") continue;
+    const lbl = String(b.account_name || b.account || fallbackAcct || "").trim() || "ไม่ระบุบัญชี";
+    m[lbl] = (m[lbl] || 0) + num(b.amount);
+  }
+  if (!Object.keys(m).length && num(split.transfer) > 0) m[String(fallbackAcct || "").trim() || "ไม่ระบุบัญชี"] = num(split.transfer);
+  if (Object.keys(m).length) split.transfer_by = m;
+  return split;
+}
 export const fmt = (n) => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const shiftDate = (iso, days) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const bc5 = (v) => String(v || "").substring(0, 5).toUpperCase();
@@ -210,6 +223,7 @@ export function buildSaleItems(rows, depRows, ctx) {
       const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
       for (const p of pms) split[methodKey(p.method)] += num(p.amount);
       split.cheque_nos = chequeNos(pms);
+      addTransferBy(split, pms, "");
       const paid = num(r.paid_amount) || METHOD_COLS.reduce((s, c) => s + split[c.key], 0);
       const refDep = depRows.find((d) => d.refunded_at && String(d.refund_note || "").includes(r.sale_no));
       // ยอดมัดจำที่ "ใช้จริง" กับใบขาย: คืนแล้ว → หักยอดใบมัดจำออก (แถว deposit_applied เติมส่วนที่ใช้ให้แทน)
@@ -296,6 +310,7 @@ export function buildDailyCashItems(src, ctx) {
       const c = num(d.cash_amount), t = num(d.transfer_amount);
       if (c + t > 0) { split.cash = c; split.transfer = t; } else split.cash = amt;
     } else if (m.includes("สด")) split.cash = amt; else if (m.includes("โอน")) split.transfer = amt; else split.other = amt;
+    addTransferBy(split, [], d.payment_account);
     return {
       kind: "deposit", category: "รายได้เงินมัดจำจองรถ",
       doc_no: d.deposit_no, date: d.deposit_date, ref_no: "",
@@ -314,6 +329,7 @@ export function buildDailyCashItems(src, ctx) {
     if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(r2.payment_method || ""), amount: amt }];
     for (const b of bks) split[methodKey(b.method)] += num(b.amount);
     split.cheque_nos = chequeNos(bks);
+    addTransferBy(split, bks, r2.payment_account);
     return {
       kind: "receipt", category: `รายได้รับเรื่อง (${r2.receipt_type || "งานทะเบียน"})`,
       doc_no: r2.receipt_no, date: r2.paid_date || r2.paid_at, ref_no: "",
@@ -331,6 +347,7 @@ export function buildDailyCashItems(src, ctx) {
     if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(p.payment_method || ""), amount: amt }];
     for (const b of bks) split[methodKey(b.method)] += num(b.amount);
     split.cheque_nos = chequeNos(bks);
+    addTransferBy(split, bks, p.payment_account);
     return {
       kind: "part_service", category: "รายได้ค่าอะไหล่/บริการ",
       doc_no: p.receipt_no || p.doc_no, date: p.paid_date, ref_no: p.doc_no,
@@ -348,6 +365,7 @@ export function buildDailyCashItems(src, ctx) {
     if (!Array.isArray(bks) || !bks.length) bks = [{ method: String(u.payment_method || ""), amount: amt }];
     for (const b of bks) split[methodKey(b.method)] += num(b.amount);
     split.cheque_nos = chequeNos(bks);
+    addTransferBy(split, bks, u.payment_account);
     return {
       kind: "used_moto", category: "รายได้ขายรถมือสอง",
       doc_no: u.doc_no, date: u.sold_date, ref_no: u.sold_invoice_no || "",
@@ -362,6 +380,7 @@ export function buildDailyCashItems(src, ctx) {
     const m = String(d.payment_method || "");
     const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
     if (m.includes("สด")) split.cash = amt; else if (m.includes("โอน")) split.transfer = amt; else split.other = amt;
+    addTransferBy(split, [], d.payment_account);
     return {
       kind: "part_deposit", category: "รายได้เงินมัดจำอะไหล่/บริการ",
       doc_no: d.deposit_doc_no, date: d.deposit_date, ref_no: "",
@@ -376,6 +395,7 @@ export function buildDailyCashItems(src, ctx) {
     const amt = num(r.total_amount);
     const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
     split[methodKey(r.payment_method || "เงินสด")] += amt;
+    addTransferBy(split, [], r.payment_account);
     return {
       kind: "deposit_income", category: r.income_kind === "other" ? "รายได้อื่นๆ (หน้าร้าน)" : "รายได้รับฝากชำระค่างวด",
       doc_no: r.receipt_no, date: String(r.receipt_date || "").slice(0, 10), ref_no: "",
@@ -461,6 +481,7 @@ export function buildDailyCashItems(src, ctx) {
       const amt = num(d.amount);
       const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
       split[methodKey(d.payment_method || "เงินสด")] += amt;
+      addTransferBy(split, [], d.payment_account);
       return {
         kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
         doc_no: d.deposit_no, date: String(d.received_date || "").slice(0, 10), ref_no: d.sale_no,
