@@ -580,6 +580,15 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         const rrow = rres && (rres.deposit || rres);
         if (!rrow || !rrow.deposit_no) throw new Error(rres?.__error || rres?.error || "บันทึกคืนเงินมัดจำไม่สำเร็จ (ใบมัดจำอาจถูกคืนไปแล้ว)");
         refundedDepNo = depNo;
+        // มัดจำป้ายแดงชำระด้วยเงินมัดจำจองรถ (ยอดชำระ ≤ 0 ไม่มี save_payment จึงไม่มีใบ RPD) → ออกใบ RPD (user 2026-10-04)
+        if (Number(saleForDoc.red_plate_deposit) > 0 && !saleForDoc.red_plate_doc_no) {
+          try {
+            const rpRes0 = await post(RETAIL_API, { action: "add_red_plate_deposit", mode: "from_booking", sale_no: sale.sale_no, received_date: todayStr(), booking_deposit_no: depNo,
+              received_by: currentUser?.username || currentUser?.name || "system" });
+            const rpRes = Array.isArray(rpRes0) ? rpRes0[0] : rpRes0;
+            if (rpRes && rpRes.red_plate_doc_no) { saleForDoc = { ...saleForDoc, red_plate_doc_no: rpRes.red_plate_doc_no }; setSavedSale(saleForDoc); }
+          } catch { /* ออกใบไม่ได้ → ไปออกย้อนหลังได้ */ }
+        }
       }
 
       // ส่งใบเสร็จเข้า LINE ลูกค้า (ถ้ามี LINE)

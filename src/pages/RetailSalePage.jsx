@@ -1209,6 +1209,16 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
       const rrow = r && (r.deposit || r);
       if (!rrow || !rrow.deposit_no) throw new Error(r?.__error || r?.error || "คืนเงินไม่สำเร็จ (ใบมัดจำอาจถูกคืนไปแล้ว)");
       let msg = `✅ บันทึกคืนเงินมัดจำ ${depNo} จำนวน ${baht(amt)} บาท แล้ว`;
+      // มัดจำป้ายแดงชำระด้วยเงินมัดจำจองรถ (ยอดชำระ ≤ 0 ไม่ผ่านรับชำระ จึงยังไม่มีใบ RPD) → ออกใบ RPD ให้ เพื่อให้คืนเงินผ่านเมนูคืนมัดจำป้ายแดงได้ (user 2026-10-04)
+      if (Number(sale.red_plate_deposit) > 0 && !sale.red_plate_doc_no) {
+        try {
+          const rpRes = await apiPost({ action: "add_red_plate_deposit", mode: "from_booking", sale_no: sale.sale_no, received_date: payForm.receipt_date, booking_deposit_no: depNo,
+            received_by: currentUser?.username || currentUser?.name || "system" });
+          const rpSale = rpRes && (rpRes.sale || null);
+          if (rpRes && rpRes.red_plate_doc_no) { msg += ` · ออกใบรับมัดจำป้ายแดง ${rpRes.red_plate_doc_no} (ชำระด้วยเงินมัดจำ)`; if (rpSale && rpSale.sale_no) setVehicle((v) => ({ ...v, sale: { ...sale, ...rpSale } })); }
+          else msg += " · ⚠️ ยังไม่ได้ออกใบรับมัดจำป้ายแดง (ตรวจว่า import retail-sale-api เวอร์ชันล่าสุดแล้ว)";
+        } catch { msg += " · ⚠️ ออกใบรับมัดจำป้ายแดงไม่สำเร็จ"; }
+      }
       // ส่งใบเสร็จคืนเงินเข้า LINE ลูกค้า
       const lid = sale.line_user_id || form.customer_line_user_id || "";
       if (lid) {
