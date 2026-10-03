@@ -23,7 +23,11 @@ function classify(it) {
   if (k === "red_plate") return ["เงินมัดจำ", "เงินมัดจำป้ายแดง (Excel = เงินมัดจำทั่วไป)"];
   if (k === "part_deposit") return ["เงินมัดจำ", "เงินมัดจำอะไหล่"];
   if (k === "receipt") { const m = cat.match(/\((.+)\)/); return ["รับเรื่องทะเบียน-ประกัน-พรบ", m ? m[1] : "งานทะเบียน"]; }
-  if (k === "deposit_income") return ["รับชำระอื่นๆ", cat.includes("ค่างวด") ? "ชำระค่างวดรับฝาก (กรุ๊ปลีส/ธนบรรณ)" : "รายได้อื่นๆ"];
+  if (k === "deposit_income") {
+    const desc = String(it.income_desc || "");
+    if (cat.includes("ค่างวด")) return ["รับชำระอื่นๆ", desc.includes("กรุ๊ปล") ? "ชำระค่างวด กรุ๊ปลีส" : desc.includes("ธนบรรณ") ? "ชำระค่างวด ธนบรรณ" : "ชำระค่างวดรับฝาก (อื่น)"];
+    return ["รับชำระอื่นๆ", desc.split(" - ")[0].trim() || "รายได้อื่นๆ"]; // หมวดรายได้ เช่น รายได้ค่าฝากส่งไปรษณีย์ / รายได้อื่นๆ
+  }
   if (k === "wht_refund") return ["รับชำระอื่นๆ", "รับคืนหัก ณ ที่จ่าย"];
   if (k === "part_service") return ["อะไหล่และบริการ", /ซ่อม|JOB|บริการ/i.test(String(it.note || "")) ? "งานบริการ" : "ขายปลีก"];
   return ["รับชำระอื่นๆ", cat || "อื่นๆ"];
@@ -96,15 +100,27 @@ export default function GeneralReceiptPivotPage() {
       if (branch && it.branch_key !== branch) continue;
       const [g, ty] = classify(it);
       const b = it.branch_key || "ไม่ระบุสาขา";
-      const G = (t[g] = t[g] || { amount: 0, count: 0, children: {} });
-      const T = (G.children[ty] = G.children[ty] || { amount: 0, count: 0, children: {} });
-      const B = (T.children[b] = T.children[b] || { amount: 0, count: 0, children: {} });
-      const amt = num(it.received);
-      G.amount += amt; T.amount += amt; B.amount += amt; G.count++; T.count++; B.count++;
-      for (const [m, v] of methodRows(it, acctNo)) {
-        const M = (B.children[m] = B.children[m] || { amount: 0, count: 0, rows: [] }); M.amount += v; M.count++;
-        M.rows.push({ date: String(it.date || "").slice(0, 10), doc_no: it.doc_no || "-", ref_no: it.ref_no || "", customer: it.customer_name || "-", seller: it.seller || "", note: it.note || "", amount: v, kind: it.kind });
-      }
+      const total = num(it.received);
+      // ใบรับฝากค่างวด: ยอดรวม = ค่างวด + ค่าบริการ → แยกค่าบริการเป็นประเภทของตัวเอง (เหมือน Excel "ค่าบริการ") ตามสัดส่วนของแต่ละวิธีรับเงิน
+      const fee = it.kind === "deposit_income" && total > 0 ? Math.min(Math.max(num(it.service_fee), 0), total) : 0;
+      const parts = fee > 0 ? [[ty, (total - fee) / total], ["ค่าบริการ (รับฝากค่างวด)", fee / total]] : [[ty, 1]];
+      const methods = methodRows(it, acctNo);
+      parts.forEach(([pty, ratio], pi) => {
+        const G = (t[g] = t[g] || { amount: 0, count: 0, children: {} });
+        const T = (G.children[pty] = G.children[pty] || { amount: 0, count: 0, children: {} });
+        const B = (T.children[b] = T.children[b] || { amount: 0, count: 0, children: {} });
+        if (pi === 0) G.count++;
+        T.count++; B.count++;
+        for (const [m, v0] of methods) {
+          // ส่วนแรกรับเศษปัด เพื่อให้สองส่วนรวมกันเท่ายอดเดิมพอดี
+          const feePart = fee > 0 ? Math.round(v0 * (fee / total) * 100) / 100 : 0;
+          const v = fee > 0 ? (pi === 0 ? Math.round((v0 - feePart) * 100) / 100 : feePart) : v0;
+          if (Math.abs(v) < 0.005) continue;
+          G.amount += v; T.amount += v; B.amount += v;
+          const M = (B.children[m] = B.children[m] || { amount: 0, count: 0, rows: [] }); M.amount += v; M.count++;
+          M.rows.push({ date: String(it.date || "").slice(0, 10), doc_no: it.doc_no || "-", ref_no: it.ref_no || "", customer: it.customer_name || "-", seller: it.seller || "", note: it.note || "", amount: v, kind: it.kind });
+        }
+      });
     }
     return t;
   }, [items, branch, acctNo]);
@@ -266,7 +282,7 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
           <li>Excel "เงินมัดจำรถ สาขา SCY10" คือยอดไฟแนนซ์โอนเข้าบัญชี ไม่ใช่เงินรับหน้าร้าน — ไม่อยู่ในรายงานนี้ (ดูที่รายงานรับชำระไฟแนนซ์)</li>
           <li>มัดจำป้ายแดง 200 ระบบแยกเป็นประเภทของตัวเอง — Excel รวมอยู่ใน "เงินมัดจำทั่วไป" ร่วมกับมัดจำจองรถบางใบของระบบเก่า</li>
           <li>งานทะเบียน/งานพรบ. ระบบแยกตามประเภทใบรับเรื่อง (ใบเดียวมีทั้งต่อภาษีและพรบ.) — Excel แยกตามรายการย่อยในใบ</li>
-          <li>Excel "ค่าบริการ" ของค่างวดรับฝาก ระบบรวมอยู่ในยอดใบรับฝากค่างวด · E-คูปอง และยอดที่ตัดจากเงินมัดจำแสดงเป็นวิธีรับเงินแยก</li>
+          <li>E-คูปอง และยอดที่ตัดจากเงินมัดจำแสดงเป็นวิธีรับเงินแยก (Excel ไม่นับ E-คูปอง)</li>
           <li>รายการจ่ายออก/คืนเงิน (ค่านำพา เบิกเงินสดย่อย คืนมัดจำ ฯลฯ) ไม่มีใน Excel — แสดงท้ายตารางเป็นกลุ่มแยก ไม่รวมใน "รวมรับเข้า"</li>
         </ul>
       </div>

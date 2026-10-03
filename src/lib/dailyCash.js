@@ -464,6 +464,7 @@ export function buildDailyCashItems(src, ctx) {
       split, received: amt,
       branch_key: bc5(r.branch_code), branch_name: r.branch_code || "ไม่ระบุสาขา",
       note: [r.description, r.payment_account].filter(Boolean).join(" · "),
+      service_fee: num(r.fee), income_desc: String(r.description || ""), // ค่าบริการรับฝากค่างวด (รวมอยู่ใน total_amount) — รายงาน pivot แยกแถว (user 2026-10-04)
     };
   });
   const deliveryFees = items.filter((it) => num(it.delivery_fee_amount) > 0).map((it) => {
