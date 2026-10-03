@@ -17,7 +17,7 @@ const GROUP_ORDER = ["ขายรถจักรยานยนต์ (รั�
 function classify(it) {
   const k = it.kind, cat = String(it.category || "");
   if (num(it.received) < 0 || /จ่ายออก/.test(cat)) return ["จ่ายออก/คืนเงิน (ไม่มีใน Excel)", cat.replace(/\s*\(จ่ายออก\)\s*/, "")];
-  if (k === "sale" || k === "deposit_applied") return ["ขายรถจักรยานยนต์ (รับชำระหน้าร้าน)", it.finance ? "ไฟแนนซ์ · " + it.finance : "เงินสด"];
+  if (k === "sale" || k === "deposit_applied") return ["ขายรถจักรยานยนต์ (รับชำระหน้าร้าน)", it.finance ? String(it.finance) : "ขายเงินสด"]; // ชื่อประเภทแบบ Excel: ชื่อบริษัทไฟแนนซ์ / ขายเงินสด
   if (k === "used_moto") return ["ขายรถจักรยานยนต์ (รับชำระหน้าร้าน)", "รถมือสอง"];
   if (k === "deposit") return ["เงินมัดจำ", "เงินมัดจำรถ"];
   if (k === "red_plate") return ["เงินมัดจำ", "เงินมัดจำป้ายแดง (Excel = เงินมัดจำทั่วไป)"];
@@ -141,13 +141,25 @@ export default function GeneralReceiptPivotPage() {
   const grand = useMemo(() => Object.values(tree).reduce((s, g) => s + g.amount, 0), [tree]);
   const grandIn = useMemo(() => Object.entries(tree).filter(([g]) => !g.startsWith("จ่ายออก")).reduce((s, [, g]) => s + g.amount, 0), [tree]);
 
-  // สรุปตามวิธีรับชำระ: กลุ่ม → วิธีรับเงิน (รวมทุกประเภท/สาขา) + แถวบนสุด "รวมรับเข้าทุกกลุ่ม" (ไม่รวมจ่ายออก)
+  // สรุปตามวิธีรับชำระ (แบบแผ่น "PRIVOT-สรุปตามการรับชำระ" ของ Excel — user 2026-10-04): วิธีรับเงิน → กลุ่มรับชำระ → ประเภท (รวมทุกสาขา)
+  //   กลุ่มจ่ายออก/คืนเงิน (ไม่มีใน Excel) แยกเป็นบล็อกท้ายตาราง ไม่ปนกับยอดรับของแต่ละวิธี
+  const OUT_KEY = "จ่ายออก/คืนเงิน (ไม่มีใน Excel)";
   const methodTree = useMemo(() => {
-    const mt = {}; const ALL = "รวมรับเข้าทุกกลุ่ม (ไม่รวมจ่ายออก)";
-    const add = (g, m, M) => { const G = (mt[g] = mt[g] || { amount: 0, count: 0, children: {} }); const X = (G.children[m] = G.children[m] || { amount: 0, count: 0, rows: [] }); G.amount += M.amount; X.amount += M.amount; X.count += M.count; G.count += M.count; X.rows.push(...M.rows); };
-    for (const [g, G] of Object.entries(tree)) for (const T of Object.values(G.children)) for (const B of Object.values(T.children)) for (const [m, M] of Object.entries(B.children)) { add(g, m, M); if (!g.startsWith("จ่ายออก")) add(ALL, m, M); }
-    return { mt, ALL };
+    const mt = {};
+    for (const [g, G] of Object.entries(tree)) for (const [ty, T] of Object.entries(G.children)) for (const B of Object.values(T.children)) for (const [m, M] of Object.entries(B.children)) {
+      const isOut = g.startsWith("จ่ายออก");
+      const top = isOut ? OUT_KEY : m;           // ระดับ 0: วิธีรับเงิน (หรือบล็อกจ่ายออก)
+      const mid = isOut ? m : g;                  // ระดับ 1: กลุ่มรับชำระ (จ่ายออก: วิธีจ่าย)
+      const X = (mt[top] = mt[top] || { amount: 0, count: 0, children: {} });
+      const Y = (X.children[mid] = X.children[mid] || { amount: 0, count: 0, children: {} });
+      const Z = (Y.children[ty] = Y.children[ty] || { amount: 0, count: 0, rows: [] });
+      X.amount += M.amount; Y.amount += M.amount; Z.amount += M.amount;
+      X.count += M.count; Y.count += M.count; Z.count += M.count; Z.rows.push(...M.rows);
+    }
+    return mt;
   }, [tree]);
+  const methodKeys = useMemo(() => Object.keys(methodTree).sort((x, y) => (x === OUT_KEY) - (y === OUT_KEY) || x.localeCompare(y, "th")), [methodTree]);
+  const groupRank = (g) => { const i = GROUP_ORDER.indexOf(g); return i < 0 ? 99 : i; };
   const isOpen = (key, depth) => (open[key] === undefined ? depth < 2 : open[key]);
   const toggle = (key) => setOpen((o) => ({ ...o, [key]: !isOpen(key, 9) }));
   const sortedGroups = Object.keys(tree).sort((a, b) => (GROUP_ORDER.indexOf(a) + 100) % 100 - (GROUP_ORDER.indexOf(b) + 100) % 100 || a.localeCompare(b, "th"));
@@ -155,12 +167,14 @@ export default function GeneralReceiptPivotPage() {
   function rowsFlat() {
     const out = [];
     if (viewMode === "method") {
-      const { mt, ALL } = methodTree;
-      for (const g of [ALL, ...sortedGroups]) {
-        const G = mt[g]; if (!G) continue;
-        const kG = "M|" + g; out.push({ depth: 0, key: kG, label: g, amount: G.amount, count: G.count });
-        if (!isOpen(kG, 0)) continue;
-        for (const m of Object.keys(G.children).sort((a, b2) => a.localeCompare(b2, "th"))) { const M = G.children[m]; out.push({ depth: 1, key: kG + "|" + m, label: m, amount: M.amount, count: M.count, leaf: true, rows: M.rows, path: g }); }
+      for (const m of methodKeys) {
+        const X = methodTree[m]; const kX = "M|" + m; out.push({ depth: 0, key: kX, label: m, amount: X.amount, count: X.count });
+        if (!isOpen(kX, 0)) continue;
+        for (const g of Object.keys(X.children).sort((x, y) => groupRank(x) - groupRank(y) || x.localeCompare(y, "th"))) {
+          const Y = X.children[g]; const kY = kX + "|" + g; out.push({ depth: 1, key: kY, label: g, amount: Y.amount, count: Y.count });
+          if (!isOpen(kY, 1)) continue;
+          for (const ty of Object.keys(Y.children).sort((x, y) => x.localeCompare(y, "th"))) { const Z = Y.children[ty]; out.push({ depth: 2, key: kY + "|" + ty, label: ty, amount: Z.amount, count: Z.count, leaf: true, rows: Z.rows, path: `${m} › ${g}` }); }
+        }
       }
       return out;
     }
@@ -183,11 +197,10 @@ export default function GeneralReceiptPivotPage() {
 
   function exportCsv() {
     if (viewMode === "method") {
-      const { mt, ALL } = methodTree;
-      const ls = [["กลุ่มรับชำระ", "วิธีรับเงิน", "จำนวนรายการ", "ยอดเงิน"]];
-      for (const g of [ALL, ...sortedGroups]) if (mt[g]) for (const [m, M] of Object.entries(mt[g].children).sort()) ls.push([g, m, M.count, M.amount.toFixed(2)]);
+      const ls = [["วิธีรับเงิน", "กลุ่มรับชำระ", "ประเภท", "จำนวนรายการ", "ยอดเงิน"]];
+      for (const m of methodKeys) for (const [g, Y] of Object.entries(methodTree[m].children)) for (const [ty, Z] of Object.entries(Y.children)) ls.push([m, g, ty, Z.count, Z.amount.toFixed(2)]);
       const csv2 = "\uFEFF" + ls.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
-      const a2 = document.createElement("a"); a2.href = URL.createObjectURL(new Blob([csv2], { type: "text/csv;charset=utf-8" })); a2.download = `สรุปรับชำระตามวิธีรับเงิน_${ym}${branch ? "_" + branch : ""}.csv`; a2.click();
+      const a2 = document.createElement("a"); a2.href = URL.createObjectURL(new Blob([csv2], { type: "text/csv;charset=utf-8" })); a2.download = `สรุปตามการรับชำระ_${ym}${branch ? "_" + branch : ""}.csv`; a2.click();
       return;
     }
     const lines = [["กลุ่มรับชำระ", "ประเภท", "สาขา", "วิธีรับเงิน", "จำนวนรายการ", "ยอดเงิน"]];
@@ -200,11 +213,14 @@ export default function GeneralReceiptPivotPage() {
     const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
     const rows = [];
     if (viewMode === "method") {
-      const { mt, ALL } = methodTree;
-      for (const g of [ALL, ...sortedGroups]) {
-        const G = mt[g]; if (!G) continue;
-        rows.push(`<tr class="g"><td colspan="3">${esc(g)}</td><td class="r">${fmt(G.amount)}</td></tr>`);
-        for (const [m, M] of Object.entries(G.children).sort()) rows.push(`<tr class="m"><td></td><td colspan="2">${esc(m)}</td><td class="r">${fmt(M.amount)}</td></tr>`);
+      for (const m of methodKeys) {
+        const X = methodTree[m];
+        rows.push(`<tr class="g"><td colspan="3">${esc(m)}</td><td class="r">${fmt(X.amount)}</td></tr>`);
+        for (const g of Object.keys(X.children).sort((x, y) => groupRank(x) - groupRank(y) || x.localeCompare(y, "th"))) {
+          const Y = X.children[g];
+          rows.push(`<tr class="t"><td></td><td colspan="2">${esc(g)}</td><td class="r">${fmt(Y.amount)}</td></tr>`);
+          for (const [ty, Z] of Object.entries(Y.children).sort()) rows.push(`<tr class="m"><td></td><td></td><td class="in">${esc(ty)}</td><td class="r">${fmt(Z.amount)}</td></tr>`);
+        }
       }
     } else
     for (const g of sortedGroups) {
@@ -246,7 +262,7 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
         <div><div style={{ fontSize: 12, color: "#4b5563", fontWeight: 600 }}>มุมมอง</div>
           <select value={viewMode} onChange={(e) => { setViewMode(e.target.value); setOpen({}); }} style={inp}>
             <option value="detail">ละเอียด (ประเภท → สาขา → วิธีรับเงิน)</option>
-            <option value="method">สรุปตามวิธีรับชำระ</option>
+            <option value="method">สรุปตามการรับชำระ (วิธีรับเงิน → กลุ่ม → ประเภท)</option>
           </select></div>
         <button onClick={() => setOpen({})} style={btn("#6b7280")}>ย่อ/ขยายค่าเริ่มต้น</button>
         <button onClick={() => { const o = {}; for (const r of flat) o[r.key] = true; for (const g of sortedGroups) { o[g] = true; for (const [ty, T] of Object.entries(tree[g].children)) { o[g + "|" + ty] = true; for (const b of Object.keys(T.children)) o[g + "|" + ty + "|" + b] = true; } } setOpen(o); }} style={btn("#6b7280")}>ขยายทั้งหมด</button>
@@ -270,7 +286,7 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead style={{ background: "#072d6b", color: "#fff" }}><tr>
-            <th style={{ ...cell, textAlign: "left" }}>กลุ่มรับชำระ / ประเภท / สาขา / วิธีรับเงิน</th>
+            <th style={{ ...cell, textAlign: "left" }}>{viewMode === "method" ? "วิธีรับเงิน / กลุ่มรับชำระ / ประเภท" : "กลุ่มรับชำระ / ประเภท / สาขา / วิธีรับเงิน"}</th>
             {showDetail && <th style={{ ...numCell }}>รายการ</th>}
             <th style={{ ...numCell }}>ยอดเงิน</th>
           </tr></thead>
