@@ -46,7 +46,8 @@ export function addTransferBy(split, bks, fallbackAcct) {
   const m = {};
   for (const b of (Array.isArray(bks) ? bks : [])) {
     if (!b || methodKey(b.method) !== "transfer") continue;
-    const lbl = String(b.account_name || b.account || fallbackAcct || "").trim() || "ไม่ระบุบัญชี";
+    // มี account_id (ใบขายรถ) → คีย์ "#id" ให้หน้ารายงานแปลงเป็นเลขที่บัญชีได้แน่นอน (ชื่อบัญชีซ้ำหลายธนาคาร — user 2026-10-03 ขอเลขที่บัญชี)
+    const lbl = Number(b.account_id) > 0 ? "#" + Number(b.account_id) : (String(b.account_name || b.account || fallbackAcct || "").trim() || "ไม่ระบุบัญชี");
     m[lbl] = (m[lbl] || 0) + num(b.amount);
   }
   if (!Object.keys(m).length && num(split.transfer) > 0) m[String(fallbackAcct || "").trim() || "ไม่ระบุบัญชี"] = num(split.transfer);
@@ -288,7 +289,7 @@ export function buildDailyCashItems(src, ctx) {
       };
       if (exactKey && (exactKey === "cash" || exactKey === "transfer") && split[exactKey] >= rp) {
         split[exactKey] -= rp; rpSplit[exactKey] = rp;
-        if (exactKey === "transfer") moveTransfer(rp, String(exactLine.account_name || exactLine.account || "").trim() || "ไม่ระบุบัญชี");
+        if (exactKey === "transfer") moveTransfer(rp, Number(exactLine.account_id) > 0 ? "#" + Number(exactLine.account_id) : (String(exactLine.account_name || exactLine.account || "").trim() || "ไม่ระบุบัญชี"));
       } else {
         const fromCash = Math.min(split.cash, rp);
         split.cash -= fromCash;

@@ -35,7 +35,7 @@ function methodRows(it, acctNo) {
   const tb = s.transfer_by;
   if (tb && Object.keys(tb).length) {
     let sum = 0;
-    for (const [lbl, v] of Object.entries(tb)) { const no = acctNo(lbl); out.push([no === "?" ? `เงินโอน ${lbl} (ชื่อบัญชีซ้ำหลายธนาคาร — ระบุไม่ได้)` : `เงินโอน ${no ? no + " " : ""}${lbl}`.trim(), num(v)]); sum += num(v); }
+    for (const [lbl, v] of Object.entries(tb)) { out.push([`เงินโอน ${acctNo(lbl)}`, num(v)]); sum += num(v); }
     const rest = Math.round((num(s.transfer) - sum) * 100) / 100;
     if (Math.abs(rest) > 0.004) out.push(["เงินโอน (ไม่ระบุบัญชี)", rest]);
   } else if (num(s.transfer)) out.push(["เงินโอน (ไม่ระบุบัญชี)", num(s.transfer)]);
@@ -71,20 +71,26 @@ export default function GeneralReceiptPivotPage() {
     fetch(ACC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "true" }) })
       .then((r) => r.json()).then((d) => setAccounts(Array.isArray(d) ? d.filter((a) => a && a.account_id) : [])).catch(() => {});
   }, []);
+  // แปลงฉลากบัญชีของยอดเงินโอน → "เลขที่บัญชี" (user 2026-10-03: แสดงเลขที่บัญชี ไม่เอาชื่อบัญชี)
+  //   "#id" (ใบขายรถมี account_id) → เลขที่บัญชีตรง ๆ · ฉลากที่มีเลขบัญชีอยู่ → จับคู่กับบัญชีในระบบด้วยตัวเลข · ชื่อบัญชีอย่างเดียว → ใช้ได้เมื่อชื่อชี้บัญชีเดียว
   const acctNo = useMemo(() => {
-    // เติมเลขบัญชีให้เฉพาะเมื่อชื่อที่เก็บมาชี้ไปที่บัญชีเดียวแน่ ๆ — ชื่อบริษัทเฉย ๆ (เช่น "หจก.สิงห์ชัยสยามยนต์" มีหลายธนาคาร) ไม่เดา (2026-10-03)
     const norm = (v) => String(v || "").replace(/\s+/g, "").trim();
+    const digits = (v) => String(v || "").replace(/\D/g, "");
+    const byId = new Map(accounts.map((x) => [String(x.account_id), String(x.account_no || "").trim()]));
+    const byDigits = new Map(accounts.map((x) => [digits(x.account_no), String(x.account_no || "").trim()]));
     const byName = new Map();
-    for (const a of accounts) { const k = norm(a.account_name); if (!k) continue; if (!byName.has(k)) byName.set(k, new Set()); byName.get(k).add(String(a.account_no || "").trim()); }
+    for (const x of accounts) { const k = norm(x.account_name); if (!k) continue; if (!byName.has(k)) byName.set(k, new Set()); byName.get(k).add(String(x.account_no || "").trim()); }
     return (lbl) => {
-      const l = norm(lbl); if (!l) return "";
-      if (/\d{6,}/.test(l)) return ""; // ฉลากมีเลขบัญชีอยู่แล้ว
-      const set = byName.get(l);
+      const raw = String(lbl || "").trim();
+      if (!raw || raw === "ไม่ระบุบัญชี") return "(ไม่ระบุบัญชี)";
+      if (raw.startsWith("#")) return byId.get(raw.slice(1)) || "(ไม่ระบุบัญชี)";
+      const m = raw.match(/\d[\d-]{7,}\d/);
+      if (m) return byDigits.get(digits(m[0])) || m[0];
+      const set = byName.get(norm(raw));
       if (set && set.size === 1) return [...set][0];
-      if (set && set.size > 1) return "?"; // ชื่อซ้ำหลายบัญชี
-      const hits = accounts.filter((a) => l.includes(norm(a.account_name)) || norm(a.account_name).includes(l));
-      const nos = new Set(hits.map((a) => String(a.account_no || "").trim()).filter(Boolean));
-      return nos.size === 1 ? [...nos][0] : nos.size > 1 ? "?" : "";
+      const hits = new Set(accounts.filter((x) => norm(raw).includes(norm(x.account_name)) || norm(x.account_name).includes(norm(raw))).map((x) => String(x.account_no || "").trim()).filter(Boolean));
+      if (hits.size === 1) return [...hits][0];
+      return `(ไม่ระบุเลขบัญชี · ${raw})`;
     };
   }, [accounts]);
 
