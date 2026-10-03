@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { loadDailyCashSources, buildDailyCashItems, num, fmt } from "../lib/dailyCash";
+import { loadDailyCashSources, buildDailyCashItems, num, fmt, makeAcctResolver } from "../lib/dailyCash";
 
 // สรุปรับชำระเงินทั่วไป (รายเดือน) — Report Admin (user 2026-10-03)
 // แทน pivot ใน Excel "สรุปรับชำระเงินทั่วไป.3.xlsx" แผ่น PRIVOT-สรุปรับชำระเงินทั่วไป ของบัญชี โดยใช้ข้อมูลจากระบบชุดเดียวกับหน้า "สรุปรายวันรับเงิน" (dailyCash.js)
@@ -71,28 +71,8 @@ export default function GeneralReceiptPivotPage() {
     fetch(ACC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "true" }) })
       .then((r) => r.json()).then((d) => setAccounts(Array.isArray(d) ? d.filter((a) => a && a.account_id) : [])).catch(() => {});
   }, []);
-  // แปลงฉลากบัญชีของยอดเงินโอน → "เลขที่บัญชี" (user 2026-10-03: แสดงเลขที่บัญชี ไม่เอาชื่อบัญชี)
-  //   "#id" (ใบขายรถมี account_id) → เลขที่บัญชีตรง ๆ · ฉลากที่มีเลขบัญชีอยู่ → จับคู่กับบัญชีในระบบด้วยตัวเลข · ชื่อบัญชีอย่างเดียว → ใช้ได้เมื่อชื่อชี้บัญชีเดียว
-  const acctNo = useMemo(() => {
-    const norm = (v) => String(v || "").replace(/\s+/g, "").trim();
-    const digits = (v) => String(v || "").replace(/\D/g, "");
-    const byId = new Map(accounts.map((x) => [String(x.account_id), String(x.account_no || "").trim()]));
-    const byDigits = new Map(accounts.map((x) => [digits(x.account_no), String(x.account_no || "").trim()]));
-    const byName = new Map();
-    for (const x of accounts) { const k = norm(x.account_name); if (!k) continue; if (!byName.has(k)) byName.set(k, new Set()); byName.get(k).add(String(x.account_no || "").trim()); }
-    return (lbl) => {
-      const raw = String(lbl || "").trim();
-      if (!raw || raw === "ไม่ระบุบัญชี") return "(ไม่ระบุบัญชี)";
-      if (raw.startsWith("#")) return byId.get(raw.slice(1)) || "(ไม่ระบุบัญชี)";
-      const m = raw.match(/\d[\d-]{7,}\d/);
-      if (m) return byDigits.get(digits(m[0])) || m[0];
-      const set = byName.get(norm(raw));
-      if (set && set.size === 1) return [...set][0];
-      const hits = new Set(accounts.filter((x) => norm(raw).includes(norm(x.account_name)) || norm(x.account_name).includes(norm(raw))).map((x) => String(x.account_no || "").trim()).filter(Boolean));
-      if (hits.size === 1) return [...hits][0];
-      return `(ไม่ระบุเลขบัญชี · ${raw})`;
-    };
-  }, [accounts]);
+  // แปลงฉลากบัญชีของยอดเงินโอน → "เลขที่บัญชี" (ตัวแปลงร่วมใน dailyCash.js ใช้กับหน้าสรุปรายวันรับเงินด้วย)
+  const acctNo = useMemo(() => makeAcctResolver(accounts), [accounts]);
 
   async function load() {
     setLoading(true); setMessage("");

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { buildDailyCashItems, loadPettyRows } from "../lib/dailyCash"; // ตรรกะสร้างแถวรายการ ย้ายไปไว้ที่เดียว ใช้ร่วมกับหน้าบันทึกฝากเงิน (user 2026-09-04)
+import { buildDailyCashItems, loadPettyRows, makeAcctResolver, transferAccounts } from "../lib/dailyCash"; // ตรรกะสร้างแถวรายการ ย้ายไปไว้ที่เดียว ใช้ร่วมกับหน้าบันทึกฝากเงิน (user 2026-09-04)
 
 // สรุปรายวันรับเงิน: ยอดขาย + เงินที่รับ + แหล่งรับชำระ (เงินสด/โอน/บัตร/ไฟแนนซ์/มัดจำ) + รับชำระเงินมัดจำจองรถ
 // ข้อมูล: retail-sale-api list_sale_payments (ใบขายที่รับชำระแล้ว) + booking-deposit-api get_deposits (มัดจำจองรถ)
@@ -84,6 +84,14 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [insRefundRows, setInsRefundRows] = useState([]);
   const [whtRefundRows, setWhtRefundRows] = useState([]);
   const [custRefundRows, setCustRefundRows] = useState([]);
+  // เลขที่บัญชีใต้ยอดเงินโอน (user 2026-10-04) — โหลดรายการบัญชีธนาคารครั้งเดียวไว้แปลงฉลาก → เลขที่บัญชี
+  const [bankAccts, setBankAccts] = useState([]);
+  useEffect(() => {
+    fetch("https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "true" }) })
+      .then((r) => r.json()).then((d) => setBankAccts(Array.isArray(d) ? d.filter((x) => x && x.account_id) : [])).catch(() => {});
+  }, []);
+  const acctNo = useMemo(() => makeAcctResolver(bankAccts), [bankAccts]);
+  const trAccts = (it) => { const xs = transferAccounts(it.split, acctNo); return xs.length === 1 ? [[xs[0][0], null]] : xs; }; // บัญชีเดียวไม่ต้องโชว์ยอดซ้ำ
   const [pettyRows, setPettyRows] = useState([]); // เบิกเงินสดย่อย 4 ประเภท (ค่าน้ำมันรถใหม่/ไปรษณีย์/ทั่วไป/ของไหว้) — หักเงินสด ณ วันที่ใบเบิก (user 2026-09-07) // คืนเงินค่าเบี้ยประกัน (insurance_fee_refunds) — เงินสด = แถวหักเงินสด
 
 
@@ -352,7 +360,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         body += `<tr>
 <td class="c">${idx}</td><td>${esc(it.doc_no || "-")}</td><td class="c">${esc(thaiDate(it.date))}</td>
 <td>${esc(it.ref_no || "-")}</td><td>${esc(it.customer_name || "")}<br><span style="font-size:9.5px;color:#555">${esc(it.category)}${it.refunded ? " · คืนเงินแล้ว" : ""}</span></td><td class="r">${it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
-${METHOD_COLS.map((c) => `<td class="r">${it.split[c.key] ? fmt(it.split[c.key]) : "-"}${c.key === "cheque" && it.split.cheque_nos ? `<br><span style="font-size:9px;color:#555">เลขที่ ${esc(it.split.cheque_nos)}</span>` : ""}</td>`).join("")}
+${METHOD_COLS.map((c) => `<td class="r">${it.split[c.key] ? fmt(it.split[c.key]) : "-"}${c.key === "cheque" && it.split.cheque_nos ? `<br><span style="font-size:9px;color:#555">เลขที่ ${esc(it.split.cheque_nos)}</span>` : ""}${c.key === "transfer" ? trAccts(it).map(([no, v]) => `<br><span style="font-size:9px;color:#555">${esc(no)}${v != null ? " " + fmt(v) : ""}</span>`).join("") : ""}</td>`).join("")}
 <td class="r b">${fmt(it.received)}</td></tr>`;
       }
       const t = sumOf(g.rows);
@@ -480,7 +488,7 @@ ${depSection}
                       </td>
                       <td style={{ ...td, textAlign: "center" }}>{dispSeller(it.seller)}</td>
                       <td style={tdR}>{it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
-                      {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(it.split[c.key])}{c.key === "cheque" && it.split.cheque_nos ? <div style={{ fontSize: 10.5, color: "#7c3aed", fontFamily: "monospace", whiteSpace: "nowrap" }}>เลขที่ {it.split.cheque_nos}</div> : null}</td>)}
+                      {METHOD_COLS.map((c) => <td key={c.key} style={tdR}>{fmt0(it.split[c.key])}{c.key === "cheque" && it.split.cheque_nos ? <div style={{ fontSize: 10.5, color: "#7c3aed", fontFamily: "monospace", whiteSpace: "nowrap" }}>เลขที่ {it.split.cheque_nos}</div> : null}{c.key === "transfer" && trAccts(it).map(([no, v], k2) => <div key={k2} style={{ fontSize: 10.5, color: "#0369a1", fontFamily: "monospace", whiteSpace: "nowrap" }}>{no}{v != null ? " " + fmt(v) : ""}</div>)}</td>)}
                       <td style={{ ...tdR, fontWeight: 700, color: "#15803d" }}>{fmt(it.received)}</td>
                     </tr>
                   ))}

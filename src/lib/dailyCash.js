@@ -54,6 +54,36 @@ export function addTransferBy(split, bks, fallbackAcct) {
   if (Object.keys(m).length) split.transfer_by = m;
   return split;
 }
+/** สร้างตัวแปลงฉลากบัญชีของยอดเงินโอน (คีย์ใน split.transfer_by) → เลขที่บัญชี จากรายการบัญชีธนาคาร (accounting-api list_bank_accounts)
+ *  "#id" → เลขบัญชีตรง ๆ · ฉลากที่มีเลขบัญชี → จับคู่ด้วยตัวเลข · ชื่อบัญชีอย่างเดียว → ใช้ได้เมื่อชื่อชี้บัญชีเดียว (ชื่อซ้ำหลายธนาคารไม่เดา) */
+export function makeAcctResolver(accounts) {
+  const list = Array.isArray(accounts) ? accounts : [];
+  const norm = (v) => String(v || "").replace(/\s+/g, "").trim();
+  const digits = (v) => String(v || "").replace(/\D/g, "");
+  const byId = new Map(list.map((x) => [String(x.account_id), String(x.account_no || "").trim()]));
+  const byDigits = new Map(list.map((x) => [digits(x.account_no), String(x.account_no || "").trim()]));
+  const byName = new Map();
+  for (const x of list) { const k = norm(x.account_name); if (!k) continue; if (!byName.has(k)) byName.set(k, new Set()); byName.get(k).add(String(x.account_no || "").trim()); }
+  return (lbl) => {
+    const raw = String(lbl || "").trim();
+    if (!raw || raw === "ไม่ระบุบัญชี") return "(ไม่ระบุบัญชี)";
+    if (raw.startsWith("#")) return byId.get(raw.slice(1)) || "(ไม่ระบุบัญชี)";
+    const m = raw.match(/\d[\d-]{7,}\d/);
+    if (m) return byDigits.get(digits(m[0])) || m[0];
+    const set = byName.get(norm(raw));
+    if (set && set.size === 1) return [...set][0];
+    const hits = new Set(list.filter((x) => norm(raw).includes(norm(x.account_name)) || norm(x.account_name).includes(norm(raw))).map((x) => String(x.account_no || "").trim()).filter(Boolean));
+    if (hits.size === 1) return [...hits][0];
+    return `(ไม่ระบุเลขบัญชี · ${raw})`;
+  };
+}
+/** รายการ [เลขที่บัญชี, ยอด] ของยอดเงินโอนในแถว (รวมฉลากที่แปลงได้เลขเดียวกัน) */
+export function transferAccounts(split, resolve) {
+  const tb = split && split.transfer_by; if (!tb) return [];
+  const m = new Map();
+  for (const [lbl, v] of Object.entries(tb)) { const k = resolve ? resolve(lbl) : lbl; m.set(k, (m.get(k) || 0) + num(v)); }
+  return [...m.entries()].filter(([, v]) => Math.abs(v) > 0.004);
+}
 export const fmt = (n) => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const shiftDate = (iso, days) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const bc5 = (v) => String(v || "").substring(0, 5).toUpperCase();
