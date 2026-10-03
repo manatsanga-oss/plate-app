@@ -123,7 +123,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         fetch(RETAIL_API, {
           method: "POST", headers: { "Content-Type": "application/json" },
           // ดึงย้อน 90 วันเผื่อใบขายรับเงินก่อนแล้วค่อยติดป้ายทีหลัง — ใช้กันหักมัดจำป้ายแดงซ้ำจากแถวขาย (แถวแสดงผลกรองช่วงวันที่อีกที)
-          body: JSON.stringify({ action: "list_red_plate_deposits", status: "all", date_from: shiftDate(dateFrom, -90), date_to: dateTo }),
+          body: JSON.stringify({ action: "list_red_plate_deposits", status: "all", date_from: shiftDate(dateFrom, -90), date_to: shiftDate(dateTo, 365) /* standalone รับเงินหลังวันขาย ต้องมองไปข้างหน้าด้วย กันแยก 200 ออกจากใบขายผิด (2026-10-03) */ }),
         }).catch(() => null),
         fetch(DEPOSIT_INCOME_API, {
           method: "POST", headers: { "Content-Type": "application/json" },

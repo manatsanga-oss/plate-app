@@ -141,7 +141,7 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
     post(PART_SVC_PAY_API, { action: "list_payments", date_from: dateFrom, date_to: dateTo }).catch(() => null),
     post(USED_MOTO_API, { action: "list_sales", date_from: dateFrom, date_to: dateTo }).catch(() => null),
     post(RETAIL_API, { action: "list_red_plate_deposits", status: "refunded", date_from: dateFrom, date_to: dateTo }).catch(() => null),
-    post(RETAIL_API, { action: "list_red_plate_deposits", status: "all", date_from: shiftDate(dateFrom, -90), date_to: dateTo }).catch(() => null),
+    post(RETAIL_API, { action: "list_red_plate_deposits", status: "all", date_from: shiftDate(dateFrom, -90), date_to: shiftDate(dateTo, 365) /* standalone รับเงินหลังวันขาย ต้องมองไปข้างหน้าด้วย กันแยก 200 ออกจากใบขายผิด (2026-10-03) */ }).catch(() => null),
     post(DEPOSIT_INCOME_API, { action: "list_deposit_income", date_from: dateFrom, date_to: dateTo }).catch(() => null),
     post(FUEL_API, { action: "list_fuel_withdraws", date_from: dateFrom, date_to: dateTo }).catch(() => null),
     post(RETAIL_API, { action: "list_retail_sales", date_from: dateFrom, date_to: dateTo, limit: 2000 }).catch(() => null),
