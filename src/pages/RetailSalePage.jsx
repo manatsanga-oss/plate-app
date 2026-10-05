@@ -1170,7 +1170,9 @@ ${s.note ? `<div style="margin-top:6px;font-size:12px">หมายเหตุ:
     const first = payLines[0] || { method: "เงินสด" };
     const isTr = String(first.method || "").includes("โอน");
     if (isTr && (!refundBank.trim() || !refundAcctNo.trim())) { setMessage("❌ คืนแบบโอน: กรอกธนาคารและเลขบัญชีของลูกค้าก่อน"); return; }
-    const accName = isTr ? (bankAccounts.find((a) => String(a.account_id) === String(first.account_id))?.account_name || "") : "";
+    // เก็บ "ชื่อบัญชี · เลขที่บัญชี (ธนาคาร)" แบบเดียวกับเมนูมัดจำจองรถ — รายงานเคลื่อนไหวบัญชีจับคู่จากเลขที่บัญชี (ชื่อบัญชีอย่างเดียวซ้ำหลายธนาคาร) user 2026-10-05
+    const accRow = isTr ? bankAccounts.find((a) => String(a.account_id) === String(first.account_id)) : null;
+    const accName = accRow ? `${accRow.account_name}${accRow.account_no && accRow.account_no !== "-" ? ` · ${accRow.account_no}` : ""}${accRow.bank_name && accRow.bank_name !== "-" ? ` (${accRow.bank_name})` : ""}` : "";
     if (isTr && !accName) { setMessage("❌ เลือกบัญชีบริษัทที่ใช้โอนเงินคืน"); return; }
     setPayingSave(true); setMessage("");
     try {

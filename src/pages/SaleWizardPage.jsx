@@ -520,7 +520,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     if (Math.abs(sum - target) > 0.5) { setMessage(`❌ ยอดรวมวิธีรับชำระ ${sum.toLocaleString("th-TH")} ไม่เท่ายอดที่ต้องรับ ${target.toLocaleString("th-TH")}`); return; }
     const payLinesOut = lines.map((l) => {
       const acc = l.method === "transfer" ? bankAccounts.find(a => String(a.account_id) === String(l.account_id)) : null;
-      return { method: l.method, methodLabel: l.method === "cash" ? "เงินสด" : "เงินโอน", account_id: acc ? Number(acc.account_id) : null, accountName: acc?.account_name || null, amount: l.amt };
+      return { method: l.method, methodLabel: l.method === "cash" ? "เงินสด" : "เงินโอน", account_id: acc ? Number(acc.account_id) : null, accountName: acc?.account_name || null,
+        accountLabel: acc ? `${acc.account_name}${acc.account_no && acc.account_no !== "-" ? ` · ${acc.account_no}` : ""}${acc.bank_name && acc.bank_name !== "-" ? ` (${acc.bank_name})` : ""}` : null, // ใช้เก็บบัญชีที่โอนคืนมัดจำ (มีเลขที่บัญชี) amount: l.amt };
     });
     if (sale.__test && !custLineUserId) { setMessage("❌ ลูกค้าไม่มี LINE ในระบบ — ส่งใบเสร็จทาง LINE ไม่ได้"); return; }
     const refund = Number(receiveAmt) < 0;
@@ -571,7 +572,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
           action: "refund_deposit", deposit_no: depNo,
           refund_method: isTr ? "โอนเข้าบัญชี" : "เงินสด",
           refund_amount: target,
-          refund_from_account: isTr ? (first.accountName || "") : "",
+          refund_from_account: isTr ? (first.accountLabel || first.accountName || "") : "",
           refund_bank: isTr ? refundBank.trim() : "",
           refund_account_no: isTr ? refundAcctNo.trim() : "",
           refund_note: "คืนส่วนเกินมัดจำจากใบขาย " + sale.sale_no,
