@@ -1128,6 +1128,8 @@ export default function SparePartsOrderPage({ currentUser }) {
   .right { text-align: right; }
   .center { text-align: center; }
   .stock { background: #f0f9ff; }
+  .sub-line { font-size: 11px; color: #555; margin-top: 2px; }
+  .sub-line.has { color: #000; font-weight: 700; }
   .footer { margin-top: 40px; display: flex; justify-content: space-between; }
   .sig { text-align: center; width: 200px; }
   .sig-line { border-top: 1px solid #333; margin-top: 50px; padding-top: 4px; }
@@ -1152,7 +1154,7 @@ export default function SparePartsOrderPage({ currentUser }) {
 <table>
   <thead><tr><th class="center">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th class="center">จำนวน</th><th class="stock">สต๊อก</th><th class="stock center">คงเหลือ</th><th class="stock">ที่เก็บ</th></tr></thead>
   <tbody>
-    ${items.length === 0 ? '<tr><td colspan="7" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}</td><td class="center">${it.quantity || 0}</td><td class="stock">${it.stock_name || '-'}${Number(it.loan_qty) > 0 ? `<br>${LOAN_STORE}(${it.loan_qty})` : ''}</td><td class="stock center">${it.stock_qty != null ? it.stock_qty : '-'}</td><td class="stock">${it.stock_location || '-'}</td></tr>`).join('')}
+    ${items.length === 0 ? '<tr><td colspan="7" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}${(it.substitutes || []).map((sb) => `<div class="sub-line${Number(sb.stock_qty) > 0 ? ' has' : ''}">↳ ${sb.code || ''}</div>`).join('')}</td><td>${it.part_name || ''}${(it.substitutes || []).map((sb) => `<div class="sub-line${Number(sb.stock_qty) > 0 ? ' has' : ''}">ทดแทน: ${sb.name || '(อะไหล่ทดแทน)'}${Number(sb.stock_qty) > 0 ? ` — มีของ ${sb.stock_qty} ชิ้น (${sb.stock_name || '-'})` : ' — ไม่มีของในสต๊อก'}</div>`).join('')}</td><td class="center">${it.quantity || 0}</td><td class="stock">${it.stock_name || '-'}${Number(it.loan_qty) > 0 ? `<br>${LOAN_STORE}(${it.loan_qty})` : ''}</td><td class="stock center">${it.stock_qty != null ? it.stock_qty : '-'}</td><td class="stock">${it.stock_location || '-'}</td></tr>`).join('')}
   </tbody>
 </table>
 <div class="footer">

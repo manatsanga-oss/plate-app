@@ -639,6 +639,8 @@ export default function YamahaOrderPage({ currentUser }) {
   th, td { border: 1px solid #ccc; padding: 6px 8px; font-size: 12px; }
   th { background: #f1f5f9; font-weight: 600; }
   .center { text-align: center; }
+  .sub-line { font-size: 11px; color: #555; margin-top: 2px; }
+  .sub-line.has { color: #000; font-weight: 700; }
   .footer { margin-top: 40px; display: flex; justify-content: space-between; }
   .sig { text-align: center; width: 200px; }
   .sig-line { border-top: 1px solid #333; margin-top: 50px; padding-top: 4px; }
@@ -670,7 +672,13 @@ export default function YamahaOrderPage({ currentUser }) {
       const srcCell = hasStock ? stocks.map(s => s.source || '-').join('<br>') : '-';
       const qtyCell = hasStock ? stocks.map(s => Number(s.quantity || 0)).join('<br>') : '-';
       const locCell = hasStock ? stocks.map(s => s.location || '-').join('<br>') : '-';
-      return `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}</td><td class="center">${it.quantity || 0}</td><td>${srcCell}</td><td class="center">${qtyCell}</td><td>${locCell}</td></tr>`;
+      // อะไหล่ทดแทน/รหัสเดิม (part_substitutes) พร้อมสต๊อก — พิมพ์ใต้ชื่ออะไหล่เหมือนบนจอ (user 2026-10-05)
+      const subsHtml = (it.substitutes || []).map((sb) => {
+        const st = Array.isArray(sb.stock) ? sb.stock : [];
+        const q = st.reduce((t, x) => t + Number(x.qty || 0), 0);
+        return `<div class="sub-line${q > 0 ? ' has' : ''}">↳ ${sb.rel || 'ทดแทน'} ${sb.code || ''}${q > 0 ? ` — มีของ ${q} ชิ้น (${st.map((x) => `${x.source} ${x.qty}${x.location ? ' ' + x.location : ''}`).join(', ')})` : ' — ไม่มีของในสต๊อก'}</div>`;
+      }).join('');
+      return `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}${subsHtml}</td><td class="center">${it.quantity || 0}</td><td>${srcCell}</td><td class="center">${qtyCell}</td><td>${locCell}</td></tr>`;
     }).join('')}
   </tbody>
 </table>
