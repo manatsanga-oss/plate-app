@@ -277,6 +277,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   const [bankAccounts, setBankAccounts] = useState([]); // บัญชีรับโอน (โหลดครั้งแรกที่เปิด modal)
   const bankLabelOf = (a) => [a.bank_name, a.account_no, a.account_name].filter(Boolean).join(" · ");
   const PAY_METHODS = ["เงินสด", "เงินโอน", "QR", "อื่นๆ"];
+  const needsAccount = (m) => m === "เงินโอน" || m === "QR"; // เงินเข้าบัญชีธนาคาร → ต้องเลือกบัญชีรับโอน (QR เพิ่ม user 2026-10-05: ให้ขึ้นรายงานเคลื่อนไหวบัญชี)
 
   const linesTotal = () => lines.reduce((s, l) => s + num(l.qty) * num(l.price_before_discount) - num(l.discount) + num(l.service_fee), 0);
 
@@ -294,7 +295,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   async function saveReceiptPayment() {
     const rows = (payModal?.rows || []).filter(r => num(r.amount) > 0);
     if (!rows.length) { setMessage("❌ ใส่ยอดรับชำระ"); return; }
-    if (rows.some(r => r.method === "เงินโอน" && !r.account)) { setMessage("❌ เลือกบัญชีรับโอนเงินของรายการเงินโอนก่อน"); return; }
+    if (rows.some(r => needsAccount(r.method) && !r.account)) { setMessage("❌ เลือกบัญชีรับโอนเงินของรายการเงินโอน/QR ก่อน"); return; }
     const total = rows.reduce((s, r) => s + num(r.amount), 0);
     const methodSum = rows.map(r => r.method).join("+");
     setPayModal(m => ({ ...m, saving: true }));
@@ -302,7 +303,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       const r = await apiPost({
         action: "save_receipt_payment", receipt_no: header.receipt_no,
         paid_date: payModal.date,
-        payments: rows.map(r2 => ({ method: r2.method, amount: num(r2.amount), account: r2.method === "เงินโอน" ? r2.account : "" })),
+        payments: rows.map(r2 => ({ method: r2.method, amount: num(r2.amount), account: needsAccount(r2.method) ? r2.account : "" })),
         payment_note: payModal.note,
         received_by: currentUser?.username || currentUser?.name || "",
       });
@@ -1320,7 +1321,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                           style={{ border: "none", background: "#fee2e2", color: "#b91c1c", borderRadius: 6, width: 28, height: 28, cursor: "pointer", flex: "0 0 auto" }}>✕</button>
                       )}
                     </div>
-                    {r3.method === "เงินโอน" && (
+                    {needsAccount(r3.method) && (
                       <div style={{ marginTop: 6 }}>
                         <select value={r3.account} onChange={e => setPayRow(i3, { account: e.target.value })}
                           style={{ ...inp, background: r3.account ? "#fff" : "#fffbeb" }}>
