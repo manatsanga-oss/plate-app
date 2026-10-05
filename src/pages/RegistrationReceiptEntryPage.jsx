@@ -794,7 +794,10 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     if (lines.length === 0 || lines.every(l => !num(l.price_before_discount) && !num(l.service_fee))) { setMessage("❌ เพิ่มรายการรายได้อย่างน้อย 1"); return; }
     // ทะเบียนรถ = หมวด + เลข + จังหวัด — งานต่อภาษี (ที่มีบรรทัดค่าต่อภาษี/ตรวจสภาพ; ต่อ พรบ. อย่างเดียวไม่บังคับ) และงานโอนทะเบียน ต้องกรอกครบ 3 ช่อง (user 2026-09-05)
     const hasTaxWork = lines.some(l => (isTaxLine(l) || isTroLine(l)) && (num(l.price_before_discount) || num(l.service_fee)));
-    if ((header.receipt_type === "งานต่อภาษีและพรบ." && hasTaxWork) || header.receipt_type === "งานโอนทะเบียน") {
+    // งานโอนทะเบียนที่มีแต่รายการแจ้งย้ายออก/แจ้งจำหน่าย (รถยังไม่มีทะเบียน เช่น รถใหม่ขายต่อร้านอื่น) ไม่บังคับทะเบียน (user 2026-10-05)
+    const pricedLines = lines.filter(l => num(l.price_before_discount) || num(l.service_fee));
+    const moveOutOnly = pricedLines.length > 0 && pricedLines.every(l => { const n = String(l.income_name || ""); return n.includes("แจ้งย้ายออก") || n.includes("แจ้งจำหน่าย"); });
+    if ((header.receipt_type === "งานต่อภาษีและพรบ." && hasTaxWork) || (header.receipt_type === "งานโอนทะเบียน" && !moveOutOnly)) {
       const missing = [!text(header.plate_category) && "หมวด", !text(header.plate_number) && "เลขทะเบียน", !text(header.plate_province) && "จังหวัด"].filter(Boolean);
       if (missing.length) { setMessage(`❌ ใส่ทะเบียนรถให้ครบ (ขาด: ${missing.join(", ")}) — ทะเบียนต้องมี หมวด + เลข + จังหวัด เช่น 1กน 4266 อุดรธานี`); return; }
     }
