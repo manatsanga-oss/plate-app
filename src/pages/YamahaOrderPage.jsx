@@ -34,6 +34,7 @@ const emptyForm = () => ({
 export default function YamahaOrderPage({ currentUser }) {
   const [orders, setOrders] = useState([]);
   const [lineByPhone, setLineByPhone] = useState({}); // เบอร์ 9 หลักท้าย → true = ลูกค้ามี LINE ผูกในระบบ
+  const [notifyingId, setNotifyingId] = useState(null); // order_id ที่กำลังส่ง LINE แจ้งลูกค้า
   // เช็คว่าลูกค้าแต่ละใบมี LINE ผูกไหม — ค้นฐานลูกค้าด้วยเบอร์โทร แล้วเทียบเบอร์ 9 หลักท้าย (ทำครั้งเดียวต่อเบอร์)
   useEffect(() => {
     const need = [...new Set(orders.map(o => phoneLast9(o.customer_phone)).filter(p => p.length === 9))].filter(p => lineByPhone[p] === undefined);
@@ -234,6 +235,53 @@ export default function YamahaOrderPage({ currentUser }) {
       setTechs(allUsers.filter(u => u.branch === myBranch && (u.position || "").includes("ช่าง")));
     } catch {}
     setLoading(false);
+  }
+
+  // ===== แจ้งลูกค้าทาง LINE (user 2026-10-05 — แบบเดียวกับหน้าสั่งซื้ออะไหล่ HONDA) =====
+  // ใช้ action send_spare_notify (Booking_Deposit_Workflow) ตัวเดียวกัน — ส่ง order_id เป็น "Y<id>" เพื่อให้ลิงก์เลือกวันนัด
+  //   /spare-appointment?order=Y<id> รู้ว่าเป็นใบ YAMAHA (หน้าเลือกวันจะบันทึกลง yamaha_spare_orders ผ่าน save_yamaha_appointment)
+  // ข้อความ: ใบ PDO (มัดจำสั่งซื้อ) = อะไหล่มาครบ เชิญเลือกวันมารับสินค้า · รถจอดร้าน = รถซ่อมเสร็จ เชิญมารับรถ · ไม่จอดร้าน = เชิญนำรถเข้ารับบริการ (เลือกวันเอง)
+  const canNotify = (o) => (o.status === "มาครบ" || o.status === "เปิดงาน") && !!lineByPhone[phoneLast9(o.customer_phone)];
+  async function handleNotifyCustomer(o) {
+    const p9 = phoneLast9(o.customer_phone);
+    const isPDO = (o.deposit_doc_no || "").startsWith("PDO");
+    const done = !isPDO && o.parking_status === "จอดร้าน";
+    const confirmText = isPDO
+      ? `ส่ง LINE แจ้ง "อะไหล่ที่สั่งซื้อมาครบแล้ว เชิญเลือกวันมารับสินค้า" ถึงคุณ ${o.customer_name || "ลูกค้า"} ?`
+      : done
+      ? `ส่ง LINE แจ้ง "รถซ่อมเสร็จแล้ว เชิญมารับรถ" ถึงคุณ ${o.customer_name || "ลูกค้า"} ?\n(รถคันนี้สถานะจอดร้าน — กดเมื่อซ่อมเสร็จแล้วเท่านั้น)`
+      : `ส่ง LINE แจ้ง "อะไหล่มาถึงแล้ว เชิญนำรถเข้ามารับบริการ" ถึงคุณ ${o.customer_name || "ลูกค้า"} ?`;
+    if (!window.confirm(confirmText)) return;
+    setNotifyingId(o.order_id);
+    try {
+      const rows = await fetch(CUSTOMER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "search_customers", keyword: p9 }) }).then(r => r.json()).catch(() => []);
+      const hit = (Array.isArray(rows) ? rows : []).find(r => String(r.line_user_id || "").trim() && phoneLast9(r.customer_phone) === p9);
+      if (!hit) { setMessage("❌ ไม่พบ LINE ลูกค้าในระบบ — ส่งข้อความไม่ได้"); setNotifyingId(null); return; }
+      const branchText = o.branch || currentUser?.branch || "";
+      const res = await fetch(CUSTOMER_API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_spare_notify",
+          line_user_id: hit.line_user_id,
+          notify_type: isPDO ? "parts_ready" : done ? "done" : "bring_in",
+          order_id: "Y" + o.order_id, // Y นำหน้า = ใบ YAMAHA (ลิงก์เลือกวันนัดแยกจากใบ HONDA ที่เลขซ้ำกันได้)
+          customer_name: o.customer_name || "",
+          model_name: o.model_name || "",
+          license_plate: o.license_plate || "",
+          job_no: o.job_no && o.job_no !== "null" ? o.job_no : "",
+          appointment_date: o.appointment_date ? fmtDate(o.appointment_date) : "",
+          branch_code: String(branchText).split(" ")[0],
+          branch_name: branchText,
+        }),
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      try { await api("save_yamaha_appointment", { order_id: o.order_id, notify_inc: true }); } catch { /* นับไม่ได้ไม่เป็นไร — LINE ส่งแล้ว */ }
+      setOrders(prev => prev.map(x => x.order_id === o.order_id ? { ...x, notify_count: Number(x.notify_count || 0) + 1 } : x));
+      setMessage(`📲 ส่ง LINE แจ้ง${isPDO ? "อะไหล่มาครบ เชิญมารับสินค้า" : done ? "รถซ่อมเสร็จ" : "นำรถเข้ารับบริการ"}ให้คุณ ${o.customer_name || "ลูกค้า"} แล้ว`);
+    } catch (e) {
+      setMessage("❌ ส่ง LINE ไม่สำเร็จ: " + (e.message || e));
+    }
+    setNotifyingId(null);
   }
 
   async function handleSaveAppointment() {
@@ -879,7 +927,11 @@ export default function YamahaOrderPage({ currentUser }) {
                 </td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
                 <td style={td}>{o.vendor_po_no || "-"}</td>
-                <td style={td}>{o.appointment_date ? fmtDate(o.appointment_date) : "-"}</td>
+                <td style={td}>{o.appointment_date
+                  ? (o.appointment_by === "customer"
+                    ? <span style={{ color: "#059669", fontWeight: 700 }} title="ลูกค้าแจ้งวันนัดเองผ่าน LINE">📲 {fmtDate(o.appointment_date)}</span>
+                    : fmtDate(o.appointment_date))
+                  : "-"}</td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <button onClick={() => viewDetail(o)} style={{ background: "#072d6b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>ดู</button>
                   {!isClosed && NOT_ARRIVED.includes(o.status) && (
@@ -902,6 +954,17 @@ export default function YamahaOrderPage({ currentUser }) {
                     <button onClick={() => { setShowAppointmentModal(o); setAppointmentDate(o.appointment_date || ""); setMessage(""); }}
                       style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>นัดหมาย</button>
                   )}
+                  {!isClosed && canNotify(o) && (() => {
+                    const cnt = Number(o.notify_count || 0);
+                    const isPDO = (o.deposit_doc_no || "").startsWith("PDO");
+                    const tip = isPDO ? "ส่ง LINE แจ้งอะไหล่ที่สั่งซื้อมาครบแล้ว เชิญเลือกวันมารับสินค้า" : o.parking_status === "จอดร้าน" ? "ส่ง LINE แจ้งรถซ่อมเสร็จ เชิญมารับรถ" : "ส่ง LINE เชิญนำรถเข้ามารับบริการ (ลูกค้าเลือกวันนัดเอง)";
+                    return (
+                      <button onClick={() => handleNotifyCustomer(o)} disabled={notifyingId === o.order_id} title={tip + (cnt > 0 ? ` — แจ้งไปแล้ว ${cnt} ครั้ง` : "")}
+                        style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: notifyingId === o.order_id ? "wait" : "pointer", marginLeft: 4, opacity: notifyingId === o.order_id ? 0.6 : 1, display: "inline-flex", alignItems: "center", gap: 5 }}>
+                        {notifyingId === o.order_id ? "กำลังส่ง..." : <>แจ้งลูกค้า{cnt > 0 && <span style={{ background: "#fff", color: "#059669", borderRadius: 9, minWidth: 16, height: 16, lineHeight: "16px", fontSize: 10, fontWeight: 800, textAlign: "center", padding: "0 3px" }}>{cnt}</span>}</>}
+                      </button>
+                    );
+                  })()}
                 </td>
               </tr>
               );

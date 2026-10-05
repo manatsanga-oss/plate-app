@@ -7,6 +7,8 @@ import React, { useEffect, useState } from "react";
 // ลูกค้าเลือกวันสะดวก → บันทึกลง spare_parts_orders (action set_spare_appointment, appointment_by='customer')
 // ============================================================================
 const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
+// ใบสั่งซื้ออะไหล่ YAMAHA: ลิงก์เป็น ?order=Y<order_id> (user 2026-10-05) — อ่าน/บันทึกที่ yamaha-spare-api (yamaha_spare_orders) แทน
+const YAMAHA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
 
 const thaiDate = (iso) => {
   if (!iso) return "-";
@@ -15,8 +17,8 @@ const thaiDate = (iso) => {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`;
 };
 
-async function postJson(body) {
-  const res = await fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+async function postJson(body, url = SPARE_API) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const raw = await res.text();
   return raw.trim() ? JSON.parse(raw) : [];
@@ -39,17 +41,24 @@ export default function SpareAppointmentPage() {
     if (!orderId.trim()) { setPhase("notfound"); return; }
     setPhase("loading");
     try {
-      const rows = await postJson({ action: "get_spare_orders" });
+      const rawId = orderId.trim();
+      const isYamaha = /^Y\d+$/i.test(rawId);
+      const idNum = isYamaha ? rawId.slice(1) : rawId;
+      const rows = isYamaha
+        ? await postJson({ action: "get_yamaha_orders", include_all: true, include_seized: true }, YAMAHA_API)
+        : await postJson({ action: "get_spare_orders" });
       const all = Array.isArray(rows) ? rows : [];
-      const o = all.find((x) => String(x.order_id) === orderId.trim());
-      if (!o) { setPhase("notfound"); return; }
+      const found = all.find((x) => String(x.order_id) === idNum);
+      if (!found) { setPhase("notfound"); return; }
+      const o = isYamaha ? { ...found, __yamaha: true } : found;
       setOrder(o);
       if (o.appointment_date) {
         setApptDate(String(o.appointment_date).slice(0, 10));
         setSavedDate(o.appointment_date);
       }
       // นัดหมายได้เฉพาะใบที่ยังไม่ปิดงาน: PDS เปิดงาน (นัดเข้ารับบริการ) / PDO มาครบ (นัดรับสินค้า)
-      if (!["เปิดงาน", "มาครบ"].includes(o.status)) { setPhase("closed"); return; }
+      // YAMAHA ไม่มีขั้น "เปิดงาน" แยก — นัดได้เมื่ออะไหล่มา (มาครบ/มาไม่ครบ) หรือเปิดงาน
+      if (!(o.__yamaha ? ["เปิดงาน", "มาครบ", "มาไม่ครบ"] : ["เปิดงาน", "มาครบ"]).includes(o.status)) { setPhase("closed"); return; }
       setPhase("ok");
     } catch (e) {
       console.warn("load spare order failed:", e);
@@ -64,11 +73,17 @@ export default function SpareAppointmentPage() {
     if (!apptDate) { alert("กรุณาเลือกวันที่สะดวกนำรถเข้ารับบริการ"); return; }
     setPhase("saving");
     try {
-      await postJson({
-        action: "set_spare_appointment",
-        order_id: order.order_id,
-        appointment_date: apptDate,
-      });
+      if (order.__yamaha) {
+        const r = await postJson({ action: "save_yamaha_appointment", order_id: order.order_id, appointment_date: apptDate, appointment_by: "customer" }, YAMAHA_API);
+        const row = Array.isArray(r) ? r[0] : r;
+        if (!row || !row.order_id) throw new Error("ไม่สามารถบันทึกวันนัดได้ (รายการอาจปิดไปแล้ว)");
+      } else {
+        await postJson({
+          action: "set_spare_appointment",
+          order_id: order.order_id,
+          appointment_date: apptDate,
+        });
+      }
       setSavedDate(apptDate);
       setPhase("done");
     } catch (e) {
