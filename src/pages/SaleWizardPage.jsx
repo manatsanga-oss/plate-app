@@ -521,7 +521,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     const payLinesOut = lines.map((l) => {
       const acc = l.method === "transfer" ? bankAccounts.find(a => String(a.account_id) === String(l.account_id)) : null;
       return { method: l.method, methodLabel: l.method === "cash" ? "เงินสด" : "เงินโอน", account_id: acc ? Number(acc.account_id) : null, accountName: acc?.account_name || null,
-        accountLabel: acc ? `${acc.account_name}${acc.account_no && acc.account_no !== "-" ? ` · ${acc.account_no}` : ""}${acc.bank_name && acc.bank_name !== "-" ? ` (${acc.bank_name})` : ""}` : null, // ใช้เก็บบัญชีที่โอนคืนมัดจำ (มีเลขที่บัญชี) amount: l.amt };
+        accountLabel: acc ? `${acc.account_name}${acc.account_no && acc.account_no !== "-" ? ` · ${acc.account_no}` : ""}${acc.bank_name && acc.bank_name !== "-" ? ` (${acc.bank_name})` : ""}` : null, /* ใช้เก็บบัญชีที่โอนคืนมัดจำ (มีเลขที่บัญชี) */ amount: l.amt };
     });
     if (sale.__test && !custLineUserId) { setMessage("❌ ลูกค้าไม่มี LINE ในระบบ — ส่งใบเสร็จทาง LINE ไม่ได้"); return; }
     const refund = Number(receiveAmt) < 0;
