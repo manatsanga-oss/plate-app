@@ -735,7 +735,7 @@ th { background: #072d6b; color: #fff; font-weight: 700; white-space: nowrap; }
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.admin_expense)}</td>
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.lost_items)}</td>
                   <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.other_expense)}</td>
-                  <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.absence_late)}</td>
+                  <td style={{ ...tdNum, color: "#dc2626" }}>{fmtNum(r.absence_late)}{r.no_wage ? <div style={{ fontSize: 10.5, color: "#b45309", fontWeight: 600, whiteSpace: "nowrap" }} title="ยอดขาด-สายครอบคลุมเงินเดือนทั้งเดือน — ระบบตั้งประกันสังคมและกองทุนสำรองฯ เป็น 0 และยอดขาด-สายเท่าเงินเดือนเต็ม">ไม่จ่ายค่าจ้าง · ปกส./กองทุน = 0</div> : null}</td>
                   <td style={{ ...tdNum, background: "#fee2e2", fontWeight: 700, color: "#991b1b" }}>{fmtNum(r.total_expense)}</td>
                   <td style={{ ...tdNum, background: "#ede9fe", fontWeight: 700, color: "#5b21b6", fontSize: 12 }}>{fmtNum(r.net_income)}</td>
                   <td style={td}>
