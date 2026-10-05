@@ -10,6 +10,9 @@ const CLOSED_STATUSES = ["ปิดงานซ่อม", "ปิดการ�
 const normNameY = (v) => String(v || "").replace(/\s+/g, "").replace(/^(นาย|นาง|นางสาว|น\.ส\.|MR\.?|MRS\.?|MS\.?|MISS)/i, "").toUpperCase();
 const normJobY = (v) => String(v || "").replace(/[\s\-\/]/g, "").toUpperCase(); // ระบบมัดจำอะไหล่ (PDS/PDO) สาขา SCY01 — แหล่งมัดจำหลักของใบสั่งซื้อ YAMAHA (user 2026-09-04)
 const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
+// ฐานลูกค้า (search_customers) — เช็คว่าลูกค้ามี LINE ผูกไว้ไหม จากเบอร์โทร 9 หลักท้าย (แบบเดียวกับหน้าสั่งซื้ออะไหล่ HONDA) — user 2026-10-05
+const CUSTOMER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api";
+const phoneLast9 = (p) => String(p || "").replace(/[^0-9]/g, "").slice(-9);
 
 const emptyItem = () => ({ part_code: "", part_name: "", quantity: 1 });
 const emptyForm = () => ({
@@ -30,6 +33,27 @@ const emptyForm = () => ({
 
 export default function YamahaOrderPage({ currentUser }) {
   const [orders, setOrders] = useState([]);
+  const [lineByPhone, setLineByPhone] = useState({}); // เบอร์ 9 หลักท้าย → true = ลูกค้ามี LINE ผูกในระบบ
+  // เช็คว่าลูกค้าแต่ละใบมี LINE ผูกไหม — ค้นฐานลูกค้าด้วยเบอร์โทร แล้วเทียบเบอร์ 9 หลักท้าย (ทำครั้งเดียวต่อเบอร์)
+  useEffect(() => {
+    const need = [...new Set(orders.map(o => phoneLast9(o.customer_phone)).filter(p => p.length === 9))].filter(p => lineByPhone[p] === undefined);
+    if (!need.length) return;
+    let alive = true;
+    (async () => {
+      const results = await Promise.all(need.map(p =>
+        fetch(CUSTOMER_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "search_customers", keyword: p }) })
+          .then(r => r.json()).catch(() => [])
+      ));
+      if (!alive) return;
+      setLineByPhone(prev => {
+        const nx = { ...prev };
+        need.forEach((p, i) => { const rows = Array.isArray(results[i]) ? results[i] : []; nx[p] = rows.some(r => String(r.line_user_id || "").trim() && phoneLast9(r.customer_phone) === p); });
+        return nx;
+      });
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line
+  }, [orders]);
   const [deposits, setDeposits] = useState([]);
   const [seizedDocs, setSeizedDocs] = useState(new Set());
   const [models, setModels] = useState([]);
@@ -819,7 +843,13 @@ export default function YamahaOrderPage({ currentUser }) {
                 </td>
                 <td style={td}>{o.deposit_date ? fmtDate(o.deposit_date) : "-"}</td>
                 <td style={td}>{o.deposit_doc_no}</td>
-                <td style={td}>{o.customer_name}</td>
+                <td style={td}>
+                  {lineByPhone[phoneLast9(o.customer_phone)] ? (
+                    <span style={{ color: "#059669", fontWeight: 700 }} title="ลูกค้ามี LINE ผูกในระบบ — ส่งเอกสาร/แจ้งเตือนทาง LINE ได้">
+                      {o.customer_name} <span style={{ fontWeight: 800 }}>✓</span>
+                    </span>
+                  ) : o.customer_name}
+                </td>
                 <td style={td}>{(o.technician || "").split(" ")[0]}</td>
                 <td style={td}>{o.model_name}</td>
                 <td style={td}>{o.license_plate || "-"}</td>
