@@ -47,7 +47,7 @@ export default function SpareAppointmentPage() {
       const rows = isYamaha
         ? await postJson({ action: "get_yamaha_orders", include_all: true, include_seized: true }, YAMAHA_API)
         : await postJson({ action: "get_spare_orders" });
-      const all = Array.isArray(rows) ? rows : [];
+      const all = Array.isArray(rows) ? rows : Array.isArray(rows?.data) ? rows.data : [];
       const found = all.find((x) => String(x.order_id) === idNum);
       if (!found) { setPhase("notfound"); return; }
       const o = isYamaha ? { ...found, __yamaha: true } : found;
@@ -75,7 +75,10 @@ export default function SpareAppointmentPage() {
     try {
       if (order.__yamaha) {
         const r = await postJson({ action: "save_yamaha_appointment", order_id: order.order_id, appointment_date: apptDate, appointment_by: "customer" }, YAMAHA_API);
-        const row = Array.isArray(r) ? r[0] : r;
+        // yamaha-spare-api ตอบ {success, data:{order_id,...}} (หรือ data เป็น array) — ไม่มี order_id = ไม่มีแถวถูกแก้ (ใบปิดไปแล้ว)
+        const body0 = Array.isArray(r) ? r[0] : r;
+        const d0 = body0 && body0.data !== undefined ? body0.data : body0;
+        const row = Array.isArray(d0) ? d0[0] : d0;
         if (!row || !row.order_id) throw new Error("ไม่สามารถบันทึกวันนัดได้ (รายการอาจปิดไปแล้ว)");
       } else {
         await postJson({
