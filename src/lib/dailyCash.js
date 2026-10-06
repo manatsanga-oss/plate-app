@@ -42,6 +42,13 @@ export const num = (v) => { const n = Number(v); return isFinite(n) ? n : 0; };
 export const chequeNos = (arr) => (Array.isArray(arr) ? arr : []).filter((x) => x && methodKey(x.method) === "cheque" && String(x.cheque_no || "").trim()).map((x) => String(x.cheque_no).trim() + (x.cheque_date ? ` (${String(x.cheque_date).slice(0, 10)})` : "")).join(", ");
 /** แยกยอด "เงินโอน" ตามบัญชีที่รับ (ใช้ในรายงานสรุปรับชำระเงินทั่วไปรายเดือน — เทียบ Excel pivot ของบัญชี 2026-10-03)
  *  bks = breakdown [{method, amount, account|account_name}] · fallbackAcct = ชื่อบัญชีของทั้งใบ (แถวที่เก็บวิธีเดียว) */
+/** บัญชีรับโอนของใบมัดจำอะไหล่ตามสาขา (ไม่มีช่องเลือกบัญชีในเมนู) — user 2026-10-06 */
+export function partDepositAccountByBranch(branchCode) {
+  const b = String(branchCode || "").substring(0, 5).toUpperCase();
+  if (b === "SCY05" || b === "SCY06") return "กรุงเทพ · 2490391139 · บจ. ป.เปา มอเตอร์เซอร์วิส";
+  if (b === "SCY01" || b === "SCY04" || b === "SCY07") return "กรุงเทพ · 2490309131 · หจก.สิงห์ชัยสยามยนต์";
+  return "";
+}
 export function addTransferBy(split, bks, fallbackAcct) {
   const m = {};
   for (const b of (Array.isArray(bks) ? bks : [])) {
@@ -442,7 +449,9 @@ export function buildDailyCashItems(src, ctx) {
     const m = String(d.payment_method || "");
     const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
     if (m.includes("สด")) split.cash = amt; else if (m.includes("โอน")) split.transfer = amt; else split.other = amt;
-    addTransferBy(split, [], d.payment_account);
+    // เมนูมัดจำอะไหล่ไม่มีช่องเลือกบัญชีรับโอน → ใช้กฎสาขา (user 2026-10-06): สิงห์ชัย (SCY01/04/07) เข้า กรุงเทพ 2490309131, ป.เปา (SCY05/06) เข้า กรุงเทพ 2490391139
+    //   เงินเข้าวันถัดไปแบบเดียวกับรับชำระทั่วไป (รายงานเคลื่อนไหวบัญชีรวมเป็นก้อนรายวัน/สาขาใน Accounting API)
+    addTransferBy(split, [], d.payment_account || partDepositAccountByBranch(d.branch_code));
     return {
       kind: "part_deposit", category: "รายได้เงินมัดจำอะไหล่/บริการ",
       doc_no: d.deposit_doc_no, date: d.deposit_date, ref_no: "",
