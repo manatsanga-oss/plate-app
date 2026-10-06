@@ -327,6 +327,20 @@ export default function SaleMoneyReportPage({ currentUser }) {
     return [...m.values()].sort((a, b) => a.key.localeCompare(b.key));
   }, [allItems]);
   const grand = sumOf(allItems);
+  // เงินโอนแยกตามบัญชีที่โอนเข้า (user 2026-10-06) — รวม split.transfer_by ทุกแถว (แปลงฉลาก → เลขที่บัญชี); ส่วนที่ไม่มีบัญชีกำกับ = "ไม่ระบุบัญชี"
+  const transferByAcct = useMemo(() => {
+    const m = new Map();
+    for (const it of allItems) {
+      const xs = transferAccounts(it.split, acctNo);
+      const known = xs.reduce((a, [, v]) => a + v, 0);
+      for (const [k, v] of xs) m.set(k, (m.get(k) || 0) + v);
+      const rest = Number(it.split?.transfer || 0) - known;
+      if (Math.abs(rest) > 0.004) m.set("ไม่ระบุบัญชี", (m.get("ไม่ระบุบัญชี") || 0) + rest);
+    }
+    const digits = (v) => String(v || "").replace(/\D/g, "");
+    const descOf = (k) => { const a = bankAccts.find((x) => digits(x.account_no) && digits(x.account_no) === digits(k)); return a ? [a.bank_name, a.account_name].filter((v) => v && v !== "-").join(" · ") : ""; };
+    return [...m.entries()].filter(([, v]) => Math.abs(v) > 0.004).sort((a, b) => (a[0] === "ไม่ระบุบัญชี") - (b[0] === "ไม่ระบุบัญชี") || b[1] - a[1]).map(([k, v]) => ({ acct: k, desc: descOf(k), amount: v }));
+  }, [allItems, acctNo, bankAccts]);
 
 
   // สรุปแยกประเภทตามรายได้
@@ -560,6 +574,12 @@ ${depSection}
             <div style={{ fontWeight: 700, fontSize: 15, marginBottom: 8 }}>💰 สรุปยอดเงินประจำวัน (จากระบบ)</div>
             <div style={{ ...rowSt, fontWeight: 700 }}><span>เงินสดรับสุทธิ (หักรายการคืนเงินแล้ว) — นำฝากธนาคาร</span><b style={{ color: grand.cash >= 0 ? "#166534" : "#b91c1c" }}>{fmt(grand.cash)}</b></div>
             <div style={rowSt}><span>เงินโอนเข้าธนาคาร (รวม)</span><b style={{ color: "#1d4ed8" }}>{fmt(grand.transfer)}</b></div>
+            {transferByAcct.map((r) => (
+              <div key={r.acct} style={{ ...rowSt, padding: "3px 0 3px 16px", fontSize: 13, color: r.acct === "ไม่ระบุบัญชี" ? "#b45309" : "#334155" }}>
+                <span>↳ {r.acct}{r.desc ? <span style={{ color: "#64748b", fontSize: 11.5 }}> · {r.desc}</span> : null}</span>
+                <span style={{ color: r.acct === "ไม่ระบุบัญชี" ? "#b45309" : "#1d4ed8", fontWeight: 600 }}>{fmt(r.amount)}</span>
+              </div>
+            ))}
             <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 6 }}>นับเฉพาะรายการที่บันทึกในระบบ (ขาย NEW / มัดจำ / รับเรื่อง / อะไหล่-บริการ / คืนเงิน) — ไม่รวมค่าใช้จ่ายเงินสดจาก upload DMS</div>
           </div>
         );
