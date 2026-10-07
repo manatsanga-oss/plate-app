@@ -50,6 +50,8 @@ export default function IncomeRecordPage({ currentUser }) {
   const TF_HIDE_RULES = [
     { tax_id: "0107536001699", name_kw: "เอสจีเอฟ", until: "2026-05-31" }, // บริษัท เอสจีเอฟ แคปปิตอล จำกัด (มหาชน): ซ่อนใบถึง 05/2569, 06/2569 ขึ้นไปแสดงปกติ
   ];
+  // ซ่อนรายใบ (เลขที่ใบกำกับ) — ใบที่บันทึกรับชำระนอกระบบแล้ว (user 2026-10-07): ค่าเช่า ไนซ์ แอฟเอ็ม 3 ใบ · ขายให้ ป.เปา TF016904/0005 · ไทยวิวัฒน์ 69TF/000102
+  const TF_HIDE_INVOICES = new Set(["69TF/000075", "69TF/000093", "69TF/000101", "69TF/000102", "TF016904/0005"]);
   const [tfImportOpen, setTfImportOpen] = useState(false);
   const [tfList, setTfList] = useState([]);
   const [tfSelected, setTfSelected] = useState({});
@@ -172,7 +174,7 @@ export default function IncomeRecordPage({ currentUser }) {
         if (tid.length === 13) return tid[0] === "0";
         return /บริษัท|บจก|บมจ|หจก|ห้างหุ้นส่วน|จำกัด|มหาชน|สหกรณ์|มูลนิธิ|สมาคม|องค์การ|เทศบาล|อบต|อบจ|co\.,?\s*ltd|limited|company/i.test(String(x.customer_name || ""));
       };
-      setTfList(Array.isArray(data) ? data.filter(x => x && x.tax_invoice_no && !hidden(x) && isJuristic(x)) : []);
+      setTfList(Array.isArray(data) ? data.filter(x => x && x.tax_invoice_no && !hidden(x) && !TF_HIDE_INVOICES.has(String(x.tax_invoice_no).trim()) && isJuristic(x)) : []);
     } catch { setTfList([]); }
     setTfLoading(false);
   }
