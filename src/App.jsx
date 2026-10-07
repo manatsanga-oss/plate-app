@@ -96,6 +96,7 @@ import TaxFormMonthlyPage from "./pages/TaxFormMonthlyPage";
 import FlowInputTaxReportPage from "./pages/FlowInputTaxReportPage";
 import OutputTaxReportPage from "./pages/OutputTaxReportPage";
 import IncomeTaxFilingPage from "./pages/IncomeTaxFilingPage";
+import SpecificBusinessTaxPage from "./pages/SpecificBusinessTaxPage"; // ยื่นภาษีธุรกิจเฉพาะ ภ.ธ.40
 import TheftInsuranceInvoicePage from "./pages/TheftInsuranceInvoicePage";
 import AdvanceExpensePage from "./pages/AdvanceExpensePage";
 import IncomeRecordPage from "./pages/IncomeRecordPage";
@@ -358,6 +359,7 @@ export default function App() {
     if (page === "loaninterestpayment") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT
     if (page === "whtremit") return ["admin", "WARUT"].includes(currentUser.username);  // ภ.ง.ด. หัก ณ ที่จ่าย — admin + WARUT (ภ.พ.36 ย้ายไปเป็นแท็บใน taxformmonthly)
     if (page === "incometaxfiling") return ["admin", "WARUT"].includes(currentUser.username);  // ยื่นภาษี ภ.ง.ด.50/51 — admin + WARUT
+    if (page === "sbtfiling") return ["admin", "WARUT"].includes(currentUser.username);  // ยื่นภาษีธุรกิจเฉพาะ ภ.ธ.40 — admin + WARUT
     if (page === "theftinsuranceinvoice") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT (บันทึกรับใบกำกับฯ ประกันรถหาย ออกแทน)
     if (page === "taxmanageinput" || page === "taxformmonthly" || page === "flowinputtaxreport" || page === "outputtaxreport") return ["admin", "WARUT"].includes(currentUser.username);  // บริหารภาษีมูลค่าเพิ่ม — admin + WARUT
     if (page === "financepayment") return false;
@@ -666,6 +668,9 @@ export default function App() {
         )}
         {activeMenu === "outputtaxreport" && canAccess("outputtaxreport") && (
           <OutputTaxReportPage currentUser={currentUser} />
+        )}
+        {activeMenu === "sbtfiling" && canAccess("sbtfiling") && (
+          <SpecificBusinessTaxPage currentUser={currentUser} />
         )}
         {activeMenu === "incometaxfiling" && canAccess("incometaxfiling") && (
           <IncomeTaxFilingPage currentUser={currentUser} />
@@ -1094,13 +1099,14 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         </MenuSubGroup>
       </MenuGroup>
 
-      <MenuGroup title="บริหารภาษี" pages={["taxmanageinput","taxformmonthly","flowinputtaxreport","outputtaxreport","whtremit","incometaxfiling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="บริหารภาษี" pages={["taxmanageinput","taxformmonthly","flowinputtaxreport","outputtaxreport","whtremit","incometaxfiling","sbtfiling"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="taxmanageinput" label="จัดการภาษีซื้อ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxformmonthly" label="เตรียมแบบภาษีรายเดือน (ภ.พ.30 / ภ.พ.36)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="flowinputtaxreport" label="รายงานภาษีซื้อ ตาม FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="outputtaxreport" label="รายงานภาษีขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="whtremit" label="ภาษีหัก ณ ที่จ่าย (ภ.ง.ด.)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="incometaxfiling" label="ยื่นภาษี ภ.ง.ด.50, 51" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="sbtfiling" label="ยื่นภาษีธุรกิจเฉพาะ (ภ.ธ.40)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Service" pages={["yamaharepairreport","hondarepairreport","partdispensereport","partservicepayment","servicehistory","servicerate","servicerateimport","partimagelookup","claim","damageassess","servicearrival"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
