@@ -1332,7 +1332,7 @@ export default function ExpenseRecordPage({ currentUser }) {
                 style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
               {(() => {
                 const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
-                const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+                const sum = sumPayments(payments); // รวมแบบเดียวกับกล่องสรุป (แถว WHT รอรับคืน หักออก)
                 const exact = Math.abs(sum - totalRequired) < 0.01;
                 const disabled = savingPay || !exact;
                 return (
