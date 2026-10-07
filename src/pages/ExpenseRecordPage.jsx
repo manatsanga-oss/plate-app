@@ -762,6 +762,11 @@ export default function ExpenseRecordPage({ currentUser }) {
   function updatePayment(idx, patch) {
     setPayments(prev => prev.map((p, i) => i === idx ? { ...p, ...patch } : p));
   }
+  // วิธีจ่าย "หัก ณ ที่จ่าย ค่าใช้จ่าย รอรับคืน" (user 2026-10-07): จ่ายผู้ขายเต็มก่อนหัก แล้วรอผู้ขายโอนยอดหัก ณ ที่จ่ายคืน
+  //   แถวนี้เป็นยอด "ติดลบ" ในการรวม (โอน 1,920 − รอรับคืน 53.83 = สุทธิ 1,866.17) และไปขึ้นเมนู Finance → หัก ณ ที่จ่าย ค่าใช้จ่าย รอรับคืน
+  const WHT_REFUND_METHOD = "หัก ณ ที่จ่าย รอรับคืน";
+  const sumPayments = (rows) => rows.reduce((s, p) => s + (p.method === WHT_REFUND_METHOD ? -1 : 1) * (Number(p.amount) || 0), 0);
+  const selectedWht = selectedRows.reduce((s, d) => s + Number(d.wht_amount || 0), 0);
   function addPayment() {
     setPayments(prev => [...prev, { method: "เงินสด", amount: 0, from_bank_account_id: "" }]);
   }
@@ -770,7 +775,7 @@ export default function ExpenseRecordPage({ currentUser }) {
   }
   async function savePayment() {
     const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
-    const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const sum = sumPayments(payments);
     // validate ยอดรวม
     if (Math.abs(sum - totalRequired) > 0.01) {
       setMessage(`❌ ยอดรวมของวิธีการจ่าย (${sum.toFixed(2)}) ต้องเท่ากับยอดที่จะชำระ (${totalRequired.toFixed(2)})`);
@@ -783,6 +788,9 @@ export default function ExpenseRecordPage({ currentUser }) {
       if (Number(p.amount) <= 0) { setMessage(`❌ แถวที่ ${i + 1}: จำนวนเงินต้องมากกว่า 0`); return; }
       if (p.method === "โอน" && !p.from_bank_account_id) {
         setMessage(`❌ แถวที่ ${i + 1} (โอน): เลือกบัญชี`); return;
+      }
+      if (p.method === WHT_REFUND_METHOD && !editPayDocNo && Number(p.amount) > selectedWht + 0.01) {
+        setMessage(`❌ แถวที่ ${i + 1} (หัก ณ ที่จ่าย รอรับคืน): ยอด ${fmt(p.amount)} เกินยอดหัก ณ ที่จ่ายของเอกสารที่เลือก (${fmt(selectedWht)})`); return;
       }
       if (p.method === "วางบิลงาน พรบ." && !String(p.policy_no || "").trim()) {
         setMessage(`❌ แถวที่ ${i + 1} (วางบิลงาน พรบ.): ใส่เลขที่กรมธรรม์`); return;
@@ -1193,7 +1201,7 @@ export default function ExpenseRecordPage({ currentUser }) {
             {/* Multi-method payment table */}
             {(() => {
               const totalRequired = editPayDocNo ? Number(editTotalRequired) || 0 : Number(selectedNet) || 0;
-              const sum = payments.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+              const sum = sumPayments(payments);
               const diff = totalRequired - sum;
               const exact = Math.abs(diff) < 0.01;
               return (
@@ -1209,7 +1217,8 @@ export default function ExpenseRecordPage({ currentUser }) {
                     {payments.map((p, idx) => (
                       <div key={idx} style={{ display: "grid", gridTemplateColumns: "130px 140px 1fr 32px", gap: 10, alignItems: "center" }}>
                         <select value={p.method}
-                          onChange={e => updatePayment(idx, { method: e.target.value, from_bank_account_id: e.target.value === "โอน" ? p.from_bank_account_id : "" })}
+                          onChange={e => updatePayment(idx, { method: e.target.value, from_bank_account_id: e.target.value === "โอน" ? p.from_bank_account_id : "",
+                            ...(e.target.value === WHT_REFUND_METHOD && !editPayDocNo && !(Number(p.amount) > 0) ? { amount: Math.round(selectedWht * 100) / 100 } : {}) })}
                           style={{ padding: "7px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontFamily: "Tahoma", fontSize: 13 }}>
                           <option value="โอน">โอน</option>
                           <option value="เงินสด">เงินสด</option>
@@ -1218,6 +1227,7 @@ export default function ExpenseRecordPage({ currentUser }) {
                           <option value="ภาษีมูลค่าเพิ่มรอนำส่ง (ภ.พ.36)">ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)</option>
                           <option value="วางบิลงาน พรบ.">วางบิลงาน พรบ.</option>
                           <option value="หักกลบรายได้">รายได้ค้างชำระ (หักกลบ)</option>
+                          <option value={WHT_REFUND_METHOD}>หัก ณ ที่จ่าย ค่าใช้จ่าย รอรับคืน</option>
                         </select>
                         <input type="number" step="0.01" min="0" value={p.amount}
                           onChange={e => updatePayment(idx, { amount: e.target.value })}
@@ -1231,6 +1241,11 @@ export default function ExpenseRecordPage({ currentUser }) {
                             <option value="">-- เลือกบัญชีโอนจาก --</option>
                             {bankAccounts.map(a => <option key={a.account_id} value={a.account_id}>{a.bank_name} · {a.account_no} · {a.account_name}</option>)}
                           </select>
+                        ) : p.method === WHT_REFUND_METHOD ? (
+                          <div style={{ padding: "7px 10px", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 6, fontSize: 12, color: "#92400e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}
+                            title="จ่ายผู้ขายเต็มจำนวนไว้ก่อน ยอดนี้จะหักออกจากยอดรวม และไปขึ้นเมนู Finance → หัก ณ ที่จ่าย ค่าใช้จ่าย รอรับคืน รอผู้ขายโอนคืน">
+                            ↩ หักออกจากยอดรวม · รอผู้ขายโอนคืน{selectedWht > 0 && !editPayDocNo ? ` (หัก ณ ที่จ่ายรวม ${fmt(selectedWht)})` : ""}
+                          </div>
                         ) : p.method === "ใบลดหนี้" ? (
                           <div style={{ padding: "7px 10px", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 6, fontSize: 12, color: "#7c2d12", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             📄 จะสร้างใบลดหนี้รับ <code>CN-YYMMDD-XXX</code> ตามจำนวนนี้
