@@ -205,7 +205,12 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   function dispenseOf(r, it) {
     const job = String(r.job_no || "").trim();
     if (r.system !== "HONDA" || !job || job === "null") return null;
-    return { job, hit: dispenseMap[`${job}|${strip(it.part_code)}`] || null };
+    // เช็ครหัสที่สั่งก่อน แล้วค่อยเช็ครหัสอะไหล่ทดแทน — งานซ่อมเบิกด้วยรหัสใหม่ (เช่น สั่ง 88210-K03-H31 เบิก 88210-K03-H33) user 2026-10-08
+    const direct = dispenseMap[`${job}|${strip(it.part_code)}`];
+    if (direct) return { job, hit: direct };
+    const sub = substituteFor(r, it);
+    const viaSub = sub ? dispenseMap[`${job}|${strip(sub)}`] : null;
+    return { job, hit: viaSub ? { ...viaSub, viaSub: true, subCode: sub } : null };
   }
 
   // เกณฑ์สำรองแบบ DCS: รับเข้าแล้ว + สต๊อกคงเหลือ = 0 → ถือว่าเบิกออกไปแล้ว (รอปิดงานค่อยขึ้นบันทึกขาย)
@@ -221,6 +226,8 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
         const c = strip(it.part_code);
         if (!c || dispenseMap[`${job}|${c}`]) continue;
         if (receiptMap[`HONDA|${normReceiptCode("HONDA", it.part_code)}`]) codes.add(c); // เช็คเฉพาะตัวที่ของถึงแล้ว
+        const sub = substituteFor(r, it); // รหัสทดแทนที่ของถึงแล้ว เช็คสต๊อกด้วย
+        if (sub && !dispenseMap[`${job}|${strip(sub)}`] && receiptMap[`HONDA|${normReceiptCode("HONDA", sub)}`]) codes.add(strip(sub));
       }
     }
     if (!codes.size) { setStockQtyMap({}); return; }
@@ -234,14 +241,16 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     })).then(pairs => { if (alive) setStockQtyMap(Object.fromEntries(pairs.filter(p => p[1] !== null))); });
     return () => { alive = false; };
     // eslint-disable-next-line
-  }, [rows, dispenseMap, receiptMap]);
+  }, [rows, dispenseMap, receiptMap, subsByOrder]);
 
   // เบิกแล้วตามเกณฑ์รับเข้า+คงเหลือหมด (ใช้เมื่อยังไม่พบในบันทึกขาย)
   function likelyDispensed(r, it) {
     const c = strip(it.part_code);
     if (!c) return false;
     const arrived = receiptMap[`HONDA|${normReceiptCode("HONDA", it.part_code)}`];
-    return !!arrived && stockQtyMap[c] === 0;
+    if (!!arrived && stockQtyMap[c] === 0) return true;
+    const sub = substituteFor(r, it); // ของมาเป็นรหัสทดแทนและสต๊อกรหัสทดแทนหมด = เบิกแล้ว
+    return !!sub && !!receiptMap[`HONDA|${normReceiptCode("HONDA", sub)}`] && stockQtyMap[strip(sub)] === 0;
   }
 
   // ของถึงแล้วหรือยัง — เช็ครหัสที่สั่งตรง ๆ ก่อน แล้วค่อยเช็ครหัสอะไหล่ทดแทน (ถ้ามีคู่)
@@ -761,8 +770,8 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                           {dp === null ? (
                             <span title="ใบสั่งซื้อยังไม่ผูกเลข Job" style={{ color: "#9ca3af" }}>-</span>
                           ) : dp.hit ? (
-                            <span title={`เบิกเข้างาน ${dp.job} เมื่อ ${fmtShortDate(dp.hit.date)} (บันทึกขายแล้ว)`} style={{ color: "#059669", fontWeight: 700, whiteSpace: "nowrap" }}>
-                              ✓ เบิก {dp.job}
+                            <span title={`เบิกเข้างาน ${dp.job} เมื่อ ${fmtShortDate(dp.hit.date)} (บันทึกขายแล้ว)${dp.hit.viaSub ? ` ด้วยรหัสทดแทน ${dp.hit.subCode}` : ""}`} style={{ color: "#059669", fontWeight: 700, whiteSpace: "nowrap" }}>
+                              ✓ เบิก {dp.job}{dp.hit.viaSub ? " (ทดแทน)" : ""}
                             </span>
                           ) : likelyDispensed(r, it) ? (
                             <span title={`รับเข้าแล้วและสต๊อกคงเหลือ 0 — ของถูกเบิกออกไปแล้ว (จะขึ้นบันทึกขายเมื่อปิดงาน ${dp.job})`}
