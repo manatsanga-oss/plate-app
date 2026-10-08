@@ -1087,6 +1087,7 @@ table.bx>tbody>tr>td{border:1px solid #c2185b;padding:5px 8px;font-size:12px;ver
     <tr><td class="lbl">ส่วนลด</td><td class="r">${dash(s.discount)}</td></tr>
     <tr><td class="lbl">ราคารถสุทธิ</td><td class="r val">${money(s.net_car_price || s.car_price)}</td></tr>
     <tr><td class="lbl">เงินจอง</td><td class="r">${dash(s.booking_deposit)}</td></tr>
+    ${Number(s.card_fee_amount) > 0 ? `<tr><td class="lbl">ค่าธรรมเนียมบัตรเครดิต</td><td class="r val">${money(s.card_fee_amount)}</td></tr>` : ""}
     ${Number(s.theft_insurance_amount) > 0 ? `<tr><td class="lbl">ประกันรถหาย</td><td class="r val">${money(s.theft_insurance_amount)}</td></tr>` : ""}
     ${Number(s.red_plate_deposit) > 0 ? `<tr><td class="lbl">มัดจำป้ายแดง${s.red_plate_no ? " (" + esc(s.red_plate_no) + ")" : ""}</td><td class="r val">${money(s.red_plate_deposit)}<div style="font-weight:400;color:#888;font-size:10px">คืนเมื่อคืนป้าย</div></td></tr>` : ""}
   </table></td>

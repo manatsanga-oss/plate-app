@@ -211,6 +211,8 @@ export default function SaleWizardPage({ currentUser }) {
   // ซื้อประกันรถหาย COSMOS เพิ่ม (เฉพาะขายเงินสด — ไฟแนนท์ไม่ขึ้น): ใส่ค่าเบี้ยแล้วบวกเข้าราคาขายตรง ๆ ตามที่ใส่ (user 2026-09-01)
   const [useInsAdd, setUseInsAdd] = useState(false);
   const [insAdd, setInsAdd] = useState(0);
+  const [useCardFee, setUseCardFee] = useState(false); // ค่าธรรมเนียมรูดบัตรเครดิต — เฉพาะขายเงินสด บวกเข้าราคาขายตรงตามที่ใส่ (user 2026-10-08)
+  const [cardFee, setCardFee] = useState(0);
   const [downPayout, setDownPayout] = useState(0);
 
   // บันทึกการขาย
@@ -371,6 +373,7 @@ table.bx>tbody>tr>td{border:1px solid #c2185b;padding:5px 8px;font-size:12px;ver
     <tr><td class="lbl">ราคารถสุทธิ</td><td class="r val">${money(sale.net_car_price || Math.max(Number(sale.car_price || 0) - Number(sale.discount || 0), 0))}</td></tr>
     <tr><td class="lbl">เงินจอง</td><td class="r">${dash(sale.booking_deposit)}</td></tr>
     ${Number(sale.theft_insurance_amount) > 0 ? `<tr><td class="lbl">ประกันรถหาย</td><td class="r val">${money(sale.theft_insurance_amount)}</td></tr>` : ""}
+    ${Number(sale.card_fee_amount) > 0 ? `<tr><td class="lbl">ค่าธรรมเนียมบัตรเครดิต</td><td class="r val">${money(sale.card_fee_amount)}</td></tr>` : ""}
     ${Number(sale.red_plate_deposit) > 0 ? `<tr><td class="lbl">มัดจำป้ายแดง${sale.red_plate_no ? " (" + esc(sale.red_plate_no) + ")" : ""}</td><td class="r val">${money(sale.red_plate_deposit)}<div style="font-weight:400;color:#888;font-size:10px">คืนเมื่อคืนป้าย</div></td></tr>` : ""}
   </table></td>
 </tr></table>
@@ -1212,6 +1215,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         // ประกันรถหาย: ลูกค้าจ่ายเอง (กรอกช่อง) ชนะ; ไม่กรอก = ใช้ยอดโปรโมชั่นออกแทนอัตโนมัติ (ไม่บวกเข้า total_payment)
         theft_insurance_amount: isFin ? (custPaidTheft || promoTheft) : insAddTotal,
         theft_insurance_source: isFin ? (custPaidTheft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : (insAddTotal > 0 ? "เงินสดซื้อเพิ่ม" : null),
+        card_fee_amount: cardFeeTotal, // ค่าธรรมเนียมรูดบัตรเครดิตที่บวกเข้าราคาขาย (เงินสดเท่านั้น)
         finance_company_code: isFin ? String(financeCo?.company_id || "") : "",
         finance_company_name: isFin ? (financeCo?.company_name || "") : "",
         interest_rate: isFin ? num(finRate) : 0,
@@ -1555,7 +1559,9 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   })();
   // ซื้อประกันรถหาย COSMOS เพิ่ม: บวกตรงตามเบี้ยที่ใส่ เฉพาะขายเงินสด
   const insAddTotal = adjOpen && saleType === "cash" && useInsAdd ? Math.max(num(insAdd), 0) : 0;
-  const adjustmentsBase = deliveryBonus + downPayoutCalc + insAddTotal + dressupTotal; // + อะไหล่แต่งรถ (บวกทับทั้งราคาประกาศและราคาสุทธิเฉพาะคัน)
+  // ค่าธรรมเนียมรูดบัตรเครดิต: ลูกค้าเงินสดจ่ายด้วยบัตร ร้านบวกค่าธรรมเนียมเข้าราคาขาย (เก็บ card_fee_amount ในใบขาย)
+  const cardFeeTotal = adjOpen && saleType === "cash" && useCardFee ? Math.max(num(cardFee), 0) : 0;
+  const adjustmentsBase = deliveryBonus + downPayoutCalc + insAddTotal + cardFeeTotal + dressupTotal; // + อะไหล่แต่งรถ (บวกทับทั้งราคาประกาศและราคาสุทธิเฉพาะคัน)
   // SGF (user 2026-09-16): ราคาขายรวมผ่อนไฟแนนท์ SGF ปัดขึ้นหลักพันเสมอ เช่น 56,400 → 57,000 · 57,100 → 58,000 · 86,300 → 87,000 (ลงท้ายพันอยู่แล้วไม่บวก)
   const sgfRoundUp = (() => {
     if (!isSGF) return 0;
@@ -1567,7 +1573,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   const adjustmentsTotal = adjustmentsBase + sgfRoundUp;
 
   function resetAdjustments() {
-    setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0); setUseInsAdd(false); setInsAdd(0);
+    setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0); setUseInsAdd(false); setInsAdd(0); setUseCardFee(false); setCardFee(0);
   }
   const thaiDate = (iso) => {
     if (!iso) return "—";
@@ -2166,6 +2172,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           <AdjRow label="ซื้อประกันรถหาย COSMOS เพิ่ม" checked={useInsAdd} onCheck={setUseInsAdd}
                             value={insAdd} onChange={setInsAdd}
                             extra={insAddTotal > 0 ? `(บวกเข้าราคาขาย +${Number(insAddTotal).toLocaleString("th-TH")})` : "ใส่ค่าเบี้ยประกัน"} />
+                        )}
+                        {/* ค่าธรรมเนียมรูดบัตรเครดิต — เฉพาะขายเงินสด: บวกเข้าราคาขายตรงตามที่ใส่ (user 2026-10-08) */}
+                        {saleType === "cash" && (
+                          <AdjRow label="ค่าธรรมเนียมรูดบัตรเครดิต" checked={useCardFee} onCheck={setUseCardFee}
+                            value={cardFee} onChange={setCardFee}
+                            extra={cardFeeTotal > 0 ? `(บวกเข้าราคาขาย +${Number(cardFeeTotal).toLocaleString("th-TH")})` : "ใส่ค่าธรรมเนียมที่เรียกเก็บ"} />
                         )}
                         {adjustmentsTotal > 0 && (
                           <div style={{ fontSize: 13, fontWeight: 700, color: "#7c3aed" }}>รวมบวกเพิ่ม: +{Number(adjustmentsTotal).toLocaleString("th-TH")} บาท</div>
