@@ -631,7 +631,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       // n8n คืน item ว่าง {} เมื่อไม่พบข้อมูล — กรองทิ้งกันแถวขีดว่างโผล่ในตาราง
       const list = (Array.isArray(data) ? data : []).filter((r) => r && (r.chassis_no || r.engine_no || r.customer_name || r.ref_no));
       // ซ้ำ = เลขถัง + เลขเครื่อง ตรงกันทั้งคู่ → แสดงแหล่งเดียว เรียงความสำคัญ: ขายปลีก (ระบบใหม่) > ใบขาย moto_sales > รับเรื่อง
-      const PRIORITY = { retail: 3, sale: 2, receipt: 1 };
+      const PRIORITY = { retail: 3, sale: 2, receipt: 1, registry: 0 }; // registry = ตารางเสริมทะเบียนรถจาก Excel งานทะเบียน (ใช้เมื่อไม่มีในระบบ) user 2026-10-09
       const best = new Map();
       const noKey = [];
       list.forEach((r) => {
@@ -677,7 +677,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
       installments: s.installments ?? h.installments,
     }));
     setSearchModal(false);
-    setMessage(`✅ ดึงข้อมูลจาก ${s.source === "sale" ? "moto_sales" : s.source === "retail" ? "ใบขายปลีก" : "ประวัติรับเรื่อง"} แล้ว`);
+    setMessage(`✅ ดึงข้อมูลจาก ${s.source === "sale" ? "moto_sales" : s.source === "retail" ? "ใบขายปลีก" : s.source === "registry" ? "ทะเบียนรถลูกค้า (Excel งานทะเบียน)" : "ประวัติรับเรื่อง"} แล้ว`);
   }
 
   // legacy: direct lookup ตามเดิม (เผื่อมีโค้ดอื่นเรียก) — แต่ตอนนี้ใช้ openSearchModal แทน
@@ -1407,10 +1407,10 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                       </thead>
                       <tbody>
                         {searchResults.map((s, i) => (
-                          <tr key={i} style={{ background: s.source === "sale" ? "#f0f9ff" : s.source === "retail" ? "#f5f3ff" : "#fef9c3" }}>
+                          <tr key={i} style={{ background: s.source === "sale" ? "#f0f9ff" : s.source === "retail" ? "#f5f3ff" : s.source === "registry" ? "#f0fdf4" : "#fef9c3" }}>
                             <td style={td}>
-                              <span style={{ background: s.source === "sale" ? "#dbeafe" : s.source === "retail" ? "#ede9fe" : "#fef3c7", color: s.source === "sale" ? "#1e40af" : s.source === "retail" ? "#6d28d9" : "#a16207", padding: "2px 8px", borderRadius: 4, fontWeight: 700, fontSize: 11 }}>
-                                {s.source === "sale" ? "ขาย" : s.source === "retail" ? "ขายปลีก" : "รับเรื่อง"}
+                              <span style={{ background: s.source === "sale" ? "#dbeafe" : s.source === "retail" ? "#ede9fe" : s.source === "registry" ? "#dcfce7" : "#fef3c7", color: s.source === "sale" ? "#1e40af" : s.source === "retail" ? "#6d28d9" : s.source === "registry" ? "#166534" : "#a16207", padding: "2px 8px", borderRadius: 4, fontWeight: 700, fontSize: 11 }}>
+                                {s.source === "sale" ? "ขาย" : s.source === "retail" ? "ขายปลีก" : s.source === "registry" ? "ทะเบียน Excel" : "รับเรื่อง"}
                               </span>
                             </td>
                             <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{s.chassis_no || "-"}</td>
