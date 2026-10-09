@@ -502,9 +502,19 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if (l.method === "transfer" && !bankAccounts.find(a => String(a.account_id) === String(l.account_id))) return "❌ เลือกบัญชีรับโอนเงินให้ครบทุกบรรทัด";
     }
     const sum = lines.reduce((acc, l) => acc + l.amt, 0);
-    if (Math.abs(sum - target) > 0.5) return `❌ ขายเงินสดต้องรับชำระให้ครบ — ยอดรวมวิธีรับชำระ ${sum.toLocaleString("th-TH")} ไม่เท่ายอดที่ต้องรับ ${target.toLocaleString("th-TH")} บาท`;
+    // รับเกินได้ (ลูกค้าจ่ายมามากกว่ายอด) แต่ต้องยืนยันก่อนบันทึก — รับขาดยังห้าม (user 2026-10-09)
+    if (sum < target - 0.5) return `❌ ขายเงินสดต้องรับชำระให้ครบ — ยอดรวมวิธีรับชำระ ${sum.toLocaleString("th-TH")} น้อยกว่ายอดที่ต้องรับ ${target.toLocaleString("th-TH")}`;
     return null;
   }
+  // ยอดที่รับเกินจากยอดที่ต้องรับ (0 = พอดี) — ใช้เตือน/ยืนยันก่อนบันทึก
+  function payLinesOver(target) {
+    const filled = payLines.map((l) => ({ ...l, amt: num(l.amount) }));
+    const known = filled.filter((l) => l.amount !== "" && l.amt > 0).reduce((sum, l) => sum + l.amt, 0);
+    const blanks = filled.filter((l) => l.amount === "");
+    const sum = known + (blanks.length === 1 ? Math.max(target - known, 0) : 0);
+    return Math.round((sum - target) * 100) / 100;
+  }
+  const confirmOverPay = (over, target) => window.confirm(`⚠️ ยอดรับชำระเกินยอดที่ต้องรับ ${over.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท\n(ต้องรับ ${target.toLocaleString("th-TH")} บาท)\n\nยืนยันบันทึกรับชำระตามยอดที่ใส่?`);
   async function handleSavePayment(receiveAmt, saleArg) {
     const sale = saleArg || savedSale;
     if (!sale || paySending || paySaved) return;
@@ -520,7 +530,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if (l.method === "transfer" && !bankAccounts.find(a => String(a.account_id) === String(l.account_id))) { setMessage("❌ เลือกบัญชีรับโอนเงินให้ครบทุกบรรทัดเงินโอน"); return; }
     }
     const sum = lines.reduce((s, l) => s + l.amt, 0);
-    if (Math.abs(sum - target) > 0.5) { setMessage(`❌ ยอดรวมวิธีรับชำระ ${sum.toLocaleString("th-TH")} ไม่เท่ายอดที่ต้องรับ ${target.toLocaleString("th-TH")}`); return; }
+    if (sum < target - 0.5) { setMessage(`❌ ยอดรวมวิธีรับชำระ ${sum.toLocaleString("th-TH")} น้อยกว่ายอดที่ต้องรับ ${target.toLocaleString("th-TH")}`); return; }
+    if (sum > target + 0.5 && !saleArg && !confirmOverPay(Math.round((sum - target) * 100) / 100, target)) return; // รับเกิน: ยืนยันก่อน (user 2026-10-09)
     const payLinesOut = lines.map((l) => {
       const acc = l.method === "transfer" ? bankAccounts.find(a => String(a.account_id) === String(l.account_id)) : null;
       return { method: l.method, methodLabel: l.method === "cash" ? "เงินสด" : "เงินโอน", account_id: acc ? Number(acc.account_id) : null, accountName: acc?.account_name || null,
@@ -1178,7 +1189,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       }
       // ขายเงินสด: ต้องรับชำระครบยอดพร้อมบันทึกขาย (ห้ามบันทึกขายแล้วค่อยรับทีหลัง/รับไม่ครบ) — user 2026-09-07 (เคส SCY06-MCSA-2609-00011 รับ 30,100 จาก 70,100)
       const cashMustPay = !isWholesale && saleType === "cash" && custPayNow > 0;
-      if (cashMustPay) { const err = payLinesError(custPayNow); if (err) throw new Error(err.replace(/^❌\s*/, "")); }
+      if (cashMustPay) {
+        const err = payLinesError(custPayNow); if (err) throw new Error(err.replace(/^❌\s*/, ""));
+        const over = payLinesOver(custPayNow);
+        if (over > 0.5 && !confirmOverPay(over, custPayNow)) throw new Error("ยกเลิกการบันทึก — ยอดรับชำระเกินยอดที่ต้องรับ กรุณาแก้ยอดแล้วบันทึกใหม่");
+      }
       // กันยอดรับชำระติดลบ (user 2026-09-23): ร้านออกแทน (โปร + ยอดที่พิมพ์) ต้องไม่เกินยอดที่ลูกค้าต้องจ่าย (เงินดาวน์ + ค่างวดล่วงหน้า + ประกัน)
       // เคย 16 ใบ ส.ค.–ก.ย. พิมพ์ค่างวดออกแทน 1 งวดแต่ไม่กรอกค่างวดล่วงหน้า → หน้ารับชำระขึ้นติดลบ (มัดจำ/ป้ายแดงไม่นับ — มัดจำเกินคืนได้ตามปกติ)
       const dueBeforeDep = isFin ? fc.down + fc.advance + custPaidTheft : netCar;
@@ -2624,7 +2639,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                             const known = payLines.reduce((s, l) => s + (l.amount === "" ? 0 : num(l.amount)), 0);
                             const blanks = payLines.filter((l) => l.amount === "").length;
                             const sum = known + (blanks === 1 ? Math.max(target - known, 0) : 0);
-                            const ok = blanks <= 1 && Math.abs(sum - target) < 0.5 && payLines.every((l) => l.method !== "transfer" || l.account_id);
+                            const over = Math.round((sum - target) * 100) / 100; // เกินยอดที่ต้องรับ (บันทึกได้ แต่เตือน) user 2026-10-09
+                            const ok = blanks <= 1 && sum >= target - 0.5 && payLines.every((l) => l.method !== "transfer" || l.account_id);
                             const setLine = (idx, patch) => setPayLines((ls) => ls.map((l, k) => (k === idx ? { ...l, ...patch } : l)));
                             const sel = { padding: "9px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14 };
                             return (
@@ -2663,7 +2679,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                                   <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
                                     <button onClick={() => setPayLines((ls) => [...ls, { method: "transfer", amount: "", account_id: "" }])}
                                       style={{ padding: "6px 14px", background: "#fff", color: "#0369a1", border: "1.5px dashed #0369a1", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 13 }}>+ เพิ่มวิธีรับชำระ</button>
-                                    <span style={{ fontSize: 13, color: ok ? "#166534" : "#b45309" }}>รวม {sum.toLocaleString("th-TH")} / {target.toLocaleString("th-TH")} บาท{ok ? " ✓" : blanks > 1 ? " (เว้นว่างได้ 1 บรรทัด)" : Math.abs(sum - target) >= 0.5 ? " (ยอดไม่ครบ)" : " (เลือกบัญชี)"}</span>
+                                    {ok && over > 0.5 && <span style={{ fontSize: 12, fontWeight: 700, color: "#b45309", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 6, padding: "3px 8px" }}>⚠️ รับเกินยอดที่ต้องรับ {over.toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท — ระบบจะถามยืนยันก่อนบันทึก</span>}
+                                    <span style={{ fontSize: 13, color: ok ? (over > 0.5 ? "#b45309" : "#166534") : "#b45309" }}>รวม {sum.toLocaleString("th-TH")} / {target.toLocaleString("th-TH")} บาท{ok ? (over > 0.5 ? " (เกิน)" : " ✓") : blanks > 1 ? " (เว้นว่างได้ 1 บรรทัด)" : Math.abs(sum - target) >= 0.5 ? " (ยอดไม่ครบ)" : " (เลือกบัญชี)"}</span>
                                   </div>
                                 )}
                               </>
