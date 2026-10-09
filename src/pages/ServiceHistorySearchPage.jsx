@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 
 const SVC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
@@ -77,6 +77,7 @@ export default function ServiceHistorySearchPage() {
   const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState(null);
   const [history, setHistory] = useState([]);
+  const histRef = useRef(null); // เลื่อนจอไปที่การ์ดประวัติหลังกดเลือก (รายการรถหลายคันดันการ์ดไปอยู่ใต้จอ — user 2026-10-09 "กดเลือกแล้วไม่ขึ้น")
   const [loadingHist, setLoadingHist] = useState(false);
   const [mymoto, setMymoto] = useState(null); // { checking, registered, notified }
   const [types, setTypes] = useState([]); // master moto_types (สำหรับ normalize รุ่น/แบบ/type)
@@ -132,6 +133,7 @@ export default function ServiceHistorySearchPage() {
 
   async function selectVehicle(v) {
     setSelected(v); setHistory([]); setMymoto(null);
+    setTimeout(() => { try { histRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); } catch { /* ignore */ } }, 60);
     // 1) load service history (on-screen)
     (async () => {
       try {
@@ -260,7 +262,7 @@ export default function ServiceHistorySearchPage() {
 
         {/* HISTORY */}
         {selected && (
-          <div className="form-card">
+          <div className="form-card" ref={histRef}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
               <h3 style={{ margin: 0, fontSize: 15, color: "#072d6b" }}>
                 ประวัติการเข้ารับบริการ — {text(selected.customer_name)} ({plateOf(selected)})
