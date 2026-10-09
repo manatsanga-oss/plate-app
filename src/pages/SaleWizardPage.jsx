@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useRef, useMemo, useState } from "react";
 import { TITLE_OPTIONS_ALL, hasNameTitle, guessTitle, withTitle } from "../utils/nameTitle"; // คำนำหน้าชื่อลูกค้า
 import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 import CustomerPickerModal from "./CustomerPickerModal";
@@ -1021,20 +1021,42 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     })());
   }, [masterRow, saleType, financeCo, saleExpenses, selSeries, cust.customer_name, cust.customer_province, financeCos, bookingDateISO]);
 
+  const isTheftName = (name) => /ประกันรถหาย|รถหาย/.test(String(name || "").replace(/\s+/g, ""));
+  // นับเฉพาะประกันรถหายที่ไฟแนนท์ออกแทน (หักจากยอดโอน) — กรมธรรม์ COSMOS (ปีต่อ/เงินสด หมวด "ประกัน คอสมอส") เป็นของแถมที่ร้านซื้อเอง ไม่ใช่ยอดไฟแนนท์หัก (2026-08-22)
+  const isCosmos = (g) => /COSMOS|คอสมอส/i.test(String(g.expense_name || "") + " " + String(g.category || ""));
+  const isFinTheft = (g) => isTheftName(g.expense_name) && !isCosmos(g);
+  // พิมพ์ยอดในช่อง "ประกันรถหาย (ไฟแนนซ์หัก)" = ลูกค้าจ่ายเบี้ยเอง → ของแถมประกันรถหาย (ไฟแนนท์ออกแทน) ต้องไม่ขึ้น/ไม่ติ๊ก (user 2026-10-09)
+  const typedTheft = num(finTheft) > 0;
+
   // default: ติ๊กรายการที่เข้าเงื่อนไขไว้ก่อน (รายการใหม่ → ติ๊กอัตโนมัติ, ที่ผู้ใช้เอาออกเองคงไว้)
   useEffect(() => {
     setSelectedGiveaways((prev) => {
       let changed = false; const next = { ...prev };
       for (const g of applicableGiveaways) {
-        if (!(g.expense_id in next)) { next[g.expense_id] = true; changed = true; }
+        if (!(g.expense_id in next)) { next[g.expense_id] = !(typedTheft && isFinTheft(g)); changed = true; } // พิมพ์เบี้ยเอง → ประกันรถหายออกแทนไม่ติ๊ก
       }
       return changed ? next : prev;
     });
   }, [applicableGiveaways]);
 
-  // รวมหมวด "ค่าจดทะเบียน" เป็นการ์ดเดียว + ซ่อน "เงินดาวน์ออกแทน" (ไปเป็นส่วนลด)
+  const prevTypedTheft = useRef(false);
+  useEffect(() => {
+    if (prevTypedTheft.current === typedTheft) return;
+    prevTypedTheft.current = typedTheft;
+    setSelectedGiveaways((prev) => {
+      let changed = false; const next = { ...prev };
+      for (const g of applicableGiveaways) {
+        if (!isFinTheft(g)) continue;
+        const want = !typedTheft; // พิมพ์ = เอาติ๊กออก, ลบยอดทิ้ง = กลับมาเป็นโปรออกแทนตามเดิม
+        if (!!next[g.expense_id] !== want) { next[g.expense_id] = want; changed = true; }
+      }
+      return changed ? next : prev;
+    });
+  }, [typedTheft]); // eslint-disable-line
+
+  // รวมหมวด "ค่าจดทะเบียน" เป็นการ์ดเดียว + ซ่อน "เงินดาวน์ออกแทน" (ไปเป็นส่วนลด) + ซ่อนประกันรถหายออกแทนเมื่อลูกค้าจ่ายเบี้ยเอง
   const displayGiveaways = useMemo(() => {
-    const filtered = applicableGiveaways.filter((g) => !isDownPaymentSub(g.expense_name));
+    const filtered = applicableGiveaways.filter((g) => !isDownPaymentSub(g.expense_name) && !(typedTheft && isFinTheft(g)));
     const REG = "ค่าจดทะเบียน";
     const reg = filtered.filter((g) => String(g.category || "").trim() === REG);
     if (reg.length <= 1) return filtered;
@@ -1045,10 +1067,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       else out.push(g);
     }
     return out;
-  }, [applicableGiveaways]);
+  }, [applicableGiveaways, typedTheft]); // eslint-disable-line
 
   const giveawaysTotal = applicableGiveaways
-    .filter((g) => selectedGiveaways[g.expense_id] && !isDownPaymentSub(g.expense_name))
+    .filter((g) => selectedGiveaways[g.expense_id] && !isDownPaymentSub(g.expense_name) && !(typedTheft && isFinTheft(g)))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
   // ส่วนลดจาก "เงินดาวน์ออกแทน" ที่ติ๊กไว้ — หักออกจากยอดที่ลูกค้าจ่าย (เหมือนหน้าขายปลีก)
   const downSubTotal = applicableGiveaways
@@ -1073,14 +1095,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
   // ประกันรถหายจากโปรโมชั่นที่ติ๊กไว้ — ร้านออกแทน (ไฟแนนซ์หักจากยอดโอน) ไม่เก็บลูกค้า ไม่บวกเข้ายอดชำระ
   // ใช้เติม theft_insurance_amount อัตโนมัติ พนักงานไม่ต้องกรอกช่อง "ประกันรถหาย" (กรอกเองเฉพาะเคสลูกค้าจ่ายเบี้ยเอง)
-  const isTheftName = (name) => /ประกันรถหาย|รถหาย/.test(String(name || "").replace(/\s+/g, ""));
-  // นับเฉพาะประกันรถหายที่ไฟแนนท์ออกแทน (หักจากยอดโอน) — กรมธรรม์ COSMOS (ปีต่อ/เงินสด หมวด "ประกัน คอสมอส") เป็นของแถมที่ร้านซื้อเอง ไม่ใช่ยอดไฟแนนท์หัก (2026-08-22)
-  const isCosmos = (g) => /COSMOS|คอสมอส/i.test(String(g.expense_name || "") + " " + String(g.category || ""));
-  const isFinTheft = (g) => isTheftName(g.expense_name) && !isCosmos(g);
   // ใบขายนี้มีประกันรถหาย COSMOS (ปีต่อ/เงินสด) ที่ติ๊กไว้ → มีกรมธรรม์ให้ส่งลูกค้า (ของไฟแนนท์ออกแทนไม่มีเอกสาร)
   const hasCosmosTheft = applicableGiveaways.some((g) => selectedGiveaways[g.expense_id] && isTheftName(g.expense_name) && isCosmos(g));
   const promoTheft = applicableGiveaways
-    .filter((g) => selectedGiveaways[g.expense_id] && isFinTheft(g))
+    .filter((g) => selectedGiveaways[g.expense_id] && isFinTheft(g) && !typedTheft)
     .reduce((s, g) => s + Number(g.amount || 0), 0);
   // ติ๊ก "ค่าประกันรถหาย" ออกจากของแถม = ลูกค้าจ่ายเบี้ยเอง → บวกเข้ายอดเก็บลูกค้า (user กำหนด 2026-08-20)
   const unpromoTheft = applicableGiveaways
@@ -2387,10 +2405,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 8 }}>
                       {displayGiveaways.map((g) => {
                         const checked = g.__merged ? g.ids.every((id) => selectedGiveaways[id]) : !!selectedGiveaways[g.expense_id];
-                        const toggle = (on) => setSelectedGiveaways((s) => {
-                          if (g.__merged) { const ns = { ...s }; g.ids.forEach((id) => { ns[id] = on; }); return ns; }
-                          return { ...s, [g.expense_id]: on };
-                        });
+                        const toggle = (on) => {
+                          // ประกันรถหายออกแทน (ไฟแนนท์หัก): ติ๊กออก = ลูกค้าจ่ายเบี้ยเอง → เติมยอดลงช่อง "ประกันรถหาย (ไฟแนนซ์หัก)" ให้อัตโนมัติ, ติ๊กกลับ = ล้างช่อง (user 2026-10-09)
+                          if (!g.__merged && isFinTheft(g) && saleType === "finance") setFinTheft(on ? "" : String(Number(g.amount || 0)));
+                          setSelectedGiveaways((s) => {
+                            if (g.__merged) { const ns = { ...s }; g.ids.forEach((id) => { ns[id] = on; }); return ns; }
+                            return { ...s, [g.expense_id]: on };
+                          });
+                        };
                         return (
                           <label key={g.__merged ? g.key : g.expense_id}
                             style={{ display: "flex", gap: 8, alignItems: "center", padding: "8px 10px", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, cursor: "pointer", fontSize: 13 }}>
@@ -2513,7 +2535,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           <div style={{ ...finLbl, lineHeight: 1.3 }}>ประกันรถหาย<br /><span style={{ fontWeight: 400, fontSize: 11, color: "#b45309" }}>(ไฟแนนซ์หัก)</span></div>
                           <div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(finTheft, setFinTheft)}<span>บาท</span></div>
-                            <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>เบี้ยที่ลูกค้าจ่าย — นับเป็นยอดชำระค่ารถ</div>
+                            <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>เบี้ยที่ลูกค้าจ่าย — นับเป็นยอดชำระค่ารถ{typedTheft ? " · ของแถมประกันรถหายถูกเอาออกแล้ว (ลูกค้าจ่ายเอง) — ลบยอดทิ้งถ้าจะกลับเป็นของแถม" : ""}</div>
                           </div>
                           <div style={finLbl}>อัตราดอกเบี้ย</div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(finRate, setFinRate)}<span style={{ whiteSpace: "nowrap" }}>% (ต่อเดือน)</span></div>
