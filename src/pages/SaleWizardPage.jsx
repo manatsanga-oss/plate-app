@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { TITLE_OPTIONS_ALL, hasNameTitle, guessTitle, withTitle } from "../utils/nameTitle"; // คำนำหน้าชื่อลูกค้า
 import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 import CustomerPickerModal from "./CustomerPickerModal";
@@ -737,7 +737,6 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
   // ช่องกรอกกรณีผ่อนไฟแนนท์ (สูตรเดียวกับบันทึกขายปลีก)
   const [finDown, setFinDown] = useState("");             // เงินดาวน์
-  const [finTheft, setFinTheft] = useState("");           // ประกันรถหาย (ไฟแนนซ์หัก)
   const [finRate, setFinRate] = useState("");             // อัตราดอกเบี้ย %/เดือน — default 0 (ช่องว่างโชว์ placeholder 0) ให้พิมพ์เองทุกครั้ง
   const [finN, setFinN] = useState("");                   // จำนวนงวด
   const [finRound5, setFinRound5] = useState(false);      // ปัดเศษค่างวดลงท้าย 0/5
@@ -745,7 +744,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   const [finInstTouched, setFinInstTouched] = useState(false);
   const [finAdvance, setFinAdvance] = useState("");       // ค่างวดจ่ายล่วงหน้า
   function resetFinanceInputs() {
-    setFinDown(""); setFinTheft(""); setFinRate(""); setFinN("");
+    setFinDown(""); setFinRate(""); setFinN("");
     setFinRound5(false); setFinInstOverride(""); setFinInstTouched(false); setFinAdvance("");
     setAdvSubsidyInput(""); // แบ่งโปรดาวน์ออกแทนไปช่วยค่างวดล่วงหน้า — เคลียร์พร้อมกัน
     setRedPlateNo(""); // มัดจำป้ายแดง — เคลียร์พร้อมกัน
@@ -756,7 +755,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // downSub = "เงินดาวน์ออกแทน" (ค่าใช้จ่ายการขาย ร้านจ่ายดาวน์แทนลูกค้า) — ไม่ลดราคาขาย (user 2026-09-09: ราคาขาย/ใบกำกับคงเต็ม)
   // ดาวน์ตามสัญญาไฟแนนซ์ = ดาวน์ที่ลูกค้าจ่าย (ช่อง) + ร้านออกแทน → ยอดจัดตรงใบอนุมัติเหมือนเดิม
   function financeCalc(carPrice, downSub = 0) {
-    const custDown = num(finDown), theft = num(finTheft), rate = num(finRate) / 100, n = num(finN);
+    const custDown = num(finDown), theft = 0, rate = num(finRate) / 100, n = num(finN);
     const down = custDown + (downSub || 0);
     const financeAmount = Math.max((carPrice || 0) - down, 0);
     const instRaw = n > 0 ? (financeAmount * (1 + rate * n)) / n : 0;
@@ -1025,38 +1024,21 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // นับเฉพาะประกันรถหายที่ไฟแนนท์ออกแทน (หักจากยอดโอน) — กรมธรรม์ COSMOS (ปีต่อ/เงินสด หมวด "ประกัน คอสมอส") เป็นของแถมที่ร้านซื้อเอง ไม่ใช่ยอดไฟแนนท์หัก (2026-08-22)
   const isCosmos = (g) => /COSMOS|คอสมอส/i.test(String(g.expense_name || "") + " " + String(g.category || ""));
   const isFinTheft = (g) => isTheftName(g.expense_name) && !isCosmos(g);
-  // พิมพ์ยอดในช่อง "ประกันรถหาย (ไฟแนนซ์หัก)" = ลูกค้าจ่ายเบี้ยเอง → ของแถมประกันรถหาย (ไฟแนนท์ออกแทน) ต้องไม่ขึ้น/ไม่ติ๊ก (user 2026-10-09)
-  const typedTheft = num(finTheft) > 0;
 
   // default: ติ๊กรายการที่เข้าเงื่อนไขไว้ก่อน (รายการใหม่ → ติ๊กอัตโนมัติ, ที่ผู้ใช้เอาออกเองคงไว้)
   useEffect(() => {
     setSelectedGiveaways((prev) => {
       let changed = false; const next = { ...prev };
       for (const g of applicableGiveaways) {
-        if (!(g.expense_id in next)) { next[g.expense_id] = !(typedTheft && isFinTheft(g)); changed = true; } // พิมพ์เบี้ยเอง → ประกันรถหายออกแทนไม่ติ๊ก
+        if (!(g.expense_id in next)) { next[g.expense_id] = true; changed = true; }
       }
       return changed ? next : prev;
     });
   }, [applicableGiveaways]);
 
-  const prevTypedTheft = useRef(false);
-  useEffect(() => {
-    if (prevTypedTheft.current === typedTheft) return;
-    prevTypedTheft.current = typedTheft;
-    setSelectedGiveaways((prev) => {
-      let changed = false; const next = { ...prev };
-      for (const g of applicableGiveaways) {
-        if (!isFinTheft(g)) continue;
-        const want = !typedTheft; // พิมพ์ = เอาติ๊กออก, ลบยอดทิ้ง = กลับมาเป็นโปรออกแทนตามเดิม
-        if (!!next[g.expense_id] !== want) { next[g.expense_id] = want; changed = true; }
-      }
-      return changed ? next : prev;
-    });
-  }, [typedTheft]); // eslint-disable-line
-
-  // รวมหมวด "ค่าจดทะเบียน" เป็นการ์ดเดียว + ซ่อน "เงินดาวน์ออกแทน" (ไปเป็นส่วนลด) + ซ่อนประกันรถหายออกแทนเมื่อลูกค้าจ่ายเบี้ยเอง
+  // รวมหมวด "ค่าจดทะเบียน" เป็นการ์ดเดียว + ซ่อน "เงินดาวน์ออกแทน" (ไปเป็นส่วนลด)
   const displayGiveaways = useMemo(() => {
-    const filtered = applicableGiveaways.filter((g) => !isDownPaymentSub(g.expense_name) && !(typedTheft && isFinTheft(g)));
+    const filtered = applicableGiveaways.filter((g) => !isDownPaymentSub(g.expense_name));
     const REG = "ค่าจดทะเบียน";
     const reg = filtered.filter((g) => String(g.category || "").trim() === REG);
     if (reg.length <= 1) return filtered;
@@ -1067,10 +1049,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       else out.push(g);
     }
     return out;
-  }, [applicableGiveaways, typedTheft]); // eslint-disable-line
+  }, [applicableGiveaways]);
 
   const giveawaysTotal = applicableGiveaways
-    .filter((g) => selectedGiveaways[g.expense_id] && !isDownPaymentSub(g.expense_name) && !(typedTheft && isFinTheft(g)))
+    .filter((g) => selectedGiveaways[g.expense_id] && !isDownPaymentSub(g.expense_name))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
   // ส่วนลดจาก "เงินดาวน์ออกแทน" ที่ติ๊กไว้ — หักออกจากยอดที่ลูกค้าจ่าย (เหมือนหน้าขายปลีก)
   const downSubTotal = applicableGiveaways
@@ -1098,14 +1080,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // ใบขายนี้มีประกันรถหาย COSMOS (ปีต่อ/เงินสด) ที่ติ๊กไว้ → มีกรมธรรม์ให้ส่งลูกค้า (ของไฟแนนท์ออกแทนไม่มีเอกสาร)
   const hasCosmosTheft = applicableGiveaways.some((g) => selectedGiveaways[g.expense_id] && isTheftName(g.expense_name) && isCosmos(g));
   const promoTheft = applicableGiveaways
-    .filter((g) => selectedGiveaways[g.expense_id] && isFinTheft(g) && !typedTheft)
+    .filter((g) => selectedGiveaways[g.expense_id] && isFinTheft(g))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
   // ติ๊ก "ค่าประกันรถหาย" ออกจากของแถม = ลูกค้าจ่ายเบี้ยเอง → บวกเข้ายอดเก็บลูกค้า (user กำหนด 2026-08-20)
   const unpromoTheft = applicableGiveaways
     .filter((g) => !selectedGiveaways[g.expense_id] && isFinTheft(g))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
-  // เบี้ยส่วนที่ลูกค้าจ่ายเอง: ช่องกรอกชนะเสมอ ไม่กรอกใช้ยอดโปรที่ติ๊กออก
-  const custPaidTheft = num(finTheft) > 0 ? num(finTheft) : unpromoTheft;
+  // เบี้ยส่วนที่ลูกค้าจ่ายเอง = ยอดโปรประกันรถหายที่เอาติ๊กออก (ช่องในฟอร์มไฟแนนท์เป็นแสดงผลอย่างเดียว ห้ามพิมพ์ — user 2026-10-09)
+  const custPaidTheft = unpromoTheft;
 
   // บันทึกการขาย (เงินสด/ผ่อนไฟแนนท์) — payload เดียวกับหน้าบันทึกขายปลีก (retail-sale-api save_sale)
   async function handleSaveSale() {
@@ -2406,8 +2388,6 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                       {displayGiveaways.map((g) => {
                         const checked = g.__merged ? g.ids.every((id) => selectedGiveaways[id]) : !!selectedGiveaways[g.expense_id];
                         const toggle = (on) => {
-                          // ประกันรถหายออกแทน (ไฟแนนท์หัก): ติ๊กออก = ลูกค้าจ่ายเบี้ยเอง → เติมยอดลงช่อง "ประกันรถหาย (ไฟแนนซ์หัก)" ให้อัตโนมัติ, ติ๊กกลับ = ล้างช่อง (user 2026-10-09)
-                          if (!g.__merged && isFinTheft(g) && saleType === "finance") setFinTheft(on ? "" : String(Number(g.amount || 0)));
                           setSelectedGiveaways((s) => {
                             if (g.__merged) { const ns = { ...s }; g.ids.forEach((id) => { ns[id] = on; }); return ns; }
                             return { ...s, [g.expense_id]: on };
@@ -2534,8 +2514,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
                           <div style={{ ...finLbl, lineHeight: 1.3 }}>ประกันรถหาย<br /><span style={{ fontWeight: 400, fontSize: 11, color: "#b45309" }}>(ไฟแนนซ์หัก)</span></div>
                           <div>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(finTheft, setFinTheft)}<span>บาท</span></div>
-                            <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>เบี้ยที่ลูกค้าจ่าย — นับเป็นยอดชำระค่ารถ{typedTheft ? " · ของแถมประกันรถหายถูกเอาออกแล้ว (ลูกค้าจ่ายเอง) — ลบยอดทิ้งถ้าจะกลับเป็นของแถม" : ""}</div>
+                            {/* แสดงผลอย่างเดียว: ขึ้นเองเมื่อเอาติ๊กของแถม "ค่าประกันรถหาย" (ไฟแนนท์ออกแทน) ออก = ลูกค้าจ่ายเบี้ยเอง (user 2026-10-09 ห้ามพิมพ์) */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <div style={{ flex: 1, padding: "8px 10px", background: custPaidTheft > 0 ? "#fffbeb" : "#e9eef0", border: custPaidTheft > 0 ? "1.5px solid #fcd34d" : "1.5px solid transparent", borderRadius: 8, fontSize: 14, textAlign: "right", fontWeight: 700, color: custPaidTheft > 0 ? "#b45309" : "#9ca3af", boxSizing: "border-box" }}>{custPaidTheft > 0 ? Number(custPaidTheft).toLocaleString("th-TH", { minimumFractionDigits: 2 }) : "0"}</div>
+                              <span>บาท</span>
+                            </div>
+                            <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>{custPaidTheft > 0 ? "ลูกค้าจ่ายเบี้ยเอง (เอาติ๊กของแถมประกันรถหายออก) — นับเป็นยอดชำระค่ารถ" : "ขึ้นอัตโนมัติเมื่อเอาติ๊กของแถม \"ค่าประกันรถหาย\" ออก — พิมพ์เองไม่ได้"}</div>
                           </div>
                           <div style={finLbl}>อัตราดอกเบี้ย</div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(finRate, setFinRate)}<span style={{ whiteSpace: "nowrap" }}>% (ต่อเดือน)</span></div>
@@ -2576,7 +2560,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         {downSubTotal - advSub > 0 && row(advSub > 0 ? "หัก โปรดาวน์ออกแทน → เงินดาวน์ (ร้านจ่ายให้)" : "หัก เงินดาวน์ออกแทน (ร้านจ่ายให้)", "-" + fmtBaht(downSubTotal - advSub), { color: "#b45309" })}
                         {advSub > 0 && row("หัก โปรดาวน์ออกแทน → ค่างวดล่วงหน้า (ร้านจ่ายให้)", "-" + fmtBaht(advSub), { color: "#b45309" })}
                         {typedPayout > 0 && row("หัก ดาวน์/ค่างวดออกแทนที่พิมพ์เพิ่ม (บวกในราคาแล้ว)", "-" + fmtBaht(typedPayout), { color: "#b45309" })}
-                        {isFin && custPaidTheft > 0 && row(num(finTheft) > 0 ? "ประกันรถหาย (ไฟแนนซ์หัก)" : "ประกันรถหาย (ลูกค้าจ่ายเอง — เอาติ๊กของแถมออก)", fmtBaht(custPaidTheft))}
+                        {isFin && custPaidTheft > 0 && row("ประกันรถหาย (ไฟแนนซ์หัก — ลูกค้าจ่ายเอง เอาติ๊กของแถมออก)", fmtBaht(custPaidTheft))}
                         {row("หัก เงินมัดจำ" + (selBooking?.deposit_no ? ` (${selBooking.deposit_no})` : ""), dep > 0 ? "-" + fmtBaht(dep) : "-", { color: "#b45309" })}
                         {redPlateDep > 0 && row("มัดจำป้ายแดง (" + text(redPlateNo) + ")", "+" + fmtBaht(redPlateDep), { color: "#b91c1c" })}
                         {isRefund
