@@ -161,13 +161,8 @@ export default function ServiceHistorySearchPage() {
       if (registered) {
         setMymoto({ checking: false, registered: true, notified: false });
       } else {
-        // auto-send LINE alert to group
-        let notified = false;
-        try {
-          const n = await apiPost(SVC_API, { action: "notify_line", message: notRegisteredMessage(v) });
-          notified = Array.isArray(n) ? !!n[0]?.success : !!n?.success;
-        } catch { notified = false; }
-        setMymoto({ checking: false, registered: false, notified });
+        // ไม่ส่ง LINE แจ้งเตือนกลุ่มอัตโนมัติแล้ว (user 2026-10-09 "ยกเลิกการส่งแจ้งเตือน") — แสดงสถานะบนจออย่างเดียว
+        setMymoto({ checking: false, registered: false, notified: null });
       }
     } catch {
       setMymoto({ checking: false, error: true });
@@ -276,7 +271,7 @@ export default function ServiceHistorySearchPage() {
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#065f46", background: "#ecfdf5", border: "1px solid #6ee7b7", padding: "6px 12px", borderRadius: 8 }}>✅ ลงทะเบียน MyMoto แล้ว</span>
               ) : mymoto && !mymoto.error ? (
                 <span style={{ fontSize: 13, fontWeight: 700, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", padding: "6px 12px", borderRadius: 8 }}>
-                  ⚠️ ยังไม่ลงทะเบียน MyMoto {mymoto.notified ? "· 📲 แจ้ง LINE กลุ่มแล้ว" : "· (ส่ง LINE ไม่สำเร็จ)"}
+                  ⚠️ ยังไม่ลงทะเบียน MyMoto
                 </span>
               ) : null}
             </div>
