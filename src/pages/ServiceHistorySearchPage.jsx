@@ -71,7 +71,7 @@ const FIELDS = [
 ];
 
 export default function ServiceHistorySearchPage() {
-  const [field, setField] = useState("all");
+  const [field, setField] = useState("plate_number"); // ค่าเริ่มต้น = ทะเบียนรถ (user 2026-10-09)
   const [keyword, setKeyword] = useState("");
   const [vehicles, setVehicles] = useState([]);
   const [searching, setSearching] = useState(false);
