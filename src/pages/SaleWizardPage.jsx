@@ -1597,6 +1597,18 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   })();
   const adjustmentsTotal = adjustmentsBase + sgfRoundUp;
 
+  // พิมพ์ใบหัก ณ ที่จ่าย ค่านำพา จากค่าที่กรอกอยู่ (ก่อน/ไม่ต้องบันทึกขาย) — ถ้าบันทึกแล้วใช้ข้อมูลใบขายจริง
+  function printWhtNow() {
+    const base = savedSale || {
+      sale_no: selUnit?.engine_no ? `(เลขเครื่อง ${selUnit.engine_no})` : "(ยังไม่บันทึกใบขาย)",
+      sale_date: todayStr(),
+      branch_code: currentUser?.branch_code || currentUser?.branch || "",
+      model_name: selSeries ? (selSeries.marketing_name || selSeries.series_name) + (selUnit ? " (" + selUnit.model + (selUnit.model_type ? " " + selUnit.model_type : "") + ")" : "") : "",
+      engine_no: selUnit?.engine_no || "",
+    };
+    const sale = { ...base, delivery_fee_amount: Number(deliveryFee || 0), delivery_payee_name: deliveryPayee?.name || "", delivery_payee_tax_id: deliveryPayee?.tax_id || "", delivery_payee_address: deliveryPayee?.address || "", delivery_payee_phone: deliveryPayee?.phone || "" };
+    openPrintHtml(buildDeliveryWhtCertHtml(sale, { docNo: savedSale ? undefined : "-" }), () => setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup อาจถูกบล็อก)"));
+  }
   function resetAdjustments() {
     setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setDeliveryPayee(null); setShowPayeePicker(false); setUseDownPayout(false); setDownPayout(0); setUseInsAdd(false); setInsAdd(0); setUseCardFee(false); setCardFee(0);
   }
@@ -2201,6 +2213,13 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                                 ? <><b>{deliveryPayee.name}</b>{deliveryPayee.tax_id ? ` · 🪪 ${deliveryPayee.tax_id}` : ""} · หัก ณ ที่จ่าย {DELIVERY_WHT_RATE}% = {whtOfDelivery(deliveryFee).toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท · จ่ายสุทธิ {(Number(deliveryFee || 0) - whtOfDelivery(deliveryFee)).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</>
                                 : <span style={{ color: "#b45309" }}>ยังไม่ได้เลือกผู้รับค่านำพา — เลือกแล้วบันทึกขาย จึงพิมพ์ใบหัก ณ ที่จ่าย 3% ได้</span>}
                             </div>
+                            {/* พิมพ์ได้ทันทีโดยไม่ต้องบันทึกขาย — ใบนี้เป็นแค่ตัวช่วยพิมพ์ ไม่มีผลกับข้อมูล (user 2026-10-10); ยังไม่มีเลขใบขาย → ใช้เลขเครื่องอ้างอิงแทน */}
+                            {deliveryPayee && Number(deliveryFee) > 0 && (
+                              <button type="button" onClick={printWhtNow} title="พิมพ์ใบหัก ณ ที่จ่าย 3% จากข้อมูลที่กรอกตอนนี้ (ไม่ต้องบันทึกขาย)"
+                                style={{ padding: "5px 12px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "Tahoma", whiteSpace: "nowrap" }}>
+                                🖨️ พิมพ์ 50 ทวิ
+                              </button>
+                            )}
                             {deliveryPayee && !savedSale && <button type="button" onClick={() => setDeliveryPayee(null)} title="เอาออก" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#9ca3af", fontSize: 14 }}>✕</button>}
                           </div>
                         )}
