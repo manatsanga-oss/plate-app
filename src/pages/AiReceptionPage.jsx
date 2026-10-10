@@ -165,9 +165,11 @@ function VariantCard({ item, onPick, disabled, t }) {
 export default function AiReceptionPage() {
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   // branch อาจมาเป็นรหัส (SCY06) หรือชื่อสาขา/ค่าที่ไม่รู้จัก → จัดเข้าร้านให้ถูก (ไม่รู้จัก = ป.เปา)
+  // ลิงก์จาก CRM อาจเป็น "SCY01 สำนักงานใหญ่" → ดึงรหัส SCY.. ออกมาก่อน
   const rawBranch = (params.get("branch") || "").trim().toUpperCase();
-  const isCode = /^SCY\d+$/.test(rawBranch);
-  const branch = isCode ? rawBranch : (/สิงห์|SING/.test(rawBranch) ? "SCY01" : "SCY06");
+  const codeMatch = rawBranch.match(/SCY\d+/);
+  const isCode = !!codeMatch;
+  const branch = isCode ? codeMatch[0] : (/สิงห์|SING/.test(rawBranch) ? "SCY01" : "SCY06");
   const info = BRANCH_INFO[branch] || (/^SCY0[56]$/.test(branch) || !isCode ? BRANCH_INFO.SCY06 : BRANCH_INFO.SCY01);
   const aiName = params.get("name") || info.name;
   const sim = (params.get("mode") || "sim") !== "answer";   // sim = น้องเปาเปาเป็นลูกค้า ถามพนักงาน
