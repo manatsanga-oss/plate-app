@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { TITLE_OPTIONS_ALL, hasNameTitle, guessTitle, withTitle } from "../utils/nameTitle"; // คำนำหน้าชื่อลูกค้า
 import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 import CustomerPickerModal from "./CustomerPickerModal";
+import { buildDeliveryWhtCertHtml, openPrintHtml, whtOfDelivery, DELIVERY_WHT_RATE } from "../utils/whtCert"; // ใบหัก ณ ที่จ่าย ค่านำพา (50 ทวิ)
 import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
 
 // บันทึกขาย NEW — wizard เลือกรถทีละขั้น: ประเภทรถ → ยี่ห้อ → รุ่น → สี (พร้อมรูป) → เลือกคันจากเลขเครื่อง/เลขถัง
@@ -207,6 +208,9 @@ export default function SaleWizardPage({ currentUser }) {
   const isWholesale = saleType === "wholesale";
   const [useDeliveryFee, setUseDeliveryFee] = useState(false);
   const [deliveryFee, setDeliveryFee] = useState(0);
+  // ผู้รับค่านำพา (ผู้ถูกหักภาษี ณ ที่จ่าย 3%) — เลือกจาก popup ลูกค้าแบบเดียวกับเลือกลูกค้า → เก็บใน retail_sales.delivery_payee_* ใช้พิมพ์ใบ 50 ทวิ (user 2026-10-10)
+  const [deliveryPayee, setDeliveryPayee] = useState(null); // { code, name, phone, address, tax_id }
+  const [showPayeePicker, setShowPayeePicker] = useState(false);
   const [useDownPayout, setUseDownPayout] = useState(false);
   // ซื้อประกันรถหาย COSMOS เพิ่ม (เฉพาะขายเงินสด — ไฟแนนท์ไม่ขึ้น): ใส่ค่าเบี้ยแล้วบวกเข้าราคาขายตรง ๆ ตามที่ใส่ (user 2026-09-01)
   const [useInsAdd, setUseInsAdd] = useState(false);
@@ -1227,6 +1231,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         down_payout_amount: (adjOpen && useDownPayout ? Number(downPayout || 0) : 0) + downSubTotal, // + เงินดาวน์ออกแทนจากกฎค่าใช้จ่ายการขาย (ไม่ลดราคา)
         // ค่านำพาที่กรอกในการ์ดราคาขายบวกเพิ่ม — เก็บลงใบขายไว้ทำรายงานค่านำพาจากระบบ (user 2026-08-29)
         delivery_fee_amount: adjOpen && useDeliveryFee ? Number(deliveryFee || 0) : 0,
+        // ผู้รับค่านำพา → ใบหัก ณ ที่จ่าย 3% (เฉพาะเมื่อติ๊กค่านำพา)
+        delivery_payee_code: adjOpen && useDeliveryFee && deliveryPayee ? text(deliveryPayee.code) : "",
+        delivery_payee_name: adjOpen && useDeliveryFee && deliveryPayee ? text(deliveryPayee.name) : "",
+        delivery_payee_tax_id: adjOpen && useDeliveryFee && deliveryPayee ? text(deliveryPayee.tax_id) : "",
+        delivery_payee_address: adjOpen && useDeliveryFee && deliveryPayee ? text(deliveryPayee.address) : "",
+        delivery_payee_phone: adjOpen && useDeliveryFee && deliveryPayee ? text(deliveryPayee.phone) : "",
         // ประกันรถหาย: ลูกค้าจ่ายเอง (กรอกช่อง) ชนะ; ไม่กรอก = ใช้ยอดโปรโมชั่นออกแทนอัตโนมัติ (ไม่บวกเข้า total_payment)
         theft_insurance_amount: isFin ? (custPaidTheft || promoTheft) : insAddTotal,
         theft_insurance_source: isFin ? (custPaidTheft > 0 ? "finance" : promoTheft > 0 ? "โปรโมชั่นออกแทน" : null) : (insAddTotal > 0 ? "เงินสดซื้อเพิ่ม" : null),
@@ -1588,7 +1598,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   const adjustmentsTotal = adjustmentsBase + sgfRoundUp;
 
   function resetAdjustments() {
-    setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setUseDownPayout(false); setDownPayout(0); setUseInsAdd(false); setInsAdd(0); setUseCardFee(false); setCardFee(0);
+    setAdjOpen(false); setUseDeliveryFee(false); setDeliveryFee(0); setDeliveryPayee(null); setShowPayeePicker(false); setUseDownPayout(false); setDownPayout(0); setUseInsAdd(false); setInsAdd(0); setUseCardFee(false); setCardFee(0);
   }
   const thaiDate = (iso) => {
     if (!iso) return "—";
@@ -2179,6 +2189,21 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         <AdjRow label="ค่านำพา" checked={useDeliveryFee} onCheck={setUseDeliveryFee}
                           value={deliveryFee} onChange={setDeliveryFee}
                           extra={deliveryBonus > 0 ? `(+โบนัส ${Number(deliveryBonus).toLocaleString("th-TH")})` : ""} />
+                        {/* ผู้รับค่านำพา → ใบหัก ณ ที่จ่าย 3% (50 ทวิ) — เลือกจาก popup ลูกค้า เหมือนเพิ่มชื่อลูกค้า (user 2026-10-10) */}
+                        {useDeliveryFee && (
+                          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "6px 10px", background: "#fff7ed", border: "1px dashed #fdba74", borderRadius: 6, fontFamily: "Tahoma" }}>
+                            <button type="button" onClick={() => setShowPayeePicker(true)} disabled={!!savedSale}
+                              style={{ padding: "5px 12px", background: "#c2410c", color: "#fff", border: "none", borderRadius: 6, cursor: savedSale ? "not-allowed" : "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "Tahoma", whiteSpace: "nowrap" }}>
+                              🧾 {deliveryPayee ? "เปลี่ยนผู้รับค่านำพา" : "ใบหัก ณ ที่จ่าย — เลือกผู้รับเงิน"}
+                            </button>
+                            <div style={{ flex: 1, textAlign: "left", color: "#9a3412" }}>
+                              {deliveryPayee
+                                ? <><b>{deliveryPayee.name}</b>{deliveryPayee.tax_id ? ` · 🪪 ${deliveryPayee.tax_id}` : ""} · หัก ณ ที่จ่าย {DELIVERY_WHT_RATE}% = {whtOfDelivery(deliveryFee).toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท · จ่ายสุทธิ {(Number(deliveryFee || 0) - whtOfDelivery(deliveryFee)).toLocaleString("th-TH", { minimumFractionDigits: 2 })}</>
+                                : <span style={{ color: "#b45309" }}>ยังไม่ได้เลือกผู้รับค่านำพา — เลือกแล้วบันทึกขาย จึงพิมพ์ใบหัก ณ ที่จ่าย 3% ได้</span>}
+                            </div>
+                            {deliveryPayee && !savedSale && <button type="button" onClick={() => setDeliveryPayee(null)} title="เอาออก" style={{ border: "none", background: "transparent", cursor: "pointer", color: "#9ca3af", fontSize: 14 }}>✕</button>}
+                          </div>
+                        )}
                         <AdjRow label="เงินดาวน์/ค่างวดออกแทน" checked={useDownPayout} onCheck={setUseDownPayout}
                           value={downPayout} onChange={setDownPayout}
                           extra={downPayoutCalc > 0 ? (isSGF ? `(SGF ปัดราคารวมขึ้นหลักพัน = +${Number(downPayoutCalc).toLocaleString("th-TH")})` : `(× 1.07 = ${Number(downPayoutCalc).toLocaleString("th-TH")})`) : ""} />
@@ -2711,6 +2736,18 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                     )}
 
                     {/* ขายส่ง: ไม่มีการ์ดเอกสาร → ปุ่มขายคันถัดไปแยกต่างหาก */}
+                    {/* ใบหัก ณ ที่จ่าย ค่านำพา (50 ทวิ) — พิมพ์ได้เมื่อใบขายมีค่านำพาและเลือกผู้รับเงินไว้ (user 2026-10-10) */}
+                    {savedSale && Number(savedSale.delivery_fee_amount) > 0 && savedSale.delivery_payee_name && (
+                      <div style={{ marginTop: 14, padding: "12px 16px", border: "1.5px solid #fdba74", borderRadius: 12, background: "#fff7ed", fontFamily: "Tahoma", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ flex: 1, textAlign: "left", fontSize: 13, color: "#9a3412" }}>
+                          <b>🧾 ใบหัก ณ ที่จ่าย ค่านำพา</b> — ผู้รับ {savedSale.delivery_payee_name} · ค่านำพา {Number(savedSale.delivery_fee_amount).toLocaleString("th-TH", { minimumFractionDigits: 2 })} · หัก {DELIVERY_WHT_RATE}% = {whtOfDelivery(savedSale.delivery_fee_amount).toLocaleString("th-TH", { minimumFractionDigits: 2 })} บาท
+                        </div>
+                        <button type="button" onClick={() => openPrintHtml(buildDeliveryWhtCertHtml(savedSale), () => setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup อาจถูกบล็อก)"))}
+                          style={{ padding: "10px 20px", background: "#c2410c", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 14, fontWeight: 700, fontFamily: "Tahoma" }}>
+                          🖨️ พิมพ์ใบหัก ณ ที่จ่าย (50 ทวิ)
+                        </button>
+                      </div>
+                    )}
                     {savedSale && isWholesale && (
                       <div style={{ marginTop: 16, textAlign: "center" }}>
                         <button onClick={resetAll}
@@ -2803,6 +2840,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
         </>
       )}
 
+      {/* popup เลือก/เพิ่มผู้รับค่านำพา (ผู้ถูกหักภาษี ณ ที่จ่าย) — ใช้ตัวเลือกลูกค้าตัวเดียวกัน */}
+      {showPayeePicker && (
+        <CustomerPickerModal currentUser={currentUser}
+          onSelect={(c) => { setDeliveryPayee({ code: text(c.code), name: text(c.name), phone: text(c.phone), address: text(c.address), tax_id: text(c.tax_id) }); setShowPayeePicker(false); }}
+          onClose={() => setShowPayeePicker(false)} />
+      )}
       {/* popup เลือก/เพิ่มลูกค้า */}
       {showCustomer && (
         <CustomerPickerModal currentUser={currentUser} onSelect={pickCustomer} onClose={() => setShowCustomer(false)} />

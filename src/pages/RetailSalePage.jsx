@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import { markupActiveOn } from "../utils/carPaymentStatus"; // กฎบวกเพิ่มมีผลตามช่วงวันที่
 import CustomerPickerModal from "./CustomerPickerModal";
 import { fetchPriceBranchGroups, priceGroupOf } from "../utils/priceBranchGroup";
+import { buildDeliveryWhtCertHtml, openPrintHtml } from "../utils/whtCert"; // ใบหัก ณ ที่จ่าย ค่านำพา (50 ทวิ) — พิมพ์ซ้ำจากใบขายที่บันทึกผู้รับค่านำพาไว้
 
 // ============================================================================
 // หน้า "บันทึกขายปลีก"
@@ -1850,6 +1851,10 @@ ${s.payment_received_note ? `<div style="margin-top:6px;font-size:12px">หม�
                   ) : (
                     <>
                       <button style={btn("#0369a1")} onClick={handlePrint}>🖨️ พิมพ์</button>
+                      {Number(sale?.delivery_fee_amount) > 0 && sale?.delivery_payee_name && (
+                        <button style={btn("#c2410c")} title={`ผู้รับค่านำพา ${sale.delivery_payee_name} — หัก ณ ที่จ่าย 3%`}
+                          onClick={() => openPrintHtml(buildDeliveryWhtCertHtml(sale), () => setMessage("❌ เปิดหน้าต่างพิมพ์ไม่ได้ (popup อาจถูกบล็อก)"))}>🧾 ใบหัก ณ ที่จ่าย</button>
+                      )}
                       {(() => {
                         const sent = lineStatus.sale === "sent";
                         const pending = linePending?.type === "sale";
