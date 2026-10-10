@@ -9,10 +9,75 @@ const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-dat
 const AI_API = "https://n8n-new-project-gwf2.onrender.com/webhook/ai-reception-api";
 
 const BRANCH_INFO = {
-  SCY01: { shop: "สิงห์ชัย", name: "น้องสิงห์" },
-  SCY06: { shop: "ป.เปา มอเตอร์", name: "น้องเปาเปา" },
+  SCY01: { shop: "สิงห์ชัย", shopEn: "Singchai Motor", name: "น้องสิงห์" },
+  SCY06: { shop: "ป.เปา มอเตอร์", shopEn: "P.Pao Motor", name: "น้องเปาเปา" },
 };
-const QUICK = ["ราคารถรุ่นใหม่", "โปรโมชั่นเดือนนี้", "เช็กสถานะรถซ่อม", "ร้านเปิดกี่โมง", "ออกรถใช้เอกสารอะไร"];
+
+// ภาษา (user 2026-10-10): ไทย/อังกฤษ/จีน/พม่า — เปลี่ยนทั้งเสียงฟัง (stt) เสียงพูด (tts) และภาษาคำตอบของ AI (ส่ง lang ไป ai-reception-api)
+// เสียงพูดขึ้นกับเครื่อง: ถ้าเครื่องไม่มีเสียงภาษานั้น (มักเป็นพม่า) จะแสดงเป็นข้อความอย่างเดียว · cps = ตัวอักษร/วินาที ใช้ขยับปาก
+const LANGS = [
+  { id: "th", flag: "🇹🇭", label: "ไทย", tts: "th-TH", stt: "th-TH", voice: /^th[-_]/i, cps: 13 },
+  { id: "en", flag: "🇬🇧", label: "English", tts: "en-US", stt: "en-US", voice: /^en[-_]/i, cps: 14 },
+  { id: "zh", flag: "🇨🇳", label: "中文", tts: "zh-CN", stt: "cmn-Hans-CN", voice: /^(zh[-_](CN|Hans)|cmn)/i, cps: 5 },
+  { id: "my", flag: "🇲🇲", label: "မြန်မာ", tts: "my-MM", stt: "my-MM", voice: /^my[-_]/i, cps: 10 },
+];
+const LANG_BY = Object.fromEntries(LANGS.map(l => [l.id, l]));
+
+// ข้อความบนจอโหมดตอบลูกค้า (โหมดฝึกพนักงานใช้ภาษาไทยเสมอ เปลี่ยนแค่ภาษาของลูกค้าจำลอง)
+const T = {
+  th: {
+    quick: ["ราคารถรุ่นใหม่", "โปรโมชั่นเดือนนี้", "เช็กสถานะรถซ่อม", "ร้านเปิดกี่โมง", "ออกรถใช้เอกสารอะไร"],
+    greet: (ai, info) => `สวัสดีครับ ${ai} ยินดีต้อนรับสู่ ${info.shop} ครับ มีอะไรให้ช่วยไหมครับ กดปุ่มไมค์แล้วพูดได้เลยครับ`,
+    start: (ai) => `แตะหน้าจอเพื่อเริ่มคุยกับ${ai}`,
+    listening: "กำลังฟัง... พูดได้เลยครับ", thinking: "กำลังหาคำตอบ...", idle: "กดไมค์แล้วพูด หรือแตะคำถามด้านล่าง",
+    typePh: "พิมพ์คำถามที่นี่...", askBtn: "ถาม", micTitle: "กดแล้วพูด", sub: "ผู้ช่วยต้อนรับ", demo: " (โหมดสาธิต)",
+    noSpeech: "ไม่ได้ยินเสียงครับ กดไมค์แล้วพูดอีกครั้งนะครับ",
+    noMic: "ใช้ไมค์ไม่ได้ในเครื่องนี้ พิมพ์คำถามด้านล่างได้เลยครับ",
+    noSR: "เบราว์เซอร์นี้ไม่รองรับการฟังเสียง (เช่น เปิดจากในแอป LINE) กรุณาเปิดลิงก์ด้วย Chrome หรือพิมพ์คำถามด้านล่างครับ",
+    baht: "บาท", colors: "สี", noImg: "ไม่มีรูป", loading: "กำลังโหลด...",
+    pick: (x) => `สนใจ ${x.series} รุ่นย่อย ${x.type}`,
+    fallback: "ขออภัยครับ ตอนนี้ระบบข้อมูลยังเชื่อมต่อไม่ครบ เดี๋ยวเรียกพนักงานมาดูแลให้นะครับ",
+  },
+  en: {
+    quick: ["New model prices", "This month's promotions", "Repair status", "Opening hours", "Documents to buy a bike"],
+    greet: (ai, info) => `Hello and welcome to ${info.shopEn}! How can I help you? Press the microphone button and speak.`,
+    start: () => "Tap the screen to start",
+    listening: "Listening... go ahead and speak", thinking: "Finding an answer...", idle: "Press the mic and speak, or tap a question below",
+    typePh: "Type your question here...", askBtn: "Ask", micTitle: "Press and speak", sub: "Reception assistant", demo: " (demo mode)",
+    noSpeech: "I didn't hear anything. Please press the mic and try again.",
+    noMic: "The microphone isn't available on this device. Please type your question below.",
+    noSR: "This browser can't listen to speech (e.g. inside the LINE app). Please open it in Chrome or type your question below.",
+    baht: "baht", colors: "Colors", noImg: "No image", loading: "Loading...",
+    pick: (x) => `I'm interested in the ${x.series} ${x.type}`,
+    fallback: "Sorry, the system isn't fully connected right now. Let me call a staff member to help you.",
+  },
+  zh: {
+    quick: ["新车价格", "本月促销", "维修进度", "营业时间", "购车需要什么证件"],
+    greet: (ai, info) => `您好，欢迎光临 ${info.shopEn}！请问有什么可以帮您？请按麦克风按钮说话。`,
+    start: () => "点击屏幕开始",
+    listening: "正在听，请说话……", thinking: "正在查找答案……", idle: "按麦克风说话，或点击下方问题",
+    typePh: "请在这里输入问题……", askBtn: "提问", micTitle: "按下说话", sub: "接待助手", demo: "（演示模式）",
+    noSpeech: "没有听到声音，请再按麦克风说一次。",
+    noMic: "此设备无法使用麦克风，请在下方输入问题。",
+    noSR: "此浏览器不支持语音识别（例如在 LINE 应用内打开），请用 Chrome 打开或在下方输入问题。",
+    baht: "泰铢", colors: "颜色", noImg: "暂无图片", loading: "加载中……",
+    pick: (x) => `我对 ${x.series} ${x.type} 感兴趣`,
+    fallback: "抱歉，系统暂时未完全连接，我请工作人员来为您服务。",
+  },
+  my: {
+    quick: ["မော်တော်ဆိုင်ကယ်အသစ် ဈေးနှုန်း", "ဒီလ ပရိုမိုးရှင်း", "ပြုပြင်မှု အခြေအနေ", "ဆိုင်ဖွင့်ချိန်", "ဝယ်ရန် လိုအပ်သောစာရွက်စာတမ်း"],
+    greet: (ai, info) => `မင်္ဂလာပါ ${info.shopEn} မှ ကြိုဆိုပါတယ်။ ဘာကူညီပေးရမလဲ။ မိုက်ခလုတ်ကိုနှိပ်ပြီး ပြောနိုင်ပါတယ်။`,
+    start: () => "စတင်ရန် မျက်နှာပြင်ကို နှိပ်ပါ",
+    listening: "နားထောင်နေပါတယ်... ပြောပါ", thinking: "အဖြေရှာနေပါတယ်...", idle: "မိုက်ကိုနှိပ်ပြီးပြောပါ သို့မဟုတ် အောက်ကမေးခွန်းကို နှိပ်ပါ",
+    typePh: "မေးခွန်းကို ဒီမှာ ရိုက်ပါ...", askBtn: "မေးမည်", micTitle: "နှိပ်ပြီးပြောပါ", sub: "ဧည့်ကြိုလက်ထောက်", demo: " (စမ်းသပ်မုဒ်)",
+    noSpeech: "အသံမကြားရပါ။ မိုက်ကိုနှိပ်ပြီး ထပ်ပြောပါ။",
+    noMic: "ဒီစက်မှာ မိုက်သုံးလို့မရပါ။ အောက်မှာ မေးခွန်းရိုက်ပါ။",
+    noSR: "ဒီဘရောက်ဆာက အသံမသိနိုင်ပါ (ဥပမာ LINE အက်ပ်ထဲ)။ Chrome ဖြင့်ဖွင့်ပါ သို့မဟုတ် အောက်မှာ ရိုက်ပါ။",
+    baht: "ဘတ်", colors: "အရောင်", noImg: "ပုံမရှိ", loading: "ဖွင့်နေသည်...",
+    pick: (x) => `${x.series} ${x.type} ကို စိတ်ဝင်စားပါတယ်`,
+    fallback: "စိတ်မကောင်းပါဘူး၊ စနစ်က အပြည့်မချိတ်ဆက်ရသေးပါ။ ဝန်ထမ်းကို ခေါ်ပေးပါမယ်။",
+  },
+};
 
 // รูปปาก (viseme) บนภาพมาสคอตจริง (พิกัดตามภาพ public/mascot-pp.webp 860x940): ขอบบน = เส้นยิ้มเดิมของตัวการ์ตูน แล้วอ้าลงด้านล่าง
 const SMILE_TOP = "M 310 482 Q 358 532 453 474";
@@ -70,7 +135,7 @@ function Face({ mouth, blink, mood, small }) {
 
 // ภาพรุ่นย่อย: ใช้รูปสีรถจาก moto_color_images (master-data-api get_color_image) โหลดครั้งเดียวต่อ color_id
 const _imgCache = new Map(); // color_id → data URL | "none" | Promise
-function VariantCard({ item, onPick, disabled }) {
+function VariantCard({ item, onPick, disabled, t }) {
   const [img, setImg] = useState(() => { const v = item.color_id ? _imgCache.get(item.color_id) : "none"; return typeof v === "string" ? v : null; });
   useEffect(() => {
     let alive = true;
@@ -84,14 +149,14 @@ function VariantCard({ item, onPick, disabled }) {
     pr.then(v => { if (alive) setImg(v); });
     return () => { alive = false; };
   }, [item.color_id]);
-  const price = item.price === null || item.price === undefined ? "" : Number(item.price).toLocaleString("en-US", { maximumFractionDigits: 0 }) + " บาท";
+  const price = item.price === null || item.price === undefined ? "" : Number(item.price).toLocaleString("en-US", { maximumFractionDigits: 0 }) + " " + t.baht;
   return (
     <button onClick={() => onPick(item)} disabled={disabled} className="air-card" style={{ border: "none", cursor: "pointer", fontFamily: "inherit", flexShrink: 0, background: "#fff", color: "#0b2447", borderRadius: 16, padding: 8, display: "flex", flexDirection: "column", alignItems: "center", gap: 4, boxShadow: "0 6px 16px rgba(0,0,0,.35)" }}>
       <div className="air-card-img" style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", background: "#f3f5f8", borderRadius: 10, overflow: "hidden" }}>
-        {img && img !== "none" ? <img src={img} alt={item.type} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 13, opacity: .5 }}>{img === "none" ? "ไม่มีรูป" : "กำลังโหลด..."}</span>}
+        {img && img !== "none" ? <img src={img} alt={item.type} style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 13, opacity: .5 }}>{img === "none" ? t.noImg : t.loading}</span>}
       </div>
       <div className="air-card-name" style={{ fontWeight: 700, lineHeight: 1.2 }}>{[item.model, item.type].filter(Boolean).join(" ")}</div>
-      {item.colors && <div style={{ fontSize: 11, opacity: .7, lineHeight: 1.2, maxHeight: 27, overflow: "hidden" }}>สี: {item.colors}</div>}
+      {item.colors && <div style={{ fontSize: 11, opacity: .7, lineHeight: 1.2, maxHeight: 27, overflow: "hidden" }}>{t.colors}: {item.colors}</div>}
       {price && <div className="air-card-price" style={{ color: "#c62828", fontWeight: 700 }}>{price}</div>}
     </button>
   );
@@ -117,6 +182,9 @@ export default function AiReceptionPage() {
   const [items, setItems] = useState([]);            // รุ่นย่อยที่ AI ให้โชว์ภาพ
   const [showType, setShowType] = useState(false);   // ช่องพิมพ์คำถาม (เมื่อไมค์ใช้ไม่ได้)
   const [typed, setTyped] = useState("");
+  const [lang, setLangState] = useState(() => (LANG_BY[params.get("lang")] ? params.get("lang") : "th"));
+  const langRef = useRef(lang);                       // ใช้ใน callback เสียง (กันค่าเก่าค้างใน closure)
+  const t = sim ? T.th : T[lang];
   const recRef = useRef(null);
   const lipTimer = useRef(null);
   const historyRef = useRef([]);
@@ -141,7 +209,7 @@ export default function AiReceptionPage() {
   // ขยับปากตามข้อความที่กำลังพูด: ไล่ตัวอักษรตามความเร็วพูด (ถ้าเบราว์เซอร์ส่ง boundary event จะปรับตำแหน่งให้ตรงคำ)
   function startLip(text, rate) {
     clearInterval(lipTimer.current);
-    const chars = Array.from(text); let i = 0; const cps = 13 * rate;       // ภาษาไทย ~13 ตัวอักษร/วิ ที่ rate 1
+    const chars = Array.from(text); let i = 0; const cps = LANG_BY[langRef.current].cps * rate;   // ไทย ~13 ตัวอักษร/วิ ที่ rate 1
     lipTimer.current = setInterval(() => { if (i >= chars.length) { i = chars.length - 1; } setMouth(visemeOf(chars[i])); i++; }, 1000 / cps);
     return (charIndex) => { if (typeof charIndex === "number" && charIndex > i) i = charIndex; };
   }
@@ -152,11 +220,14 @@ export default function AiReceptionPage() {
       const synth = window.speechSynthesis;
       if (!synth) { setAnswer(text); resolve(); return; }
       synth.cancel();
-      const u = new SpeechSynthesisUtterance(text);
+      const L = LANG_BY[langRef.current];
       const voices = synth.getVoices();
-      const th = voices.find(v => /th[-_]TH/i.test(v.lang) && /male|ชาย|Niwat|Pattara/i.test(v.name)) || voices.find(v => /th[-_]TH/i.test(v.lang));
-      if (th) u.voice = th;
-      u.lang = "th-TH"; u.rate = 1.05; u.pitch = 1.25;   // เสียงเด็กผู้ชายสดใส (มาสคอต)
+      const voice = voices.find(v => L.voice.test(v.lang) && /male|ชาย|Niwat|Pattara/i.test(v.name)) || voices.find(v => L.voice.test(v.lang));
+      // เครื่องไม่มีเสียงภาษานี้ (เช่น พม่า) → แสดงข้อความอย่างเดียว ไม่ให้เบราว์เซอร์อ่านผิดภาษา
+      if (!voice && voices.length && L.id !== "th") { setAnswer(text); setMood("idle"); resolve(); return; }
+      const u = new SpeechSynthesisUtterance(text);
+      if (voice) u.voice = voice;
+      u.lang = L.tts; u.rate = 1.05; u.pitch = 1.25;   // เสียงเด็กผู้ชายสดใส (มาสคอต)
       let sync = null;
       u.onstart = () => { setMood("speaking"); sync = startLip(text, u.rate); };
       u.onboundary = (e) => { if (sync) sync(e.charIndex); };
@@ -169,6 +240,7 @@ export default function AiReceptionPage() {
 
   // คำตอบสาธิต (ใช้เมื่อ webhook ยังไม่พร้อม)
   function demoAnswer(q) {
+    if (langRef.current !== "th") return T[langRef.current].fallback;
     if (/เปิด|ปิด|กี่โมง/.test(q)) return "ร้านเปิดทุกวัน แปดโมงครึ่งถึงห้าโมงเย็นครับ ศูนย์บริการรับรถคันสุดท้ายสี่โมงครึ่งนะครับ";
     if (/เอกสาร|ออกรถ/.test(q)) return "ออกรถใช้บัตรประชาชนตัวจริงกับทะเบียนบ้านครับ ถ้าผ่อนไฟแนนซ์ เพิ่มสลิปเงินเดือนหรือหลักฐานรายได้ด้วยนะครับ";
     if (/โปร|ของแถม/.test(q)) return "เดือนนี้มีโปรโมชั่นหลายรุ่นเลยครับ เดี๋ยวพนักงานขายจะแจ้งรายละเอียดของแถมและดาวน์ให้นะครับ";
@@ -185,7 +257,7 @@ export default function AiReceptionPage() {
     try {
       const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 25000);
       const res = await fetch(AI_API, { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
-        body: JSON.stringify({ action: "ask", branch_code: branch, session_id: sessionId, question, history: historyRef.current.slice(-8) }) });
+        body: JSON.stringify({ action: "ask", branch_code: branch, session_id: sessionId, lang: langRef.current, question, history: historyRef.current.slice(-8) }) });
       clearTimeout(to);
       if (!res.ok) throw new Error("http " + res.status);
       const data = await res.json(); const row = Array.isArray(data) ? data[0] : data;
@@ -210,7 +282,7 @@ export default function AiReceptionPage() {
     try {
       const ctrl = new AbortController(); const to = setTimeout(() => ctrl.abort(), 30000);
       const res = await fetch(AI_API, { method: "POST", headers: { "Content-Type": "application/json" }, signal: ctrl.signal,
-        body: JSON.stringify({ action: "sim_next", branch_code: branch, session_id: st.session, staff_name: staffName.trim(), scenario: st.scenario, history, last_question: st.lastQ, staff_answer: ans, answer_source: source || "" }) });
+        body: JSON.stringify({ action: "sim_next", branch_code: branch, session_id: st.session, lang: langRef.current, staff_name: staffName.trim(), scenario: st.scenario, history, last_question: st.lastQ, staff_answer: ans, answer_source: source || "" }) });
       clearTimeout(to);
       if (!res.ok) throw new Error("http " + res.status);
       const data = await res.json(); const row = Array.isArray(data) ? data[0] : data;
@@ -241,7 +313,7 @@ export default function AiReceptionPage() {
     const question = simRef.current.lastQ;
     const run = () => {
       const rec = new SR(); recRef.current = rec;
-      rec.lang = "th-TH"; rec.interimResults = true; rec.maxAlternatives = 1;
+      rec.lang = LANG_BY[langRef.current].stt; rec.interimResults = true; rec.maxAlternatives = 1;   // พนักงานตอบเป็นภาษาเดียวกับลูกค้าจำลอง
       let finalText = ""; let lastText = ""; let fatal = false;
       rec.onstart = () => { setMood("listening"); setAnswer(question); };
       rec.onresult = (e) => { let t = ""; for (const r of e.results) t += r[0].transcript; lastText = t; setHeard((accum + " " + t).trim()); if (e.results[e.results.length - 1].isFinal) finalText = t; };
@@ -266,11 +338,11 @@ export default function AiReceptionPage() {
   function listen() {
     if (sim) { listenSim(); return; }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setShowType(true); setAnswer("เบราว์เซอร์นี้ไม่รองรับการฟังเสียง (เช่น เปิดจากในแอป LINE) กรุณาเปิดลิงก์ด้วย Chrome หรือพิมพ์คำถามด้านล่างครับ"); return; }
+    if (!SR) { setShowType(true); setAnswer(t.noSR); return; }
     if (mood === "listening") { try { recRef.current?.stop(); } catch { /* ignore */ } return; }
     window.speechSynthesis?.cancel(); stopLip();
     const rec = new SR(); recRef.current = rec;
-    rec.lang = "th-TH"; rec.interimResults = true; rec.maxAlternatives = 1;
+    rec.lang = LANG_BY[langRef.current].stt; rec.interimResults = true; rec.maxAlternatives = 1;
     let finalText = ""; let lastText = ""; let failed = false;
     rec.onstart = () => { setMood("listening"); setHeard(""); setAnswer(""); setItems([]); };
     rec.onresult = (e) => { let s = ""; for (const r of e.results) s += r[0].transcript; lastText = s; setHeard(s); if (e.results[e.results.length - 1].isFinal) finalText = s; };
@@ -278,15 +350,28 @@ export default function AiReceptionPage() {
       const code = e?.error || "";
       if (code === "aborted") return;
       failed = true; setMood("idle");
-      if (code === "no-speech") { setAnswer("ไม่ได้ยินเสียงครับ กดไมค์แล้วพูดอีกครั้งนะครับ"); return; }
+      if (code === "no-speech") { setAnswer(t.noSpeech); return; }
       setShowType(true);
-      if (code === "not-allowed" || code === "service-not-allowed") setAnswer("ยังไม่ได้อนุญาตให้ใช้ไมโครโฟน กรุณากดอนุญาตไมค์ของเว็บนี้ในเบราว์เซอร์ หรือพิมพ์คำถามด้านล่างครับ");
+      if (langRef.current !== "th") setAnswer(`${t.noMic} (${code || "error"})`);
+      else if (code === "not-allowed" || code === "service-not-allowed") setAnswer("ยังไม่ได้อนุญาตให้ใช้ไมโครโฟน กรุณากดอนุญาตไมค์ของเว็บนี้ในเบราว์เซอร์ หรือพิมพ์คำถามด้านล่างครับ");
       else if (code === "audio-capture") setAnswer("ไม่พบไมโครโฟนในเครื่องนี้ พิมพ์คำถามด้านล่างได้เลยครับ");
       else if (code === "network") setAnswer("ระบบฟังเสียงเชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง หรือพิมพ์คำถามด้านล่างครับ");
       else setAnswer(`ใช้ไมค์ไม่ได้ (${code || "ไม่ทราบสาเหตุ"}) พิมพ์คำถามด้านล่างได้เลยครับ`);
     };
-    rec.onend = () => { const t = (finalText || lastText).trim(); if (failed) return; if (t) ask(t); else setMood("idle"); };
-    try { rec.start(); } catch (err) { setMood("idle"); setShowType(true); setAnswer(`เปิดไมค์ไม่ได้ (${err?.name || "error"}) พิมพ์คำถามด้านล่างได้เลยครับ`); }
+    rec.onend = () => { const s = (finalText || lastText).trim(); if (failed) return; if (s) ask(s); else setMood("idle"); };
+    try { rec.start(); } catch (err) { setMood("idle"); setShowType(true); setAnswer(`${t.noMic} (${err?.name || "error"})`); }
+  }
+
+  // เปลี่ยนภาษา: โหมดตอบลูกค้า = ทักทายใหม่ด้วยภาษานั้น (ล้างประวัติคุย) · โหมดฝึก = เริ่มลูกค้าจำลองคนใหม่ที่พูดภาษานั้น
+  function changeLang(id) {
+    if (id === langRef.current || mood === "thinking") return;
+    langRef.current = id; setLangState(id);
+    try { recRef.current?.abort(); } catch { /* ignore */ }
+    window.speechSynthesis?.cancel(); stopLip(); setMood("idle");
+    if (!started) return;
+    if (sim) { simNewCustomer(false); return; }
+    historyRef.current = []; setItems([]); setHeard("");
+    speak(T[id].greet(aiName, info));
   }
 
   async function start() {
@@ -297,11 +382,11 @@ export default function AiReceptionPage() {
     }
     setStarted(true);
     window.speechSynthesis?.getVoices();
-    await speak(`สวัสดีครับ ${aiName} ยินดีต้อนรับสู่ ${info.shop} ครับ มีอะไรให้ช่วยไหมครับ กดปุ่มไมค์แล้วพูดได้เลยครับ`);
+    await speak(T[langRef.current].greet(aiName, info));
   }
 
   const simStatus = mood === "listening" ? "กำลังฟังคำตอบ... ตอบจบแล้วกดปุ่มสีแดง" : mood === "thinking" ? "ลูกค้ากำลังคิด..." : mood === "speaking" ? "" : simDone ? "จบการสนทนากับลูกค้าคนนี้แล้ว กด \"ลูกค้าคนต่อไป\"" : "กดไมค์แล้วตอบลูกค้า (หรือพิมพ์คำตอบ)";
-  const statusText = sim ? simStatus : mood === "listening" ? "กำลังฟัง... พูดได้เลยครับ" : mood === "thinking" ? "กำลังหาคำตอบ..." : mood === "speaking" ? "" : "กดไมค์แล้วพูด หรือแตะคำถามด้านล่าง";
+  const statusText = sim ? simStatus : mood === "listening" ? t.listening : mood === "thinking" ? t.thinking : mood === "speaking" ? "" : t.idle;
   const btn = { border: "none", borderRadius: 999, cursor: "pointer", fontFamily: "inherit" };
 
   return (
@@ -310,8 +395,18 @@ export default function AiReceptionPage() {
         + "@media (max-width:640px),(max-height:560px){.air-face{width:min(42dvh,76vw)}.air-face.small{width:min(20dvh,40vw)}.air-card{width:138px}.air-card-img{height:92px}.air-card-name{font-size:13px}.air-card-price{font-size:14px}.air-shop{font-size:17px}.air-sub{font-size:12px}.air-heard,.air-status{font-size:15px}.air-answer{font-size:17px}.air-chips{flex-wrap:nowrap;justify-content:flex-start;overflow-x:auto;width:100%;scrollbar-width:none}.air-chips::-webkit-scrollbar{display:none}.air-chip{font-size:15px;padding:8px 14px}.air-mic{width:68px;height:68px;font-size:30px}.air-start{font-size:20px;padding:14px 24px}}"
         + "@keyframes mascotIdle{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}@keyframes mascotTalk{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-4px) rotate(-1deg)}75%{transform:translateY(-2px) rotate(1deg)}}"}</style>
       <div style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", gap: 10, boxSizing: "border-box", flexShrink: 0 }}>
-        <div className="air-shop" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{info.shop}</div>
-        <div className="air-sub" style={{ opacity: .8, textAlign: "right" }}>{sim ? `ฝึกตอบลูกค้า · ${staffName || "-"}${started ? ` · ลูกค้าคนที่ ${simCount} · คำถามที่ ${simTurn}` : ""}` : `${aiName} · ผู้ช่วยต้อนรับ${demo ? " (โหมดสาธิต)" : ""}`}</div>
+        <div className="air-shop" style={{ fontWeight: 700, whiteSpace: "nowrap" }}>{lang === "th" || sim ? info.shop : info.shopEn}</div>
+        <div className="air-sub" style={{ opacity: .8, textAlign: "right" }}>{sim ? `ฝึกตอบลูกค้า · ${staffName || "-"}${started ? ` · ลูกค้าคนที่ ${simCount} · คำถามที่ ${simTurn}` : ""}` : `${lang === "th" ? aiName + " · " : ""}${t.sub}${demo ? t.demo : ""}`}</div>
+      </div>
+      {/* เลือกภาษา — อยู่เหนือหน้าจอ "แตะเพื่อเริ่ม" ให้เลือกก่อนเริ่มได้ */}
+      <div style={{ position: "relative", zIndex: 5, display: "flex", alignItems: "center", gap: 6, padding: "0 16px", flexWrap: "wrap", justifyContent: "center", flexShrink: 0 }}>
+        {sim && <span className="air-sub" style={{ opacity: .75 }}>ภาษาลูกค้า:</span>}
+        {LANGS.map(l => (
+          <button key={l.id} onClick={() => changeLang(l.id)} disabled={mood === "thinking"} className="air-lang"
+            style={{ ...btn, padding: "5px 12px", fontSize: 15, background: lang === l.id ? "#f9a825" : "rgba(255,255,255,.14)", color: lang === l.id ? "#1b1b1b" : "#fff", fontWeight: lang === l.id ? 700 : 400 }}>
+            {l.flag} {l.label}
+          </button>
+        ))}
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "100%", position: "relative" }}>
@@ -320,7 +415,7 @@ export default function AiReceptionPage() {
         </div>
         {items.length > 0 && (
           <div className="air-cards">
-            {items.map(it => <VariantCard key={it.type_id} item={it} disabled={mood === "thinking"} onPick={(x) => ask(`สนใจ ${x.series} รุ่นย่อย ${x.type}`)} />)}
+            {items.map(it => <VariantCard key={it.type_id} item={it} t={t} disabled={mood === "thinking"} onPick={(x) => ask(t.pick(x))} />)}
           </div>
         )}
         {/* กล่องข้อความ: สิ่งที่ได้ยิน + คำตอบ */}
@@ -354,18 +449,18 @@ export default function AiReceptionPage() {
           </>
         ) : (
         <div className="air-chips" style={{ display: "flex", gap: 10 }}>
-          {QUICK.map(q => (
+          {t.quick.map(q => (
             <button key={q} onClick={() => ask(q)} disabled={mood === "thinking"} className="air-chip" style={{ ...btn, whiteSpace: "nowrap", flexShrink: 0, background: "rgba(255,255,255,.14)", color: "#fff" }}>{q}</button>
           ))}
         </div>
         )}
         {!sim && showType && (
           <form onSubmit={(e) => { e.preventDefault(); const t = typed; setTyped(""); ask(t); }} style={{ display: "flex", gap: 8, width: "min(560px, 100%)" }}>
-            <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="พิมพ์คำถามที่นี่..." style={{ flex: 1, minWidth: 0, fontSize: 16, padding: "10px 14px", borderRadius: 999, border: "none", fontFamily: "inherit", userSelect: "text" }} />
-            <button type="submit" disabled={mood === "thinking" || !typed.trim()} style={{ ...btn, padding: "10px 18px", fontSize: 16, background: "#2e7d32", color: "#fff" }}>ถาม</button>
+            <input value={typed} onChange={(e) => setTyped(e.target.value)} placeholder={t.typePh} style={{ flex: 1, minWidth: 0, fontSize: 16, padding: "10px 14px", borderRadius: 999, border: "none", fontFamily: "inherit", userSelect: "text" }} />
+            <button type="submit" disabled={mood === "thinking" || !typed.trim()} style={{ ...btn, padding: "10px 18px", fontSize: 16, background: "#2e7d32", color: "#fff" }}>{t.askBtn}</button>
           </form>
         )}
-        <button onClick={listen} disabled={mood === "thinking" || (sim && (simDone || !simTurn))} className="air-mic" style={{ ...btn, flexShrink: 0, color: "#fff", background: mood === "listening" ? "#e53935" : "#2e7d32", boxShadow: mood === "listening" ? "0 0 0 12px rgba(229,57,53,.25)" : "0 6px 18px rgba(0,0,0,.4)", transition: "all .2s", opacity: sim && (simDone || !simTurn) ? .4 : 1 }} title="กดแล้วพูด">
+        <button onClick={listen} disabled={mood === "thinking" || (sim && (simDone || !simTurn))} className="air-mic" style={{ ...btn, flexShrink: 0, color: "#fff", background: mood === "listening" ? "#e53935" : "#2e7d32", boxShadow: mood === "listening" ? "0 0 0 12px rgba(229,57,53,.25)" : "0 6px 18px rgba(0,0,0,.4)", transition: "all .2s", opacity: sim && (simDone || !simTurn) ? .4 : 1 }} title={t.micTitle}>
           {mood === "listening" ? "■" : "🎤"}
         </button>
       </div>
@@ -382,7 +477,7 @@ export default function AiReceptionPage() {
       )}
       {!started && !sim && (
         <div onClick={start} style={{ position: "fixed", inset: 0, background: "rgba(6,21,40,.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: "12vh", cursor: "pointer" }}>
-          <div className="air-start" style={{ fontWeight: 700, background: "#2e7d32", borderRadius: 999, textAlign: "center", margin: "0 16px", boxShadow: "0 8px 24px rgba(0,0,0,.45)" }}>แตะหน้าจอเพื่อเริ่มคุยกับ{aiName}</div>
+          <div className="air-start" style={{ fontWeight: 700, background: "#2e7d32", borderRadius: 999, textAlign: "center", margin: "0 16px", boxShadow: "0 8px 24px rgba(0,0,0,.45)" }}>{t.start(aiName)}</div>
         </div>
       )}
     </div>
