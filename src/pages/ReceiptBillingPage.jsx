@@ -55,19 +55,24 @@ async function recomputeTaxRenewalRows(list, isTarget, feeOwnerOf) {
     const submit = addDaysISO(sent, TAX_FILE_LAG_DAYS); // วันยื่นขนส่งจริง = วันส่งเรื่อง + 1
     const c0 = calcMcTax(h.register_date ? String(h.register_date).slice(0, 10) : "", expire, submit);
     if (!c0 || c0.suspended) return r;
-    const waived = TAX_NO_SURCHARGE.has(String(r.receipt_no)) && c0.surcharge > 0;
-    const c = waived ? { ...c0, surcharge: 0 } : c0;
+    // เงินเพิ่มที่พนักงานแก้ตามใบเสร็จขนส่งจริง (registration_receipts.tax_surcharge_override — save_tax_surcharge) ชนะค่าคำนวณ 1%/เดือน (user 2026-10-10)
+    const ovRaw = h.tax_surcharge_override;
+    const ov = ovRaw === null || ovRaw === undefined || ovRaw === '' ? null : round2(ovRaw);
+    const waived = ov === null && TAX_NO_SURCHARGE.has(String(r.receipt_no)) && c0.surcharge > 0;
+    const c = ov !== null ? { ...c0, surcharge: ov } : waived ? { ...c0, surcharge: 0 } : c0;
     const years = c.lateYears || 1;
     const dlt = round2(c.taxTotal + c.surcharge);
     const owner = feeOwnerOf(r);
     const feeElsewhere = owner && owner !== r.receipt_no;
     const amt = round2(dlt + (feeElsewhere ? 0 : MC_BILL_SERVICE_FEE));
-    const base = `ค่าต่อภาษี ${years} ปี ${fmtNum2(c.taxTotal)}` + (c.surcharge > 0
+    const base = `ค่าต่อภาษี ${years} ปี ${fmtNum2(c.taxTotal)}` + (ov !== null
+      ? (ov > 0 ? ` + เงินเพิ่ม ${fmtNum2(ov)} (ตามใบเสร็จขนส่ง — คำนวณ ${fmtNum2(c0.surcharge)})` : ` (ยื่น ${fmtBE2(submit)} — ขนส่งไม่เก็บเงินเพิ่ม ตามใบเสร็จ, คำนวณ ${fmtNum2(c0.surcharge)})`)
+      : c.surcharge > 0
       ? ` + เงินเพิ่ม ${fmtNum2(c.surcharge)} (ยื่น ${fmtBE2(submit)} หลังสิ้นอายุ ${fmtBE2(expire)})`
       : waived ? ` (ยื่น ${fmtBE2(submit)} — ไม่คิดเงินเพิ่ม ${fmtNum2(c0.surcharge)} ตามที่สั่ง)` : ` (ยื่น ${fmtBE2(submit)} ไม่มีเงินเพิ่ม)`);
     // ⚠ ชื่อรายการที่ "ไม่คิด 20" ห้ามมีคำว่า "ค่าบริการ" (feeTakenBy/WHT base ใช้คำนี้เช็ค)
     const name = feeElsewhere ? `${base} (คันเดียวกัน — 20 บาทคิดที่ ${owner} แล้ว)` : `${base} + ค่าบริการ ${MC_BILL_SERVICE_FEE} บาท`;
-    return { ...r, bill_amount: amt, bill_items: [{ expense_name: name, amount: amt }], tax_recalc: { dlt, receipt_amount: round2(r.net_price), submit, expire, surcharge: c.surcharge, years } };
+    return { ...r, bill_amount: amt, bill_items: [{ expense_name: name, amount: amt }], tax_recalc: { dlt, receipt_amount: round2(r.net_price), submit, expire, surcharge: c.surcharge, surcharge_calc: c0.surcharge, surcharge_override: ov, years } };
   });
 }
 const fmtNum2 = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -584,6 +589,29 @@ ${transferSummary.length > 0 ? `
     setLoading(false);
   }
 
+  // แก้เงินเพิ่ม (ค่าปรับต่อภาษีล่าช้า) เฉพาะใบ ตามใบเสร็จขนส่งจริง — แก้ได้เฉพาะเงินเพิ่ม ภาษี/ค่าบริการคงตามกฎ (user 2026-10-10)
+  async function editTaxSurcharge(r) {
+    const t = r.tax_recalc || {};
+    const cur = t.surcharge_override != null ? t.surcharge_override : t.surcharge;
+    const ans = window.prompt(`เงินเพิ่ม (ค่าปรับ) ที่ขนส่งเก็บจริง ใบ ${r.receipt_no}\nคำนวณตามกฎ 1%/เดือน = ${fmtNum(t.surcharge_calc)} บาท\nใส่ยอดตามใบเสร็จขนส่ง (0 = ไม่เก็บ) · เว้นว่าง = กลับไปใช้ค่าคำนวณ`, cur == null ? "" : String(cur));
+    if (ans === null) return;
+    const v = ans.trim();
+    if (v !== "" && (!isFinite(Number(v)) || Number(v) < 0)) { setMessage("❌ เงินเพิ่มต้องเป็นตัวเลข 0 ขึ้นไป"); return; }
+    setSaving(true);
+    try {
+      const res = await fetch(RECEIPT_ENTRY_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        action: "save_tax_surcharge", receipt_no: r.receipt_no, surcharge: v === "" ? null : Number(v),
+        note: v === "" ? "" : `ตามใบเสร็จขนส่ง (คำนวณ ${fmtNum(t.surcharge_calc)})`, updated_by: currentUser?.username || currentUser?.name || "system",
+      }) });
+      const txt = await res.text(); const d = txt.trim() ? JSON.parse(txt) : null;
+      const row = Array.isArray(d) ? d[0] : d;
+      if (!row || row.message) throw new Error(row?.message || "ไม่มีผลลัพธ์");
+      setMessage(v === "" ? `↩️ ใบ ${r.receipt_no} กลับไปใช้เงินเพิ่มตามคำนวณ` : `✅ บันทึกเงินเพิ่มใบ ${r.receipt_no} = ${fmtNum(v)} บาท`);
+      await fetchData();
+    } catch (e) { setMessage("❌ บันทึกเงินเพิ่มไม่สำเร็จ: " + String(e.message || e).slice(0, 120)); }
+    setSaving(false);
+  }
+
   function fmtNum(v) {
     return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
@@ -1092,6 +1120,15 @@ ${transferSummary.length > 0 ? `
                         <div title={`ใบรับเรื่องบันทึก ${fmtNum(r.tax_recalc.receipt_amount)} — คำนวณใหม่จากวันยื่น ${fmtBE2(r.tax_recalc.submit)} (สิ้นอายุ ${fmtBE2(r.tax_recalc.expire)}) = ${fmtNum(r.tax_recalc.dlt)}`}
                           style={{ fontSize: 10, color: r.tax_recalc.dlt > r.tax_recalc.receipt_amount ? "#dc2626" : "#2563eb", fontWeight: 700, whiteSpace: "nowrap" }}>
                           ⇒ ขนส่งจริง {fmtNum(r.tax_recalc.dlt)}
+                        </div>
+                      )}
+                      {r.tax_recalc && r.tax_recalc.expire && !isPaid && !showBilled && (
+                        <div style={{ marginTop: 2, whiteSpace: "nowrap" }} onClick={e => e.stopPropagation()}>
+                          <span style={{ fontSize: 10, color: r.tax_recalc.surcharge_override != null ? "#b45309" : "#6b7280" }}>
+                            เงินเพิ่ม {fmtNum(r.tax_recalc.surcharge)}{r.tax_recalc.surcharge_override != null ? " (แก้แล้ว)" : ""}
+                          </span>
+                          <button type="button" disabled={saving} onClick={() => editTaxSurcharge(r)} title="แก้เงินเพิ่ม (ค่าปรับ) ตามใบเสร็จขนส่งจริง — แก้ได้เฉพาะเงินเพิ่ม"
+                            style={{ marginLeft: 4, padding: "0 5px", fontSize: 10, border: "1px solid #d1d5db", borderRadius: 4, background: "#fff", cursor: "pointer" }}>✏️</button>
                         </div>
                       )}
                     </td>
