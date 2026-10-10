@@ -14,6 +14,9 @@ const round2 = (n) => Math.round(Number(n || 0) * 100) / 100;
 // ดึงหัวใบรับเรื่องด้วย get_receipt (receipt-entry-api) — ไม่ต้องแก้ n8n; ดึงไม่ได้/ไม่มีวันสิ้นอายุ → ใช้ยอดตามใบรับเรื่องเหมือนเดิม (user 2026-09-14)
 // วันยื่นขนส่งจริง = วันที่ส่งเรื่อง (ใบส่งงาน) + 1 วัน — คีย์ส่งเรื่องก่อน แล้วไปต่อภาษีจริงวันถัดไป (user 2026-09-19)
 const TAX_FILE_LAG_DAYS = 1;
+// ต่อภาษีเพิ่มปีที่ 2 ของคันเดิม (ขนส่งให้ต่อ 2 ปี ลูกค้ากลับมาชำระเพิ่มอีกใบ): ใบแรกคิดค่าบริการ 20 ไปแล้ว ใบหลังไม่คิดซ้ำ
+//   แม้อยู่คนละใบส่งงาน — มองหาใบ "ค่าต่อภาษี" คันเดียวกันที่ส่งเรื่องก่อนหน้าภายในช่วงนี้ (user 2026-10-10 เคส SCY04-CA691000003)
+const PRIOR_FEE_LOOKBACK_DAYS = 90;
 const addDaysISO = (iso, n) => { const d = new Date(iso + "T00:00:00"); if (isNaN(d)) return iso; d.setDate(d.getDate() + n); return localISO(d); };
 // ใบที่ user สั่งไม่คิดเงินเพิ่มตอนวางบิล (ขนส่งไม่ได้เก็บค่าปรับ) — user 2026-09-19: TBR-2609-008 ต่อภาษีจริง 18/09/69
 //   SCY01-CA690900012 สิ้นอายุ 18/09 = ไม่มีค่าปรับ · (SCY04-CA690900007 สิ้นอายุ 15/09 มีค่าปรับ 1 บาทจริง — เอาออกจากข้อยกเว้นแล้ว)
@@ -537,6 +540,11 @@ ${transferSummary.length > 0 ? `
       // รถคันเดียวกันวางบิล "ค่าต่อภาษี" 2 ใบในใบส่งงาน (รอบวางบิล) เดียวกัน → บวกค่าบริการ 20 บาทแค่ใบเดียว (ใบเลขน้อยสุด) (user 2026-09-05)
       // key = เลขใบส่งงาน + เลขตัวถัง; ถ้ามีใบที่วางบิลแล้วในกลุ่มเดียวกันซึ่งคิด 20 ไปแล้ว ใบที่ยังไม่วางก็ไม่บวกซ้ำ
       const feeTakenBy = {}; // key → receipt_no ที่ได้ค่าบริการ 20
+      // วางบิลแล้ว: ถือว่าคิด 20 ไปแล้วเมื่อยอดบิลมากกว่ายอดรายได้ หรือรายการค่าใช้จ่ายมีคำว่า "ค่าบริการ"
+      const feeTook = (r) => {
+        let items = []; try { items = Array.isArray(r.bill_items) ? r.bill_items : (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : []); } catch {}
+        return Number(r.bill_amount || 0) > Number(r.net_price || 0) + 0.005 || items.some(it => String(it?.expense_name || "").includes("ค่าบริการ"));
+      };
       const feeKey = (r) => `${String(r.batch_code || "").trim()}|${String(r.chassis_no || "").trim().toUpperCase()}`;
       raw
         .filter(r => isSystemReceipt(r.receipt_no) && String(r.income_name || "").trim() === "ค่าต่อภาษี" && String(r.chassis_no || "").trim())
@@ -545,14 +553,38 @@ ${transferSummary.length > 0 ? `
           const k = feeKey(r);
           if (feeTakenBy[k]) return;
           if (r.billed_at || r.batch_billed_at) {
-            // วางบิลแล้ว: ถือว่าคิด 20 ไปแล้วเมื่อยอดบิลมากกว่ายอดรายได้ หรือรายการค่าใช้จ่ายมีคำว่า "ค่าบริการ"
-            let items = []; try { items = Array.isArray(r.bill_items) ? r.bill_items : (typeof r.bill_items === "string" ? JSON.parse(r.bill_items) : []); } catch {}
-            const took = Number(r.bill_amount || 0) > Number(r.net_price || 0) + 0.005 || items.some(it => String(it?.expense_name || "").includes("ค่าบริการ"));
+            const took = feeTook(r);
             if (took) feeTakenBy[k] = r.receipt_no;
             return;
           }
           feeTakenBy[k] = r.receipt_no;
         });
+      // ใบ "ค่าต่อภาษี" คันเดียวกันที่ส่งเรื่องก่อนหน้า (คนละใบส่งงาน) ภายใน PRIOR_FEE_LOOKBACK_DAYS วัน และได้ค่าบริการ 20 ไปแล้ว (วางบิลแล้ว) หรือเป็นใบที่ยังไม่วางบิลแต่มาก่อน
+      // → ใบหลังไม่คิด 20 ซ้ำ (เคสขนส่งให้ต่อ 2 ปี ลูกค้ากลับมาชำระเพิ่มอีก 1 ปี)
+      const priorFeeOwner = {}; // receipt_no (ใบหลัง) → receipt_no ใบแรกที่ได้ 20
+      try {
+        const isTaxRow = (r) => isSystemReceipt(r.receipt_no) && String(r.income_name || "").trim() === "ค่าต่อภาษี" && String(r.chassis_no || "").trim() && r.submission_date;
+        const subOf = (r) => String(r.submission_date).slice(0, 10);
+        const chOf = (r) => String(r.chassis_no || "").trim().toUpperCase();
+        const targets = raw.filter(r => isTaxRow(r) && !r.billed_at && !r.batch_billed_at);
+        if (targets.length) {
+          const minSub = targets.map(subOf).sort()[0];
+          const res2 = await fetch(API_URL, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "get_receipt_billing_data", vendor: vendor || null, income_type: incomeType || null, only_unbilled: false, date_from: addDaysISO(minSub, -PRIOR_FEE_LOOKBACK_DAYS), date_to: null }),
+          });
+          const prev = await res2.json();
+          const cand = (Array.isArray(prev) ? prev : []).filter(isTaxRow);
+          for (const t of targets) {
+            const tSub = subOf(t), tCh = chOf(t), floor = addDaysISO(tSub, -PRIOR_FEE_LOOKBACK_DAYS);
+            const earlier = cand.filter(c => String(c.receipt_no) !== String(t.receipt_no) && chOf(c) === tCh && String(c.batch_code || "") !== String(t.batch_code || "")
+              && subOf(c) <= tSub && subOf(c) >= floor
+              && ((c.billed_at || c.batch_billed_at) ? feeTook(c) : String(c.receipt_no) < String(t.receipt_no)))
+              .sort((a, b) => subOf(a).localeCompare(subOf(b)) || String(a.receipt_no).localeCompare(String(b.receipt_no)));
+            if (earlier[0]) priorFeeOwner[String(t.receipt_no)] = earlier[0].receipt_no;
+          }
+        }
+      } catch { /* มองย้อนหลังไม่ได้ → คิด 20 ตามปกติ */ }
       const list = raw
         // เฉพาะใบจากระบบ: "ค่าบริการต่อภาษี" = บรรทัดค่าบริการที่แยกจากค่าต่อภาษี (รวม VAT) — ไม่ต้องวางบิล (วางบิลที่บรรทัดค่าต่อภาษีแทน)
         // + "ค่าบริการตรวจสภาพต่อภาษี" (190) = ค่าบริการร้าน ไม่วางบิลเช่นกัน (user 2026-08-22)
@@ -582,7 +614,7 @@ ${transferSummary.length > 0 ? `
       const list2 = await recomputeTaxRenewalRows(
         list,
         r => isSystemReceipt(r.receipt_no) && !r.billed_at && !r.batch_billed_at && String(r.income_name || "").trim() === "ค่าต่อภาษี" && !!r.submission_date,
-        r => feeTakenBy[feeKey(r)]
+        r => priorFeeOwner[String(r.receipt_no)] || feeTakenBy[feeKey(r)]
       );
       setRows(list2);
     } catch { setMessage("❌ โหลดไม่สำเร็จ"); setRows([]); }
