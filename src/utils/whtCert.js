@@ -8,7 +8,7 @@ export function companyForBranch(branchCode) {
   if (bc === "SCY05" || bc === "SCY06") {
     return { name: "บริษัท ป.เปามอเตอร์เซอร์วิส จำกัด", branch: "สำนักงานใหญ่", taxId: "0145546000707", addr: "189-191 ม.7 ต.ลำไทร อ.วังน้อย จ.พระนครศรีอยุธยา 13170" };
   }
-  return { name: "หจก. สิงห์ชัย สยามยนต์", branch: "สำนักงานใหญ่", taxId: "0143543001310", addr: "34 หมู่ 7 ซอย 10 ต.ลำไทร อ.วังน้อย จ.พระนครศรีอยุธยา 13170" };
+  return { name: "หจก. สิงห์ชัย สยามยนต์", branch: "สำนักงานใหญ่", taxId: "0143543001310", addr: "295-299 หมู่ 7 ต.ลำไทร อ.วังน้อย จ.พระนครศรีอยุธยา 13170" }; // ที่อยู่ สนญ. ใหม่ ตาม branch_master SCY01 (user 2026-10-10)
 }
 
 export const whtOfDelivery = (amount) => Math.round((Number(amount) || 0) * DELIVERY_WHT_RATE) / 100;
