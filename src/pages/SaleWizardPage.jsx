@@ -547,7 +547,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     const rpAmt = refund ? 0 : Math.min(Number(sale.red_plate_deposit) || 0, Math.abs(Number(receiveAmt) || 0));
     const pay = {
       refund,
-      amount: Math.abs(Number(receiveAmt) || 0) - rpAmt,
+      // ยอดรับจริง = ผลรวมวิธีรับชำระ (รับเกินได้ตั้งแต่ 2026-10-09) — เดิมใช้ยอดที่ต้องรับ ทำให้ paid_amount ไม่ตรงเงินที่เข้าจริง (เคส SCY01-MCSA-2610-00048 โอน 30,000 บันทึก 28,000) user 2026-10-12
+      amount: (refund ? Math.abs(Number(receiveAmt) || 0) : Math.max(sum, Math.abs(Number(receiveAmt) || 0))) - rpAmt,
       methodLabel: payLinesOut.map((l) => l.methodLabel).join("+"),
       accountName: payLinesOut.map((l) => l.accountName).filter(Boolean).join(", ") || null,
       lines: payLinesOut,
