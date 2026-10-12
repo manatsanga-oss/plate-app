@@ -39,6 +39,10 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
   const [historyDate, setHistoryDate] = useState(todayISO());
   // คัดลอกรหัสอะไหล่ไปวางในระบบอื่น (NIDS/DMS) — user 2026-10-12
   const [copied, setCopied] = useState(""); // ข้อความที่เพิ่งคัดลอก (โชว์สั้น ๆ)
+  const [copiedRows, setCopiedRows] = useState(new Set()); // key แถวที่คัดลอกแล้ว (ไฮไลต์ค้างไว้จนรีเฟรช) — user 2026-10-12
+  const [lastCopiedRow, setLastCopiedRow] = useState(null);
+  const rowKey = (w, i) => String(w.id || `${w.batch_no}|${w.part_code}|${i}`);
+  const markCopied = (keys) => { setCopiedRows(prev => { const n = new Set(prev); keys.forEach(k => n.add(k)); return n; }); setLastCopiedRow(keys.length === 1 ? keys[0] : null); };
   async function copyText(txt, label) {
     try {
       if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(txt);
@@ -46,9 +50,9 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
       setCopied(label || txt); setTimeout(() => setCopied(""), 1800);
     } catch { setCopied("❌ คัดลอกไม่สำเร็จ"); setTimeout(() => setCopied(""), 2500); }
   }
-  const copyBtn = (txt, title, label) => (
-    <button type="button" onClick={(e) => { e.stopPropagation(); copyText(txt, label); }} title={title || "คัดลอก"}
-      style={{ marginLeft: 6, padding: "1px 6px", fontSize: 11, border: "1px solid #cbd5e1", borderRadius: 4, background: "#fff", cursor: "pointer", color: "#334155" }}>📋</button>
+  const copyBtn = (txt, title, label, onDone, done) => (
+    <button type="button" onClick={(e) => { e.stopPropagation(); copyText(txt, label); if (onDone) onDone(); }} title={title || "คัดลอก"}
+      style={{ marginLeft: 6, padding: "1px 6px", fontSize: 11, border: done ? "1px solid #16a34a" : "1px solid #cbd5e1", borderRadius: 4, background: done ? "#dcfce7" : "#fff", cursor: "pointer", color: done ? "#166534" : "#334155" }}>{done ? "✅" : "📋"}</button>
   );
 
   async function loadHistory() {
@@ -353,10 +357,10 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
                     const prev = i > 0 ? withdrawn[i - 1] : null;
                     const gap = prev ? Math.abs(new Date(prev.withdrawn_at) - new Date(w.withdrawn_at)) : Infinity;
                     const same = !!prev && String(prev.withdrawn_by || "") === String(w.withdrawn_by || "") && (gap <= GROUP_GAP_MS || prev.batch_no === w.batch_no);
-                    if (!same) groups.push({ start: i, batches: [], codes: [] });
+                    if (!same) groups.push({ start: i, batches: [], codes: [], keys: [] });
                     const g = groups[groups.length - 1];
                     if (w.batch_no && !g.batches.includes(w.batch_no)) g.batches.push(w.batch_no);
-                    if (w.part_code) g.codes.push(String(w.part_code));
+                    if (w.part_code) { g.codes.push(String(w.part_code)); g.keys.push(rowKey(w, i)); }
                     groupOf[i] = g;
                   });
                   return withdrawn.map((w, i) => {
@@ -369,14 +373,14 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
                         <tr>
                           <td colSpan={6} style={{ background: "#eef2ff", color: "#3730a3", fontSize: 12, fontWeight: 700, padding: "6px 10px", borderTop: i > 0 ? "3px solid #6366f1" : "none" }}>
                             ━━━ Batch <span style={{ fontFamily: "monospace", color: "#1e40af" }}>{batchLabel}</span> · {new Date(w.withdrawn_at).toLocaleString("th-TH")} · ผู้เบิก: {w.withdrawn_by || "-"} ━━━
-                            {g.codes.length > 0 && copyBtn(g.codes.join("\n"), `คัดลอกรหัสทั้งกลุ่ม ${g.codes.length} รหัส (บรรทัดละรหัส)`, `คัดลอก ${g.codes.length} รหัสแล้ว`)}
+                            {g.codes.length > 0 && copyBtn(g.codes.join("\n"), `คัดลอกรหัสทั้งกลุ่ม ${g.codes.length} รหัส (บรรทัดละรหัส)`, `คัดลอก ${g.codes.length} รหัสแล้ว`, () => markCopied(g.keys), g.keys.length > 0 && g.keys.every(k => copiedRows.has(k)))}
                           </td>
                         </tr>
                       )}
-                      <tr style={{ borderTop: "1px solid #f3f4f6" }}>
+                      <tr style={{ borderTop: "1px solid #f3f4f6", background: lastCopiedRow === rowKey(w, i) ? "#fef08a" : copiedRows.has(rowKey(w, i)) ? "#f0fdf4" : "transparent", transition: "background .3s" }}>
                         <td style={td}>{i + 1}</td>
                         <td style={td}>{w.withdrawn_at ? new Date(w.withdrawn_at).toLocaleTimeString("th-TH") : "-"}</td>
-                        <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#0369a1", whiteSpace: "nowrap" }}>{w.part_code}{w.part_code ? copyBtn(String(w.part_code), "คัดลอกรหัสนี้", `คัดลอก ${w.part_code} แล้ว`) : null}</td>
+                        <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#0369a1", whiteSpace: "nowrap" }}>{w.part_code}{w.part_code ? copyBtn(String(w.part_code), "คัดลอกรหัสนี้", `คัดลอก ${w.part_code} แล้ว`, () => markCopied([rowKey(w, i)]), copiedRows.has(rowKey(w, i))) : null}</td>
                         <td style={td}>{w.product_name}</td>
                         <td style={td}>{w.withdrawn_by}</td>
                         <td style={{ ...td, fontFamily: "monospace", color: "#6366f1" }}>{w.batch_no}</td>
