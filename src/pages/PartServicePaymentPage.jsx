@@ -105,9 +105,21 @@ export default function PartServicePaymentPage({ currentUser }) {
   const [note, setNote] = useState("");
 
   // ใส่ยอดที่ต้องชำระ → เติมยอดให้วิธีแรกอัตโนมัติ (ถ้ายังมีวิธีเดียวและไม่ใช่มัดจำ)
+  // ลูกค้าชำระด้วยบัตรเครดิต → ค่าธรรมเนียม 2.5% บวกเข้ายอดที่ต้องชำระ (วิธีรับชำระเหมือนเดิม) — user 2026-10-12
+  const CARD_FEE_PCT = 2.5;
+  const [cardFee, setCardFee] = useState(false);
+  const cardFeeAmt = cardFee ? Math.round(num(billAmount) * CARD_FEE_PCT) / 100 : 0;
+  const billDue = Math.round((num(billAmount) + cardFeeAmt) * 100) / 100; // ยอดที่ต้องรับชำระจริง (บิล + ค่าธรรมเนียมบัตร)
+  const syncSingleRow = (amt) => setRows(rs => (rs.length === 1 && rs[0].method !== "มัดจำ") ? [{ ...rs[0], amount: amt }] : rs);
   function changeBillAmount(v) {
     setBillAmount(v);
-    setRows(rs => (rs.length === 1 && rs[0].method !== "มัดจำ") ? [{ ...rs[0], amount: v }] : rs);
+    const due = cardFee ? Math.round((num(v) + Math.round(num(v) * CARD_FEE_PCT) / 100) * 100) / 100 : v;
+    syncSingleRow(due);
+  }
+  function toggleCardFee(on) {
+    setCardFee(on);
+    const base = num(billAmount);
+    syncSingleRow(on ? Math.round((base + Math.round(base * CARD_FEE_PCT) / 100) * 100) / 100 : (billAmount === "" ? "" : base));
   }
 
   // ===== popup ค้นหาลูกค้า (พิมพ์เองก็ได้) =====
@@ -318,8 +330,8 @@ export default function PartServicePaymentPage({ currentUser }) {
     if (!autoOtherMode && (!docNo.trim() || docNo.trim() === docPrefixOf(docType, myBranch))) { setMessage("❌ พิมพ์เลขที่ใบขาย/ใบ JOB ให้ครบก่อน"); return; }
     if (!num(billAmount)) { setMessage("❌ ใส่จำนวนเงินที่ต้องชำระทั้งหมดก่อน"); return; }
     if (!list.length) { setMessage("❌ ใส่ยอดรับชำระอย่างน้อย 1 วิธี"); return; }
-    if (Math.abs(total - num(billAmount)) >= 0.01 &&
-        !window.confirm(`รวมรับชำระ ${fmt(total)} ไม่เท่ายอดที่ต้องชำระ ${fmt(billAmount)}\nบันทึกต่อหรือไม่?`)) return;
+    if (Math.abs(total - billDue) >= 0.01 &&
+        !window.confirm(`รวมรับชำระ ${fmt(total)} ไม่เท่ายอดที่ต้องชำระ ${fmt(billDue)}${cardFee ? ` (บิล ${fmt(billAmount)} + ค่าธรรมเนียมบัตร ${fmt(cardFeeAmt)})` : ""}\nบันทึกต่อหรือไม่?`)) return;
     if (list.some(r => r.method === "เงินโอน" && !r.account)) { setMessage("❌ เลือกบัญชีรับโอนเงินของรายการเงินโอนก่อน"); return; }
     if (list.some(r => r.method === "เช็ค" && (!String(r.cheque_no || "").trim() || !String(r.cheque_date || "").trim()))) { setMessage("❌ กรอกเลขที่เช็คและวันที่ลงในเช็คให้ครบ"); return; }
     if (list.some(r => r.method === "หัก ณ ที่จ่าย") && !isJuristic) { setMessage("❌ หัก ณ ที่จ่าย ใช้ได้เฉพาะลูกค้านิติบุคคล (บริษัท/หจก. ฯลฯ) — กรอกชื่อนิติบุคคลในช่องชื่อลูกค้าก่อน"); return; }
@@ -342,13 +354,14 @@ export default function PartServicePaymentPage({ currentUser }) {
           action: "save_payment",
           doc_no: autoOtherMode ? "" : docNo.trim(), doc_type: docType, auto_doc: autoOtherMode,
           customer_name: customerName, branch_code: branchCode,
-          paid_date: paidDate, bill_amount: num(billAmount),
+          paid_date: paidDate, bill_amount: billDue, // รวมค่าธรรมเนียมบัตรเครดิต (ถ้ามี) — รายละเอียดอยู่ใน payment_note
           payments: list.map(r => ({ method: r.method, amount: num(r.amount), account: r.method === "เงินโอน" ? r.account : "", deposit_doc_no: r.method === "มัดจำ" ? r.deposit_doc_no : "", coupon_no: r.method === "E-คูปอง" ? String(r.coupon_no || "").trim() : "", cheque_no: r.method === "เช็ค" ? String(r.cheque_no || "").trim() : "", cheque_date: r.method === "เช็ค" ? String(r.cheque_date || "").trim() : "" })),
           // แนบเลข E-คูปอง เข้าหมายเหตุด้วย — เห็นในรายการ/รายงานได้ทันทีแม้ workflow เก่ายังไม่เก็บ coupon_no ใน breakdowns
           payment_note: (() => {
             const cps = list.filter(r => r.method === "E-คูปอง" && String(r.coupon_no || "").trim()).map(r => String(r.coupon_no).trim());
             const chq = list.filter(r => r.method === "เช็ค" && String(r.cheque_no || "").trim()).map(r => `เช็ค ${String(r.cheque_no).trim()} ลงวันที่ ${String(r.cheque_date || "-")}`);
-            return [note, cps.length ? `E-คูปอง: ${cps.join(", ")}` : "", chq.join(", ")].filter(Boolean).join(" | ");
+            const cf = cardFee && cardFeeAmt > 0 ? `ชำระบัตรเครดิต ค่าธรรมเนียม ${CARD_FEE_PCT}% = ${fmt(cardFeeAmt)} (ยอดบิล ${fmt(billAmount)})` : "";
+            return [note, cf, cps.length ? `E-คูปอง: ${cps.join(", ")}` : "", chq.join(", ")].filter(Boolean).join(" | ");
           })(),
           received_by: currentUser?.username || currentUser?.name || "",
         }),
@@ -365,7 +378,7 @@ export default function PartServicePaymentPage({ currentUser }) {
         payment_breakdowns: row.payment_breakdowns || JSON.stringify(list.map(r => ({ method: r.method, amount: num(r.amount), account: r.account, deposit_doc_no: r.deposit_doc_no, coupon_no: r.coupon_no, cheque_no: r.cheque_no, cheque_date: r.cheque_date }))),
         payment_note: row.payment_note || note, received_by: row.received_by || currentUser?.username || currentUser?.name || "",
       });
-      setDocNo(docPrefixOf(docType, myBranch)); setCustomerName("เงินสด"); setNote(""); setBillAmount("");
+      setDocNo(docPrefixOf(docType, myBranch)); setCustomerName("เงินสด"); setNote(""); setBillAmount(""); setCardFee(false);
       setRows([{ method: "เงินสด", amount: "", account: "", deposit_doc_no: "", coupon_no: "", cheque_no: "", cheque_date: "" }]);
       loadDeposits(); loadPayments();
     } catch (e) {
@@ -550,6 +563,11 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
           <input type="number" step="0.01" value={billAmount} onChange={e => changeBillAmount(e.target.value)}
             style={{ ...inp, width: 180, textAlign: "right", fontWeight: 800, fontSize: 17, border: "2px solid #1d4ed8" }} placeholder="0.00" />
           <div style={{ fontSize: 12.5, color: "#64748b" }}>ใส่ยอดนี้ก่อน แล้วค่อยเลือกวิธีรับชำระด้านล่าง</div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "#7c2d12", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8, padding: "6px 10px", cursor: "pointer", marginLeft: "auto" }}>
+            <input type="checkbox" checked={cardFee} onChange={e => toggleCardFee(e.target.checked)} />
+            💳 ลูกค้าชำระด้วยบัตรเครดิต (+ค่าธรรมเนียม {CARD_FEE_PCT}%)
+            {cardFee && num(billAmount) > 0 && <span style={{ fontWeight: 800, color: "#c2410c" }}>= {fmt(cardFeeAmt)} → ต้องชำระ {fmt(billDue)}</span>}
+          </label>
         </div>
 
         <div style={{ marginTop: 6 }}>
@@ -628,14 +646,14 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
               )}
             </div>
           ))}
-          <button onClick={() => setRows(rs => [...rs, { method: "เงินโอน", amount: Math.max(0, Math.round((num(billAmount) - total) * 100) / 100) || "", account: defaultTransferAccount(), deposit_doc_no: "", coupon_no: "" }])}
+          <button onClick={() => setRows(rs => [...rs, { method: "เงินโอน", amount: Math.max(0, Math.round((billDue - total) * 100) / 100) || "", account: defaultTransferAccount(), deposit_doc_no: "", coupon_no: "" }])}
             style={{ border: "1px dashed #059669", background: "#f0fdf4", color: "#047857", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 13 }}>
             ＋ เพิ่มวิธีรับชำระ
           </button>
           <span style={{ marginLeft: 14, fontSize: 14 }}>
-            รวมรับชำระ: <b style={{ color: num(billAmount) > 0 && Math.abs(total - num(billAmount)) < 0.01 ? "#059669" : "#b45309", fontSize: 16 }}>{fmt(total)}</b>
-            {num(billAmount) > 0 && <> / ต้องชำระ {fmt(billAmount)} บาท
-              {Math.abs(total - num(billAmount)) >= 0.01 && <b style={{ color: "#b45309" }}> (ขาด/เกิน {fmt(num(billAmount) - total)})</b>}
+            รวมรับชำระ: <b style={{ color: billDue > 0 && Math.abs(total - billDue) < 0.01 ? "#059669" : "#b45309", fontSize: 16 }}>{fmt(total)}</b>
+            {billDue > 0 && <> / ต้องชำระ {fmt(billDue)} บาท{cardFee && cardFeeAmt > 0 ? ` (บิล ${fmt(billAmount)} + บัตร ${fmt(cardFeeAmt)})` : ""}
+              {Math.abs(total - billDue) >= 0.01 && <b style={{ color: "#b45309" }}> (ขาด/เกิน {fmt(billDue - total)})</b>}
             </>}
           </span>
         </div>
