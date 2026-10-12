@@ -59,6 +59,9 @@ export default function CustomerRefundPage({ currentUser }) {
   const [rcFrom, setRcFrom] = useState(shiftDate(todayStr(), -60));
   const [rcTo, setRcTo] = useState(todayStr());
   const [rcKeyword, setRcKeyword] = useState("");
+  // ค่าเริ่มต้นโชว์เฉพาะใบที่รับชำระเกินยอดที่ต้องชำระ (ลูกค้าโอนเกิน) — ติ๊กออกเพื่อดูทุกใบ (ลดหนี้/รับชำระผิด) user 2026-10-12
+  const [onlyOver, setOnlyOver] = useState(true);
+  const overOf = (r) => Math.round((num(r.paid_amount) - num(r.bill_amount)) * 100) / 100;
   const [receipts, setReceipts] = useState([]);
   const [rcLoading, setRcLoading] = useState(false);
   const [picked, setPicked] = useState(null); // ใบเสร็จที่เลือก (normalized)
@@ -136,9 +139,10 @@ export default function CustomerRefundPage({ currentUser }) {
     const kw = rcKeyword.trim().toLowerCase();
     return receipts
       .filter((r) => isAdmin || !myBranch || bc5(r.branch_code) === myBranch)
+      .filter((r) => !onlyOver || (num(r.bill_amount) > 0 && overOf(r) > 0.009))
       .filter((r) => !kw || [r.receipt_no, r.ref_doc_no, r.customer_name, r.customer_phone].filter(Boolean).join(" ").toLowerCase().includes(kw))
       .slice(0, 300);
-  }, [receipts, rcKeyword, isAdmin, myBranch]);
+  }, [receipts, rcKeyword, isAdmin, myBranch, onlyOver]);
 
   const refundAmount = picked ? Math.round((num(picked.paid_amount) - num(correctAmount)) * 100) / 100 : 0;
   // ยอดที่ต้องชำระตามใบขาย/บิล (0 = ไม่ทราบ) — ยอดที่ถูกต้องต่ำกว่านี้ = คืนเงินเกินกว่าที่ควร → เตือน + ยืนยันอีกชั้น (user 2026-10-01)
@@ -275,6 +279,9 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
           <div><label style={lbl}>ถึง</label><input type="date" value={rcTo} onChange={(e) => setRcTo(e.target.value)} style={inp} /></div>
           <button onClick={loadReceipts} disabled={rcLoading} style={btn("#0369a1")}>{rcLoading ? "กำลังโหลด…" : "🔍 ค้นหาใบเสร็จ"}</button>
           <div style={{ flex: 1, minWidth: 240 }}><label style={lbl}>กรอง: เลขที่ใบเสร็จ / เลขเอกสาร / ชื่อลูกค้า</label><input value={rcKeyword} onChange={(e) => setRcKeyword(e.target.value)} placeholder="พิมพ์เพื่อกรองรายการที่โหลดมา" style={inp} /></div>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "#9a3412", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8, padding: "8px 10px", cursor: "pointer", whiteSpace: "nowrap" }}>
+            <input type="checkbox" checked={onlyOver} onChange={(e) => setOnlyOver(e.target.checked)} /> เฉพาะใบที่รับชำระเกิน
+          </label>
           {picked && <button onClick={() => { setPicked(null); setCorrectAmount(""); }} style={btn("#6b7280")}>เปลี่ยนใบเสร็จ</button>}
         </div>
         {!picked && receipts.length > 0 && (
@@ -292,11 +299,11 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
                       <td style={td}>{r.branch_code || "-"}</td>
                       <td style={{ ...td, fontFamily: "monospace" }}>{r.ref_doc_no || "-"}{r.extra ? <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "inherit" }}>{r.extra}</div> : null}</td>
                       <td style={td}>{r.customer_name || "-"}{r.customer_phone ? <div style={{ fontSize: 11, color: "#6b7280" }}>{r.customer_phone}</div> : null}</td>
-                      <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(r.paid_amount)}</td>
+                      <td style={{ ...td, textAlign: "right", fontWeight: 600 }}>{baht(r.paid_amount)}{num(r.bill_amount) > 0 && overOf(r) > 0.009 && <div style={{ fontSize: 11, color: "#b91c1c", fontWeight: 700 }}>เกิน {baht(overOf(r))}</div>}</td>
                       <td style={{ ...td, fontSize: 11.5, color: "#4b5563" }}>{r.methods}</td>
                     </tr>);
                 })}
-                {shownReceipts.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>ไม่พบใบเสร็จตามคำค้น</td></tr>}
+                {shownReceipts.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{onlyOver ? "ไม่พบใบที่รับชำระเกิน — ติ๊ก \"เฉพาะใบที่รับชำระเกิน\" ออกเพื่อดูทุกใบ" : "ไม่พบใบเสร็จตามคำค้น"}</td></tr>}
               </tbody>
             </table>
             {receipts.length > 300 && <div style={{ fontSize: 11, color: "#6b7280", padding: 6 }}>แสดง 300 รายการแรก — พิมพ์กรองเพื่อหาใบที่ต้องการ</div>}
