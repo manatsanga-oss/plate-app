@@ -111,6 +111,7 @@ import HrPayrollAccountsPage from "./pages/HrPayrollAccountsPage";
 import BankAccountsPage from "./pages/BankAccountsPage";
 import LoanAccountsPage from "./pages/LoanAccountsPage";
 import LoanInterestPaymentPage from "./pages/LoanInterestPaymentPage";
+import CardFeeRecordPage from "./pages/CardFeeRecordPage"; // บันทึกค่าธรรมเนียมรูดบัตรเครดิต (ใบเสร็จธนาคาร)
 import BankMovementsPage from "./pages/BankMovementsPage";
 import BankTransferPage from "./pages/BankTransferPage";
 import FinanceTransferPage from "./pages/FinanceTransferPage";
@@ -360,6 +361,7 @@ export default function App() {
     if (page === "whtremit") return ["admin", "WARUT"].includes(currentUser.username);  // ภ.ง.ด. หัก ณ ที่จ่าย — admin + WARUT (ภ.พ.36 ย้ายไปเป็นแท็บใน taxformmonthly)
     if (page === "incometaxfiling") return ["admin", "WARUT"].includes(currentUser.username);  // ยื่นภาษี ภ.ง.ด.50/51 — admin + WARUT
     if (page === "sbtfiling") return ["admin", "WARUT"].includes(currentUser.username);  // ยื่นภาษีธุรกิจเฉพาะ ภ.ธ.40 — admin + WARUT
+    if (page === "cardfeerecord") return ["admin", "WARUT"].includes(currentUser.username);  // บันทึกค่าธรรมเนียมรูดบัตรเครดิต — admin + WARUT
     if (page === "theftinsuranceinvoice") return ["admin", "WARUT"].includes(currentUser.username);  // เฉพาะ admin + WARUT (บันทึกรับใบกำกับฯ ประกันรถหาย ออกแทน)
     if (page === "taxmanageinput" || page === "taxformmonthly" || page === "flowinputtaxreport" || page === "outputtaxreport") return ["admin", "WARUT"].includes(currentUser.username);  // บริหารภาษีมูลค่าเพิ่ม — admin + WARUT
     if (page === "financepayment") return false;
@@ -656,6 +658,9 @@ export default function App() {
         )}
         {activeMenu === "taxmanageinput" && canAccess("taxmanageinput") && (
           <TaxManageInputPage currentUser={currentUser} />
+        )}
+        {activeMenu === "cardfeerecord" && canAccess("cardfeerecord") && (
+          <CardFeeRecordPage currentUser={currentUser} />
         )}
         {activeMenu === "theftinsuranceinvoice" && canAccess("theftinsuranceinvoice") && (
           <TheftInsuranceInvoicePage currentUser={currentUser} />
@@ -1031,7 +1036,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="mailinbox" label="📬 บันทึกจดหมายเข้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "whtrefund", "partwholesalepayment", "customerrefund", "flowexpense", "advanceexpense", "bankdeposit", "chequereceive", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment", "theftinsuranceinvoice"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Finance" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering", "paydeposit", "expenserecord", "whtrefund", "partwholesalepayment", "customerrefund", "flowexpense", "advanceexpense", "bankdeposit", "chequereceive", "payment", "financepayment", "goodspayment", "otherincome", "loaninterestpayment", "cardfeerecord", "theftinsuranceinvoice"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuSubGroup title="เงินสดย่อย" pages={["pettycash", "postage", "pettycashgeneral", "pettycashoffering"]} activeMenu={activeMenu}>
           <MenuItem page="pettycash" label="ค่าน้ำมันรถใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="postage" label="ค่าไปรษณีย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -1052,6 +1057,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="customerrefund" label="💸 บันทึกคืนเงินลูกค้า (ลดหนี้/รับชำระผิด)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="otherincome" label="บันทึกรายได้อื่น ๆ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="loaninterestpayment" label="บันทึกจ่ายดอกเบี้ยธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="cardfeerecord" label="💳 บันทึกค่าธรรมเนียมรูดบัตรเครดิต" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="theftinsuranceinvoice" label="📑 บันทึกรับใบกำกับฯ ประกันรถหาย (ออกแทน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
