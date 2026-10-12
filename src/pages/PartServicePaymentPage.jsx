@@ -150,7 +150,23 @@ export default function PartServicePaymentPage({ currentUser }) {
         if (!x.customer_name || seen.has(k)) continue;
         seen.add(k); list.push(x);
       }
-      setCustResults(list.slice(0, 30));
+      // รวมเป็นการ์ดเดียวต่อคน (user 2026-10-12): คนเดียวกัน = เบอร์โทร 9 หลักท้ายตรงกัน หรือไม่มีเบอร์ก็ใช้ชื่อ (ตัดคำนำหน้า/ช่องว่าง)
+      //   การ์ดโชว์ป้ายทุกแหล่งที่พบ (ใบมัดจำขึ้นก่อน) — เลือกการ์ดไหนก็ได้ชื่อเดียวกัน
+      const mergeByPerson = (rows) => {
+        const m = new Map();
+        for (const x of rows) {
+          const ph = String(x.customer_phone || "").replace(/\D/g, "").slice(-9);
+          const key = ph ? "P:" + ph : "N:" + normName(x.customer_name);
+          const label = x.source_label || x.source || "";
+          if (!m.has(key)) { m.set(key, { customer_name: String(x.customer_name || "").trim(), customer_phone: x.customer_phone || "", customer_code: x.customer_code || "", labels: [] }); }
+          const g = m.get(key);
+          if (!g.customer_phone && x.customer_phone) g.customer_phone = x.customer_phone;
+          if (!g.customer_code && x.customer_code) g.customer_code = x.customer_code;
+          if (label && !g.labels.includes(label)) g.labels.push(label);
+        }
+        return [...m.values()].map(g => ({ ...g, source_label: g.labels.join(" · ") }));
+      };
+      setCustResults(mergeByPerson(list).slice(0, 30));
     } catch { setCustResults([]); }
     setCustSearching(false);
   }
@@ -728,7 +744,7 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
               </button>
             </div>
             {custResults === null ? (
-              <div style={{ fontSize: 13, color: "#94a3b8" }}>พิมพ์คำค้นแล้วกด Enter — ค้นจากใบมัดจำคงเหลือ + ฐานลูกค้า + QR/LINE + ใบขาย</div>
+              <div style={{ fontSize: 13, color: "#94a3b8" }}>พิมพ์คำค้นแล้วกด Enter — ค้นจากใบมัดจำคงเหลือ + ฐานลูกค้า + QR/LINE + ใบขาย (รวมเป็นการ์ดเดียวต่อคน)</div>
             ) : !custResults.length ? (
               <div style={{ fontSize: 13.5, color: "#b45309" }}>ไม่พบลูกค้า — ปิดหน้าต่างนี้แล้วพิมพ์ชื่อเองได้เลย</div>
             ) : (
