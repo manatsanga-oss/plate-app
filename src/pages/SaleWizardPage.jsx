@@ -747,8 +747,10 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   const [finInstOverride, setFinInstOverride] = useState("");
   const [finInstTouched, setFinInstTouched] = useState(false);
   const [finAdvance, setFinAdvance] = useState("");       // ค่างวดจ่ายล่วงหน้า
+  // ประกันรถหายกรอกเอง — ใช้เฉพาะเมื่อรถคันนี้ไม่มีของแถมประกันรถหายของไฟแนนท์ (ถูก exclude เช่น บิ๊กไบค์/XMAX) ลูกค้าจ่ายเบี้ยเอง ไฟแนนท์หักจากยอดโอน (user 2026-10-12)
+  const [manualTheft, setManualTheft] = useState("");
   function resetFinanceInputs() {
-    setFinDown(""); setFinRate(""); setFinN("");
+    setFinDown(""); setFinRate(""); setFinN(""); setManualTheft("");
     setFinRound5(false); setFinInstOverride(""); setFinInstTouched(false); setFinAdvance("");
     setAdvSubsidyInput(""); // แบ่งโปรดาวน์ออกแทนไปช่วยค่างวดล่วงหน้า — เคลียร์พร้อมกัน
     setRedPlateNo(""); // มัดจำป้ายแดง — เคลียร์พร้อมกัน
@@ -1091,7 +1093,9 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     .filter((g) => !selectedGiveaways[g.expense_id] && isFinTheft(g))
     .reduce((s, g) => s + Number(g.amount || 0), 0);
   // เบี้ยส่วนที่ลูกค้าจ่ายเอง = ยอดโปรประกันรถหายที่เอาติ๊กออก (ช่องในฟอร์มไฟแนนท์เป็นแสดงผลอย่างเดียว ห้ามพิมพ์ — user 2026-10-09)
-  const custPaidTheft = unpromoTheft;
+  // มีของแถมประกันรถหาย (ไฟแนนท์ออกแทน) ให้เลือกหรือไม่ — ถ้าไม่มี (กฎ exclude รุ่นนี้) ให้พิมพ์เบี้ยที่ลูกค้าจ่ายเองได้
+  const hasFinTheftGiveaway = applicableGiveaways.some((g) => isFinTheft(g));
+  const custPaidTheft = hasFinTheftGiveaway ? unpromoTheft : num(manualTheft);
 
   // บันทึกการขาย (เงินสด/ผ่อนไฟแนนท์) — payload เดียวกับหน้าบันทึกขายปลีก (retail-sale-api save_sale)
   async function handleSaveSale() {
@@ -2539,12 +2543,21 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
 
                           <div style={{ ...finLbl, lineHeight: 1.3 }}>ประกันรถหาย<br /><span style={{ fontWeight: 400, fontSize: 11, color: "#b45309" }}>(ไฟแนนซ์หัก)</span></div>
                           <div>
-                            {/* แสดงผลอย่างเดียว: ขึ้นเองเมื่อเอาติ๊กของแถม "ค่าประกันรถหาย" (ไฟแนนท์ออกแทน) ออก = ลูกค้าจ่ายเบี้ยเอง (user 2026-10-09 ห้ามพิมพ์) */}
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <div style={{ flex: 1, padding: "8px 10px", background: custPaidTheft > 0 ? "#fffbeb" : "#e9eef0", border: custPaidTheft > 0 ? "1.5px solid #fcd34d" : "1.5px solid transparent", borderRadius: 8, fontSize: 14, textAlign: "right", fontWeight: 700, color: custPaidTheft > 0 ? "#b45309" : "#9ca3af", boxSizing: "border-box" }}>{custPaidTheft > 0 ? Number(custPaidTheft).toLocaleString("th-TH", { minimumFractionDigits: 2 }) : "0"}</div>
-                              <span>บาท</span>
-                            </div>
-                            <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>{custPaidTheft > 0 ? "ลูกค้าจ่ายเบี้ยเอง (เอาติ๊กของแถมประกันรถหายออก) — นับเป็นยอดชำระค่ารถ" : "ขึ้นอัตโนมัติเมื่อเอาติ๊กของแถม \"ค่าประกันรถหาย\" ออก — พิมพ์เองไม่ได้"}</div>
+                            {/* มีของแถมประกันรถหาย: แสดงผลอย่างเดียว ขึ้นเองเมื่อเอาติ๊กออก (user 2026-10-09 ห้ามพิมพ์) · ไม่มีของแถม (กฎ exclude รุ่นนี้): พิมพ์เบี้ยที่ลูกค้าจ่ายเองได้ (user 2026-10-12) */}
+                            {hasFinTheftGiveaway ? (
+                              <>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <div style={{ flex: 1, padding: "8px 10px", background: custPaidTheft > 0 ? "#fffbeb" : "#e9eef0", border: custPaidTheft > 0 ? "1.5px solid #fcd34d" : "1.5px solid transparent", borderRadius: 8, fontSize: 14, textAlign: "right", fontWeight: 700, color: custPaidTheft > 0 ? "#b45309" : "#9ca3af", boxSizing: "border-box" }}>{custPaidTheft > 0 ? Number(custPaidTheft).toLocaleString("th-TH", { minimumFractionDigits: 2 }) : "0"}</div>
+                                  <span>บาท</span>
+                                </div>
+                                <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>{custPaidTheft > 0 ? "ลูกค้าจ่ายเบี้ยเอง (เอาติ๊กของแถมประกันรถหายออก) — นับเป็นยอดชำระค่ารถ" : "ขึ้นอัตโนมัติเมื่อเอาติ๊กของแถม \"ค่าประกันรถหาย\" ออก — พิมพ์เองไม่ได้"}</div>
+                              </>
+                            ) : (
+                              <>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(manualTheft, setManualTheft)}<span>บาท</span></div>
+                                <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>รุ่นนี้ไม่มีโปรประกันรถหายออกแทน — ถ้าลูกค้าซื้อประกันรถหายเอง พิมพ์เบี้ยที่นี่ (นับเป็นยอดชำระค่ารถ ไฟแนนท์หักจากยอดโอน) · ไม่ซื้อปล่อยว่าง</div>
+                              </>
+                            )}
                           </div>
                           <div style={finLbl}>อัตราดอกเบี้ย</div>
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>{finInp(finRate, setFinRate)}<span style={{ whiteSpace: "nowrap" }}>% (ต่อเดือน)</span></div>
@@ -2585,7 +2598,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         {downSubTotal - advSub > 0 && row(advSub > 0 ? "หัก โปรดาวน์ออกแทน → เงินดาวน์ (ร้านจ่ายให้)" : "หัก เงินดาวน์ออกแทน (ร้านจ่ายให้)", "-" + fmtBaht(downSubTotal - advSub), { color: "#b45309" })}
                         {advSub > 0 && row("หัก โปรดาวน์ออกแทน → ค่างวดล่วงหน้า (ร้านจ่ายให้)", "-" + fmtBaht(advSub), { color: "#b45309" })}
                         {typedPayout > 0 && row("หัก ดาวน์/ค่างวดออกแทนที่พิมพ์เพิ่ม (บวกในราคาแล้ว)", "-" + fmtBaht(typedPayout), { color: "#b45309" })}
-                        {isFin && custPaidTheft > 0 && row("ประกันรถหาย (ไฟแนนซ์หัก — ลูกค้าจ่ายเอง เอาติ๊กของแถมออก)", fmtBaht(custPaidTheft))}
+                        {isFin && custPaidTheft > 0 && row(hasFinTheftGiveaway ? "ประกันรถหาย (ไฟแนนซ์หัก — ลูกค้าจ่ายเอง เอาติ๊กของแถมออก)" : "ประกันรถหาย (ไฟแนนซ์หัก — ลูกค้าซื้อเอง)", fmtBaht(custPaidTheft))}
                         {row("หัก เงินมัดจำ" + (selBooking?.deposit_no ? ` (${selBooking.deposit_no})` : ""), dep > 0 ? "-" + fmtBaht(dep) : "-", { color: "#b45309" })}
                         {redPlateDep > 0 && row("มัดจำป้ายแดง (" + text(redPlateNo) + ")", "+" + fmtBaht(redPlateDep), { color: "#b91c1c" })}
                         {isRefund
