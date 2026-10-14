@@ -72,7 +72,13 @@ function parseDms(grid) {
     });
   }
   if (!out.length) throw new Error("ไม่พบใบเสร็จในไฟล์");
-  return out;
+  // รับเฉพาะใบประเภทขายอะไหล่/งานบริการ — ไฟล์ "รายงานใบเสร็จรับเงินทุกประเภท" (REC/RM เงินดาวน์/มัดจำ/รายได้อื่น) จะถูกข้าม (user 2026-10-14 เคส ต.ค.69)
+  const isPartServiceType = (t) => /อะไหล่|บริการ/.test(String(t || ""));
+  const kept = out.filter(r => isPartServiceType(r.receipt_type));
+  const skipped = out.length - kept.length;
+  if (!kept.length) throw new Error(`ไม่มีใบเสร็จประเภทขายอะไหล่/งานบริการในไฟล์ (${skipped} ใบเป็นประเภทอื่น เช่น เงินดาวน์/มัดจำ/รายได้อื่น) — เลือกไฟล์ "รายงานรับชำระค่าอะไหล่และบริการ"`);
+  if (skipped > 0) kept.__skipped = skipped;
+  return kept;
 }
 
 // NIDS: เลขใบเสร็จเริ่มนับใหม่แยกสาขา → ทุกใบต้องมีรหัสสาขา ไม่งั้นห้าม upload (เคยได้แถวสาขาว่าง 55 ใบ 2026-09-16)
@@ -142,7 +148,7 @@ function UploadBlock({ title, desc, table, accept, action, parser, summary, curr
   async function handleParse(f) {
     setMsg(""); setRows([]); if (!f) return;
     setBusy(true);
-    try { const grid = await readGrid(f); const out = parser(grid); setRows(out); setMsg(`อ่านได้ ${out.length} ใบ · ${summary(out)} — กด Upload เพื่อนำเข้า`); }
+    try { const grid = await readGrid(f); const out = parser(grid); setRows(out); setMsg(`อ่านได้ ${out.length} ใบ${out.__skipped ? ` (ข้าม ${out.__skipped} ใบประเภทอื่นที่ไม่ใช่อะไหล่/บริการ)` : ""} · ${summary(out)} — กด Upload เพื่อนำเข้า`); }
     catch (e) { setMsg("❌ อ่านไฟล์ไม่สำเร็จ: " + e.message); }
     setBusy(false);
   }
