@@ -14,6 +14,7 @@ export default function BankMovementsPage({ currentUser }) {
   const [ccDetail, setCcDetail] = useState(null); // { date, rows, loading }
   const [editDate, setEditDate] = useState(null); // { original_date, current_settlement, hasOverride }
   const [savingDate, setSavingDate] = useState(false);
+  const [tab, setTab] = useState("movements"); // movements = รายการเคลื่อนไหวรายบัญชี · balances = ยอดคงเหลือทุกบัญชี ณ วันที่ (user 2026-10-14)
 
   function openEditDate(originalDate, currentSettlement, hasOverride) {
     setEditDate({
@@ -253,6 +254,14 @@ ${sec("รายจ่าย (CR)", outRows, totalOut, "#dc2626")}
         <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8, background: "#fee2e2", color: "#991b1b" }}>{message}</div>
       )}
 
+      {/* แท็บ */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+        {[["movements", "📑 รายการเคลื่อนไหวรายบัญชี"], ["balances", "💰 ยอดคงเหลือทุกบัญชี ณ วันที่"]].map(([k, label]) => (
+          <button key={k} onClick={() => setTab(k)} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #d1d5db", cursor: "pointer", fontFamily: "Tahoma", fontSize: 13.5, fontWeight: 700, background: tab === k ? "#1e3a8a" : "#fff", color: tab === k ? "#fff" : "#374151" }}>{label}</button>
+        ))}
+      </div>
+      {tab === "balances" && <BalancesPanel accounts={accounts} />}
+      {tab === "movements" && (<>
       {/* Toolbar */}
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
         <label style={{ fontSize: 13, fontWeight: 600 }}>บัญชี:</label>
@@ -445,6 +454,93 @@ ${sec("รายจ่าย (CR)", outRows, totalOut, "#dc2626")}
           </div>
         </div>
       )}
+      </>)}
+    </div>
+  );
+}
+
+// ยอดคงเหลือทุกบัญชี ณ วันที่เลือก (ค่าเริ่มต้น = วันนี้): ยอดตั้งต้นบัญชี + ผลรวมรายการเคลื่อนไหวตั้งแต่ต้นจนถึงวันนั้น (action เดียวกับรายงานรายบัญชี → เลขตรงกัน)
+function BalancesPanel({ accounts }) {
+  const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+  const [asOf, setAsOf] = useState(todayISO());
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState("");
+  const fmtN = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtBE = (iso) => { if (!iso) return "-"; const d = new Date(iso + "T00:00:00"); return isNaN(d) ? iso : `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`; };
+  const companyOf = (a) => /สิงห์ชัย/.test(String(a.account_name || "")) ? "สิงห์ชัย" : /เปา/.test(String(a.account_name || "")) ? "ป.เปา" : "อื่น ๆ";
+  async function load() {
+    if (!accounts.length) return;
+    setLoading(true); setErr("");
+    try {
+      const out = await Promise.all(accounts.map(async (a) => {
+        const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_movements", account_id: Number(a.account_id), date_from: "2000-01-01", date_to: asOf }) });
+        const data = await res.json().catch(() => []);
+        const mv = Array.isArray(data) ? data : [];
+        const inSum = mv.reduce((t, m) => t + (Number(m.amount) > 0 ? Number(m.amount) : 0), 0);
+        const outSum = mv.reduce((t, m) => t + (Number(m.amount) < 0 ? -Number(m.amount) : 0), 0);
+        const last = mv.reduce((t, m) => (String(m.movement_date || "") > t ? String(m.movement_date || "") : t), "");
+        const opening = Number(a.opening_balance || 0);
+        return { ...a, company: companyOf(a), opening, inSum, outSum, count: mv.length, last, balance: Math.round((opening + inSum - outSum) * 100) / 100 };
+      }));
+      setRows(out);
+    } catch { setErr("❌ โหลดยอดคงเหลือไม่สำเร็จ"); setRows([]); }
+    setLoading(false);
+  }
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [accounts, asOf]);
+  const groups = ["ป.เปา", "สิงห์ชัย", "อื่น ๆ"].map((g) => ({ g, list: rows.filter((r) => r.company === g) })).filter((x) => x.list.length);
+  const grand = rows.reduce((t, r) => t + r.balance, 0);
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12, padding: "12px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e5e7eb" }}>
+        <label style={{ fontSize: 13, fontWeight: 600 }}>ยอดคงเหลือ ณ วันที่:</label>
+        <input type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} style={inp} />
+        <button onClick={() => setAsOf(todayISO())} style={{ padding: "7px 12px", borderRadius: 6, border: "1px solid #d1d5db", background: "#fff", cursor: "pointer", fontFamily: "Tahoma", fontSize: 13 }}>วันนี้</button>
+        <button onClick={load} disabled={loading} style={{ padding: "7px 14px", borderRadius: 6, border: "none", background: "#1e3a8a", color: "#fff", cursor: "pointer", fontFamily: "Tahoma", fontSize: 13, fontWeight: 700 }}>{loading ? "กำลังโหลด…" : "🔄 รีเฟรช"}</button>
+        <span style={{ marginLeft: "auto", fontSize: 13 }}>รวมทุกบัญชี <b style={{ fontFamily: "monospace", fontSize: 16, color: grand < 0 ? "#dc2626" : "#1d4ed8" }}>{fmtN(grand)}</b> บาท</span>
+      </div>
+      {err && <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8, background: "#fee2e2", color: "#991b1b" }}>{err}</div>}
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr style={{ background: "#1e3a8a", color: "#fff" }}>
+            <th style={th}>ธนาคาร</th><th style={th}>เลขบัญชี</th><th style={th}>ชื่อบัญชี</th>
+            <th style={{ ...th, textAlign: "right" }}>ยอดตั้งต้น</th><th style={{ ...th, textAlign: "right" }}>รับเข้า (DR)</th><th style={{ ...th, textAlign: "right" }}>จ่ายออก (CR)</th>
+            <th style={{ ...th, textAlign: "right" }}>คงเหลือ {fmtBE(asOf)}</th><th style={th}>รายการล่าสุด</th>
+          </tr></thead>
+          <tbody>
+            {groups.map(({ g, list }) => {
+              const sub = list.reduce((t, r) => t + r.balance, 0);
+              return (
+                <React.Fragment key={g}>
+                  <tr><td colSpan={8} style={{ padding: "8px 10px", background: "#eef2ff", color: "#3730a3", fontWeight: 700, fontSize: 13 }}>{g} · {list.length} บัญชี · รวม {fmtN(sub)}</td></tr>
+                  {list.map((r) => (
+                    <tr key={r.account_id} style={{ borderTop: "1px solid #f1f5f9" }}>
+                      <td style={td}>{r.bank_name && r.bank_name !== "-" ? r.bank_name : "-"}</td>
+                      <td style={{ ...td, fontFamily: "monospace" }}>{r.account_no}</td>
+                      <td style={td}>{r.account_name}</td>
+                      <td style={tdNum}>{fmtN(r.opening)}</td>
+                      <td style={{ ...tdNum, color: "#059669" }}>{fmtN(r.inSum)}</td>
+                      <td style={{ ...tdNum, color: "#dc2626" }}>{fmtN(r.outSum)}</td>
+                      <td style={{ ...tdNum, fontWeight: 800, fontSize: 14, color: r.balance < 0 ? "#dc2626" : "#1d4ed8" }}>{fmtN(r.balance)}</td>
+                      <td style={{ ...td, color: "#6b7280" }}>{r.last ? fmtBE(String(r.last).slice(0, 10)) : "-"} · {r.count} รายการ</td>
+                    </tr>
+                  ))}
+                </React.Fragment>
+              );
+            })}
+            {!rows.length && !loading && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+          </tbody>
+          <tfoot><tr style={{ background: "#f8fafc", borderTop: "2px solid #1e3a8a" }}>
+            <td colSpan={3} style={{ ...td, fontWeight: 700 }}>รวมทุกบัญชี ({rows.length} บัญชี)</td>
+            <td style={tdNum}>{fmtN(rows.reduce((t, r) => t + r.opening, 0))}</td>
+            <td style={{ ...tdNum, color: "#059669" }}>{fmtN(rows.reduce((t, r) => t + r.inSum, 0))}</td>
+            <td style={{ ...tdNum, color: "#dc2626" }}>{fmtN(rows.reduce((t, r) => t + r.outSum, 0))}</td>
+            <td style={{ ...tdNum, fontWeight: 800, fontSize: 15, color: grand < 0 ? "#dc2626" : "#1d4ed8" }}>{fmtN(grand)}</td>
+            <td style={td}></td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <div style={{ fontSize: 12, color: "#6b7280", marginTop: 8 }}>คงเหลือ = ยอดตั้งต้นบัญชี + รับเข้า − จ่ายออก ของรายการทั้งหมดถึงวันที่เลือก (แหล่งเดียวกับแท็บรายการเคลื่อนไหว) · เงินสดย่อยและเงินให้กู้ยืมกรรมการแสดงในกลุ่ม "อื่น ๆ"</div>
     </div>
   );
 }
