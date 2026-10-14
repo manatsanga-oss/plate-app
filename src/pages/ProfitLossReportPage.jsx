@@ -53,6 +53,9 @@ const SERVICE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/service-a
 const REG_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const REPORT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api";
 const SALES_EXTRA_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
+const SBT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sbt-tax-api";          // ภาษีธุรกิจเฉพาะ ภ.ธ.40 (เพิ่มเข้างบ 2026-10-14)
+const CARDFEE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/card-fee-api";     // ค่าธรรมเนียมรูดบัตรเครดิต (ใบเสร็จธนาคาร)
+const FLOWEXP_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/upload-accounting-expense"; // ค่าใช้จ่ายจาก FLOW ACC (flow_expense_documents)
 const HR_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 const BOOKING_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/booking-api";
 const ASSET_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/asset-api"; // หักค่าใช้จ่ายที่แปลงเป็นสินทรัพย์ออกจากค่าใช้จ่ายทั่วไป
@@ -281,6 +284,11 @@ export default function ProfitLossReportPage() {
   const [pettyAgg, setPettyAgg] = useState(zeroAgg);
   const [pettyRows, setPettyRows] = useState([]);
   const [fuelExpRows, setFuelExpRows] = useState([]);
+  // 4 หมวดเพิ่ม 2026-10-14 (user): ดอกเบี้ย+ค่าธรรมเนียมธนาคาร · ค่าธรรมเนียมรูดบัตรเครดิต · ค่าใช้จ่าย FLOW ACC (ที่ไม่ซ้ำ EXP) · ภาษีธุรกิจเฉพาะ — ระดับบริษัท ลงช่องรวม (unassigned)
+  const [loanIntAgg, setLoanIntAgg] = useState(zeroAgg); const [loanIntRows, setLoanIntRows] = useState([]);
+  const [cardFeeAgg, setCardFeeAgg] = useState(zeroAgg); const [cardFeeRows, setCardFeeRows] = useState([]);
+  const [flowAccAgg, setFlowAccAgg] = useState(zeroAgg); const [flowAccRows, setFlowAccRows] = useState([]);
+  const [sbtAgg, setSbtAgg] = useState(zeroAgg); const [sbtRows, setSbtRows] = useState([]);
 
   async function loadReport(targetYm = ym) {
     setLoading(true);
@@ -288,7 +296,7 @@ export default function ProfitLossReportPage() {
     const { start, end, thYm } = monthRange(targetYm);
     const [adYear, adMonth] = String(targetYm).split("-").map(Number);
     try {
-      const [taxByBranch, partSvcByAff, hondaJobs, partsCostRows, regLines, feeLines, billLines, insBillRows, regSumRows, delivRows, cosmosRows, specCommDetail, giveCostData, payrollCalc, hrEmployees, otherInv, incomeDocs, commNormalMonth, flowExpDocs, fuelPayRows, assetList, bookingRows, pettyDocsByType] = await Promise.all([
+      const [taxByBranch, partSvcByAff, hondaJobs, partsCostRows, regLines, feeLines, billLines, insBillRows, regSumRows, delivRows, cosmosRows, specCommDetail, giveCostData, payrollCalc, hrEmployees, otherInv, incomeDocs, commNormalMonth, flowExpDocs, fuelPayRows, assetList, bookingRows, pettyDocsByType, loanPayRows, cardFeeDocs, flowAccDocs, sbtFilings] = await Promise.all([
         // 1) ใบกำกับขายรถ — เรียกทีละบริษัท (workflow แยกตารางตาม branch)
         //    สาขาจริงดูจาก branch_codes ของใบขาย (นครหลวงไม่มี code → SCY05 ทั้งตาราง)
         (String(targetYm) >= SYSTEM_SALES_FROM_YM ? (async () => {
@@ -441,6 +449,14 @@ export default function ProfitLossReportPage() {
         Promise.all(PETTY_TYPES.map((t) =>
           post(PETTY_URL, { action: t.action }).then(asArray).catch(() => [])
         )),
+        // 3q) ดอกเบี้ยเงินกู้/OD + ค่าธรรมเนียมธนาคาร (เมนูบันทึกจ่ายดอกเบี้ยธนาคาร) — เดือนตามวันที่จ่าย
+        post(ACCOUNTING_URL, { action: "list_loan_interest_payments", date_from: start, date_to: end }).then(asArray).catch(() => []),
+        // 3r) ค่าธรรมเนียมรูดบัตรเครดิต (ใบเสร็จธนาคาร merchant) — เดือนตามวันที่ใบเสร็จ ค่าธรรมเนียมก่อน VAT
+        post(CARDFEE_URL, { action: "list", date_from: start, date_to: end, status: "active" }).then(asArray).catch(() => []),
+        // 3s) ค่าใช้จ่าย FLOW ACC (upload จาก สนง.บัญชี) — เฉพาะใบที่ไม่ซ้ำกับเอกสาร EXP (อ้างอิง/ผู้ขาย+ยอด+วันที่เดียวกัน) และไม่ใช่หมวดที่นับที่อื่นแล้ว
+        post(FLOWEXP_URL, { action: "list_expenses", date_from: start, date_to: end }).then(asArray).catch(() => []),
+        // 3t) ภาษีธุรกิจเฉพาะ ภ.ธ.40 — เดือนตามวันที่ยื่น/จ่าย
+        post(SBT_URL, { action: "list", status: "active" }).then(asArray).catch(() => []),
       ]);
 
       // แยกอะไหล่+งานซ่อมจริง / ประกันรถหาย (คอสมอส/ล็อคตั้น)
@@ -795,6 +811,49 @@ export default function ProfitLossReportPage() {
       setGenExpAgg(ge);
       setGenExpRows(geRows);
 
+      // ===== 4 หมวดระดับบริษัท (ลงช่องรวม) =====
+      const inMonth = (d) => { const x = String(d || "").slice(0, 10); return x >= start && x <= end; };
+      const affOfName = (n) => /สิงห์ชัย/.test(String(n || "")) ? "สิงห์ชัย" : /เปา/.test(String(n || "")) ? "ป.เปา" : "";
+      const mkAgg = (rows) => { const a = zeroAgg(); a.unassigned = r2(rows.reduce((t, r) => t + r.beforeVat, 0)); a.total = a.unassigned; return a; };
+      // (1) ดอกเบี้ย + ค่าธรรมเนียมธนาคาร: interest_amount (ไม่รวมเงินต้น) · [ค่าธรรมเนียมธนาคาร] อยู่ใน note
+      const liRows = (loanPayRows || []).filter((p) => p && !isCancelled(p.status) && inMonth(p.payment_date) && r2(p.interest_amount) !== 0).map((p) => ({
+        branch: "", doc: `LOAN-${p.payment_id}`, date: p.payment_date, customer: `${p.bank_name || ""} ${p.account_no || ""} ${p.account_name || ""}`.trim() || "-",
+        detail: [/ค่าธรรมเนียมธนาคาร/.test(String(p.note || "")) ? "ค่าธรรมเนียมธนาคาร" : (p.loan_name || p.loan_id ? `ดอกเบี้ยเงินกู้ ${p.loan_name || p.loan_id}` : "ดอกเบี้ย"), affOfName(p.account_name) ? `สังกัด ${affOfName(p.account_name)}` : "", String(p.note || "").replace(/\[ค่าธรรมเนียมธนาคาร\]/, "").trim()].filter(Boolean).join(" · "),
+        beforeVat: r2(p.interest_amount), vat: 0, total: r2(p.interest_amount),
+      }));
+      setLoanIntAgg(mkAgg(liRows)); setLoanIntRows(liRows);
+      // (2) ค่าธรรมเนียมรูดบัตรเครดิต: fee_amount ก่อน VAT (VAT เป็นภาษีซื้อ)
+      const cfRows = (cardFeeDocs || []).filter((c) => c && c.doc_no && c.status === "active" && inMonth(c.bank_receipt_date)).map((c) => ({
+        branch: "", doc: c.doc_no, date: c.bank_receipt_date, customer: c.bank_name || "ธนาคาร",
+        detail: [`ใบเสร็จธนาคาร ${c.bank_receipt_no || "-"}`, `ยอดรูด ${fmtN(c.gross_amount)}`, c.affiliation ? `สังกัด ${c.affiliation}` : ""].filter(Boolean).join(" · "),
+        beforeVat: r2(c.fee_amount), vat: r2(c.vat_amount), total: r2(r2(c.fee_amount) + r2(c.vat_amount)),
+      }));
+      setCardFeeAgg(mkAgg(cfRows)); setCardFeeRows(cfRows);
+      // (3) FLOW ACC: ตัดใบที่ซ้ำกับ EXP (เลขอ้างอิงเดียวกัน หรือ ผู้ขาย+ยอด+วันที่เดียวกัน) · ตัดหมวดที่นับที่อื่น (ประกันรถหาย 52071 / น้ำมัน / ค่าคอม-นายหน้า-นำพา / เงินเดือน)
+      const normRef = (v) => String(v || "").replace(/\s+/g, "").toUpperCase();
+      const expRefSet = new Set((flowExpDocs || []).filter((r) => r && r.reference_no && !isCancelled(r.status)).map((r) => normRef(r.reference_no)));
+      const expKeySet = new Set((flowExpDocs || []).filter((r) => r && !isCancelled(r.status)).map((r) => `${String(r.vendor_tax_id || "").replace(/\D/g, "")}|${String(r.doc_date || "").slice(0, 10)}|${r2(r.total)}`));
+      const FLOW_EXCLUDE = /ประกันรถหาย|52071|น้ำมัน|เงินเดือน|ค่าจ้างพนักงาน|ประกันสังคม/;
+      const faRows = (flowAccDocs || []).filter((r) => r && r.expense_doc_no && !isCancelled(r.status) && inMonth(r.doc_date)).filter((r) => {
+        if (r.reference_no && expRefSet.has(normRef(r.reference_no))) return false;
+        if (expKeySet.has(`${String(r.vendor_tax_id || "").replace(/\D/g, "")}|${String(r.doc_date || "").slice(0, 10)}|${r2(r.total)}`)) return false;
+        const hay = `${r.expense_type || ""} ${r.description || ""} ${r.vendor_name || ""}`;
+        if (FLOW_EXCLUDE.test(hay) || (GENEXP_EXCLUDE.test(hay) && !/CSR|จัดกิจกรรม/i.test(hay))) return false;
+        return r2(r.subtotal) !== 0;
+      }).map((r) => ({
+        branch: "", doc: r.expense_doc_no, date: r.doc_date, customer: r.vendor_name || "-",
+        detail: [r.expense_type, r.description, r.reference_no ? `อ้างอิง ${r.reference_no}` : "", r.affiliation ? `สังกัด ${r.affiliation}` : ""].filter(Boolean).join(" · "),
+        beforeVat: r2(r.subtotal), vat: r2(r.vat_amount), total: r2(r.total),
+      }));
+      setFlowAccAgg(mkAgg(faRows)); setFlowAccRows(faRows);
+      // (4) ภาษีธุรกิจเฉพาะ: ยอดรวมทั้งสิ้นของแบบที่ยื่น/จ่ายในเดือน
+      const sbRows = (sbtFilings || []).filter((f) => f && f.doc_no && f.status === "active" && inMonth(f.filing_date)).map((f) => ({
+        branch: "", doc: f.doc_no, date: f.filing_date, customer: "สรรพากร",
+        detail: [`ภ.ธ.40 ${f.filing_type || ""} เดือนภาษี ${String(f.tax_month || "").slice(0, 7)}`, `ฐาน ${fmtN(f.revenue)} × ${f.tax_rate}%`, f.affiliation ? `สังกัด ${f.affiliation}` : "", f.receipt_no ? `ใบเสร็จ ${f.receipt_no}` : ""].filter(Boolean).join(" · "),
+        beforeVat: r2(f.total_amount), vat: 0, total: r2(f.total_amount),
+      }));
+      setSbtAgg(mkAgg(sbRows)); setSbtRows(sbRows);
+
       // ค่าน้ำมัน — ยอดเบิกจริงรายใบ (ไม่นับยกเลิก) ไม่ปันส่วนสาขา → ช่องรายได้รวมทั้งก้อน
       const fu = zeroAgg();
       const fuRows = [];
@@ -1033,7 +1092,7 @@ export default function ProfitLossReportPage() {
       setLoadedYm(targetYm);
     } catch (e) {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + (e.message || e));
-      setVehicleRows([]); setPartSvcRows([]); setFeeRows([]); setPostRows([]); setTheftRows([]); setRegRows([]); setPromoRows([]); setOtherInvRows([]); setManualRows([]); setPartsCostAgg(zeroAgg()); setTheftCostAgg(zeroAgg()); setRegCostAgg(zeroAgg()); setTheftCostRows([]); setRegCostRows([]); setSaleExpAgg(zeroAgg()); setSaleExpRows([]); setDelivFeeAgg(zeroAgg()); setDelivFeeRows([]); setCosmosExpAgg(zeroAgg()); setCosmosExpRows([]); setSpecCommAgg(zeroAgg()); setSpecCommRows([]); setGiveCostAgg(zeroAgg()); setGiveCostRows([]); setPayrollAgg(zeroAgg()); setPayrollRows([]); setGenExpAgg(zeroAgg()); setGenExpRows([]); setFuelExpAgg(zeroAgg()); setFuelExpRows([]);
+      setVehicleRows([]); setPartSvcRows([]); setFeeRows([]); setPostRows([]); setTheftRows([]); setRegRows([]); setPromoRows([]); setOtherInvRows([]); setManualRows([]); setPartsCostAgg(zeroAgg()); setTheftCostAgg(zeroAgg()); setRegCostAgg(zeroAgg()); setTheftCostRows([]); setRegCostRows([]); setSaleExpAgg(zeroAgg()); setSaleExpRows([]); setDelivFeeAgg(zeroAgg()); setDelivFeeRows([]); setCosmosExpAgg(zeroAgg()); setCosmosExpRows([]); setSpecCommAgg(zeroAgg()); setSpecCommRows([]); setGiveCostAgg(zeroAgg()); setGiveCostRows([]); setPayrollAgg(zeroAgg()); setPayrollRows([]); setGenExpAgg(zeroAgg()); setGenExpRows([]); setFuelExpAgg(zeroAgg()); setFuelExpRows([]); setLoanIntAgg(zeroAgg()); setLoanIntRows([]); setCardFeeAgg(zeroAgg()); setCardFeeRows([]); setFlowAccAgg(zeroAgg()); setFlowAccRows([]); setSbtAgg(zeroAgg()); setSbtRows([]);
     }
     setLoading(false);
   }
@@ -1388,14 +1447,50 @@ export default function ProfitLossReportPage() {
                   ))}
                   <td style={{ ...tdNum, fontSize: 13 }}>{deprecAgg.total ? `(${fmtN(deprecAgg.total)})` : "-"}</td>
                 </tr>
+                <tr onClick={() => loanIntRows.length > 0 && openPopup("loanint")} title={loanIntRows.length > 0 ? "คลิกดูรายละเอียดรายใบ" : ""}
+                  style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b", cursor: loanIntRows.length > 0 ? "pointer" : "default" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>หัก ดอกเบี้ยเงินกู้ + ค่าธรรมเนียมธนาคาร
+                    <span style={{ display: "block", fontSize: 10.5, fontWeight: 400, color: "#9ca3af" }}>เมนูบันทึกจ่ายดอกเบี้ยธนาคาร · เฉพาะดอกเบี้ย/ค่าธรรมเนียม ไม่รวมเงินต้น · ระดับบริษัท ลงช่องรวม</span>
+                    {loanIntRows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({loanIntRows.length} รายการ)</span>}
+                  </td>
+                  {branches.map((b) => <td key={b.key} style={tdNum}>{loanIntAgg[b.key] ? `(${fmtN(loanIntAgg[b.key])})` : "-"}</td>)}
+                  <td style={{ ...tdNum, fontSize: 13 }}>{loanIntAgg.total ? `(${fmtN(loanIntAgg.total)})` : "-"}</td>
+                </tr>
+                <tr onClick={() => cardFeeRows.length > 0 && openPopup("cardfee")} title={cardFeeRows.length > 0 ? "คลิกดูรายละเอียดรายใบ" : ""}
+                  style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b", cursor: cardFeeRows.length > 0 ? "pointer" : "default" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>หัก ค่าธรรมเนียมรูดบัตรเครดิต
+                    <span style={{ display: "block", fontSize: 10.5, fontWeight: 400, color: "#9ca3af" }}>ใบเสร็จค่าธรรมเนียมจากธนาคาร (merchant) ก่อน VAT · ระดับบริษัท ลงช่องรวม</span>
+                    {cardFeeRows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({cardFeeRows.length} รายการ)</span>}
+                  </td>
+                  {branches.map((b) => <td key={b.key} style={tdNum}>{cardFeeAgg[b.key] ? `(${fmtN(cardFeeAgg[b.key])})` : "-"}</td>)}
+                  <td style={{ ...tdNum, fontSize: 13 }}>{cardFeeAgg.total ? `(${fmtN(cardFeeAgg.total)})` : "-"}</td>
+                </tr>
+                <tr onClick={() => flowAccRows.length > 0 && openPopup("flowacc")} title={flowAccRows.length > 0 ? "คลิกดูรายละเอียดรายใบ" : ""}
+                  style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b", cursor: flowAccRows.length > 0 ? "pointer" : "default" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>หัก ค่าใช้จ่ายจาก FLOW ACC (ที่ไม่ซ้ำ EXP)
+                    <span style={{ display: "block", fontSize: 10.5, fontWeight: 400, color: "#9ca3af" }}>เอกสาร F-EXP ของ สนง.บัญชี ตัดใบที่มีใน EXP แล้ว (อ้างอิง/ผู้ขาย+ยอด+วันที่) และหมวดที่นับที่อื่น (ประกันรถหาย น้ำมัน ค่าคอม เงินเดือน) · ลงช่องรวม</span>
+                    {flowAccRows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({flowAccRows.length} รายการ)</span>}
+                  </td>
+                  {branches.map((b) => <td key={b.key} style={tdNum}>{flowAccAgg[b.key] ? `(${fmtN(flowAccAgg[b.key])})` : "-"}</td>)}
+                  <td style={{ ...tdNum, fontSize: 13 }}>{flowAccAgg.total ? `(${fmtN(flowAccAgg.total)})` : "-"}</td>
+                </tr>
+                <tr onClick={() => sbtRows.length > 0 && openPopup("sbt")} title={sbtRows.length > 0 ? "คลิกดูรายละเอียดรายใบ" : ""}
+                  style={{ background: "#fff7f7", fontWeight: 700, color: "#991b1b", cursor: sbtRows.length > 0 ? "pointer" : "default" }}>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>หัก ภาษีธุรกิจเฉพาะ (ภ.ธ.40)
+                    <span style={{ display: "block", fontSize: 10.5, fontWeight: 400, color: "#9ca3af" }}>แบบที่ยื่น/จ่ายในเดือน รวมภาษีท้องถิ่น · ระดับบริษัท ลงช่องรวม</span>
+                    {sbtRows.length > 0 && <span className="no-print" style={{ marginLeft: 6, fontSize: 11, fontWeight: 400, color: "#2563eb" }}>🔍 ({sbtRows.length} รายการ)</span>}
+                  </td>
+                  {branches.map((b) => <td key={b.key} style={tdNum}>{sbtAgg[b.key] ? `(${fmtN(sbtAgg[b.key])})` : "-"}</td>)}
+                  <td style={{ ...tdNum, fontSize: 13 }}>{sbtAgg.total ? `(${fmtN(sbtAgg.total)})` : "-"}</td>
+                </tr>
                 <tr style={{ background: "#ecfdf5", fontWeight: 700, color: "#065f46", borderTop: "1px solid #065f46", borderBottom: "2px solid #065f46" }}>
-                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>กำไรสุทธิ (หลังหักเงินเดือน + ค่าใช้จ่ายทั่วไป + ค่าน้ำมัน + เบ็ดเตล็ด + ค่าเสื่อมราคา)</td>
+                  <td colSpan={2} style={{ ...td, textAlign: "right" }}>กำไรสุทธิ (หลังหักเงินเดือน + ค่าใช้จ่ายทั่วไป + ค่าน้ำมัน + เบ็ดเตล็ด + ดอกเบี้ย/ค่าธรรมเนียม + FLOW ACC + ภ.ธ.40 + ค่าเสื่อมราคา)</td>
                   {branches.map((b) => {
-                    const v = r2(tot[b.key] - vehicleCostAgg[b.key] - saleExpAgg[b.key] - delivFeeAgg[b.key] - cosmosExpAgg[b.key] - specCommAgg[b.key] - giveCostAgg[b.key] - partsCostAgg[b.key] - theftCostAgg[b.key] - regCostAgg[b.key] - payrollAgg[b.key] - genExpAgg[b.key] - fuelExpAgg[b.key] - pettyAgg[b.key] - deprecAgg[b.key]);
+                    const v = r2(tot[b.key] - vehicleCostAgg[b.key] - saleExpAgg[b.key] - delivFeeAgg[b.key] - cosmosExpAgg[b.key] - specCommAgg[b.key] - giveCostAgg[b.key] - partsCostAgg[b.key] - theftCostAgg[b.key] - regCostAgg[b.key] - payrollAgg[b.key] - genExpAgg[b.key] - fuelExpAgg[b.key] - pettyAgg[b.key] - deprecAgg[b.key] - loanIntAgg[b.key] - cardFeeAgg[b.key] - flowAccAgg[b.key] - sbtAgg[b.key]);
                     return <td key={b.key} style={{ ...tdNum, color: v < 0 ? "#dc2626" : undefined }}>{fmtN(v)}</td>;
                   })}
                   {(() => {
-                    const v = r2(tot.total - vehicleCostAgg.total - saleExpAgg.total - delivFeeAgg.total - cosmosExpAgg.total - specCommAgg.total - giveCostAgg.total - partsCostAgg.total - theftCostAgg.total - regCostAgg.total - payrollAgg.total - genExpAgg.total - fuelExpAgg.total - pettyAgg.total - deprecAgg.total);
+                    const v = r2(tot.total - vehicleCostAgg.total - saleExpAgg.total - delivFeeAgg.total - cosmosExpAgg.total - specCommAgg.total - giveCostAgg.total - partsCostAgg.total - theftCostAgg.total - regCostAgg.total - payrollAgg.total - genExpAgg.total - fuelExpAgg.total - pettyAgg.total - deprecAgg.total - loanIntAgg.total - cardFeeAgg.total - flowAccAgg.total - sbtAgg.total);
                     return <td style={{ ...tdNum, fontSize: 13, color: v < 0 ? "#dc2626" : undefined }}>{fmtN(v)}</td>;
                   })()}
                 </tr>
@@ -1414,7 +1509,7 @@ export default function ProfitLossReportPage() {
         <DetailModal
           popup={popup}
           ym={ymLabelTH(loadedYm || ym)}
-          rows={popup === "vehicle" ? vehicleRows : popup === "salexp" ? saleExpRows : popup === "delivfee" ? delivFeeRows : popup === "cosmosexp" ? cosmosExpRows : popup === "speccomm" ? specCommRows : popup === "givecost" ? giveCostRows : popup === "payroll" ? payrollRows : popup === "genexp" ? genExpRows : popup === "fuelexp" ? fuelExpRows : popup === "pettycash" ? pettyRows : popup === "deprec" ? deprecRows : popup === "partsvc" ? partSvcRows : popup === "fee" ? feeRows : popup === "post" ? postRows : popup === "theft" ? theftRows : popup === "theftcost" ? theftCostRows : popup === "regwork" ? regRows : popup === "regcost" ? regCostRows : popup === "promo" ? promoRows : popup === "otherinv" ? otherInvRows : manualRows}
+          rows={popup === "vehicle" ? vehicleRows : popup === "salexp" ? saleExpRows : popup === "delivfee" ? delivFeeRows : popup === "cosmosexp" ? cosmosExpRows : popup === "speccomm" ? specCommRows : popup === "givecost" ? giveCostRows : popup === "payroll" ? payrollRows : popup === "genexp" ? genExpRows : popup === "fuelexp" ? fuelExpRows : popup === "loanint" ? loanIntRows : popup === "cardfee" ? cardFeeRows : popup === "flowacc" ? flowAccRows : popup === "sbt" ? sbtRows : popup === "pettycash" ? pettyRows : popup === "deprec" ? deprecRows : popup === "partsvc" ? partSvcRows : popup === "fee" ? feeRows : popup === "post" ? postRows : popup === "theft" ? theftRows : popup === "theftcost" ? theftCostRows : popup === "regwork" ? regRows : popup === "regcost" ? regCostRows : popup === "promo" ? promoRows : popup === "otherinv" ? otherInvRows : manualRows}
           branches={branches}
           branchFilter={popupBranch}
           onClose={() => { setPopup(null); setPopupBranch(null); }}
@@ -1437,6 +1532,10 @@ function DetailModal({ popup, ym, rows: allRows, branches, branchFilter, onClose
     : popup === "payroll" ? "👥 เงินเดือนรายคน (ยอดก่อนหักรายการหัก)"
     : popup === "genexp" ? "🧾 ค่าใช้จ่ายทั่วไป (บันทึกค่าใช้จ่าย — สาขาตามช่องสาขาที่ใช้)"
     : popup === "fuelexp" ? "⛽ ค่าน้ำมัน (รายการเบิกค่าน้ำมัน)"
+    : popup === "loanint" ? "🏦 ดอกเบี้ยเงินกู้ + ค่าธรรมเนียมธนาคาร (รายใบจ่าย)"
+    : popup === "cardfee" ? "💳 ค่าธรรมเนียมรูดบัตรเครดิต (ใบเสร็จธนาคาร)"
+    : popup === "flowacc" ? "📑 ค่าใช้จ่ายจาก FLOW ACC (ที่ไม่ซ้ำเอกสาร EXP)"
+    : popup === "sbt" ? "🧾 ภาษีธุรกิจเฉพาะ ภ.ธ.40 (แบบที่ยื่นในเดือน)"
     : popup === "pettycash" ? "🪙 ค่าใช้จ่ายเบ็ดเตล็ด (เงินสดย่อย — น้ำมันรถใหม่/ไปรษณีย์/ทั่วไป/ของไหว้)"
     : popup === "deprec" ? "📉 ค่าเสื่อมราคาของเดือน (รายสินทรัพย์ — จากทะเบียนสินทรัพย์)"
     : popup === "partsvc" ? "🔧 รายได้อะไหล่+งานซ่อม"
