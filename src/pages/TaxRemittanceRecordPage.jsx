@@ -15,7 +15,8 @@ const HR_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/hr-api";
 const REFERRAL_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/referral-fee-api";
 const REG_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
 const SXP_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
-const THEFT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/upload-accounting-expense"; // ประกันรถหาย ออกแทน (52071)
+const THEFT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/upload-accounting-expense";
+const RETAIL_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api"; // ค่านำพาจากใบขาย NEW (retail_sales.delivery_fee_amount) หัก ณ ที่จ่าย 3% // ประกันรถหาย ออกแทน (52071)
 
 const TAX_TYPES = [
   { value: "ภ.พ.36", label: "ภ.พ.36 (ภาษีมูลค่าเพิ่มรอนำส่ง)", ready: true },
@@ -355,10 +356,36 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       doc_refs: `ภ.ง.ด.53 ${x.paid_doc_no} (ประกัน COSMOS · ${x.n} รายการ)`,
     }));
   }
+  // ---------- ภ.ง.ด.3: ค่านำพา จากใบขาย NEW (สรุปเดือน × สังกัด, รายคันใน details) ----------
+  //   ตั้งแต่ 14/08/69 ค่านำพาอยู่ใน retail_sales.delivery_fee_amount (ไม่ผ่าน daily_expenses/delivery_fees) — สนง.บัญชียื่น ภ.ง.ด.3 รายคัน 3% (ก.ย.69: ป.เปา 68 คัน / สิงห์ชัย 83 คัน)
+  //   สังกัดตามยี่ห้อรถ (HONDA = ป.เปา, YAMAHA = สิงห์ชัย) · งวด = เดือนที่ขาย · ผู้รับ = ผู้รับค่านำพาที่เลือกไว้ตอนขาย (ไม่มี = ผู้นำพาของลูกค้าคันนั้น)
+  //   บันทึกนำส่งแบบ itemized รายคัน source_table = retail_sales_delivery, source_id = เลขจากเลขใบขาย (YYMM+สาขา+ลำดับ) กันนำส่งซ้ำ (user 2026-10-14)
+  function deliverySrcId(invoiceNo) {
+    const m = String(invoiceNo || "").match(/^SCY(\d{2})-MCSA-(\d{4})-(\d{5})$/);
+    return m ? Number(m[2] + m[1] + m[3]) : 0;
+  }
+  async function loadDeliveryRows() {
+    const from = dateFrom || "2026-08-14", to = dateTo || todayISO();
+    const raw = await post(RETAIL_URL, { action: "list_retail_sales", date_from: from, date_to: to, limit: 5000 }).catch(() => []);
+    const sales = (Array.isArray(raw) ? raw : (raw?.data || [])).filter(s => s && s.invoice_no && Number(s.delivery_fee_amount || 0) > 0 && String(s.sale_status || "10") !== "90");
+    const map = {};
+    sales.forEach(s => {
+      const fee = Number(s.delivery_fee_amount || 0), wht = Math.round(fee * 3) / 100;
+      const aff = /ยามา|yamaha/i.test(String(s.brand || "")) ? "สิงห์ชัย" : "ป.เปา";
+      const pm = periodOf(s.sale_date);
+      const key = `ภ.ง.ด.3|${pm}|${aff}`;
+      if (!map[key]) map[key] = { source_id: `deliv|${key}`, kind: "delivery", pndType: "ภ.ง.ด.3", sourceLabel: "ค่านำพา (ใบขาย NEW)", affiliation: aff, paid_at: `${yymm(s.sale_date)}-01`, period_month: pm, amount: 0, count: 0, details: [], items: [] };
+      const payee = s.delivery_payee_name || `ผู้นำพา (ลูกค้า ${s.customer_name || "-"})`;
+      map[key].amount = Math.round((map[key].amount + wht) * 100) / 100; map[key].count += 1;
+      map[key].details.push({ payment_no: s.invoice_no, payment_date: s.sale_date, pay_to: payee, total_amount: fee, withholding_tax: wht });
+      map[key].items.push({ source_table: "retail_sales_delivery", source_id: deliverySrcId(s.invoice_no), amount: wht, vendor_name: `${payee} · ${s.invoice_no}`, doc_date: String(s.sale_date || "").slice(0, 10), affiliation: aff });
+    });
+    return Object.values(map).map(b => ({ ...b, vendor_name: `ผู้นำพา ${b.count} คัน`, doc_refs: `ภ.ง.ด.3 ค่านำพา ใบขาย NEW ${b.count} คัน (หัก ณ ที่จ่าย 3%)` }));
+  }
   async function fetchPendingWHT() {
     setLoading(true);
     try {
-      const [payroll, referral, expense, registration, commission, theft, cosmos, doneRaw] = await Promise.all([
+      const [payroll, referral, expense, registration, commission, theft, cosmos, doneRaw, delivery] = await Promise.all([
         loadPayrollRows().catch(() => []),
         loadReferralRows().catch(() => []),
         loadExpenseRows().catch(() => []),
@@ -367,6 +394,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
         loadTheftInsuranceRows().catch(() => []),
         loadCosmosRows().catch(() => []),
         post(TAX_URL, { action: "list_tax_remittances" }).catch(() => []),
+        loadDeliveryRows().catch(() => []),
       ]);
       const done = (Array.isArray(doneRaw) ? doneRaw : []).filter(h => h.status !== "cancelled");
       const itemsOf = h => (Array.isArray(h.items) ? h.items : []);
@@ -375,6 +403,13 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const refDone = new Set(done.filter(h => itemsOf(h).some(i => i.source_table === "referral")).map(h => `${h.tax_type}|${h.period_month}|${h.affiliation}`));
       const expDone = new Set(done.flatMap(h => itemsOf(h).map(i => `${i.source_table}|${i.source_id}`)));
       const refRows = referral.filter(b => !refDone.has(`${b.pndType}|${b.period_month}|${b.affiliation}`));
+      // ค่านำพาใบขาย NEW: ตัดคันที่นำส่งแล้ว (itemized รายคัน) ออกจากก้อนเดือน — เหลือ 0 คัน = ไม่แสดง
+      const deliveryRows = delivery.map(b => {
+        const keep = b.items.map((it, i) => ({ it, d: b.details[i] })).filter(x => !expDone.has(`${x.it.source_table}|${x.it.source_id}`));
+        if (!keep.length) return null;
+        const amount = Math.round(keep.reduce((s2, x) => s2 + x.it.amount, 0) * 100) / 100;
+        return { ...b, items: keep.map(x => x.it), details: keep.map(x => x.d), amount, count: keep.length, vendor_name: `ผู้นำพา ${keep.length} คัน`, doc_refs: `ภ.ง.ด.3 ค่านำพา ใบขาย NEW ${keep.length} คัน (หัก ณ ที่จ่าย 3%)` };
+      }).filter(Boolean);
       // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = รายเอกสาร (itemized) — dedup นำส่งแล้ว + กันซ้ำ source เดียวกัน
       const seenItem = new Set();
       // งวด/สังกัด/แบบ ที่มีใบนำส่งแล้ว (paid) → รายการที่ยังค้างในงวดนั้น = ตกหล่น (ลงระบบหลังยื่น)
@@ -389,7 +424,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
         return h ? { ...b, late_remit_doc: h.remit_doc_no, late_remit_date: h.remit_date } : b;
       });
       // ไม่กรองที่นี่ — เก็บดิบไว้ให้ useMemo กรองฝั่งจอ (เปลี่ยน filter ไม่ต้อง refetch)
-      const rows = [...payroll, ...refRows, ...itemRows]
+      const rows = [...payroll, ...refRows, ...deliveryRows, ...itemRows]
         .sort((a, b) => String(b.period_month).localeCompare(String(a.period_month)) || String(a.pndType).localeCompare(String(b.pndType)));
       setPendingRaw(rows);
     } catch { setPendingRaw([]); }
@@ -515,6 +550,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     let okAny = false;
     const payroll = selectedRows.filter(r => r.kind === "payroll");
     const referral = selectedRows.filter(r => r.kind === "referral");
+    const delivery = selectedRows.filter(r => r.kind === "delivery"); // ค่านำพาใบขาย NEW → itemized รายคัน
     // ค่าใช้จ่าย + งานทะเบียน + ค่านายหน้า = บันทึกแบบ itemized (แต่ละแถวพก source_table/source_id ของตัวเอง)
     const expense = selectedRows.filter(r => r.kind === "expense" || r.kind === "registration" || r.kind === "commission" || r.kind === "theft" || r.kind === "cosmos");
 
@@ -545,6 +581,11 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
     }
     for (const r of referral) {
       const res = await post(TAX_URL, { action: "save_tax_remittance", tax_type: r.pndType, period_month: r.period_month, affiliation: r.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: payForm.note, amount_total: r.amount, created_by: whoami(), source_ids: [], batch_no: batchNo, fee_amount: feePending });
+      const row = Array.isArray(res) ? res[0] : res;
+      if (Number(row?.updated_count || 0) > 0) { okAny = true; feePending = 0; }
+    }
+    for (const r of delivery) {
+      const res = await post(TAX_URL, { action: "save_tax_remittance", mode: "itemized", tax_type: r.pndType, period_month: r.period_month, affiliation: r.affiliation, remit_date: payForm.remit_date, payment_method: payForm.payment_method, from_bank_account_id: bank, receipt_no: payForm.receipt_no, note: [payForm.note, `ค่านำพาใบขาย NEW ${r.count} คัน`].filter(Boolean).join(" · "), items: r.items, created_by: whoami(), batch_no: batchNo, fee_amount: feePending });
       const row = Array.isArray(res) ? res[0] : res;
       if (Number(row?.updated_count || 0) > 0) { okAny = true; feePending = 0; }
     }
