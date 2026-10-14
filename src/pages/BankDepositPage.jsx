@@ -239,8 +239,11 @@ export default function BankDepositPage({ currentUser }) {
       const items = buildDailyCashItems(src, ctx);
       const rawDays = dailyCashByDate(items).filter(d => d.branch === String(userBranchCode).toUpperCase() && d.date >= "2026-09-01" && Math.abs(d.cash) >= 0.01);
       // วันติดลบไม่ขึ้นเป็นวันฝาก → ยกไปหักยอดวันถัดไปที่เป็นบวก (user 2026-09-07)
-      const days = carryNegativeDays(rawDays).sort((a, b) => b.date.localeCompare(a.date));
       const depList = (Array.isArray(depRes) ? depRes : []).filter(d => d && d.status !== "cancelled");
+      // ยอดที่ฝากไปแล้วของแต่ละวัน (ใบฝากที่ระบุ "ฝากเงินสดประจำวัน YYYY-MM-DD") — วันติดลบที่ฝากไปแล้วต้องยกไปหักวันถัดไปเพิ่ม (user 2026-10-14 เคส 21/09 ฝาก 495)
+      const depositedByDay = {};
+      depList.forEach(d => { const m = String(d.source || "").match(/ฝากเงินสดประจำวัน (\d{4}-\d{2}-\d{2})/); if (m) depositedByDay[m[1]] = (depositedByDay[m[1]] || 0) + (Number(d.amount) || 0); });
+      const days = carryNegativeDays(rawDays, depositedByDay).sort((a, b) => b.date.localeCompare(a.date));
       // วันที่ฝากแล้วไม่ต้องขึ้น — จับคู่ใบฝากกับวันด้วย "ยอด" (ชุดใบฝากลงวันที่ D/D+1 รวมเท่าเงินสดสุทธิ) ไม่ใช่วันที่อย่างเดียว (user 2026-09-07: วันที่ 3 ฝาก 2 ยอดข้ามวัน ทำให้วันที่ 4 หาย)
       const done = depositedDaySet(days, depList, addDays);
       setCashDays(days.filter(d => !done.has(d.date)));
@@ -251,7 +254,7 @@ export default function BankDepositPage({ currentUser }) {
     setCashDate(date);
     const d = cashDays.find(x => x.date === date);
     if (!d) return;
-    const carriedNote = d.carried?.length ? ` · หักยอดติดลบ ${d.carried.map(c => `${fmtDateShort(c.date)} ${fmt(c.cash)}`).join(", ")}` : "";
+    const carriedNote = d.carried?.length ? ` · หักยอดติดลบ ${d.carried.map(c => `${fmtDateShort(c.date)} ${fmt(c.cash)}${c.deposited > 0 ? ` (ฝากไปแล้ว ${fmt(c.deposited)})` : ""}`).join(", ")}` : "";
     setForm(p => ({ ...p, amount: d.cash, source: `ฝากเงินสดประจำวัน ${date} (เงินสดรับสุทธิจากระบบ${carriedNote})` }));
     setLines([{ to_account_id: "", amount: String(d.cash) }]); // แถวแรกรับยอดเต็ม แบ่งเพิ่มได้ด้วยปุ่ม + บัญชี
   }

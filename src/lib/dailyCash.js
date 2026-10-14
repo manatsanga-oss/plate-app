@@ -130,13 +130,20 @@ export async function loadPettyRows() {
 /** ยกยอดวันติดลบไปหักวันถัดไป (user 2026-09-07: วันไหนเงินสดสุทธิติดลบ ไม่ต้องขึ้นเป็นวันฝาก ให้ไปหักยอดนำฝากวันถัดไปที่เป็นบวก)
  *  รับ days ของสาขาเดียว → คืน days ใหม่เรียงเก่า→ใหม่: วันบวกที่รับยอดยกมาจะมี cash = ยอดหลังหัก, carried = [{date, cash}] ของวันติดลบที่รวมเข้ามา
  *  วันติดลบท้ายสุดที่ยังไม่มีวันบวกมารับ จะไม่ขึ้น (รอวันถัดไป) */
-export function carryNegativeDays(days) {
+//  depositedByDay (เพิ่ม 2026-10-14): {date: ยอดที่ฝากไปแล้วของวันนั้น} — วันติดลบที่พนักงานนำฝากไปแล้ว (เคส 21/09/69 ฝาก 495 ทั้งที่ระบบ −475)
+//    เงินก้อนนั้นออกจากลิ้นชักไปแล้ว → ยอดยกไปหักวันถัดไปต้องรวมเงินที่ฝากไปด้วย (−475 − 495 = −970) ไม่ใช่หักแค่ยอดติดลบ
+export function carryNegativeDays(days, depositedByDay = {}) {
   const sorted = [...days].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const out = [];
   let carry = 0, carried = [];
   for (const d of sorted) {
     const amt = Math.round((num(d.cash) + carry) * 100) / 100;
-    if (amt <= 0.005) { carry = amt; carried = [...carried, { date: d.date, cash: num(d.cash) }]; continue; }
+    if (amt <= 0.005) {
+      const dep = Math.round(num(depositedByDay[d.date]) * 100) / 100; // ฝากไปแล้วทั้งที่ติดลบ → ยกไปหักเพิ่ม
+      carry = Math.round((amt - dep) * 100) / 100;
+      carried = [...carried, { date: d.date, cash: num(d.cash), deposited: dep }];
+      continue;
+    }
     out.push({ ...d, cash: amt, rawCash: num(d.cash), carried });
     carry = 0; carried = [];
   }
