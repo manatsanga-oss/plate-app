@@ -18,6 +18,7 @@ import PartWithdrawalPage from "./pages/PartWithdrawalPage";
 import VehiclePurchaseReportPage from "./pages/VehiclePurchaseReportPage";
 import HondaSalesReportPage from "./pages/HondaSalesReportPage";
 import PricePromoAdvicePage from "./pages/PricePromoAdvicePage";
+import MarketRegistrationReportPage from "./pages/MarketRegistrationReportPage";
 import PriceImpactAnalysisPage from "./pages/PriceImpactAnalysisPage";
 import StockTurnoverReportPage from "./pages/StockTurnoverReportPage";
 import PartReceiptReportPage from "./pages/PartReceiptReportPage";
@@ -298,6 +299,8 @@ export default function App() {
     }
     // งบกำไรขาดทุน — เห็นเฉพาะ user "admin" คนเดียว (จำกัดก่อนเช็ค role admin ทั่วไป)
     if (page === "profitloss") return currentUser.username === "admin";
+    // Report Manager — เฉพาะ user admin (มนัส สง่าศรี) เท่านั้น ไม่รวม admin คนอื่น (user 2026-10-15)
+    if (["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "marketregistration"].includes(page)) return currentUser.username === "admin";
     // บันทึกแก้ไขราคาขายเฉพาะคัน — เฉพาะ admin (user 2026-09-01)
     if (page === "vehpriceoverride") return currentUser.role === "admin";
     if (currentUser.role === "admin") return true;
@@ -330,11 +333,7 @@ export default function App() {
     if (page === "generalreceiptpivot") return false;         // เฉพาะ admin (สรุปรับชำระเงินทั่วไปรายเดือน — แทน pivot Excel ของบัญชี 2026-10-03)
     if (page === "receipttransferreport") return false;       // เฉพาะ admin (รายงานสรุปรับชำระเงิน)
     if (page === "vehiclepurchasereport") return false;       // เฉพาะ admin (รายงานรับรถจักรยานยนต์)
-    if (page === "hondasalesreport") return false;            // เฉพาะ admin (ส่งรายงาน HONDA)
     if (page === "deliveryfee") return false;                 // เฉพาะ admin (รายงานค่านำพาจากระบบ — ย้ายมา Report Admin 2026-08-29)
-    if (page === "pricepromoadvice") return false;            // เฉพาะ admin (แนะนำราคา/ค่าส่งเสริม)
-    if (page === "priceimpact") return false;                 // เฉพาะ admin (วิเคราะห์ผลราคา/โปร ต่อยอดขาย)
-    if (page === "stockturnover") return false;               // เฉพาะ admin (สินค้าคงเหลือ & turnover)
     if (page === "partreceiptreport") return false;           // เฉพาะ admin (รายงานรับอะไหล่)
     if (page === "receiptqrreport") return false;             // เฉพาะ admin (รายงานลูกค้าสแกน QR กรอกผ่าน LINE)
     if (page === "yamaharepairreport") return true;           // ทุก user เห็นรายงานใบแจ้งซ่อม
@@ -407,6 +406,7 @@ export default function App() {
         {activeMenu === "vehiclepurchasereport" && canAccess("vehiclepurchasereport") && <VehiclePurchaseReportPage currentUser={currentUser} />}
         {activeMenu === "hondasalesreport" && canAccess("hondasalesreport") && <HondaSalesReportPage currentUser={currentUser} />}
         {activeMenu === "pricepromoadvice" && canAccess("pricepromoadvice") && <PricePromoAdvicePage currentUser={currentUser} />}
+        {activeMenu === "marketregistration" && canAccess("marketregistration") && <MarketRegistrationReportPage currentUser={currentUser} />}
         {activeMenu === "priceimpact" && canAccess("priceimpact") && <PriceImpactAnalysisPage currentUser={currentUser} />}
         {activeMenu === "stockturnover" && canAccess("stockturnover") && <StockTurnoverReportPage currentUser={currentUser} />}
         {activeMenu === "partreceiptreport" && canAccess("partreceiptreport") && <PartReceiptReportPage currentUser={currentUser} />}
@@ -949,7 +949,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 45 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","partservicereceiptreport","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","generalreceiptpivot","salesbypayment","otherincometaxreport","promoincomebyvehicle","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","hondasalesreport","deliveryfee","pricepromoadvice","priceimpact","stockturnover","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Admin" pages={["reportadmin","partservicereceiptreport","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","generalreceiptpivot","salesbypayment","otherincometaxreport","promoincomebyvehicle","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","deliveryfee","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -965,12 +965,17 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="vehiclepurchasereport" label="รายงานรับรถจักรยานยนต์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="deliveryfee" label="รายงานค่านำพา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="partservicereceiptreport" label="รายงานรับชำระเงินค่าอะไหล่และบริการ (DMS · NIDS)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="hondasalesreport" label="ส่งรายงาน HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="partreceiptreport" label="รายงานรับอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="receiptqrreport" label="รายงานลูกค้าสแกน QR (LINE)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
+      {/* Report Manager — รายงานวิเคราะห์สำหรับผู้บริหาร เห็นเฉพาะ user admin (มนัส สง่าศรี) — user 2026-10-15 */}
+      <MenuGroup title="Report Manager" pages={["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "marketregistration"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="pricepromoadvice" label="แนะนำราคา/ค่าส่งเสริม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="priceimpact" label="วิเคราะห์ผลราคา/โปร ต่อยอดขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="stockturnover" label="สินค้าคงเหลือ & อัตราการหมุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="partreceiptreport" label="รายงานรับอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="receiptqrreport" label="รายงานลูกค้าสแกน QR (LINE)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hondasalesreport" label="ส่งรายงาน HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="marketregistration" label="ข้อมูลจดทะเบียนรถในตลาด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Sales" pages={salesPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
