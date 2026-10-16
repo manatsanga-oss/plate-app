@@ -7,7 +7,7 @@ const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-ap
 
 const AFFILIATIONS = ["ป.เปา", "สิงห์ชัย"];
 const TAX_FORMS = ["ภ.ง.ด.50", "ภ.ง.ด.51"];
-const PAY_METHODS = ["โอน", "เงินสด", "เช็ค"];
+const PAY_METHODS = ["โอน", "เงินสด", "เช็ค", "ไม่มีภาษีต้องชำระ"]; // ไม่มีภาษีต้องชำระ = ยื่นแบบแล้ว ยอด 0 (เครดิตภาษีครอบคลุม) — ไม่ตัดยอดบัญชี (user 2026-10-15)
 
 function fmt(v) { return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(v) {
@@ -80,7 +80,9 @@ export default function IncomeTaxFilingPage({ currentUser }) {
   function resetForm() { setEditId(null); setForm(EMPTY()); setMsg(""); }
 
   async function save() {
-    if (!form.amount || Number(form.amount) <= 0) { setMsg("⚠️ ใส่ยอดภาษีที่จ่าย"); return; }
+    const zeroTax = form.payment_method === "ไม่มีภาษีต้องชำระ";
+    if (!zeroTax && (!form.amount || Number(form.amount) <= 0)) { setMsg("⚠️ ใส่ยอดภาษีที่จ่าย (ถ้ายื่นแล้วไม่มีภาษีต้องชำระ เลือกวิธีจ่าย \"ไม่มีภาษีต้องชำระ\")"); return; }
+    if (zeroTax && Number(form.amount) > 0) { setMsg("⚠️ วิธีจ่าย \"ไม่มีภาษีต้องชำระ\" ยอดต้องเป็น 0"); return; }
     if (form.payment_method === "โอน" && !form.from_bank_account_id) { setMsg("⚠️ เลือกบัญชีที่โอนจ่าย (ตัดยอดบัญชี)"); return; }
     if (!form.filing_date) { setMsg("⚠️ ใส่วันที่ยื่น/จ่าย"); return; }
     setSaving(true); setMsg("");
@@ -91,7 +93,7 @@ export default function IncomeTaxFilingPage({ currentUser }) {
           action: editId ? "edit" : "save",
           id: editId || undefined,
           tax_form: form.tax_form, tax_year: Number(form.tax_year) || null, affiliation: form.affiliation,
-          filing_date: form.filing_date, amount: Number(form.amount),
+          filing_date: form.filing_date, amount: zeroTax ? 0 : Number(form.amount),
           payment_method: form.payment_method,
           from_bank_account_id: form.payment_method === "โอน" ? (Number(form.from_bank_account_id) || null) : null,
           note: form.note || null,

@@ -38,6 +38,7 @@ export default function MarketRegistrationReportPage() {
   const [cat, setCat] = useState("all");
   const [brand, setBrand] = useState("all");
   const [search, setSearch] = useState("");
+  const [tab, setTab] = useState("market"); // market = จดทะเบียนตลาด · shop = ร้าน vs ตลาด (user 2026-10-15)
 
   useEffect(() => {
     (async () => {
@@ -129,6 +130,14 @@ export default function MarketRegistrationReportPage() {
   return (
     <div className="page-container">
       <div className="page-topbar"><div className="page-title">📈 ข้อมูลการจดทะเบียนรถในตลาด</div></div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 12, borderBottom: "2px solid #e5e7eb" }}>
+        {[{ k: "market", l: "📊 จดทะเบียนในตลาด" }, { k: "shop", l: "🏪 ร้านเทียบกับตลาด" }].map((t) => (
+          <button key={t.k} onClick={() => setTab(t.k)}
+            style={{ padding: "8px 18px", fontSize: 14, fontWeight: 700, border: "none", background: "transparent", borderBottom: tab === t.k ? "3px solid #072d6b" : "3px solid transparent", color: tab === t.k ? "#072d6b" : "#6b7280", cursor: "pointer", marginBottom: -2, fontFamily: "inherit" }}>{t.l}</button>
+        ))}
+      </div>
+      {tab === "shop" && <ShopVsMarketTab periods={periods} period={period} setPeriod={setPeriod} marketRows={rows} prevMarketRows={prevRows} />}
+      {tab === "market" && (<>
       <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 10 }}>
         จัดอันดับรวมทุกยี่ห้อตามจำนวนจดทะเบียน (ไม่แยกประเภทรถ) · ข้อมูลรายเดือนจากรายงาน Brand/Category/Model — ส่งภาพรายงานให้ Claude บันทึกเข้าระบบทุกเดือน
       </div>
@@ -227,6 +236,192 @@ export default function MarketRegistrationReportPage() {
           </tbody>
         </table>
       </div>
+      </>)}
+    </div>
+  );
+}
+
+// ===== แท็บ "ร้านเทียบกับตลาด": รถที่ร้านส่งจดทะเบียน (งานจดทะเบียนรถใหม่ นับตามเดือนของวันจดทะเบียนจริง) เทียบยอดจดทะเบียนทั้งตลาด (user 2026-10-15) =====
+// ฝั่งร้านใช้ registrations-api get_billing_data (ค่าจดทะเบียน ทั้งวางบิลแล้ว/ยังไม่วาง) — มี register_date + brand + model_series
+// ชื่อรุ่นร้าน (ฮอนด้าเก็บรหัสซีรีย์) → ชื่อรุ่นในรายงานตลาด; แมปไม่ได้จะแสดงแยกท้ายตาราง ไม่นับรวม
+const REG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api";
+const SHOP_TO_MARKET = {
+  AFS110: "WAVE 110", AFS125: "WAVE 125", ACF125: "GIORNO", NHX125: "LEAD125", WW160: "PCX 160", ACF110: "SCOOPY I", ACB160: "CLICK 160",
+  ACB125: "CLICK 125 I", NSS350: "FORZA 350", ADV160: "ADV160", ADV350: "ADV350", CBR150: "CBR 150R", CRF300: "CRF300", NBC110: "DREAM 110",
+  "N-MAX": "NMAX", R15: "YZF-R15", XSR: "XSR155",
+};
+const normModel = (v) => String(v || "").toUpperCase().replace(/[\s\-_.]/g, "");
+const shopBrand = (b) => (/ฮอนด้า|HONDA/i.test(String(b || "")) ? "HONDA" : /ยามาฮ่า|YAMAHA/i.test(String(b || "")) ? "YAMAHA" : "OTHERS");
+const marketNameOf = (series) => { const k = String(series || "").trim(); return SHOP_TO_MARKET[k] || SHOP_TO_MARKET[k.toUpperCase()] || k; };
+
+function ShopVsMarketTab({ periods, period, setPeriod, marketRows, prevMarketRows }) {
+  const [shop, setShop] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [brand, setBrand] = useState("all");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      setLoading(true); setError("");
+      try {
+        const lists = await Promise.all(["ฮอนด้า", "ยามาฮ่า"].map((br) =>
+          fetch(REG_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_billing_data", brand: br, category: "ค่าจดทะเบียน", only_unbilled: false }) })
+            .then((r) => r.text()).then((t) => (t.trim() ? JSON.parse(t) : [])).then((d) => (Array.isArray(d) ? d : d?.data || []))));
+        if (!alive) return;
+        setShop(lists.flat().filter((r) => r && r.register_date).map((r) => ({
+          ym: String(r.register_date).slice(0, 7), brand: shopBrand(r.brand), series: String(r.model_series || "").trim(), model: marketNameOf(r.model_series),
+        })));
+      } catch (e) { if (alive) setError("โหลดงานจดทะเบียนของร้านไม่สำเร็จ: " + (e.message || e)); }
+      if (alive) setLoading(false);
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const pp = prevPeriod(period);
+  const shopCur = shop.filter((r) => r.ym === period);
+  const shopPrev = shop.filter((r) => r.ym === pp);
+  const countBy = (list) => { const m = {}; list.forEach((r) => { const k = `${r.brand}|${normModel(r.model)}`; m[k] = (m[k] || 0) + 1; }); return m; };
+  const sc = countBy(shopCur), sp = countBy(shopPrev);
+  const marketKey = (r) => `${r.brand}|${normModel(r.model)}`;
+  const mkCur = {}; marketRows.forEach((r) => { mkCur[marketKey(r)] = (mkCur[marketKey(r)] || 0) + (Number(r.registered) || 0); });
+  const mkPrev = {}; prevMarketRows.forEach((r) => { mkPrev[marketKey(r)] = (mkPrev[marketKey(r)] || 0) + (Number(r.registered) || 0); });
+  const hasPrev = prevMarketRows.length > 0;
+  const known = new Set(marketRows.map(marketKey));
+
+  // แถวเทียบ: ทุกรุ่นในตลาด (HONDA/YAMAHA/OTHERS) — ร้านมีเฉพาะ 2 ยี่ห้อ
+  const list = marketRows
+    .map((r) => { const k = marketKey(r); return { key: k, brand: r.brand, category: r.category, model: r.model, market: Number(r.registered) || 0, shop: sc[k] || 0, marketPrev: hasPrev ? (mkPrev[k] || 0) : null, shopPrev: hasPrev ? (sp[k] || 0) : null }; })
+    .filter((r) => brand === "all" || r.brand === brand)
+    .sort((a, b) => b.market - a.market || b.shop - a.shop);
+  const unmatched = Object.entries(sc).filter(([k]) => !known.has(k)).map(([k, n]) => ({ key: k, brand: k.split("|")[0], n, series: [...new Set(shopCur.filter((r) => `${r.brand}|${normModel(r.model)}` === k).map((r) => r.series))].join(", ") }));
+  const sum = (arr, f) => arr.reduce((t, r) => t + (f(r) || 0), 0);
+  const brandRow = (b) => {
+    const mk = marketRows.filter((r) => r.brand === b).reduce((t, r) => t + (Number(r.registered) || 0), 0);
+    const mkp = prevMarketRows.filter((r) => r.brand === b).reduce((t, r) => t + (Number(r.registered) || 0), 0);
+    return { brand: b, market: mk, shop: shopCur.filter((r) => r.brand === b).length, marketPrev: mkp, shopPrev: shopPrev.filter((r) => r.brand === b).length };
+  };
+  const brands = ["HONDA", "YAMAHA"].map(brandRow);
+  const totalMarket = sum(marketRows, (r) => Number(r.registered));
+  const totalShop = shopCur.length;
+  const totalMarketPrev = sum(prevMarketRows, (r) => Number(r.registered));
+  const totalShopPrev = shopPrev.length;
+
+  // แนวโน้มรายเดือน: ทุกเดือนที่มีข้อมูลตลาด (list_market_periods มี honda/yamaha/others รวม)
+  const trend = [...periods].sort((a, b) => String(a.period).localeCompare(String(b.period))).map((p) => {
+    const sh = shop.filter((r) => r.ym === p.period);
+    return { period: p.period, market: Number(p.registered) || 0, shop: sh.length, h: Number(p.honda) || 0, hs: sh.filter((r) => r.brand === "HONDA").length, y: Number(p.yamaha) || 0, ys: sh.filter((r) => r.brand === "YAMAHA").length };
+  });
+
+  const shareCell = (n, d) => <span style={{ fontWeight: 700, color: d > 0 && n / d >= 0.3 ? "#15803d" : d > 0 && n / d >= 0.15 ? "#b45309" : "#374151" }}>{pct(n, d)}</span>;
+  const ptDiff = (n, d, pn, pd) => { if (pd == null || !(pd > 0) || !(d > 0)) return null; const v = (n / d - pn / pd) * 100; return <span style={{ fontSize: 11, marginLeft: 4, color: v > 0 ? "#15803d" : v < 0 ? "#b91c1c" : "#6b7280" }}>({v > 0 ? "+" : ""}{v.toFixed(1)} pt)</span>; };
+  const th = { padding: "9px 8px", fontSize: 12.5, textAlign: "left", whiteSpace: "nowrap", background: "#072d6b", color: "#fff" };
+  const td = { padding: "7px 8px", fontSize: 13, borderBottom: "1px solid #e5e7eb" };
+  const tdR = { ...td, textAlign: "right", whiteSpace: "nowrap" };
+  const card = { background: "#fff", borderRadius: 12, padding: 14, boxShadow: "0 2px 12px rgba(7,45,107,0.10)" };
+  const inp = { padding: "8px 12px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma" };
+
+  return (
+    <div>
+      <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 10 }}>
+        ร้านจดทะเบียน = งานจดทะเบียนรถใหม่ที่ร้านส่งจด นับตามเดือนของวันจดทะเบียนจริง (รถที่ลูกค้า/ไฟแนนซ์ไปจดเองไม่รวม · เดือนล่าสุดยังเพิ่มได้จนกว่าจะรับเล่มครบ) · ส่วนแบ่งร้าน = ร้านจด ÷ ตลาดจดทะเบียน
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+        <label style={{ fontSize: 13 }}>🗓️ เดือน</label>
+        <select value={period} onChange={(e) => setPeriod(e.target.value)} style={{ ...inp, minWidth: 150 }}>
+          {periods.map((p) => <option key={p.period} value={p.period}>{periodLabel(p.period)}</option>)}
+        </select>
+        <select value={brand} onChange={(e) => setBrand(e.target.value)} style={inp}>
+          <option value="all">ทุกยี่ห้อ</option><option value="HONDA">HONDA</option><option value="YAMAHA">YAMAHA</option><option value="OTHERS">อื่นๆ</option>
+        </select>
+        {loading && <span style={{ fontSize: 12.5, color: "#9ca3af" }}>กำลังโหลดงานจดทะเบียนของร้าน...</span>}
+      </div>
+      {error && <div style={{ marginBottom: 10, padding: "8px 12px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 13 }}>❌ {error}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12, marginBottom: 14 }}>
+        <div style={card}>
+          <div style={{ fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>ส่วนแบ่งของร้าน — {periodLabel(period)}</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr>{["ยี่ห้อ", "ร้านจด", "ตลาดจด", "ส่วนแบ่งร้าน"].map((h, i) => <th key={h} style={{ padding: "4px 6px", textAlign: i ? "right" : "left", borderBottom: "1px solid #e5e7eb", fontSize: 12, color: "#6b7280" }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {brands.map((b) => (
+                <tr key={b.brand}>
+                  <td style={{ padding: "6px", fontWeight: 700, color: BRAND_META[b.brand].color }}>{b.brand}</td>
+                  <td style={{ padding: "6px", textAlign: "right", fontWeight: 700 }}>{fmt(b.shop)}{hasPrev && <span style={{ fontSize: 11, color: "#6b7280" }}> ({fmt(b.shopPrev)})</span>}</td>
+                  <td style={{ padding: "6px", textAlign: "right" }}>{fmt(b.market)}{hasPrev && <span style={{ fontSize: 11, color: "#6b7280" }}> ({fmt(b.marketPrev)})</span>}</td>
+                  <td style={{ padding: "6px", textAlign: "right" }}>{shareCell(b.shop, b.market)}{hasPrev && ptDiff(b.shop, b.market, b.shopPrev, b.marketPrev)}</td>
+                </tr>
+              ))}
+              <tr style={{ background: "#fef3c7", fontWeight: 700 }}>
+                <td style={{ padding: "6px" }}>รวมทั้งตลาด</td>
+                <td style={{ padding: "6px", textAlign: "right" }}>{fmt(totalShop)}{hasPrev && <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 400 }}> ({fmt(totalShopPrev)})</span>}</td>
+                <td style={{ padding: "6px", textAlign: "right" }}>{fmt(totalMarket)}{hasPrev && <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 400 }}> ({fmt(totalMarketPrev)})</span>}</td>
+                <td style={{ padding: "6px", textAlign: "right" }}>{shareCell(totalShop, totalMarket)}{hasPrev && ptDiff(totalShop, totalMarket, totalShopPrev, totalMarketPrev)}</td>
+              </tr>
+            </tbody>
+          </table>
+          {hasPrev && <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>ตัวเลขในวงเล็บ = เดือนก่อน ({periodLabel(pp)}) · pt = จุดเปอร์เซ็นต์ที่เปลี่ยน</div>}
+        </div>
+        <div style={card}>
+          <div style={{ fontWeight: 700, color: "#072d6b", marginBottom: 8 }}>แนวโน้มรายเดือน (ส่วนแบ่งร้าน)</div>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead><tr>{["เดือน", "รวม", "HONDA", "YAMAHA"].map((h, i) => <th key={h} style={{ padding: "4px 6px", textAlign: i ? "right" : "left", borderBottom: "1px solid #e5e7eb", fontSize: 12, color: "#6b7280" }}>{h}</th>)}</tr></thead>
+            <tbody>
+              {trend.map((t) => (
+                <tr key={t.period} style={{ background: t.period === period ? "#eff6ff" : undefined, cursor: "pointer" }} onClick={() => setPeriod(t.period)}>
+                  <td style={{ padding: "5px 6px" }}>{periodLabel(t.period)}</td>
+                  <td style={{ padding: "5px 6px", textAlign: "right" }}>{fmt(t.shop)}/{fmt(t.market)} <b>{pct(t.shop, t.market)}</b></td>
+                  <td style={{ padding: "5px 6px", textAlign: "right", color: BRAND_META.HONDA.color }}>{fmt(t.hs)}/{fmt(t.h)} <b>{pct(t.hs, t.h)}</b></td>
+                  <td style={{ padding: "5px 6px", textAlign: "right", color: BRAND_META.YAMAHA.color }}>{fmt(t.ys)}/{fmt(t.y)} <b>{pct(t.ys, t.y)}</b></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div style={{ ...card, padding: 0, overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead><tr>
+            <th style={{ ...th, textAlign: "center", width: 44 }}>อันดับ</th><th style={th}>รุ่น</th><th style={th}>ยี่ห้อ</th><th style={{ ...th, textAlign: "center" }}>ประเภท</th>
+            <th style={{ ...th, textAlign: "right" }}>ร้านจด (คัน)</th><th style={{ ...th, textAlign: "right" }}>ตลาดจด (คัน)</th><th style={{ ...th, textAlign: "right" }}>ส่วนแบ่งร้าน</th>
+            <th style={{ ...th, textAlign: "right" }}>เดือนก่อน ร้าน/ตลาด</th><th style={{ ...th, textAlign: "right" }}>ส่วนแบ่งเดือนก่อน</th>
+          </tr></thead>
+          <tbody>
+            {list.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 22 }}>ไม่มีข้อมูล</td></tr>}
+            {list.map((r, i) => {
+              const bm = BRAND_META[r.brand] || BRAND_META.OTHERS;
+              return (
+                <tr key={r.key} style={{ background: r.shop > 0 ? (i % 2 ? "#f9fafb" : "#fff") : "#fafafa", color: r.shop > 0 ? undefined : "#9ca3af" }}>
+                  <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{i + 1}</td>
+                  <td style={{ ...td, fontWeight: 600 }}>{r.model}</td>
+                  <td style={td}><span style={{ padding: "1px 8px", borderRadius: 10, fontSize: 11.5, fontWeight: 700, background: bm.bg, color: bm.color }}>{bm.label}</span></td>
+                  <td style={{ ...td, textAlign: "center", fontSize: 12 }}>{r.category}</td>
+                  <td style={{ ...tdR, fontWeight: 700, fontSize: 14, color: r.shop > 0 ? "#072d6b" : "#9ca3af" }}>{r.shop ? fmt(r.shop) : "-"}</td>
+                  <td style={tdR}>{fmt(r.market)}</td>
+                  <td style={tdR}>{r.shop ? shareCell(r.shop, r.market) : "-"}</td>
+                  <td style={{ ...tdR, color: "#6b7280" }}>{r.shopPrev == null ? "-" : `${fmt(r.shopPrev)}/${fmt(r.marketPrev)}`}</td>
+                  <td style={{ ...tdR, color: "#6b7280" }}>{r.shopPrev == null || !r.shopPrev ? "-" : pct(r.shopPrev, r.marketPrev)}</td>
+                </tr>
+              );
+            })}
+            {list.length > 0 && (
+              <tr style={{ background: "#fef3c7", fontWeight: 700 }}>
+                <td style={td} colSpan={4}>รวม{brand !== "all" ? ` (${brand})` : ""}</td>
+                <td style={tdR}>{fmt(sum(list, (r) => r.shop))}</td><td style={tdR}>{fmt(sum(list, (r) => r.market))}</td>
+                <td style={tdR}>{shareCell(sum(list, (r) => r.shop), sum(list, (r) => r.market))}</td>
+                <td style={tdR}>{hasPrev ? `${fmt(sum(list, (r) => r.shopPrev))}/${fmt(sum(list, (r) => r.marketPrev))}` : "-"}</td>
+                <td style={tdR}>{hasPrev ? pct(sum(list, (r) => r.shopPrev), sum(list, (r) => r.marketPrev)) : "-"}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+      {unmatched.length > 0 && (
+        <div style={{ marginTop: 10, padding: "8px 12px", borderRadius: 8, background: "#fffbeb", border: "1px solid #fde68a", fontSize: 12.5 }}>
+          ⚠️ รถที่ร้านจดใน {periodLabel(period)} แต่ไม่พบรุ่นในรายงานตลาด (ไม่นับในตาราง): {unmatched.map((u) => `${u.series} ${u.n} คัน`).join(" · ")}
+        </div>
+      )}
     </div>
   );
 }

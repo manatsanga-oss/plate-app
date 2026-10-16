@@ -928,7 +928,20 @@ export default function SparePartsOrderPage({ currentUser }) {
           setOrders(prev => prev.map(o => o.order_id === order.order_id ? { ...o, status: "มาครบ" } : o));
         } catch {}
       }
-      setShowDetail({ ...order, status: finalStatus, items: itemsWithSubs, dcsStatus: null, boItems, alreadyApproved });
+      // "มาครบ" จากสต๊อก (ยังไม่ได้สั่ง DCS = ไม่มีเลขใบรับสั่งซื้อ) แต่วันนี้ของในสต๊อกไม่พอแล้ว (ถูกเบิกไปใช้งานอื่น)
+      // → ถอยกลับเป็น "รอดำเนินการ" ให้ไปสั่งซื้อ (เคส PO691000030 ลูกปืน 91001-KCW-003 มาครบ 09/10 แต่ 16/10 สต๊อก 0) — user 2026-10-16
+      let stockGoneNote = "";
+      if (!allInStock && order.status === "มาครบ" && !order.vendor_po_no && !order.job_no) {
+        const missing = itemsWithStock.filter(it => Number(it.stock_qty || 0) < Number(it.quantity || 0)).map(it => `${it.part_code} (สต๊อก ${Number(it.stock_qty || 0)}/${it.quantity})`);
+        try {
+          await api("update_order_status", { order_id: order.order_id, status: "รอดำเนินการ" });
+          finalStatus = "รอดำเนินการ";
+          setOrders(prev => prev.map(o => o.order_id === order.order_id ? { ...o, status: "รอดำเนินการ" } : o));
+          stockGoneNote = `⚠️ ใบนี้เคย "มาครบ" จากของในสต๊อก แต่ตอนนี้สต๊อกไม่พอแล้ว: ${missing.join(", ")} — เปลี่ยนสถานะกลับเป็น "รอดำเนินการ" ให้สั่งซื้อ`;
+          setMessage(stockGoneNote);
+        } catch {}
+      }
+      setShowDetail({ ...order, status: finalStatus, items: itemsWithSubs, dcsStatus: null, boItems, alreadyApproved, stockGoneNote });
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
@@ -1778,7 +1791,7 @@ export default function SparePartsOrderPage({ currentUser }) {
               <div><b>เบอร์โทร:</b> {showDetail.customer_phone || "-"}</div>
               <div><b>ทะเบียนรถ:</b> {showDetail.license_plate || "-"}</div>
               <div><b>สถานะจอด:</b> {showDetail.parking_status}</div>
-              <div><b>สถานะ:</b> {showDetail.status}</div>
+              <div><b>สถานะ:</b> {showDetail.status}{showDetail.stockGoneNote && <div style={{ marginTop: 4, padding: "6px 10px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", color: "#b91c1c", fontSize: 12.5, fontWeight: 400 }}>{showDetail.stockGoneNote}</div>}</div>
               {showDetail.vendor_po_no && <div><b>เลขที่ใบรับสั่งซื้อ:</b> <span style={{ color: "#10b981", fontWeight: 700 }}>{showDetail.vendor_po_no}</span></div>}
               {(() => {
                 const ps = pdoSoldMap[showDetail.order_id];
