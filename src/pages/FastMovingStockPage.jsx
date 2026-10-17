@@ -162,7 +162,10 @@ export default function FastMovingStockPage() {
     // "ไม่ค้างรับเข้า": ซ่อนรายการที่ค้างรับเข้าสต๊อก
     // (ค้างรับเข้า = สั่งซื้อแล้ว + ไม่ค้างส่ง + วันที่สั่งซื้อ > วันที่รับเข้าล่าสุด หรือยังไม่เคยรับเข้า)
     // เงื่อนไขเพิ่ม: สั่งซื้อก่อน 31/5/2569 (2026-05-31) ถือว่ารับเข้าหมดแล้ว → ไม่นับเป็นค้าง
-    if (hidePendingReceipt && r.last_order_date && Number(r.backorder_qty || 0) <= 0) {
+    // ยกเว้นแบตเตอรี่ HONDA (PG-001): สั่งนอก DCS ไม่มีข้อมูลใบสั่งซื้อ/ค้างส่ง — "วันที่สั่งล่าสุด" เป็นแค่ใบมัดจำลูกค้า
+    // ตัดสินค้างรับเข้าไม่ได้ → ของหมดต้องโชว์ให้สั่งเสมอ (user 2026-10-17)
+    const isHondaBattery = _brand.includes("HONDA") && /^PG-001\b/.test(String(r.product_group || "").trim());
+    if (hidePendingReceipt && !isHondaBattery && r.last_order_date && Number(r.backorder_qty || 0) <= 0) {
       const orderDate = new Date(r.last_order_date);
       const RECEIPT_CUTOFF = new Date("2026-05-31"); // สั่งก่อนวันนี้ = รับเข้าแล้ว
       if (!isNaN(orderDate) && orderDate.getTime() >= RECEIPT_CUTOFF.getTime()) {
@@ -370,7 +373,7 @@ export default function FastMovingStockPage() {
           <input type="checkbox" checked={filterPendingJob === "no"} onChange={e => { setFilterPendingJob(e.target.checked ? "no" : "all"); setCurrentPage(1); }} />
           ไม่ค้างปิด JOB
         </label>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#dc2626", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: hidePendingReceipt ? "#fef2f2" : "#fff" }}>
+        <label title="ซ่อนรหัสที่สั่งซื้อแล้ว (ตั้งแต่ 31/5/69) แต่ยังไม่มีใบรับเข้าหลังวันสั่ง — ยกเว้นแบตเตอรี่ HONDA (PG-001) สั่งนอก DCS แสดงเสมอ" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#dc2626", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: hidePendingReceipt ? "#fef2f2" : "#fff" }}>
           <input type="checkbox" checked={hidePendingReceipt} onChange={e => { setHidePendingReceipt(e.target.checked); setCurrentPage(1); }} />
           📥 ไม่ค้างรับเข้า
         </label>
