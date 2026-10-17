@@ -716,7 +716,7 @@ export default function App() {
         {activeMenu === "repairdeposit" && canAccess("repairdeposit") && (
           <RepairDepositPage currentUser={currentUser} />
         )}
-        {activeMenu === "fastmovingstock" && canAccess("fastmovingstock") && <FastMovingStockPage />}
+        {activeMenu === "fastmovingstock" && canAccess("fastmovingstock") && <FastMovingStockPage currentUser={currentUser} />}
         {activeMenu === "motostock" && canAccess("motostock") && <MotoStockPage />}
         {activeMenu === "mototransfer" && canAccess("mototransfer") && <MotoTransferPage currentUser={currentUser} onNavigate={setActiveMenu} />}
         {activeMenu === "pettycash" && canAccess("pettycash") && <PettyCashFuelPage currentUser={currentUser} />}

@@ -4,9 +4,14 @@ import { printBoxLabels as printBoxLabelsShared } from "../utils/boxLabels";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-master-api"; // get_product_groups — master กลุ่มสินค้า (สถานะใช้งาน/ยกเลิก)
+const MAIN_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-api"; // list/save/cancel_manual_order — บันทึกสั่งซื้อนอก DCS (แบตเตอรี่ HONDA)
+// แบตเตอรี่ HONDA (PG-001) สั่งนอก DCS: ไม่มีใบสั่งซื้อ/ค้างส่ง DCS → ใช้ "บันทึกสั่งซื้อ" ในหน้านี้บอกว่าสั่งแล้วรอรับเข้า (user 2026-10-17)
+const isHondaBattery = (r) => String(r?.brand || "").toUpperCase().includes("HONDA") && /^PG-001\b/.test(String(r?.product_group || "").trim());
+const normCode = (c) => String(c || "").replace(/-/g, "").trim().toUpperCase();
+const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const groupCodeOf = (v) => { const m = String(v || "").match(/^PG-\d+/i); return m ? m[0].toUpperCase() : ""; };
 
-export default function FastMovingStockPage() {
+export default function FastMovingStockPage({ currentUser }) {
   const [rows, setRows] = useState([]);
   // เลือกแถวเพื่อพิมพ์ป้ายปิดหน้ากล่อง (สติ๊กเกอร์ A4) — user 2026-09-15
   const [labelSel, setLabelSel] = useState(() => new Set());
@@ -34,6 +39,44 @@ export default function FastMovingStockPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [jobDetail, setJobDetail] = useState(null); // { item_code, item_name, loading, rows }
   const [loanDetail, setLoanDetail] = useState(null); // { part_code, product_name, loading, rows }
+  // บันทึกสั่งซื้อนอก DCS (แบตเตอรี่ HONDA) — active = รอรับเข้า, received = รับเข้าแล้ว (ย้อนหลัง 14 วัน) · n8n ปิดให้เองเมื่อรายงานรับอะไหล่มีใบรับหลังวันสั่ง
+  const [manualOrders, setManualOrders] = useState([]);
+  const [moModal, setMoModal] = useState(null); // { row, order_date, qty, vendor, note, saving, err }
+  async function loadManualOrders() {
+    try {
+      const res = await fetch(MAIN_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_manual_orders" }) });
+      const d = await res.json();
+      setManualOrders((Array.isArray(d) ? d : []).filter(o => o && o.part_code));
+    } catch { setManualOrders([]); }
+  }
+  const sameBrand = (o, r) => String(o.brand || "").toUpperCase() === String(r.brand || "").toUpperCase();
+  const manualOrderFor = (r) => manualOrders.find(o => o.status === "active" && sameBrand(o, r) && normCode(o.part_code) === normCode(r.part_code)) || null;
+  const receivedOrderFor = (r) => manualOrders.find(o => o.status === "received" && sameBrand(o, r) && normCode(o.part_code) === normCode(r.part_code)) || null;
+  function openManualOrder(r) {
+    const avg = Number(r.avg_order_qty_3m || 0);
+    setMoModal({ row: r, order_date: todayISO(), qty: Math.max(1, Math.ceil(avg || 1)), vendor: "", note: "", saving: false, err: "" });
+  }
+  async function saveManualOrder() {
+    if (!moModal) return;
+    const qty = Number(moModal.qty);
+    if (!(qty > 0)) { setMoModal(m => ({ ...m, err: "ใส่จำนวนที่สั่ง" })); return; }
+    setMoModal(m => ({ ...m, saving: true, err: "" }));
+    try {
+      const res = await fetch(MAIN_API, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "save_manual_order", brand: moModal.row.brand || "HONDA", part_code: moModal.row.part_code, order_date: moModal.order_date, qty, vendor: moModal.vendor.trim(), note: moModal.note.trim(), created_by: currentUser?.username || currentUser?.name || "" }) });
+      const d = await res.json();
+      if (!Array.isArray(d) || !d.length || !d[0]?.id) throw new Error("no id");
+      setMoModal(null);
+      loadManualOrders();
+    } catch { setMoModal(m => ({ ...m, saving: false, err: "บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง" })); }
+  }
+  async function cancelManualOrder(o) {
+    if (!window.confirm(`ยกเลิกบันทึกสั่งซื้อ ${o.part_code} วันที่ ${new Date(o.order_date).toLocaleDateString("th-TH")} × ${Number(o.qty)}?`)) return;
+    try {
+      await fetch(MAIN_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "cancel_manual_order", id: o.id }) });
+    } catch {}
+    loadManualOrders();
+  }
 
   async function openJobDetail(part_code, product_name) {
     setJobDetail({ part_code, product_name, loading: true, rows: [] });
@@ -68,6 +111,7 @@ export default function FastMovingStockPage() {
 
   async function fetchData() {
     setLoading(true);
+    loadManualOrders(); // ไม่ await — ป้ายสั่งซื้อแบตโหลดคู่กัน
     try {
       const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
       const data = await res.json();
@@ -162,10 +206,11 @@ export default function FastMovingStockPage() {
     // "ไม่ค้างรับเข้า": ซ่อนรายการที่ค้างรับเข้าสต๊อก
     // (ค้างรับเข้า = สั่งซื้อแล้ว + ไม่ค้างส่ง + วันที่สั่งซื้อ > วันที่รับเข้าล่าสุด หรือยังไม่เคยรับเข้า)
     // เงื่อนไขเพิ่ม: สั่งซื้อก่อน 31/5/2569 (2026-05-31) ถือว่ารับเข้าหมดแล้ว → ไม่นับเป็นค้าง
-    // ยกเว้นแบตเตอรี่ HONDA (PG-001): สั่งนอก DCS ไม่มีข้อมูลใบสั่งซื้อ/ค้างส่ง — "วันที่สั่งล่าสุด" เป็นแค่ใบมัดจำลูกค้า
-    // ตัดสินค้างรับเข้าไม่ได้ → ของหมดต้องโชว์ให้สั่งเสมอ (user 2026-10-17)
-    const isHondaBattery = _brand.includes("HONDA") && /^PG-001\b/.test(String(r.product_group || "").trim());
-    if (hidePendingReceipt && !isHondaBattery && r.last_order_date && Number(r.backorder_qty || 0) <= 0) {
+    // แบตเตอรี่ HONDA (PG-001) สั่งนอก DCS: "วันที่สั่งล่าสุด" เป็นแค่ใบมัดจำลูกค้า ตัดสินค้างรับเข้าไม่ได้
+    // → ใช้ "บันทึกสั่งซื้อ" ในหน้านี้แทน: มีรายการ active = สั่งแล้วรอรับเข้า (ซ่อน), ไม่มี = โชว์ให้สั่ง (user 2026-10-17)
+    const hondaBatt = isHondaBattery(r);
+    if (hidePendingReceipt && hondaBatt && manualOrderFor(r)) return false; // แบต HONDA: บันทึกสั่งซื้อแล้วรอรับเข้า → ซ่อน
+    if (hidePendingReceipt && !hondaBatt && r.last_order_date && Number(r.backorder_qty || 0) <= 0) {
       const orderDate = new Date(r.last_order_date);
       const RECEIPT_CUTOFF = new Date("2026-05-31"); // สั่งก่อนวันนี้ = รับเข้าแล้ว
       if (!isNaN(orderDate) && orderDate.getTime() >= RECEIPT_CUTOFF.getTime()) {
@@ -373,7 +418,7 @@ export default function FastMovingStockPage() {
           <input type="checkbox" checked={filterPendingJob === "no"} onChange={e => { setFilterPendingJob(e.target.checked ? "no" : "all"); setCurrentPage(1); }} />
           ไม่ค้างปิด JOB
         </label>
-        <label title="ซ่อนรหัสที่สั่งซื้อแล้ว (ตั้งแต่ 31/5/69) แต่ยังไม่มีใบรับเข้าหลังวันสั่ง — ยกเว้นแบตเตอรี่ HONDA (PG-001) สั่งนอก DCS แสดงเสมอ" style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#dc2626", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: hidePendingReceipt ? "#fef2f2" : "#fff" }}>
+        <label title='ซ่อนรหัสที่สั่งซื้อแล้ว (ตั้งแต่ 31/5/69) แต่ยังไม่มีใบรับเข้าหลังวันสั่ง · แบตเตอรี่ HONDA (สั่งนอก DCS) ซ่อนเฉพาะที่กด "บันทึกสั่งซื้อ" ไว้แล้ว' style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#dc2626", fontWeight: 600, cursor: "pointer", padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: hidePendingReceipt ? "#fef2f2" : "#fff" }}>
           <input type="checkbox" checked={hidePendingReceipt} onChange={e => { setHidePendingReceipt(e.target.checked); setCurrentPage(1); }} />
           📥 ไม่ค้างรับเข้า
         </label>
@@ -449,7 +494,27 @@ export default function FastMovingStockPage() {
                         title="คลิกดูเลขที่ใบให้ยืม">{fmtQty(r.loan_qty)}</span>
                     ) : ""}
                   </td>
-                  <td style={td}>{r.last_order_date ? new Date(r.last_order_date).toLocaleDateString("th-TH") : ""}</td>
+                  <td style={td}>
+                    {r.last_order_date ? new Date(r.last_order_date).toLocaleDateString("th-TH") : ""}
+                    {isHondaBattery(r) && (() => {
+                      const mo = manualOrderFor(r);
+                      if (mo) return (
+                        <div style={{ marginTop: 3, display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700, background: "#ffedd5", color: "#9a3412", whiteSpace: "nowrap" }}
+                          title={`บันทึกสั่งซื้อนอก DCS${mo.vendor ? ` · ${mo.vendor}` : ""}${mo.note ? ` · ${mo.note}` : ""}${mo.created_by ? ` · โดย ${mo.created_by}` : ""} — ระบบจะปิดให้เองเมื่อรายงานรับอะไหล่มีใบรับหลังวันสั่ง`}>
+                          🛒 สั่งแล้ว {new Date(mo.order_date).toLocaleDateString("th-TH", { day: "numeric", month: "numeric" })} × {Number(mo.qty)} รอรับเข้า
+                          <span onClick={() => cancelManualOrder(mo)} title="ยกเลิกบันทึกสั่งซื้อ" style={{ cursor: "pointer", color: "#b91c1c", marginLeft: 2 }}>✕</span>
+                        </div>
+                      );
+                      const rc = receivedOrderFor(r);
+                      return (
+                        <div style={{ marginTop: 3, display: "flex", alignItems: "center", gap: 6 }}>
+                          <button onClick={() => openManualOrder(r)} title="บันทึกว่าสั่งซื้อแบตนอก DCS แล้ว (รอรับเข้า)"
+                            style={{ padding: "2px 8px", fontSize: 11, fontWeight: 700, background: "#fff7ed", color: "#c2410c", border: "1px solid #fdba74", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>📝 บันทึกสั่งซื้อ</button>
+                          {rc && <span style={{ fontSize: 11, color: "#6b7280", whiteSpace: "nowrap" }} title={`ใบรับ ${rc.received_doc || "-"}`}>✔ รับเข้าแล้ว {new Date(rc.received_at).toLocaleDateString("th-TH", { day: "numeric", month: "numeric" })}</span>}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td style={{ ...td, textAlign: "right" }}>{Number(r.avg_order_qty_3m || 0) > 0 ? Number(r.avg_order_qty_3m).toLocaleString("th-TH", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : ""}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.backorder_qty || 0) > 0 ? "#b91c1c" : undefined, fontWeight: Number(r.backorder_qty || 0) > 0 ? 700 : undefined }}>{Number(r.backorder_qty || 0) > 0 ? fmtQty(r.backorder_qty) : ""}</td>
                   <td style={td}>{r.expected_date ? new Date(r.expected_date).toLocaleDateString("th-TH") : ""}</td>
@@ -502,6 +567,28 @@ export default function FastMovingStockPage() {
         </div>
       )}
 
+      {moModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 2100 }}
+             onClick={() => !moModal.saving && setMoModal(null)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 10, width: 420, maxWidth: "95%", padding: 18 }}>
+            <h3 style={{ margin: "0 0 10px", color: "#c2410c" }}>📝 บันทึกสั่งซื้อนอก DCS</h3>
+            <div style={{ fontSize: 13, marginBottom: 10 }}><b>{moModal.row.part_code}</b> · {moModal.row.product_name || "-"}<br />
+              <span style={{ color: "#6b7280" }}>สต๊อกตอนนี้ {fmtQty(moModal.row.quantity)} · จ่ายเฉลี่ย 3 ด. {Number(moModal.row.avg_order_qty_3m || 0).toLocaleString("th-TH", { maximumFractionDigits: 1 })}</span></div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, fontSize: 13 }}>
+              <label>วันที่สั่ง<br /><input type="date" value={moModal.order_date} onChange={e => setMoModal(m => ({ ...m, order_date: e.target.value }))} style={{ width: "100%", padding: 6, border: "1px solid #d1d5db", borderRadius: 6 }} /></label>
+              <label>จำนวน<br /><input type="number" min="1" step="1" value={moModal.qty} onChange={e => setMoModal(m => ({ ...m, qty: e.target.value }))} style={{ width: "100%", padding: 6, border: "1px solid #d1d5db", borderRadius: 6 }} /></label>
+              <label style={{ gridColumn: "1 / -1" }}>สั่งจาก (ร้าน/บริษัท)<br /><input value={moModal.vendor} onChange={e => setMoModal(m => ({ ...m, vendor: e.target.value }))} placeholder="เช่น FURUKAWA / ร้านแบต…" style={{ width: "100%", padding: 6, border: "1px solid #d1d5db", borderRadius: 6 }} /></label>
+              <label style={{ gridColumn: "1 / -1" }}>หมายเหตุ<br /><input value={moModal.note} onChange={e => setMoModal(m => ({ ...m, note: e.target.value }))} style={{ width: "100%", padding: 6, border: "1px solid #d1d5db", borderRadius: 6 }} /></label>
+            </div>
+            <div style={{ fontSize: 11.5, color: "#6b7280", marginTop: 8 }}>ป้าย "สั่งแล้ว รอรับเข้า" จะหายเองเมื่อ upload รายงานรับอะไหล่ที่มีรหัสนี้ลงวันที่ตั้งแต่วันสั่ง (รวมใบรับนอกการสั่งซื้อ SP…)</div>
+            {moModal.err && <div style={{ color: "#dc2626", fontSize: 13, marginTop: 6 }}>⚠️ {moModal.err}</div>}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+              <button onClick={() => setMoModal(null)} disabled={moModal.saving} style={{ padding: "6px 14px", border: "1px solid #d1d5db", background: "#fff", borderRadius: 6, cursor: "pointer" }}>ยกเลิก</button>
+              <button onClick={saveManualOrder} disabled={moModal.saving} style={{ padding: "6px 14px", border: "none", background: "#ea580c", color: "#fff", borderRadius: 6, cursor: "pointer", fontWeight: 700 }}>{moModal.saving ? "กำลังบันทึก..." : "บันทึกสั่งซื้อ"}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {jobDetail && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 2000 }}
              onClick={() => setJobDetail(null)}>
