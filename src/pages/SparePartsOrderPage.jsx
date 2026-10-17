@@ -945,7 +945,7 @@ export default function SparePartsOrderPage({ currentUser }) {
     } catch { setMessage("โหลดรายละเอียดไม่สำเร็จ"); }
   }
 
-  // ปุ่ม "แจ้งลูกค้า" ทาง LINE (ใช้ทั้งใบ PDS เปิดงาน + ใบ PDO มาครบ) — ขึ้นเฉพาะลูกค้ามี LINE ผูก
+  // ปุ่ม "แจ้งลูกค้า" ทาง LINE (ใบ PDS เปิดงาน · ใบ PDS มาครบ+ไม่จอดร้าน · ใบ PDO มาครบ) — ขึ้นเฉพาะลูกค้ามี LINE ผูก
   function renderNotifyButton(o) {
     if (!lineByPhone[phoneLast9(o.customer_phone)]) return null;
     const isPDO = (o.deposit_doc_no || "").startsWith("PDO");
@@ -1463,6 +1463,8 @@ export default function SparePartsOrderPage({ currentUser }) {
                         )}
                         {/* ใบ PDO (มัดจำสั่งซื้อ) อะไหล่มาครบ → แจ้งลูกค้าเลือกวันมารับสินค้าทาง LINE */}
                         {o.status === "มาครบ" && (o.deposit_doc_no || "").startsWith("PDO") && renderNotifyButton(o)}
+                        {/* ใบ PDS มาครบ + รถไม่จอดร้าน → แจ้ง LINE เชิญนำรถเข้ามารับบริการได้เลย ไม่ต้องรอเปิด Job (user 2026-10-17) · รถจอดร้านไม่ขึ้น เพราะข้อความ "ซ่อมเสร็จ" ยังไม่จริง */}
+                        {o.status === "มาครบ" && !(o.deposit_doc_no || "").startsWith("PDO") && o.parking_status !== "จอดร้าน" && renderNotifyButton(o)}
                         {o.status === "เปิดงาน" && (
                           <>
                             <button onClick={() => openJobModal(o, "job")}
