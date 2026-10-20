@@ -455,10 +455,15 @@ export function buildDailyCashItems(src, ctx) {
     const amt = num(d.deposit_amount);
     const m = String(d.payment_method || "");
     const split = { cash: 0, transfer: 0, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 };
-    if (m.includes("สด")) split.cash = amt; else if (m.includes("โอน")) split.transfer = amt; else split.other = amt;
+    // หลายวิธีชำระ (user 2026-10-20): payment_breakdowns [{method, amount}] แยกเงินสด/เงินโอนตามจริง · ใบเก่าไม่มี → วิธีเดียวตาม payment_method
+    let pbk = d.payment_breakdowns;
+    if (typeof pbk === "string") { try { pbk = JSON.parse(pbk); } catch { pbk = null; } }
+    if (Array.isArray(pbk) && pbk.length) {
+      for (const b of pbk) { const bm = String(b.method || ""), ba = num(b.amount); if (bm.includes("สด")) split.cash += ba; else if (bm.includes("โอน")) split.transfer += ba; else split.other += ba; }
+    } else if (m.includes("สด")) split.cash = amt; else if (m.includes("โอน")) split.transfer = amt; else split.other = amt;
     // เมนูมัดจำอะไหล่ไม่มีช่องเลือกบัญชีรับโอน → ใช้กฎสาขา (user 2026-10-06): สิงห์ชัย (SCY01/04/07) เข้า กรุงเทพ 2490309131, ป.เปา (SCY05/06) เข้า กรุงเทพ 2490391139
     //   เงินเข้าวันถัดไปแบบเดียวกับรับชำระทั่วไป (รายงานเคลื่อนไหวบัญชีรวมเป็นก้อนรายวัน/สาขาใน Accounting API)
-    addTransferBy(split, [], d.payment_account || partDepositAccountByBranch(d.branch_code));
+    if (split.transfer > 0) addTransferBy(split, [], d.payment_account || partDepositAccountByBranch(d.branch_code));
     return {
       kind: "part_deposit", category: "รายได้เงินมัดจำอะไหล่/บริการ",
       doc_no: d.deposit_doc_no, date: d.deposit_date, ref_no: "",

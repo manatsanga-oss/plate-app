@@ -25,6 +25,20 @@ async function post(body) {
 const asArray = (d) => (Array.isArray(d) ? d : d ? [d] : []);
 const num = (v) => { const n = Number(String(v == null ? "" : v).replace(/,/g, "")); return isFinite(n) ? n : 0; };
 const fmt = (n) => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// รับชำระมัดจำได้มากกว่า 1 วิธี (user 2026-10-20): เก็บ payment_breakdowns [{method, amount}] + payment_method = "เงินสด+เงินโอน"
+//   + transfer_amount (ส่วนเงินโอน) ให้สรุปรายวัน/รายงานเคลื่อนไหวบัญชีแยกเงินสด-เงินโอนได้ถูก
+const PAY_METHODS = ["เงินสด", "เงินโอน"];
+const parseBreakdowns = (r) => {
+  let b = r?.payment_breakdowns;
+  if (typeof b === "string") { try { b = JSON.parse(b); } catch { b = null; } }
+  if (!Array.isArray(b) || !b.length) return null;
+  return b.map((x) => ({ method: String(x.method || ""), amount: num(x.amount) })).filter((x) => x.amount > 0);
+};
+// ข้อความวิธีชำระของใบ: "เงินสด 1,000.00 + เงินโอน 500.00" (ใบเก่าไม่มี breakdown → วิธีเดียว)
+const payLabel = (r) => {
+  const b = parseBreakdowns(r);
+  return b && b.length > 1 ? b.map((x) => `${x.method} ${fmt(x.amount)}`).join(" + ") : (r?.payment_method || "-");
+};
 const todayStr = () => new Date().toISOString().slice(0, 10);
 const thaiDate = (iso) => {
   if (!iso) return "—";
@@ -57,6 +71,12 @@ export default function PartDepositPage({ currentUser }) {
   const [payConfirmed, setPayConfirmed] = useState(false); // กด "ตกลง" ยืนยันยอดแล้ว → รอกดบันทึกอีกที
   const [payMethod, setPayMethod] = useState("เงินสด");
   const [payAmount, setPayAmount] = useState("");
+  // ใบรับมัดจำ: รายการวิธีชำระหลายบรรทัด (payAmount = ยอดรวมของทุกบรรทัด) · ใบคืนมัดจำใช้ payMethod/payAmount เดิม
+  const [payLines, setPayLines] = useState([{ method: "เงินสด", amount: "" }]);
+  const linesTotal = (ls) => Math.round(ls.reduce((t, l) => t + num(l.amount), 0) * 100) / 100;
+  const updLines = (next) => { setPayLines(next); setPayAmount(linesTotal(next) > 0 ? String(linesTotal(next)) : ""); };
+  const payLinesClean = () => payLines.map((l) => ({ method: l.method, amount: num(l.amount) })).filter((l) => l.amount > 0);
+  const payMethodLabel = () => { const ms = [...new Set(payLinesClean().map((l) => l.method))]; return ms.length ? ms.join("+") : payMethod; };
   const [savedDocNo, setSavedDocNo] = useState("");       // เลขที่ใบรับมัดจำที่เพิ่งบันทึก
   const [refundDoc, setRefundDoc] = useState("");         // เลขที่ใบรับมัดจำที่เลือกคืนเงิน
   const [view, setView] = useState("form");               // form | search | detail (โหมดค้นหาแบบ NID — เฉพาะแท็บบริการ)
@@ -112,17 +132,19 @@ export default function PartDepositPage({ currentUser }) {
     setView("form"); setSelDoc(null); setSearchQ("");
   }
   function switchKind(k) {
-    setDocKind(k); setMessage(""); setPayOpen(false); setPayConfirmed(false); setSavedDocNo(""); setRefundDoc(""); setPayAmount("");
+    setDocKind(k); setMessage(""); setPayOpen(false); setPayConfirmed(false); setSavedDocNo(""); setRefundDoc(""); setPayAmount(""); setPayLines([{ method: "เงินสด", amount: "" }]);
   }
   function resetServiceForm() {
     setForm({ ...FORM0, deposit_date: todayStr() });
-    setPayOpen(false); setPayConfirmed(false); setPayAmount(""); setRefundDoc("");
+    setPayOpen(false); setPayConfirmed(false); setPayAmount(""); setRefundDoc(""); setPayLines([{ method: "เงินสด", amount: "" }]);
   }
 
   // กด "ตกลง" ในส่วนชำระโดย = ยืนยันยอด (ยังไม่บันทึก DB — รอกดปุ่มบันทึกอีกที)
   function confirmPay() {
     const amt = num(payAmount);
     if (!(amt > 0)) { setMessage("❌ กรอกจำนวนเงินให้ถูกต้อง"); return; }
+    if (!isRefund && payLines.some((l) => num(l.amount) < 0)) { setMessage("❌ จำนวนเงินแต่ละวิธีต้องไม่ติดลบ"); return; }
+    if (!isRefund && payLines.some((l) => String(l.amount).trim() !== "" && !(num(l.amount) > 0))) { setMessage("❌ ลบบรรทัดวิธีชำระที่ยอดเป็น 0 ออกก่อน"); return; }
     if (isRefund && refundSel && amt > refundAvail(refundSel)) {
       setMessage(`❌ ยอดคืนเกินมัดจำที่คืนได้ (${fmt(refundAvail(refundSel))} บาท)`); return;
     }
@@ -168,7 +190,7 @@ table{width:100%;border-collapse:collapse}td{border:1px solid #999;padding:6px 1
 <tr><td class="l">ลูกค้า</td><td>${esc(r.customer_name)}${r.customer_code ? " (" + esc(r.customer_code) + ")" : ""}</td></tr>
 <tr><td class="l">เบอร์โทร</td><td>${esc(r.customer_phone || "-")}</td></tr>
 ${r.vin ? `<tr><td class="l">หมายเลขตัวถัง</td><td>${esc(r.vin)}</td></tr>` : ""}
-<tr><td class="l">ยอดเงินมัดจำ</td><td><b>${fmt(r.deposit_amount)} บาท</b> (${esc(r.payment_method || "-")})</td></tr>
+<tr><td class="l">ยอดเงินมัดจำ</td><td><b>${fmt(r.deposit_amount)} บาท</b> (${esc(payLabel(r))})</td></tr>
 ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้ว</td><td>${fmt(r.refunded_amount)} บาท${r.refund_method ? " (" + esc(r.refund_method) + ")" : ""}</td></tr>` : ""}
 <tr><td class="l">ยอดมัดจำคงเหลือ</td><td><b>${fmt(r.remaining_amount)} บาท</b></td></tr>
 <tr><td class="l">หมายเหตุ</td><td>${esc(r.remark || "-")}</td></tr>
@@ -180,6 +202,45 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     if (!w) return;
     w.document.write(html); w.document.close(); w.focus();
     setTimeout(() => { try { w.print(); } catch { /* ignore */ } }, 300);
+  }
+
+  // ตัวแก้ไขวิธีชำระหลายบรรทัด (ใบรับมัดจำ ทั้งแท็บบริการ/สั่งซื้อ) — เพิ่มได้สูงสุดตามจำนวนวิธี ยอดรวม = ยอดเงินมัดจำ
+  function renderPayLines() {
+    const total = linesTotal(payLines);
+    return (
+      <div style={{ padding: 14 }}>
+        {payLines.map((l, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+            <select value={l.method} onChange={(e) => updLines(payLines.map((x, j) => (j === i ? { ...x, method: e.target.value } : x)))} style={{ ...inp, width: 190 }}>
+              {PAY_METHODS.map((m, k) => <option key={m} value={m}>{k + 1} - {m}</option>)}
+            </select>
+            <input type="number" min="0" value={l.amount} autoFocus={i === payLines.length - 1}
+              onChange={(e) => updLines(payLines.map((x, j) => (j === i ? { ...x, amount: e.target.value } : x)))}
+              onKeyDown={(e) => e.key === "Enter" && confirmPay()}
+              placeholder="0.00" style={{ ...inp, width: 170, textAlign: "right", fontWeight: 700 }} />
+            <span style={{ fontSize: 14 }}>บาท</span>
+            {payLines.length > 1 && (
+              <button onClick={() => updLines(payLines.filter((_, j) => j !== i))} title="ลบวิธีชำระนี้"
+                style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #fca5a5", background: "#fff", color: "#b91c1c", cursor: "pointer", fontSize: 13 }}>✕</button>
+            )}
+          </div>
+        ))}
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          {payLines.length < PAY_METHODS.length && (
+            <button onClick={() => updLines([...payLines, { method: PAY_METHODS.find((m) => !payLines.some((x) => x.method === m)) || "เงินโอน", amount: "" }])}
+              style={{ padding: "5px 12px", borderRadius: 6, border: "1px dashed #0e7490", background: "#ecfeff", color: "#0e7490", cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+              ➕ เพิ่มวิธีชำระ (เงินสด + เงินโอน)
+            </button>
+          )}
+          {payLines.length > 1 && <span style={{ fontSize: 13.5, color: "#334155" }}>รวม <b style={{ color: "#15803d" }}>{fmt(total)}</b> บาท</span>}
+        </div>
+      </div>
+    );
+  }
+  function renderPaySummary() {
+    const ls = payLinesClean();
+    if (ls.length <= 1) return <>{ls[0]?.method || payMethod} : <b>{fmt(payAmount)} บาท</b></>;
+    return <>{ls.map((l) => `${l.method} ${fmt(l.amount)}`).join(" + ")} = <b>{fmt(payAmount)} บาท</b></>;
   }
 
   // กด "เพิ่มข้อมูล" → เปิดส่วนชำระโดย (ตรวจข้อมูลก่อน)
@@ -232,14 +293,16 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         line_user_id: lineUserId,
         vin: form.vin, // แท็บสั่งซื้อใส่เลขถังได้ถ้ามี (ไม่บังคับ)
         deposit_amount: num(payAmount),
-        payment_method: payMethod,
+        payment_method: payMethodLabel(),
+        payment_breakdowns: payLinesClean(), // หลายวิธีชำระ: [{method, amount}] รวม = deposit_amount
+        transfer_amount: Math.round(payLinesClean().filter((l) => l.method.includes("โอน")).reduce((t, l) => t + l.amount, 0) * 100) / 100,
         remark: form.remark,
         recorded_by: currentUser?.name || currentUser?.username || "",
       });
       const row = asArray(d)[0];
       if (!row || row.error || !row.deposit_doc_no) throw new Error(row?.error || "บันทึกไม่สำเร็จ (ตรวจสอบว่า import workflow part-deposit-api แล้ว)");
       setSavedDocNo(row.deposit_doc_no);
-      setMessage(`✅ บันทึกใบรับมัดจำแล้ว เลขที่ ${row.deposit_doc_no} · ${fmt(row.deposit_amount)} บาท (${payMethod})`);
+      setMessage(`✅ บันทึกใบรับมัดจำแล้ว เลขที่ ${row.deposit_doc_no} · ${fmt(row.deposit_amount)} บาท (${payLinesClean().map((l) => `${l.method} ${fmt(l.amount)}`).join(" + ")})`);
       resetServiceForm();
       load();
     } catch (e) { setMessage("❌ " + (e.message || "บันทึกไม่สำเร็จ")); }
@@ -501,6 +564,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 {!payConfirmed ? (
                   <>
                     {/* ขั้นที่ 1: ใส่จำนวนเงิน แล้วกด "ตกลง" (ยังไม่บันทึก) */}
+                    {isRefund ? (
                     <div style={{ padding: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                       <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={{ ...inp, width: 190 }}>
                         <option value="เงินสด">1 - เงินสด</option>
@@ -510,8 +574,9 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                         onKeyDown={(e) => e.key === "Enter" && confirmPay()}
                         placeholder="0.00" style={{ ...inp, width: 170, textAlign: "right", fontWeight: 700 }} />
                       <span style={{ fontSize: 14 }}>บาท</span>
-                      {isRefund && refundSel && <span style={{ fontSize: 12.5, color: "#64748b" }}>(คงเหลือคืนได้ {fmt(refundSel.remaining_amount)} บาท)</span>}
+                      {refundSel && <span style={{ fontSize: 12.5, color: "#64748b" }}>(คงเหลือคืนได้ {fmt(refundSel.remaining_amount)} บาท)</span>}
                     </div>
+                    ) : renderPayLines()}
                     <div style={{ padding: "0 14px 14px", display: "flex", gap: 8, justifyContent: "center" }}>
                       <button onClick={confirmPay}
                         style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#16a34a", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
@@ -528,7 +593,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                     {/* ขั้นที่ 2: ยืนยันยอดแล้ว — ตรวจสอบอีกครั้ง แล้วกดบันทึกจริง */}
                     <div style={{ padding: 14 }}>
                       <div style={{ border: "1px solid #9fc9d0", borderRadius: 4, padding: "12px 16px", textAlign: "center", fontSize: 15 }}>
-                        {payMethod} : <b>{fmt(payAmount)} บาท</b>
+                        {isRefund ? <>{payMethod} : <b>{fmt(payAmount)} บาท</b></> : renderPaySummary()}
                         <button onClick={() => setPayConfirmed(false)} title="แก้ไขยอด/วิธีชำระ"
                           style={{ marginLeft: 12, padding: "2px 12px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: "pointer", fontSize: 12.5 }}>
                           ✏️ แก้ไข
@@ -703,7 +768,10 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 <div style={{ background: "#eef2f3", padding: "8px 14px", fontWeight: 700, fontSize: 14, color: "#334155" }}>☰ ชำระโดย</div>
                 <div style={{ padding: 14 }}>
                   <div style={{ border: "1px solid #9fc9d0", borderRadius: 4, padding: "12px 16px", textAlign: "center", fontSize: 15 }}>
-                    {selDoc.payment_method || "เงินสด"} : <b>{fmt(selDoc.deposit_amount)} บาท</b>
+                    {parseBreakdowns(selDoc) && parseBreakdowns(selDoc).length > 1
+                      ? parseBreakdowns(selDoc).map((x, i) => <div key={i}>{x.method} : <b>{fmt(x.amount)} บาท</b></div>)
+                      : <>{selDoc.payment_method || "เงินสด"} : <b>{fmt(selDoc.deposit_amount)} บาท</b></>}
+                    {parseBreakdowns(selDoc) && parseBreakdowns(selDoc).length > 1 && <div style={{ marginTop: 4, fontSize: 13, color: "#64748b" }}>รวม <b>{fmt(selDoc.deposit_amount)} บาท</b></div>}
                   </div>
                   {num(selDoc.refunded_amount) > 0 && (
                     <div style={{ border: "1px solid #f3c6a8", borderRadius: 4, padding: "12px 16px", textAlign: "center", fontSize: 15, marginTop: 8, color: "#c2410c" }}>
@@ -785,16 +853,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
               <div style={{ background: "#eef2f3", padding: "8px 14px", fontWeight: 700, fontSize: 14, color: "#334155" }}>☰ ชำระโดย</div>
               {!payConfirmed ? (
                 <>
-                  <div style={{ padding: 14, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                    <select value={payMethod} onChange={(e) => setPayMethod(e.target.value)} style={{ ...inp, width: 190 }}>
-                      <option value="เงินสด">1 - เงินสด</option>
-                      <option value="เงินโอน">2 - เงินโอน</option>
-                    </select>
-                    <input type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus
-                      onKeyDown={(e) => e.key === "Enter" && confirmPay()}
-                      placeholder="0.00" style={{ ...inp, width: 170, textAlign: "right", fontWeight: 700 }} />
-                    <span style={{ fontSize: 14 }}>บาท</span>
-                  </div>
+                  {renderPayLines()}
                   <div style={{ padding: "0 14px 14px", display: "flex", gap: 8, justifyContent: "center" }}>
                     <button onClick={confirmPay}
                       style={{ padding: "9px 26px", borderRadius: 8, border: "none", background: "#16a34a", color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
@@ -810,7 +869,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 <>
                   <div style={{ padding: 14 }}>
                     <div style={{ border: "1px solid #9fc9d0", borderRadius: 4, padding: "12px 16px", textAlign: "center", fontSize: 15 }}>
-                      {payMethod} : <b>{fmt(payAmount)} บาท</b>
+                      {renderPaySummary()}
                       <button onClick={() => setPayConfirmed(false)} title="แก้ไขยอด/วิธีชำระ"
                         style={{ marginLeft: 12, padding: "2px 12px", borderRadius: 6, border: "1px solid #cbd5e1", background: "#fff", color: "#334155", cursor: "pointer", fontSize: 12.5 }}>
                         ✏️ แก้ไข
@@ -874,7 +933,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   <td style={{ ...td, textAlign: "right", color: "#b45309" }}>{num(r.paid_amount) ? fmt(r.paid_amount) : "-"}</td>
                   <td style={{ ...td, textAlign: "right", color: "#c2410c" }}>{num(r.refunded_amount) ? fmt(r.refunded_amount) : "-"}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#15803d" }}>{fmt(r.remaining_amount)}</td>
-                  <td style={td}>{r.payment_method || "-"}</td>
+                  <td style={{ ...td, fontSize: 12.5 }}>{payLabel(r)}</td>
                   <td style={td}>{r.recorded_by || "-"}</td>
                   <td style={{ ...td, fontSize: 12, maxWidth: 240 }}>{r.remark || "-"}</td>
                   <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
