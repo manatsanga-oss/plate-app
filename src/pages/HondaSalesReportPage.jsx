@@ -11,6 +11,21 @@ const HONDA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/honda-repor
 
 const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, "").toUpperCase();
+// ลำดับรุ่นตามรายงานวางแผน Honda ("ข้อมูลการขาย สินค้าคงเหลือ และแผนการขาย") = เรียงตามรหัสซีรี่ย์ A→Z แล้วรหัสแบบ → type (2TH < 3TH < TH)
+// master บางแบบไม่มี series (เช่น ACB125 โชว์ "ACB125") → เติมจาก prefix รหัสแบบ (user 2026-10-21)
+const HONDA_SERIES = { ADV160: "ADV160", ADV350: "ADV350", CBF150: "CB150", CBF300: "CB300", CBR150: "CBR150R", CBR250: "CBR250", CL300: "CL300", ACB125: "CLICK125", ACB160: "CLICK160", CRF300: "CRF300", NBC110: "DREAM110", NSS350: "FORZA", ACF125: "GIORNO +", NHX125: "LEAD125", MSX125: "MSX125", WW160: "PCX160", CMX300: "REBEL300", ACF110: "SCOOPY i", RST900: "UC3", AFS110: "WAVE110i", AFS125: "WAVE125" };
+const hondaSeriesOf = (code) => { const c = norm(code); const k = Object.keys(HONDA_SERIES).find((pfx) => c.startsWith(pfx)); return k ? HONDA_SERIES[k] : ""; };
+// ป้ายชื่อซีรี่ย์บนหน้า/ใบพิมพ์: ใช้ชื่อตามรายงาน Honda ก่อน (master บางแบบเก็บชื่อซีรี่ย์เป็นรหัส เช่น "AFS125") — user 2026-10-21
+const seriesLabel = (g) => hondaSeriesOf(g.code) || g.run;
+const hondaOrderKey = (g) => norm(hondaSeriesOf(g.code) || g.run) + "|" + norm(g.code) + "|" + norm(g.type);
+// รุ่นที่รายงาน Honda ขึ้นช่อง "ขายปกติ เดือนหน้า" เป็นสีเทา (ฮอนด้าจัดโควตาเอง ผู้จำหน่ายวางแผนไม่ได้) → ล็อกเดือนหน้าเป็นค่าเริ่มต้น
+// อ้างอิงรายงานรอบ ต.ค. 2026 (user 2026-10-21) — ดับเบิลคลิกชื่อรุ่นเพื่อปลด/ล็อกเพิ่มได้ · รอบที่บันทึกแล้วใช้ค่าที่บันทึก
+const HONDA_LOCKED_NEXT_DEFAULT = ["ADV160AT|3TH", "ADV160AT|7TH", "ADV350AS|3TH", "CBF150NAR|TH", "CBF300NAP|TH", "CBR150RAS|4TH", "CBR150RAS|TH", "CBR250S3AP|7TH", "CL300A3S|TH", "ACB125BTP|TH", "ACB125CBTP|TH", "CRF300LDAS|2TH", "CRF300LDAS|TH", "CRF300LRAS|TH", "NBC110MSBT|2TH", "NSS350AS|2TH", "ACF125CAT|TH", "ACF125CBT|TH", "NHX125AT|TH", "NHX125T|TH", "MSX125AR|2TH", "MSX125R|TH", "WW160AV|TH", "WW160SV|TH", "CMX300A3S|TH", "CMX300AS|TH", "RST9004T|4TH", "RST9004T|5TH"];
+const defaultLockedNext = () => Object.fromEntries(HONDA_LOCKED_NEXT_DEFAULT.map((k) => [k, true]));
+// ส่วนแบ่งตลาด: ยอดจดทะเบียนในจังหวัดรายรุ่น (market-registration-api เดือนล่าสุด) เทียบยอดขายเราในรอบ — ชื่อรุ่นตลาด map จากซีรี่ย์ Honda (user 2026-10-21)
+const MKT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/market-registration-api";
+const mktNorm = (v) => String(v || "").toUpperCase().replace(/[\s\-_.+]/g, "");
+const SERIES_TO_MARKET = { ADV160: "ADV160", ADV350: "ADV350", CB150: "CB150R", CB300: "CB300R", CBR150R: "CBR150R", CBR250: "CBR250RR", CL300: "CL300", CLICK125: "CLICK125I", CLICK160: "CLICK160", CRF300: "CRF300", DREAM110: "SUPERCUB", FORZA: "FORZA350", "GIORNO +": "GIORNO", LEAD125: "LEAD125", MSX125: "GROM", PCX160: "PCX160", REBEL300: "REBEL300", "SCOOPY i": "SCOOPYI", UC3: "UC3", WAVE110i: "WAVE110", WAVE125: "WAVE125" };
 // type พิเศษ (สีพิเศษ/ชุดแต่ง): TH+เลข เช่น TH1..TH8 หรือแบบ master พ่วง "2TH(TH1)" — สั่งซื้อ/วางแผนแยกไม่ได้
 const isSpecialTHType = (t) => /^TH\d+$/.test(norm(t)) || /\(TH\d+\)$/.test(norm(t));
 const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -33,12 +48,36 @@ export default function HondaSalesReportPage() {
   const [dateFrom, setDateFrom] = useState(() => planWindow().from);
   const [dateTo, setDateTo] = useState(() => planWindow().to);
   const [colors, setColors] = useState([]);     // master colors (HONDA)
+  const [market, setMarket] = useState({ period: "", byModel: {}, total: 0 }); // ยอดจดทะเบียนตลาด HONDA เดือนล่าสุด {mktNorm(model): qty}
+  async function loadMarket() {
+    try {
+      // market-registration-api ตอบ {listjson: "<json>"} (แถวเดียว) — post() กลางไม่แกะ listjson จึงแกะเอง
+      const mktPost = async (body) => {
+        const t = await fetch(MKT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) => r.text());
+        if (!t.trim()) return [];
+        const d = JSON.parse(t); const first = Array.isArray(d) ? d[0] : d;
+        if (first && typeof first.listjson === "string") return JSON.parse(first.listjson);
+        return Array.isArray(d) ? d : (d && d.data) || [];
+      };
+      const list = await mktPost({ action: "list_market_periods" });
+      if (!Array.isArray(list) || !list.length) return;
+      const per = list[0].period;
+      const arr = await mktPost({ action: "list_market_registrations", period: per });
+      const byModel = {}; let total = 0;
+      for (const r of arr) {
+        if (!/honda/i.test(String(r.brand || ""))) continue;
+        const q = Number(r.registered) || 0; total += q;
+        byModel[mktNorm(r.model)] = (byModel[mktNorm(r.model)] || 0) + q;
+      }
+      setMarket({ period: per, byModel, total });
+    } catch { /* ไม่มีข้อมูลตลาด — ซ่อนคอลัมน์ */ }
+  }
   const [report, setReport] = useState([]);      // {model_code, type, color_code, sold_qty, stock_qty}
   const [backorder, setBackorder] = useState({}); // {key: number} กรอกเอง (ค้างส่ง)
   const [plan, setPlan] = useState({}); // {`${key}#${ci}`: number} แผนการขาย 3 ช่อง กรอกเอง (กล่องขาว)
   const [target, setTarget] = useState(200);  // เป้าขายเดือนนี้ (คัน) → คุมแผนเดือนนี้ (ci=0)
   const [target2, setTarget2] = useState(200); // เป้าขายเดือนหน้า (คัน) → กระจายแผนเดือนหน้า (ci=1)
-  const [lockedNext, setLockedNext] = useState({}); // {norm(code)|norm(type):true} รุ่นที่ "ล็อก" คาดการณ์เดือนหน้า
+  const [lockedNext, setLockedNext] = useState(defaultLockedNext); // {norm(code)|norm(type):true} รุ่นที่ "ล็อก" คาดการณ์เดือนหน้า — ค่าเริ่มต้นตามรายงาน Honda
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [savedPeriods, setSavedPeriods] = useState([]); // [{period,target_this,target_next,saved_at,rows}]
@@ -69,7 +108,7 @@ export default function HondaSalesReportPage() {
     } catch { setReport([]); setMessage("❌ โหลดข้อมูลไม่สำเร็จ"); }
     setLoading(false);
   }
-  useEffect(() => { loadMaster(); loadReport(); listPeriods(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => { loadMaster(); loadReport(); listPeriods(); loadMarket(); /* eslint-disable-next-line */ }, []);
 
   // อัปโหลดแผ่นการสั่งซื้อ (.xls ที่ export จากระบบฮอนด้า = HTML table) → เติมช่อง "ยอดส่งรถค้างส่ง"
   // คอลัมน์: Model, Type, Color, ..., Delivery, Pending(=ค้างส่ง) · key = norm(model)|norm(type)|norm(color)
@@ -238,8 +277,16 @@ export default function HondaSalesReportPage() {
   // เคลียร์ช่องกรอกทั้งหมด (ค้างส่ง/แผน/ล็อก/เป้า) — ยอดขาย/คงเหลือยังอยู่ตามที่ดึง
   function clearForm() {
     if (!window.confirm("เคลียร์ช่องกรอกทั้งหมด? (ค้างส่ง / แผน 2 เดือน / ล็อกเดือนหน้า / เป้า)\nยอดขายและสินค้าคงเหลือยังอยู่")) return;
-    setBackorder({}); setPlan({}); setLockedNext({}); setTarget(200); setTarget2(200);
-    setMessage("🧹 เคลียร์ช่องกรอกแล้ว (ค้างส่ง/แผน/ล็อก/เป้า กลับค่าเริ่มต้น)");
+    setBackorder({}); setPlan({}); setLockedNext(defaultLockedNext()); setTarget(200); setTarget2(200);
+    setMessage("🧹 เคลียร์ช่องกรอกแล้ว (ค้างส่ง/แผน/เป้า กลับค่าเริ่มต้น · ล็อกเดือนหน้ากลับเป็นค่าเริ่มต้นตามรายงาน Honda)");
+  }
+  // ตั้งล็อกเดือนหน้าใหม่ตามรายงาน Honda (รุ่นสีเทา) — ล้างแผนเดือนหน้าของรุ่นที่ถูกล็อก
+  function resetLockHonda() {
+    if (!window.confirm("ตั้งล็อกเดือนหน้าตามรายงาน Honda? (รุ่นที่ฮอนด้าขึ้นสีเทา " + HONDA_LOCKED_NEXT_DEFAULT.length + " แบบ จะล็อกและล้างช่องขายปกติเดือนหน้าของรุ่นนั้น · รุ่นอื่นปลดล็อก)")) return;
+    const d = defaultLockedNext();
+    setLockedNext(d);
+    setPlan((s) => { const n = { ...s }; for (const k of Object.keys(n)) { if (!k.endsWith("#1")) continue; const [mc = "", ty = ""] = k.split("|"); if (d[mc + "|" + ty]) delete n[k]; } return n; });
+    setMessage("🔒 ตั้งล็อกเดือนหน้าตามรายงาน Honda แล้ว (" + HONDA_LOCKED_NEXT_DEFAULT.length + " แบบ)");
   }
 
   // map ข้อมูลขาย/คงเหลือ ตาม (model_code|type|color_code)
@@ -311,8 +358,8 @@ export default function HondaSalesReportPage() {
       if (!/honda|ฮอนด้า/i.test(String(c.brand_name || ""))) continue;
       if (c.status && c.status !== "active") continue;
       if (isSpecialTHType(c.type_name)) continue; // type พิเศษไม่แสดงแถว — ยอดถูกยุบเข้า TH แล้วใน reportAdj
-      const run = c.series_name || c.marketing_name || "-";
       const code = c.model_code || "-";
+      const run = c.series_name || c.marketing_name || hondaSeriesOf(code) || "-";
       const type = c.type_name || "-";
       seriesByCode[norm(code)] = run;
       colorNameByMC[norm(code) + "|" + norm(c.color_code)] = c.color_name;
@@ -336,7 +383,7 @@ export default function HondaSalesReportPage() {
       const key = norm(code) + "|" + norm(type) + "|" + norm(cc);
       if (seen.has(key)) continue;
       seen.add(key);
-      grp(seriesByCode[norm(code)] || code, code, type).colors.push({
+      grp(seriesByCode[norm(code)] || hondaSeriesOf(code) || code, code, type).colors.push({
         key, color_code: cc, color_name: anyColorName(code, cc),
         sold: Number(r.sold_qty) || 0, stock: Number(r.stock_qty) || 0,
       });
@@ -346,14 +393,15 @@ export default function HondaSalesReportPage() {
       if (seen.has(key) || !(Number(backorder[key]) || 0)) continue;
       seen.add(key);
       const [code = "-", type = "-", cc = ""] = key.split("|");
-      grp(seriesByCode[norm(code)] || code, code, type).colors.push({
+      grp(seriesByCode[norm(code)] || hondaSeriesOf(code) || code, code, type).colors.push({
         key, color_code: cc, color_name: anyColorName(code, cc),
         sold: 0, stock: 0,
       });
     }
     const arr = [...map.values()].filter((g) => !OLD_CODES.has(norm(g.code))); // ตัดแบบเก่าที่ถูกแทนออกจากตาราง
     for (const g of arr) g.colors.sort((a, b) => String(a.color_code).localeCompare(String(b.color_code), "th"));
-    return arr.sort((a, b) => (a.run + a.code + a.type).localeCompare(b.run + b.code + b.type, "th"));
+    // เรียงตามรายงาน Honda: รหัสซีรี่ย์ → รหัสแบบ → type (เทียบตัวอักษรตรง ๆ ให้ 2TH/3TH มาก่อน TH เหมือนรายงาน)
+    return arr.sort((a, b) => { const ka = hondaOrderKey(a), kb = hondaOrderKey(b); return ka < kb ? -1 : ka > kb ? 1 : 0; });
   }, [colors, reportAdj, reportMap, backorder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ชื่อสีจาก master (รวมแถว inactive ของแบบเก่า) — ใช้จับคู่สีข้ามแบบ
@@ -515,6 +563,24 @@ export default function HondaSalesReportPage() {
     return { sold: s, stock: st, bo, p };
   }, [groups, backorder, plan]);
 
+  // ส่วนแบ่งตลาดรายซีรี่ย์: ตลาด = ยอดจดทะเบียนจังหวัดเดือนล่าสุด · เรา = ยอดขายรอบนี้รวมทุกแบบ/type ของซีรี่ย์ · เป้าตามส่วนแบ่งรวม = ตลาดรุ่น × (ขายรวมเรา / ตลาดรวม)
+  const marketInfo = useMemo(() => {
+    if (!market.total) return null;
+    const soldBySeries = {};
+    for (const g of groups) { const sk = hondaSeriesOf(g.code) || g.run; soldBySeries[sk] = (soldBySeries[sk] || 0) + g.colors.reduce((a, c) => a + c.sold, 0); }
+    const ourTotal = Object.values(soldBySeries).reduce((a, b) => a + b, 0);
+    const overall = market.total ? ourTotal / market.total : 0;
+    const of = (g) => {
+      const sk = hondaSeriesOf(g.code) || g.run;
+      const mk = SERIES_TO_MARKET[sk] || mktNorm(sk);
+      const mkt = market.byModel[mk] || 0;
+      const sold = soldBySeries[sk] || 0;
+      return { series: sk, mkt, sold, share: mkt ? sold / mkt : null, target: Math.round(mkt * overall), mktShare: market.total ? mkt / market.total : 0 };
+    };
+    return { of, overall, ourTotal, period: market.period, total: market.total };
+  }, [groups, market]);
+  const mktPeriodLabel = (per) => { const [y, m] = String(per || "").split("-"); return m ? `${TH_MONTHS[Number(m) - 1]} ${Number(y) + 543}` : per; };
+
   // หัวคอลัมน์ตามวันที่
   const dF = new Date(dateFrom), dT = new Date(dateTo);
   const saleHdr = `ยอดขายวันที่ ${dF.getDate()}-${dT.getDate()} ${TH_MONTHS[dT.getMonth()]} ${dT.getFullYear() + 543}`;
@@ -529,7 +595,7 @@ export default function HondaSalesReportPage() {
     for (const g of groups) {
       idx++;
       const lockNext = !!lockedNext[norm(g.code) + "|" + norm(g.type)];
-      const gLabel = `${esc(g.run)} [ซีรี่ย์: ${esc(g.run)}]<br>${idx}. ${esc(g.code)} (${esc(g.type)})`;
+      const gLabel = `${esc(seriesLabel(g))} [ซีรี่ย์: ${esc(seriesLabel(g))}]<br>${idx}. ${esc(g.code)} (${esc(g.type)})`;
       g.colors.forEach((c, i) => {
         rows += `<tr>${i === 0 ? `<td rowspan="${g.colors.length + 1}" class="run">${gLabel}</td>` : ""}
           <td>${esc(c.color_code)} (${esc(c.color_name)})</td>
@@ -570,6 +636,7 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
           <button onClick={() => fileRef.current && fileRef.current.click()} title="อัปโหลดแผ่นการสั่งซื้อ (.xls จากระบบฮอนด้า) → เติมช่องยอดส่งรถค้างส่งอัตโนมัติ" style={{ padding: "8px 18px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>📤 อัปโหลดค้างส่ง</button>
           <button onClick={saveReport} disabled={saving} title="บันทึกรายงานรอบนี้ลงฐานข้อมูล (period = วันสิ้นรอบ)" style={{ padding: "8px 18px", background: saving ? "#9ca3af" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>{saving ? "⏳ บันทึก..." : "💾 บันทึกลงฐานข้อมูล"}</button>
           <button onClick={clearForm} title="เคลียร์ช่องกรอกทั้งหมด (ค้างส่ง/แผน/ล็อก/เป้า) — ยอดขาย/คงเหลือยังอยู่" style={{ padding: "8px 18px", background: "#fff", color: "#b45309", border: "1px solid #f59e0b", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🧹 เคลียร์</button>
+          <button onClick={resetLockHonda} title="ล็อกช่องขายปกติเดือนหน้าของรุ่นที่รายงาน Honda ขึ้นสีเทา (ฮอนด้าจัดโควตาเอง) — รุ่นอื่นปลดล็อก" style={{ padding: "8px 18px", background: "#fff", color: "#7c3aed", border: "1px solid #a78bfa", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🔒 ล็อกตาม Honda</button>
           <button onClick={openQuota} title="บันทึกโควต้าที่ Honda จัดให้จริง + เทียบแผน vs โควต้า (fill rate)" style={{ padding: "8px 18px", background: "#d97706", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🎯 โควต้า/เทียบแผน</button>
           <button onClick={printReport} style={{ padding: "8px 18px", background: "#0369a1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>🖨️ พิมพ์</button>
         </div>
@@ -598,6 +665,7 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
           <thead style={{ background: "#caa300", color: "#000" }}>
             <tr>
               <th style={{ ...tdc, textAlign: "left" }}>รุ่นรถ</th>
+              {marketInfo && <th style={tdc} title={`ยอดจดทะเบียนในจังหวัด (ฮอนด้า) เดือน ${mktPeriodLabel(marketInfo.period)} รวม ${marketInfo.total.toLocaleString("th-TH")} คัน · เราขายรอบนี้ ${marketInfo.ourTotal} = ส่วนแบ่งรวม ${(marketInfo.overall * 100).toFixed(1)}% · เป้า = ตลาดรุ่น × ส่วนแบ่งรวม`}>ส่วนแบ่งตลาด<br /><span style={{ fontSize: 10, fontWeight: 400 }}>จดทะเบียน {mktPeriodLabel(marketInfo.period)} · เรา {(marketInfo.overall * 100).toFixed(1)}%</span></th>}
               <th style={tdc}>สี</th>
               <th style={tdc}>{saleHdr}</th>
               <th style={tdc}>{stockHdr}</th>
@@ -609,9 +677,9 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={marketInfo ? 9 : 8} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>กำลังโหลด...</td></tr>
             ) : groups.length === 0 ? (
-              <tr><td colSpan={8} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล (เช็ค master สี HONDA)</td></tr>
+              <tr><td colSpan={marketInfo ? 9 : 8} style={{ padding: 30, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล (เช็ค master สี HONDA)</td></tr>
             ) : groups.map((g, gi) => {
               const gs = g.colors.reduce((a, c) => a + c.sold, 0), gst = g.colors.reduce((a, c) => a + c.stock, 0), gbo = g.colors.reduce((a, c) => a + boOf(c.key), 0);
               const gid = norm(g.code) + "|" + norm(g.type);
@@ -622,7 +690,7 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
                     <tr key={c.key} style={{ borderTop: "1px solid #f1f5f9" }}>
                       {i === 0 && (
                         <td rowSpan={g.colors.length + 1} onDoubleClick={() => toggleLockNext(gid, g)} title="ดับเบิลคลิก = ล็อก/ปลดล็อก คาดการณ์เดือนหน้า (รุ่นที่ฮอนด้าล็อกโควตา)" style={{ ...tdc, textAlign: "left", background: lockNext ? "#ede9fe" : "#fafafa", verticalAlign: "top", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}>
-                          <div style={{ color: "#9ca3af", fontSize: 11 }}>{g.run} [ซีรี่ย์: {g.run}]</div>
+                          <div style={{ color: "#9ca3af", fontSize: 11 }}>{seriesLabel(g)} [ซีรี่ย์: {seriesLabel(g)}]</div>
                           <div style={{ fontWeight: 700 }}>{gi + 1}. {g.code} ({g.type})</div>
                           {OLD_CODES.has(norm(g.code)) && (
                             <div style={{ fontSize: 10, color: "#dc2626", fontWeight: 700 }}>
@@ -632,6 +700,23 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
                           {lockNext && <div style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed" }}>🔒 ล็อกเดือนหน้า</div>}
                         </td>
                       )}
+                      {i === 0 && marketInfo && (() => {
+                        const mi = marketInfo.of(g);
+                        const pct = mi.share == null ? null : Math.round(mi.share * 100);
+                        const col = pct == null ? "#9ca3af" : mi.share >= marketInfo.overall * 1.3 ? "#059669" : mi.share <= marketInfo.overall * 0.7 ? "#dc2626" : "#374151";
+                        return (
+                          <td rowSpan={g.colors.length + 1} style={{ ...tdc, verticalAlign: "top", whiteSpace: "nowrap", background: "#f8fafc", fontSize: 11 }}
+                            title={`${mi.series}: ตลาด ${mi.mkt} คัน (${(mi.mktShare * 100).toFixed(1)}% ของตลาดฮอนด้า) · เราขายทั้งซีรี่ย์ ${mi.sold} · เป้าถ้าได้ส่วนแบ่งเท่าค่าเฉลี่ยเรา ${(marketInfo.overall * 100).toFixed(1)}% = ${mi.target} คัน/เดือน`}>
+                            {mi.mkt ? (
+                              <>
+                                <div>ตลาด <b>{mi.mkt.toLocaleString("th-TH")}</b></div>
+                                <div style={{ color: col, fontWeight: 700 }}>เรา {mi.sold} ({pct}%)</div>
+                                <div style={{ color: "#6b7280" }}>เป้า {mi.target}</div>
+                              </>
+                            ) : <span style={{ color: "#9ca3af" }}>-</span>}
+                          </td>
+                        );
+                      })()}
                       <td style={{ ...tdc, textAlign: "left" }}>{c.color_code} ({c.color_name})</td>
                       <td style={tdc}>
                         <span style={{ ...yBox, display: "inline-block" }}>{c.sold || 0}</span>
@@ -668,7 +753,7 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
             })}
             {groups.length > 0 && (
               <tr style={{ background: "#fbbf24", fontWeight: 800 }}>
-                <td style={{ ...tdc, textAlign: "center" }} colSpan={2}>รวมสุทธิ</td>
+                <td style={{ ...tdc, textAlign: "center" }} colSpan={marketInfo ? 3 : 2}>รวมสุทธิ</td>
                 <td style={tdc}>{grand.sold}</td>
                 <td style={tdc}>{grand.stock}</td>
                 <td style={tdc}>{grand.bo}</td>

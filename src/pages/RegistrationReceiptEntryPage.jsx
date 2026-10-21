@@ -213,6 +213,19 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
   // ⚠ ต้องไม่จับบรรทัด "ค่าบริการ..." (บรรทัดแตกจากช่องค่าบริการตอนบันทึก) — ไม่งั้น auto-fill ทับแล้วบันทึกซ้ำจะเบิ้ลรายการ
   const isTaxLine = (l) => { const n = String(l.income_name || ""); return n.includes("ต่อภาษี") && !n.includes("ตรวจ") && !n.startsWith("ค่าบริการ"); };
   const isTroLine = (l) => { const n = String(l.income_name || ""); return n.includes("ตรวจสภาพ") && !n.startsWith("ค่าบริการ"); };
+  // จำนวนปีตามราคาเหมาที่พนักงานใส่ (ค่าต่อภาษี + ค่าบริการ ÷ 200/ปี) เทียบกับจำนวนปีตามวันสิ้นอายุภาษี — ไม่ตรง = วันสิ้นอายุน่าจะผิด
+  // (เคส SCY01-CA691000031 แก้ราคาเป็น 2 ปีแต่วันสิ้นอายุยังเป็นปีล่าสุด → วางบิลคิดภาษี/เงินเพิ่มแค่ 1 ปี) user 2026-10-21
+  const taxYearMismatch = () => {
+    if (header.receipt_type !== "งานต่อภาษีและพรบ." || !header.tax_paid_date) return null;
+    const tl = lines.filter(isTaxLine);
+    const flat = tl.reduce((a, l) => a + num(l.price_before_discount) + num(l.service_fee), 0);
+    if (!(flat > 0)) return null;
+    const yearsByPrice = Math.round(flat / MC_RENEW_FLAT);
+    const r = calcMcTax(header.register_date, header.tax_paid_date, taxSubmitDate || nextThursday(header.receive_date || todayISO()));
+    if (!r || r.suspended) return null;
+    const yearsByDate = r.lateYears || 1;
+    return yearsByPrice >= 1 && yearsByPrice !== yearsByDate ? { yearsByPrice, yearsByDate, flat } : null;
+  };
 
   // งานต่อภาษี: เติมราคาอัตโนมัติ (ทับทุกครั้งที่เข้าขั้นสรุป/วันที่เปลี่ยน/เลือกชื่อรายได้)
   // - "ค่าต่อภาษี": ยอดเก็บลูกค้าเหมา 200 บาท/ปี (1 ปี = 200, 2 ปี = 400, ...) — ราคา = ภาษี 100 × ปีที่ค้าง (ไม่คิดเงินเพิ่ม
@@ -793,6 +806,13 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
     // ช่องเลขถังหน้าตาเหมือนเลขเครื่อง (มีขีด/สั้นกว่า 17 ตัว) → ถามยืนยันก่อน (รถเก่า/รถนำเข้าบางคันเลขถังไม่ครบ 17 ตัว จึงไม่บล็อก)
     if (looksEngine(header.chassis_no) && !window.confirm(`เลขถัง "${text(header.chassis_no)}" ไม่ใช่รูปแบบเลขถังปกติ (17 ตัว ไม่มีขีด) — อาจเป็นเลขเครื่อง\n\nตรวจกับเล่มทะเบียนแล้ว ยืนยันบันทึกตามนี้?`)) return;
     if (lines.length === 0 || lines.every(l => !num(l.price_before_discount) && !num(l.service_fee))) { setMessage("❌ เพิ่มรายการรายได้อย่างน้อย 1"); return; }
+    // งานต่อภาษี: ราคาเหมา N ปี ไม่ตรงกับจำนวนปีตามวันสิ้นอายุภาษี → ถามยืนยัน (วันสิ้นอายุผิดจะทำให้วางบิลคิดภาษี/เงินเพิ่มขาด) user 2026-10-21
+    const mm = taxYearMismatch();
+    if (mm && !window.confirm(`⚠️ ราคาค่าต่อภาษีที่ใส่ = เหมา ${mm.yearsByPrice} ปี แต่วันสิ้นอายุภาษีเดิม ${fmtBE(header.tax_paid_date)} คิดได้ ${mm.yearsByDate} ปี
+
+ถ้าต่อ ${mm.yearsByPrice} ปีจริง ให้กด "ยกเลิก" แล้วแก้วันสิ้นอายุภาษีเดิมเป็นปีที่ขาดต่อปีแรกก่อน (ตอนวางบิลระบบคิดภาษี/เงินเพิ่มจากวันนี้)
+
+ยืนยันบันทึกตามนี้เลย?`)) return;
     // ทะเบียนรถ = หมวด + เลข + จังหวัด — งานต่อภาษี (ที่มีบรรทัดค่าต่อภาษี/ตรวจสภาพ; ต่อ พรบ. อย่างเดียวไม่บังคับ) และงานโอนทะเบียน ต้องกรอกครบ 3 ช่อง (user 2026-09-05)
     const hasTaxWork = lines.some(l => (isTaxLine(l) || isTroLine(l)) && (num(l.price_before_discount) || num(l.service_fee)));
     // งานโอนทะเบียนที่มีแต่รายการแจ้งย้ายออก/แจ้งจำหน่าย (รถยังไม่มีทะเบียน เช่น รถใหม่ขายต่อร้านอื่น) ไม่บังคับทะเบียน (user 2026-10-05)
@@ -1099,6 +1119,11 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
                             เก็บลูกค้าเหมา {baht(MC_RENEW_FLAT * (r.lateYears || 1) + (r.needTro ? MC_TRO_FLAT : 0))} บาท (ยังไม่รวม พ.ร.บ.)
                           </span>
                         </div>
+                        {(() => { const mm = taxYearMismatch(); return mm ? (
+                          <div style={{ marginTop: 6, padding: "8px 10px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8, color: "#991b1b", fontWeight: 700, fontSize: 13 }}>
+                            ⚠️ ราคาค่าต่อภาษีที่ใส่ = เหมา {mm.yearsByPrice} ปี ({baht(mm.flat)} บาท) แต่วันสิ้นอายุภาษีเดิม {fmtBE(header.tax_paid_date)} คิดได้ {mm.yearsByDate} ปี — กรุณาตรวจ "วันสิ้นอายุภาษีเดิม" ในขั้นข้อมูลรถ (ต่อ {mm.yearsByPrice} ปี วันสิ้นอายุควรเป็นปีที่ขาดต่อปีแรก) ไม่งั้นตอนวางบิลระบบจะคิดภาษี/เงินเพิ่มแค่ {mm.yearsByDate} ปี
+                          </div>
+                        ) : null; })()}
                         <div>
                           {r.age != null && <>🏍️ อายุรถ ~{r.age} ปี → {r.needTro ? <b style={{ color: "#b45309" }}>ต้องตรวจสภาพ ตรอ. (อายุ ≥ {MC_TRO_AGE} ปี)</b> : "ไม่ต้องตรวจสภาพ"}</>}
                           {r.age == null && <span style={{ color: "#9ca3af" }}>กรอกวันจดทะเบียนเพื่อเช็คเกณฑ์ตรวจสภาพ (อายุ ≥ {MC_TRO_AGE} ปี)</span>}
