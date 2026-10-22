@@ -3,6 +3,7 @@
 # v2 (2026-10-01): ตอบเป็น JSON {answer, show:[type_id]} → ส่ง items (รุ่นย่อย+ราคา+color_id ที่มีรูป) ให้หน้าเว็บโชว์ภาพรุ่นย่อย
 # v3 (2026-10-02): action sim_next — น้องเปาเปาสวมบท "ลูกค้า" ถามพนักงานขาย (แนวคำถามจากข้อความลูกค้าจริง AI_Reception_Customer_Samples.json) แล้วเก็บคำตอบพนักงานลง ai_reception_sim_logs
 # v4 (2026-10-02): ให้คะแนนคำตอบพนักงาน (score 0-10 + score_comment ในการเรียก sim_next ครั้งถัดไป) + action sim_report (รายงานการเข้าใช้/คะแนน → IF แยกออกไม่ผ่าน OpenAI)
+# v5 (2026-10-02): แยกการให้คะแนนเป็น OpenAI call ที่สอง (node OpenAI Grade) — เดิมรวมใน call เดียวกับบทลูกค้า ทำให้ AI หลุดบทไปตอบแทนพนักงาน/บอกราคาเอง (ข้อมูลราคาอยู่ใน prompt ลูกค้า)
 # ใช้: python build_ai_reception_workflow.py  → เขียนไฟล์ลง OneDrive\New folder\AI_Reception_API_Workflow.json + AI_Reception_DDL.sql
 import json, os, uuid
 
@@ -89,6 +90,8 @@ const today = new Date().toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok',
 
 const aiName = (ctx.branch === 'SCY05' || ctx.branch === 'SCY06') ? 'น้องเปาเปา' : 'น้องสิงห์';
 
+const NOOP = { model: 'gpt-4.1-mini', temperature: 0, max_tokens: 5, messages: [{ role: 'user', content: 'ตอบว่า ok' }] };
+
 // ---------- โหมดลูกค้าจำลอง (sim_next): AI เป็น "ลูกค้า" ถามพนักงานขาย ทีละคำถาม ----------
 if (ctx.action === 'sim_next') {
   const SAMPLES = __SAMPLES__;
@@ -122,32 +125,38 @@ if (ctx.action === 'sim_next') {
 - ถ้าพนักงานถามกลับ (เช่น อาชีพ รายได้ งบประมาณ) ให้ตอบสั้น ๆ ตามลักษณะลูกค้าในสถานการณ์ แล้วถามคำถามถัดไปในประโยคเดียวกัน
 - ห้ามตอบคำถามแทนพนักงาน ห้ามให้ข้อมูลร้าน ห้ามสอน ชม ติ หรือให้คะแนนพนักงาน ห้ามออกนอกบทลูกค้า
 - ตอนนี้ถามไปแล้ว ${turn} คำถาม: เมื่อถามครบประมาณ 5-6 คำถาม หรือได้ข้อมูลพอแล้ว ให้กล่าวขอบคุณปิดการสนทนาแบบลูกค้า (เช่น ขอกลับไปคิดดูก่อน หรือเดี๋ยวเข้ามาใหม่) แล้วตั้ง done เป็น true${turn >= 7 ? ' — ครั้งนี้ต้องปิดการสนทนาเลย' : ''}
-- ตอบกลับเป็น JSON เท่านั้น รูปแบบ {"say": "ประโยคที่ลูกค้าพูด", "done": false, "score": null, "comment": ""}
-
-การให้คะแนน (ระบบเก็บไว้เบื้องหลัง ลูกค้าไม่รู้ ห้ามพูดถึงคะแนนหรือข้อมูลอ้างอิงใน say):
-- score = คะแนน 0-10 (จำนวนเต็ม) ของ "คำตอบล่าสุดของพนักงาน" ต่อคำถามก่อนหน้าของลูกค้า ถ้ายังไม่มีคำตอบของพนักงาน (ประโยคแรก) ให้ใส่ null
-- เกณฑ์: ตอบตรงคำถาม 4 คะแนน, ข้อมูลครบและชัดเจน (ตัวเลข/เงื่อนไข/ขั้นตอน) 3 คะแนน, สุภาพเป็นมิตร 1 คะแนน, ชวนคุยต่อหรือพยายามปิดการขาย (ถามความต้องการ เสนอทางเลือก ชวนจอง/ทดลอง) 2 คะแนน
-- ตอบไม่ตรงคำถาม เลี่ยง หรือตอบสั้นจนลูกค้าไม่ได้ข้อมูล ให้ไม่เกิน 3 คะแนน ถ้าคำตอบขัดกับ "ข้อมูลอ้างอิงของร้าน" อย่างชัดเจน (เช่น ราคาผิด) ให้หักคะแนนและระบุใน comment เรื่องที่ไม่มีในข้อมูลอ้างอิง (เช่น ดาวน์ ค่างวด ของแถม) ไม่ต้องตรวจความถูกต้อง ให้ดูแค่ความชัดเจน
-- คำตอบมาจากการแปลงเสียงเป็นข้อความ อาจสะกดเพี้ยน ไม่ต้องหักคะแนนเรื่องตัวสะกด
-- comment = เหตุผลสั้น ๆ 1 ประโยค บอกจุดเด่นหรือสิ่งที่ควรเพิ่ม (ถ้า score เป็น null ให้เว้นว่าง)
-
-ข้อมูลอ้างอิงของร้าน (ใช้ตรวจคำตอบเท่านั้น ลูกค้าไม่รู้ข้อมูลนี้):
-${refLines || '(ไม่มีข้อมูลราคาของรุ่นนี้)'}
-${faqLines ? 'เรื่องทั่วไป:' + NL + faqLines : ''}
+- คุณไม่รู้ราคา โปรโมชั่น เงื่อนไข หรือข้อมูลใด ๆ ของร้าน say ต้องเป็นคำพูดของลูกค้าเท่านั้น (ถาม ขอข้อมูล หรือเล่าเรื่องของตัวเอง) ห้ามบอกราคา ห้ามอธิบายข้อมูลรถหรือเงื่อนไขการผ่อน ห้ามถามว่า "สนใจรุ่นไหน" หรือ "สนใจรายละเอียดแบบไหน" เพราะนั่นคือคำพูดของพนักงาน
+- ถ้าพนักงานตอบสั้นมาก ตอบไม่รู้เรื่อง หรือตอบเหมือนเป็นลูกค้าเสียเอง ให้ยังคงเป็นลูกค้า แล้วถามคำถามเดิมซ้ำให้ชัดขึ้น หรือถามเรื่องถัดไป
+- ตอบกลับเป็น JSON เท่านั้น รูปแบบ {"say": "ประโยคที่ลูกค้าพูด", "done": false}
 
 ตัวอย่างคำถามจากลูกค้าจริง — หัวข้อหลัก (${topicKey || '-'}):
 ${main.map(m => '- ' + m).join(NL) || '-'}
 
 ตัวอย่างคำถามจากลูกค้าจริง — เรื่องอื่นที่มักถามต่อ:
 ${others.map(m => '- ' + m).join(NL) || '-'}`;
-  const msgs = [{ role: 'system', content: simSystem }, { role: 'user', content: 'สวัสดีครับ ยินดีต้อนรับครับ สนใจรถรุ่นไหน สอบถามได้เลยครับ' }];
+  const msgs = [{ role: 'system', content: simSystem }, { role: 'user', content: 'พนักงานขายพูดว่า: สวัสดีครับ ยินดีต้อนรับครับ สนใจรถรุ่นไหน สอบถามได้เลยครับ' + NL + '(คุณคือลูกค้า เริ่มพูดในบทลูกค้า)' }];
   for (const h of (ctx.history || [])) {
     if (!h || !h.content) continue;
     if (h.role === 'customer') msgs.push({ role: 'assistant', content: JSON.stringify({ say: String(h.content).slice(0, 600), done: false }) });
-    else if (h.role === 'staff') msgs.push({ role: 'user', content: String(h.content).slice(0, 2000) });
+    else if (h.role === 'staff') msgs.push({ role: 'user', content: 'พนักงานขายตอบว่า: ' + String(h.content).slice(0, 2000) + NL + '(คุณคือลูกค้า พูดต่อในบทลูกค้า)' });
   }
   const simModel = 'gpt-4.1-mini';
-  return [{ json: { payload: { model: simModel, temperature: 0.8, max_tokens: 350, response_format: { type: 'json_object' }, messages: msgs }, model: simModel, scenario, turn } }];
+  const gradeSystem = `คุณคือหัวหน้าฝ่ายขายของร้าน${shop} (ร้านจำหน่ายและศูนย์บริการรถจักรยานยนต์) ทำหน้าที่ให้คะแนนคำตอบของพนักงานขายต่อคำถามของลูกค้า
+ตอบกลับเป็น JSON เท่านั้น รูปแบบ {"score": 0, "comment": ""}
+- score = คะแนน 0-10 (จำนวนเต็ม) เกณฑ์: ตอบตรงคำถาม 4 คะแนน, ข้อมูลครบและชัดเจน (ตัวเลข/เงื่อนไข/ขั้นตอน) 3 คะแนน, สุภาพเป็นมิตร 1 คะแนน, ชวนคุยต่อหรือพยายามปิดการขาย (ถามความต้องการ เสนอทางเลือก ชวนจอง/ทดลอง) 2 คะแนน
+- ตอบไม่ตรงคำถาม เลี่ยง หรือตอบสั้นจนลูกค้าไม่ได้ข้อมูล ให้ไม่เกิน 3 คะแนน
+- ถ้าคำตอบขัดกับ "ข้อมูลอ้างอิงของร้าน" อย่างชัดเจน (เช่น ราคาผิด) ให้หักคะแนนและระบุใน comment เรื่องที่ไม่มีในข้อมูลอ้างอิง (เช่น ดาวน์ ค่างวด ของแถม) ไม่ต้องตรวจความถูกต้อง ให้ดูแค่ความชัดเจน
+- คำตอบมาจากการแปลงเสียงเป็นข้อความ อาจสะกดเพี้ยน ไม่ต้องหักคะแนนเรื่องตัวสะกด
+- comment = เหตุผลสั้น ๆ 1 ประโยค ภาษาไทย บอกจุดเด่นหรือสิ่งที่ควรเพิ่ม
+
+สถานการณ์ลูกค้า: ${scenario}
+ข้อมูลอ้างอิงของร้าน:
+${refLines || '(ไม่มีข้อมูลราคาของรุ่นนี้)'}
+${faqLines ? 'เรื่องทั่วไป:' + NL + faqLines : ''}`;
+  const grade_payload = ctx.staff_answer
+    ? { model: simModel, temperature: 0.2, max_tokens: 200, response_format: { type: 'json_object' }, messages: [{ role: 'system', content: gradeSystem }, { role: 'user', content: `คำถามของลูกค้า: ${ctx.last_question || '(ลูกค้าเพิ่งเดินเข้าร้าน)'}${NL}คำตอบของพนักงาน: ${ctx.staff_answer}` }] }
+    : NOOP;
+  return [{ json: { payload: { model: simModel, temperature: 0.8, max_tokens: 250, response_format: { type: 'json_object' }, messages: msgs }, grade_payload, model: simModel, scenario, turn } }];
 }
 const system = `คุณคือ "${aiName}" มาสคอตเด็กผู้ชายใส่หมวกกันน็อก เป็นพนักงานต้อนรับ AI ของ${shop} (ร้านจำหน่ายและศูนย์บริการรถจักรยานยนต์) ยืนอยู่หน้าร้าน คุยกับลูกค้าด้วยเสียง
 วันนี้: ${today}
@@ -176,13 +185,14 @@ for (const h of (ctx.history || [])) {
 }
 messages.push({ role: 'user', content: ctx.question });
 const model = 'gpt-4.1-mini';
-return [{ json: { payload: { model, temperature: 0.3, max_tokens: 450, response_format: { type: 'json_object' }, messages }, model } }];
+return [{ json: { payload: { model, temperature: 0.3, max_tokens: 450, response_format: { type: 'json_object' }, messages }, grade_payload: NOOP, model } }];
 """
 
 # ---------- Code: Parse answer + log SQL ----------
 PARSE = r"""const ctx = $('Build Context SQL').first().json;
 const model = $('Build Payload').first().json.model;
-const res = $input.first().json || {};
+const res = $('OpenAI Chat').first().json || {};
+const gradeRes = $input.first().json || {};
 const q = (s) => "'" + String(s || '').split(String.fromCharCode(36)).join('').replace(/'/g, "''").slice(0, 3000) + "'";
 
 // ---------- โหมดลูกค้าจำลอง: คืนคำถามถัดไป + บันทึกคำตอบพนักงานของคำถามก่อนหน้า ----------
@@ -190,11 +200,14 @@ if (ctx.action === 'sim_next') {
   const bp = $('Build Payload').first().json;
   let say = ''; let done = false;
   let score = null; let comment = '';
-  try {
-    const j = JSON.parse(String(res.choices[0].message.content || '').trim()); say = String(j.say || '').trim(); done = j.done === true || j.done === 'true';
-    const n = Number(j.score); if (ctx.staff_answer && j.score !== null && j.score !== '' && !isNaN(n)) score = Math.max(0, Math.min(10, Math.round(n)));
-    comment = score === null ? '' : String(j.comment || '').trim().slice(0, 500);
-  } catch (e) { say = ''; }
+  try { const j = JSON.parse(String(res.choices[0].message.content || '').trim()); say = String(j.say || '').trim(); done = j.done === true || j.done === 'true'; } catch (e) { say = ''; }
+  if (ctx.staff_answer) {
+    try {
+      const g = JSON.parse(String(gradeRes.choices[0].message.content || '').trim());
+      const n = Number(g.score); if (g.score !== null && g.score !== '' && !isNaN(n)) score = Math.max(0, Math.min(10, Math.round(n)));
+      comment = score === null ? '' : String(g.comment || '').trim().slice(0, 500);
+    } catch (e) { score = null; }
+  }
   say = say.replace(/[*#_`]/g, '').split(' ').filter(Boolean).join(' ');
   const error = !say;
   if (bp.turn >= 8) done = true;
@@ -244,13 +257,16 @@ nodes = [
     {"parameters": {"method": "POST", "url": "https://api.openai.com/v1/chat/completions", "authentication": "predefinedCredentialType", "nodeCredentialType": "openAiApi",
                     "sendBody": True, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($json.payload) }}", "options": {"timeout": 30000}},
      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [880, 0], "id": nid(), "name": "OpenAI Chat", "credentials": OPENAI, "onError": "continueRegularOutput"},
+    {"parameters": {"method": "POST", "url": "https://api.openai.com/v1/chat/completions", "authentication": "predefinedCredentialType", "nodeCredentialType": "openAiApi",
+                    "sendBody": True, "specifyBody": "json", "jsonBody": "={{ JSON.stringify($('Build Payload').first().json.grade_payload) }}", "options": {"timeout": 30000}},
+     "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [990, 160], "id": nid(), "name": "OpenAI Grade", "credentials": OPENAI, "onError": "continueRegularOutput"},
     {"parameters": {"jsCode": PARSE}, "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1100, 0], "id": nid(), "name": "Parse Answer"},
     {"parameters": {"operation": "executeQuery", "query": "{{ $json.query }}", "options": {}}, "type": "n8n-nodes-base.postgres", "typeVersion": 2.5,
      "position": [1320, 0], "id": nid(), "name": "PG Log", "alwaysOutputData": True, "credentials": PG, "onError": "continueRegularOutput"},
     {"parameters": {"respondWith": "json", "responseBody": "={{ JSON.stringify($('Parse Answer').first().json.out) }}", "options": CORS},
      "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.1, "position": [1540, 0], "id": nid(), "name": "Respond Answer"},
 ]
-chain = ["Webhook AI Reception", "Build Context SQL", "PG Context", "Build Payload", "OpenAI Chat", "Parse Answer", "PG Log", "Respond Answer"]
+chain = ["Webhook AI Reception", "Build Context SQL", "PG Context", "Build Payload", "OpenAI Chat", "OpenAI Grade", "Parse Answer", "PG Log", "Respond Answer"]
 connections = {a: {"main": [[{"node": b, "type": "main", "index": 0}]]} for a, b in zip(chain, chain[1:])}
 # PG Context → Is Report → (true) Respond Report / (false) Build Payload
 connections["PG Context"] = {"main": [[{"node": "Is Report", "type": "main", "index": 0}]]}

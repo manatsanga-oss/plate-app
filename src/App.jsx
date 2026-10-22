@@ -158,6 +158,7 @@ import PartWholesalePaymentPage from "./pages/PartWholesalePaymentPage";
 import CustomerRefundPage from "./pages/CustomerRefundPage";
 import CrmEventPage from "./pages/CrmEventPage";
 import AiSimReportPage from "./pages/AiSimReportPage";
+import DoorControlPage from "./pages/DoorControlPage";
 import CrmReplyPage from "./pages/CrmReplyPage";
 import AiReceptionPage from "./pages/AiReceptionPage";
 import ReceiptBillingPage from "./pages/ReceiptBillingPage";
@@ -292,6 +293,8 @@ export default function App() {
     }
     // รายงานฝึกตอบลูกค้า (AI ลูกค้าจำลอง) — เฉพาะผู้ดูแลระบบ + วรุฒ (user 2026-10-02)
     if (page === "aisimreport") return ["admin", "WARUT"].includes(currentUser.username);
+    // ประตูร้าน (สั่งประตูม้วน/สิทธิ์ LINE) — เฉพาะผู้ดูแลระบบ + วรุฒ (user 2026-10-22)
+    if (page === "doorcontrol") return ["admin", "WARUT"].includes(currentUser.username);
     // เมนู Accounting — เห็นเฉพาะ admin + WARUT เท่านั้น
     const ACC_USERS = ["admin", "WARUT"];
     if (page === "accounting" || page.startsWith("acc")) {
@@ -559,6 +562,9 @@ export default function App() {
         )}
         {activeMenu === "whtrefund" && canAccess("whtrefund") && (
           <WhtRefundPage currentUser={currentUser} />
+        )}
+        {activeMenu === "doorcontrol" && canAccess("doorcontrol") && (
+          <DoorControlPage currentUser={currentUser} />
         )}
         {activeMenu === "aisimreport" && canAccess("aisimreport") && (
           <AiSimReportPage currentUser={currentUser} />
@@ -1166,6 +1172,11 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         </button>
         {/* รายงานการเข้าใช้ + คะแนนการตอบ — เฉพาะ admin + WARUT (กำหนดใน canAccess) */}
         <MenuItem page="aisimreport" label="📊 รายงานฝึกตอบลูกค้า" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
+      {/* ประตูร้าน: สั่งประตูม้วนผ่าน Tuya + พนักงานขอเปิดทาง LINE — เฉพาะ admin/WARUT (กำหนดใน canAccess) */}
+      <MenuGroup title="ประตูร้าน" pages={["doorcontrol"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+        <MenuItem page="doorcontrol" label="🚪 ประตูร้าน / เปิดผ่าน LINE" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="CRM" pages={["crmevent"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

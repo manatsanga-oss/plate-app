@@ -246,7 +246,11 @@ export default function BankDepositPage({ currentUser }) {
       const days = carryNegativeDays(rawDays, depositedByDay).sort((a, b) => b.date.localeCompare(a.date));
       // วันที่ฝากแล้วไม่ต้องขึ้น — จับคู่ใบฝากกับวันด้วย "ยอด" (ชุดใบฝากลงวันที่ D/D+1 รวมเท่าเงินสดสุทธิ) ไม่ใช่วันที่อย่างเดียว (user 2026-09-07: วันที่ 3 ฝาก 2 ยอดข้ามวัน ทำให้วันที่ 4 หาย)
       const done = depositedDaySet(days, depList, addDays);
-      setCashDays(days.filter(d => !done.has(d.date)));
+      // ฝากบางส่วนแล้ว (เข้าเงินสดย่อย ให้เจ้าของเก็บ) → โชว์ยอดที่เหลือให้ฝากต่อ (user 2026-10-22)
+      setCashDays(days.filter(d => !done.has(d.date)).map(d => {
+        const dep = Math.round((depositedByDay[d.date] || 0) * 100) / 100;
+        return dep > 0 ? { ...d, cash: Math.round((d.cash - dep) * 100) / 100, deposited: dep, fullCash: d.cash } : d;
+      }));
     } catch { setCashDays([]); }
     setCashLoading(false);
   }
@@ -255,7 +259,8 @@ export default function BankDepositPage({ currentUser }) {
     const d = cashDays.find(x => x.date === date);
     if (!d) return;
     const carriedNote = d.carried?.length ? ` · หักยอดติดลบ ${d.carried.map(c => `${fmtDateShort(c.date)} ${fmt(c.cash)}${c.deposited > 0 ? ` (ฝากไปแล้ว ${fmt(c.deposited)})` : ""}`).join(", ")}` : "";
-    setForm(p => ({ ...p, amount: d.cash, source: `ฝากเงินสดประจำวัน ${date} (เงินสดรับสุทธิจากระบบ${carriedNote})` }));
+    const partNote = d.deposited > 0 ? ` · ฝากไปแล้ว ${fmt(d.deposited)} เหลือ ${fmt(d.cash)}` : "";
+    setForm(p => ({ ...p, amount: d.cash, source: `ฝากเงินสดประจำวัน ${date} (เงินสดรับสุทธิจากระบบ${carriedNote}${partNote})` }));
     setLines([{ to_account_id: "", amount: String(d.cash) }]); // แถวแรกรับยอดเต็ม แบ่งเพิ่มได้ด้วยปุ่ม + บัญชี
   }
   const linesTotal = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -295,7 +300,11 @@ export default function BankDepositPage({ currentUser }) {
       const valid = lines.filter(l => l.to_account_id && Number(l.amount) > 0);
       if (!valid.length) { setMessage("❌ เลือกบัญชีรับฝากและยอดอย่างน้อย 1 บัญชี"); return; }
       if (lines.some(l => (l.to_account_id && !(Number(l.amount) > 0)) || (!l.to_account_id && Number(l.amount) > 0))) { setMessage("❌ แถวบัญชีต้องมีทั้งบัญชีและยอด (ลบแถวที่ไม่ใช้ออก)"); return; }
-      if (Math.abs(linesTotal - cashSel.cash) >= 0.01) { setMessage(`❌ ยอดรวมที่ฝาก ${fmt(linesTotal)} ไม่เท่ายอดเงินสดรับสุทธิของวัน ${fmt(cashSel.cash)}`); return; }
+      // ฝากเข้า "เงินสดย่อย" (account_type) = เจ้าของเก็บไว้ก่อน → ฝากบางส่วนได้ ที่เหลือยังค้างให้ฝากวันถัดไป (user 2026-10-22)
+      const hasPetty = valid.some(l => accounts.find(a => String(a.account_id) === String(l.to_account_id))?.account_type === "เงินสดย่อย");
+      if (linesTotal - cashSel.cash >= 0.01) { setMessage(`❌ ยอดรวมที่ฝาก ${fmt(linesTotal)} เกินยอดเงินสดรับสุทธิของวัน ${fmt(cashSel.cash)}`); return; }
+      if (cashSel.cash - linesTotal >= 0.01 && !hasPetty) { setMessage(`❌ ยอดรวมที่ฝาก ${fmt(linesTotal)} ไม่เท่ายอดเงินสดรับสุทธิของวัน ${fmt(cashSel.cash)} (ฝากบางส่วนได้เฉพาะเมื่อมีบัญชีเงินสดย่อย ที่เหลือฝากวันถัดไป)`); return; }
+      const remainAfter = Math.round((cashSel.cash - linesTotal) * 100) / 100;
       const accIds = valid.map(l => String(l.to_account_id));
       if (new Set(accIds).size !== accIds.length) { setMessage("❌ เลือกบัญชีซ้ำกัน"); return; }
       setSaving(true); setMessage("");
@@ -313,7 +322,7 @@ export default function BankDepositPage({ currentUser }) {
           await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         }
         setShowForm(false);
-        setMessage(`✅ บันทึกฝากเงินวันที่ ${fmtDateShort(cashSel.date)} รวม ${fmt(linesTotal)} บาท (${valid.length} บัญชี)`);
+        setMessage(`✅ บันทึกฝากเงินวันที่ ${fmtDateShort(cashSel.date)} รวม ${fmt(linesTotal)} บาท (${valid.length} บัญชี)${remainAfter >= 0.01 ? ` · เหลือ ${fmt(remainAfter)} บาท ค้างฝากวันถัดไป` : ""}`);
         fetchData();
       } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
       setSaving(false);
@@ -723,7 +732,7 @@ th { background: #f0fdf4; }
                       <option value="">{cashLoading ? "กำลังคำนวณยอดเงินสดรายวัน…" : cashDays.length ? "-- เลือกวันที่สรุปเงิน --" : "ไม่มีวันที่ยังไม่ได้ฝาก (ตั้งแต่ 1/9/2569)"}</option>
                       {cashDays.map(d => (
                         <option key={d.date} value={d.date}>
-                          {fmtDateShort(d.date)} · เงินสดรับสุทธิ {fmt(d.cash)} บาท ({d.count} รายการ{d.carried?.length ? ` · หักยอดติดลบ ${d.carried.map(c => `${fmtDateShort(c.date)} ${fmt(c.cash)}`).join(", ")}` : ""})
+                          {fmtDateShort(d.date)} · เงินสดรับสุทธิ {fmt(d.deposited > 0 ? d.fullCash : d.cash)} บาท{d.deposited > 0 ? ` · ฝากแล้ว ${fmt(d.deposited)} เหลือ ${fmt(d.cash)}` : ""} ({d.count} รายการ{d.carried?.length ? ` · หักยอดติดลบ ${d.carried.map(c => `${fmtDateShort(c.date)} ${fmt(c.cash)}`).join(", ")}` : ""})
                         </option>
                       ))}
                     </select>

@@ -158,7 +158,10 @@ export function depositedDaySet(days, depList, addDays) {
   const tagged = (x) => (String(x.source || "").match(/ฝากเงินสดประจำวัน (\d{4}-\d{2}-\d{2})/) || [])[1] || "";
   const done = new Set();
   const used = new Set();
-  for (const x of depList) { const t = tagged(x); if (t) done.add(t); }
+  // ใบฝากระบุวัน: ฝากแล้วเมื่อยอดรวมของวันนั้น ≥ ยอดเงินสดสุทธิ (−2 บาท) — ฝากบางส่วนเข้าเงินสดย่อย (เจ้าของเก็บ) แล้วที่เหลือฝากวันถัดไปได้ (user 2026-10-22)
+  const taggedSum = {};
+  for (const x of depList) { const t = tagged(x); if (t) taggedSum[t] = (taggedSum[t] || 0) + num(x.amount); }
+  for (const t of Object.keys(taggedSum)) { const day = days.find((d) => d.date === t); if (!day || taggedSum[t] >= num(day.cash) - 2) done.add(t); }
   const untagged = depList.map((x, i) => ({ i, date: String(x.deposit_date || "").slice(0, 10), amt: num(x.amount) })).filter((x) => x.date && !tagged(depList[x.i]));
   const sorted = [...days].sort((a, b) => String(a.date).localeCompare(String(b.date)));
   for (const d of sorted) {
