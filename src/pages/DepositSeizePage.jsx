@@ -3,6 +3,7 @@ import React, { useState, useEffect } from "react";
 const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const YAMAHA_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-deposit-api";
 const YAMAHA_SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
+const PART_DEPOSIT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api"; // ใบมัดจำระบบใหม่ PDS/PDO (user 2026-10-22: ยึดมัดจำใบ PDS ได้)
 
 function fmt(v) {
   return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -42,12 +43,13 @@ export default function DepositSeizePage({ currentUser } = {}) {
     setLoading(true);
     setMessage("");
     try {
-      const [hOrdRes, yOrdRes, hDepRes, yDepRes, seizeRes] = await Promise.all([
+      const [hOrdRes, yOrdRes, hDepRes, yDepRes, seizeRes, pdRes] = await Promise.all([
         fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_spare_orders" }) }),
         fetch(YAMAHA_SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_yamaha_orders", include_seized: true }) }).catch(() => null),
         fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_honda_deposits" }) }),
         fetch(YAMAHA_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) }),
         fetch(SPARE_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposit_seizures" }) }).catch(() => null),
+        fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_deposits", limit: 3000 }) }).catch(() => null),
       ]);
       const norm = (data) => Array.isArray(data) ? data : (data?.items || data?.rows || []);
       const hOrders = norm(await hOrdRes.json()).map(o => ({ ...o, brand: "HONDA" }));
@@ -64,6 +66,20 @@ export default function DepositSeizePage({ currentUser } = {}) {
         const key = d?.receipt_no || d?.deposit_doc_no;
         if (key) depMap[`YAMAHA:${key}`] = { ...d, receipt_no: d?.receipt_no || d?.deposit_doc_no };
       });
+      // ใบมัดจำระบบใหม่ (PDS-/PDO- จาก part-deposit-api) — เดิมหน้านี้โหลดแต่มัดจำ upload ทำให้ใบสั่งซื้อที่ผูก PDS หายไปจากรายการยึด (user 2026-10-22)
+      // ยี่ห้อไม่อยู่ในใบมัดจำ → ใส่ทั้ง HONDA:/YAMAHA: (ไม่ทับของ upload) · ยอดคงเหลือสำหรับยึด = ยอดรับ − ที่คืนไปแล้ว (เงินที่ถูกจองกับใบสั่งซื้อยังอยู่กับร้าน)
+      try {
+        const pds = pdRes ? norm(await pdRes.json()) : [];
+        pds.forEach(d => {
+          const key = d?.deposit_doc_no;
+          if (!key || !/^PD[SO]-/.test(key) || d.status === "cancelled") return;
+          // paid_amount มี 2 ความหมาย: จองกับใบสั่งซื้อ (remark "ใช้กับใบสั่งซื้อ") = เงินยังอยู่ ยึดได้ · ตัดรับชำระจริง (remark "ใช้รับชำระ ... กับเอกสาร") = ใช้ไปแล้ว ยึดไม่ได้
+          const usedInPayment = /ใช้รับชำระ/.test(String(d.remark || "")) ? Number(d.paid_amount || 0) : 0;
+          const held = Math.max(Number(d.deposit_amount || 0) - Number(d.refunded_amount || 0) - usedInPayment, 0);
+          const row = { ...d, receipt_no: key, deposit_doc_no: key, deposit_type: `เงินมัดจำอะไหล่ (${d.deposit_type || "-"})`, remaining_amount: held, note: d.remark || "" };
+          for (const b of ["HONDA", "YAMAHA"]) if (!depMap[`${b}:${key}`]) depMap[`${b}:${key}`] = row;
+        });
+      } catch {}
       // หา deposit ที่ "ยังไม่ได้สั่งซื้อ" (ไม่มี order อ้างอิงถึง) — สร้าง pseudo-order
       const orderedDocSet = new Set([...hOrders, ...yOrders].map(o => `${o.brand}:${o.deposit_doc_no}`));
       const isSparePartsDeposit = (d) => {
