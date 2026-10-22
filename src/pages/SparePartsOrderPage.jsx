@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from "react";
+import BankAccountSelect from "../utils/BankAccountSelect"; // เลือกบัญชีโอนออกตอนคืนมัดจำแบบเงินโอน (user 2026-10-22)
 import usePartStockHints, { useAutoStockCheck, PartStockHintRow, fetchLoanStock, LOAN_STORE } from "../utils/usePartStockHints";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
@@ -566,12 +567,12 @@ export default function SparePartsOrderPage({ currentUser }) {
     if (!window.confirm(`ยกเลิกคำขอ — ให้ใบ ${o.deposit_doc_no || o.order_no} กลับเป็น "อะไหล่ค้างส่ง" ตามเดิม?`)) return;
     try { await api("update_order_status", { order_id: o.order_id, status: "อะไหล่ค้างส่ง" }); loadAll(); } catch { setMessage("❌ เปลี่ยนสถานะไม่สำเร็จ"); }
   }
-  async function doRefundOrder({ amount, method, note }) {
+  async function doRefundOrder({ amount, method, note, account }) {
     const o = refundOrder; if (!o) return;
     try {
       if (/^PD[SO]-/.test(String(o.deposit_doc_no || ""))) {
         const r = await fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "refund_deposit", deposit_doc_no: o.deposit_doc_no, refund_amount: amount, refund_method: method, from_order: true,
+          body: JSON.stringify({ action: "refund_deposit", deposit_doc_no: o.deposit_doc_no, refund_amount: amount, refund_method: method, from_order: true, refund_account_id: account?.account_id ?? null, refund_account_name: account?.account_name || "", refund_account_no: account?.account_no || "",
             refund_note: `ยกเลิกใบสั่งซื้อ ${o.order_no || o.order_id} (สินค้ายังไม่มา)${note ? " · " + note : ""}`, refunded_by: currentUser?.name || currentUser?.username || "" }) });
         const d = await r.json().catch(() => null);
         const row = Array.isArray(d) ? d[0] : (d && d.listJson ? JSON.parse(d.listJson)[0] : d);
@@ -579,7 +580,7 @@ export default function SparePartsOrderPage({ currentUser }) {
       } else if (String(o.deposit_doc_no || "").trim()) {
         // ใบมัดจำระบบเก่า (DEPD-/REC จาก upload) — บันทึกเอกสารคืนเงินลง part_deposits เพื่อให้สรุปรายวันรับเงินหักยอด (user 2026-09-05)
         const r = await fetch(PART_DEPOSIT_API, { method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "refund_legacy_deposit", deposit_doc_no: o.deposit_doc_no, refund_amount: amount, refund_method: method,
+          body: JSON.stringify({ action: "refund_legacy_deposit", deposit_doc_no: o.deposit_doc_no, refund_amount: amount, refund_method: method, refund_account_id: account?.account_id ?? null, refund_account_name: account?.account_name || "", refund_account_no: account?.account_no || "",
             brand: "HONDA", branch_code: String(currentUser?.branch || o.branch || "").split(" ")[0], deposit_type: "สั่งซื้อ",
             customer_code: o.customer_code || "", customer_name: o.customer_name || "", customer_phone: o.customer_phone || "", vin: o.vin || "",
             refund_note: `ยกเลิกใบสั่งซื้อ ${o.order_no || o.order_id} (สินค้ายังไม่มา)${note ? " · " + note : ""}`, refunded_by: currentUser?.name || currentUser?.username || "" }) });
@@ -2140,15 +2141,17 @@ function RefundOrderModal({ order, onClose, onConfirm }) {
   const [method, setMethod] = useState("เงินสด");
   const [amount, setAmount] = useState(String(Number(order.deposit_amount || 0)));
   const [note, setNote] = useState("");
+  const [account, setAccount] = useState(null); // บัญชีที่โอนออก (เฉพาะเงินโอน) → รายงานเคลื่อนไหวบัญชี
   const [busy, setBusy] = useState(false);
   const isSys = /^PD[SO]-/.test(String(order.deposit_doc_no || ""));
   const inp = { width: "100%", padding: "8px 10px", border: "1px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box" };
   async function ok() {
     const amt = Number(String(amount).replace(/,/g, ""));
     if (!(amt > 0)) { alert("กรอกจำนวนเงินคืน"); return; }
-    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${order.deposit_doc_no} ${amt.toLocaleString("th-TH")} บาท (${method})\nและเปลี่ยนสถานะใบสั่งซื้อเป็น "ยกเลิก (คืนเงิน)"?`)) return;
+    if (method === "เงินโอน" && !account) { alert("เลือกบัญชีที่ใช้โอนเงินคืน"); return; }
+    if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${order.deposit_doc_no} ${amt.toLocaleString("th-TH")} บาท (${method}${method === "เงินโอน" && account ? ` จาก ${account.account_name}` : ""})\nและเปลี่ยนสถานะใบสั่งซื้อเป็น "ยกเลิก (คืนเงิน)"?`)) return;
     setBusy(true);
-    await onConfirm({ amount: amt, method, note });
+    await onConfirm({ amount: amt, method, note, account: method === "เงินโอน" ? account : null });
     setBusy(false);
   }
   return (
@@ -2169,6 +2172,12 @@ function RefundOrderModal({ order, onClose, onConfirm }) {
             <option value="เงินสด">เงินสด</option>
             <option value="เงินโอน">เงินโอน</option>
           </select>
+          {method === "เงินโอน" && (
+            <>
+              <label>บัญชีที่โอนออก</label>
+              <BankAccountSelect value={account?.account_id} onChange={setAccount} style={inp} />
+            </>
+          )}
           <label>จำนวนเงินคืน</label>
           <input type="number" value={amount} onChange={e => setAmount(e.target.value)} style={{ ...inp, textAlign: "right" }} />
           <label>หมายเหตุ</label>

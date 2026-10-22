@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import BankAccountSelect from "../utils/BankAccountSelect"; // เลือกบัญชีโอนออกตอนคืนมัดจำแบบเงินโอน (user 2026-10-22)
 import CustomerPickerModal from "./CustomerPickerModal";
 
 // ระบบมัดจำอะไหล่ — บันทึกรับเงินมัดจำเอง (โครงข้อมูลเดียวกับมัดจำที่ upload จาก NID/DMS)
@@ -79,6 +80,7 @@ export default function PartDepositPage({ currentUser }) {
   const payMethodLabel = () => { const ms = [...new Set(payLinesClean().map((l) => l.method))]; return ms.length ? ms.join("+") : payMethod; };
   const [savedDocNo, setSavedDocNo] = useState("");       // เลขที่ใบรับมัดจำที่เพิ่งบันทึก
   const [refundDoc, setRefundDoc] = useState("");         // เลขที่ใบรับมัดจำที่เลือกคืนเงิน
+  const [refundAccount, setRefundAccount] = useState(null); // บัญชีที่โอนเงินคืน (ใบคืนมัดจำแบบเงินโอน) → รายงานเคลื่อนไหวบัญชี (user 2026-10-22)
   const [view, setView] = useState("form");               // form | search | detail (โหมดค้นหาแบบ NID — เฉพาะแท็บบริการ)
   const [searchQ, setSearchQ] = useState("");
   const [fltReceive, setFltReceive] = useState(true);     // filter การ์ด: ใบรับมัดจำ
@@ -315,6 +317,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     const amt = num(payAmount);
     if (!(amt > 0)) { setMessage("❌ กรอกจำนวนเงินคืนให้ถูกต้อง"); return; }
     if (amt > refundAvail(refundSel)) { setMessage(`❌ ยอดคืนเกินมัดจำที่คืนได้ (${fmt(refundAvail(refundSel))} บาท)`); return; }
+    if (payMethod === "เงินโอน" && !refundAccount) { setMessage("❌ เลือกบัญชีที่ใช้โอนเงินคืน"); return; }
     const fromOrder = num(refundSel.remaining_amount) <= 0 && pendingOrder(refundSel);
     if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${refundSel.deposit_doc_no}\nลูกค้า ${refundSel.customer_name} จำนวน ${fmt(amt)} บาท (${payMethod})?${fromOrder ? "\n\n⚠ ใบนี้สั่งซื้อแล้วแต่สินค้ายังไม่มา → ใบสั่งซื้อจะเปลี่ยนเป็น \"ยกเลิก (คืนเงิน)\"" : ""}`)) return;
     setSaving(true); setMessage("");
@@ -324,6 +327,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         deposit_doc_no: refundSel.deposit_doc_no,
         refund_amount: amt,
         refund_method: payMethod,
+        refund_account_id: payMethod === "เงินโอน" ? refundAccount?.account_id ?? null : null, refund_account_name: payMethod === "เงินโอน" ? refundAccount?.account_name || "" : "", refund_account_no: payMethod === "เงินโอน" ? refundAccount?.account_no || "" : "",
         refund_note: fromOrder ? `ยกเลิกใบสั่งซื้อ ${orderOf(refundSel)?.order_no || orderOf(refundSel)?.order_id} (สินค้ายังไม่มา)${form.remark ? " · " + form.remark : ""}` : form.remark,
         from_order: fromOrder,
         refunded_by: currentUser?.name || currentUser?.username || "",
@@ -332,6 +336,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
       if (!row || row.error || !row.deposit_doc_no) throw new Error(row?.error || (fromOrder ? "คืนเงินไม่สำเร็จ (ตรวจว่า re-import Part_Deposit_Workflow แล้ว)" : "คืนเงินไม่สำเร็จ (ยอดอาจถูกใช้/คืนไปแล้ว)"));
       const extra = fromOrder ? await cancelLinkedOrder(refundSel) : "";
       setMessage(`✅ คืนเงินมัดจำ ${row.deposit_doc_no} จำนวน ${fmt(amt)} บาท แล้ว · คงเหลือ ${fmt(row.remaining_amount)} บาท${extra}`);
+      setRefundAccount(null);
       resetServiceForm();
       load();
     } catch (e) { setMessage("❌ " + (e.message || "คืนเงินไม่สำเร็จ")); }
@@ -345,6 +350,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
     const amt = num(rfd.amount);
     if (!(amt > 0)) { setMessage("❌ กรอกจำนวนเงินคืนให้ถูกต้อง"); return; }
     if (amt > refundAvail(rfd.doc)) { setMessage(`❌ ยอดคืนเกินมัดจำที่คืนได้ (${fmt(refundAvail(rfd.doc))} บาท)`); return; }
+    if (rfd.method === "เงินโอน" && !rfd.account) { setMessage("❌ เลือกบัญชีที่ใช้โอนเงินคืน"); return; }
     const fromOrder = num(rfd.doc.remaining_amount) <= 0 && pendingOrder(rfd.doc);
     if (!window.confirm(`ยืนยันคืนเงินมัดจำ ${rfd.doc.deposit_doc_no}\nลูกค้า ${rfd.doc.customer_name} จำนวน ${fmt(amt)} บาท (${rfd.method})?${fromOrder ? "\n\n⚠ ใบนี้สั่งซื้อแล้วแต่สินค้ายังไม่มา → ใบสั่งซื้อจะเปลี่ยนเป็น \"ยกเลิก (คืนเงิน)\"" : ""}`)) return;
     setSaving(true); setMessage("");
@@ -354,6 +360,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         deposit_doc_no: rfd.doc.deposit_doc_no,
         refund_amount: amt,
         refund_method: rfd.method,
+        refund_account_id: rfd.method === "เงินโอน" ? rfd.account?.account_id ?? null : null, refund_account_name: rfd.method === "เงินโอน" ? rfd.account?.account_name || "" : "", refund_account_no: rfd.method === "เงินโอน" ? rfd.account?.account_no || "" : "",
         refund_note: fromOrder ? `ยกเลิกใบสั่งซื้อ ${orderOf(rfd.doc)?.order_no || orderOf(rfd.doc)?.order_id} (สินค้ายังไม่มา)${rfd.note ? " · " + rfd.note : ""}` : rfd.note,
         from_order: fromOrder,
         refunded_by: currentUser?.name || currentUser?.username || "",
@@ -570,6 +577,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                         <option value="เงินสด">1 - เงินสด</option>
                         <option value="เงินโอน">2 - เงินโอน</option>
                       </select>
+                      {payMethod === "เงินโอน" && <BankAccountSelect value={refundAccount?.account_id} onChange={setRefundAccount} style={{ ...inp, width: 300 }} />}
                       <input type="number" min="0" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} autoFocus
                         onKeyDown={(e) => e.key === "Enter" && confirmPay()}
                         placeholder="0.00" style={{ ...inp, width: 170, textAlign: "right", fontWeight: 700 }} />
@@ -985,6 +993,13 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 </select>
               </div>
             </div>
+            {rfd.method === "เงินโอน" && (
+              <div style={{ marginBottom: 10 }}>
+                <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>บัญชีที่โอนเงินคืน</label>
+                <BankAccountSelect value={rfd.account?.account_id} onChange={(a) => setRfd((p) => ({ ...p, account: a }))}
+                  style={{ width: "100%", padding: "8px 10px", border: "1px solid #cbd5e1", borderRadius: 8, fontSize: 14, boxSizing: "border-box" }} />
+              </div>
+            )}
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12.5, fontWeight: 600, display: "block", marginBottom: 4 }}>หมายเหตุการคืน</label>
               <input value={rfd.note} onChange={(e) => setRfd((p) => ({ ...p, note: e.target.value }))} placeholder="เช่น ลูกค้ายกเลิกสั่งซื้อ"

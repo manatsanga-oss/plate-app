@@ -30,7 +30,7 @@ async function postJson(url, body) {
 }
 
 let _subsCache = null; // โหลดครั้งเดียวต่อการเปิดแอป
-async function loadSubs() {
+export async function loadSubs() { // export ให้หน้าสั่งซื้อ YAMAHA ใช้เช็คสถานะ B2B ผ่านรหัสทดแทน (user 2026-10-22)
   if (_subsCache) return _subsCache;
   const rows = (await postJson(SUBS_API, { action: "get_part_substitutes" })).filter((r) => r && r.original_code && r.substitute_code);
   _subsCache = rows;
