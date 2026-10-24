@@ -477,11 +477,14 @@ export default function InsuranceBillingPage({ currentUser }) {
     const n = Number(v || 0);
     return n.toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
+  // วันที่กรมธรรม์ (contract_date/coverage_*) ในตาราง insurance_records เก็บเป็นปี พ.ศ. อยู่แล้ว (2569-08-23) ส่วน billed_at/paid_at เป็น ค.ศ.
+  //   → บวก 543 เฉพาะปี ค.ศ. (ไม่งั้นโชว์ 3112 — user 2026-10-24)
   function fmtDate(v) {
     if (!v) return "-";
     const d = new Date(v);
     if (isNaN(d)) return String(v).slice(0, 10);
-    return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`;
+    const y = d.getFullYear();
+    return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${y > 2400 ? y : y + 543}`;
   }
 
   return (
@@ -1501,7 +1504,7 @@ const tdNum = { padding: "8px", fontSize: 12, textAlign: "right", fontFamily: "m
 function buildBillingHTML({ rows, totalPremium, commission, remit }) {
   const safe = s => String(s ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]));
   const fmtNum = v => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fmtDate = v => { if (!v) return "-"; const d = new Date(v); if (isNaN(d)) return String(v).slice(0, 10); return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear() + 543}`; };
+  const fmtDate = v => { if (!v) return "-"; const d = new Date(v); if (isNaN(d)) return String(v).slice(0, 10); const y = d.getFullYear(); return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${y > 2400 ? y : y + 543}`; }; // ปีในตารางประกันเป็น พ.ศ. อยู่แล้ว
   const today = new Date();
   const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear() + 543}`;
   const trs = rows.map((r, i) => {
