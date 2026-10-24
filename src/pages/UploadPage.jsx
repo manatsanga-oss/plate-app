@@ -32,7 +32,7 @@ const UPLOAD_GROUPS = [
       { key: "honda-part-sales", label: "รายงานขายอะไหล่รายตัว HONDA", desc: "ไฟล์ XLS (TIS-620) ยอดขายอะไหล่รายตัว · UPSERT (sale_doc_no + part_code)", db: "honda_part_sales", url: `${BASE}/upload-honda-part-sales` },
       { key: "yamaha-part-dispense", label: "รายงานการจ่ายอะไหล่ YAMAHA", desc: "ไฟล์ XLSX การจ่าย/ขายอะไหล่รายตัว · UPSERT (doc_no + part_code + ref_doc_no)", db: "yamaha_part_dispense", url: `${BASE}/upload-yamaha-part-dispense` },
       { key: "part-giveaway", label: "รายการสินค้าของแถม", desc: "ไฟล์ XLSX รายงานขายอะไหล่ — กรองเฉพาะ ของแถม · UPSERT (sale_doc_no + part_code)", db: "part_giveaway_items", url: `${BASE}/upload-part-giveaway` },
-      { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
+      { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ · เลือกไฟล์ .csv ที่ download จาก B2B ได้เลย (ระบบแปลงเป็น xlsx ให้) หรือ .xlsx", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
       { key: "yamaha-b2b-backorders", label: "รายงานอะไหล่ค้างส่ง YAMAHA B2B", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "yamaha_b2b_backorders", url: `${BASE}/upload-yamaha-b2b-backorders` },
       { key: "pending-job", label: "รายการอะไหล่เบิกค้างปิด JOB", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "pending_job_parts", url: `${BASE}/upload-pending-job` },
       { key: "yamaha-repair", label: "Upload ใบแจ้งซ่อม Yamaha", desc: "39 คอลัมน์ · UPSERT (job_no + item_type + repair_type_code + mechanic_code)", db: "yamaha_repair_invoices", url: `${BASE}/upload-yamaha-repair` },
@@ -87,6 +87,24 @@ const FILE_UPLOAD_KEYS = new Set([
 
 // รายการที่รองรับ 2 โหมด: เลือกไฟล์เอง (default) หรือวาง OneDrive File ID ให้ n8n download มาเอง
 const ONEDRIVE_MODE_KEYS = new Set(["stock"]);
+
+// รายการที่รับไฟล์ .csv ได้โดยตรง — แปลงเป็น .xlsx ในเบราว์เซอร์ก่อนส่ง (workflow ฝั่ง n8n อ่านแบบ xlsx และจับคอลัมน์ด้วยชื่อหัวตารางไทย)
+//   CSV จาก B2B ยามาฮ่าเข้ารหัส Windows-874 ถ้าส่งตรงหัวตารางจะเพี้ยน → อ่านเป็น windows-874 แล้วสร้าง xlsx ที่มีเซลล์เหมือนตอนเปิดด้วย Excel แล้ว Save As (user 2026-10-24 ไม่ต้องเปิด Excel บันทึกซ้ำ)
+const CSV_AUTO_XLSX_KEYS = new Set(["yamaha-b2b-orders"]);
+async function csvToXlsxFile(file) {
+  const XLSX = await import("xlsx");
+  const buf = await file.arrayBuffer();
+  const bytes = new Uint8Array(buf);
+  let text;
+  if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) text = new TextDecoder("utf-8").decode(buf);
+  else {
+    // ลอง utf-8 แบบเข้มงวดก่อน ไม่ผ่าน = Windows-874 (ไทย) ซึ่งเป็นแบบที่ B2B ส่งออก
+    try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { text = new TextDecoder("windows-874").decode(buf); }
+  }
+  const wb = XLSX.read(text, { type: "string", raw: true });
+  const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  return new File([out], file.name.replace(/\.csv$/i, "") + ".xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
 
 // ===== สต๊อกอะไหล่ สช.ตลาด (SCY07) จากไฟล์ DMS ทุกสาขา — แปลง xlsx ในเบราว์เซอร์ แล้วส่งเฉพาะรหัสที่มีในระบบ (user 2026-09-05: ต้องเร็ว ข้อมูลส่วนใหญ่ในไฟล์ไม่ใช้) =====
 const normPartCode = (v) => String(v ?? "").trim().replace(/^'+/, "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -193,7 +211,12 @@ export default function UploadPage({ currentUser } = {}) {
       } else if (FILE_UPLOAD_KEYS.has(item.key)) {
         // ส่งไฟล์เป็น multipart/form-data
         const fd = new FormData();
-        fd.append("file", files[item.key]);
+        let f = files[item.key];
+        if (CSV_AUTO_XLSX_KEYS.has(item.key) && /\.csv$/i.test(f.name)) {
+          setMessages(prev => ({ ...prev, [item.key]: "⏳ แปลง CSV เป็น XLSX…" }));
+          f = await csvToXlsxFile(f);
+        }
+        fd.append("file", f, f.name);
         res = await fetch(url, { method: "POST", body: fd });
       } else {
         res = await fetch(url, { method: "GET" });
