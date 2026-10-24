@@ -134,6 +134,7 @@ import MyMotorRegisterPage from "./pages/MyMotorRegisterPage";
 import ReportAdminPage from "./pages/ReportAdminPage";
 import GeneralReceiptPivotPage from "./pages/GeneralReceiptPivotPage";
 import ProfitLossReportPage from "./pages/ProfitLossReportPage";
+import HondaQuotaSnapshotPage from "./pages/HondaQuotaSnapshotPage"; // โควต้า HONDA (DOSS) snapshot (user 2026-10-24)
 import MotoStockOnHandReportPage from "./pages/MotoStockOnHandReportPage";
 import MotoTransferPage from "./pages/MotoTransferPage";
 import CreditNoteReportPage from "./pages/CreditNoteReportPage";
@@ -303,7 +304,7 @@ export default function App() {
     // งบกำไรขาดทุน — เห็นเฉพาะ user "admin" คนเดียว (จำกัดก่อนเช็ค role admin ทั่วไป)
     if (page === "profitloss") return currentUser.username === "admin";
     // Report Manager — เฉพาะ user admin (มนัส สง่าศรี) เท่านั้น ไม่รวม admin คนอื่น (user 2026-10-15)
-    if (["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "marketregistration"].includes(page)) return currentUser.username === "admin";
+    if (["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "marketregistration", "hondaquota"].includes(page)) return currentUser.username === "admin";
     // บันทึกแก้ไขราคาขายเฉพาะคัน — เฉพาะ admin (user 2026-09-01)
     if (page === "vehpriceoverride") return currentUser.role === "admin";
     if (currentUser.role === "admin") return true;
@@ -408,6 +409,7 @@ export default function App() {
         {activeMenu === "reportadmin" && <ReportAdminPage currentUser={currentUser} />}
         {activeMenu === "vehiclepurchasereport" && canAccess("vehiclepurchasereport") && <VehiclePurchaseReportPage currentUser={currentUser} />}
         {activeMenu === "hondasalesreport" && canAccess("hondasalesreport") && <HondaSalesReportPage currentUser={currentUser} />}
+        {activeMenu === "hondaquota" && canAccess("hondaquota") && <HondaQuotaSnapshotPage currentUser={currentUser} />}
         {activeMenu === "pricepromoadvice" && canAccess("pricepromoadvice") && <PricePromoAdvicePage currentUser={currentUser} />}
         {activeMenu === "marketregistration" && canAccess("marketregistration") && <MarketRegistrationReportPage currentUser={currentUser} />}
         {activeMenu === "priceimpact" && canAccess("priceimpact") && <PriceImpactAnalysisPage currentUser={currentUser} />}
@@ -976,11 +978,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
       </MenuGroup>
 
       {/* Report Manager — รายงานวิเคราะห์สำหรับผู้บริหาร เห็นเฉพาะ user admin (มนัส สง่าศรี) — user 2026-10-15 */}
-      <MenuGroup title="Report Manager" pages={["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "marketregistration", "profitloss"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Manager" pages={["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "hondaquota", "marketregistration", "profitloss"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="pricepromoadvice" label="แนะนำราคา/ค่าส่งเสริม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="priceimpact" label="วิเคราะห์ผลราคา/โปร ต่อยอดขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="stockturnover" label="สินค้าคงเหลือ & อัตราการหมุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hondasalesreport" label="ส่งรายงาน HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hondaquota" label="โควต้า HONDA (DOSS)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="marketregistration" label="ข้อมูลจดทะเบียนรถในตลาด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="profitloss" label="งบกำไรขาดทุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
