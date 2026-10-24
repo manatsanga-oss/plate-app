@@ -45,6 +45,19 @@ export default function InsuranceBillingPage({ currentUser }) {
     return res.json();
   }
 
+  // กรมธรรม์ที่อ้างใบขายรถ + มีใบรับเรื่องเก็บส่วนต่าง (เปิดผิดชั้น) → แตกเป็น 2 แถว: ฝั่งขายรถ = ยอดมาตรฐาน (323.14) / ฝั่งรับเรื่อง = ส่วนต่าง (53.50)
+  //   ทั้งสองแถวใช้ insurance_id เดียวกัน (เลือก/วางบิลไปด้วยกัน ยอดรวมเท่าเดิม) — user 2026-10-24 "ขายต้อง 323.14 ที่เหลือเป็นรับเรื่อง"
+  function splitExtraRows(list) {
+    const r2 = (v) => Math.round(Number(v || 0) * 100) / 100;
+    return list.flatMap((r) => {
+      const ex = Number(r.extra_amount || 0);
+      if (!(r && r.invoice_no && r.extra_receipt_no && ex > 0 && r.record_type !== "extra")) return [r];
+      return [
+        { ...r, total_premium: r2(Number(r.total_premium) - ex), premium_remit: r2(Number(r.premium_remit) - ex), premium: r2(Number(r.premium) - ex), _split: "sale" },
+        { ...r, receipt_no: r.extra_receipt_no, invoice_no: null, sale_id: null, total_premium: ex, premium_remit: ex, premium: ex, stamp_duty: 0, tax: 0, commission: 0, short_term_fee: 0, claimed_items: [], has_claim: false, _split: "extra", _sale_invoice: r.invoice_no },
+      ];
+    });
+  }
   async function fetchData() {
     setLoading(true);
     setSelected({});
@@ -55,7 +68,7 @@ export default function InsuranceBillingPage({ currentUser }) {
         date_from: dateFrom || null,
         date_to: dateTo || null,
       });
-      setRows(Array.isArray(data) ? data : []);
+      setRows(splitExtraRows(Array.isArray(data) ? data : []));
     } catch {
       setRows([]);
     }
@@ -365,7 +378,7 @@ export default function InsuranceBillingPage({ currentUser }) {
           if (!r.billing_doc_no) {
             if (r.record_type === "extra") extraIds.push(r.insurance_id);
             else {
-              ids.push(r.insurance_id);
+              if (!ids.includes(r.insurance_id)) ids.push(r.insurance_id); // แถวแตกส่วนต่างใช้ id เดียวกัน
               if (!inheritedBatchNo && r.record_batch_no) inheritedBatchNo = r.record_batch_no;
             }
             totalPremium += Number(r.total_premium || 0);
@@ -407,8 +420,8 @@ export default function InsuranceBillingPage({ currentUser }) {
     setMessage("");
     try {
       const insRows = selectedRows.filter(r => r.record_type !== "extra");
-      const insIds = insRows.map(r => r.insurance_id);
-      const exIds = selectedRows.filter(r => r.record_type === "extra").map(r => r.insurance_id);
+      const insIds = [...new Set(insRows.map(r => r.insurance_id))]; // แถวแตก (ส่วนต่าง) ใช้ id เดียวกัน
+      const exIds = [...new Set(selectedRows.filter(r => r.record_type === "extra").map(r => r.insurance_id))];
       const inheritedBatchNo = insRows.find(r => r.record_batch_no)?.record_batch_no || "";
       await post({
         action: "save_insurance_billing",
@@ -769,7 +782,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                   : needAttention ? "#fef3c7"
                   : "transparent";
                 return (
-                <tr key={r.insurance_id} style={{ borderTop: "1px solid #e5e7eb", background: rowBg }}>
+                <tr key={`${r.insurance_id}${r._split === "extra" ? "-x" : ""}`} style={{ borderTop: "1px solid #e5e7eb", background: rowBg }}>
                   <td style={td}><input type="checkbox" checked={!!selected[r.insurance_id]} onChange={() => toggleOne(r.insurance_id)} /></td>
                   <td style={td}>{fmtDate(r.contract_date)}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.policy_no || "-"}</td>
@@ -778,9 +791,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                   <td style={td}>{r.plate_number || "-"}</td>
                   <td style={{ ...td, color: r.invoice_no ? "#065f46" : "#9ca3af", fontWeight: r.invoice_no ? 600 : 400 }}>{r.invoice_no || "-"}
                     {/* กรมธรรม์อ้างใบขาย + มีใบรับเรื่องเก็บส่วนต่าง (เปิดผิดชั้น): ต้นทุนรถใหม่ = ยอดกรมธรรม์ − ส่วนต่าง · ส่วนต่าง = ต้นทุนงานรับเรื่อง (user 2026-10-24) */}
-                    {r.invoice_no && r.extra_receipt_no && Number(r.extra_amount) > 0 && (
-                      <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", fontFamily: "Tahoma" }}>รถใหม่ {fmtNum(Number(r.total_premium) - Number(r.extra_amount))} · เก็บเพิ่ม {r.extra_receipt_no} {fmtNum(r.extra_amount)}</div>
-                    )}
+                    {r._split === "sale" && <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", fontFamily: "Tahoma" }}>ส่วนต่าง {fmtNum(r.extra_amount)} แยกไปใบรับเรื่อง {r.extra_receipt_no}</div>}
                   </td>
                   <td style={td}>
                     {r.receipt_no ? (
@@ -870,7 +881,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                     {detailRow.rows.map((r, i) => {
                       const expNo = expPolicyMap[normPolicy(r.policy_no)];
                       return (
-                      <tr key={r.insurance_id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                      <tr key={`${r.insurance_id}${r._split === "extra" ? "-x" : ""}`} style={{ borderTop: "1px solid #e5e7eb" }}>
                         <td style={{ ...td, textAlign: "center" }}>{i + 1}</td>
                         <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(r.contract_date)}</td>
                         <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>
@@ -888,7 +899,8 @@ export default function InsuranceBillingPage({ currentUser }) {
                         <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{fmtNum(r.premium_remit)}</td>
                         <td style={td}>
                           {r.invoice_no && <div style={{ color: "#065f46", fontWeight: 600 }}>{r.invoice_no}</div>}
-                          {r.invoice_no && r.extra_receipt_no && Number(r.extra_amount) > 0 && <div style={{ fontSize: 10.5, color: "#b45309" }}>รถใหม่ {fmtNum(Number(r.total_premium) - Number(r.extra_amount))} · เก็บเพิ่ม {r.extra_receipt_no} {fmtNum(r.extra_amount)}</div>}
+                          {r._split === "sale" && <div style={{ fontSize: 10.5, color: "#b45309" }}>ส่วนต่าง {fmtNum(r.extra_amount)} แยกไปใบรับเรื่อง {r.extra_receipt_no}</div>}
+                          {r._split === "extra" && <div style={{ fontSize: 10.5, color: "#b45309" }}>ส่วนต่างเบี้ย พรบ. จากใบขาย {r._sale_invoice || ""} (เปิดผิดชั้น)</div>}
                           {r.customer_name && <div style={{ fontSize: 11, color: "#6b7280" }}>{r.customer_name}</div>}
                           {!r.invoice_no && !r.customer_name && <span style={{ color: "#9ca3af" }}>-</span>}
                         </td>
@@ -1041,7 +1053,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                         </thead>
                         <tbody>
                           {b.rows.map((r, j) => (
-                            <tr key={r.insurance_id} style={{ borderTop: "1px solid #e5e7eb" }}>
+                            <tr key={`${r.insurance_id}${r._split === "extra" ? "-x" : ""}`} style={{ borderTop: "1px solid #e5e7eb" }}>
                               <td style={{ ...td, textAlign: "center" }}>{j + 1}</td>
                               <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(r.contract_date)}</td>
                               <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.policy_no || "-"}</td>
