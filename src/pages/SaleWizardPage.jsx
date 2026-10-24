@@ -899,7 +899,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   const depositAmt = bookingAsk === "booked" && selBooking ? Number(selBooking.remaining || 0) : 0;
 
   // ===== ราคาประกาศ ณ วันจอง — ลูกค้าจองไว้ก่อนปรับราคา ต้องคิดราคาวันที่จอง ไม่ใช่ราคาปัจจุบัน (เหมือนหน้าขายปลีก) =====
-  const bookingDateISO = bookingAsk === "booked" && selBooking?.booking_date ? String(selBooking.booking_date).slice(0, 10) : "";
+  // ลูกค้าจองบางรายต้องการใช้ราคาวันนี้แทนราคา ณ วันจอง (เช่น ราคาวันนี้ถูกกว่า) → ปุ่มสลับ "ใช้ราคาวันนี้แทน" (user 2026-10-24)
+  //   เมื่อเปิด: ทุกกฎที่อิงวันจอง (ตารางราคา/โปร/บวกเพิ่ม/กลุ่มราคาสาขา) ใช้วันนี้แทน · รีเซ็ตเมื่อเปลี่ยนใบจอง
+  const [useTodayPrice, setUseTodayPrice] = useState(false);
+  useEffect(() => { setUseTodayPrice(false); }, [selBooking?.deposit_no]);
+  const bookingDateISO = !useTodayPrice && bookingAsk === "booked" && selBooking?.booking_date ? String(selBooking.booking_date).slice(0, 10) : "";
   const [bookingPrices, setBookingPrices] = useState(null); // ตารางราคา ณ วันจอง (null = ใช้ราคาปัจจุบัน)
   useEffect(() => {
     if (!bookingDateISO) { setBookingPrices(null); return; }
@@ -2171,11 +2175,26 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                           </div>
                         )}
                         {usingBookingPrice && (
-                          <div style={{ marginTop: 6 }}>
+                          <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                             <span title="ลูกค้าจองไว้ก่อนปรับราคา — ใช้ราคาประกาศที่มีผล ณ วันจอง (ไม่ใช่ราคาปัจจุบัน)"
                               style={{ padding: "2px 10px", borderRadius: 10, background: "#fef3c7", color: "#92400e", fontSize: 12, fontWeight: 700, cursor: "help" }}>
                               🔖 ราคา ณ วันจอง {thaiDate(bookingDateISO)}
                             </span>
+                            <button onClick={() => setUseTodayPrice(true)} title="ลูกค้าต้องการใช้ราคาประกาศวันนี้แทนราคา ณ วันจอง (ราคา/โปร/บวกเพิ่ม คิดตามวันนี้ทั้งหมด)"
+                              style={{ padding: "2px 10px", borderRadius: 10, border: "1px solid #93c5fd", background: "#fff", color: "#1d4ed8", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Tahoma" }}>
+                              ใช้ราคาวันนี้แทน
+                            </button>
+                          </div>
+                        )}
+                        {bookingAsk === "booked" && selBooking?.booking_date && useTodayPrice && (
+                          <div style={{ marginTop: 6, display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                            <span style={{ padding: "2px 10px", borderRadius: 10, background: "#dbeafe", color: "#1e40af", fontSize: 12, fontWeight: 700 }}>
+                              📅 ใช้ราคาวันนี้ (ไม่ใช้ราคา ณ วันจอง {thaiDate(String(selBooking.booking_date).slice(0, 10))})
+                            </span>
+                            <button onClick={() => setUseTodayPrice(false)}
+                              style={{ padding: "2px 10px", borderRadius: 10, border: "1px solid #fcd34d", background: "#fff", color: "#92400e", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "Tahoma" }}>
+                              กลับไปใช้ราคา ณ วันจอง
+                            </button>
                           </div>
                         )}
                         {price == null && <div style={{ fontSize: 12, color: "#991b1b", marginTop: 4 }}>ไม่พบราคาประกาศของแบบ/type นี้ในเมนูราคารถ</div>}
