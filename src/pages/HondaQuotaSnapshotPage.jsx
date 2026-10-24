@@ -31,15 +31,27 @@ const asArray = (d) => (Array.isArray(d) ? d : d && Array.isArray(d.rows) ? d.ro
 
 // อ่านไฟล์ DOSS (HTML table / xls / xlsx) → แถว {model_code, type, color_code, est_w1..4, est_total, est_direct, current_quota, adjusted_quota, delivery, pending}
 async function parseDossFile(file) {
-  const XLSX = await import("xlsx");
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
-  const hi = rows.findIndex((r) => Array.isArray(r) && r.map((x) => String(x).trim().toLowerCase()).includes("current quota"));
-  if (hi < 0) throw new Error("ไม่พบคอลัมน์ Current Quota — ตรวจว่าเป็นไฟล์โควต้า DOSS (32116_YYYYMM.xls)");
-  const head = rows[hi].map((x) => String(x).trim().toLowerCase());
-  const col = (name) => head.indexOf(name.toLowerCase());
+  const text = new TextDecoder("utf-8").decode(buf.slice(0, 4000));
+  let rows;
+  if (/<table/i.test(text)) {
+    // ไฟล์ DOSS = HTML table แท้ ๆ → อ่านด้วย DOMParser ตรง ๆ (ไม่พึ่ง SheetJS)
+    const doc = new DOMParser().parseFromString(new TextDecoder("utf-8").decode(buf), "text/html");
+    rows = [...doc.querySelectorAll("tr")].map((tr) => [...tr.querySelectorAll("td,th")].map((c) => String(c.textContent || "").trim()));
+  } else {
+    const XLSX = await import("xlsx");
+    const wb = XLSX.read(buf, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+  }
+  const clean = (x) => String(x == null ? "" : x).replace(/\s+/g, " ").trim().toLowerCase();
+  const hi = rows.findIndex((r) => Array.isArray(r) && r.some((x) => clean(x) === "current quota"));
+  if (hi < 0) {
+    const first = rows.find((r) => Array.isArray(r) && r.length) || [];
+    throw new Error(`ไม่พบคอลัมน์ Current Quota — ตรวจว่าเป็นไฟล์โควต้า DOSS (32116_YYYYMM.xls) · หัวตารางที่อ่านได้: ${first.slice(0, 8).join(" | ") || "(ว่าง)"}`);
+  }
+  const head = rows[hi].map(clean);
+  const col = (name) => head.indexOf(clean(name));
   const c = {
     model: col("Model"), type: col("Type"), color: col("Color"),
     w1: col("Estimate Quota Week 1"), w2: col("Estimate Quota Week 2"), w3: col("Estimate Quota Week 3"), w4: col("Estimate Quota Week 4"),
@@ -81,7 +93,7 @@ export default function HondaQuotaSnapshotPage({ currentUser }) {
   const [pendingUpload, setPendingUpload] = useState(null); // {file, rows, period_month} รอยืนยันเดือน
 
   async function loadSnaps(selectLatestOf) {
-    const d = asArray(await post(API, { action: "list_snapshots" }));
+    const d = asArray(await post(API, { action: "list_snapshots" })).filter((s) => s && s.id); // n8n ตอบ [{success:true}] เมื่อไม่มีแถว
     setSnaps(d);
     const months = [...new Set(d.map((s) => s.period_month))];
     const want = selectLatestOf || pm || months[0] || curPm();
