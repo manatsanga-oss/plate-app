@@ -7,13 +7,13 @@ const UPLOAD_GROUPS = [
     title: "UPLOAD ข้อมูลการขาย",
     items: [
       { key: "stock", label: "สต๊อกสินค้าคงเหลือ", desc: "เลือกไฟล์ XLSX หรือดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_stock", url: `${BASE}/upload-stock` },
-      { key: "sales", label: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "sales_report", url: `${BASE}/upload-sales` },
+      // ⛔ ปิด 2026-10-24 (user: ไม่ใช้แล้ว — ขาย/รายได้อื่น/ค่าใช้จ่ายบันทึกในระบบโดยตรง): { key: "sales", label: "รายงานการขาย", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "sales_report", url: `${BASE}/upload-sales` },
       // ⛔ ปิด upload เงินมัดจำคงเหลือ (YAMAHA/HONDA) ตั้งแต่ 2026-09-04 — มัดจำอะไหล่ใหม่บันทึกใน "ระบบมัดจำอะไหล่" (PDS/PDO) ทางเดียว
       // ตาราง moto_deposit / honda_deposits = ยอดยกมาชุดสุดท้าย ตัดผ่านหน้ารับชำระในระบบ; ถ้า upload ทับจะล้างยอดที่ตัดไว้ทั้งหมด (workflow TRUNCATE)
       // { key: "deposit", label: "เงินมัดจำคงเหลือ", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "moto_deposit", url: `${BASE}/upload-deposit` },
       // { key: "honda-deposit", label: "เงินมัดจำคงเหลือ HONDA", desc: "ลบข้อมูลเก่า แล้วนำเข้าใหม่ทั้งหมด", db: "honda_deposits", url: `${BASE}/upload-honda-deposit` },
-      { key: "other-income", label: "รายได้อื่นๆ", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "other_income", url: `${BASE}/upload-other-income` },
-      { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่ายรายวัน → daily_expenses (สังกัดกำหนดที่ปลายทางตอนใช้งาน)", db: "daily_expenses", url: `${BASE}/upload-expenses` },
+      // ⛔ ปิด 2026-10-24 (user: ไม่ใช้แล้ว — ขาย/รายได้อื่น/ค่าใช้จ่ายบันทึกในระบบโดยตรง): { key: "other-income", label: "รายได้อื่นๆ", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ", db: "other_income", url: `${BASE}/upload-other-income` },
+      // ⛔ ปิด 2026-10-24 (user: ไม่ใช้แล้ว — ขาย/รายได้อื่น/ค่าใช้จ่ายบันทึกในระบบโดยตรง): { key: "expense", label: "ค่าใช้จ่ายรายวัน", desc: "นำเข้าข้อมูลค่าใช้จ่ายรายวัน → daily_expenses (สังกัดกำหนดที่ปลายทางตอนใช้งาน)", db: "daily_expenses", url: `${BASE}/upload-expenses` },
     ],
   },
   {
