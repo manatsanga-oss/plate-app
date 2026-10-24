@@ -776,7 +776,12 @@ export default function InsuranceBillingPage({ currentUser }) {
                   <td style={td}>{r.insured_name || "-"}</td>
                   <td style={{ ...td, fontFamily: "monospace" }}>{r.chassis_no || "-"}</td>
                   <td style={td}>{r.plate_number || "-"}</td>
-                  <td style={{ ...td, color: r.invoice_no ? "#065f46" : "#9ca3af", fontWeight: r.invoice_no ? 600 : 400 }}>{r.invoice_no || "-"}</td>
+                  <td style={{ ...td, color: r.invoice_no ? "#065f46" : "#9ca3af", fontWeight: r.invoice_no ? 600 : 400 }}>{r.invoice_no || "-"}
+                    {/* กรมธรรม์อ้างใบขาย + มีใบรับเรื่องเก็บส่วนต่าง (เปิดผิดชั้น): ต้นทุนรถใหม่ = ยอดกรมธรรม์ − ส่วนต่าง · ส่วนต่าง = ต้นทุนงานรับเรื่อง (user 2026-10-24) */}
+                    {r.invoice_no && r.extra_receipt_no && Number(r.extra_amount) > 0 && (
+                      <div style={{ fontSize: 10.5, fontWeight: 400, color: "#b45309", fontFamily: "Tahoma" }}>รถใหม่ {fmtNum(Number(r.total_premium) - Number(r.extra_amount))} · เก็บเพิ่ม {r.extra_receipt_no} {fmtNum(r.extra_amount)}</div>
+                    )}
+                  </td>
                   <td style={td}>
                     {r.receipt_no ? (
                       <button onClick={() => setClaimDialog(r)}
@@ -883,6 +888,7 @@ export default function InsuranceBillingPage({ currentUser }) {
                         <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{fmtNum(r.premium_remit)}</td>
                         <td style={td}>
                           {r.invoice_no && <div style={{ color: "#065f46", fontWeight: 600 }}>{r.invoice_no}</div>}
+                          {r.invoice_no && r.extra_receipt_no && Number(r.extra_amount) > 0 && <div style={{ fontSize: 10.5, color: "#b45309" }}>รถใหม่ {fmtNum(Number(r.total_premium) - Number(r.extra_amount))} · เก็บเพิ่ม {r.extra_receipt_no} {fmtNum(r.extra_amount)}</div>}
                           {r.customer_name && <div style={{ fontSize: 11, color: "#6b7280" }}>{r.customer_name}</div>}
                           {!r.invoice_no && !r.customer_name && <span style={{ color: "#9ca3af" }}>-</span>}
                         </td>

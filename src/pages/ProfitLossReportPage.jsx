@@ -570,6 +570,18 @@ export default function ProfitLossReportPage() {
           beforeVat: remit, vat: 0, total: remit,
         });
       });
+      // ส่วนต่างเบี้ย พรบ. ที่เก็บเพิ่มผ่านใบรับเรื่อง (กรมธรรม์อ้างใบขายรถ แต่เปิดผิดชั้น → ลูกค้าจ่ายเพิ่มผ่าน CA) = ต้นทุนหมวดรับเรื่องของเดือน/สาขาตามใบรับเรื่องเก็บเพิ่ม
+      //   ฝั่งขายรถ (ใบปะหน้า) หักส่วนนี้ออกแล้วใน list_registration_summary — user 2026-10-24 เคส SCY06-CA691000007
+      insBillRows.filter((r) => r && r.extra_receipt_no && Number(r.extra_amount) > 0).forEach((r) => {
+        const m = String(r.extra_receipt_no).match(/^(SCY\d{2})-CA(\d{4})/);
+        if (!m || m[2] !== yymm) return;
+        const k = DEFAULT_BRANCHES.some((b) => b.key === m[1]) ? m[1] : "";
+        const key = k || "unassigned";
+        const amt = r2(r.extra_amount);
+        rc[key] = r2(rc[key] + amt);
+        rcRows.push({ branch: k, doc: r.extra_receipt_no, date: r.billed_at || r.contract_date, customer: r.insured_name || r.customer_name || "-",
+          detail: ["ส่วนต่างเบี้ยพรบ เก็บเพิ่ม", r.policy_no, r.invoice_no ? `ใบขาย ${r.invoice_no}` : ""].filter(Boolean).join(" · "), beforeVat: amt, vat: 0, total: amt });
+      });
       rc.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + rc[b.key], rc.unassigned));
       tc.total = r2(DEFAULT_BRANCHES.reduce((s, b) => s + tc[b.key], tc.unassigned));
       setRegCostAgg(rc);
