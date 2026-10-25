@@ -85,6 +85,9 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [filterSystem, setFilterSystem] = useState("all");
+  // โหมด "เฉพาะใบที่ยังมีรหัสไม่จับคู่": ดึงใบ HONDA/YAMAHA ที่มีเลขใบรับสั่งซื้อย้อนหลัง N วัน (ไม่ใช่แค่วันที่เลือก) แล้วโชว์เฉพาะใบที่มีรายการ ✗ (user 2026-10-25 ไม่ได้ย้อนกลับไปดูใบเก่า)
+  const [unmatchedOnly, setUnmatchedOnly] = useState(false);
+  const UNMATCHED_LOOKBACK_DAYS = 90;
   const [usageMap, setUsageMap] = useState(null); // strip(part_code) → [{base, type}] จาก part_model_usage
   const [dcsByOrder, setDcsByOrder] = useState({});   // order_id → รายการอะไหล่จากใบรับสั่งซื้อที่ upload (dcs_spare_orders)
   const [boByOrder, setBoByOrder] = useState({});     // order_id → รายการอะไหล่ค้างส่ง (dcs/b2b backorders)
@@ -133,7 +136,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     // eslint-disable-next-line
   }, [rows, dcsByOrder, subsByOrder, knownPairs]);
 
-  useEffect(() => { load(date); /* eslint-disable-next-line */ }, [date]);
+  useEffect(() => { load(date); /* eslint-disable-next-line */ }, [date, unmatchedOnly]);
 
   // เช็คของถึง: รวมรหัสที่สั่ง + รหัสในใบรับสั่งซื้อ (เผื่อรับเป็นอะไหล่ทดแทน) → ถามรายงานรับอะไหล่ตั้งแต่วันที่สั่ง
   useEffect(() => {
@@ -313,8 +316,11 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
       post(YAMAHA_API, { action: "get_yamaha_orders" }).then(norm).catch(() => []),
       post(OUTSIDE_API, { action: "get_orders" }).then(norm).catch(() => []),
     ]);
-    const pick = (list) => list.filter(o => thaiDateOf(o.created_at) === day);
-    const hondaDay = pick(honda), yamahaDay = pick(yamaha), outsideDay = pick(outside);
+    const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - UNMATCHED_LOOKBACK_DAYS); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+    const pick = (list) => unmatchedOnly
+      ? list.filter(o => o.vendor_po_no && String(o.created_at || "").slice(0, 10) >= cutoff) // โหมดไม่จับคู่: ย้อนหลัง N วัน เฉพาะใบที่สั่งเข้า DCS/B2B แล้ว
+      : list.filter(o => thaiDateOf(o.created_at) === day);
+    const hondaDay = pick(honda), yamahaDay = pick(yamaha), outsideDay = unmatchedOnly ? [] : pick(outside);
     // ดึงรายการอะไหล่ของใบที่อยู่ในวันนั้น (รายวันมีไม่กี่ใบ)
     const detail = (url, action, o) =>
       post(url, { action, order_id: o.order_id }).then(norm).catch(() => []);
@@ -550,7 +556,12 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     setDate(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
   }
 
-  const filtered = rows.filter(r => filterSystem === "all" || r.system === filterSystem);
+  const hasUnmatched = (r) => {
+    const key = `${r.system}-${r.order_id}`;
+    if (!(key in dcsByOrder)) return false; // ยังโหลดใบรับสั่งซื้อไม่เสร็จ — รอก่อน
+    return (r.items || []).some(it => orderedInDcs(r, it) === false && !isBackordered(r, it));
+  };
+  const filtered = rows.filter(r => (filterSystem === "all" || r.system === filterSystem) && (!unmatchedOnly || hasUnmatched(r)));
   const totalItems = filtered.reduce((s, r) => s + (r.items || []).reduce((s2, it) => s2 + (Number(it.quantity) || 0), 0), 0);
 
   function printReport() {
@@ -644,8 +655,14 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
         <button onClick={() => setDate(todayISO())} style={{ ...btn, background: "#072d6b", color: "#fff" }}>วันนี้</button>
         <button onClick={() => load(date)} style={{ ...btn, background: "#0e7490", color: "#fff" }}>รีเฟรช</button>
         <button onClick={printReport} disabled={loading || filtered.length === 0} style={{ ...btn, background: "#6b7280", color: "#fff" }}>พิมพ์</button>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: unmatchedOnly ? "#fee2e2" : "#fff", cursor: "pointer" }}
+          title={`แสดงเฉพาะใบสั่งซื้อ HONDA/YAMAHA ที่ยังมีรหัสอะไหล่ ✗ (สั่งแล้วแต่ไม่พบในใบรับสั่งซื้อ และยังไม่จับคู่อะไหล่ทดแทน) ย้อนหลัง ${UNMATCHED_LOOKBACK_DAYS} วัน ไม่สนวันที่เลือก`}>
+          <input type="checkbox" checked={unmatchedOnly} onChange={e => setUnmatchedOnly(e.target.checked)} />
+          <span style={{ color: "#b91c1c", fontWeight: 700 }}>✗ เฉพาะใบที่ยังมีรหัสไม่จับคู่</span>
+          <span style={{ color: "#6b7280" }}>(ย้อนหลัง {UNMATCHED_LOOKBACK_DAYS} วัน)</span>
+        </label>
         <span style={{ fontSize: 14, fontWeight: 700, color: "#072d6b" }}>
-          {fmtThaiDate(date)} — {filtered.length} ใบ · {totalItems} ชิ้น
+          {unmatchedOnly ? `ย้อนหลัง ${UNMATCHED_LOOKBACK_DAYS} วัน (ถึง ${fmtThaiDate(todayISO())})` : fmtThaiDate(date)} — {filtered.length} ใบ · {totalItems} ชิ้น{unmatchedOnly && loading ? " · กำลังโหลด…" : ""}
         </span>
       </div>
 
