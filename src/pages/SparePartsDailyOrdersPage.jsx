@@ -380,7 +380,15 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
     if (r.system === "YAMAHA") {
       const orderCodes = (r.items || []).map(it => yamahaPad(it.part_code));
-      return dcs.filter(d => !orderCodes.includes(yamahaPad(d.part_number)) && !orderCodes.includes(yamahaPad(d.received_part_number)));
+      const out = dcs.filter(d => !orderCodes.includes(yamahaPad(d.part_number)) && !orderCodes.includes(yamahaPad(d.received_part_number)));
+      // B2B ส่งรหัสอื่นมาแทนรหัสที่สั่ง (received_part_number ≠ part_number) → โชว์รหัสที่ส่งมาเป็นรายการให้จับคู่/บันทึก (user 2026-10-25 เคส 2BL-H2310-00 → B8B-H2310-01)
+      dcs.forEach(d => {
+        const rc = yamahaPad(d.received_part_number);
+        if (rc && rc !== yamahaPad(d.part_number) && orderCodes.includes(yamahaPad(d.part_number)) && !orderCodes.includes(rc) && !out.some(x => yamahaPad(x.part_number) === rc)) {
+          out.push({ ...d, part_number: d.received_part_number, _recvOf: d.part_number });
+        }
+      });
+      return out;
     }
     const orderCodes = (r.items || []).map(it => strip(it.part_code));
     return dcs.filter(d => !orderCodes.includes(strip(d.part_number)));
@@ -441,6 +449,48 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     return pend ? pend.substitute_code : null;
   }
 
+  // เสนอคู่ทดแทนอัตโนมัติจาก B2B (YAMAHA) — ไม่ต้องรอพนักงานกดจับคู่เอง (user 2026-10-25):
+  //   (A) B2B ส่งรหัสอื่นมาแทนรหัสที่สั่ง (received_part_number ≠ part_number) เช่น 2BL-H2310-00 → B8B-H2310-01
+  //   (B) รหัสในใบสั่งที่ไม่พบใน B2B แต่มีรายการ B2B ที่ไม่ตรงใบสั่งซึ่ง "เลขกลาง+ท้าย" เท่ากัน (ยามาฮ่าเปลี่ยนแค่รหัสรุ่นนำหน้า) เช่น 2BL-E3585-00 → 2BM-E3585-00
+  //   ใส่เป็นคู่รอบันทึก (พนักงานกด "บันทึกอะไหล่ทดแทน" หรือ × ยกเลิกได้) ไม่ทับคู่ที่จับเอง/บันทึกแล้ว
+  const yamahaMid = (c) => { const p = yamahaPad(c); return p.length === 12 ? p.slice(3) : ""; }; // 2BLE35850000 → E35850000
+  useEffect(() => {
+    const add = {};
+    rows.filter(r => r.system === "YAMAHA" && r.vendor_po_no).forEach(r => {
+      const key = `${r.system}-${r.order_id}`;
+      const dcs = dcsByOrder[key] || [];
+      if (!dcs.length) return;
+      const orderCodes = (r.items || []).map(it => yamahaPad(it.part_code));
+      const savedOrig = new Set((subsByOrder[String(r.order_id)] || []).map(p => strip(p.original_code)));
+      const pendOrig = new Set((pendingPairs[key] || []).map(p => strip(p.original_code)));
+      const usedSub = new Set([...(pendingPairs[key] || []).map(p => strip(p.substitute_code))]);
+      (r.items || []).forEach(it => {
+        const oc = strip(it.part_code), pc = yamahaPad(it.part_code);
+        if (!oc || savedOrig.has(oc) || pendOrig.has(oc)) return;
+        let cand = null;
+        // (A) รหัสที่สั่งตรง แต่ส่งรหัสอื่นมา
+        const a = dcs.find(d => yamahaPad(d.part_number) === pc && d.received_part_number && yamahaPad(d.received_part_number) !== pc);
+        if (a) cand = { code: a.received_part_number, name: a.part_description || "" };
+        // (B) ไม่พบใน B2B เลย → หา B2B ที่ไม่ตรงใบสั่งและเลขกลาง+ท้ายเท่ากัน
+        if (!cand && !dcs.some(d => yamahaPad(d.part_number) === pc || yamahaPad(d.received_part_number) === pc)) {
+          const b = dcs.find(d => !orderCodes.includes(yamahaPad(d.part_number)) && !orderCodes.includes(yamahaPad(d.received_part_number)) && yamahaMid(d.part_number) && yamahaMid(d.part_number) === yamahaMid(it.part_code));
+          if (b) cand = { code: b.received_part_number || b.part_number, name: b.part_description || "" };
+        }
+        if (!cand || !cand.code || strip(cand.code) === oc || usedSub.has(strip(cand.code))) return;
+        if (knownPairs.has(`${oc}|${strip(cand.code)}`)) return; // เคยบันทึกจากใบอื่นแล้ว — substituteFor จะเห็นเอง
+        usedSub.add(strip(cand.code));
+        (add[key] = add[key] || []).push({ original_code: it.part_code, original_name: it.part_name || "", substitute_code: cand.code, substitute_name: cand.name, auto: true });
+      });
+    });
+    if (!Object.keys(add).length) return;
+    setPendingPairs(prev => {
+      const next = { ...prev };
+      for (const [key, list] of Object.entries(add)) next[key] = [...(prev[key] || []), ...list];
+      return next;
+    });
+    // eslint-disable-next-line
+  }, [rows, dcsByOrder, subsByOrder, knownPairs]);
+
   // ติ๊กปุ่มหน้า ✗ แล้วกด "จับคู่" ที่รายการ DCS → เก็บคู่ไว้รอบันทึก
   function pairWith(r, d) {
     const key = `${r.system}-${r.order_id}`;
@@ -476,7 +526,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     setMessage("");
     try {
       // ตัดคู่ที่เคยบันทึกไว้แล้ว (จากใบไหนก็ได้) — กันข้อมูลซ้ำในตาราง
-      const pairs = all.filter(p => !pairKnown(p));
+      const pairs = all.filter(p => !pairKnown(p)).map(({ auto, ...p }) => p); // ตัด flag auto ก่อนส่ง
       if (!pairs.length) {
         setSubsOrders(prev => new Set([...prev, String(r.order_id)]));
         setPendingPairs(prev => ({ ...prev, [key]: [] }));
@@ -804,8 +854,8 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                                     ✓ แทน {savedOrig}
                                   </span>
                                 ) : pendPair ? (
-                                  <span style={{ color: "#d97706", fontWeight: 700, marginLeft: 6 }} title="จับคู่แล้ว — รอกดบันทึก">
-                                    → แทน {pendPair.original_code}
+                                  <span style={{ color: "#d97706", fontWeight: 700, marginLeft: 6 }} title={pendPair.auto ? "B2B เสนอให้อัตโนมัติ (รหัสที่ส่งมาแทน / เลขกลางเดียวกัน) — กดบันทึกเพื่อยืนยัน หรือ × ถ้าไม่ใช่" : "จับคู่แล้ว — รอกดบันทึก"}>
+                                    → แทน {pendPair.original_code}{pendPair.auto ? " (B2B)" : ""}
                                     <button onClick={() => unpair(r, d)} title="ยกเลิกคู่นี้"
                                       style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer", fontWeight: 800, marginLeft: 2 }}>×</button>
                                   </span>
