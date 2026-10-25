@@ -87,7 +87,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   const [filterSystem, setFilterSystem] = useState("all");
   // โหมด "เฉพาะใบที่ยังมีรหัสไม่จับคู่": ดึงใบ HONDA/YAMAHA ที่มีเลขใบรับสั่งซื้อย้อนหลัง N วัน (ไม่ใช่แค่วันที่เลือก) แล้วโชว์เฉพาะใบที่มีรายการ ✗ (user 2026-10-25 ไม่ได้ย้อนกลับไปดูใบเก่า)
   const [unmatchedOnly, setUnmatchedOnly] = useState(false);
-  const UNMATCHED_LOOKBACK_DAYS = 90;
+  const UNMATCHED_LOOKBACK_DAYS = 30; // user 2026-10-25: 90 วันนานไป
   const [usageMap, setUsageMap] = useState(null); // strip(part_code) → [{base, type}] จาก part_model_usage
   const [dcsByOrder, setDcsByOrder] = useState({});   // order_id → รายการอะไหล่จากใบรับสั่งซื้อที่ upload (dcs_spare_orders)
   const [boByOrder, setBoByOrder] = useState({});     // order_id → รายการอะไหล่ค้างส่ง (dcs/b2b backorders)
