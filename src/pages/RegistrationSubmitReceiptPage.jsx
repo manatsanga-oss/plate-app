@@ -49,6 +49,8 @@ export default function RegistrationSubmitReceiptPage({ currentUser }) {
           date_from: dateFrom, date_to: dateTo,
           // ตัวกรองล็อคตั้นเป็นค่าพิเศษฝั่งหน้าเว็บ — ส่ง income_type ว่างให้ API แล้วกรองเองด้านล่าง
           branch_code: branchFilter, income_type: incomeTypeFilter === LOCKTON_FILTER ? "" : incomeTypeFilter,
+          // โหมดล็อคตั้น: API ซ่อนบรรทัดประกันของใบประเภท "ต่อภาษี" เป็นค่าเริ่มต้น (flow วางบิลประกัน) → ต้อง bypass ไม่งั้นล็อคตั้นที่ซื้อพร้อมต่อภาษีหาย (เคส SCY04-CA691000001 03/10/69 — user 2026-10-26)
+          bypass_insurance_filter: incomeTypeFilter === LOCKTON_FILTER,
           keyword: search.trim(),
         }),
       });
