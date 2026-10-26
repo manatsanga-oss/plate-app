@@ -1,4 +1,5 @@
 # สร้าง n8n workflow: door-api — ควบคุมประตูม้วน/อ่านเซนเซอร์ประตูผ่าน Tuya Cloud OpenAPI (Singapore) + พนักงานขอเปิดประตูทาง LINE
+# v1.3 (2026-10-22): scene trigger ส่งแบบไม่มี body (POST ที่มี body จาก n8n ยัง sign invalid แม้ raw)
 # v1.2 (2026-10-22): ประตูม้วนสั่งผ่านฉาก Tap-to-Run (scene_map ใน door_settings, action scenes) + HTTP body raw แก้ sign invalid
 # v1.1 (2026-10-22): เลือกบานที่สั่ง (open/stop/close รับ shutter both/1/2; line_open ใช้ door_settings.line_shutter)
 # v1 (2026-10-22): actions get_settings/save_settings/list_users/save_user/delete_user/list_log (DB) · status/open/stop/close/functions (Tuya) · line_open (จากบอท LINE พนักงาน: เช็กสิทธิ์+ช่วงเวลา แล้วเปิด)
@@ -75,7 +76,7 @@ const pickShutters = (which) => { const w = String(which || 'both'); return cfg.
 const sceneMap = (settings.scene_map && typeof settings.scene_map === 'object') ? settings.scene_map : {};
 const cmdCalls = (value, which) => pickShutters(which).map((d) => {
   const idx = cfg.devices.shutters.indexOf(d) + 1; const sid = sceneMap[`${idx}_${value}`];
-  if (sid) return { method: 'POST', path: `/v1.0/homes/${cfg.homeId}/scenes/${sid}/trigger`, body: {}, name: d.name, scene: sid };
+  if (sid) return { method: 'POST', path: `/v1.0/homes/${cfg.homeId}/scenes/${sid}/trigger`, body: null, name: d.name, scene: sid };   // ไม่ส่ง body (เซ็นด้วย SHA256('') เหมือน GET) — body ที่ n8n ส่งไม่ตรงกับที่เซ็น → sign invalid แม้ใช้ raw (2026-10-22)
   return { method: 'POST', path: `/v1.0/iot-03/devices/${d.id}/commands`, body: { commands: [{ code: 'control', value }] }, name: d.name };
 });
 if (action === 'line_open') {
@@ -248,7 +249,7 @@ nodes = [
      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1980, -160], "id": nid(), "name": "Tuya Token", "onError": "continueRegularOutput"},
     code("Call Prep", CALL_PREP, 2640, -160),
     {"parameters": {"method": "={{ $json.method }}", "url": "={{ $json.url }}", "sendHeaders": True, "headerParameters": tuya_hdr([{"name": "access_token", "value": "={{ $json.access }}"}]),
-                    "sendBody": "={{ $json.method === 'POST' }}", "contentType": "raw", "rawContentType": "application/json", "body": "={{ $json.bodyStr || '{}' }}", "options": {"timeout": 15000}},   # raw = ส่ง body ตรงตัวที่เซ็น (specifyBody json ถูก n8n แปลงใหม่ → Tuya 'sign invalid' 2026-10-22)
+                    "sendBody": "={{ !!$json.bodyStr }}", "contentType": "raw", "rawContentType": "application/json", "body": "={{ $json.bodyStr || '{}' }}", "options": {"timeout": 15000}},   # raw = ส่ง body ตรงตัวที่เซ็น (specifyBody json ถูก n8n แปลงใหม่ → Tuya 'sign invalid' 2026-10-22)
      "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [2420, -160], "id": nid(), "name": "Tuya Call", "onError": "continueRegularOutput"},
     code("Finalize", FINALIZE, 3960, 0),
     {"parameters": {"operation": "executeQuery", "query": "{{ $json.logQuery }}", "options": {}}, "type": "n8n-nodes-base.postgres", "typeVersion": 2.5, "position": [2860, 0], "id": nid(), "name": "PG Log", "alwaysOutputData": True, "credentials": PG, "onError": "continueRegularOutput"},

@@ -1,0 +1,15 @@
+[Unit]
+Description=platewatch - NVR snapshot vehicle watcher (service-queue-api)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/nvr
+ExecStart=/home/pi/pw/bin/python /home/pi/nvr/platewatch.py
+Restart=always
+RestartSec=10
+Environment=YOLO_CONFIG_DIR=/home/pi/nvr/.yolo
+
+[Install]
+WantedBy=multi-user.target
