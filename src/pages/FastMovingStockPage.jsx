@@ -8,6 +8,11 @@ const MAIN_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-
 // แบตเตอรี่ HONDA (PG-001) สั่งนอก DCS: ไม่มีใบสั่งซื้อ/ค้างส่ง DCS → ใช้ "บันทึกสั่งซื้อ" ในหน้านี้บอกว่าสั่งแล้วรอรับเข้า (user 2026-10-17)
 const isHondaBattery = (r) => String(r?.brand || "").toUpperCase().includes("HONDA") && /^PG-001\b/.test(String(r?.product_group || "").trim());
 const normCode = (c) => String(c || "").replace(/-/g, "").trim().toUpperCase();
+// อะไหล่ทดแทน (ตาราง part_substitutes ของหน้าสั่งซื้อ): รหัสหมุนเร็วที่ Yamaha/Honda เปลี่ยนรหัสใหม่ → แสดงรหัสทดแทนในคอลัมน์รหัสสินค้า (user 2026-10-27 เคสรีโมท B2T-H6261-03 → -47, B5X-H6261-45 → -46)
+//   คีย์เทียบ = รหัสตัดขีด pad 12 หลักด้วย 0 (รูปที่ตารางหมุนเร็วเก็บ) — รหัส 10 หลักของยามาฮ่า (B5X-H6261-46) = B5XH62614600
+const SUBS_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
+const padCode = (c) => { const n = normCode(c); return n && n.length < 12 ? n.padEnd(12, "0") : n; };
+const fmtSubCode = (c) => { const n = normCode(c); return /^[A-Z0-9]{3}[A-Z0-9]{5}[0-9]{2}[0-9]{2}$/.test(n) && n.length === 12 ? `${n.slice(0, 3)}-${n.slice(3, 8)}-${n.slice(8, 10)}-${n.slice(10)}` : String(c || ""); };
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
 const groupCodeOf = (v) => { const m = String(v || "").match(/^PG-\d+/i); return m ? m[0].toUpperCase() : ""; };
 
@@ -28,6 +33,16 @@ export default function FastMovingStockPage({ currentUser }) {
   }, []);
   const [filterBrand, setFilterBrand] = useState("all");
   const [filterStock, setFilterStock] = useState("all");
+  const [subMap, setSubMap] = useState({}); // padCode(รหัสเดิม) → {code, name} รหัสทดแทน
+  useEffect(() => {
+    fetch(SUBS_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "get_part_substitutes" }) })
+      .then(r => r.json()).then(d => {
+        const m = {};
+        (Array.isArray(d) ? d : []).forEach(p => { if (p && p.original_code && p.substitute_code) m[padCode(p.original_code)] = { code: p.substitute_code, name: p.substitute_name || "" }; });
+        setSubMap(m);
+      }).catch(() => setSubMap({}));
+  }, []);
+  const subOf = (r) => subMap[padCode(r.part_code)] || null;
   const [filterStockType, setFilterStockType] = useState("all");
   const [filterBackorder, setFilterBackorder] = useState("all");
   const [filterPendingJob, setFilterPendingJob] = useState("all");
@@ -221,8 +236,8 @@ export default function FastMovingStockPage({ currentUser }) {
     }
     if (search) {
       const q = search.toLowerCase();
-      const hit = [r.part_code, r.product_name, r.product_group]
-        .filter(Boolean).some(v => String(v).toLowerCase().includes(q));
+      const hit = [r.part_code, r.product_name, r.product_group, subOf(r)?.code]
+        .filter(Boolean).some(v => String(v).toLowerCase().includes(q) || normCode(v).toLowerCase().includes(normCode(q).toLowerCase()));
       if (!hit) return false;
     }
     return true;
@@ -272,7 +287,7 @@ export default function FastMovingStockPage({ currentUser }) {
       return `<tr>
         <td class="c">${i + 1}</td>
         <td>${r.product_group || "-"}</td>
-        <td>${r.part_code}</td>
+        <td>${subOf(r) ? `${fmtSubCode(subOf(r).code)} (ทดแทน ${r.part_code})` : r.part_code}</td>
         <td>${r.product_name || "-"}</td>
         <td class="r">${Number(r.quantity || 0)}</td>
         <td class="r">${s.ppao}</td>
@@ -480,7 +495,15 @@ export default function FastMovingStockPage({ currentUser }) {
                   </td>
                   <td style={{ ...td, textAlign: "center" }}>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
                   <td style={td}>{r.product_group || "-"}</td>
-                  <td style={td}>{r.part_code}</td>
+                  <td style={td}>
+                    {subOf(r) ? (
+                      <span title={`รหัสเดิม ${r.part_code} ถูกแทนด้วย ${subOf(r).code} (จากตารางอะไหล่ใช้แทนกัน)`}>
+                        <span style={{ fontWeight: 700, color: "#b45309" }}>{fmtSubCode(subOf(r).code)}</span>
+                        <span style={{ marginLeft: 4, padding: "0 5px", borderRadius: 4, background: "#fef3c7", color: "#92400e", fontSize: 10, fontWeight: 700 }}>ทดแทน</span>
+                        <div style={{ fontSize: 10.5, color: "#9ca3af" }}>เดิม {r.part_code}</div>
+                      </span>
+                    ) : r.part_code}
+                  </td>
                   <td style={{ ...td, whiteSpace: "normal", maxWidth: 240 }}>{r.product_name || "-"}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: qty <= 0 ? "#ef4444" : "#065f46" }}>{fmtQty(qty)}</td>
                   <td style={{ ...td, textAlign: "right" }}>{s.ppao}</td>
