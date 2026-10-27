@@ -157,7 +157,13 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
     setScanned(prev => {
       const list = [...prev];
       for (const code of codes) {
-        const row = allRows.find(r => String(r.part_code || "").trim().toUpperCase() === code);
+        const norm = (v) => String(v || "").toUpperCase().replace(/[-\s_./]/g, "");
+        let row = allRows.find(r => String(r.part_code || "").trim().toUpperCase() === code) || allRows.find(r => norm(r.part_code) === norm(code));
+        if (!row && norm(code).length >= 8) { // บาร์โค้ดยามาฮ่าบางชิ้นไม่มีเลขท้าย "00" (90793AT829 → 90793AT82900): ใช้ได้เมื่อมีรหัสที่ขึ้นต้นแบบนี้เพียงรหัสเดียว (user 2026-10-27)
+          const k = norm(code);
+          const cands = allRows.filter(r => { const c = norm(r.part_code); return c.length > k.length && c.length - k.length <= 2 && c.startsWith(k); });
+          if (cands.length === 1) row = cands[0];
+        }
         if (!row) { notFoundCodes.push(code); continue; }
         if (list.some(s => s.row.part_code === row.part_code)) continue;  // skip duplicate in scanned list
         list.push({ row, stores: parseStores(row.stores), ts: Date.now() + addedCount });
