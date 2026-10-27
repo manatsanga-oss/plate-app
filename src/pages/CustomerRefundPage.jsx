@@ -9,9 +9,11 @@ const API = "https://n8n-new-project-gwf2.onrender.com/webhook/customer-refund-a
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
 const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api"; // ใบรับเรื่องงานทะเบียน (receipt_requests) — คืนเงินบางรายการ เช่น ลูกค้าซื้อ พรบ. มาแล้ว (user 2026-10-27)
 const BRANCH_NAME = { SCY01: "สิงห์ชัย อยุธยา", SCY04: "สิงห์ชัย เสนา", SCY05: "ป.เปา นครหลวง", SCY06: "ป.เปา วังน้อย", SCY07: "สิงห์ชัย ตลาด" };
-const SOURCE_LABEL = { vehicle: "ขายรถ", partsvc: "รับชำระอะไหล่/บริการ" };
-const REASONS = ["ลดหนี้", "บันทึกรับชำระผิด", "รับชำระเกิน", "คืนส่วนต่างรถเทิร์น"]; // รับชำระเกิน = ลูกค้าจ่ายมามากกว่ายอด (หน้าขาย NEW รับเกินได้ตั้งแต่ 2026-10-09) // คืนส่วนต่างรถเทิร์น = ตีเทิร์นเกินยอดดาวน์ ลูกค้ารับเงินส่วนเกินกลับ (user 2026-10-01)
+const SOURCE_LABEL = { vehicle: "ขายรถ", partsvc: "รับชำระอะไหล่/บริการ", receipt: "ใบรับเรื่องงานทะเบียน" };
+const SOURCE_ICON = { vehicle: "🏍️ ", partsvc: "🔧 ", receipt: "📋 " };
+const REASONS = ["ลดหนี้", "บันทึกรับชำระผิด", "รับชำระเกิน", "คืนส่วนต่างรถเทิร์น", "ยกเลิกบางรายการในใบรับเรื่อง"]; // ยกเลิกบางรายการ = ใบรับเรื่องงานทะเบียน เช่น ลูกค้าซื้อ พรบ. มาแล้ว คืนเฉพาะค่า พรบ. งานต่อภาษีทำต่อ (user 2026-10-27) // รับชำระเกิน = ลูกค้าจ่ายมามากกว่ายอด (หน้าขาย NEW รับเกินได้ตั้งแต่ 2026-10-09) // คืนส่วนต่างรถเทิร์น = ตีเทิร์นเกินยอดดาวน์ ลูกค้ารับเงินส่วนเกินกลับ (user 2026-10-01)
 const STATUS_STYLE = { "รอคืนเงิน": { bg: "#fef3c7", fg: "#92400e" }, "คืนเงินแล้ว": { bg: "#dcfce7", fg: "#166534" }, "ยกเลิก": { bg: "#f3f4f6", fg: "#6b7280" } };
 
 async function post(url, body) {
@@ -65,6 +67,7 @@ export default function CustomerRefundPage({ currentUser }) {
   const [receipts, setReceipts] = useState([]);
   const [rcLoading, setRcLoading] = useState(false);
   const [picked, setPicked] = useState(null); // ใบเสร็จที่เลือก (normalized)
+  const [pickedLines, setPickedLines] = useState([]); // บรรทัดรายได้ของใบรับเรื่อง (เฉพาะประเภท receipt) — ติ๊กรายการที่คืน → คำนวณยอดที่ถูกต้องให้
   const [correctAmount, setCorrectAmount] = useState("");
   const [reason, setReason] = useState("ลดหนี้");
   const [reasonNote, setReasonNote] = useState("");
@@ -119,6 +122,15 @@ export default function CustomerRefundPage({ currentUser }) {
           branch_code: r.branch_code, customer_name: r.customer_name, customer_phone: "", paid_amount: num(r.paid_amount),
           bill_amount: Math.max(0, num(r.total_payment) - (payoutMap.get(String(r.sale_no)) || 0)), methods: methodsText(r), extra: [r.finance_type, r.finance_company_name].filter(Boolean).join(" "),
         }));
+      } else if (sourceType === "receipt") {
+        // ใบรับเรื่องงานทะเบียน (receipt_requests) — เฉพาะใบที่รับชำระแล้วและไม่ยกเลิก; ยอดตามเอกสาร = ยอดรวมใบ (ไม่มีกรณีรับเกิน)
+        const d = await post(RECEIPT_API, { action: "list_receipts", keyword: "", date_from: rcFrom, date_to: rcTo, only_manual: false });
+        rows = (Array.isArray(d) ? d : []).filter((r) => r && r.receipt_no && r.receipt_status !== "ยกเลิก" && r.receive_status !== "ยกเลิก" && (r.paid_at || num(r.paid_amount) > 0)).map((r) => ({
+          source_type: "receipt", receipt_no: r.receipt_no, ref_doc_no: [r.plate_category, r.plate_number].filter(Boolean).join(" ") || r.chassis_no || "",
+          receipt_date: String(r.paid_date || r.receive_date || "").slice(0, 10),
+          branch_code: r.branch_code, customer_name: String(r.customer_name || "").trim(), customer_phone: r.customer_phone || "", paid_amount: num(r.paid_amount) || num(r.total),
+          bill_amount: num(r.total), methods: methodsText(r), extra: [r.receipt_type, r.brand, r.model_series].filter(Boolean).join(" · "), receipt_id: r.id,
+        }));
       } else {
         const d = await post(PART_SVC_PAY_API, { action: "list_payments", date_from: rcFrom, date_to: rcTo });
         rows = unwrapList(d).filter((r) => r && r.payment_id && r.status === "active").map((r) => ({
@@ -133,7 +145,28 @@ export default function CustomerRefundPage({ currentUser }) {
     } catch (e) { setMessage("❌ โหลดใบเสร็จไม่สำเร็จ " + (e?.message || "")); setReceipts([]); }
     setRcLoading(false);
   }
-  useEffect(() => { setPicked(null); setReceipts([]); setCorrectAmount(""); }, [sourceType]);
+  useEffect(() => { setPicked(null); setPickedLines([]); setReceipts([]); setCorrectAmount(""); if (sourceType === "receipt") setOnlyOver(false); }, [sourceType]);
+
+  /** เลือกใบ → ถ้าเป็นใบรับเรื่อง โหลดบรรทัดรายได้มาให้ติ๊กรายการที่คืน */
+  async function pickReceipt(r) {
+    setPicked(r); setCorrectAmount(""); setMessage(""); setPickedLines([]);
+    if (r.source_type !== "receipt") return;
+    try {
+      const d = await post(RECEIPT_API, { action: "get_receipt", receipt_no: r.receipt_no });
+      const first = Array.isArray(d) ? d[0] : d;
+      const lines = first?.data?.lines || first?.lines || [];
+      setPickedLines((Array.isArray(lines) ? lines : []).map((l) => ({ id: l.id, income_type: l.income_type || "", income_name: l.income_name || "", description: l.description || "", net_price: num(l.net_price), refund: false })));
+    } catch { setPickedLines([]); }
+  }
+  /** ติ๊ก/เลิกติ๊กบรรทัดที่คืนเงิน → ยอดที่ถูกต้อง = ยอดรับไว้ − รวมบรรทัดที่ติ๊ก, เติมรายละเอียดให้อัตโนมัติ */
+  function toggleLine(id) {
+    const next = pickedLines.map((l) => (l.id === id ? { ...l, refund: !l.refund } : l));
+    setPickedLines(next);
+    const sum = next.filter((l) => l.refund).reduce((t, l) => t + l.net_price, 0);
+    setCorrectAmount(sum > 0 ? String(Math.round((num(picked?.paid_amount) - sum) * 100) / 100) : "");
+    const names = next.filter((l) => l.refund).map((l) => `${l.income_name} ${baht(l.net_price)}`);
+    if (names.length) { setReasonNote("คืน: " + names.join(", ")); if (reason !== "ยกเลิกบางรายการในใบรับเรื่อง") setReason("ยกเลิกบางรายการในใบรับเรื่อง"); }
+  }
 
   const shownReceipts = useMemo(() => {
     const kw = rcKeyword.trim().toLowerCase();
@@ -259,7 +292,7 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
       <h2 style={{ margin: "0 0 4px" }}>💸 บันทึกคืนเงินลูกค้า (ลดหนี้ / บันทึกรับชำระผิด)</h2>
       <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 12 }}>
         เลือกประเภทการรับชำระ → เลือกเลขที่ใบเสร็จรับชำระ → ใส่ยอดที่ถูกต้อง → บันทึก → เลือกวิธีคืนเงิน (เงินสด / เงินโอน) → บันทึก · ใบเสร็จต้นทางไม่ถูกแก้ไข ระบบเก็บส่วนต่างเป็นรายการคืนเงินแยก
-        · คืนเงินสดจะหักในสรุปรายวันรับเงิน ณ วันคืนเงิน · เงินโอนเข้ารายงานเคลื่อนไหวบัญชี
+        · คืนเงินสดจะหักในสรุปรายวันรับเงิน ณ วันคืนเงิน · เงินโอนเข้ารายงานเคลื่อนไหวบัญชี · ใบรับเรื่องงานทะเบียน: ติ๊กรายการที่คืน (เช่น พรบ. ซ้ำ) งานทะเบียนที่เหลือทำต่อตามปกติ
       </div>
       {message && <div style={{ padding: "8px 12px", borderRadius: 8, marginBottom: 12, background: message.startsWith("❌") ? "#fee2e2" : message.startsWith("✅") ? "#dcfce7" : "#fef9c3", fontSize: 13 }}>{message}</div>}
 
@@ -269,7 +302,7 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
         <div style={{ display: "flex", gap: 18, marginBottom: 12, fontSize: 14 }}>
           {Object.entries(SOURCE_LABEL).map(([k, v]) => (
             <label key={k} style={{ cursor: "pointer", padding: "6px 14px", borderRadius: 8, border: sourceType === k ? "2px solid #0369a1" : "1px solid #d1d5db", background: sourceType === k ? "#e0f2fe" : "#fff", fontWeight: sourceType === k ? 700 : 400 }}>
-              <input type="radio" name="srcType" checked={sourceType === k} onChange={() => setSourceType(k)} style={{ marginRight: 6 }} />{k === "vehicle" ? "🏍️ " : "🔧 "}{v}
+              <input type="radio" name="srcType" checked={sourceType === k} onChange={() => setSourceType(k)} style={{ marginRight: 6 }} />{SOURCE_ICON[k] || ""}{v}
             </label>))}
         </div>
 
@@ -282,7 +315,7 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
           <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 600, color: "#9a3412", background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 8, padding: "8px 10px", cursor: "pointer", whiteSpace: "nowrap" }}>
             <input type="checkbox" checked={onlyOver} onChange={(e) => setOnlyOver(e.target.checked)} /> เฉพาะใบที่รับชำระเกิน
           </label>
-          {picked && <button onClick={() => { setPicked(null); setCorrectAmount(""); }} style={btn("#6b7280")}>เปลี่ยนใบเสร็จ</button>}
+          {picked && <button onClick={() => { setPicked(null); setPickedLines([]); setCorrectAmount(""); }} style={btn("#6b7280")}>เปลี่ยนใบเสร็จ</button>}
         </div>
         {!picked && receipts.length > 0 && (
           <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
@@ -293,7 +326,7 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
                   const dup = refundedReceiptSet.has(`${r.source_type}|${r.receipt_no}`);
                   return (
                     <tr key={r.receipt_no + r.ref_doc_no} style={{ background: dup ? "#f9fafb" : "#fff", color: dup ? "#9ca3af" : "#111" }}>
-                      <td style={td}>{dup ? <span style={{ fontSize: 11 }}>มีรายการคืนแล้ว</span> : <button onClick={() => { setPicked(r); setCorrectAmount(""); setMessage(""); }} style={btn("#16a34a", { padding: "4px 10px", fontSize: 12 })}>เลือก</button>}</td>
+                      <td style={td}>{dup ? <span style={{ fontSize: 11 }}>มีรายการคืนแล้ว</span> : <button onClick={() => pickReceipt(r)} style={btn("#16a34a", { padding: "4px 10px", fontSize: 12 })}>เลือก</button>}</td>
                       <td style={{ ...td, fontFamily: "monospace", fontWeight: 600 }}>{r.receipt_no}</td>
                       <td style={td}>{thaiDate(r.receipt_date)}</td>
                       <td style={td}>{r.branch_code || "-"}</td>
@@ -320,6 +353,22 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
               <div><div style={lbl}>ยอดที่ต้องชำระตามเอกสาร</div><div style={{ fontWeight: 700, color: "#0369a1" }}>{dueAmount > 0 ? baht(dueAmount) : "-"}{dueAmount > 0 && Math.abs(dueAmount - num(picked.paid_amount)) > 0.009 && <button onClick={() => setCorrectAmount(String(dueAmount))} style={{ marginLeft: 8, fontSize: 11, padding: "2px 8px", border: "1px solid #0369a1", background: "#fff", color: "#0369a1", borderRadius: 6, cursor: "pointer" }}>ใช้ยอดนี้</button>}</div></div>
               <div><div style={lbl}>วิธีชำระเดิม</div><div style={{ fontSize: 12 }}>{picked.methods}</div></div>
             </div>
+            {picked.source_type === "receipt" && pickedLines.length > 0 && (
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0369a1", marginBottom: 4 }}>รายการในใบรับเรื่อง — ติ๊กรายการที่ต้องคืนเงินลูกค้า (เช่น พรบ. ที่ลูกค้าซื้อมาแล้ว) ระบบจะคำนวณยอดที่ถูกต้องให้</div>
+                <table style={{ borderCollapse: "collapse", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8 }}>
+                  <thead><tr><th style={th}>คืน</th><th style={th}>ประเภทรายได้</th><th style={th}>รายการ</th><th style={{ ...th, textAlign: "right" }}>ยอด</th></tr></thead>
+                  <tbody>
+                    {pickedLines.map((l) => (
+                      <tr key={l.id} style={{ background: l.refund ? "#fff7ed" : "#fff" }}>
+                        <td style={td}><input type="checkbox" checked={l.refund} onChange={() => toggleLine(l.id)} /></td>
+                        <td style={{ ...td, fontSize: 12 }}>{l.income_type}</td>
+                        <td style={td}>{l.income_name}{l.description ? <span style={{ fontSize: 11, color: "#6b7280" }}> · {l.description}</span> : null}</td>
+                        <td style={{ ...td, textAlign: "right", fontWeight: l.refund ? 700 : 400, color: l.refund ? "#b91c1c" : "#111" }}>{baht(l.net_price)}</td>
+                      </tr>))}
+                  </tbody>
+                </table>
+              </div>)}
             <div style={{ fontWeight: 700, marginBottom: 8 }}>3️⃣ ยอดเงินที่ถูกต้อง</div>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
               <div><label style={lbl}>ยอดที่รับชำระไว้</label><div style={{ ...inp, background: "#f3f4f6", fontWeight: 700, textAlign: "right", width: 150 }}>{baht(picked.paid_amount)}</div></div>
