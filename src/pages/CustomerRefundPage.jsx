@@ -9,7 +9,9 @@ const API = "https://n8n-new-project-gwf2.onrender.com/webhook/customer-refund-a
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
 const PART_SVC_PAY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-service-payment-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
-const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api"; // ใบรับเรื่องงานทะเบียน (receipt_requests) — คืนเงินบางรายการ เช่น ลูกค้าซื้อ พรบ. มาแล้ว (user 2026-10-27)
+const RECEIPT_API = "https://n8n-new-project-gwf2.onrender.com/webhook/receipt-entry-api";
+const REG_API = "https://n8n-new-project-gwf2.onrender.com/webhook/registrations-api"; // เช็คกรมธรรม์ พรบ. ของคัน (moto_insurance_records) — มีกรมธรรม์แล้วห้ามคืนบรรทัด พรบ. (user 2026-10-27)
+const isPrbLine = (l) => /พรบ/.test(`${l.income_type || ""} ${l.income_name || ""}`); // ใบรับเรื่องงานทะเบียน (receipt_requests) — คืนเงินบางรายการ เช่น ลูกค้าซื้อ พรบ. มาแล้ว (user 2026-10-27)
 const BRANCH_NAME = { SCY01: "สิงห์ชัย อยุธยา", SCY04: "สิงห์ชัย เสนา", SCY05: "ป.เปา นครหลวง", SCY06: "ป.เปา วังน้อย", SCY07: "สิงห์ชัย ตลาด" };
 const SOURCE_LABEL = { vehicle: "ขายรถ", partsvc: "รับชำระอะไหล่/บริการ", receipt: "ใบรับเรื่องงานทะเบียน" };
 const SOURCE_ICON = { vehicle: "🏍️ ", partsvc: "🔧 ", receipt: "📋 " };
@@ -67,6 +69,7 @@ export default function CustomerRefundPage({ currentUser }) {
   const [receipts, setReceipts] = useState([]);
   const [rcLoading, setRcLoading] = useState(false);
   const [picked, setPicked] = useState(null); // ใบเสร็จที่เลือก (normalized)
+  const [pickedPolicy, setPickedPolicy] = useState(null); // กรมธรรม์ พรบ. ที่ออกแล้วของคันในใบรับเรื่อง (null = ยังไม่มี → คืน พรบ. ได้)
   const [pickedLines, setPickedLines] = useState([]); // บรรทัดรายได้ของใบรับเรื่อง (เฉพาะประเภท receipt) — ติ๊กรายการที่คืน → คำนวณยอดที่ถูกต้องให้
   const [correctAmount, setCorrectAmount] = useState("");
   const [reason, setReason] = useState("ลดหนี้");
@@ -129,7 +132,7 @@ export default function CustomerRefundPage({ currentUser }) {
           source_type: "receipt", receipt_no: r.receipt_no, ref_doc_no: [r.plate_category, r.plate_number].filter(Boolean).join(" ") || r.chassis_no || "",
           receipt_date: String(r.paid_date || r.receive_date || "").slice(0, 10),
           branch_code: r.branch_code, customer_name: String(r.customer_name || "").trim(), customer_phone: r.customer_phone || "", paid_amount: num(r.paid_amount) || num(r.total),
-          bill_amount: num(r.total), methods: methodsText(r), extra: [r.receipt_type, r.brand, r.model_series].filter(Boolean).join(" · "), receipt_id: r.id,
+          bill_amount: num(r.total), methods: methodsText(r), extra: [r.receipt_type, r.brand, r.model_series].filter(Boolean).join(" · "), receipt_id: r.id, chassis_no: String(r.chassis_no || "").trim().toUpperCase(),
         }));
       } else {
         const d = await post(PART_SVC_PAY_API, { action: "list_payments", date_from: rcFrom, date_to: rcTo });
@@ -145,21 +148,29 @@ export default function CustomerRefundPage({ currentUser }) {
     } catch (e) { setMessage("❌ โหลดใบเสร็จไม่สำเร็จ " + (e?.message || "")); setReceipts([]); }
     setRcLoading(false);
   }
-  useEffect(() => { setPicked(null); setPickedLines([]); setReceipts([]); setCorrectAmount(""); if (sourceType === "receipt") setOnlyOver(false); }, [sourceType]);
+  useEffect(() => { setPicked(null); setPickedLines([]); setPickedPolicy(null); setReceipts([]); setCorrectAmount(""); if (sourceType === "receipt") setOnlyOver(false); }, [sourceType]);
 
   /** เลือกใบ → ถ้าเป็นใบรับเรื่อง โหลดบรรทัดรายได้มาให้ติ๊กรายการที่คืน */
   async function pickReceipt(r) {
-    setPicked(r); setCorrectAmount(""); setMessage(""); setPickedLines([]);
+    setPicked(r); setCorrectAmount(""); setMessage(""); setPickedLines([]); setPickedPolicy(null);
     if (r.source_type !== "receipt") return;
     try {
-      const d = await post(RECEIPT_API, { action: "get_receipt", receipt_no: r.receipt_no });
+      const [d, ins] = await Promise.all([
+        post(RECEIPT_API, { action: "get_receipt", receipt_no: r.receipt_no }),
+        r.chassis_no ? post(REG_API, { action: "get_insurance_list", search: r.chassis_no }).catch(() => []) : Promise.resolve([]),
+      ]);
       const first = Array.isArray(d) ? d[0] : d;
       const lines = first?.data?.lines || first?.lines || [];
       setPickedLines((Array.isArray(lines) ? lines : []).map((l) => ({ id: l.id, income_type: l.income_type || "", income_name: l.income_name || "", description: l.description || "", net_price: num(l.net_price), refund: false })));
+      // กรมธรรม์ พรบ. ที่ออกแล้วของคันนี้ (เลขถังตรง + ยังไม่ยกเลิก) → ร้านจ่ายเบี้ยให้บริษัทประกันแล้ว ห้ามคืนบรรทัด พรบ.
+      const pol = (Array.isArray(ins) ? ins : []).find((x) => x && x.insurance_id && x.status === "active" && String(x.chassis_no || "").trim().toUpperCase() === r.chassis_no);
+      setPickedPolicy(pol || null);
     } catch { setPickedLines([]); }
   }
   /** ติ๊ก/เลิกติ๊กบรรทัดที่คืนเงิน → ยอดที่ถูกต้อง = ยอดรับไว้ − รวมบรรทัดที่ติ๊ก, เติมรายละเอียดให้อัตโนมัติ */
   function toggleLine(id) {
+    const cur = pickedLines.find((l) => l.id === id);
+    if (cur && isPrbLine(cur) && pickedPolicy) { setMessage(`❌ คันนี้ออกกรมธรรม์ พรบ. เลขที่ ${pickedPolicy.policy_no || "-"} แล้ว คืนค่า พรบ. ไม่ได้`); return; }
     const next = pickedLines.map((l) => (l.id === id ? { ...l, refund: !l.refund } : l));
     setPickedLines(next);
     const sum = next.filter((l) => l.refund).reduce((t, l) => t + l.net_price, 0);
@@ -356,12 +367,16 @@ td.k{width:34%;color:#444} .amt{font-size:18pt;font-weight:700} .sig{display:fle
             {picked.source_type === "receipt" && pickedLines.length > 0 && (
               <div style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: 12.5, fontWeight: 700, color: "#0369a1", marginBottom: 4 }}>รายการในใบรับเรื่อง — ติ๊กรายการที่ต้องคืนเงินลูกค้า (เช่น พรบ. ที่ลูกค้าซื้อมาแล้ว) ระบบจะคำนวณยอดที่ถูกต้องให้</div>
+                {pickedPolicy && (
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: "#b91c1c", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: 8, padding: "6px 10px", marginBottom: 6 }}>
+                    ⛔ คันนี้ออกกรมธรรม์ พรบ. แล้ว เลขที่ {pickedPolicy.policy_no || "-"}{pickedPolicy.coverage_start ? ` คุ้มครอง ${String(pickedPolicy.coverage_start).slice(0, 10).split("-").reverse().join("/")}` : ""}{pickedPolicy.billing_doc_no ? ` · วางบิล ${pickedPolicy.billing_doc_no}` : ""} — คืนเงินบรรทัด พรบ. ไม่ได้ (ร้านจ่ายเบี้ยให้บริษัทประกันแล้ว) ถ้าต้องยกเลิกกรมธรรม์ให้ติดต่อบริษัทประกันก่อน
+                  </div>)}
                 <table style={{ borderCollapse: "collapse", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 8 }}>
                   <thead><tr><th style={th}>คืน</th><th style={th}>ประเภทรายได้</th><th style={th}>รายการ</th><th style={{ ...th, textAlign: "right" }}>ยอด</th></tr></thead>
                   <tbody>
                     {pickedLines.map((l) => (
                       <tr key={l.id} style={{ background: l.refund ? "#fff7ed" : "#fff" }}>
-                        <td style={td}><input type="checkbox" checked={l.refund} onChange={() => toggleLine(l.id)} /></td>
+                        <td style={td}>{isPrbLine(l) && pickedPolicy ? <span title="มีกรมธรรม์ พรบ. แล้ว คืนไม่ได้" style={{ fontSize: 11, color: "#b91c1c", fontWeight: 700 }}>⛔</span> : <input type="checkbox" checked={l.refund} onChange={() => toggleLine(l.id)} />}</td>
                         <td style={{ ...td, fontSize: 12 }}>{l.income_type}</td>
                         <td style={td}>{l.income_name}{l.description ? <span style={{ fontSize: 11, color: "#6b7280" }}> · {l.description}</span> : null}</td>
                         <td style={{ ...td, textAlign: "right", fontWeight: l.refund ? 700 : 400, color: l.refund ? "#b91c1c" : "#111" }}>{baht(l.net_price)}</td>
