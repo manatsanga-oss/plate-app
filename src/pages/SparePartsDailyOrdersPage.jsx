@@ -258,7 +258,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
 
   // ของถึงแล้วหรือยัง — เช็ครหัสที่สั่งตรง ๆ ก่อน แล้วค่อยเช็ครหัสอะไหล่ทดแทน (ถ้ามีคู่)
   function arrivalOf(r, it) {
-    if (r.system !== "HONDA" && r.system !== "YAMAHA") return null;
+    if (r.system !== "HONDA" && r.system !== "YAMAHA" && r.system !== "OUTSIDE") return null;
     const direct = receiptMap[`${r.system}|${normReceiptCode(r.system, it.part_code)}`];
     if (direct) return { ...direct, viaSub: false };
     const sub = substituteFor(r, it);
@@ -331,14 +331,15 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     ]);
     hondaDay.forEach((o, i) => out.push({ ...o, system: "HONDA", items: hi[i] }));
     yamahaDay.forEach((o, i) => out.push({ ...o, system: "YAMAHA", items: yi[i] }));
-    outsideDay.forEach((o, i) => out.push({ ...o, system: "OUTSIDE", items: oi[i] }));
+    // ใบนอกเงินมัดจำเก็บเลขใบสั่งซื้อ DCS ไว้ใน po_no (หน้าเดิมแสดง/เทียบด้วย vendor_po_no → ขึ้น "-" ทั้งที่บันทึกแล้ว) — user 2026-10-27 เคส OD6910-00002 M321166A2655
+    outsideDay.forEach((o, i) => out.push({ ...o, system: "OUTSIDE", vendor_po_no: o.vendor_po_no || o.po_no || "", items: oi[i] }));
     out.sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
     setRows(out);
     setLoading(false);
     // เทียบกับใบรับสั่งซื้อที่ upload — HONDA: dcs_spare_orders · YAMAHA: yamaha_b2b_orders (จับคู่ด้วยเลขที่ใบรับสั่งซื้อ)
-    const withPo = out.filter(r => (r.system === "HONDA" || r.system === "YAMAHA") && r.vendor_po_no);
+    const withPo = out.filter(r => (r.system === "HONDA" || r.system === "YAMAHA" || r.system === "OUTSIDE") && r.vendor_po_no); // OUTSIDE = สั่งผ่าน DCS ฮอนด้าเหมือน HONDA
     Promise.all(withPo.map(o =>
-      o.system === "HONDA"
+      o.system !== "YAMAHA"
         ? post(HONDA_API, { action: "search_dcs_orders", vendor_po_no: o.vendor_po_no }).then(norm).catch(() => [])
         : post(YAMAHA_API, { action: "search_yamaha_b2b_orders", vendor_po_no: o.vendor_po_no }).then(norm).catch(() => [])
     )).then(res => {
@@ -349,7 +350,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     });
     // อะไหล่ค้างส่ง — HONDA: dcs_backorders · YAMAHA: b2b_backorders
     Promise.all(withPo.map(o =>
-      (o.system === "HONDA"
+      (o.system !== "YAMAHA"
         ? post(HONDA_API, { action: "search_dcs_backorders", vendor_po_no: o.vendor_po_no })
         : post(YAMAHA_API, { action: "search_yamaha_b2b_backorders", vendor_po_no: o.vendor_po_no })
       ).then(norm).catch(() => [])
@@ -375,14 +376,14 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   // เลขที่ใบรับสั่งซื้อเพิ่มเติม (ใบสั่งตามหลัง) — จับด้วยเลขสั่งซื้อลูกค้า/ผู้จำหน่ายฐานเดียวกัน (เลขเดิม+อักษรท้าย) แต่ apc คนละใบ
   // HONDA = dcs_spare_orders, YAMAHA = yamaha_b2b_orders (ทั้งคู่มี apc_order_no + customer_order_no)
   function extraPoNos(r) {
-    if ((r.system !== "HONDA" && r.system !== "YAMAHA") || !r.vendor_po_no) return [];
+    if ((r.system !== "HONDA" && r.system !== "YAMAHA" && r.system !== "OUTSIDE") || !r.vendor_po_no) return [];
     const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
     return [...new Set(dcs.map(d => d.apc_order_no).filter(a => a && String(a) !== String(r.vendor_po_no)))];
   }
 
   // รายการในใบรับสั่งซื้อที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ตัวที่ศูนย์ส่งมาแทน/ส่งเกิน (HONDA=DCS, YAMAHA=B2B)
   function unmatchedDcs(r) {
-    if ((r.system !== "HONDA" && r.system !== "YAMAHA") || !r.vendor_po_no) return [];
+    if ((r.system !== "HONDA" && r.system !== "YAMAHA" && r.system !== "OUTSIDE") || !r.vendor_po_no) return [];
     const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
     if (r.system === "YAMAHA") {
       const orderCodes = (r.items || []).map(it => yamahaPad(it.part_code));
@@ -414,7 +415,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
 
   // อะไหล่ตัวนี้ถูกสั่งเข้าใบรับสั่งซื้อแล้วหรือยัง (HONDA=DCS, YAMAHA=B2B): true=สั่งแล้ว, false=ยังไม่พบ, null=ไม่เช็ค (นอกเงินมัดจำ)
   function orderedInDcs(r, it) {
-    if (r.system !== "HONDA" && r.system !== "YAMAHA") return null;
+    if (r.system !== "HONDA" && r.system !== "YAMAHA" && r.system !== "OUTSIDE") return null;
     if (!r.vendor_po_no) return false;                 // ยังไม่ระบุเลขใบรับสั่งซื้อ = ยังไม่ได้สั่ง
     const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
     if (!dcs.length) return false;                     // มีเลขแล้วแต่ยังไม่พบในไฟล์ที่ upload
