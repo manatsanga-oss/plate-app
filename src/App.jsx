@@ -216,6 +216,15 @@ export default function App() {
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/crm-reply")) {
     return <CrmReplyPage />;
   }
+  // คีออสเบิกอะไหล่ (EDATEC/Pi เปิด Chromium เต็มจอ) — ไม่ต้อง login: /kiosk-withdraw?name=ป.เปา → ผู้เบิก "kiosk-ป.เปา" (user 2026-10-27)
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/kiosk-withdraw")) {
+    const kioskName = (new URLSearchParams(window.location.search).get("name") || "คีออส").trim();
+    return (
+      <div style={{ padding: 12, background: "#f3f4f6", minHeight: "100vh" }}>
+        <PartWithdrawalPage currentUser={{ username: `kiosk-${kioskName}`, name: `คีออส ${kioskName}` }} />
+      </div>
+    );
+  }
 
   const [activeMenu, setActiveMenu] = useState("salesoverview");
   const [currentUser, setCurrentUser] = useState(null);
