@@ -8,6 +8,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 const ST_API = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-turnover-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const HONDA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/honda-report-api";
+const SNAP_API = "https://n8n-new-project-gwf2.onrender.com/webhook/honda-quota-snapshot-api"; // ไฟล์โควต้า DOSS (snapshot) — ใช้เป็น "Honda ให้จริง" รายสี
+// กฎเพดานรายสี (user 2026-10-28): แผนเดือนหน้าของแต่ละสี ≤ 1.25 × max(ขายรอบนี้, เฉลี่ย 2 รอบ) (ขั้นต่ำ 1) — สีที่ Honda ให้จริง < 60% ของที่ขอ ≥ 2 รอบ ใช้ตัวคูณ 1.0
+// เหตุผล: เบื้องต้น Honda ตัดแผนเราเป็นสัดส่วนเท่ากันทุกสีในแบบเดียวกัน แล้วเติมกลางเดือนตามยอดขายจริงรายสี → ขอสีเกินยอดขาย = โดนตัดทิ้ง + ดึงสัดส่วนสีอื่น
+const COLOR_CAP_FACTOR = 1.25;
+const COLOR_CAP_FACTOR_LOWFILL = 1.0;
+const LOW_FILL = 0.6;
 
 const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 const norm = (v) => String(v == null ? "" : v).replace(/\s+/g, "").toUpperCase();
@@ -83,6 +89,8 @@ export default function HondaSalesReportPage() {
   const [savedPeriods, setSavedPeriods] = useState([]); // [{period,target_this,target_next,saved_at,rows}]
   const [hist, setHist] = useState({});       // {key: [s1,s2]} ยอดขาย 2 เดือนก่อน (s1=ล่าสุด, s2=ก่อนหน้า) สำหรับเทรนด์
   const [histLabels, setHistLabels] = useState([]); // [periodล่าสุด, periodก่อนหน้า] (label)
+  // Honda ให้จริงรายสี: {key: [{period, plan, got, src}]} จาก 3 รอบล่าสุดที่บันทึกแผน — got = ไฟล์โควต้า DOSS (Current) ถ้ามี ไม่งั้นโควต้าเบื้องต้นที่บันทึก
+  const [fillHist, setFillHist] = useState({});
   const [message, setMessage] = useState("");
   const fileRef = useRef(null);
   // ===== โควต้าที่ Honda จัดให้จริง (เทียบแผน vs โควต้า) =====
@@ -154,6 +162,7 @@ export default function HondaSalesReportPage() {
       const arr = Array.isArray(r) ? r : [];
       setSavedPeriods(arr);
       loadHistory(arr);
+      loadFillHistory(arr);
     } catch { /* เงียบ */ }
   }
   // โหลดยอดขาย 2 รอบล่าสุดที่บันทึกไว้ (ก่อนรอบปัจจุบัน) มาทำเทรนด์ — s1=ล่าสุด, s2=ก่อนหน้า
@@ -173,6 +182,53 @@ export default function HondaSalesReportPage() {
       setHist(h); setHistLabels(prior.map((p) => p.period));
     } catch { setHist({}); setHistLabels([]); }
   }
+  // Honda ให้จริงรายสี 3 รอบล่าสุด (แผนเดือนหน้าที่ส่ง vs โควต้าที่ได้) — period 2026-09-20 = รถเดือน 202610
+  async function loadFillHistory(periodsList) {
+    const prior = (periodsList || []).filter((p) => p.period < dateTo && Number(p.plan_next_total) > 0).slice(0, 3);
+    if (!prior.length) { setFillHist({}); return; }
+    try {
+      const snapList = await post(SNAP_API, { action: "list_snapshots" }).catch(() => []);
+      const monthOf = (period) => { const d = new Date(period + "T00:00:00"); d.setMonth(d.getMonth() + 1); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}`; };
+      const OLD2NEW = {}; for (const [nw, old] of Object.entries(SUCCESSOR)) OLD2NEW[norm(old)] = norm(nw);
+      const keyOf = (r) => (OLD2NEW[norm(r.model_code)] || norm(r.model_code)) + "|" + norm(r.type) + "|" + norm(r.color_code);
+      const out = {};
+      for (const p of prior) {
+        const snap = (Array.isArray(snapList) ? snapList : []).filter((x) => x && x.id && String(x.period_month) === monthOf(p.period)).sort((a, b) => String(b.file_time).localeCompare(String(a.file_time)))[0];
+        const [planRows, quotaRows, snapRows] = await Promise.all([
+          post(HONDA_API, { action: "get_honda_report", period: p.period }),
+          post(HONDA_API, { action: "get_honda_quota", period: p.period }).catch(() => []),
+          snap ? post(SNAP_API, { action: "get_snapshot", id: snap.id }).catch(() => []) : Promise.resolve([]),
+        ]);
+        const plan = {}, got = {};
+        for (const r of (Array.isArray(planRows) ? planRows : [])) if (r && r.model_code) plan[keyOf(r)] = (plan[keyOf(r)] || 0) + (Number(r.plan_next) || 0);
+        const useSnap = Array.isArray(snapRows) && snapRows.some((r) => r && r.model_code);
+        const src = useSnap ? "ไฟล์โควต้า" : "เบื้องต้น";
+        for (const r of (useSnap ? snapRows : (Array.isArray(quotaRows) ? quotaRows : []))) if (r && r.model_code) got[keyOf(r)] = (got[keyOf(r)] || 0) + (Number(useSnap ? r.current_quota : r.quota_qty) || 0);
+        if (!Object.keys(got).length) continue; // รอบที่ยังไม่มีโควต้าบันทึก ไม่นับ
+        for (const k of new Set([...Object.keys(plan), ...Object.keys(got)])) {
+          if (!(plan[k] || got[k])) continue;
+          (out[k] = out[k] || []).push({ period: p.period, plan: plan[k] || 0, got: got[k] || 0, src });
+        }
+      }
+      setFillHist(out);
+    } catch { setFillHist({}); }
+  }
+  // สรุป Honda ให้จริงของสี: {pct, plan, got, rounds, lowFill} — pct = Σได้/Σแผน (เฉพาะรอบที่ขอ), lowFill = ได้ < 60% ของที่ขอ ≥ 2 รอบ
+  const fillOf = (key) => {
+    const h = fillHist[key]; if (!h || !h.length) return null;
+    const plan = h.reduce((a, x) => a + x.plan, 0), got = h.reduce((a, x) => a + x.got, 0);
+    const lowRounds = h.filter((x) => x.plan > 0 && x.got / x.plan < LOW_FILL).length;
+    return { pct: plan > 0 ? got / plan : null, plan, got, rounds: h, lowFill: lowRounds >= 2 };
+  };
+  // เพดานแผนเดือนหน้ารายสี = ceil(ตัวคูณ × max(ขายรอบนี้, เฉลี่ย 2 รอบ)) ขั้นต่ำ 1 — ตัวคูณ 1.25 ปกติ / 1.0 ถ้า Honda ให้น้อยประจำ
+  const colorCapOf = (key, sold) => {
+    const h = histOf(key); const s1 = h && h[0] != null ? Number(h[0]) || 0 : null;
+    const base = s1 == null ? (Number(sold) || 0) : Math.max(Number(sold) || 0, ((Number(sold) || 0) + s1) / 2);
+    const f = fillOf(key);
+    const factor = f && f.lowFill ? COLOR_CAP_FACTOR_LOWFILL : COLOR_CAP_FACTOR;
+    return Math.max(1, Math.ceil(base * factor));
+  };
+
   async function saveReport() {
     if (!groups.length) { setMessage("⚠️ ไม่มีข้อมูลให้บันทึก (ดึงข้อมูลก่อน)"); return; }
     setSaving(true); setMessage("⏳ กำลังบันทึก...");
@@ -541,6 +597,22 @@ export default function HondaSalesReportPage() {
     // เดือนหน้า — กระจายเป้าตาม demand (เทรนด์) · ข้ามรุ่นที่ล็อก
     const T1 = Math.max(0, Math.round(Number(target2) || 0));
     const v1 = allocByWeight(cells.map((x) => (x.lockNext ? 0 : x.demand)), T1);
+    // เพดานรายสี (หลังกระจายเป้า — ทำก่อนกระจายจะถูก allocByWeight ขยายกลับ): สีที่เกิน colorCapOf → ตัดลงเพดาน
+    // ส่วนเกินย้ายให้สีอื่นในแบบเดียวกันที่ยังไม่ชนเพดาน (เรียงสีขายดีก่อน เติมได้ไม่เกินเพดานของสีนั้น) · เหลือ = ตัดทิ้ง (รวมเดือนหน้าอาจต่ำกว่าเป้า)
+    const capNote = { cut: 0, colors: 0, moved: 0 };
+    const byGroup = new Map();
+    cells.forEach((c, i) => { if (c.lockNext || !(v1[i] > 0)) return; const gk = c.code + "|" + c.type; (byGroup.get(gk) || byGroup.set(gk, []).get(gk)).push(i); });
+    for (const idxs of byGroup.values()) {
+      let excess = 0; const free = [];
+      for (const i of idxs) {
+        const cap = colorCapOf(cells[i].key, cells[i].sold);
+        if (v1[i] > cap) { excess += v1[i] - cap; capNote.cut += v1[i] - cap; capNote.colors++; v1[i] = cap; }
+        else free.push([i, cap]);
+      }
+      if (!(excess > 0)) continue;
+      free.sort((a, b) => cells[b[0]].demand - cells[a[0]].demand);
+      for (const [i, cap] of free) { if (excess <= 0) break; const room = cap - v1[i]; if (room <= 0) continue; const add = Math.min(room, excess); v1[i] += add; excess -= add; capNote.moved += add; }
+    }
     const sum1 = v1.reduce((a, b) => a + b, 0);
     setPlan((s) => {
       const next = { ...s };
@@ -551,7 +623,8 @@ export default function HondaSalesReportPage() {
       return next;
     });
     const trendNote = histLabels.length ? ` · ใช้เทรนด์ ${histLabels.length} เดือน` : " · (ยังไม่มีประวัติ ใช้เดือนเดียว)";
-    setMessage(`✅ เดือนนี้ ${sum0} คัน (เทรนด์+คาลิเบรต · หักค้างส่ง${cap && rawTot > cap ? ` · คุมเป้า ${cap}` : ""})${T1 ? ` · เดือนหน้า ${sum1} คัน` : ""}${trendNote} — แก้รายแถวได้`);
+    const capMsg = capNote.colors ? ` · เพดานสี: ตัด ${capNote.cut} คันจาก ${capNote.colors} สี (ย้ายให้สีอื่นแบบเดียวกัน ${capNote.moved}${capNote.cut > capNote.moved ? ` · ตัดทิ้ง ${capNote.cut - capNote.moved} เพราะทุกสีชนเพดาน` : ""})` : "";
+    setMessage(`✅ เดือนนี้ ${sum0} คัน (เทรนด์+คาลิเบรต · หักค้างส่ง${cap && rawTot > cap ? ` · คุมเป้า ${cap}` : ""})${T1 ? ` · เดือนหน้า ${sum1} คัน` : ""}${trendNote}${capMsg} — แก้รายแถวได้`);
   }
 
   const boOf = (k) => Number(backorder[k]) || 0;
@@ -717,7 +790,17 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
                           </td>
                         );
                       })()}
-                      <td style={{ ...tdc, textAlign: "left" }}>{c.color_code} ({c.color_name})</td>
+                      <td style={{ ...tdc, textAlign: "left" }}>
+                        {c.color_code} ({c.color_name})
+                        {(() => {
+                          const f = fillOf(c.key); if (!f) return null;
+                          const detail = f.rounds.map((x) => `${x.period}: ขอ ${x.plan} → ได้ ${x.got} (${x.src})`).join(" · ");
+                          if (f.pct == null) return <div style={{ fontSize: 9, color: "#7c3aed" }} title={detail}>Honda เติมเอง {f.got}</div>;
+                          const pct = Math.round(f.pct * 100);
+                          const col = pct >= 90 ? "#059669" : pct >= LOW_FILL * 100 ? "#d97706" : "#dc2626";
+                          return <div style={{ fontSize: 9, fontWeight: 700, color: col }} title={`Honda ให้จริง ${f.rounds.length} รอบ: ขอ ${f.plan} ได้ ${f.got} · ${detail}${f.lowFill ? " · ให้น้อยประจำ → เพดานสี ×1.0" : ""}`}>Honda ให้ {pct}%{f.lowFill ? " ⚠" : ""}</div>;
+                        })()}
+                      </td>
                       <td style={tdc}>
                         <span style={{ ...yBox, display: "inline-block" }}>{c.sold || 0}</span>
                         {sellPct(c.sold, c.stock) != null && <div style={{ fontSize: 9, fontWeight: 700, color: sellColor(sellPct(c.sold, c.stock)) }}>ขายออก {sellPct(c.sold, c.stock)}%</div>}
@@ -736,7 +819,13 @@ table{width:100%;border-collapse:collapse} th,td{border:1px solid #888;padding:3
                         <td key={ci} style={tdc}>
                           {ci === 1 && lockNext
                             ? <span style={grayBox} title="ล็อก — คาดการณ์เดือนหน้าไม่ได้" />
-                            : <input type="number" min="0" value={plan[`${c.key}#${ci}`] ?? ""} onChange={(e) => setPlan((s) => ({ ...s, [`${c.key}#${ci}`]: e.target.value }))} style={wBox} />}
+                            : (() => {
+                              const capV = ci === 1 ? colorCapOf(c.key, c.sold) : null;
+                              const over = capV != null && planOf(c.key, 1) > capV;
+                              return <input type="number" min="0" value={plan[`${c.key}#${ci}`] ?? ""} onChange={(e) => setPlan((s) => ({ ...s, [`${c.key}#${ci}`]: e.target.value }))}
+                                style={over ? { ...wBox, border: "2px solid #dc2626", background: "#fef2f2" } : wBox}
+                                title={capV != null ? `เพดานสี ${capV} คัน (${COLOR_CAP_FACTOR}× ของ max(ขายรอบนี้, เฉลี่ย 2 รอบ)${fillOf(c.key)?.lowFill ? " · Honda ให้น้อยประจำ ใช้ ×1.0" : ""})${over ? " — เกินเพดาน Honda มักตัดทิ้งและดึงสัดส่วนสีอื่น" : ""}` : undefined} />;
+                            })()}
                         </td>
                       ))}
                     </tr>
