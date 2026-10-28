@@ -124,6 +124,8 @@ import DeliveryFeePage from "./pages/DeliveryFeePage";
 import FuelWithdrawPage from "./pages/FuelWithdrawPage";
 import MailDispatchPage from "./pages/MailDispatchPage";
 import VehiclePriceOverridePage from "./pages/VehiclePriceOverridePage";
+import SignageAdminPage from "./pages/SignageAdminPage"; // จอประชาสัมพันธ์หน้าร้าน (จัดการสไลด์)
+import SignageDisplayPage from "./pages/SignageDisplayPage"; // หน้าจอแสดงผล public /signage
 import VehicleDressupPage from "./pages/VehicleDressupPage"; // บันทึกอะไหล่แต่งรถสำหรับขาย (user 2026-09-24)
 import PartReturnPage from "./pages/PartReturnPage";
 import SalePriceMarkupPage from "./pages/SalePriceMarkupPage";
@@ -215,6 +217,10 @@ export default function App() {
   // หน้าตอบกลับข่าวกิจกรรม CRM (ปุ่ม สนใจ/ไม่สนใจ ในการ์ด LINE) — public ไม่ต้อง login
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/crm-reply")) {
     return <CrmReplyPage />;
+  }
+  // จอประชาสัมพันธ์หน้าร้าน (Android signage 49" แนวตั้ง ป.เปา) — public ไม่ต้อง login: /signage?branch=SCY06 (user 2026-10-28)
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/signage")) {
+    return <SignageDisplayPage />;
   }
   // คีออสเบิกอะไหล่ (EDATEC/Pi เปิด Chromium เต็มจอ) — ไม่ต้อง login: /kiosk-withdraw?name=ป.เปา → ผู้เบิก "kiosk-ป.เปา" (user 2026-10-27)
   if (typeof window !== "undefined" && window.location.pathname.startsWith("/kiosk-withdraw")) {
@@ -316,6 +322,8 @@ export default function App() {
     if (["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "marketregistration", "hondaquota"].includes(page)) return currentUser.username === "admin";
     // บันทึกแก้ไขราคาขายเฉพาะคัน — เฉพาะ admin (user 2026-09-01)
     if (page === "vehpriceoverride") return currentUser.role === "admin";
+    // จอประชาสัมพันธ์หน้าร้าน (จัดการสไลด์) — เฉพาะ admin (user 2026-10-28)
+    if (page === "signage") return currentUser.role === "admin";
     if (currentUser.role === "admin") return true;
     // ตั้งค่าค่าใช้จ่าย (การขาย/งานบริการ/ทั่วไป) — เฉพาะ admin เท่านั้น (override explicit pages)
     if (page === "motoexpense" || page === "serviceexpense" || page === "generalexpense") return false;
@@ -477,6 +485,9 @@ export default function App() {
         )}
         {activeMenu === "vehpriceoverride" && canAccess("vehpriceoverride") && (
           <VehiclePriceOverridePage currentUser={currentUser} />
+        )}
+        {activeMenu === "signage" && canAccess("signage") && (
+          <SignageAdminPage currentUser={currentUser} />
         )}
         {activeMenu === "vehdressup" && canAccess("vehdressup") && (
           <VehicleDressupPage currentUser={currentUser} />
@@ -1191,8 +1202,9 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="doorcontrol" label="🚪 ประตูร้าน / เปิดผ่าน LINE" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="CRM" pages={["crmevent"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="CRM" pages={["crmevent", "signage"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="crmevent" label="📣 ประชาสัมพันธ์กิจกรรม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="signage" label="📺 จอประชาสัมพันธ์หน้าร้าน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Master Data" pages={masterPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>

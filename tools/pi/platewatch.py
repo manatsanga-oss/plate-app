@@ -70,22 +70,216 @@ def crop_jpeg(img, roi, pad, max_side):
     x2, y2 = min(W, int(x2 + pw)), min(H, int(y2 + ph))
     crop = img[y1:y2, x1:x2]
     s = max(crop.shape[:2])
+    f = 1.0
     if s > max_side:
         f = max_side / s
         crop = cv2.resize(crop, (int(crop.shape[1] * f), int(crop.shape[0] * f)))
     elif s < UPSCALE_MIN:   # โซนเล็ก (ป้ายไกลกล้อง ~70px) ขยายก่อนส่งให้ GPT อ่านง่ายขึ้น
         f = UPSCALE_MIN / s
         crop = cv2.resize(crop, (int(crop.shape[1] * f), int(crop.shape[0] * f)), interpolation=cv2.INTER_CUBIC)
+    # วาดกรอบสีเหลือง = ขอบเขตโซนจริง (ส่วนที่เกินคือ pad) ให้ GPT อ่านเฉพาะรถในกรอบ — กันอ่านป้ายรถช่องข้าง ๆ ที่โผล่เข้ามาในขอบ (2026-10-27 เคส 2กข 909)
+    rx1, ry1, rx2, ry2 = roi
+    crop = np.ascontiguousarray(crop)
+    cv2.rectangle(crop, (int((rx1 - x1) * f), int((ry1 - y1) * f)), (int((rx2 - x1) * f) - 1, int((ry2 - y1) * f) - 1), (0, 220, 255), 4)
+    draw_grid(crop)
     ok, buf = cv2.imencode('.jpg', crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
     return base64.b64encode(buf.tobytes()).decode('ascii'), [x1, y1, x2 - x1, y2 - y1]
 
 
+GRID_ROWS = 8          # ตารางบนภาพโซนให้ GPT ชี้ช่องที่มีป้าย (plate_cell) — แม่นกว่าให้ประมาณพิกัด; คอลัมน์ปรับตามสัดส่วนภาพให้ช่องใกล้จัตุรัส (โซนแคบ-สูง ch10 เคยได้ช่องกว้าง 65px)
+GRID_COLS = 'ABCDEFGH'
+PLATE_MIN_HALF = 200   # ครึ่งความกว้าง/สูงขั้นต่ำ (px ภาพต้นฉบับ) ของภาพซูมป้าย — เผื่อ GPT ชี้ช่องเพี้ยน 1-2 ช่อง
+
+
+def grid_dims(w, h):
+    cols = max(3, min(len(GRID_COLS), int(round(GRID_ROWS * w / float(h)))))
+    return cols, GRID_ROWS
+
+
+def draw_grid(crop, cols=None, rows=None):
+    # เส้นตารางสีม่วง + ป้ายกำกับคอลัมน์ (ขอบบน/ล่าง) และแถว (ขอบซ้าย/ขวา) — ป้ายอยู่ในแถบขอบซึ่งเป็น pad นอกโซนอยู่แล้ว
+    h, w = crop.shape[:2]
+    if not cols:
+        cols, rows = grid_dims(w, h)
+    for i in range(1, cols):
+        x = int(w * i / cols); cv2.line(crop, (x, 0), (x, h - 1), (255, 0, 255), 2)
+    for i in range(1, rows):
+        y = int(h * i / rows); cv2.line(crop, (0, y), (w - 1, y), (255, 0, 255), 2)
+    fs = max(0.9, w / 1400.0); th = 2
+    for i in range(cols):
+        lab = GRID_COLS[i]; (tw, tht), _ = cv2.getTextSize(lab, cv2.FONT_HERSHEY_SIMPLEX, fs, th)
+        cx = int(w * (i + 0.5) / cols)
+        for y in (tht + 8, h - 8):
+            cv2.rectangle(crop, (cx - tw // 2 - 4, y - tht - 4), (cx + tw // 2 + 4, y + 4), (255, 0, 255), -1)
+            cv2.putText(crop, lab, (cx - tw // 2, y), cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255), th, cv2.LINE_AA)
+    for i in range(rows):
+        lab = str(i + 1); (tw, tht), _ = cv2.getTextSize(lab, cv2.FONT_HERSHEY_SIMPLEX, fs, th)
+        cy = int(h * (i + 0.5) / rows)
+        for x in (8, w - tw - 8):
+            cv2.rectangle(crop, (x - 4, cy - tht // 2 - 4), (x + tw + 4, cy + tht // 2 + 4), (255, 0, 255), -1)
+            cv2.putText(crop, lab, (x, cy + tht // 2), cv2.FONT_HERSHEY_SIMPLEX, fs, (255, 255, 255), th, cv2.LINE_AA)
+    return cols, rows
+
+
+TILE_TARGET = 600      # ขนาดเป้าหมายต่อแผ่น (px ต้นฉบับ) → โซน 1248x1115 = 2x2 แผ่น, โซนแคบ 719x1351 = 1x2
+TILE_OVERLAP = 0.15
+TILE_SHORT = 768       # ส่งแผ่นให้ด้านสั้น = 768px (ขนาดที่ GPT ใช้จริง) → ป้ายใหญ่ขึ้น ~2.5 เท่าเทียบส่งทั้งโซน
+TILE_GRID = 4
+
+
+def make_tiles(img, roi, box):
+    # แบ่งบริเวณ box (พิกัดภาพเต็ม) เป็นแผ่นซ้อนกัน 15% วาดกรอบเหลือง roi + ตาราง 4x4 + ป้าย T<n> มุมซ้ายบน → [{'b64','x1','y1','w','h'}]
+    bx, by, bw, bh = box
+    nx = max(1, min(3, int(round(bw / float(TILE_TARGET))))); ny = max(1, min(3, int(round(bh / float(TILE_TARGET)))))
+    tw, th = bw / float(nx), bh / float(ny)
+    ox, oy = tw * TILE_OVERLAP, th * TILE_OVERLAP
+    full = img.copy()
+    rx1, ry1, rx2, ry2 = roi
+    cv2.rectangle(full, (rx1, ry1), (rx2 - 1, ry2 - 1), (0, 220, 255), 3)
+    tiles = []
+    for j in range(ny):
+        for i in range(nx):
+            x1 = int(max(bx, bx + i * tw - ox)); y1 = int(max(by, by + j * th - oy))
+            x2 = int(min(bx + bw, bx + (i + 1) * tw + ox)); y2 = int(min(by + bh, by + (j + 1) * th + oy))
+            t = full[y1:y2, x1:x2]
+            f = TILE_SHORT / float(min(t.shape[:2]))
+            if f > 1:
+                t = cv2.resize(t, (int(t.shape[1] * f), int(t.shape[0] * f)), interpolation=cv2.INTER_CUBIC)
+            t = np.ascontiguousarray(t)
+            draw_grid(t, TILE_GRID, TILE_GRID)
+            lab = 'T%d' % (len(tiles) + 1)
+            cv2.rectangle(t, (0, 0), (120, 64), (0, 0, 0), -1)
+            cv2.putText(t, lab, (8, 50), cv2.FONT_HERSHEY_SIMPLEX, 1.6, (0, 255, 255), 3, cv2.LINE_AA)
+            ok, buf = cv2.imencode('.jpg', t, [cv2.IMWRITE_JPEG_QUALITY, 85])
+            tiles.append({'b64': base64.b64encode(buf.tobytes()).decode('ascii'), 'x1': x1, 'y1': y1, 'w': x2 - x1, 'h': y2 - y1})
+    return tiles
+
+
+def cell_region(img, region, cols, rows, cell, grow=None):
+    # ช่องตาราง cell บน region (x1,y1,w,h พิกัดภาพเต็ม) ที่แบ่ง cols x rows → กรอบ ±max(1.5 ช่อง, PLATE_MIN_HALF); grow ขยายด้านที่ป้ายโดนตัด
+    H, W = img.shape[:2]
+    bx, by, bw, bh = region
+    c = GRID_COLS.index(cell[0]); r = int(cell[1:]) - 1
+    cw, ch = bw / float(cols), bh / float(rows)
+    cx, cy = bx + (c + 0.5) * cw, by + (r + 0.5) * ch
+    hx, hy = max(1.5 * cw, PLATE_MIN_HALF), max(1.5 * ch, PLATE_MIN_HALF)
+    g = grow or {}
+    x1, y1 = max(0, int(cx - hx - g.get('left', 0))), max(0, int(cy - hy - g.get('top', 0)))
+    x2, y2 = min(W, int(cx + hx + g.get('right', 0))), min(H, int(cy + hy + g.get('bottom', 0)))
+    return x1, y1, x2, y2
+
+
+def plate_cell_region(img, box, cell, grow=None):
+    # cell เช่น "G6" บนตาราง (cols,rows) ของภาพที่ส่ง (= box ในพิกัดภาพเต็ม) → กรอบรอบช่องนั้น ±max(1.5 ช่อง, PLATE_MIN_HALF) จากภาพต้นฉบับ
+    # grow = {'top'|'bottom'|'left'|'right': px} ขยายด้านที่ GPT บอกว่าป้ายโดนตัด (รอบซ้ำ)
+    H, W = img.shape[:2]
+    bx, by, bw, bh = box
+    cols, rows = grid_dims(bw, bh)
+    c = GRID_COLS.index(cell[0]); r = int(cell[1:]) - 1
+    cw, ch = bw / float(cols), bh / float(rows)
+    cx, cy = bx + (c + 0.5) * cw, by + (r + 0.5) * ch
+    hx, hy = max(1.5 * cw, PLATE_MIN_HALF), max(1.5 * ch, PLATE_MIN_HALF)
+    g = grow or {}
+    x1, y1 = max(0, int(cx - hx - g.get('left', 0))), max(0, int(cy - hy - g.get('top', 0)))
+    x2, y2 = min(W, int(cx + hx + g.get('right', 0))), min(H, int(cy + hy + g.get('bottom', 0)))
+    return x1, y1, x2, y2
+
+
+def region_jpeg(img, reg):
+    x1, y1, x2, y2 = reg
+    if x2 - x1 < 20 or y2 - y1 < 20:
+        return None
+    crop = img[y1:y2, x1:x2]
+    f = min(PLATE_OUT_W / crop.shape[1], 6.0)
+    crop = cv2.resize(crop, (int(crop.shape[1] * f), int(crop.shape[0] * f)), interpolation=cv2.INTER_CUBIC)
+    ok, buf = cv2.imencode('.jpg', crop, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    return base64.b64encode(buf.tobytes()).decode('ascii')
+
+
+def plate_cell_crop_jpeg(img, box, cell, grow=None):
+    return region_jpeg(img, plate_cell_region(img, box, cell, grow))
+
+
+PLATE_EXPAND = 2.6     # ขยายกรอบป้ายที่ GPT บอก (กรอบ GPT คลาดเคลื่อนได้) ก่อนตัด
+PLATE_OUT_W = 900      # ความกว้างภาพซูมป้ายที่ส่ง (ขยาย cubic จากภาพต้นฉบับ)
+
+
+def plate_crop_jpeg(img, box, pb):
+    # box = [x1,y1,w,h] ของภาพที่ส่งรอบ 1 (พิกัดภาพเต็ม) · pb = plate_box จาก GPT เป็นสัดส่วน 0-1 ของภาพที่ส่ง (ถ้าเกิน 1.5 ถือว่าเป็นพิกเซลของภาพที่ส่ง)
+    H, W = img.shape[:2]
+    bx, by, bw, bh = box
+    px, py, pw_, ph_ = [float(v) for v in pb]
+    if max(px, py, pw_, ph_) > 1.5:   # GPT ตอบเป็นพิกเซล → แปลงเป็นสัดส่วนด้วยขนาดภาพที่ส่ง (ด้านยาว = UPSCALE_MIN หรือ max_side)
+        s = max(bw, bh); f = (UPSCALE_MIN / s) if s < UPSCALE_MIN else 1.0
+        px, py, pw_, ph_ = px / (bw * f), py / (bh * f), pw_ / (bw * f), ph_ / (bh * f)
+    cx, cy = bx + (px + pw_ / 2) * bw, by + (py + ph_ / 2) * bh
+    w = max(pw_ * bw * PLATE_EXPAND, 180)
+    h = max(ph_ * bh * PLATE_EXPAND, 150)
+    x1, y1 = max(0, int(cx - w / 2)), max(0, int(cy - h / 2))
+    x2, y2 = min(W, int(cx + w / 2)), min(H, int(cy + h / 2))
+    if x2 - x1 < 20 or y2 - y1 < 20:
+        return None
+    crop = img[y1:y2, x1:x2]
+    f = min(PLATE_OUT_W / crop.shape[1], 6.0)
+    crop = cv2.resize(crop, (int(crop.shape[1] * f), int(crop.shape[0] * f)), interpolation=cv2.INTER_CUBIC)
+    ok, buf = cv2.imencode('.jpg', crop, [cv2.IMWRITE_JPEG_QUALITY, 92])
+    return base64.b64encode(buf.tobytes()).decode('ascii')
+
+
 def post_event(cfg, z, img):
     b64, box = crop_jpeg(img, z['roi'], z['pad'], z['max_side'])
+    tiles = make_tiles(img, z['roi'], box)
     payload = {'action': 'vehicle_arrived', 'source': z['source'], 'zone': z['name'], 'vehicle_count': 1,
-               'image_base64': b64, 'vehicle_boxes': [box]}
+               'image_base64': b64, 'vehicle_boxes': [box], 'tiles': [t['b64'] for t in tiles]}
     r = requests.post(cfg['api_url'], json=payload, timeout=90)
     log.info('[%s/%s] vehicle_arrived sent: http %s %s', z['source'], z['name'], r.status_code, r.text[:200].replace('\n', ' '))
+    # รอบ 2 (2026-10-27): n8n ตอบ plate_box (ตำแหน่งป้ายที่ GPT เห็นในภาพโซน) → ตัดป้ายจากภาพต้นฉบับ ขยาย ส่ง read_plate ให้อ่านซ้ำจากภาพซูม (LINE แจ้งรอบนี้)
+    try:
+        j = r.json()
+    except Exception:
+        return
+    pb, cell, tile, eid = j.get('plate_box'), j.get('plate_cell'), j.get('plate_tile'), j.get('event_id')
+    if not eid:
+        return
+    cell = str(cell).strip().upper() if cell else None
+    if cell and not (len(cell) in (2, 3) and cell[0] in GRID_COLS and cell[1:].isdigit() and 1 <= int(cell[1:]) <= GRID_ROWS):
+        cell = None
+    tile = int(tile) if isinstance(tile, int) and 1 <= tile <= len(tiles) and cell and cell[0] in GRID_COLS[:TILE_GRID] and int(cell[1:]) <= TILE_GRID else None
+    if tile:   # ชี้จากแผ่นขยาย (แม่นสุด) → ช่องตารางบนแผ่นนั้น
+        tr = tiles[tile - 1]; region = (tr['x1'], tr['y1'], tr['w'], tr['h']); gcols = grows = TILE_GRID
+    else:
+        region = tuple(box); gcols, grows = grid_dims(box[2], box[3])
+    if not cell and not (isinstance(pb, list) and len(pb) == 4):
+        return
+    if not cell and max(float(pb[2]), float(pb[3])) > 0.35 and max(float(v) for v in pb) <= 1.5:   # กรอบใหญ่เกินจะเป็นป้าย (เช่น ตัวรถ/แผ่นดำบนลิฟต์) ไม่ซูม
+        log.info('[%s/%s] plate_box too large, skip pass 2: %s', z['source'], z['name'], pb); return
+    try:
+        zb64 = region_jpeg(img, cell_region(img, region, gcols, grows, cell)) if cell else plate_crop_jpeg(img, box, pb)   # ช่องตาราง (แผ่นขยาย/ภาพโซน) ก่อน, plate_box สำรอง
+    except Exception as e:
+        log.error('[%s/%s] plate crop failed: %s (cell=%s box=%s)', z['source'], z['name'], e, cell, pb); return
+    if not zb64:
+        log.info('[%s/%s] plate region too small, skip pass 2: %s', z['source'], z['name'], cell or pb); return
+    grow = {}
+    for attempt in range(3):   # รอบ 2 + ส่งซ้ำได้อีก 2 ครั้งเมื่อ GPT บอกว่าป้ายโดนขอบภาพตัด (cut_edge) → ขยายด้านนั้น
+        final = attempt == 2 or not cell
+        try:
+            open(os.path.expanduser('~/nvr/last_plate_%s.jpg' % z['source']), 'wb').write(base64.b64decode(zb64))
+        except Exception:
+            pass
+        p2 = {'action': 'read_plate', 'event_id': int(eid), 'source': z['source'], 'zone': z['name'], 'image_base64': zb64, 'final': final}
+        try:
+            r2 = requests.post(cfg['api_url'], json=p2, timeout=90)
+            log.info('[%s/%s] read_plate (pass 2.%d, at=%s%s grow=%s) sent: http %s %s', z['source'], z['name'], attempt + 1, ('T%d/' % tile) if tile else '', cell or pb, grow, r2.status_code, r2.text[:200].replace('\n', ' '))
+            j2 = r2.json()
+        except Exception as e:
+            log.error('[%s/%s] read_plate failed: %s', z['source'], z['name'], e); return
+        edge = j2.get('cut_edge') if isinstance(j2, dict) else None
+        if final or edge not in ('top', 'bottom', 'left', 'right'):
+            return
+        grow[edge] = grow.get(edge, 0) + PLATE_MIN_HALF * 1.5
+        zb64 = region_jpeg(img, cell_region(img, region, gcols, grows, cell, grow))
+        if not zb64:
+            return
 
 
 def main():
