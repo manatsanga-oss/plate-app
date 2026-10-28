@@ -24,6 +24,7 @@ const fmtBaht = (n) => (n == null ? "-" : Number(n).toLocaleString("th-TH"));
 export default function SignageDisplayPage() {
   const params = new URLSearchParams(window.location.search);
   const branch = (params.get("branch") || "SCY06").toUpperCase();
+  const screen = (params.get("screen") || "all").trim();   // ร้านมีจอ 2 ขนาด: ?screen=1 / 2 → เอาสไลด์ "ทุกจอ" + ของจอนั้น
   const priceGroup = ["SCY05", "SCY06"].includes(branch) ? "ป.เปา" : "สิงห์ชัย";
 
   const [items, setItems] = useState([]);
@@ -34,19 +35,26 @@ export default function SignageDisplayPage() {
   const [queue, setQueue] = useState({ tickets: [], bays: [] });
   const [clock, setClock] = useState(new Date());
   const [fade, setFade] = useState(true);
+  const [cursorOn, setCursorOn] = useState(false);   // ซ่อนเมาส์เมื่อนิ่งเกิน 3 วิ (จอป้ายไม่ให้ลูกศรค้าง) — ขยับแล้วโผล่ ใช้บนคอมได้
   const timerRef = useRef(null);
+  useEffect(() => {
+    let t = null;
+    const onMove = () => { setCursorOn(true); clearTimeout(t); t = setTimeout(() => setCursorOn(false), 3000); };
+    window.addEventListener("mousemove", onMove);
+    return () => { window.removeEventListener("mousemove", onMove); clearTimeout(t); };
+  }, []);
 
   // รายการสไลด์ (เฉพาะ active + อยู่ในช่วงวันที่) — refresh ทุก 1 นาที
   useEffect(() => {
     let alive = true;
     const load = async () => {
-      const d = parseList(await post(SIGNAGE_API, { action: "list_items", branch_code: branch, for_display: true }).catch(() => null));
+      const d = parseList(await post(SIGNAGE_API, { action: "list_items", branch_code: branch, for_display: true, screen: screen === "all" ? undefined : screen }).catch(() => null));
       if (alive && Array.isArray(d)) setItems(d);
     };
     load();
     const t = setInterval(load, RELOAD_ITEMS_MS);
     return () => { alive = false; clearInterval(t); };
-  }, [branch]);
+  }, [branch, screen]);
 
   // ราคา/สี จาก master (สำหรับสไลด์รถแนะนำ) — refresh ทุก 30 นาที
   useEffect(() => {
@@ -152,7 +160,7 @@ export default function SignageDisplayPage() {
   const dateStr = clock.toLocaleDateString("th-TH", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#0b1220", color: "#fff", overflow: "hidden", fontFamily: "'Noto Sans Thai', 'Sarabun', Tahoma, sans-serif", cursor: "none" }}>
+    <div style={{ position: "fixed", inset: 0, background: "#0b1220", color: "#fff", overflow: "hidden", fontFamily: "'Noto Sans Thai', 'Sarabun', Tahoma, sans-serif", cursor: cursorOn ? "default" : "none" }}>
       <div style={{ position: "absolute", inset: 0, opacity: fade ? 1 : 0, transition: "opacity .4s" }}>
         {cur.kind === "image" && <ImageSlide it={cur} src={images[`${cur.id}@${cur.updated_at}`]} />}
         {cur.kind === "vehicle" && <VehicleSlide it={cur} img={colorImgs[cur.color_id]} price={cashPrice(cur.color_id)} row={colorRow(cur.color_id)} />}

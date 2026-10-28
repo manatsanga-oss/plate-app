@@ -7,6 +7,8 @@ const SIGNAGE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-a
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const DISPLAY_BASE = "https://plate-app-y1z1.onrender.com";
 const KINDS = { image: "🖼️ รูปภาพ/โปรโมชั่น", vehicle: "🏍️ รถแนะนำ + ราคา", text: "📢 ประกาศข้อความ", queue: "🎫 คิวศูนย์บริการ", line: "💚 QR LINE OA" };
+// ร้านมีจอ 2 ขนาด — สไลด์เลือกได้ว่าโชว์ทุกจอหรือเฉพาะจอ 1/2; แต่ละจอเปิด /signage?branch=..&screen=1|2 (user 2026-10-28)
+const SCREENS = { all: "ทุกจอ", 1: "จอ 1 (49\")", 2: "จอ 2 (42\")" };
 const MAX_W = 1080, MAX_H = 1920;
 
 async function post(url, body) {
@@ -43,7 +45,7 @@ export default function SignageAdminPage({ currentUser }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState("image");
-  const [form, setForm] = useState({ title: "", duration_sec: 10, start_date: "", end_date: "", promo: "", note: "", text: "" });
+  const [form, setForm] = useState({ title: "", duration_sec: 10, start_date: "", end_date: "", promo: "", note: "", text: "", screen: "all" });
   const [imgFile, setImgFile] = useState(null);   // {b64, w, h, preview}
   // master สำหรับรถแนะนำ
   const [brands, setBrands] = useState([]); const [series, setSeries] = useState([]); const [colors, setColors] = useState([]);
@@ -92,7 +94,7 @@ export default function SignageAdminPage({ currentUser }) {
   }
 
   async function addItem() {
-    const body = { action: "save_item", branch_code: branch, kind, title: form.title, duration_sec: Number(form.duration_sec) || 10, start_date: form.start_date || null, end_date: form.end_date || null, created_by: by, payload: {} };
+    const body = { action: "save_item", branch_code: branch, kind, title: form.title, duration_sec: Number(form.duration_sec) || 10, start_date: form.start_date || null, end_date: form.end_date || null, screen: form.screen || "all", created_by: by, payload: {} };
     if (kind === "image") { if (!imgFile) return setMsg("❌ เลือกรูปก่อน"); body.image_base64 = imgFile.b64; }
     if (kind === "vehicle") {
       const row = colors.find((c) => String(c.color_id) === String(selColor)); if (!row) return setMsg("❌ เลือกรุ่นและสี");
@@ -138,7 +140,7 @@ export default function SignageAdminPage({ currentUser }) {
     <div style={{ padding: 20, fontFamily: "Tahoma, sans-serif" }}>
       <h2 style={{ margin: "0 0 4px" }}>📺 จอประชาสัมพันธ์หน้าร้าน</h2>
       <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 12 }}>
-        สไลด์หมุนบนจอ Android 49" แนวตั้ง — เปิดบนเครื่องป้ายที่ <a href={displayUrl} target="_blank" rel="noreferrer">{displayUrl}</a> (ไม่ต้อง login) · แก้ที่นี่แล้วจอเปลี่ยนเองภายใน 1 นาที
+        สไลด์หมุนบนจอ Android — เปิดบนเครื่องป้ายแต่ละจอ (ไม่ต้อง login): จอ 1 <a href={`${displayUrl}&screen=1`} target="_blank" rel="noreferrer">{displayUrl}&screen=1</a> · จอ 2 <a href={`${displayUrl}&screen=2`} target="_blank" rel="noreferrer">{displayUrl}&screen=2</a> · แก้ที่นี่แล้วจอเปลี่ยนเองภายใน 1 นาที (สไลด์ "ทุกจอ" ขึ้นทั้ง 2 จอ)
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
         <label>สาขา <select value={branch} onChange={(e) => setBranch(e.target.value)} style={inp}>
@@ -151,9 +153,9 @@ export default function SignageAdminPage({ currentUser }) {
 
       {/* รายการสไลด์ */}
       <table style={{ width: "100%", borderCollapse: "collapse", background: "#fff", marginBottom: 20 }}>
-        <thead><tr><th style={th}>ลำดับ</th><th style={th}>ชนิด</th><th style={th}>ตัวอย่าง</th><th style={th}>หัวข้อ</th><th style={th}>วินาที</th><th style={th}>แสดงตั้งแต่–ถึง</th><th style={th}>เปิด</th><th style={th}></th></tr></thead>
+        <thead><tr><th style={th}>ลำดับ</th><th style={th}>ชนิด</th><th style={th}>ตัวอย่าง</th><th style={th}>หัวข้อ</th><th style={th}>จอ</th><th style={th}>วินาที</th><th style={th}>แสดงตั้งแต่–ถึง</th><th style={th}>เปิด</th><th style={th}></th></tr></thead>
         <tbody>
-          {items.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 20 }}>ยังไม่มีสไลด์ — เพิ่มด้านล่าง</td></tr>}
+          {items.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 20 }}>ยังไม่มีสไลด์ — เพิ่มด้านล่าง</td></tr>}
           {items.map((it, i) => {
             const thumb = it.kind === "image" ? thumbs[`${it.id}@${it.updated_at}`] : null;
             return (
@@ -170,6 +172,8 @@ export default function SignageAdminPage({ currentUser }) {
                   {it.kind === "text" && <span style={{ fontSize: 13, color: "#374151", whiteSpace: "pre-wrap" }}>{String(it.payload?.text || "").slice(0, 80)}</span>}
                 </td>
                 <td style={td}><input defaultValue={it.title || ""} onBlur={(e) => { if (e.target.value !== (it.title || "")) patch(it, { title: e.target.value }); }} style={{ ...inp, width: 200 }} /></td>
+                <td style={td}><select value={it.screen || "all"} onChange={(e) => patch(it, { screen: e.target.value })} style={inp}>
+                  {Object.entries(SCREENS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></td>
                 <td style={td}><input type="number" min={3} defaultValue={it.duration_sec} onBlur={(e) => { const v = Number(e.target.value) || 10; if (v !== it.duration_sec) patch(it, { duration_sec: v }); }} style={{ ...inp, width: 64 }} /></td>
                 <td style={{ ...td, whiteSpace: "nowrap" }}>
                   <input type="date" defaultValue={it.start_date ? String(it.start_date).slice(0, 10) : ""} onBlur={(e) => patch(it, { start_date: e.target.value || null })} style={inp} /> –{" "}
@@ -193,7 +197,9 @@ export default function SignageAdminPage({ currentUser }) {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, maxWidth: 900 }}>
           <label>หัวข้อ (ไม่บังคับ)<br /><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} style={{ ...inp, width: "100%" }} placeholder={kind === "vehicle" ? "ว่าง = ยี่ห้อ + รุ่น" : kind === "line" ? "ว่าง = เพิ่มเพื่อน LINE ป.เปามอเตอร์เซอร์วิส" : ""} /></label>
-          <label>แสดงกี่วินาที<br /><input type="number" min={3} value={form.duration_sec} onChange={(e) => setForm({ ...form, duration_sec: e.target.value })} style={{ ...inp, width: 100 }} /></label>
+          <label>แสดงบนจอ / กี่วินาที<br />
+            <select value={form.screen} onChange={(e) => setForm({ ...form, screen: e.target.value })} style={inp}>{Object.entries(SCREENS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>{" "}
+            <input type="number" min={3} value={form.duration_sec} onChange={(e) => setForm({ ...form, duration_sec: e.target.value })} style={{ ...inp, width: 80 }} /> วินาที</label>
           <label>แสดงตั้งแต่วันที่ (ไม่บังคับ)<br /><input type="date" value={form.start_date} onChange={(e) => setForm({ ...form, start_date: e.target.value })} style={inp} /></label>
           <label>ถึงวันที่ (ไม่บังคับ)<br /><input type="date" value={form.end_date} onChange={(e) => setForm({ ...form, end_date: e.target.value })} style={inp} /></label>
 
