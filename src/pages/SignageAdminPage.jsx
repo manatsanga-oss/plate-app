@@ -8,7 +8,7 @@ const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-dat
 const DISPLAY_BASE = "https://plate-app-y1z1.onrender.com";
 const KINDS = { image: "🖼️ รูปภาพ/โปรโมชั่น", vehicle: "🏍️ รถแนะนำ + ราคา", text: "📢 ประกาศข้อความ", queue: "🎫 คิวศูนย์บริการ", line: "💚 QR LINE OA" };
 // ร้านมีจอ 2 ขนาด — สไลด์เลือกได้ว่าโชว์ทุกจอหรือเฉพาะจอ 1/2; แต่ละจอเปิด /signage?branch=..&screen=1|2 (user 2026-10-28)
-const SCREENS = { all: "ทุกจอ", 1: "จอ 1 (49\")", 2: "จอ 2 (42\")" };
+const SCREENS = { all: "ทุกจอ", 1: "จอ 1 (32\" หน้าร้าน)", 2: "จอ 2 (49\")" };
 const MAX_W = 1080, MAX_H = 1920;
 
 async function post(url, body) {

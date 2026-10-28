@@ -136,9 +136,9 @@ export default function SignageDisplayPage() {
   useEffect(() => {
     clearTimeout(timerRef.current);
     const sec = Math.max(3, Number(cur?.duration_sec) || 10);
+    // ไม่ใช้ fade (opacity transition) บนเครื่องป้าย — WebView Android ของป้าย 972S ค้างจอดำหลังเปลี่ยนสไลด์ครั้งแรก (user 2026-10-28 "ภาพขึ้นแล้วดับ")
     timerRef.current = setTimeout(() => {
-      setFade(false);
-      setTimeout(() => { setIdx((i) => (i + 1) % list.length); setFade(true); }, 400);
+      setIdx((i) => (i + 1) % list.length); setFade(true);
     }, sec * 1000);
     return () => clearTimeout(timerRef.current);
   }, [idx, list.length, cur?.duration_sec]);
@@ -161,7 +161,7 @@ export default function SignageDisplayPage() {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#0b1220", color: "#fff", overflow: "hidden", fontFamily: "'Noto Sans Thai', 'Sarabun', Tahoma, sans-serif", cursor: cursorOn ? "default" : "none" }}>
-      <div style={{ position: "absolute", inset: 0, opacity: fade ? 1 : 0, transition: "opacity .4s" }}>
+      <div style={{ position: "absolute", inset: 0, opacity: fade ? 1 : 0 }}>
         {cur.kind === "image" && <ImageSlide it={cur} src={images[`${cur.id}@${cur.updated_at}`]} />}
         {cur.kind === "vehicle" && <VehicleSlide it={cur} img={colorImgs[cur.color_id]} price={cashPrice(cur.color_id)} row={colorRow(cur.color_id)} />}
         {cur.kind === "queue" && <QueueSlide it={cur} queue={queue} />}
@@ -194,7 +194,7 @@ function ImageSlide({ it, src }) {
   if (src === "none") return <TextSlide it={{ title: it.title, payload: { text: "ไม่มีรูป" } }} />;
   return (
     <div style={{ position: "absolute", inset: 0, background: "#000" }}>
-      {src ? <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <div style={{ display: "grid", placeItems: "center", height: "100%", opacity: .6, fontSize: "3vh" }}>กำลังโหลดรูป…</div>}
+      {src ? <img src={src} alt="" decoding="sync" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <div style={{ display: "grid", placeItems: "center", height: "100%", opacity: .6, fontSize: "3vh" }}>กำลังโหลดรูป…</div>}
       {it.title && <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "2vh 3vw", fontSize: "4vh", fontWeight: 800, textShadow: "0 2px 12px #000", background: "linear-gradient(rgba(0,0,0,.55), transparent)" }}>{it.title}</div>}
     </div>
   );
