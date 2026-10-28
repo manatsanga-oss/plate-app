@@ -121,6 +121,39 @@ for n in w["nodes"]:
     n["id"] = "sg" + n["id"][2:] if len(n["id"]) > 2 else "sg_" + n["id"]
     if n["type"] == "n8n-nodes-base.postgres":
         n["credentials"] = {}
+
+# ---- webhook รูป: GET /webhook/signage-image?id=N → JPEG binary (ให้ <img src> บนจอป้ายโหลดตรง ไม่ฝัง base64 ในหน้า) ----
+GETIMG = r"""// เสิร์ฟรูปสไลด์ให้จอป้าย (GET ?id=N) — WebView ของป้าย Android ล่มเมื่อฝัง base64 ใหญ่ในหน้า จึงให้โหลดเป็น JPEG ปกติ
+const q = $input.first().json.query || {};
+let id = parseInt(q.id);
+if (!Number.isFinite(id) || id < 1) id = 0;
+return [{ json: { query: "SELECT image_base64 FROM signage_items WHERE id = " + id + " LIMIT 1" } }];
+"""
+TOBIN = r"""// แปลง base64 เป็น JPEG binary (ต้องใช้ prepareBinaryData ไม่งั้นได้ 0 bytes)
+const row = $input.first().json || {};
+let b64 = String(row.image_base64 || '').replace(/^data:[^,]+,/, '');
+let mime = 'image/jpeg', fname = 'slide.jpg';
+if (!b64) { b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='; mime = 'image/png'; fname = 'blank.png'; }
+const buffer = Buffer.from(b64, 'base64');
+const binaryData = await this.helpers.prepareBinaryData(buffer, fname, mime);
+return [{ json: {}, binary: { data: binaryData } }];
+"""
+pg_tpl = next(n for n in w["nodes"] if n["type"] == "n8n-nodes-base.postgres")
+w["nodes"] += [
+    {"parameters": {"httpMethod": "GET", "path": "signage-image", "responseMode": "responseNode", "options": {}},
+     "id": "sgimg01", "name": "Webhook Image", "type": "n8n-nodes-base.webhook", "typeVersion": 2, "position": [200, 560], "webhookId": "signage-image"},
+    {"parameters": {"jsCode": GETIMG}, "id": "sgimg02", "name": "Build get_image SQL", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [420, 560]},
+    {"parameters": {"operation": "executeQuery", "query": "={{ $json.query }}", "options": {}}, "id": "sgimg03", "name": "PG Image", "type": "n8n-nodes-base.postgres", "typeVersion": pg_tpl["typeVersion"], "position": [640, 560], "credentials": {}},
+    {"parameters": {"jsCode": TOBIN}, "id": "sgimg04", "name": "Image To Binary", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [860, 560]},
+    {"parameters": {"respondWith": "binary", "options": {"responseHeaders": {"entries": [{"name": "Content-Type", "value": "image/jpeg"}, {"name": "Cache-Control", "value": "public, max-age=300"}, {"name": "Access-Control-Allow-Origin", "value": "*"}]}}},
+     "id": "sgimg05", "name": "Respond Image", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.5, "position": [1080, 560]},
+]
+w["connections"].update({
+    "Webhook Image": {"main": [[{"node": "Build get_image SQL", "type": "main", "index": 0}]]},
+    "Build get_image SQL": {"main": [[{"node": "PG Image", "type": "main", "index": 0}]]},
+    "PG Image": {"main": [[{"node": "Image To Binary", "type": "main", "index": 0}]]},
+    "Image To Binary": {"main": [[{"node": "Respond Image", "type": "main", "index": 0}]]},
+})
 json.dump(w, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 open(os.path.join(D, "Signage_DDL.sql"), "w", encoding="utf-8").write("-- จอประชาสัมพันธ์หน้าร้าน (signage-api) — workflow รัน CREATE TABLE IF NOT EXISTS เองทุกครั้ง\n" + DDL_SQL + "\n")
 stub = "const $=(x)=>({first:()=>({json:{body:{}}}),all:()=>[]});const $input={first:()=>({json:{body:{}}}),all:()=>[]};\n(async()=>{" + BUILD + "\n})();"

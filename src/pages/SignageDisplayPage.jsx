@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 // สไลด์: image (รูปโปรโมชั่นอัปโหลดจากเมนู CRM → จอประชาสัมพันธ์หน้าร้าน) · vehicle (รุ่นแนะนำ รูปสี + ราคาเงินสดสดจาก master)
 //        · queue (บัตรคิวศูนย์บริการ + รถในช่องซ่อมจากกล้อง) · line (QR เพิ่มเพื่อน OA) · text (ประกาศข้อความ)
 const SIGNAGE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-api";
+const SIGNAGE_IMG = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-image?id="; // รูปสไลด์เป็น JPEG ตรง (WebView ป้าย 972S จอดำเมื่อฝัง base64 ใหญ่ในหน้า 2026-10-28)
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const TICKET_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-queue-ticket-api";
 const SQ_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-queue-api";
@@ -72,16 +73,14 @@ export default function SignageDisplayPage() {
     return () => { alive = false; clearInterval(t); };
   }, []);
 
-  // รูปสไลด์ image: โหลดเมื่อมีในรายการ (cache ตาม updated_at)
+  // รูปสไลด์ image: ใช้ลิงก์ JPEG ตรงจาก webhook (v=updated_at กัน cache เก่า) — preload ล่วงหน้าทุกใบ
   useEffect(() => {
     items.filter((it) => it.kind === "image" && it.has_image).forEach((it) => {
       const key = `${it.id}@${it.updated_at}`;
       if (images[key] !== undefined) return;
-      setImages((p) => ({ ...p, [key]: null }));
-      post(SIGNAGE_API, { action: "get_image", id: it.id }).then((r) => {
-        const rec = Array.isArray(r) ? r[0] : r;
-        setImages((p) => ({ ...p, [key]: rec?.image_base64 ? (rec.image_base64.startsWith("data:") ? rec.image_base64 : "data:image/jpeg;base64," + rec.image_base64) : "none" }));
-      }).catch(() => setImages((p) => ({ ...p, [key]: "none" })));
+      const url = SIGNAGE_IMG + it.id + "&v=" + encodeURIComponent(String(it.updated_at || ""));
+      setImages((p) => ({ ...p, [key]: url }));
+      const pre = new Image(); pre.src = url;
     });
   }, [items]); // eslint-disable-line
 
