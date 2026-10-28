@@ -63,6 +63,22 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
     loadBays();
   }
   const bayLabel = (b) => `${b.plate_no || "ไม่ทราบทะเบียน"}${b.plate_province ? " " + b.plate_province : ""}`;
+  // สกรีนเซฟเวอร์คีออส (user 2026-10-28): ไม่แตะ/ไม่ยิงบาร์โค้ด idle วิ → ซ้อนทับด้วยจอประชาสัมพันธ์ (/signage สไลด์เดียวกับจอหน้าร้าน)
+  // แตะจอ/กดคีย์/ยิงบาร์โค้ด → ซ่อนทันที (ช่องสแกนยังโฟกัสอยู่ รหัสที่ยิงไม่หาย) — เฉพาะผู้ใช้ kiosk-*; ปรับเวลาได้ด้วย ?idle=วินาที (0 = ปิด)
+  const isKiosk = /^kiosk-/.test(String(currentUser?.username || ""));
+  const kioskParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+  const idleSec = isKiosk ? Math.max(0, Number(kioskParams?.get("idle") ?? 120)) : 0;
+  const saverBranch = (kioskParams?.get("branch") || "SCY06").toUpperCase();
+  const [saverOn, setSaverOn] = useState(false);
+  useEffect(() => {
+    if (!idleSec) return;
+    let t = null;
+    const arm = () => { clearTimeout(t); t = setTimeout(() => setSaverOn(true), idleSec * 1000); };
+    const wake = () => { setSaverOn((on) => { if (on) setTimeout(() => inputRef.current?.focus(), 0); return false; }); arm(); };
+    ["touchstart", "mousedown", "keydown", "pointerdown"].forEach((ev) => window.addEventListener(ev, wake, { passive: true }));
+    arm();
+    return () => { clearTimeout(t); ["touchstart", "mousedown", "keydown", "pointerdown"].forEach((ev) => window.removeEventListener(ev, wake)); };
+  }, [idleSec]);
 
   // วันที่กรอง — default = วันนี้
   const todayISO = () => {
@@ -235,6 +251,16 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
 
   return (
     <div className="page-container">
+      {saverOn && (
+        <div onPointerDown={() => setSaverOn(false)} onTouchStart={() => setSaverOn(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "#000" }}>
+          <iframe title="screensaver" src={`/signage?branch=${encodeURIComponent(saverBranch)}&screen=kiosk`}
+            style={{ width: "100%", height: "100%", border: 0, pointerEvents: "none" }} />
+          <div style={{ position: "absolute", bottom: "4vh", left: 0, right: 0, textAlign: "center", color: "#fff", fontSize: "2.4vh", opacity: .85, textShadow: "0 1px 6px #000" }}>
+            แตะหน้าจอหรือยิงบาร์โค้ด เพื่อเริ่มเบิกอะไหล่
+          </div>
+        </div>
+      )}
       <div className="page-topbar">
         <h2 className="page-title">📦 บันทึกการเบิกอะไหล่</h2>
       </div>

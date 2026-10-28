@@ -37,6 +37,10 @@ export default function SignageDisplayPage() {
   const [clock, setClock] = useState(new Date());
   const [fade, setFade] = useState(true);
   const [cursorOn, setCursorOn] = useState(false);   // ซ่อนเมาส์เมื่อนิ่งเกิน 3 วิ (จอป้ายไม่ให้ลูกศรค้าง) — ขยับแล้วโผล่ ใช้บนคอมได้
+  // โหมดดีบักบนจอป้าย (?debug=1): โชว์ UA/ขนาดจอ/log โหลดรูป — ป้าย 972S โหลดรูปไม่ขึ้น (2026-10-28) ดูสาเหตุจากหน้าจอได้โดยไม่ต้องต่อ ADB
+  const debug = !!params.get("debug");
+  const [dbg, setDbg] = useState([]);
+  const log = (m) => { if (debug) setDbg((p) => [...p.slice(-9), new Date().toLocaleTimeString("th-TH") + " " + m]); };
   const timerRef = useRef(null);
   useEffect(() => {
     let t = null;
@@ -161,13 +165,18 @@ export default function SignageDisplayPage() {
   return (
     <div style={{ position: "fixed", inset: 0, background: "#0b1220", color: "#fff", overflow: "hidden", fontFamily: "'Noto Sans Thai', 'Sarabun', Tahoma, sans-serif", cursor: cursorOn ? "default" : "none" }}>
       <div style={{ position: "absolute", inset: 0, opacity: fade ? 1 : 0 }}>
-        {cur.kind === "image" && <ImageSlide it={cur} src={images[`${cur.id}@${cur.updated_at}`]} />}
+        {cur.kind === "image" && <ImageSlide it={cur} src={images[`${cur.id}@${cur.updated_at}`]} log={log} onFallback={(dataUrl) => setImages((p) => ({ ...p, [`${cur.id}@${cur.updated_at}`]: dataUrl }))} />}
         {cur.kind === "vehicle" && <VehicleSlide it={cur} img={colorImgs[cur.color_id]} price={cashPrice(cur.color_id)} row={colorRow(cur.color_id)} />}
         {cur.kind === "queue" && <QueueSlide it={cur} queue={queue} />}
         {cur.kind === "line" && <LineSlide it={cur} />}
         {cur.kind === "text" && <TextSlide it={cur} />}
         {cur.kind === "idle" && <IdleSlide />}
       </div>
+      {debug && (
+        <div style={{ position: "absolute", top: 0, left: 0, right: 0, background: "rgba(0,0,0,.75)", color: "#9ae6b4", fontSize: "1.6vh", fontFamily: "monospace", padding: "0.8vh 1vw", whiteSpace: "pre-wrap", wordBreak: "break-all", zIndex: 9 }}>
+          {`UA: ${navigator.userAgent}\nwin ${window.innerWidth}x${window.innerHeight} dpr ${window.devicePixelRatio} · slides ${list.length} · cur #${cur.id} ${cur.kind}\n`}{dbg.join("\n")}
+        </div>
+      )}
       {/* แถบล่าง: เวลา/วันที่ + จุดบอกลำดับสไลด์ */}
       <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "1.2vh 2.5vw", display: "flex", justifyContent: "space-between", alignItems: "center", background: "linear-gradient(transparent, rgba(0,0,0,.55))", fontSize: "2.2vh" }}>
         <span style={{ opacity: .9 }}>{dateStr}</span>
@@ -189,11 +198,22 @@ function Title({ children, sub }) {
   );
 }
 
-function ImageSlide({ it, src }) {
+function ImageSlide({ it, src, log, onFallback }) {
   if (src === "none") return <TextSlide it={{ title: it.title, payload: { text: "ไม่มีรูป" } }} />;
+  // ลิงก์ตรงโหลดไม่ได้ (WebView เก่า/ใบรับรอง) → สำรอง: ดึง base64 ผ่าน POST get_image แล้วใส่เป็น data URL
+  const onError = async () => {
+    log && log(`img #${it.id} ERROR ${String(src).slice(0, 60)}`);
+    if (String(src).startsWith("data:")) return;
+    try {
+      const r = await post(SIGNAGE_API, { action: "get_image", id: it.id });
+      const rec = Array.isArray(r) ? r[0] : r;
+      if (rec?.image_base64) { onFallback && onFallback("data:image/jpeg;base64," + rec.image_base64.replace(/^data:[^,]+,/, "")); log && log(`img #${it.id} fallback base64 ${Math.round(rec.image_base64.length / 1024)}KB`); }
+      else log && log(`img #${it.id} fallback: no data`);
+    } catch (e) { log && log(`img #${it.id} fallback failed ${e?.message || e}`); }
+  };
   return (
     <div style={{ position: "absolute", inset: 0, background: "#000" }}>
-      {src ? <img src={src} alt="" decoding="sync" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <div style={{ display: "grid", placeItems: "center", height: "100%", opacity: .6, fontSize: "3vh" }}>กำลังโหลดรูป…</div>}
+      {src ? <img src={src} alt="" onLoad={(e) => log && log(`img #${it.id} loaded ${e.currentTarget.naturalWidth}x${e.currentTarget.naturalHeight}`)} onError={onError} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <div style={{ display: "grid", placeItems: "center", height: "100%", opacity: .6, fontSize: "3vh" }}>กำลังโหลดรูป…</div>}
       {it.title && <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "2vh 3vw", fontSize: "4vh", fontWeight: 800, textShadow: "0 2px 12px #000", background: "linear-gradient(rgba(0,0,0,.55), transparent)" }}>{it.title}</div>}
     </div>
   );
