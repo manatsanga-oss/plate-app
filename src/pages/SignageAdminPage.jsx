@@ -12,14 +12,10 @@ const SCREENS = { all: "ทุกจอ", 1: "จอ 1 (32\" หน้าร้�
 // จอที่แบ่ง 3 ส่วน (จอ 2 เปิด /signage?...&split=3): สไลด์เลือก "ส่วน" ที่จะโชว์ — 1 สไลด์หลักด้านบน (75%) / 2 รูปเล็กมุมขวาบน (เฉพาะรูป) / 3 ข้อความด้านล่าง (25%) — จอเต็มไม่สนค่านี้
 const ZONES = { 1: "ส่วนหลัก (บน)", 2: "รูปเล็กมุมขวาบน", 3: "ข้อความด้านล่าง" };
 const MAX_W = 1080, MAX_H = 1920;
-// วิดีโอ: อัปโหลด MP4 สั้นเข้าระบบ (เก็บ base64 ผ่าน n8n — จำกัด 10 MB เพราะ n8n บน Render รับ body ~16 MB) หรือใส่ลิงก์ไฟล์ภายนอก (ไม่จำกัดขนาด) — user 2026-10-29
+// วิดีโอ: อัปโหลด MP4/MOV/WebM เข้าระบบ (เก็บ base64 ผ่าน n8n — จำกัด 10 MB เพราะ n8n บน Render รับ body ~16 MB; ไฟล์ใหญ่กว่านั้นย่อในเบราว์เซอร์เป็น WebM) หรือใส่ลิงก์ไฟล์ตรงภายนอก — user 2026-10-29
 const MAX_VIDEO_MB = 10;
-// ลิงก์แชร์ Google Drive (…/file/d/ID/view หรือ ?id=ID) → ลิงก์ไฟล์ตรงที่ <video> เล่นได้ (ไฟล์ต้องแชร์ "ทุกคนที่มีลิงก์") — ทดสอบ 2026-10-29 ตอบ video/mp4
-function toDirectVideoUrl(u) {
-  const m = String(u || "").trim().match(/drive\.google\.com\/(?:file\/d\/([\w-]{20,})|(?:open|uc)\?(?:[^#]*&)?id=([\w-]{20,}))/);
-  const id = m && (m[1] || m[2]);
-  return id ? `https://drive.usercontent.google.com/download?id=${id}&export=download` : String(u || "").trim();
-}
+// ⚠️ ลิงก์ Google Drive ใช้ฝังเล่นในหน้าเว็บอื่นไม่ได้ — Google ตอบ 403 เมื่อเบราว์เซอร์ส่ง Sec-Fetch-Site: cross-site (ทดสอบ 2026-10-29 ทั้ง Chrome และ WebView ส่งหัวนี้) จึงรับเฉพาะลิงก์ไฟล์ .mp4/.webm ตรง
+const isGoogleDrive = (u) => /(^|\/\/)(drive|docs)\.google\.com\//i.test(String(u || "").trim()) || /drive\.usercontent\.google\.com/i.test(String(u || ""));
 
 async function post(url, body) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -44,6 +40,47 @@ function resizeImage(file) {
     };
     img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("อ่านรูปไม่ได้")); };
     img.src = url;
+  });
+}
+
+// อ่าน metadata ของไฟล์วิดีโอ (ความยาว/ขนาดภาพ)
+function videoMeta(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video"); v.preload = "metadata"; v.muted = true;
+    v.onloadedmetadata = () => { const m = { sec: v.duration, w: v.videoWidth, h: v.videoHeight }; URL.revokeObjectURL(url); resolve(m); };
+    v.onerror = () => { URL.revokeObjectURL(url); reject(new Error("bad video")); };
+    v.src = url;
+  });
+}
+// ย่อคลิปในเบราว์เซอร์ด้วย MediaRecorder (เล่นคลิปจริงแล้วอัดใหม่เป็น WebM VP9/Opus — ป้าย Android เล่น WebM ได้) ใช้เวลาเท่าความยาวคลิป
+// บิตเรตคำนวณจากความยาวให้ได้ ≈ 8.5 MB; ย่อภาพให้ด้านสั้นไม่เกิน 720 px ผ่าน canvas; เสียงผ่าน AudioContext (ไม่ดังออกลำโพงตอนอัด)
+function compressVideo(file, meta, onProgress) {
+  return new Promise((resolve, reject) => {
+    if (typeof MediaRecorder === "undefined" || !HTMLCanvasElement.prototype.captureStream) return reject(new Error("เบราว์เซอร์นี้ย่อวิดีโอไม่ได้"));
+    const mime = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((m) => MediaRecorder.isTypeSupported(m));
+    if (!mime) return reject(new Error("เบราว์เซอร์นี้ไม่รองรับ WebM"));
+    const targetBytes = 8.5 * 1048576;
+    const vbps = Math.max(800000, Math.min(4000000, Math.floor((targetBytes * 8) / Math.max(1, meta.sec)) - 96000));
+    const f = Math.min(1, 720 / Math.min(meta.w, meta.h));
+    const W = Math.round(meta.w * f / 2) * 2, H = Math.round(meta.h * f / 2) * 2;
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video"); v.src = url; v.playsInline = true; v.preload = "auto";
+    const c = document.createElement("canvas"); c.width = W; c.height = H; const ctx = c.getContext("2d");
+    const stream = c.captureStream(30);
+    let ac = null;
+    try { ac = new (window.AudioContext || window.webkitAudioContext)(); const src = ac.createMediaElementSource(v); const dest = ac.createMediaStreamDestination(); src.connect(dest); dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t)); } catch { /* ไม่มีเสียงก็อัดต่อ */ }
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: vbps, audioBitsPerSecond: 96000 });
+    const chunks = []; rec.ondataavailable = (ev) => { if (ev.data?.size) chunks.push(ev.data); };
+    // วาดเฟรมด้วย setInterval ไม่ใช้ requestAnimationFrame (แท็บถูกซ่อน rAF หยุดเดิน → ได้ไฟล์ว่าง); ผู้ใช้ต้องเปิดแท็บนี้ค้างไว้จนย่อเสร็จ
+    let timer = 0;
+    const draw = () => { ctx.drawImage(v, 0, 0, W, H); onProgress && onProgress(Math.min(99, Math.round((v.currentTime / meta.sec) * 100))); };
+    const finish = () => { clearInterval(timer); if (rec.state !== "inactive") rec.stop(); };
+    rec.onstop = () => { URL.revokeObjectURL(url); ac && ac.close().catch(() => {}); const blob = new Blob(chunks, { type: "video/webm" }); resolve(new File([blob], file.name.replace(/\.\w+$/, "") + ".webm", { type: "video/webm" })); };
+    rec.onerror = (ev) => { finish(); reject(ev.error || new Error("record error")); };
+    v.onended = finish;
+    v.onerror = () => { finish(); reject(new Error("เล่นไฟล์ไม่ได้")); };
+    v.oncanplay = () => { if (rec.state !== "inactive") return; ac && ac.resume().catch(() => {}); rec.start(1000); v.play().then(() => { draw(); timer = setInterval(draw, 1000 / 30); }).catch((e) => { finish(); reject(e); }); };
   });
 }
 
@@ -105,30 +142,37 @@ export default function SignageAdminPage({ currentUser }) {
     catch (err) { setMsg("❌ " + err.message); }
   }
 
-  // อ่านไฟล์วิดีโอเป็น base64 + ความยาวคลิป (ตั้งวินาทีสไลด์ให้อัตโนมัติ)
-  function onPickVideo(e) {
-    const f = e.target.files?.[0]; if (!f) return;
-    const sizeMb = f.size / 1048576;
-    if (!/^video\/(mp4|webm)$/i.test(f.type)) return setMsg("❌ รองรับเฉพาะไฟล์ MP4 (H.264) หรือ WebM");
-    if (sizeMb > MAX_VIDEO_MB) return setMsg(`❌ ไฟล์ ${sizeMb.toFixed(1)} MB ใหญ่เกิน ${MAX_VIDEO_MB} MB — ย่อคลิปให้สั้น/720p ก่อน หรือใช้ช่องลิงก์วิดีโอแทน`);
-    const url = URL.createObjectURL(f);
-    const v = document.createElement("video"); v.preload = "metadata";
-    v.onloadedmetadata = () => {
-      const sec = Math.max(3, Math.ceil(v.duration || 0)) || 10;
-      const rd = new FileReader();
-      rd.onload = () => { setVidFile({ b64: String(rd.result).split(",")[1], mime: f.type.toLowerCase(), sizeMb, sec, preview: url }); setForm((p) => ({ ...p, duration_sec: sec })); setMsg(`วิดีโอ ${sizeMb.toFixed(1)} MB · ${sec} วินาที`); };
-      rd.onerror = () => setMsg("❌ อ่านไฟล์ไม่ได้");
-      rd.readAsDataURL(f);
-    };
-    v.onerror = () => { URL.revokeObjectURL(url); setMsg("❌ เล่นไฟล์นี้ไม่ได้ (ต้องเป็น MP4 H.264)"); };
-    v.src = url;
+  // อ่านไฟล์วิดีโอเป็น base64 + ความยาวคลิป (ตั้งวินาทีสไลด์ให้อัตโนมัติ); ไฟล์เกิน MAX_VIDEO_MB → ย่อในเบราว์เซอร์ (compressVideo)
+  async function onPickVideo(e) {
+    let f = e.target.files?.[0]; if (!f) return;
+    if (!/^video\/(mp4|webm|quicktime)$/i.test(f.type)) return setMsg("❌ รองรับเฉพาะไฟล์ MP4 / MOV / WebM");
+    const meta = await videoMeta(f).catch(() => null);
+    if (!meta) return setMsg("❌ เล่นไฟล์นี้ไม่ได้ (ต้องเป็น MP4 H.264 / WebM)");
+    let sizeMb = f.size / 1048576, note = "";
+    if (sizeMb > MAX_VIDEO_MB) {
+      if (meta.sec > 90) return setMsg(`❌ คลิปยาว ${Math.round(meta.sec)} วินาที — ตัดให้สั้นกว่า 90 วินาทีก่อน`);
+      try {
+        setBusy(true);
+        const out = await compressVideo(f, meta, (pct) => setMsg(`⏳ กำลังย่อคลิป ${sizeMb.toFixed(1)} MB → ไม่เกิน ${MAX_VIDEO_MB} MB … ${pct}% (ใช้เวลาเท่าความยาวคลิป — อย่าสลับแท็บ/ย่อหน้าต่างระหว่างนี้)`));
+        setBusy(false);
+        const outMb = out.size / 1048576;
+        if (outMb > MAX_VIDEO_MB) return setMsg(`❌ ย่อแล้วยังได้ ${outMb.toFixed(1)} MB — ตัดคลิปให้สั้นลงก่อน`);
+        note = ` (ย่อจาก ${sizeMb.toFixed(1)} MB)`; f = out; sizeMb = outMb;
+      } catch (err) { setBusy(false); return setMsg("❌ ย่อคลิปไม่สำเร็จ: " + (err?.message || err) + " — ย่อด้วยแอปอื่นให้ไม่เกิน " + MAX_VIDEO_MB + " MB แล้วลองใหม่"); }
+    }
+    const sec = Math.max(3, Math.ceil(meta.sec || 0)) || 10;
+    const rd = new FileReader();
+    rd.onload = () => { setVidFile({ b64: String(rd.result).split(",")[1], mime: f.type.toLowerCase() === "video/webm" ? "video/webm" : "video/mp4", sizeMb, sec, preview: URL.createObjectURL(f) }); setForm((p) => ({ ...p, duration_sec: sec })); setMsg(`วิดีโอ ${sizeMb.toFixed(1)} MB · ${sec} วินาที${note}`); };
+    rd.onerror = () => setMsg("❌ อ่านไฟล์ไม่ได้");
+    rd.readAsDataURL(f);
   }
 
   async function addItem() {
     const body = { action: "save_item", branch_code: branch, kind, title: form.title, duration_sec: Number(form.duration_sec) || 10, start_date: form.start_date || null, end_date: form.end_date || null, screen: form.screen || "all", zone: Number(form.zone) || 1, created_by: by, payload: {} };
     if (kind === "image") { if (!imgFile) return setMsg("❌ เลือกรูปก่อน"); body.image_base64 = imgFile.b64; }
     if (kind === "video") {
-      const u = toDirectVideoUrl(vidUrl);
+      const u = vidUrl.trim();
+      if (isGoogleDrive(u)) return setMsg("❌ ลิงก์ Google Drive เล่นบนจอไม่ได้ (Google บล็อกการฝังจากเว็บอื่น) — ให้อัปโหลดไฟล์เข้าระบบแทน (ระบบย่อให้เองถ้าไฟล์ใหญ่)");
       if (vidFile) { body.image_base64 = vidFile.b64; body.media_mime = vidFile.mime; }
       else if (/^https?:\/\/\S+$/i.test(u)) body.payload = { url: u };
       else return setMsg("❌ เลือกไฟล์วิดีโอ หรือใส่ลิงก์วิดีโอ (ขึ้นต้น https://)");
@@ -254,9 +298,9 @@ export default function SignageAdminPage({ currentUser }) {
           )}
           {kind === "video" && (
             <div style={{ gridColumn: "1 / -1" }}>
-              <div style={{ marginBottom: 6 }}>อัปโหลดคลิปสั้น (MP4 ไม่เกิน {MAX_VIDEO_MB} MB) <input type="file" accept="video/mp4,video/webm" onChange={onPickVideo} /></div>
-              <div style={{ marginBottom: 6 }}>หรือใส่ลิงก์วิดีโอ (ไฟล์ .mp4 ที่ฝากไว้ที่อื่น เช่น Cloudflare R2 / Google Drive ลิงก์ตรง) <input value={vidUrl} onChange={(e) => setVidUrl(e.target.value)} style={{ ...inp, width: 420 }} placeholder="https://.../promo.mp4 หรือลิงก์แชร์ Google Drive" disabled={!!vidFile} /></div>
-              {vidUrl.trim() && toDirectVideoUrl(vidUrl) !== vidUrl.trim() && <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>✔ ลิงก์ Google Drive — ระบบจะแปลงเป็นลิงก์ไฟล์ตรงให้ (ไฟล์ต้องตั้งแชร์ "ทุกคนที่มีลิงก์")</div>}
+              <div style={{ marginBottom: 6 }}>อัปโหลดคลิป (MP4/MOV/WebM — เกิน {MAX_VIDEO_MB} MB ระบบย่อให้เอง ใช้เวลาเท่าความยาวคลิป) <input type="file" accept="video/mp4,video/webm,video/quicktime" onChange={onPickVideo} disabled={busy} /></div>
+              <div style={{ marginBottom: 6 }}>หรือใส่ลิงก์วิดีโอ (ไฟล์ .mp4 ที่ฝากไว้ที่อื่น เช่น Cloudflare R2 — Google Drive ใช้ไม่ได้) <input value={vidUrl} onChange={(e) => setVidUrl(e.target.value)} style={{ ...inp, width: 420 }} placeholder="https://.../promo.mp4 (ลิงก์ไฟล์ตรง เช่น Cloudflare R2)" disabled={!!vidFile} /></div>
+              {isGoogleDrive(vidUrl) && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>⚠️ ลิงก์ Google Drive เล่นบนจอไม่ได้ (Google บล็อกการฝังจากเว็บอื่น) — ดาวน์โหลดไฟล์แล้วอัปโหลดเข้าระบบแทน</div>}
               <div style={{ fontSize: 12, color: "#6b7280" }}>แนะนำคลิปแนวตั้ง 1080×1920 ยาว 15–30 วินาที (ความละเอียด 720p ก็พอ) — จอจะเล่นจนจบคลิปแล้วไปสไลด์ถัดไป ปิดเสียงเป็นค่าเริ่มต้น (เปิดเสียงที่จอด้วย &sound=1)</div>
               {vidFile && <video src={vidFile.preview} controls muted style={{ height: 240, marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 6, background: "#000" }} />}
             </div>
