@@ -196,7 +196,7 @@ def process(item, items, creds):
         vdur = round(copies * dur, 1)
         lc.update_program(CFG["video_program"], vp["name"], vdur, vdata)
         wsec = web_secs(items)
-        programs = [CFG["video_program"]]
+        programs = [CFG["video_program"]]   # คลิปเล่นก่อน → เห็นผลทันทีหลังป้ายรับ
         if with_web and wsec > 0:
             step = "program web"
             wp = lc.program(CFG["web_program"])
@@ -204,9 +204,16 @@ def process(item, items, creds):
             if html:
                 html["attributes"]["duration"] = int(wsec)
                 lc.update_program(CFG["web_program"], wp["name"], int(wsec), wp["data"])
-            programs = [CFG["web_program"], CFG["video_program"]]
+            programs = [CFG["video_program"], CFG["web_program"]]
         step = "send"
+        time.sleep(20)   # ให้ไฟล์ transcode กระจายขึ้น CDN ก่อน (ส่งทันทีป้ายเคยไม่รับ 2026-10-29 15:18)
         task = lc.send(programs, CFG["device"])
+        time.sleep(60)
+        try:
+            task2 = lc.send(programs, CFG["device"])   # ส่งซ้ำกันพลาด (idempotent: แทนที่รายการเดิม)
+            log(f"  resend task {task2.get('id')}")
+        except Exception as e:
+            log("  resend skipped:", e)
         dead = []
         try:
             dead = lc.cleanup(res["id"])
