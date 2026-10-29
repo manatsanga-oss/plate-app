@@ -1,0 +1,86 @@
+{
+ "zones": [
+  {
+   "channel": 15,
+   "source": "nvr-ch15-lift",
+   "name": "ลิฟต์ซ่อม",
+   "roi": [
+    150,
+    200,
+    1030,
+    1320
+   ],
+   "motion_thr": 6,
+   "change_thr": 14,
+   "stable_sec": 20,
+   "pad": 0.15,
+   "max_side": 2000
+  },
+  {
+   "channel": 15,
+   "source": "nvr-ch15-mid",
+   "name": "ช่องซ่อมขวา",
+   "roi": [
+    1180,
+    180,
+    1860,
+    1180
+   ],
+   "motion_thr": 6,
+   "change_thr": 16,
+   "stable_sec": 25,
+   "pad": 0.15,
+   "max_side": 2000
+  },
+  {
+   "channel": 15,
+   "source": "nvr-ch15-right",
+   "name": "ลิฟต์กลาง",
+   "roi": [
+    2060,
+    150,
+    2560,
+    1000
+   ],
+   "motion_thr": 6,
+   "change_thr": 14,
+   "stable_sec": 20,
+   "pad": 0.15,
+   "max_side": 2000
+  },
+  {
+   "channel": 10,
+   "source": "nvr-ch10-lane",
+   "name": "ช่องจอดกลาง (ระหว่างลิฟต์)",
+   "roi": [
+    1380,
+    300,
+    1820,
+    1380
+   ],
+   "motion_thr": 6,
+   "change_thr": 16,
+   "stable_sec": 25,
+   "pad": 0.12,
+   "max_side": 2000
+  },
+  {
+   "channel": 10,
+   "source": "nvr-ch10-right",
+   "name": "ลิฟต์ขวา",
+   "roi": [
+    1800,
+    140,
+    2320,
+    1250
+   ],
+   "motion_thr": 6,
+   "change_thr": 14,
+   "stable_sec": 20,
+   "pad": 0.12,
+   "max_side": 2000
+  }
+ ],
+ "interval_sec": 3,
+ "send_on_start": false
+}
