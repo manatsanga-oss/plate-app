@@ -1,14 +1,14 @@
 {
  "zones": [
   {
-   "channel": 15,
-   "source": "nvr-ch15-lift",
+   "channel": 6,
+   "source": "nvr-ch6-lift",
    "name": "ลิฟต์ซ่อม",
    "roi": [
-    150,
-    200,
-    1030,
-    1320
+    560,
+    460,
+    1520,
+    1360
    ],
    "motion_thr": 6,
    "change_thr": 14,
