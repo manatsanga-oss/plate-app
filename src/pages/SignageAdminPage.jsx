@@ -148,7 +148,8 @@ export default function SignageAdminPage({ currentUser }) {
         <label>สาขา <select value={branch} onChange={(e) => setBranch(e.target.value)} style={inp}>
           {(branches.length ? branches : [{ branch_code: "SCY06", branch_name: "ป.เปา" }]).map((b) => <option key={b.branch_code} value={b.branch_code}>{b.branch_code} {b.branch_name || ""}</option>)}
         </select></label>
-        <button onClick={() => window.open(`/signage?branch=${branch}`, "_blank")} style={{ ...btn, background: "#1d4ed8", color: "#fff" }}>▶ ดูตัวอย่างจอ</button>
+        <button onClick={() => window.open(`/signage?branch=${branch}&screen=1`, "_blank")} style={{ ...btn, background: "#1d4ed8", color: "#fff" }}>▶ ดูตัวอย่างจอ 1</button>
+        <button onClick={() => window.open(`/signage?branch=${branch}&screen=2&split=3`, "_blank")} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>▶ ดูตัวอย่างจอ 2 (แบ่ง 3 ส่วน)</button>
         <button onClick={load} style={{ ...btn, background: "#e5e7eb" }}>🔄</button>
         {msg && <span style={{ fontSize: 14, color: msg.startsWith("❌") ? "#b91c1c" : "#166534" }}>{msg}</span>}
       </div>

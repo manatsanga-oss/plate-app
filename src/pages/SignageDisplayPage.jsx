@@ -124,6 +124,20 @@ export default function SignageDisplayPage() {
     }, 15000);
     return () => clearInterval(t);
   }, []);
+  // ตรวจเวอร์ชันใหม่ทุก 10 นาที: โหลด index.html สด เทียบชื่อไฟล์ bundle — เปลี่ยน = deploy ใหม่ → reload ทันที (ป้ายไม่ต้องรอตี 3 / ไม่ต้องส่งโปรแกรมซ้ำ 2026-10-29)
+  useEffect(() => {
+    const current = [...document.scripts].map((s) => s.src).find((s) => /\/assets\/index-.*\.js/.test(s)) || "";
+    if (!current) return;
+    const check = async () => {
+      try {
+        const html = await (await fetch("/index.html?v=" + Date.now(), { cache: "no-store" })).text();
+        const m = html.match(/assets\/index-[^"']+\.js/);
+        if (m && !current.endsWith(m[0])) window.location.reload();
+      } catch { /* เน็ตหลุด ข้าม */ }
+    };
+    const t = setInterval(check, 10 * 60000);
+    return () => clearInterval(t);
+  }, []);
 
   // รายการสไลด์ — ?demo=1 = สไลด์ตัวอย่างไว้ดู layout ก่อนมีข้อมูลจริง
   const demo = params.get("demo") ? [
@@ -139,7 +153,9 @@ export default function SignageDisplayPage() {
   // ?split=2 → บน/ล่างครึ่งเท่ากัน; ส่วนที่ย่อใช้ CSS zoom ให้ layout เดิม (หน่วย vh/vw) พอดีความสูงของส่วน
   const split = Math.max(1, Math.min(3, Number(params.get("split")) || 1));
   const bands = split === 2 ? [0.5, 0.5] : [1];
-  const MAIN_H = 0.75;   // split=3: ส่วนหลักสูง 75%, ข้อความล่าง 25%
+  // split=3: ความสูงแถบข้อความล่างเป็น % ของจอ (?bottom=18, ค่าเริ่มต้น 18, 10–50) — user 2026-10-29 "ส่วนข้อความเล็กลง"; ส่วนหลัก = ที่เหลือ
+  const bottomPct = Math.max(10, Math.min(50, Number(params.get("bottom")) || 18));
+  const MAIN_H = 1 - bottomPct / 100;
   const zoneItems = (z) => list.filter((it) => (Number(it.zone) || 1) === z);
   const shared = { images, setImages, colorImgs, queue, log, cashPrice: (id) => cashPrice(id), colorRow: (id) => colorRow(id) };
 
@@ -169,7 +185,7 @@ export default function SignageDisplayPage() {
               <Rotator items={zoneItems(1)} shared={shared} />
             </div>
           </div>
-          <BottomText items={zoneItems(3)} top={MAIN_H} />
+          <BottomText items={zoneItems(3)} top={MAIN_H} scale={bottomPct / 25} />
           <Pip items={zoneItems(2)} images={images} />
         </>
       ) : bands.map((f, i) => {
@@ -232,15 +248,16 @@ function Rotator({ items, shared, onIndex }) {
 }
 
 // ส่วน 3 (split=3): แถบข้อความด้านล่าง — สไลด์ชนิด "ประกาศข้อความ" ที่ใส่ในเมนู หมุนทีละข้อความ (ชนิดอื่นในส่วนนี้แสดงเป็นหัวข้อ)
-function BottomText({ items, top }) {
+function BottomText({ items, top, scale = 1 }) {
   const { cur } = useRotation(items);
   const body = cur ? (cur.kind === "text" ? text(cur.payload?.text) : "") : "";
   const title = cur ? text(cur.title) : "";
+  const fs = (v) => `${(v * Math.max(0.6, Math.min(1.3, scale))).toFixed(2)}vh`;   // ขนาดตัวอักษรตามความสูงแถบ
   return (
-    <div style={{ position: "absolute", left: 0, right: 0, top: `${top * 100}%`, bottom: 0, background: "linear-gradient(180deg, #7c2d12, #431407)", borderTop: "0.5vh solid #fbbf24", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "2vh 4vw 6vh", overflow: "hidden" }}>
-      {!cur && <div style={{ fontSize: "2.4vh", opacity: .5 }}>— ใส่ "ประกาศข้อความ" เลือกส่วน "ข้อความด้านล่าง" ในเมนู —</div>}
-      {title && <div style={{ fontSize: "4.2vh", fontWeight: 900, lineHeight: 1.3, marginBottom: body ? "1vh" : 0 }}>{title}</div>}
-      {body && <div style={{ fontSize: "3.4vh", lineHeight: 1.45, whiteSpace: "pre-wrap", fontWeight: 600 }}>{body}</div>}
+    <div style={{ position: "absolute", left: 0, right: 0, top: `${top * 100}%`, bottom: 0, background: "linear-gradient(180deg, #7c2d12, #431407)", borderTop: "0.5vh solid #fbbf24", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "1.2vh 4vw 6vh", overflow: "hidden" }}>
+      {!cur && <div style={{ fontSize: fs(2.4), opacity: .5 }}>— ใส่ "ประกาศข้อความ" เลือกส่วน "ข้อความด้านล่าง" ในเมนู —</div>}
+      {title && <div style={{ fontSize: fs(4.2), fontWeight: 900, lineHeight: 1.3, marginBottom: body ? "0.8vh" : 0 }}>{title}</div>}
+      {body && <div style={{ fontSize: fs(3.4), lineHeight: 1.4, whiteSpace: "pre-wrap", fontWeight: 600 }}>{body}</div>}
     </div>
   );
 }
