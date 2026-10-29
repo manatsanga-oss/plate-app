@@ -5,6 +5,8 @@ import React, { useEffect, useRef, useState } from "react";
 // สไลด์: image (รูปโปรโมชั่นอัปโหลดจากเมนู CRM → จอประชาสัมพันธ์หน้าร้าน) · vehicle (รุ่นแนะนำ รูปสี + ราคาเงินสดสดจาก master)
 //        · queue (บัตรคิวศูนย์บริการ + รถในช่องซ่อมจากกล้อง) · line (QR เพิ่มเพื่อน OA) · text (ประกาศข้อความ)
 const SIGNAGE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-api";
+// ป้าย Android (972S) จอดำค้างหลังถอด <video> ออก (2026-10-29) → หลังคลิปจบให้รีโหลดทั้งหน้า (?noreload=1 ปิดได้); Pi/PC ไม่ต้อง
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
 const SIGNAGE_IMG = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-image?id="; // รูปสไลด์เป็น JPEG ตรง (WebView ป้าย 972S จอดำเมื่อฝัง base64 ใหญ่ในหน้า 2026-10-28)
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const TICKET_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-queue-ticket-api";
@@ -158,7 +160,8 @@ export default function SignageDisplayPage() {
   const bottomPct = Math.max(10, Math.min(50, Number(params.get("bottom")) || 18));
   const MAIN_H = 1 - bottomPct / 100;
   const zoneItems = (z) => list.filter((it) => (Number(it.zone) || 1) === z);
-  const shared = { images, setImages, colorImgs, queue, log, sound, cashPrice: (id) => cashPrice(id), colorRow: (id) => colorRow(id) };
+  const reloadAfterVideo = IS_ANDROID && !params.get("noreload");
+  const shared = { images, setImages, colorImgs, queue, log, sound, reloadAfterVideo, cashPrice: (id) => cashPrice(id), colorRow: (id) => colorRow(id) };
 
   // ราคาเงินสดของกลุ่มสาขา สำหรับ color_id
   const cashPrice = (colorId) => {
@@ -236,11 +239,15 @@ function Rotator({ items, shared, onIndex }) {
   const list = items.length ? items : [{ id: 0, kind: "idle", duration_sec: 30 }];
   const { cur, idx, next } = useRotation(list);
   useEffect(() => { onIndex && onIndex(idx, list.length, cur); }, [idx, list.length]); // eslint-disable-line
-  const { images, setImages, colorImgs, queue, log, sound, cashPrice, colorRow } = shared;
+  const { images, setImages, colorImgs, queue, log, sound, reloadAfterVideo, cashPrice, colorRow } = shared;
+  const afterVideo = () => {
+    if (reloadAfterVideo) { log && log("video ended → reload page (Android black-screen workaround)"); setTimeout(() => window.location.reload(), 300); return; }
+    next();
+  };
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       {cur.kind === "image" && <ImageSlide it={cur} src={images[`${cur.id}@${cur.updated_at}`]} log={log} onFallback={(dataUrl) => setImages((p) => ({ ...p, [`${cur.id}@${cur.updated_at}`]: dataUrl }))} />}
-      {cur.kind === "video" && <VideoSlide it={cur} src={cur.has_image ? images[`${cur.id}@${cur.updated_at}`] : text(cur.payload?.url)} sound={sound} log={log} onEnded={list.length > 1 ? next : undefined} />}
+      {cur.kind === "video" && <VideoSlide it={cur} src={cur.has_image ? images[`${cur.id}@${cur.updated_at}`] : text(cur.payload?.url)} sound={sound} log={log} onEnded={list.length > 1 ? afterVideo : undefined} />}
       {cur.kind === "vehicle" && <VehicleSlide it={cur} img={colorImgs[cur.color_id]} price={cashPrice(cur.color_id)} row={colorRow(cur.color_id)} />}
       {cur.kind === "queue" && <QueueSlide it={cur} queue={queue} />}
       {cur.kind === "line" && <LineSlide it={cur} />}
