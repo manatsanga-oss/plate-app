@@ -1,7 +1,7 @@
 # สร้าง n8n workflow "Tuya Schedule" — เปิดแอร์+ทีวี 08:00 / ปิดทีวี 17:00 / ปิดแอร์ 17:10 ทุกวัน ผ่าน Tuya Cloud API (IR blaster Smart Life) — user 2026-10-29 "แบบ 2"
 # ใช้โค้ดเซ็น HMAC-SHA256 แบบ JS ล้วน + ค่า client/secret/base เดียวกับ Door_Control_Workflow.json (Code node n8n require('crypto') ไม่ได้)
-# โครง: Schedule (17:00, 17:10 Asia/Bangkok) + Webhook tuya-schedule-api (ทดสอบ {action:'run', slot:'tv'|'ac'|'list'}) → Prepare → Token Sign → Tuya Token
-#       → List Prep (GET /v1.0/infrareds/{blaster}/remotes ทุกตัว) → Tuya List → Command Prep (เลือกรีโมทตามชนิด → คำสั่งปิด) → Tuya Cmd → Finalize
+# โครง: Schedule (08:00, 17:00, 17:10 Asia/Bangkok) + Webhook tuya-schedule-api (ทดสอบ {action:'run', slot:'tv'|'ac'|'list'}) → Prepare → Token Sign → Tuya Token
+#       → List Prep (GET /v1.0/infrareds/{blaster}/remotes ทุกตัว) → Tuya List → Command Prep (เลือกรีโมทตามชนิด → ยิงคำสั่งเองใน Code node)
 # ใช้ IR Control Hub Open Service (สมัคร Free Trial + Authorize ในโปรเจกต์ 2026-10-29): GET /v1.0/infrareds/{blaster}/remotes (category_id '5'=แอร์, '2'=ทีวี)
 #    แอร์: POST /v1.0/infrareds/{ir}/air-conditioners/{remote}/command {code:'power', value:0|1} (ทดสอบ 17:26 ปิดได้ 3 ตัว user ยืนยัน)
 #    ทีวี: POST /v1.0/infrareds/{ir}/remotes/{remote}/command {key:'Power'} (รีโมทเรียนรู้เอง key ตาม GET .../keys; ปุ่มสลับไม่รู้สถานะ)
@@ -68,11 +68,22 @@ const calls = [];
 if (d.slot === 'ac') AC.forEach((r) => calls.push(acCmd(r, false)));
 if (d.slot === 'tv') TV.forEach((r) => calls.push(tvCmd(r)));
 if (d.slot === 'on') { AC.forEach((r) => calls.push(acCmd(r, true))); TV.forEach((r) => calls.push(tvCmd(r))); }   // ทีวี = ปุ่ม Power สลับ (ตอน 08:00 ทีวีควรปิดอยู่)
-if (!calls.length) return [{ json: { noop: true, slot: d.slot, th: d.th, remotes } }];
-return calls.map((c, i) => { const t = String(Date.now()); const bodyStr = JSON.stringify(c.body);
-  const strToSign = c.method + '\\n' + sha256Hex(bodyStr) + '\\n\\n' + c.path;
+if (!calls.length) return [{ json: { ok: true, noop: true, slot: d.slot, th: d.th, sent: 0, remotes } }];
+// ยิงเองใน Code node ด้วย body string ตรงตัว (HTTP Request node แปลง body ทำให้ hash ไม่ตรง "sign invalid" 2026-10-29)
+const results = [];
+for (const c of calls) {
+  const t = String(Date.now()); const bodyStr = JSON.stringify(c.body);
+  const strToSign = c.method + '\n' + sha256Hex(bodyStr) + '\n\n' + c.path;
   const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + access + t + strToSign).toUpperCase();
-  return { json: { idx: i, kind: c.kind, name: c.name, method: c.method, url: d.cfg.base + c.path, bodyStr, access, clientId: d.cfg.clientId, t, sign, slot: d.slot, th: d.th, remotes } }; });
+  let r = null;
+  try {
+    r = await this.helpers.httpRequest({ method: c.method, url: d.cfg.base + c.path, body: bodyStr, json: false, returnFullResponse: false, timeout: 15000,
+      headers: { client_id: d.cfg.clientId, sign, t, sign_method: 'HMAC-SHA256', access_token: access, 'Content-Type': 'application/json', Accept: 'application/json' } });
+    if (typeof r === 'string') { try { r = JSON.parse(r); } catch { r = { raw: String(r).slice(0, 200) }; } }
+  } catch (e) { r = { success: false, msg: String(e && e.message || e).slice(0, 200) }; }
+  results.push({ name: c.name, kind: c.kind, success: !!(r && r.success && r.result !== false), msg: r && (r.msg || r.code || '') });
+}
+return [{ json: { ok: results.every((x) => x.success), slot: d.slot, th: d.th, sent: results.length, results } }];
 """
 
 FINALIZE = """// สรุปผล (ทดสอบผ่าน webhook จะเห็นตรงนี้)
@@ -100,11 +111,6 @@ w = {
         {"parameters": {"method": "GET", "url": "={{ $json.url }}", "sendHeaders": True, "headerParameters": {"parameters": http_hdr + [{"name": "access_token", "value": "={{ $json.access }}"}]}, "options": {"timeout": 15000}},
          "id": "ts07", "name": "Tuya List", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1320, 300], "onError": "continueRegularOutput"},
         {"parameters": {"jsCode": CMD_PREP}, "id": "ts08", "name": "Command Prep", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1540, 300]},
-        {"parameters": {"method": "={{ $json.method || 'GET' }}", "url": "={{ $json.url || ($json.noop ? 'https://openapi.tuyaus.com/v1.0/token?grant_type=1' : '') }}", "sendHeaders": True,
-                        "headerParameters": {"parameters": http_hdr + [{"name": "access_token", "value": "={{ $json.access }}"}]},
-                        "sendBody": "={{ !!$json.bodyStr }}", "contentType": "raw", "rawContentType": "application/json", "body": "={{ $json.bodyStr || '{}' }}", "options": {"timeout": 15000}},
-         "id": "ts09", "name": "Tuya Cmd", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1760, 300], "onError": "continueRegularOutput"},
-        {"parameters": {"jsCode": FINALIZE}, "id": "ts10", "name": "Finalize", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1980, 300]},
     ],
     "connections": {
         "Schedule": {"main": [[{"node": "Prepare", "type": "main", "index": 0}]]},
@@ -114,14 +120,12 @@ w = {
         "Tuya Token": {"main": [[{"node": "List Prep", "type": "main", "index": 0}]]},
         "List Prep": {"main": [[{"node": "Tuya List", "type": "main", "index": 0}]]},
         "Tuya List": {"main": [[{"node": "Command Prep", "type": "main", "index": 0}]]},
-        "Command Prep": {"main": [[{"node": "Tuya Cmd", "type": "main", "index": 0}]]},
-        "Tuya Cmd": {"main": [[{"node": "Finalize", "type": "main", "index": 0}]]},
     },
     "settings": {"executionOrder": "v1", "timezone": "Asia/Bangkok"},
     "meta": {"instanceId": ""},
 }
 json.dump(w, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-for name, code in (("PREPARE", PREPARE), ("TOKEN_SIGN", TOKEN_SIGN), ("LIST_PREP", LIST_PREP), ("CMD_PREP", CMD_PREP), ("FINALIZE", FINALIZE)):
+for name, code in (("PREPARE", PREPARE), ("TOKEN_SIGN", TOKEN_SIGN), ("LIST_PREP", LIST_PREP), ("CMD_PREP", CMD_PREP)):
     stub = "const $=(x)=>({first:()=>({json:{}}),all:()=>[]});const $input={first:()=>({json:{}}),all:()=>[]};\n(function(){" + code + "\n})();"
     f = os.path.join(tempfile.gettempdir(), "chk_" + name + ".js"); open(f, "w", encoding="utf-8").write(stub)
     r = subprocess.run(["node", "--check", f], capture_output=True, text=True, encoding="utf-8", errors="replace")
