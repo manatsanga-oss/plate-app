@@ -320,6 +320,7 @@ function ImageSlide({ it, src, log, onFallback }) {
 function VideoSlide({ it, src, sound, log, onEnded }) {
   const [errSrc, setErrSrc] = useState(null);   // src ที่เล่นไม่ได้ (เปลี่ยน src = ลองใหม่)
   const [state, setState] = useState("loading");   // loading | playing | blocked
+  const [stat, setStat] = useState("");   // แถบสถานะตอนเล่น (ป้าย Android จอดำ 2026-10-29: ดูว่าถอดรหัสได้กี่เฟรม)
   const [lines, setLines] = useState([]);   // log ของวิดีโอนี้ โชว์ใต้ข้อความกำลังโหลด (ถ่ายรูปจอส่งมาดูได้ ไม่ต้องเปิด debug)
   const ref = useRef(null);
   const err = !!src && errSrc === src;
@@ -337,12 +338,16 @@ function VideoSlide({ it, src, sound, log, onEnded }) {
     el.addEventListener("playing", onPlaying); el.addEventListener("loadedmetadata", onMeta); el.addEventListener("canplay", onCanPlay);
     el.addEventListener("stalled", onStall); el.addEventListener("waiting", onStall); el.addEventListener("suspend", onStall);
     tryPlay("mount");
+    const statTimer = setInterval(() => {
+      const q = el.getVideoPlaybackQuality ? el.getVideoPlaybackQuality() : null;
+      setStat(`t=${el.currentTime.toFixed(1)}/${Math.round(el.duration || 0)}s · เฟรม ${q ? q.totalVideoFrames : "?"} ตก ${q ? q.droppedVideoFrames : "?"} · rs=${el.readyState} ns=${el.networkState} ${el.paused ? "หยุด" : "เล่น"} ${el.videoWidth}x${el.videoHeight}`);
+    }, 500);
     const watchdog = setTimeout(() => {
       if (done) return;
       L(`video #${it.id} watchdog: not playing after 20s rs=${el.readyState} ns=${el.networkState} err=${el.error?.code || 0} → skip`);
       onEnded && onEnded();
     }, 20000);
-    return () => { clearTimeout(watchdog); el.removeEventListener("playing", onPlaying); el.removeEventListener("loadedmetadata", onMeta); el.removeEventListener("canplay", onCanPlay); el.removeEventListener("stalled", onStall); el.removeEventListener("waiting", onStall); el.removeEventListener("suspend", onStall); };
+    return () => { clearTimeout(watchdog); clearInterval(statTimer); el.removeEventListener("playing", onPlaying); el.removeEventListener("loadedmetadata", onMeta); el.removeEventListener("canplay", onCanPlay); el.removeEventListener("stalled", onStall); el.removeEventListener("waiting", onStall); el.removeEventListener("suspend", onStall); };
   }, [src, err, sound, it.id, log, onEnded]);
   if (!src || err) return <TextSlide it={{ title: it.title || "วิดีโอ", payload: { text: err ? "เล่นวิดีโอไม่ได้" : "กำลังโหลดวิดีโอ…" } }} />;
   return (
@@ -351,6 +356,7 @@ function VideoSlide({ it, src, sound, log, onEnded }) {
         onEnded={() => { log && log(`video #${it.id} ended`); onEnded && onEnded(); }}
         onError={(e) => { const er = e.currentTarget.error; log && log(`video #${it.id} ERROR code=${er?.code} ${er?.message || ""} ${String(src).slice(0, 60)}`); setErrSrc(src); }}
         style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
+      {IS_ANDROID && stat && <div style={{ position: "absolute", left: 0, right: 0, bottom: "8vh", textAlign: "center", fontSize: "2.6vh", fontFamily: "monospace", background: "rgba(0,0,0,.6)", padding: "1vh", zIndex: 3 }}>{stat}</div>}
       {state !== "playing" && (
         <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center", padding: "0 6vw" }}>
           <div>
