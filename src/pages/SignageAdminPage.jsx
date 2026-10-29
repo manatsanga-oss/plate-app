@@ -247,7 +247,7 @@ export default function SignageAdminPage({ currentUser }) {
     <div style={{ padding: 20, fontFamily: "Tahoma, sans-serif" }}>
       <h2 style={{ margin: "0 0 4px" }}>📺 จอประชาสัมพันธ์หน้าร้าน</h2>
       <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 12 }}>
-        สไลด์หมุนบนจอ Android — เปิดบนเครื่องป้ายแต่ละจอ (ไม่ต้อง login): จอ 1 <a href={`${displayUrl}&screen=1`} target="_blank" rel="noreferrer">{displayUrl}&screen=1</a> · จอ 2 <a href={`${displayUrl}&screen=2`} target="_blank" rel="noreferrer">{displayUrl}&screen=2</a> · แก้ที่นี่แล้วจอเปลี่ยนเองภายใน 1 นาที (สไลด์ "ทุกจอ" ขึ้นทั้ง 2 จอ)
+        จอ 1 (32" หน้าร้าน): เครื่องที่ร้านส่ง "รูปภาพ + วิดีโอ" ของจอ 1 ขึ้นป้ายเองเมื่อแก้ตาราง (1–4 นาที) · หน้าเว็บสำหรับคีออส/จอ 2: <a href={`${displayUrl}&screen=1`} target="_blank" rel="noreferrer">{displayUrl}&screen=1</a> · <a href={`${displayUrl}&screen=2`} target="_blank" rel="noreferrer">{displayUrl}&screen=2</a>
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
         <label>สาขา <select value={branch} onChange={(e) => setBranch(e.target.value)} style={inp}>
@@ -337,7 +337,7 @@ export default function SignageAdminPage({ currentUser }) {
               <div style={{ marginBottom: 6, padding: "6px 8px", background: "#eff6ff", borderRadius: 6 }}>
                 <label><input type="checkbox" checked={pushSign} onChange={(e) => setPushSign(e.target.checked)} disabled={!vidFile && !!vidUrl.trim()} /> <b>📺 ส่งขึ้นจอป้าย 1 (32" หน้าร้าน) ด้วย</b></label>{" "}
                 เล่นวน <input type="number" min={1} max={30} value={signMin} onChange={(e) => setSignMin(e.target.value)} style={{ ...inp, width: 60 }} /> นาที สลับกับรูป/ข้อความของจอ 1
-                <div style={{ fontSize: 12, color: "#1e3a8a", marginTop: 2 }}>ป้ายเล่นวิดีโอผ่านระบบของป้ายเอง (ไม่ผ่านหน้าเว็บ) ระบบจะอัปโหลดให้หลังบันทึก ใช้เวลา 1–4 นาที — ลิงก์ภายนอกส่งขึ้นป้ายไม่ได้ (ต้องอัปโหลดไฟล์)</div>
+                <div style={{ fontSize: 12, color: "#1e3a8a", marginTop: 2 }}>จอป้าย 1 เล่นผ่านระบบของป้ายเอง (ไม่ผ่านหน้าเว็บ): เครื่องที่ร้านจะประกอบ "รูปภาพ + วิดีโอ" ของจอ 1 ตามลำดับในตารางเป็นรายการเดียวแล้วส่งขึ้นป้ายเอง ใช้เวลา 1–4 นาที — สไลด์ข้อความ/รถแนะนำ/คิว/QR ไม่ขึ้นจอป้าย 1 และลิงก์ภายนอกส่งขึ้นป้ายไม่ได้ (ต้องอัปโหลดไฟล์)</div>
               </div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>แนะนำคลิปแนวตั้ง 1080×1920 ยาว 15–30 วินาที (ความละเอียด 720p ก็พอ) — คีออส/PC เล่นจนจบคลิปแล้วไปสไลด์ถัดไป ปิดเสียงเป็นค่าเริ่มต้น (เปิดเสียงที่จอด้วย &sound=1)</div>
               {vidFile && <video src={vidFile.preview} controls muted style={{ height: 240, marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 6, background: "#000" }} />}

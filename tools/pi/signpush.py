@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""signpush — ส่งสไลด์วิดีโอจากเมนูจอประชาสัมพันธ์ (signage_items) ขึ้นป้าย Android 972S ผ่าน XiaoHui Cloud (led-cloud.com)
+"""signpush v2 — สร้างโปรแกรมจอ 1 (ป้าย Android 972S) ทั้งหมดจากสไลด์ในเมนูจอประชาสัมพันธ์ ผ่าน XiaoHui Cloud (led-cloud.com)
 
-รันบน shoppi (Raspberry Pi ที่ร้าน ป.เปา) เป็น systemd service — n8n บน Render ทำงานนี้ไม่ไหว (CPU 100% → ล้ม 2026-10-29)
-เหตุผลที่ต้องทำ: WebView ของป้ายเล่น <video> ในหน้าเว็บแล้วแอป Magic Player ล้ม → ต้องเล่นแบบ native ผ่านโปรแกรมของ XiaoHui
-
-การทำงาน (poll ทุก POLL_SEC วินาที):
-  list_items (signage-api) → สไลด์ kind=video มีไฟล์ + payload.sign_status == 'queued' (เมนูตั้งให้ตอนกด "ส่งขึ้นจอป้าย")
-  → ตั้ง 'uploading' → ดาวน์โหลดไฟล์จาก webhook signage-image → ล็อกอิน led-cloud (RSA PKCS#1 v1.5)
-  → อัปโหลด multipart (ก้อน 5 MB) → รอ transcode → resource/preview → แก้โปรแกรมวิดีโอ (เพลย์ลิสต์ซ้ำให้ครบ sign_loop_sec)
-  → แก้โปรแกรมหน้าเว็บ (residence = ผลรวมวินาทีสไลด์รูป/ข้อความของจอ 1) → ส่ง 2 โปรแกรมเข้าจอ 1 → ลบไฟล์เก่า (เก็บ KEEP_RESOURCES)
-  → บันทึกสถานะ done/error ลง payload (save_item)
-API led-cloud แกะจากหน้าเว็บ 2026-10-29 (ไม่มีเอกสาร): ดูรายละเอียดใน tools/build_signage_sign_workflow.py (เลิกใช้) / memory signage-display-feature
-secrets: ~/nvr/signpush_secrets.json {"user": "...", "pass": "..."} (chmod 600)
+รันบน shoppi (Raspberry Pi ที่ร้าน ป.เปา) เป็น systemd service signpush.service — n8n บน Render ทำงานนี้ไม่ไหว (CPU 100% → ล้ม 2026-10-29)
+ทำไมต้องทำแบบนี้ (2026-10-29):
+  - WebView ของป้ายเล่น <video> ในหน้าเว็บแล้วแอป Magic Player ล้ม → วิดีโอต้องเล่นแบบ native
+  - ป้ายไม่สลับระหว่างหลายโปรแกรมบนเครื่อง (เล่นแต่โปรแกรมแรก) → รูป+คลิปต้องอยู่ใน "โปรแกรมเดียว" ด้วยพื้นที่ Mixed Broadcast (type mixingArea)
+การทำงาน (poll ทุก POLL_SEC):
+  list_items → สไลด์ของจอ 1 ที่เปิดอยู่ (screen all/1, อยู่ในช่วงวันที่) เรียงตามลำดับ: image → รูป (วินาทีตาม duration_sec), video (ไฟล์ในระบบ) → คลิปซ้ำให้ครบ payload.sign_loop_sec
+  ชนิดอื่น (ข้อความ/รถแนะนำ/คิว/LINE) ป้ายแสดงไม่ได้ → ข้าม
+  ลายเซ็นของชุดสไลด์เปลี่ยน (เพิ่ม/ลบ/แก้/หมดอายุ/กด "ส่งขึ้นจอป้าย") → อัปโหลดไฟล์ที่ยังไม่มีบนคลาวด์ป้าย → แก้โปรแกรม MIX → ถอดโปรแกรมอื่นออกจากเครื่อง → ส่งโปรแกรม (ส่งซ้ำกันพลาด) → ลบไฟล์ที่ไม่ใช้
+  สถานะเขียนกลับ payload.sign_status ของสไลด์วิดีโอ (queued/uploading/done/error) ให้เมนูแสดง
+API led-cloud แกะจากหน้าเว็บ 2026-10-29 (ไม่มีเอกสาร): oauth/key + oauth/token (RSA PKCS#1 v1.5), resource/upload/multipart/{init,part,complete}, resource/list, resource/preview,
+  program/{id}?format=2, program/update/{id}, task/add/program, task/add/removeProgram {programs:[program uuid], sn}, device/{sn}/programs, resource/delete
+secrets: ~/nvr/signpush_secrets.json {"user": "...", "pass": "..."} (chmod 600) · state: ~/nvr/signpush_state.json
 """
-import base64, json, os, random, sys, time, traceback, uuid
+import base64, hashlib, json, os, sys, time, traceback, uuid
 import requests
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -23,21 +24,32 @@ SIGNAGE_IMG = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-image?i
 BRANCH = os.environ.get("SIGNPUSH_BRANCH", "SCY06")
 POLL_SEC = int(os.environ.get("SIGNPUSH_POLL", "20"))
 SECRETS = os.path.expanduser("~/nvr/signpush_secrets.json")
+STATE = os.path.expanduser("~/nvr/signpush_state.json")
 
 CFG = {
     "base": "https://www.led-cloud.com",
     "oss": "https://dms-singapore.oss-ap-southeast-1.aliyuncs.com/",
     "client": "dms-browser2",
     "device": "972S-2C6-00B9B",      # จอ 1 (32" หน้าร้าน ป.เปา)
-    "video_program": 1293195,        # "PorPaor Video (จอ 1)"
-    "web_program": 1291219,          # "PorPaor Signage 1" (HTML /signage?screen=1)
-    "keep_resources": 3,
+    "mix_program": 1293482,          # "PorPaor Mix (จอ 1)" — พื้นที่ Mixed Broadcast เต็มจอ (สร้างจากหน้าเว็บ 2026-10-29)
     "chunk": 5242880,
+    "default_loop": 120,             # คลิปวนกี่วินาทีถ้าเมนูไม่ได้ตั้ง
 }
 
 
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
+
+
+def load_state():
+    try:
+        return json.load(open(STATE, encoding="utf-8"))
+    except Exception:
+        return {"sig": "", "resources": {}}
+
+
+def save_state(st):
+    json.dump(st, open(STATE, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
 
 # ---------- signage-api ----------
@@ -52,22 +64,37 @@ def set_status(item, **fields):
     payload = dict(item.get("payload") or {})
     payload.update(fields)
     item["payload"] = payload
-    requests.post(SIGNAGE_API, json={"action": "save_item", "id": item["id"], "payload": payload}, timeout=60)
+    try:
+        requests.post(SIGNAGE_API, json={"action": "save_item", "id": item["id"], "payload": payload}, timeout=60)
+    except Exception as e:
+        log("set_status failed:", e)
 
 
-def web_secs(items):
+def screen1_slides(items):
+    """สไลด์ที่จอ 1 ควรแสดงตอนนี้ เรียงตามลำดับในเมนู → [(kind, item, seconds)]"""
     today = time.strftime("%Y-%m-%d")
-    tot = 0
-    for it in items:
-        if it.get("kind") == "video" or not it.get("active"):
-            continue
-        if str(it.get("screen") or "all") not in ("all", "1"):
+    out, skipped = [], []
+    for it in sorted(items, key=lambda x: (int(x.get("sort_order") or 0), int(x.get("id") or 0))):
+        if not it.get("active") or str(it.get("screen") or "all") not in ("all", "1"):
             continue
         sd, ed = (it.get("start_date") or "")[:10], (it.get("end_date") or "")[:10]
-        if sd and sd > today or ed and ed < today:
+        if (sd and sd > today) or (ed and ed < today):
             continue
-        tot += int(it.get("duration_sec") or 10)
-    return tot
+        kind = it.get("kind")
+        if kind == "image" and it.get("has_image"):
+            out.append(("image", it, max(3, int(it.get("duration_sec") or 10))))
+        elif kind == "video" and it.get("has_image"):
+            p = it.get("payload") or {}
+            loop = int(p.get("sign_loop_sec") or 0) or CFG["default_loop"]
+            out.append(("video", it, max(10, min(1800, loop))))
+        else:
+            skipped.append(f"{kind}#{it.get('id')}")
+    return out, skipped
+
+
+def signature(slides):
+    parts = [f"{k}:{it['id']}:{it.get('updated_at')}:{sec}" for k, it, sec in slides]
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()
 
 
 # ---------- led-cloud ----------
@@ -121,21 +148,22 @@ class LedCloud:
             fields = {"md5": "undefined", "chunks": str(n), "chunksize": str(ch), "chunkNumber": str(i + 1), "filename": fname, "uuid": uid, "uploadId": upload_id}
             res = self._call("POST", "/v1/resource/upload/multipart/part", data=fields, files={"file": ("blob", part, "application/octet-stream")})
             chunks.append(res["data"]["chunk"])
-            log(f"  part {i + 1}/{n} ok")
         self._call("POST", "/v1/resource/upload/multipart/complete", json={"filename": fname, "uuid": uid, "uploadId": upload_id, "chunks": chunks, "groupId": -1})
-        return uid
 
-    def wait_transcode(self, fname, max_sec=420):
+    def find_resource(self, fname, rtype):
+        lst = self._call("GET", f"/v1/resource/list?type={rtype}&pageNum=1&pageSize=25&q={requests.utils.quote(fname)}&groupId=-1")["data"]["list"]
+        return next((r for r in lst if r.get("name") == fname), None)
+
+    def wait_ready(self, fname, rtype, max_sec=420):
         t0 = time.time()
         while time.time() - t0 < max_sec:
             time.sleep(5)
-            lst = self._call("GET", f"/v1/resource/list?type=2&pageNum=1&pageSize=25&q={requests.utils.quote(fname)}&groupId=-1")["data"]["list"]
-            res = next((r for r in lst if r.get("name") == fname), None)
-            if res and res.get("transcodeState") == 2:
+            res = self.find_resource(fname, rtype)
+            if res and (rtype == 1 or res.get("transcodeState") == 2):
                 return res
             if res and res.get("transcodeState") == 3:
                 raise RuntimeError("transcode failed")
-        raise RuntimeError("transcode timeout")
+        raise RuntimeError("resource not ready (timeout)")
 
     def preview(self, rid):
         return self._call("POST", "/v1/resource/preview", json=[rid])["data"][0]
@@ -146,113 +174,168 @@ class LedCloud:
     def update_program(self, pid, name, duration, data):
         self._call("POST", f"/v1/program/update/{pid}", json={"name": name, "duration": str(duration), "data": data})
 
+    def device_programs(self, sn):
+        return self._call("GET", f"/v1/device/{sn}/programs?pageNum=1&pageSize=25")["data"]["list"]
+
+    def remove_programs(self, sn, uuids):
+        return self._call("POST", "/v1/task/add/removeProgram", json={"programs": uuids, "sn": sn})["data"]
+
     def send(self, programs, device):
         return self._call("POST", "/v1/task/add/program", json={"interlude": False, "reset": False, "programs": programs, "devices": [device], "isSliceScreen": False})["data"]
 
-    def cleanup(self, keep_id):
-        lst = self._call("GET", "/v1/resource/list?type=2&pageNum=1&pageSize=100&q=signage_&groupId=-1")["data"]["list"]
-        mine = sorted([r for r in lst if r["name"].startswith("signage_") and r["id"] != keep_id], key=lambda r: str(r.get("createTime")), reverse=True)
-        dead = [r["id"] for r in mine[max(0, CFG["keep_resources"] - 1):]]
-        if dead:
-            self._call("POST", "/v1/resource/delete", json=dead)
-        return dead
+    def all_signage_resources(self):
+        out = []
+        for t in (1, 2):
+            lst = self._call("GET", f"/v1/resource/list?type={t}&pageNum=1&pageSize=100&q=signage_&groupId=-1")["data"]["list"]
+            out += [r for r in lst if str(r.get("name", "")).startswith("signage_")]
+        return out
+
+    def delete_resources(self, ids):
+        if ids:
+            self._call("POST", "/v1/resource/delete", json=ids)
 
 
-def process(item, items, creds):
-    pid = item["id"]
-    payload = item.get("payload") or {}
-    loop_sec = max(10, min(1800, int(payload.get("sign_loop_sec") or 120)))
-    with_web = str(payload.get("sign_with_web", True)).lower() != "false"
-    step = "start"
+# ---------- build ----------
+def ensure_resource(lc, st, kind, it):
+    """อัปโหลดไฟล์ของสไลด์ขึ้นคลาวด์ป้าย (ถ้ายังไม่มี) → dict {id, name, path, snapshot, duration}"""
+    key = f"{it['id']}@{it.get('updated_at')}"
+    cached = st["resources"].get(key)
+    rtype = 1 if kind == "image" else 2
+    if cached and lc.find_resource(cached["name"], rtype):
+        return cached
+    r = requests.get(SIGNAGE_IMG + str(it["id"]) + "&v=" + str(int(time.time())), timeout=180)
+    r.raise_for_status()
+    data = r.content
+    if len(data) < 500:
+        raise RuntimeError(f"slide #{it['id']} file empty")
+    ext = "jpg" if kind == "image" else ("webm" if "webm" in str(it.get("media_mime") or "") else "mp4")
+    fname = f"signage_{it['id']}_{int(time.time())}.{ext}"
+    log(f"  upload #{it['id']} {kind} {len(data) / 1048576:.1f} MB → {fname}")
+    lc.upload(fname, data)
+    res = lc.wait_ready(fname, rtype)
+    info = lc.preview(res["id"])
+    rec = {"id": res["id"], "name": fname, "path": info["path"], "snapshot": info.get("snapshot") or info["path"], "duration": float(info.get("duration") or 0),
+           "width": info.get("width"), "height": info.get("height")}
+    st["resources"][key] = rec
+    save_state(st)
+    return rec
+
+
+def widget_image(rec, sec):
+    return {"name": rec["name"], "type": "image", "uuid": str(uuid.uuid4()),
+            "attributes": {"preview": CFG["oss"] + rec["snapshot"], "resourceId": rec["id"], "src": CFG["oss"] + rec["path"],
+                           "effect": {"duration": int(sec * 1000), "in": 0, "clearScreen": False, "inSpeed": 1000}, "keepAspectRatio": False}}
+
+
+def widget_video(rec):
+    return {"name": rec["name"], "type": "video", "uuid": str(uuid.uuid4()),
+            "attributes": {"volume": 100, "preview": CFG["oss"] + rec["snapshot"], "duration": int(round(rec["duration"] * 1000)), "resourceId": rec["id"],
+                           "src": CFG["oss"] + rec["path"], "originalVideo": False, "keepAspectRatio": False}}
+
+
+def rebuild(slides, skipped, st, creds):
+    videos = [it for k, it, _ in slides if k == "video"]
+    for it in videos:
+        set_status(it, sign_status="uploading", sign_error=None, sign_at=time.strftime("%Y-%m-%d %H:%M"))
+    step = "login"
     try:
-        set_status(item, sign_status="uploading", sign_error=None, sign_at=time.strftime("%Y-%m-%d %H:%M"))
-        step = "download"
-        r = requests.get(SIGNAGE_IMG + str(pid) + "&v=" + str(int(time.time())), timeout=180)
-        r.raise_for_status()
-        data = r.content
-        if len(data) < 1000:
-            raise RuntimeError(f"video file empty ({len(data)} bytes)")
-        ext = "webm" if "webm" in str(item.get("media_mime") or "") else "mp4"
-        fname = f"signage_{pid}_{int(time.time())}.{ext}"
-        log(f"#{pid} {len(data) / 1048576:.1f} MB → {fname}")
         lc = LedCloud(creds["user"], creds["pass"])
-        step = "login"; lc.login()
-        step = "upload"; lc.upload(fname, data)
-        step = "transcode"; res = lc.wait_transcode(fname)
-        step = "preview"; info = lc.preview(res["id"])
-        dur = float(info.get("duration") or res.get("duration") or item.get("duration_sec") or 10)
-        copies = max(1, min(60, round(loop_sec / dur)))
-        step = "program video"
-        vp = lc.program(CFG["video_program"])
-        vdata = vp["data"]
-        area = next((c for c in vdata.get("children") or [] if c.get("type") == "video"), None)
+        lc.login()
+        widgets, total, used = [], 0.0, set()
+        for kind, it, sec in slides:
+            step = f"upload #{it['id']}"
+            rec = ensure_resource(lc, st, kind, it)
+            used.add(rec["id"])
+            if kind == "image":
+                widgets.append(widget_image(rec, sec)); total += sec
+            else:
+                dur = rec["duration"] or float(it.get("duration_sec") or 10)
+                copies = max(1, min(60, round(sec / dur)))
+                widgets += [widget_video(rec) for _ in range(copies)]; total += copies * dur
+                it["_copies"] = copies; it["_vsec"] = round(copies * dur, 1)
+        step = "program"
+        p = lc.program(CFG["mix_program"])
+        data = p["data"]
+        area = next((c for c in data.get("children") or [] if c.get("type") == "mixingArea"), None)
         if area is None:
-            area = {"motion": True, "name": "video1", "attributes": {"x": 0, "y": 0, "width": vp.get("width", 1080), "height": vp.get("height", 1920)}, "type": "video", "widgets": [], "carousel": True, "uuid": str(uuid.uuid4())}
-            vdata["children"] = [area]
-        area["widgets"] = [{"name": fname, "type": "video", "uuid": str(uuid.uuid4()),
-                            "attributes": {"volume": 100, "preview": CFG["oss"] + info["snapshot"], "duration": int(round(dur * 1000)), "resourceId": res["id"],
-                                           "src": CFG["oss"] + info["path"], "originalVideo": False, "keepAspectRatio": False}} for _ in range(copies)]
+            area = {"motion": True, "name": "mixingArea1", "attributes": {"x": 0, "y": 0, "width": p.get("width", 1080), "height": p.get("height", 1920)}, "type": "mixingArea", "widgets": [], "carousel": True, "uuid": str(uuid.uuid4())}
+            data["children"] = [area]
+        area["attributes"].update({"x": 0, "y": 0, "width": p.get("width", 1080), "height": p.get("height", 1920)})
+        area["widgets"] = widgets
+        area["dataSource"] = json.loads(json.dumps(widgets))
         area["carousel"] = True
-        vdur = round(copies * dur, 1)
-        lc.update_program(CFG["video_program"], vp["name"], vdur, vdata)
-        wsec = web_secs(items)
-        programs = [CFG["video_program"]]   # คลิปเล่นก่อน → เห็นผลทันทีหลังป้ายรับ
-        if with_web and wsec > 0:
-            step = "program web"
-            wp = lc.program(CFG["web_program"])
-            html = next((w for c in wp["data"].get("children") or [] for w in c.get("widgets") or [] if w.get("type") == "html"), None)
-            if html:
-                html["attributes"]["duration"] = int(wsec)
-                lc.update_program(CFG["web_program"], wp["name"], int(wsec), wp["data"])
-            programs = [CFG["video_program"], CFG["web_program"]]
-        step = "send"
-        time.sleep(20)   # ให้ไฟล์ transcode กระจายขึ้น CDN ก่อน (ส่งทันทีป้ายเคยไม่รับ 2026-10-29 15:18)
-        task = lc.send(programs, CFG["device"])
+        lc.update_program(CFG["mix_program"], p["name"], round(total, 1), data)
+        step = "device"
+        others = [d["uuid"] for d in lc.device_programs(CFG["device"]) if d.get("uuid") and d["uuid"] != p["uuid"]]
+        if others:
+            lc.remove_programs(CFG["device"], others)
+            log(f"  removed {len(others)} other program(s) from device")
+            time.sleep(10)
+        time.sleep(20)   # ให้ไฟล์กระจายขึ้น CDN ก่อน (ส่งทันทีป้ายเคยไม่รับ)
+        task = lc.send([CFG["mix_program"]], CFG["device"])
         time.sleep(60)
         try:
-            task2 = lc.send(programs, CFG["device"])   # ส่งซ้ำกันพลาด (idempotent: แทนที่รายการเดิม)
-            log(f"  resend task {task2.get('id')}")
+            lc.send([CFG["mix_program"]], CFG["device"])   # ส่งซ้ำกันพลาด
         except Exception as e:
             log("  resend skipped:", e)
-        dead = []
+        step = "cleanup"
         try:
-            dead = lc.cleanup(res["id"])
-        except Exception as e:  # ลบไม่ได้ไม่เป็นไร
-            log("cleanup skipped:", e)
-        set_status(item, sign_status="done", sign_error=None, sign_resource_id=res["id"], sign_resource_name=fname, sign_task_id=task.get("id"),
-                   sign_copies=copies, sign_video_sec=vdur, sign_web_secs=wsec, sign_done_at=time.strftime("%Y-%m-%d %H:%M"))
-        log(f"#{pid} done: {copies}x{dur:.1f}s = {vdur}s, web {wsec}s, task {task.get('id')}, deleted {dead}")
+            dead = [r["id"] for r in lc.all_signage_resources() if r["id"] not in used]
+            lc.delete_resources(dead)
+            st["resources"] = {k: v for k, v in st["resources"].items() if v["id"] in used}
+        except Exception as e:
+            log("  cleanup skipped:", e)
+        for it in videos:
+            set_status(it, sign_status="done", sign_error=None, sign_copies=it.get("_copies"), sign_video_sec=it.get("_vsec"), sign_task_id=task.get("id"),
+                       sign_done_at=time.strftime("%Y-%m-%d %H:%M"), sign_total_sec=round(total, 1), sign_skipped=skipped)
+        log(f"  done: {len(widgets)} widgets, {round(total)}s total, task {task.get('id')}, skipped {skipped}")
+        return True
     except Exception as e:
         err = f"{step}: {e}"[:300]
-        log(f"#{pid} ERROR {err}")
+        log("  ERROR", err)
         traceback.print_exc()
-        try:
-            set_status(item, sign_status="error", sign_error=err)
-        except Exception:
-            pass
+        for it in videos:
+            set_status(it, sign_status="error", sign_error=err)
+        return False
+
+
+def tick(st, creds):
+    items = api_items()
+    slides, skipped = screen1_slides(items)
+    if not slides:
+        return
+    sig = signature(slides)
+    queued = any((it.get("payload") or {}).get("sign_status") == "queued" for _, it, _ in slides)
+    if sig == st.get("sig") and not queued:
+        return
+    if sig == st.get("sig_error") and not queued:
+        return   # พังแล้วกับชุดนี้ รอให้เมนูเปลี่ยนก่อนค่อยลองใหม่
+    log(f"change detected: {[(k, it['id'], sec) for k, it, sec in slides]}")
+    if rebuild(slides, skipped, st, creds):
+        st["sig"] = sig; st.pop("sig_error", None)
+    else:
+        st["sig_error"] = sig
+    save_state(st)
 
 
 def main():
     creds = json.load(open(SECRETS, encoding="utf-8"))
-    log(f"signpush start branch={BRANCH} poll={POLL_SEC}s device={CFG['device']}")
+    st = load_state()
+    log(f"signpush v2 start branch={BRANCH} poll={POLL_SEC}s device={CFG['device']} program={CFG['mix_program']}")
     while True:
         try:
-            items = api_items()
-            for it in items:
-                p = it.get("payload") or {}
-                if it.get("kind") == "video" and it.get("has_image") and p.get("sign_status") == "queued":
-                    process(it, items, creds)
+            tick(st, creds)
         except Exception as e:
             log("poll error:", e)
         time.sleep(POLL_SEC)
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1 and sys.argv[1] == "once":   # ทดสอบ: ประมวลผลคิวรอบเดียวแล้วออก
+    if len(sys.argv) > 1 and sys.argv[1] == "once":
         creds = json.load(open(SECRETS, encoding="utf-8"))
-        items = api_items()
-        for it in items:
-            if it.get("kind") == "video" and it.get("has_image") and (it.get("payload") or {}).get("sign_status") == "queued":
-                process(it, items, creds)
+        st = load_state()
+        if len(sys.argv) > 2 and sys.argv[2] == "force":
+            st["sig"] = ""; st.pop("sig_error", None)
+        tick(st, creds)
     else:
         main()
