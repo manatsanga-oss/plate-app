@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 // จอประชาสัมพันธ์หน้าร้าน (Android signage 49" แนวตั้ง 1080x1920 ที่ ป.เปา 2 จอ — user 2026-10-28)
 // public ไม่ต้อง login: /signage?branch=SCY06 — เปิดด้วยเบราว์เซอร์คีออสบนเครื่องป้าย
@@ -312,16 +312,48 @@ function ImageSlide({ it, src, log, onFallback }) {
 // เล่นจบ → ไปสไลด์ถัดไปทันที (ถ้ามีสไลด์เดียวเล่นวน); ตัวจับเวลาของ useRotation ยังเดินตาม duration_sec เป็นเพดานกันค้างเมื่อโหลดไม่ขึ้น
 function VideoSlide({ it, src, sound, log, onEnded }) {
   const [errSrc, setErrSrc] = useState(null);   // src ที่เล่นไม่ได้ (เปลี่ยน src = ลองใหม่)
+  const [state, setState] = useState("loading");   // loading | playing | blocked
+  const [lines, setLines] = useState([]);   // log ของวิดีโอนี้ โชว์ใต้ข้อความกำลังโหลด (ถ่ายรูปจอส่งมาดูได้ ไม่ต้องเปิด debug)
+  const ref = useRef(null);
   const err = !!src && errSrc === src;
+  // ป้าย 972S (WebView Android 9) จอดำตรงสไลด์วิดีโอ 2026-10-29 → บังคับ muted เป็น attribute + สั่ง play() เอง + log เหตุผลที่เล่นไม่ได้; ไม่เล่นใน 20 วิ → ข้าม
+  useEffect(() => {
+    const el = ref.current; if (!el || !src || err) return;
+    const log0 = log; log = (m) => { log0 && log0(m); setLines((p) => [...p.slice(-3), new Date().toLocaleTimeString("th-TH") + " " + m.replace(`video #${it.id} `, "")]); };
+    el.muted = !sound; if (!sound) el.setAttribute("muted", ""); el.defaultMuted = !sound;
+    let done = false;
+    const tryPlay = (why) => { const pr = el.play(); if (pr && pr.catch) pr.catch((e) => { log && log(`video #${it.id} play() ${why} rejected: ${e?.name || e}`); if (e?.name === "NotAllowedError") setState("blocked"); }); };
+    const onPlaying = () => { done = true; setState("playing"); log && log(`video #${it.id} playing ${el.videoWidth}x${el.videoHeight} rs=${el.readyState}`); };
+    const onMeta = () => { log && log(`video #${it.id} metadata ${el.videoWidth}x${el.videoHeight} dur=${Math.round(el.duration || 0)}`); };
+    const onCanPlay = () => { log && log(`video #${it.id} canplay rs=${el.readyState}`); if (el.paused) tryPlay("canplay"); };
+    const onStall = (ev) => log && log(`video #${it.id} ${ev.type} rs=${el.readyState} ns=${el.networkState} t=${el.currentTime.toFixed(1)}`);
+    el.addEventListener("playing", onPlaying); el.addEventListener("loadedmetadata", onMeta); el.addEventListener("canplay", onCanPlay);
+    el.addEventListener("stalled", onStall); el.addEventListener("waiting", onStall); el.addEventListener("suspend", onStall);
+    tryPlay("mount");
+    const watchdog = setTimeout(() => {
+      if (done) return;
+      log && log(`video #${it.id} watchdog: not playing after 20s rs=${el.readyState} ns=${el.networkState} err=${el.error?.code || 0} → skip`);
+      onEnded && onEnded();
+    }, 20000);
+    return () => { clearTimeout(watchdog); el.removeEventListener("playing", onPlaying); el.removeEventListener("loadedmetadata", onMeta); el.removeEventListener("canplay", onCanPlay); el.removeEventListener("stalled", onStall); el.removeEventListener("waiting", onStall); el.removeEventListener("suspend", onStall); };
+  }, [src, err]); // eslint-disable-line
   if (!src || err) return <TextSlide it={{ title: it.title || "วิดีโอ", payload: { text: err ? "เล่นวิดีโอไม่ได้" : "กำลังโหลดวิดีโอ…" } }} />;
   return (
     <div style={{ position: "absolute", inset: 0, background: "#000" }}>
-      <video key={src} src={src} autoPlay muted={!sound} playsInline loop={!onEnded} preload="auto"
+      <video key={src} ref={ref} src={src} autoPlay muted={!sound} playsInline loop={!onEnded} preload="auto"
         onEnded={() => { log && log(`video #${it.id} ended`); onEnded && onEnded(); }}
-        onError={() => { log && log(`video #${it.id} ERROR ${String(src).slice(0, 60)}`); setErrSrc(src); }}
-        onLoadedData={(e) => { log && log(`video #${it.id} loaded ${e.currentTarget.videoWidth}x${e.currentTarget.videoHeight}`); e.currentTarget.play().catch(() => {}); }}
+        onError={(e) => { const er = e.currentTarget.error; log && log(`video #${it.id} ERROR code=${er?.code} ${er?.message || ""} ${String(src).slice(0, 60)}`); setErrSrc(src); }}
         style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
-      {it.title && <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "2vh 3vw", fontSize: "4vh", fontWeight: 800, textShadow: "0 2px 12px #000", background: "linear-gradient(rgba(0,0,0,.55), transparent)" }}>{it.title}</div>}
+      {state !== "playing" && (
+        <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", textAlign: "center", padding: "0 6vw" }}>
+          <div>
+            <div style={{ fontSize: "4.5vh", fontWeight: 800 }}>{it.title || "วิดีโอ"}</div>
+            <div style={{ fontSize: "3vh", opacity: .75, marginTop: "1.5vh" }}>{state === "blocked" ? "เครื่องนี้ไม่อนุญาตให้เล่นวิดีโออัตโนมัติ" : "กำลังโหลดวิดีโอ…"}</div>
+            <div style={{ fontSize: "1.6vh", opacity: .5, marginTop: "3vh", fontFamily: "monospace", textAlign: "left", whiteSpace: "pre-wrap" }}>{lines.join("\n")}</div>
+          </div>
+        </div>
+      )}
+      {it.title && state === "playing" && <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "2vh 3vw", fontSize: "4vh", fontWeight: 800, textShadow: "0 2px 12px #000", background: "linear-gradient(rgba(0,0,0,.55), transparent)" }}>{it.title}</div>}
     </div>
   );
 }
