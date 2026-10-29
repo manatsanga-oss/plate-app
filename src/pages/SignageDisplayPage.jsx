@@ -151,7 +151,8 @@ export default function SignageDisplayPage() {
     { id: -5, kind: "text", title: "ประกาศ", payload: { text: "ศูนย์บริการเปิดทุกวัน 08:00–17:30 น. โทร 035-271146" }, duration_sec: 8, zone: 3 },
     { id: -6, kind: "text", title: "โปรโมชั่นเดือนนี้", payload: { text: "เปลี่ยนถ่ายน้ำมันเครื่อง ฟรีค่าแรง" }, duration_sec: 8, zone: 3 },
   ] : null;
-  const list = demo || items;
+  // ป้าย Android (972S) เล่น <video> ในหน้าเว็บแล้วแอปล้ม → ข้ามสไลด์วิดีโอบนป้ายเสมอ (ป้ายเล่นคลิปผ่านโปรแกรม XiaoHui ที่ n8n ส่งให้แทน); คีออส/PC ยังเล่นได้
+  const list = (demo || items).filter((it) => !(IS_ANDROID && it.kind === "video"));
   // แบ่งจอ (user 2026-10-29 จอ 2): ?split=3 → ส่วน 1 = สไลด์หลักด้านบน (75%) · ส่วน 2 = รูปเล็กมุมขวาบน (PiP) · ส่วน 3 = ข้อความด้านล่าง (25%)
   // ?split=2 → บน/ล่างครึ่งเท่ากัน; ส่วนที่ย่อใช้ CSS zoom ให้ layout เดิม (หน่วย vh/vw) พอดีความสูงของส่วน
   const split = Math.max(1, Math.min(3, Number(params.get("split")) || 1));

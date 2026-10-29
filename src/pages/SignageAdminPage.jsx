@@ -5,6 +5,8 @@ import React, { useEffect, useMemo, useState } from "react";
 // ชนิดสไลด์: image (อัปโหลดรูป ย่อเป็นแนวตั้ง 1080x1920 ก่อนเก็บ) · video (MP4 สั้น ≤10 MB ในระบบ หรือลิงก์ภายนอก payload.url) · vehicle (รุ่น/สีจาก master + ราคาเงินสดสด) · text · queue (คิวศูนย์บริการ+รถในช่องซ่อม) · line (QR OA)
 const SIGNAGE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
+// ส่งวิดีโอขึ้นป้าย Android (972S) ผ่าน XiaoHui Cloud — ป้ายเล่น <video> ในหน้าเว็บไม่ได้ (แอปล้ม 2026-10-29): เมนูตั้ง payload.sign_status='queued' แล้ว signpush.py บน Raspberry Pi ที่ร้าน (tools/pi/signpush.py, poll ทุก 20 วิ) อัปโหลดไฟล์ขึ้นคลาวด์ป้าย + แก้โปรแกรม + ส่งเข้าจอ 1 (n8n บน Render ทำงานนี้แล้วล้ม)
+const SIGN_STATUS = { queued: "🕒 รอส่งขึ้นป้าย (เครื่องที่ร้านรับงานภายใน 20 วิ)", uploading: "⏳ กำลังส่งขึ้นป้าย…", done: "✅ อยู่บนป้ายแล้ว", error: "❌ ส่งขึ้นป้ายไม่สำเร็จ" };
 const DISPLAY_BASE = "https://plate-app-y1z1.onrender.com";
 const KINDS = { image: "🖼️ รูปภาพ/โปรโมชั่น", video: "🎬 วิดีโอ", vehicle: "🏍️ รถแนะนำ + ราคา", text: "📢 ประกาศข้อความ", queue: "🎫 คิวศูนย์บริการ", line: "💚 QR LINE OA" };
 // ร้านมีจอ 2 ขนาด — สไลด์เลือกได้ว่าโชว์ทุกจอหรือเฉพาะจอ 1/2; แต่ละจอเปิด /signage?branch=..&screen=1|2 (user 2026-10-28)
@@ -96,6 +98,8 @@ export default function SignageAdminPage({ currentUser }) {
   const [imgFile, setImgFile] = useState(null);   // {b64, w, h, preview}
   const [vidFile, setVidFile] = useState(null);   // {b64, mime, sizeMb, sec, preview}
   const [vidUrl, setVidUrl] = useState("");
+  const [pushSign, setPushSign] = useState(true);   // ส่งขึ้นจอป้าย 1 หลังบันทึก
+  const [signMin, setSignMin] = useState(2);        // เล่นวนบนป้ายกี่นาที (ป้ายวนคลิปซ้ำให้ครบ)
   // master สำหรับรถแนะนำ
   const [brands, setBrands] = useState([]); const [series, setSeries] = useState([]); const [colors, setColors] = useState([]);
   const [selBrand, setSelBrand] = useState(""); const [selSeries, setSelSeries] = useState(""); const [selColor, setSelColor] = useState("");
@@ -191,10 +195,32 @@ export default function SignageAdminPage({ currentUser }) {
       const r = await post(SIGNAGE_API, body);
       if (r?.__error) throw new Error(r.__error);
       setMsg("✅ เพิ่มสไลด์แล้ว — จอจะเปลี่ยนภายใน 1 นาที");
+      const wasFileVideo = kind === "video" && !!vidFile;
       setImgFile(null); setVidFile(null); setVidUrl(""); setForm((f) => ({ ...f, title: "", promo: "", note: "", text: "" }));
       await load();
+      if (wasFileVideo && pushSign && r?.id) { setBusy(false); await pushToSign(r.id, signMin, r.payload || {}); return; }
     } catch (err) { setMsg("❌ บันทึกไม่สำเร็จ: " + err.message); }
     setBusy(false);
+  }
+  // สั่ง n8n ส่งสไลด์วิดีโอขึ้นป้าย แล้วคอยอ่านสถานะจาก payload.sign_status ทุก 5 วินาที (งานใช้เวลา 1–4 นาที รอแปลงไฟล์ฝั่งคลาวด์ป้าย)
+  async function pushToSign(id, minutes, payload0) {
+    const loop = Math.max(10, Math.round((Number(minutes) || 2) * 60));
+    setMsg("⏳ กำลังส่งขึ้นจอป้าย 1 … (ประมาณ 1–4 นาที จอเปลี่ยนเองเมื่อเสร็จ)");
+    try {
+      const cur = payload0 || items.find((x) => x.id === id)?.payload || {};
+      const r = await post(SIGNAGE_API, { action: "save_item", id, payload: { ...cur, sign_status: "queued", sign_error: null, sign_loop_sec: loop, sign_with_web: true } });
+      if (!r || r.__error) throw new Error(r?.__error || "ไม่ตอบกลับ");
+    } catch (err) { setMsg("❌ ส่งขึ้นป้ายไม่สำเร็จ: " + err.message); return; }
+    await load();
+    for (let i = 0; i < 60; i++) {
+      await new Promise((res) => setTimeout(res, 5000));
+      const d = parseList(await post(SIGNAGE_API, { action: "list_items", branch_code: branch }).catch(() => null));
+      const rows = Array.isArray(d) ? d : []; setItems(rows);
+      const st = rows.find((x) => x.id === id)?.payload?.sign_status;
+      if (st === "done") { setMsg("✅ คลิปอยู่บนจอป้าย 1 แล้ว"); return; }
+      if (st === "error") { setMsg("❌ ส่งขึ้นป้ายไม่สำเร็จ: " + (rows.find((x) => x.id === id)?.payload?.sign_error || "")); return; }
+    }
+    setMsg("⚠️ ยังส่งไม่เสร็จ (เกิน 5 นาที) — กดรีเฟรชดูสถานะในตารางอีกครั้ง (ถ้าค้าง \"รอส่ง\" นาน แสดงว่าเครื่อง Pi ที่ร้านไม่ได้ทำงาน)");
   }
   async function patch(it, fields) {
     setBusy(true);
@@ -250,7 +276,14 @@ export default function SignageAdminPage({ currentUser }) {
                 <td style={td}>{KINDS[it.kind] || it.kind}</td>
                 <td style={td}>
                   {it.kind === "image" && (thumb && thumb !== "none" ? <img src={thumb} alt="" style={{ height: 70, borderRadius: 4, border: "1px solid #e5e7eb" }} /> : <span style={{ color: "#9ca3af" }}>{thumb === "none" ? "ไม่มีรูป" : "…"}</span>)}
-                  {it.kind === "video" && <span style={{ fontSize: 13, color: "#374151" }}>🎬 {it.has_image ? `ไฟล์ในระบบ ${(Number(it.media_len || 0) * 0.75 / 1048576).toFixed(1)} MB` : it.payload?.url ? <a href={it.payload.url} target="_blank" rel="noreferrer">{String(it.payload.url).slice(0, 50)}…</a> : "ไม่มีวิดีโอ"}</span>}
+                  {it.kind === "video" && (
+                    <span style={{ fontSize: 13, color: "#374151" }}>🎬 {it.has_image ? `ไฟล์ในระบบ ${(Number(it.media_len || 0) * 0.75 / 1048576).toFixed(1)} MB` : it.payload?.url ? <a href={it.payload.url} target="_blank" rel="noreferrer">{String(it.payload.url).slice(0, 50)}…</a> : "ไม่มีวิดีโอ"}
+                      {it.has_image && <div style={{ marginTop: 4 }}>
+                        {it.payload?.sign_status && <div style={{ fontSize: 12, color: it.payload.sign_status === "error" ? "#b91c1c" : it.payload.sign_status === "done" ? "#166534" : "#92400e" }}>{SIGN_STATUS[it.payload.sign_status] || it.payload.sign_status}{it.payload.sign_done_at ? ` ${it.payload.sign_done_at}` : ""}{it.payload.sign_video_sec ? ` · วน ${Math.round(it.payload.sign_video_sec / 60)} นาที` : ""}{it.payload.sign_error ? ` (${it.payload.sign_error})` : ""}</div>}
+                        <button onClick={() => { const m = window.prompt("ให้คลิปเล่นวนบนป้ายกี่นาที (ต่อรอบ สลับกับรูป)", String(it.payload?.sign_video_sec ? Math.round(it.payload.sign_video_sec / 60) : signMin)); if (m != null && Number(m) > 0) pushToSign(it.id, Number(m), it.payload || {}); }} disabled={busy || ["queued", "uploading"].includes(it.payload?.sign_status)} style={{ ...btn, padding: "3px 8px", fontSize: 12, background: "#dbeafe", color: "#1e3a8a", marginTop: 2 }}>📺 ส่งขึ้นจอป้าย 1</button>
+                      </div>}
+                    </span>
+                  )}
                   {it.kind === "vehicle" && <span style={{ fontSize: 13, color: "#374151" }}>{it.brand_name} {it.series_name}{it.payload?.promo ? ` · 🔥 ${it.payload.promo}` : ""}</span>}
                   {it.kind === "text" && <span style={{ fontSize: 13, color: "#374151", whiteSpace: "pre-wrap" }}>{String(it.payload?.text || "").slice(0, 80)}</span>}
                 </td>
@@ -301,7 +334,12 @@ export default function SignageAdminPage({ currentUser }) {
               <div style={{ marginBottom: 6 }}>อัปโหลดคลิป (MP4/MOV/WebM — เกิน {MAX_VIDEO_MB} MB ระบบย่อให้เอง ใช้เวลาเท่าความยาวคลิป) <input type="file" accept="video/mp4,video/webm,video/quicktime" onChange={onPickVideo} disabled={busy} /></div>
               <div style={{ marginBottom: 6 }}>หรือใส่ลิงก์วิดีโอ (ไฟล์ .mp4 ที่ฝากไว้ที่อื่น เช่น Cloudflare R2 — Google Drive ใช้ไม่ได้) <input value={vidUrl} onChange={(e) => setVidUrl(e.target.value)} style={{ ...inp, width: 420 }} placeholder="https://.../promo.mp4 (ลิงก์ไฟล์ตรง เช่น Cloudflare R2)" disabled={!!vidFile} /></div>
               {isGoogleDrive(vidUrl) && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>⚠️ ลิงก์ Google Drive เล่นบนจอไม่ได้ (Google บล็อกการฝังจากเว็บอื่น) — ดาวน์โหลดไฟล์แล้วอัปโหลดเข้าระบบแทน</div>}
-              <div style={{ fontSize: 12, color: "#6b7280" }}>แนะนำคลิปแนวตั้ง 1080×1920 ยาว 15–30 วินาที (ความละเอียด 720p ก็พอ) — จอจะเล่นจนจบคลิปแล้วไปสไลด์ถัดไป ปิดเสียงเป็นค่าเริ่มต้น (เปิดเสียงที่จอด้วย &sound=1)</div>
+              <div style={{ marginBottom: 6, padding: "6px 8px", background: "#eff6ff", borderRadius: 6 }}>
+                <label><input type="checkbox" checked={pushSign} onChange={(e) => setPushSign(e.target.checked)} disabled={!vidFile && !!vidUrl.trim()} /> <b>📺 ส่งขึ้นจอป้าย 1 (32" หน้าร้าน) ด้วย</b></label>{" "}
+                เล่นวน <input type="number" min={1} max={30} value={signMin} onChange={(e) => setSignMin(e.target.value)} style={{ ...inp, width: 60 }} /> นาที สลับกับรูป/ข้อความของจอ 1
+                <div style={{ fontSize: 12, color: "#1e3a8a", marginTop: 2 }}>ป้ายเล่นวิดีโอผ่านระบบของป้ายเอง (ไม่ผ่านหน้าเว็บ) ระบบจะอัปโหลดให้หลังบันทึก ใช้เวลา 1–4 นาที — ลิงก์ภายนอกส่งขึ้นป้ายไม่ได้ (ต้องอัปโหลดไฟล์)</div>
+              </div>
+              <div style={{ fontSize: 12, color: "#6b7280" }}>แนะนำคลิปแนวตั้ง 1080×1920 ยาว 15–30 วินาที (ความละเอียด 720p ก็พอ) — คีออส/PC เล่นจนจบคลิปแล้วไปสไลด์ถัดไป ปิดเสียงเป็นค่าเริ่มต้น (เปิดเสียงที่จอด้วย &sound=1)</div>
               {vidFile && <video src={vidFile.preview} controls muted style={{ height: 240, marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 6, background: "#000" }} />}
             </div>
           )}
