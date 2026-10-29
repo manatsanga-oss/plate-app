@@ -20,9 +20,11 @@ DDL_SQL = """CREATE TABLE IF NOT EXISTS signage_items (
   active BOOLEAN NOT NULL DEFAULT true,
   start_date DATE, end_date DATE,
   screen TEXT NOT NULL DEFAULT 'all',   -- all | 1 | 2 (ร้านมีจอ 2 ขนาด เลือกสไลด์แยกจอได้)
+  zone INT NOT NULL DEFAULT 1,         -- ส่วนของจอที่แบ่ง 3 (?split=3): 1 บน 40% / 2 กลาง 35% / 3 ล่าง 25%
   created_by TEXT, created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
 );
-ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS screen TEXT NOT NULL DEFAULT 'all';"""
+ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS screen TEXT NOT NULL DEFAULT 'all';
+ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS zone INT NOT NULL DEFAULT 1;"""
 
 BUILD = r"""// signage-api: สไลด์จอประชาสัมพันธ์หน้าร้าน (signage_items) — user 2026-10-28
 // list_items (ไม่ส่งรูป) · get_image · save_item (insert/update) · delete_item · reorder — เส้นตรง Webhook→Code→PG→Shape→Respond
@@ -34,7 +36,8 @@ const sNum = (v) => { const n = Number(String(v == null ? '' : v).replace(/,/g, 
 const sBool = (v) => (v === true || v === 'true' || v === 1 || v === '1') ? 'true' : 'false';
 const sJson = (v) => (v && typeof v === 'object') ? `'${esc(JSON.stringify(v))}'::jsonb` : (typeof v === 'string' && v.trim() ? `'${esc(v)}'::jsonb` : 'NULL');
 const DDL = `__DDL__`;
-const COLS = "id, branch_code, kind, title, color_id, series_name, brand_name, payload, duration_sec, sort_order, active, start_date, end_date, screen, created_by, created_at, updated_at, (image_base64 IS NOT NULL) AS has_image";
+const COLS = "id, branch_code, kind, title, color_id, series_name, brand_name, payload, duration_sec, sort_order, active, start_date, end_date, screen, zone, created_by, created_at, updated_at, (image_base64 IS NOT NULL) AS has_image";
+const sZone = (v) => { const n = parseInt(v); return [1, 2, 3].includes(n) ? n : 1; };
 const sScreen = (v) => { const t = String(v == null ? 'all' : v).trim(); return ['1', '2', '3', '4'].includes(t) ? t : 'all'; };
 
 if (action === 'list_items') {
@@ -71,6 +74,7 @@ if (action === 'save_item') {
     if ('series_name' in b) sets.push(`series_name = ${sTxt(b.series_name)}`);
     if ('brand_name' in b) sets.push(`brand_name = ${sTxt(b.brand_name)}`);
     if ('screen' in b) sets.push(`screen = '${sScreen(b.screen)}'`);
+    if ('zone' in b) sets.push(`zone = ${sZone(b.zone)}`);
     if (img) sets.push(`image_base64 = '${img}'`);
     if (!sets.length) return [{ json: { query: "SELECT 'nothing to update' AS __error" } }];
     sets.push('updated_at = now()');
@@ -82,9 +86,9 @@ UPDATE signage_items SET ${sets.join(', ')} WHERE id = ${id} RETURNING ${COLS};`
   if (kind === 'image' && !img) return [{ json: { query: "SELECT 'missing image' AS __error" } }];
   const br = String(b.branch_code || 'SCY06').toUpperCase().slice(0, 5);
   return [{ json: { query: `${DDL}
-INSERT INTO signage_items (branch_code, kind, title, image_base64, color_id, series_name, brand_name, payload, duration_sec, sort_order, active, start_date, end_date, screen, created_by)
+INSERT INTO signage_items (branch_code, kind, title, image_base64, color_id, series_name, brand_name, payload, duration_sec, sort_order, active, start_date, end_date, screen, zone, created_by)
 VALUES ('${esc(br)}', '${esc(kind)}', ${sTxt(b.title)}, ${img ? `'${img}'` : 'NULL'}, ${sNum(b.color_id)}, ${sTxt(b.series_name)}, ${sTxt(b.brand_name)}, ${sJson(b.payload)},
-  ${Math.max(3, Number(b.duration_sec) || 10)}, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM signage_items WHERE branch_code = '${esc(br)}'), true, ${sTxt(b.start_date)}, ${sTxt(b.end_date)}, '${sScreen(b.screen)}', ${sTxt(b.created_by)})
+  ${Math.max(3, Number(b.duration_sec) || 10)}, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM signage_items WHERE branch_code = '${esc(br)}'), true, ${sTxt(b.start_date)}, ${sTxt(b.end_date)}, '${sScreen(b.screen)}', ${sZone(b.zone)}, ${sTxt(b.created_by)})
 RETURNING ${COLS};` } }];
 }
 

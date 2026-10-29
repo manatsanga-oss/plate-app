@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 
 // จอประชาสัมพันธ์หน้าร้าน (Android signage 49" แนวตั้ง 1080x1920 ที่ ป.เปา 2 จอ — user 2026-10-28)
 // public ไม่ต้อง login: /signage?branch=SCY06 — เปิดด้วยเบราว์เซอร์คีออสบนเครื่องป้าย
@@ -29,19 +29,17 @@ export default function SignageDisplayPage() {
   const priceGroup = ["SCY05", "SCY06"].includes(branch) ? "ป.เปา" : "สิงห์ชัย";
 
   const [items, setItems] = useState([]);
-  const [idx, setIdx] = useState(0);
+  const [pos, setPos] = useState({ idx: 0, n: 1, cur: null });   // ตำแหน่งสไลด์ปัจจุบัน (โหมดเต็มจอ) สำหรับจุดบอกลำดับ/ดีบัก
   const [images, setImages] = useState({});        // id -> dataURL (key id@updated_at)
   const [master, setMaster] = useState({ priceTypes: [], prices: [], colors: [] });
   const [colorImgs, setColorImgs] = useState({});  // color_id -> dataURL
   const [queue, setQueue] = useState({ tickets: [], bays: [] });
   const [clock, setClock] = useState(new Date());
-  const [fade, setFade] = useState(true);
   const [cursorOn, setCursorOn] = useState(false);   // ซ่อนเมาส์เมื่อนิ่งเกิน 3 วิ (จอป้ายไม่ให้ลูกศรค้าง) — ขยับแล้วโผล่ ใช้บนคอมได้
   // โหมดดีบักบนจอป้าย (?debug=1): โชว์ UA/ขนาดจอ/log โหลดรูป — ป้าย 972S โหลดรูปไม่ขึ้น (2026-10-28) ดูสาเหตุจากหน้าจอได้โดยไม่ต้องต่อ ADB
   const debug = !!params.get("debug");
   const [dbg, setDbg] = useState([]);
   const log = (m) => { if (debug) setDbg((p) => [...p.slice(-9), new Date().toLocaleTimeString("th-TH") + " " + m]); };
-  const timerRef = useRef(null);
   useEffect(() => {
     let t = null;
     const onMove = () => { setCursorOn(true); clearTimeout(t); t = setTimeout(() => setCursorOn(false), 3000); };
@@ -127,28 +125,26 @@ export default function SignageDisplayPage() {
     return () => clearInterval(t);
   }, []);
 
-  // หมุนสไลด์ตาม duration_sec ของแต่ละสไลด์ (fade เปลี่ยนภาพ) — ?demo=1 = สไลด์ตัวอย่างไว้ดู layout ก่อนมีข้อมูลจริง
+  // รายการสไลด์ — ?demo=1 = สไลด์ตัวอย่างไว้ดู layout ก่อนมีข้อมูลจริง
   const demo = params.get("demo") ? [
-    { id: -1, kind: "text", title: "ยินดีต้อนรับ", payload: { text: "ป.เปามอเตอร์เซอร์วิส\nศูนย์บริการฮอนด้า วังน้อย" }, duration_sec: 6 },
-    { id: -2, kind: "vehicle", title: "HONDA PCX160", payload: { promo: "ดาวน์ 0 บาท", note: "ราคาไม่รวมค่าจดทะเบียน", sub: "สีดำ" }, duration_sec: 6 },
-    { id: -3, kind: "queue", title: "คิวรับบริการวันนี้", duration_sec: 8 },
-    { id: -4, kind: "line", duration_sec: 6 },
+    { id: -1, kind: "text", title: "ยินดีต้อนรับ", payload: { text: "ป.เปามอเตอร์เซอร์วิส\nศูนย์บริการฮอนด้า วังน้อย" }, duration_sec: 6, zone: 1 },
+    { id: -2, kind: "vehicle", title: "HONDA PCX160", payload: { promo: "ดาวน์ 0 บาท", note: "ราคาไม่รวมค่าจดทะเบียน", sub: "สีดำ" }, duration_sec: 6, zone: 1 },
+    { id: -3, kind: "queue", title: "คิวรับบริการวันนี้", duration_sec: 8, zone: 1 },
+    { id: -4, kind: "line", duration_sec: 6, zone: 1 },
+    { id: -5, kind: "text", title: "ประกาศ", payload: { text: "ศูนย์บริการเปิดทุกวัน 08:00–17:30 น. โทร 035-271146" }, duration_sec: 8, zone: 3 },
+    { id: -6, kind: "text", title: "โปรโมชั่นเดือนนี้", payload: { text: "เปลี่ยนถ่ายน้ำมันเครื่อง ฟรีค่าแรง" }, duration_sec: 8, zone: 3 },
   ] : null;
-  const list = demo || (items.length ? items : [{ id: 0, kind: "idle", duration_sec: 30 }]);
-  const cur = list[Math.min(idx, list.length - 1)];
-  useEffect(() => {
-    clearTimeout(timerRef.current);
-    const sec = Math.max(3, Number(cur?.duration_sec) || 10);
-    // ไม่ใช้ fade (opacity transition) บนเครื่องป้าย — WebView Android ของป้าย 972S ค้างจอดำหลังเปลี่ยนสไลด์ครั้งแรก (user 2026-10-28 "ภาพขึ้นแล้วดับ")
-    timerRef.current = setTimeout(() => {
-      setIdx((i) => (i + 1) % list.length); setFade(true);
-    }, sec * 1000);
-    return () => clearTimeout(timerRef.current);
-  }, [idx, list.length, cur?.duration_sec]);
-  useEffect(() => { if (idx >= list.length) setIdx(0); }, [list.length]); // eslint-disable-line
+  const list = demo || items;
+  // แบ่งจอ (user 2026-10-29 จอ 2): ?split=3 → ส่วน 1 = สไลด์หลักด้านบน (75%) · ส่วน 2 = รูปเล็กมุมขวาบน (PiP) · ส่วน 3 = ข้อความด้านล่าง (25%)
+  // ?split=2 → บน/ล่างครึ่งเท่ากัน; ส่วนที่ย่อใช้ CSS zoom ให้ layout เดิม (หน่วย vh/vw) พอดีความสูงของส่วน
+  const split = Math.max(1, Math.min(3, Number(params.get("split")) || 1));
+  const bands = split === 2 ? [0.5, 0.5] : [1];
+  const MAIN_H = 0.75;   // split=3: ส่วนหลักสูง 75%, ข้อความล่าง 25%
+  const zoneItems = (z) => list.filter((it) => (Number(it.zone) || 1) === z);
+  const shared = { images, setImages, colorImgs, queue, log, cashPrice: (id) => cashPrice(id), colorRow: (id) => colorRow(id) };
 
   // ราคาเงินสดของกลุ่มสาขา สำหรับ color_id
-  const cashPrice = useMemo(() => (colorId) => {
+  const cashPrice = (colorId) => {
     const row = master.colors.find((c) => String(c.color_id) === String(colorId));
     if (!row) return null;
     const pt = master.priceTypes.find((p) => { const n = text(p.type_name); return n.includes(priceGroup) && n.includes("เงินสด"); });
@@ -156,7 +152,7 @@ export default function SignageDisplayPage() {
     const ptId = pt.price_type_id || pt.type_id;
     const pr = master.prices.find((x) => String(x.type_id) === String(row.type_id) && String(x.price_type_id) === String(ptId));
     return pr ? Number(pr.amount || 0) : null;
-  }, [master, priceGroup]);
+  };
   const colorRow = (colorId) => master.colors.find((c) => String(c.color_id) === String(colorId)) || null;
 
   const timeStr = clock.toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" });
@@ -164,27 +160,100 @@ export default function SignageDisplayPage() {
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "#0b1220", color: "#fff", overflow: "hidden", fontFamily: "'Noto Sans Thai', 'Sarabun', Tahoma, sans-serif", cursor: cursorOn ? "default" : "none" }}>
-      <div style={{ position: "absolute", inset: 0, opacity: fade ? 1 : 0 }}>
-        {cur.kind === "image" && <ImageSlide it={cur} src={images[`${cur.id}@${cur.updated_at}`]} log={log} onFallback={(dataUrl) => setImages((p) => ({ ...p, [`${cur.id}@${cur.updated_at}`]: dataUrl }))} />}
-        {cur.kind === "vehicle" && <VehicleSlide it={cur} img={colorImgs[cur.color_id]} price={cashPrice(cur.color_id)} row={colorRow(cur.color_id)} />}
-        {cur.kind === "queue" && <QueueSlide it={cur} queue={queue} />}
-        {cur.kind === "line" && <LineSlide it={cur} />}
-        {cur.kind === "text" && <TextSlide it={cur} />}
-        {cur.kind === "idle" && <IdleSlide />}
-      </div>
+      {split === 1 ? (
+        <Rotator items={list} shared={shared} onIndex={(idx, n, cur) => setPos({ idx, n, cur })} />
+      ) : split === 3 ? (
+        <>
+          <div style={{ position: "absolute", left: 0, right: 0, top: 0, height: `${MAIN_H * 100}%`, overflow: "hidden", background: "#0b1220" }}>
+            <div style={{ zoom: MAIN_H, width: `${100 / MAIN_H}vw`, height: "100vh", position: "relative" }}>
+              <Rotator items={zoneItems(1)} shared={shared} />
+            </div>
+          </div>
+          <BottomText items={zoneItems(3)} top={MAIN_H} />
+          <Pip items={zoneItems(2)} images={images} />
+        </>
+      ) : bands.map((f, i) => {
+        const top = bands.slice(0, i).reduce((a, b) => a + b, 0);
+        return (
+          <div key={i} style={{ position: "absolute", left: 0, right: 0, top: `${top * 100}%`, height: `${f * 100}%`, overflow: "hidden", borderBottom: i < bands.length - 1 ? "0.4vh solid #111827" : "none", background: "#0b1220" }}>
+            <div style={{ zoom: f, width: `${100 / f}vw`, height: "100vh", position: "relative" }}>
+              <Rotator items={zoneItems(i + 1)} shared={shared} />
+            </div>
+          </div>
+        );
+      })}
       {debug && (
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, background: "rgba(0,0,0,.75)", color: "#9ae6b4", fontSize: "1.6vh", fontFamily: "monospace", padding: "0.8vh 1vw", whiteSpace: "pre-wrap", wordBreak: "break-all", zIndex: 9 }}>
-          {`UA: ${navigator.userAgent}\nwin ${window.innerWidth}x${window.innerHeight} dpr ${window.devicePixelRatio} · slides ${list.length} · cur #${cur.id} ${cur.kind}\n`}{dbg.join("\n")}
+          {`UA: ${navigator.userAgent}\nwin ${window.innerWidth}x${window.innerHeight} dpr ${window.devicePixelRatio} · slides ${list.length} · split ${split} · cur #${pos.cur?.id} ${pos.cur?.kind}\n`}{dbg.join("\n")}
         </div>
       )}
-      {/* แถบล่าง: เวลา/วันที่ + จุดบอกลำดับสไลด์ */}
-      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "1.2vh 2.5vw", display: "flex", justifyContent: "space-between", alignItems: "center", background: "linear-gradient(transparent, rgba(0,0,0,.55))", fontSize: "2.2vh" }}>
+      {/* แถบล่าง: เวลา/วันที่ + จุดบอกลำดับสไลด์ (จุดเฉพาะโหมดเต็มจอ) */}
+      <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "1.2vh 2.5vw", display: "flex", justifyContent: "space-between", alignItems: "center", background: "linear-gradient(transparent, rgba(0,0,0,.55))", fontSize: "2.2vh", pointerEvents: "none" }}>
         <span style={{ opacity: .9 }}>{dateStr}</span>
         <span style={{ display: "flex", gap: "0.6vh" }}>
-          {list.map((_, i) => <span key={i} style={{ width: "1.1vh", height: "1.1vh", borderRadius: "50%", background: i === idx ? "#fbbf24" : "rgba(255,255,255,.35)" }} />)}
+          {split === 1 && Array.from({ length: pos.n }).map((_, i) => <span key={i} style={{ width: "1.1vh", height: "1.1vh", borderRadius: "50%", background: i === pos.idx ? "#fbbf24" : "rgba(255,255,255,.35)" }} />)}
         </span>
         <span style={{ fontWeight: 700, fontSize: "3vh" }}>{timeStr} น.</span>
       </div>
+    </div>
+  );
+}
+
+// หมุนรายการตาม duration_sec ของแต่ละสไลด์ (ไม่ใช้ fade — WebView ป้าย 972S ค้างจอดำหลังเฟด 2026-10-28)
+function useRotation(list) {
+  const [idx, setIdx] = useState(0);
+  const cur = list[Math.min(idx, Math.max(0, list.length - 1))];
+  useEffect(() => {
+    if (!list.length) return;
+    const sec = Math.max(3, Number(cur?.duration_sec) || 10);
+    const t = setTimeout(() => setIdx((i) => (i + 1) % list.length), sec * 1000);
+    return () => clearTimeout(t);
+  }, [idx, list.length, cur?.duration_sec]);
+  useEffect(() => { if (idx >= list.length) setIdx(0); }, [list.length]); // eslint-disable-line
+  return { cur, idx: Math.min(idx, Math.max(0, list.length - 1)), n: list.length };
+}
+
+// ส่วนหลัก: หมุนสไลด์ทุกชนิด; ไม่มีสไลด์ → หน้า idle ชื่อร้าน
+function Rotator({ items, shared, onIndex }) {
+  const list = items.length ? items : [{ id: 0, kind: "idle", duration_sec: 30 }];
+  const { cur, idx } = useRotation(list);
+  useEffect(() => { onIndex && onIndex(idx, list.length, cur); }, [idx, list.length]); // eslint-disable-line
+  const { images, setImages, colorImgs, queue, log, cashPrice, colorRow } = shared;
+  return (
+    <div style={{ position: "absolute", inset: 0 }}>
+      {cur.kind === "image" && <ImageSlide it={cur} src={images[`${cur.id}@${cur.updated_at}`]} log={log} onFallback={(dataUrl) => setImages((p) => ({ ...p, [`${cur.id}@${cur.updated_at}`]: dataUrl }))} />}
+      {cur.kind === "vehicle" && <VehicleSlide it={cur} img={colorImgs[cur.color_id]} price={cashPrice(cur.color_id)} row={colorRow(cur.color_id)} />}
+      {cur.kind === "queue" && <QueueSlide it={cur} queue={queue} />}
+      {cur.kind === "line" && <LineSlide it={cur} />}
+      {cur.kind === "text" && <TextSlide it={cur} />}
+      {cur.kind === "idle" && <IdleSlide />}
+    </div>
+  );
+}
+
+// ส่วน 3 (split=3): แถบข้อความด้านล่าง — สไลด์ชนิด "ประกาศข้อความ" ที่ใส่ในเมนู หมุนทีละข้อความ (ชนิดอื่นในส่วนนี้แสดงเป็นหัวข้อ)
+function BottomText({ items, top }) {
+  const { cur } = useRotation(items);
+  const body = cur ? (cur.kind === "text" ? text(cur.payload?.text) : "") : "";
+  const title = cur ? text(cur.title) : "";
+  return (
+    <div style={{ position: "absolute", left: 0, right: 0, top: `${top * 100}%`, bottom: 0, background: "linear-gradient(180deg, #7c2d12, #431407)", borderTop: "0.5vh solid #fbbf24", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", padding: "2vh 4vw 6vh", overflow: "hidden" }}>
+      {!cur && <div style={{ fontSize: "2.4vh", opacity: .5 }}>— ใส่ "ประกาศข้อความ" เลือกส่วน "ข้อความด้านล่าง" ในเมนู —</div>}
+      {title && <div style={{ fontSize: "4.2vh", fontWeight: 900, lineHeight: 1.3, marginBottom: body ? "1vh" : 0 }}>{title}</div>}
+      {body && <div style={{ fontSize: "3.4vh", lineHeight: 1.45, whiteSpace: "pre-wrap", fontWeight: 600 }}>{body}</div>}
+    </div>
+  );
+}
+
+// ส่วน 2 (split=3): รูปเล็กมุมขวาบน — เฉพาะสไลด์รูปภาพในส่วนนี้ หมุนตามเวลา
+function Pip({ items, images }) {
+  const imgs = items.filter((it) => it.kind === "image" && it.has_image);
+  const { cur } = useRotation(imgs);
+  if (!cur) return null;
+  const src = images[`${cur.id}@${cur.updated_at}`];
+  return (
+    <div style={{ position: "absolute", top: "1.5vh", right: "1.5vw", width: "30vw", height: "22vh", background: "#000", border: "0.4vh solid rgba(255,255,255,.85)", borderRadius: "1.5vh", overflow: "hidden", boxShadow: "0 1vh 3vh rgba(0,0,0,.6)", zIndex: 5 }}>
+      {src && <img src={src} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />}
     </div>
   );
 }
