@@ -319,24 +319,24 @@ function VideoSlide({ it, src, sound, log, onEnded }) {
   // ป้าย 972S (WebView Android 9) จอดำตรงสไลด์วิดีโอ 2026-10-29 → บังคับ muted เป็น attribute + สั่ง play() เอง + log เหตุผลที่เล่นไม่ได้; ไม่เล่นใน 20 วิ → ข้าม
   useEffect(() => {
     const el = ref.current; if (!el || !src || err) return;
-    const log0 = log; log = (m) => { log0 && log0(m); setLines((p) => [...p.slice(-3), new Date().toLocaleTimeString("th-TH") + " " + m.replace(`video #${it.id} `, "")]); };
+    const L = (m) => { L(m); setLines((p) => [...p.slice(-3), new Date().toLocaleTimeString("th-TH") + " " + m.replace(`video #${it.id} `, "")]); };
     el.muted = !sound; if (!sound) el.setAttribute("muted", ""); el.defaultMuted = !sound;
     let done = false;
-    const tryPlay = (why) => { const pr = el.play(); if (pr && pr.catch) pr.catch((e) => { log && log(`video #${it.id} play() ${why} rejected: ${e?.name || e}`); if (e?.name === "NotAllowedError") setState("blocked"); }); };
-    const onPlaying = () => { done = true; setState("playing"); log && log(`video #${it.id} playing ${el.videoWidth}x${el.videoHeight} rs=${el.readyState}`); };
-    const onMeta = () => { log && log(`video #${it.id} metadata ${el.videoWidth}x${el.videoHeight} dur=${Math.round(el.duration || 0)}`); };
-    const onCanPlay = () => { log && log(`video #${it.id} canplay rs=${el.readyState}`); if (el.paused) tryPlay("canplay"); };
-    const onStall = (ev) => log && log(`video #${it.id} ${ev.type} rs=${el.readyState} ns=${el.networkState} t=${el.currentTime.toFixed(1)}`);
+    const tryPlay = (why) => { const pr = el.play(); if (pr && pr.catch) pr.catch((e) => { L(`video #${it.id} play() ${why} rejected: ${e?.name || e}`); if (e?.name === "NotAllowedError") setState("blocked"); }); };
+    const onPlaying = () => { done = true; setState("playing"); L(`video #${it.id} playing ${el.videoWidth}x${el.videoHeight} rs=${el.readyState}`); };
+    const onMeta = () => { L(`video #${it.id} metadata ${el.videoWidth}x${el.videoHeight} dur=${Math.round(el.duration || 0)}`); };
+    const onCanPlay = () => { L(`video #${it.id} canplay rs=${el.readyState}`); if (el.paused) tryPlay("canplay"); };
+    const onStall = (ev) => L(`video #${it.id} ${ev.type} rs=${el.readyState} ns=${el.networkState} t=${el.currentTime.toFixed(1)}`);
     el.addEventListener("playing", onPlaying); el.addEventListener("loadedmetadata", onMeta); el.addEventListener("canplay", onCanPlay);
     el.addEventListener("stalled", onStall); el.addEventListener("waiting", onStall); el.addEventListener("suspend", onStall);
     tryPlay("mount");
     const watchdog = setTimeout(() => {
       if (done) return;
-      log && log(`video #${it.id} watchdog: not playing after 20s rs=${el.readyState} ns=${el.networkState} err=${el.error?.code || 0} → skip`);
+      L(`video #${it.id} watchdog: not playing after 20s rs=${el.readyState} ns=${el.networkState} err=${el.error?.code || 0} → skip`);
       onEnded && onEnded();
     }, 20000);
     return () => { clearTimeout(watchdog); el.removeEventListener("playing", onPlaying); el.removeEventListener("loadedmetadata", onMeta); el.removeEventListener("canplay", onCanPlay); el.removeEventListener("stalled", onStall); el.removeEventListener("waiting", onStall); el.removeEventListener("suspend", onStall); };
-  }, [src, err]); // eslint-disable-line
+  }, [src, err, sound, it.id, log, onEnded]);
   if (!src || err) return <TextSlide it={{ title: it.title || "วิดีโอ", payload: { text: err ? "เล่นวิดีโอไม่ได้" : "กำลังโหลดวิดีโอ…" } }} />;
   return (
     <div style={{ position: "absolute", inset: 0, background: "#000" }}>
