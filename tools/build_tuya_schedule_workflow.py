@@ -2,9 +2,10 @@
 # ใช้โค้ดเซ็น HMAC-SHA256 แบบ JS ล้วน + ค่า client/secret/base เดียวกับ Door_Control_Workflow.json (Code node n8n require('crypto') ไม่ได้)
 # โครง: Schedule (17:00, 17:10 Asia/Bangkok) + Webhook tuya-schedule-api (ทดสอบ {action:'run', slot:'tv'|'ac'|'list'}) → Prepare → Token Sign → Tuya Token
 #       → List Prep (GET /v1.0/infrareds/{blaster}/remotes ทุกตัว) → Tuya List → Command Prep (เลือกรีโมทตามชนิด → คำสั่งปิด) → Tuya Cmd → Finalize
-# ⚠️ IR Control Hub API ไม่ได้สมัคร (No permissions) → ใช้ "อุปกรณ์เสมือน" ที่ Smart Life สร้างให้แทน: GET /v1.0/iot-03/devices/{blaster}/sub-devices (category infrared_ac / infrared_tv)
-#    แอร์: POST /v1.0/iot-03/devices/{id}/commands {commands:[{code:'PowerOff'|'PowerOn', value:'PowerOff'|'PowerOn'}]} (ทดสอบ 2026-10-29 17:12 ปิดได้ 3 ตัว)
-#    ทีวี: code 'Power' value 'Power' (ปุ่มสลับ ไม่รู้สถานะ — 08:00 เปิด / 17:00 ปิด ถ้ามีคนกดรีโมทเองระหว่างวันอาจสลับผิด)
+# ใช้ IR Control Hub Open Service (สมัคร Free Trial + Authorize ในโปรเจกต์ 2026-10-29): GET /v1.0/infrareds/{blaster}/remotes (category_id '5'=แอร์, '2'=ทีวี)
+#    แอร์: POST /v1.0/infrareds/{ir}/air-conditioners/{remote}/command {code:'power', value:0|1} (ทดสอบ 17:26 ปิดได้ 3 ตัว user ยืนยัน)
+#    ทีวี: POST /v1.0/infrareds/{ir}/remotes/{remote}/command {key:'Power'} (รีโมทเรียนรู้เอง key ตาม GET .../keys; ปุ่มสลับไม่รู้สถานะ)
+#    ⚠️ เส้นทาง /v1.0/iot-03/devices/{id}/commands ของอุปกรณ์เสมือน ตอบ success แต่ไม่ยิง IR จริง (ทดสอบ 17:12 ไม่ดับ)
 # output: C:\Users\manat\OneDrive\New folder\Tuya_Schedule_Workflow.json
 import json, os, re, subprocess, tempfile
 D = r"C:\Users\manat\OneDrive\New folder"
@@ -43,11 +44,11 @@ return [{ json: { sign, t, url: d.cfg.base + url, clientId: d.cfg.clientId } }];
 """
 
 LIST_PREP = HELPERS + """
-// รายการอุปกรณ์เสมือน (แอร์/ทีวี) ใต้ IR blaster แต่ละตัว
+// รายการรีโมท (แอร์/ทีวี) ใต้ IR blaster แต่ละตัว (IR Control Hub API)
 const tok = $input.first().json; const d = $('Prepare').first().json;
 const access = tok && tok.result && tok.result.access_token;
 if (!access) throw new Error('tuya token failed: ' + JSON.stringify(tok).slice(0, 200));
-return d.blasters.map((bl) => { const t = String(Date.now()); const path = `/v1.0/iot-03/devices/${bl.id}/sub-devices`;
+return d.blasters.map((bl) => { const t = String(Date.now()); const path = `/v1.0/infrareds/${bl.id}/remotes`;
   const strToSign = 'GET\\n' + sha256Hex('') + '\\n\\n' + path;
   const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + access + t + strToSign).toUpperCase();
   return { json: { blaster: bl.id, blasterName: bl.name, method: 'GET', url: d.cfg.base + path, bodyStr: '', access, clientId: d.cfg.clientId, t, sign } }; });
@@ -58,14 +59,15 @@ CMD_PREP = HELPERS + """
 const d = $('Prepare').first().json; const lists = $('List Prep').all().map((x) => x.json); const res = $input.all().map((x) => x.json);
 const access = lists[0].access;
 const remotes = [];
-res.forEach((r, i) => { const bl = lists[i] || {}; (r.result || []).forEach((dv) => remotes.push({ blaster: bl.blaster, blasterName: bl.blasterName, id: dv.id, name: dv.name, category: dv.category, online: dv.online })); });
-const AC = remotes.filter((r) => r.category === 'infrared_ac');
-const TV = remotes.filter((r) => r.category === 'infrared_tv');
-const cmd = (r, kind, code) => ({ kind, name: r.name, method: 'POST', path: `/v1.0/iot-03/devices/${r.id}/commands`, body: { commands: [{ code, value: code }] } });
+res.forEach((r, i) => { const bl = lists[i] || {}; (r.result || []).forEach((rm) => remotes.push({ blaster: bl.blaster, blasterName: bl.blasterName, id: rm.remote_id, name: rm.remote_name, category: String(rm.category_id), brand: rm.brand_name })); });
+const AC = remotes.filter((r) => r.category === '5');
+const TV = remotes.filter((r) => r.category === '2');
+const acCmd = (r, on) => ({ kind: 'ac', name: r.name, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/air-conditioners/${r.id}/command`, body: { code: 'power', value: on ? 1 : 0 } });
+const tvCmd = (r) => ({ kind: 'tv', name: r.name, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/remotes/${r.id}/command`, body: { key: 'Power' } });
 const calls = [];
-if (d.slot === 'ac') AC.forEach((r) => calls.push(cmd(r, 'ac', 'PowerOff')));
-if (d.slot === 'tv') TV.forEach((r) => calls.push(cmd(r, 'tv', 'Power')));
-if (d.slot === 'on') { AC.forEach((r) => calls.push(cmd(r, 'ac', 'PowerOn'))); TV.forEach((r) => calls.push(cmd(r, 'tv', 'Power'))); }   // ทีวี = ปุ่ม power สลับ (ตอน 08:00 ทีวีควรปิดอยู่)
+if (d.slot === 'ac') AC.forEach((r) => calls.push(acCmd(r, false)));
+if (d.slot === 'tv') TV.forEach((r) => calls.push(tvCmd(r)));
+if (d.slot === 'on') { AC.forEach((r) => calls.push(acCmd(r, true))); TV.forEach((r) => calls.push(tvCmd(r))); }   // ทีวี = ปุ่ม Power สลับ (ตอน 08:00 ทีวีควรปิดอยู่)
 if (!calls.length) return [{ json: { noop: true, slot: d.slot, th: d.th, remotes } }];
 return calls.map((c, i) => { const t = String(Date.now()); const bodyStr = JSON.stringify(c.body);
   const strToSign = c.method + '\\n' + sha256Hex(bodyStr) + '\\n\\n' + c.path;
