@@ -92,8 +92,13 @@ def screen1_slides(items):
     return out, skipped
 
 
+def slide_key(kind, it):
+    # วิดีโอ: ห้ามใช้ updated_at (เราเขียน sign_status กลับ → updated_at เปลี่ยน → วนอัปโหลดไม่รู้จบ) ใช้ขนาดไฟล์แทน
+    return f"{it['id']}@{it.get('updated_at')}" if kind == "image" else f"{it['id']}@{it.get('media_len')}"
+
+
 def signature(slides):
-    parts = [f"{k}:{it['id']}:{it.get('updated_at')}:{sec}" for k, it, sec in slides]
+    parts = [f"{k}:{slide_key(k, it)}:{sec}" for k, it, sec in slides]
     return hashlib.sha1("|".join(parts).encode()).hexdigest()
 
 
@@ -198,7 +203,7 @@ class LedCloud:
 # ---------- build ----------
 def ensure_resource(lc, st, kind, it):
     """อัปโหลดไฟล์ของสไลด์ขึ้นคลาวด์ป้าย (ถ้ายังไม่มี) → dict {id, name, path, snapshot, duration}"""
-    key = f"{it['id']}@{it.get('updated_at')}"
+    key = slide_key(kind, it)
     cached = st["resources"].get(key)
     rtype = 1 if kind == "image" else 2
     if cached and lc.find_resource(cached["name"], rtype):
