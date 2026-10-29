@@ -126,7 +126,7 @@ w = {
 }
 json.dump(w, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 for name, code in (("PREPARE", PREPARE), ("TOKEN_SIGN", TOKEN_SIGN), ("LIST_PREP", LIST_PREP), ("CMD_PREP", CMD_PREP)):
-    stub = "const $=(x)=>({first:()=>({json:{}}),all:()=>[]});const $input={first:()=>({json:{}}),all:()=>[]};\n(function(){" + code + "\n})();"
+    stub = "const $=(x)=>({first:()=>({json:{}}),all:()=>[]});const $input={first:()=>({json:{}}),all:()=>[]};\n(async function(){" + code + "\n})();"
     f = os.path.join(tempfile.gettempdir(), "chk_" + name + ".js"); open(f, "w", encoding="utf-8").write(stub)
     r = subprocess.run(["node", "--check", f], capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(name, "=>", "OK" if r.returncode == 0 else r.stderr[-400:])
