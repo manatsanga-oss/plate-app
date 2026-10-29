@@ -73,7 +73,7 @@ if (!calls.length) return [{ json: { ok: true, noop: true, slot: d.slot, th: d.t
 const results = [];
 for (const c of calls) {
   const t = String(Date.now()); const bodyStr = JSON.stringify(c.body);
-  const strToSign = c.method + '\n' + sha256Hex(bodyStr) + '\n\n' + c.path;
+  const strToSign = c.method + '\\n' + sha256Hex(bodyStr) + '\\n\\n' + c.path;
   const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + access + t + strToSign).toUpperCase();
   let r = null;
   try {
