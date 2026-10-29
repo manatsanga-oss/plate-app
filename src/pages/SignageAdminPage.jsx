@@ -2,16 +2,24 @@ import React, { useEffect, useMemo, useState } from "react";
 
 // จัดการจอประชาสัมพันธ์หน้าร้าน (Android signage 49" แนวตั้ง ป.เปา 2 จอ — user 2026-10-28)
 // สไลด์เก็บใน signage_items ผ่าน signage-api · จอเปิด /signage?branch=SCY06 ดึงรายการใหม่ทุก 1 นาที
-// ชนิดสไลด์: image (อัปโหลดรูป ย่อเป็นแนวตั้ง 1080x1920 ก่อนเก็บ) · vehicle (รุ่น/สีจาก master + ราคาเงินสดสด) · text · queue (คิวศูนย์บริการ+รถในช่องซ่อม) · line (QR OA)
+// ชนิดสไลด์: image (อัปโหลดรูป ย่อเป็นแนวตั้ง 1080x1920 ก่อนเก็บ) · video (MP4 สั้น ≤10 MB ในระบบ หรือลิงก์ภายนอก payload.url) · vehicle (รุ่น/สีจาก master + ราคาเงินสดสด) · text · queue (คิวศูนย์บริการ+รถในช่องซ่อม) · line (QR OA)
 const SIGNAGE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-api";
 const MASTER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 const DISPLAY_BASE = "https://plate-app-y1z1.onrender.com";
-const KINDS = { image: "🖼️ รูปภาพ/โปรโมชั่น", vehicle: "🏍️ รถแนะนำ + ราคา", text: "📢 ประกาศข้อความ", queue: "🎫 คิวศูนย์บริการ", line: "💚 QR LINE OA" };
+const KINDS = { image: "🖼️ รูปภาพ/โปรโมชั่น", video: "🎬 วิดีโอ", vehicle: "🏍️ รถแนะนำ + ราคา", text: "📢 ประกาศข้อความ", queue: "🎫 คิวศูนย์บริการ", line: "💚 QR LINE OA" };
 // ร้านมีจอ 2 ขนาด — สไลด์เลือกได้ว่าโชว์ทุกจอหรือเฉพาะจอ 1/2; แต่ละจอเปิด /signage?branch=..&screen=1|2 (user 2026-10-28)
 const SCREENS = { all: "ทุกจอ", 1: "จอ 1 (32\" หน้าร้าน)", 2: "จอ 2 (49\")" };
 // จอที่แบ่ง 3 ส่วน (จอ 2 เปิด /signage?...&split=3): สไลด์เลือก "ส่วน" ที่จะโชว์ — 1 สไลด์หลักด้านบน (75%) / 2 รูปเล็กมุมขวาบน (เฉพาะรูป) / 3 ข้อความด้านล่าง (25%) — จอเต็มไม่สนค่านี้
 const ZONES = { 1: "ส่วนหลัก (บน)", 2: "รูปเล็กมุมขวาบน", 3: "ข้อความด้านล่าง" };
 const MAX_W = 1080, MAX_H = 1920;
+// วิดีโอ: อัปโหลด MP4 สั้นเข้าระบบ (เก็บ base64 ผ่าน n8n — จำกัด 10 MB เพราะ n8n บน Render รับ body ~16 MB) หรือใส่ลิงก์ไฟล์ภายนอก (ไม่จำกัดขนาด) — user 2026-10-29
+const MAX_VIDEO_MB = 10;
+// ลิงก์แชร์ Google Drive (…/file/d/ID/view หรือ ?id=ID) → ลิงก์ไฟล์ตรงที่ <video> เล่นได้ (ไฟล์ต้องแชร์ "ทุกคนที่มีลิงก์") — ทดสอบ 2026-10-29 ตอบ video/mp4
+function toDirectVideoUrl(u) {
+  const m = String(u || "").trim().match(/drive\.google\.com\/(?:file\/d\/([\w-]{20,})|(?:open|uc)\?(?:[^#]*&)?id=([\w-]{20,}))/);
+  const id = m && (m[1] || m[2]);
+  return id ? `https://drive.usercontent.google.com/download?id=${id}&export=download` : String(u || "").trim();
+}
 
 async function post(url, body) {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -49,6 +57,8 @@ export default function SignageAdminPage({ currentUser }) {
   const [kind, setKind] = useState("image");
   const [form, setForm] = useState({ title: "", duration_sec: 10, start_date: "", end_date: "", promo: "", note: "", text: "", screen: "all", zone: 1 });
   const [imgFile, setImgFile] = useState(null);   // {b64, w, h, preview}
+  const [vidFile, setVidFile] = useState(null);   // {b64, mime, sizeMb, sec, preview}
+  const [vidUrl, setVidUrl] = useState("");
   // master สำหรับรถแนะนำ
   const [brands, setBrands] = useState([]); const [series, setSeries] = useState([]); const [colors, setColors] = useState([]);
   const [selBrand, setSelBrand] = useState(""); const [selSeries, setSelSeries] = useState(""); const [selColor, setSelColor] = useState("");
@@ -95,9 +105,34 @@ export default function SignageAdminPage({ currentUser }) {
     catch (err) { setMsg("❌ " + err.message); }
   }
 
+  // อ่านไฟล์วิดีโอเป็น base64 + ความยาวคลิป (ตั้งวินาทีสไลด์ให้อัตโนมัติ)
+  function onPickVideo(e) {
+    const f = e.target.files?.[0]; if (!f) return;
+    const sizeMb = f.size / 1048576;
+    if (!/^video\/(mp4|webm)$/i.test(f.type)) return setMsg("❌ รองรับเฉพาะไฟล์ MP4 (H.264) หรือ WebM");
+    if (sizeMb > MAX_VIDEO_MB) return setMsg(`❌ ไฟล์ ${sizeMb.toFixed(1)} MB ใหญ่เกิน ${MAX_VIDEO_MB} MB — ย่อคลิปให้สั้น/720p ก่อน หรือใช้ช่องลิงก์วิดีโอแทน`);
+    const url = URL.createObjectURL(f);
+    const v = document.createElement("video"); v.preload = "metadata";
+    v.onloadedmetadata = () => {
+      const sec = Math.max(3, Math.ceil(v.duration || 0)) || 10;
+      const rd = new FileReader();
+      rd.onload = () => { setVidFile({ b64: String(rd.result).split(",")[1], mime: f.type.toLowerCase(), sizeMb, sec, preview: url }); setForm((p) => ({ ...p, duration_sec: sec })); setMsg(`วิดีโอ ${sizeMb.toFixed(1)} MB · ${sec} วินาที`); };
+      rd.onerror = () => setMsg("❌ อ่านไฟล์ไม่ได้");
+      rd.readAsDataURL(f);
+    };
+    v.onerror = () => { URL.revokeObjectURL(url); setMsg("❌ เล่นไฟล์นี้ไม่ได้ (ต้องเป็น MP4 H.264)"); };
+    v.src = url;
+  }
+
   async function addItem() {
     const body = { action: "save_item", branch_code: branch, kind, title: form.title, duration_sec: Number(form.duration_sec) || 10, start_date: form.start_date || null, end_date: form.end_date || null, screen: form.screen || "all", zone: Number(form.zone) || 1, created_by: by, payload: {} };
     if (kind === "image") { if (!imgFile) return setMsg("❌ เลือกรูปก่อน"); body.image_base64 = imgFile.b64; }
+    if (kind === "video") {
+      const u = toDirectVideoUrl(vidUrl);
+      if (vidFile) { body.image_base64 = vidFile.b64; body.media_mime = vidFile.mime; }
+      else if (/^https?:\/\/\S+$/i.test(u)) body.payload = { url: u };
+      else return setMsg("❌ เลือกไฟล์วิดีโอ หรือใส่ลิงก์วิดีโอ (ขึ้นต้น https://)");
+    }
     if (kind === "vehicle") {
       const row = colors.find((c) => String(c.color_id) === String(selColor)); if (!row) return setMsg("❌ เลือกรุ่นและสี");
       const br = brands.find((b) => String(b.brand_id) === String(selBrand)); const se = series.find((s) => String(s.series_id) === String(selSeries));
@@ -112,7 +147,7 @@ export default function SignageAdminPage({ currentUser }) {
       const r = await post(SIGNAGE_API, body);
       if (r?.__error) throw new Error(r.__error);
       setMsg("✅ เพิ่มสไลด์แล้ว — จอจะเปลี่ยนภายใน 1 นาที");
-      setImgFile(null); setForm((f) => ({ ...f, title: "", promo: "", note: "", text: "" }));
+      setImgFile(null); setVidFile(null); setVidUrl(""); setForm((f) => ({ ...f, title: "", promo: "", note: "", text: "" }));
       await load();
     } catch (err) { setMsg("❌ บันทึกไม่สำเร็จ: " + err.message); }
     setBusy(false);
@@ -171,6 +206,7 @@ export default function SignageAdminPage({ currentUser }) {
                 <td style={td}>{KINDS[it.kind] || it.kind}</td>
                 <td style={td}>
                   {it.kind === "image" && (thumb && thumb !== "none" ? <img src={thumb} alt="" style={{ height: 70, borderRadius: 4, border: "1px solid #e5e7eb" }} /> : <span style={{ color: "#9ca3af" }}>{thumb === "none" ? "ไม่มีรูป" : "…"}</span>)}
+                  {it.kind === "video" && <span style={{ fontSize: 13, color: "#374151" }}>🎬 {it.has_image ? `ไฟล์ในระบบ ${(Number(it.media_len || 0) * 0.75 / 1048576).toFixed(1)} MB` : it.payload?.url ? <a href={it.payload.url} target="_blank" rel="noreferrer">{String(it.payload.url).slice(0, 50)}…</a> : "ไม่มีวิดีโอ"}</span>}
                   {it.kind === "vehicle" && <span style={{ fontSize: 13, color: "#374151" }}>{it.brand_name} {it.series_name}{it.payload?.promo ? ` · 🔥 ${it.payload.promo}` : ""}</span>}
                   {it.kind === "text" && <span style={{ fontSize: 13, color: "#374151", whiteSpace: "pre-wrap" }}>{String(it.payload?.text || "").slice(0, 80)}</span>}
                 </td>
@@ -214,6 +250,15 @@ export default function SignageAdminPage({ currentUser }) {
               <input type="file" accept="image/*" onChange={onPickFile} />
               <div style={{ fontSize: 12, color: "#6b7280", marginTop: 4 }}>แนะนำรูปแนวตั้ง 1080×1920 (ระบบย่อให้อัตโนมัติ) — รูปแนวนอนจะแสดงแบบมีขอบดำบน-ล่าง</div>
               {imgFile && <img src={imgFile.preview} alt="" style={{ height: 240, marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 6 }} />}
+            </div>
+          )}
+          {kind === "video" && (
+            <div style={{ gridColumn: "1 / -1" }}>
+              <div style={{ marginBottom: 6 }}>อัปโหลดคลิปสั้น (MP4 ไม่เกิน {MAX_VIDEO_MB} MB) <input type="file" accept="video/mp4,video/webm" onChange={onPickVideo} /></div>
+              <div style={{ marginBottom: 6 }}>หรือใส่ลิงก์วิดีโอ (ไฟล์ .mp4 ที่ฝากไว้ที่อื่น เช่น Cloudflare R2 / Google Drive ลิงก์ตรง) <input value={vidUrl} onChange={(e) => setVidUrl(e.target.value)} style={{ ...inp, width: 420 }} placeholder="https://.../promo.mp4 หรือลิงก์แชร์ Google Drive" disabled={!!vidFile} /></div>
+              {vidUrl.trim() && toDirectVideoUrl(vidUrl) !== vidUrl.trim() && <div style={{ fontSize: 12, color: "#166534", marginBottom: 6 }}>✔ ลิงก์ Google Drive — ระบบจะแปลงเป็นลิงก์ไฟล์ตรงให้ (ไฟล์ต้องตั้งแชร์ "ทุกคนที่มีลิงก์")</div>}
+              <div style={{ fontSize: 12, color: "#6b7280" }}>แนะนำคลิปแนวตั้ง 1080×1920 ยาว 15–30 วินาที (ความละเอียด 720p ก็พอ) — จอจะเล่นจนจบคลิปแล้วไปสไลด์ถัดไป ปิดเสียงเป็นค่าเริ่มต้น (เปิดเสียงที่จอด้วย &sound=1)</div>
+              {vidFile && <video src={vidFile.preview} controls muted style={{ height: 240, marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 6, background: "#000" }} />}
             </div>
           )}
           {kind === "vehicle" && (

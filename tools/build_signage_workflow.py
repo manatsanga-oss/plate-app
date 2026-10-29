@@ -9,12 +9,13 @@ OUT = os.path.join(D, "Signage_API_Workflow.json")
 DDL_SQL = """CREATE TABLE IF NOT EXISTS signage_items (
   id SERIAL PRIMARY KEY,
   branch_code TEXT NOT NULL DEFAULT 'SCY06',
-  kind TEXT NOT NULL,                 -- image | vehicle | text | queue | line
+  kind TEXT NOT NULL,                 -- image | video | vehicle | text | queue | line
   title TEXT,
-  image_base64 TEXT,                  -- รูปสไลด์ (JPEG ย่อแล้ว ไม่มี prefix)
+  image_base64 TEXT,                  -- รูปสไลด์ (JPEG ย่อแล้ว ไม่มี prefix) / วิดีโอ MP4 สั้น (kind=video, ดู media_mime)
+  media_mime TEXT,                    -- NULL=image/jpeg · video/mp4 · video/webm (ไฟล์ใน image_base64)
   color_id INT,                       -- vehicle: master color (moto_color_images / ราคา type_id)
   series_name TEXT, brand_name TEXT,
-  payload JSONB,                      -- vehicle: promo/note/type_name · text: text · line: line_id
+  payload JSONB,                      -- vehicle: promo/note/type_name · text: text · line: line_id · video: url (ลิงก์ภายนอกแทนไฟล์)
   duration_sec INT NOT NULL DEFAULT 10,
   sort_order INT NOT NULL DEFAULT 0,
   active BOOLEAN NOT NULL DEFAULT true,
@@ -24,7 +25,8 @@ DDL_SQL = """CREATE TABLE IF NOT EXISTS signage_items (
   created_by TEXT, created_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS screen TEXT NOT NULL DEFAULT 'all';
-ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS zone INT NOT NULL DEFAULT 1;"""
+ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS zone INT NOT NULL DEFAULT 1;
+ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS media_mime TEXT;"""
 
 BUILD = r"""// signage-api: สไลด์จอประชาสัมพันธ์หน้าร้าน (signage_items) — user 2026-10-28
 // list_items (ไม่ส่งรูป) · get_image · save_item (insert/update) · delete_item · reorder — เส้นตรง Webhook→Code→PG→Shape→Respond
@@ -36,7 +38,8 @@ const sNum = (v) => { const n = Number(String(v == null ? '' : v).replace(/,/g, 
 const sBool = (v) => (v === true || v === 'true' || v === 1 || v === '1') ? 'true' : 'false';
 const sJson = (v) => (v && typeof v === 'object') ? `'${esc(JSON.stringify(v))}'::jsonb` : (typeof v === 'string' && v.trim() ? `'${esc(v)}'::jsonb` : 'NULL');
 const DDL = `__DDL__`;
-const COLS = "id, branch_code, kind, title, color_id, series_name, brand_name, payload, duration_sec, sort_order, active, start_date, end_date, screen, zone, created_by, created_at, updated_at, (image_base64 IS NOT NULL) AS has_image";
+const COLS = "id, branch_code, kind, title, color_id, series_name, brand_name, payload, duration_sec, sort_order, active, start_date, end_date, screen, zone, media_mime, created_by, created_at, updated_at, (image_base64 IS NOT NULL) AS has_image, COALESCE(length(image_base64), 0) AS media_len";
+const sMime = (v) => { const t = String(v || '').trim().toLowerCase(); return ['video/mp4', 'video/webm'].includes(t) ? t : null; };
 const sZone = (v) => { const n = parseInt(v); return [1, 2, 3].includes(n) ? n : 1; };
 const sScreen = (v) => { const t = String(v == null ? 'all' : v).trim(); return ['1', '2', '3', '4'].includes(t) ? t : 'all'; };
 
@@ -75,19 +78,22 @@ if (action === 'save_item') {
     if ('brand_name' in b) sets.push(`brand_name = ${sTxt(b.brand_name)}`);
     if ('screen' in b) sets.push(`screen = '${sScreen(b.screen)}'`);
     if ('zone' in b) sets.push(`zone = ${sZone(b.zone)}`);
-    if (img) sets.push(`image_base64 = '${img}'`);
+    if (img) { sets.push(`image_base64 = '${img}'`); sets.push(`media_mime = ${sMime(b.media_mime) ? `'${sMime(b.media_mime)}'` : 'NULL'}`); }
     if (!sets.length) return [{ json: { query: "SELECT 'nothing to update' AS __error" } }];
     sets.push('updated_at = now()');
     return [{ json: { query: `${DDL}
 UPDATE signage_items SET ${sets.join(', ')} WHERE id = ${id} RETURNING ${COLS};` } }];
   }
   const kind = String(b.kind || '').trim();
-  if (!['image', 'vehicle', 'text', 'queue', 'line'].includes(kind)) return [{ json: { query: "SELECT 'bad kind' AS __error" } }];
+  if (!['image', 'video', 'vehicle', 'text', 'queue', 'line'].includes(kind)) return [{ json: { query: "SELECT 'bad kind' AS __error" } }];
   if (kind === 'image' && !img) return [{ json: { query: "SELECT 'missing image' AS __error" } }];
+  const vurl = (b.payload && typeof b.payload === 'object') ? String(b.payload.url || '').trim() : '';
+  if (kind === 'video' && !img && !/^https?:\/\//i.test(vurl)) return [{ json: { query: "SELECT 'missing video' AS __error" } }];
+  const mime = kind === 'video' && img ? (sMime(b.media_mime) || 'video/mp4') : null;
   const br = String(b.branch_code || 'SCY06').toUpperCase().slice(0, 5);
   return [{ json: { query: `${DDL}
-INSERT INTO signage_items (branch_code, kind, title, image_base64, color_id, series_name, brand_name, payload, duration_sec, sort_order, active, start_date, end_date, screen, zone, created_by)
-VALUES ('${esc(br)}', '${esc(kind)}', ${sTxt(b.title)}, ${img ? `'${img}'` : 'NULL'}, ${sNum(b.color_id)}, ${sTxt(b.series_name)}, ${sTxt(b.brand_name)}, ${sJson(b.payload)},
+INSERT INTO signage_items (branch_code, kind, title, image_base64, media_mime, color_id, series_name, brand_name, payload, duration_sec, sort_order, active, start_date, end_date, screen, zone, created_by)
+VALUES ('${esc(br)}', '${esc(kind)}', ${sTxt(b.title)}, ${img ? `'${img}'` : 'NULL'}, ${mime ? `'${mime}'` : 'NULL'}, ${sNum(b.color_id)}, ${sTxt(b.series_name)}, ${sTxt(b.brand_name)}, ${sJson(b.payload)},
   ${Math.max(3, Number(b.duration_sec) || 10)}, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM signage_items WHERE branch_code = '${esc(br)}'), true, ${sTxt(b.start_date)}, ${sTxt(b.end_date)}, '${sScreen(b.screen)}', ${sZone(b.zone)}, ${sTxt(b.created_by)})
 RETURNING ${COLS};` } }];
 }
@@ -131,16 +137,18 @@ GETIMG = r"""// เสิร์ฟรูปสไลด์ให้จอป้�
 const q = $input.first().json.query || {};
 let id = parseInt(q.id);
 if (!Number.isFinite(id) || id < 1) id = 0;
-return [{ json: { query: "SELECT image_base64 FROM signage_items WHERE id = " + id + " LIMIT 1" } }];
+return [{ json: { query: "SELECT image_base64, media_mime FROM signage_items WHERE id = " + id + " LIMIT 1" } }];
 """
 TOBIN = r"""// แปลง base64 เป็น JPEG binary (ต้องใช้ prepareBinaryData ไม่งั้นได้ 0 bytes)
 const row = $input.first().json || {};
 let b64 = String(row.image_base64 || '').replace(/^data:[^,]+,/, '');
 let mime = 'image/jpeg', fname = 'slide.jpg';
+if (row.media_mime === 'video/mp4') { mime = 'video/mp4'; fname = 'slide.mp4'; }
+else if (row.media_mime === 'video/webm') { mime = 'video/webm'; fname = 'slide.webm'; }
 if (!b64) { b64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='; mime = 'image/png'; fname = 'blank.png'; }
 const buffer = Buffer.from(b64, 'base64');
 const binaryData = await this.helpers.prepareBinaryData(buffer, fname, mime);
-return [{ json: {}, binary: { data: binaryData } }];
+return [{ json: { mime }, binary: { data: binaryData } }];
 """
 pg_tpl = next(n for n in w["nodes"] if n["type"] == "n8n-nodes-base.postgres")
 w["nodes"] += [
@@ -149,7 +157,7 @@ w["nodes"] += [
     {"parameters": {"jsCode": GETIMG}, "id": "sgimg02", "name": "Build get_image SQL", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [420, 560]},
     {"parameters": {"operation": "executeQuery", "query": "={{ $json.query }}", "options": {}}, "id": "sgimg03", "name": "PG Image", "type": "n8n-nodes-base.postgres", "typeVersion": pg_tpl["typeVersion"], "position": [640, 560], "credentials": {}},
     {"parameters": {"jsCode": TOBIN}, "id": "sgimg04", "name": "Image To Binary", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [860, 560]},
-    {"parameters": {"respondWith": "binary", "options": {"responseHeaders": {"entries": [{"name": "Content-Type", "value": "image/jpeg"}, {"name": "Cache-Control", "value": "public, max-age=300"}, {"name": "Access-Control-Allow-Origin", "value": "*"}]}}},
+    {"parameters": {"respondWith": "binary", "options": {"responseHeaders": {"entries": [{"name": "Content-Type", "value": "={{ $json.mime || 'image/jpeg' }}"}, {"name": "Accept-Ranges", "value": "none"}, {"name": "Cache-Control", "value": "public, max-age=300"}, {"name": "Access-Control-Allow-Origin", "value": "*"}]}}},
      "id": "sgimg05", "name": "Respond Image", "type": "n8n-nodes-base.respondToWebhook", "typeVersion": 1.5, "position": [1080, 560]},
 ]
 w["connections"].update({

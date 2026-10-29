@@ -38,6 +38,7 @@ export default function SignageDisplayPage() {
   const [cursorOn, setCursorOn] = useState(false);   // ซ่อนเมาส์เมื่อนิ่งเกิน 3 วิ (จอป้ายไม่ให้ลูกศรค้าง) — ขยับแล้วโผล่ ใช้บนคอมได้
   // โหมดดีบักบนจอป้าย (?debug=1): โชว์ UA/ขนาดจอ/log โหลดรูป — ป้าย 972S โหลดรูปไม่ขึ้น (2026-10-28) ดูสาเหตุจากหน้าจอได้โดยไม่ต้องต่อ ADB
   const debug = !!params.get("debug");
+  const sound = !!params.get("sound");   // ?sound=1 เปิดเสียงวิดีโอ (ค่าเริ่มต้นปิดเสียง — autoplay ใน WebView ต้อง muted)
   const [dbg, setDbg] = useState([]);
   const log = (m) => { if (debug) setDbg((p) => [...p.slice(-9), new Date().toLocaleTimeString("th-TH") + " " + m]); };
   useEffect(() => {
@@ -77,12 +78,12 @@ export default function SignageDisplayPage() {
 
   // รูปสไลด์ image: ใช้ลิงก์ JPEG ตรงจาก webhook (v=updated_at กัน cache เก่า) — preload ล่วงหน้าทุกใบ
   useEffect(() => {
-    items.filter((it) => it.kind === "image" && it.has_image).forEach((it) => {
+    items.filter((it) => (it.kind === "image" || it.kind === "video") && it.has_image).forEach((it) => {
       const key = `${it.id}@${it.updated_at}`;
       if (images[key] !== undefined) return;
       const url = SIGNAGE_IMG + it.id + "&v=" + encodeURIComponent(String(it.updated_at || ""));
       setImages((p) => ({ ...p, [key]: url }));
-      const pre = new Image(); pre.src = url;
+      if (it.kind === "image") { const pre = new Image(); pre.src = url; }
     });
   }, [items]); // eslint-disable-line
 
@@ -157,7 +158,7 @@ export default function SignageDisplayPage() {
   const bottomPct = Math.max(10, Math.min(50, Number(params.get("bottom")) || 18));
   const MAIN_H = 1 - bottomPct / 100;
   const zoneItems = (z) => list.filter((it) => (Number(it.zone) || 1) === z);
-  const shared = { images, setImages, colorImgs, queue, log, cashPrice: (id) => cashPrice(id), colorRow: (id) => colorRow(id) };
+  const shared = { images, setImages, colorImgs, queue, log, sound, cashPrice: (id) => cashPrice(id), colorRow: (id) => colorRow(id) };
 
   // ราคาเงินสดของกลุ่มสาขา สำหรับ color_id
   const cashPrice = (colorId) => {
@@ -226,18 +227,20 @@ function useRotation(list) {
     return () => clearTimeout(t);
   }, [idx, list.length, cur?.duration_sec]);
   useEffect(() => { if (idx >= list.length) setIdx(0); }, [list.length]); // eslint-disable-line
-  return { cur, idx: Math.min(idx, Math.max(0, list.length - 1)), n: list.length };
+  const next = () => setIdx((i) => (i + 1) % Math.max(1, list.length));
+  return { cur, idx: Math.min(idx, Math.max(0, list.length - 1)), n: list.length, next };
 }
 
 // ส่วนหลัก: หมุนสไลด์ทุกชนิด; ไม่มีสไลด์ → หน้า idle ชื่อร้าน
 function Rotator({ items, shared, onIndex }) {
   const list = items.length ? items : [{ id: 0, kind: "idle", duration_sec: 30 }];
-  const { cur, idx } = useRotation(list);
+  const { cur, idx, next } = useRotation(list);
   useEffect(() => { onIndex && onIndex(idx, list.length, cur); }, [idx, list.length]); // eslint-disable-line
-  const { images, setImages, colorImgs, queue, log, cashPrice, colorRow } = shared;
+  const { images, setImages, colorImgs, queue, log, sound, cashPrice, colorRow } = shared;
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       {cur.kind === "image" && <ImageSlide it={cur} src={images[`${cur.id}@${cur.updated_at}`]} log={log} onFallback={(dataUrl) => setImages((p) => ({ ...p, [`${cur.id}@${cur.updated_at}`]: dataUrl }))} />}
+      {cur.kind === "video" && <VideoSlide it={cur} src={cur.has_image ? images[`${cur.id}@${cur.updated_at}`] : text(cur.payload?.url)} sound={sound} log={log} onEnded={list.length > 1 ? next : undefined} />}
       {cur.kind === "vehicle" && <VehicleSlide it={cur} img={colorImgs[cur.color_id]} price={cashPrice(cur.color_id)} row={colorRow(cur.color_id)} />}
       {cur.kind === "queue" && <QueueSlide it={cur} queue={queue} />}
       {cur.kind === "line" && <LineSlide it={cur} />}
@@ -300,6 +303,24 @@ function ImageSlide({ it, src, log, onFallback }) {
   return (
     <div style={{ position: "absolute", inset: 0, background: "#000" }}>
       {src ? <img src={src} alt="" onLoad={(e) => log && log(`img #${it.id} loaded ${e.currentTarget.naturalWidth}x${e.currentTarget.naturalHeight}`)} onError={onError} style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <div style={{ display: "grid", placeItems: "center", height: "100%", opacity: .6, fontSize: "3vh" }}>กำลังโหลดรูป…</div>}
+      {it.title && <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "2vh 3vw", fontSize: "4vh", fontWeight: 800, textShadow: "0 2px 12px #000", background: "linear-gradient(rgba(0,0,0,.55), transparent)" }}>{it.title}</div>}
+    </div>
+  );
+}
+
+// สไลด์วิดีโอ (user 2026-10-29): ไฟล์ในระบบผ่าน webhook signage-image (video/mp4) หรือลิงก์ภายนอก payload.url
+// เล่นจบ → ไปสไลด์ถัดไปทันที (ถ้ามีสไลด์เดียวเล่นวน); ตัวจับเวลาของ useRotation ยังเดินตาม duration_sec เป็นเพดานกันค้างเมื่อโหลดไม่ขึ้น
+function VideoSlide({ it, src, sound, log, onEnded }) {
+  const [errSrc, setErrSrc] = useState(null);   // src ที่เล่นไม่ได้ (เปลี่ยน src = ลองใหม่)
+  const err = !!src && errSrc === src;
+  if (!src || err) return <TextSlide it={{ title: it.title || "วิดีโอ", payload: { text: err ? "เล่นวิดีโอไม่ได้" : "กำลังโหลดวิดีโอ…" } }} />;
+  return (
+    <div style={{ position: "absolute", inset: 0, background: "#000" }}>
+      <video key={src} src={src} autoPlay muted={!sound} playsInline loop={!onEnded} preload="auto"
+        onEnded={() => { log && log(`video #${it.id} ended`); onEnded && onEnded(); }}
+        onError={() => { log && log(`video #${it.id} ERROR ${String(src).slice(0, 60)}`); setErrSrc(src); }}
+        onLoadedData={(e) => { log && log(`video #${it.id} loaded ${e.currentTarget.videoWidth}x${e.currentTarget.videoHeight}`); e.currentTarget.play().catch(() => {}); }}
+        style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} />
       {it.title && <div style={{ position: "absolute", top: 0, left: 0, right: 0, padding: "2vh 3vw", fontSize: "4vh", fontWeight: 800, textShadow: "0 2px 12px #000", background: "linear-gradient(rgba(0,0,0,.55), transparent)" }}>{it.title}</div>}
     </div>
   );
