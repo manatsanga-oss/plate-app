@@ -10,7 +10,7 @@ const SIGN_STATUS = { queued: "🕒 รอส่งขึ้นป้าย (เ
 const DISPLAY_BASE = "https://plate-app-y1z1.onrender.com";
 const KINDS = { image: "🖼️ รูปภาพ/โปรโมชั่น", video: "🎬 วิดีโอ", vehicle: "🏍️ รถแนะนำ + ราคา", text: "📢 ประกาศข้อความ", queue: "🎫 คิวศูนย์บริการ", line: "💚 QR LINE OA" };
 // ร้านมีจอ 2 ขนาด — สไลด์เลือกได้ว่าโชว์ทุกจอหรือเฉพาะจอ 1/2; แต่ละจอเปิด /signage?branch=..&screen=1|2 (user 2026-10-28)
-const SCREENS = { all: "ทุกจอ", 1: "จอ 1 (32\" หน้าร้าน)", 2: "จอ 2 (49\")" };
+const SCREENS = { all: "ทุกจอ", 1: "จอ 1 (32\" แนวตั้ง)", 2: "จอ 2 (49\" แนวนอน)" };   // ป้ายจริง 2 จอ คนละโปรแกรม: จอ 1 1080x1920 / จอ 2 1920x1080 (2026-10-30 เลิกต่อ HDMI จอ 2)
 // จอที่แบ่ง 3 ส่วน (จอ 2 เปิด /signage?...&split=3): สไลด์เลือก "ส่วน" ที่จะโชว์ — 1 สไลด์หลักด้านบน (75%) / 2 รูปเล็กมุมขวาบน (เฉพาะรูป) / 3 ข้อความด้านล่าง (25%) — จอเต็มไม่สนค่านี้
 const ZONES = { 1: "ส่วนหลัก (บน)", 2: "รูปเล็กมุมขวาบน", 3: "ข้อความด้านล่าง" };
 const MAX_W = 1080, MAX_H = 1920;
@@ -98,7 +98,7 @@ export default function SignageAdminPage({ currentUser }) {
   const [imgFile, setImgFile] = useState(null);   // {b64, w, h, preview}
   const [vidFile, setVidFile] = useState(null);   // {b64, mime, sizeMb, sec, preview}
   const [vidUrl, setVidUrl] = useState("");
-  const [pushSign, setPushSign] = useState(true);   // ส่งขึ้นจอป้าย 1 หลังบันทึก
+  const [pushSign, setPushSign] = useState(true);   // ส่งขึ้นจอป้ายหลังบันทึก
   const [signMin, setSignMin] = useState(2);        // เล่นวนบนป้ายกี่นาที (ป้ายวนคลิปซ้ำให้ครบ)
   // master สำหรับรถแนะนำ
   const [brands, setBrands] = useState([]); const [series, setSeries] = useState([]); const [colors, setColors] = useState([]);
@@ -205,7 +205,7 @@ export default function SignageAdminPage({ currentUser }) {
   // สั่ง n8n ส่งสไลด์วิดีโอขึ้นป้าย แล้วคอยอ่านสถานะจาก payload.sign_status ทุก 5 วินาที (งานใช้เวลา 1–4 นาที รอแปลงไฟล์ฝั่งคลาวด์ป้าย)
   async function pushToSign(id, minutes, payload0) {
     const loop = Math.max(10, Math.round((Number(minutes) || 2) * 60));
-    setMsg("⏳ กำลังส่งขึ้นจอป้าย 1 … (ประมาณ 1–4 นาที จอเปลี่ยนเองเมื่อเสร็จ)");
+    setMsg("⏳ กำลังส่งขึ้นจอป้าย … (ประมาณ 1–4 นาที จอเปลี่ยนเองเมื่อเสร็จ)");
     try {
       const cur = payload0 || items.find((x) => x.id === id)?.payload || {};
       const r = await post(SIGNAGE_API, { action: "save_item", id, payload: { ...cur, sign_status: "queued", sign_error: null, sign_loop_sec: loop, sign_with_web: true } });
@@ -217,7 +217,7 @@ export default function SignageAdminPage({ currentUser }) {
       const d = parseList(await post(SIGNAGE_API, { action: "list_items", branch_code: branch }).catch(() => null));
       const rows = Array.isArray(d) ? d : []; setItems(rows);
       const st = rows.find((x) => x.id === id)?.payload?.sign_status;
-      if (st === "done") { setMsg("✅ คลิปอยู่บนจอป้าย 1 แล้ว"); return; }
+      if (st === "done") { setMsg("✅ คลิปอยู่บนจอป้ายแล้ว"); return; }
       if (st === "error") { setMsg("❌ ส่งขึ้นป้ายไม่สำเร็จ: " + (rows.find((x) => x.id === id)?.payload?.sign_error || "")); return; }
     }
     setMsg("⚠️ ยังส่งไม่เสร็จ (เกิน 5 นาที) — กดรีเฟรชดูสถานะในตารางอีกครั้ง (ถ้าค้าง \"รอส่ง\" นาน แสดงว่าเครื่อง Pi ที่ร้านไม่ได้ทำงาน)");
@@ -247,7 +247,7 @@ export default function SignageAdminPage({ currentUser }) {
     <div style={{ padding: 20, fontFamily: "Tahoma, sans-serif" }}>
       <h2 style={{ margin: "0 0 4px" }}>📺 จอประชาสัมพันธ์หน้าร้าน</h2>
       <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 12 }}>
-        จอ 1 (32" หน้าร้าน): เครื่องที่ร้านส่ง "รูปภาพ + วิดีโอ" ของจอ 1 ขึ้นป้ายเองเมื่อแก้ตาราง (1–4 นาที) · หน้าเว็บสำหรับคีออส/จอ 2: <a href={`${displayUrl}&screen=1`} target="_blank" rel="noreferrer">{displayUrl}&screen=1</a> · <a href={`${displayUrl}&screen=2`} target="_blank" rel="noreferrer">{displayUrl}&screen=2</a>
+        ป้าย 2 จอ: จอ 1 (32" แนวตั้ง) เล่นสไลด์ "ทุกจอ/จอ 1" · จอ 2 (49" แนวนอน) เล่นสไลด์ "ทุกจอ/จอ 2" (รูปควรเป็นแนวนอน) — เครื่องที่ร้านส่งสไลด์ทุกชนิด (ยกเว้นลิงก์วิดีโอภายนอก) ขึ้นป้ายเองเมื่อแก้ตาราง (1–4 นาทีต่อจอ) · ส่วนแบ่ง 3 มีผลเฉพาะหน้าเว็บ: <a href={`${displayUrl}&screen=1`} target="_blank" rel="noreferrer">{displayUrl}&screen=1</a> · <a href={`${displayUrl}&screen=2`} target="_blank" rel="noreferrer">{displayUrl}&screen=2</a>
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 14, flexWrap: "wrap" }}>
         <label>สาขา <select value={branch} onChange={(e) => setBranch(e.target.value)} style={inp}>
@@ -280,7 +280,7 @@ export default function SignageAdminPage({ currentUser }) {
                     <span style={{ fontSize: 13, color: "#374151" }}>🎬 {it.has_image ? `ไฟล์ในระบบ ${(Number(it.media_len || 0) * 0.75 / 1048576).toFixed(1)} MB` : it.payload?.url ? <a href={it.payload.url} target="_blank" rel="noreferrer">{String(it.payload.url).slice(0, 50)}…</a> : "ไม่มีวิดีโอ"}
                       {it.has_image && <div style={{ marginTop: 4 }}>
                         {it.payload?.sign_status && <div style={{ fontSize: 12, color: it.payload.sign_status === "error" ? "#b91c1c" : it.payload.sign_status === "done" ? "#166534" : "#92400e" }}>{SIGN_STATUS[it.payload.sign_status] || it.payload.sign_status}{it.payload.sign_done_at ? ` ${it.payload.sign_done_at}` : ""}{it.payload.sign_video_sec ? ` · วน ${Math.round(it.payload.sign_video_sec / 60)} นาที` : ""}{it.payload.sign_error ? ` (${it.payload.sign_error})` : ""}</div>}
-                        <button onClick={() => { const m = window.prompt("ให้คลิปเล่นวนบนป้ายกี่นาที (ต่อรอบ สลับกับรูป)", String(it.payload?.sign_video_sec ? Math.round(it.payload.sign_video_sec / 60) : signMin)); if (m != null && Number(m) > 0) pushToSign(it.id, Number(m), it.payload || {}); }} disabled={busy || ["queued", "uploading"].includes(it.payload?.sign_status)} style={{ ...btn, padding: "3px 8px", fontSize: 12, background: "#dbeafe", color: "#1e3a8a", marginTop: 2 }}>📺 ส่งขึ้นจอป้าย 1</button>
+                        <button onClick={() => { const m = window.prompt("ให้คลิปเล่นวนบนป้ายกี่นาที (ต่อรอบ สลับกับรูป)", String(it.payload?.sign_video_sec ? Math.round(it.payload.sign_video_sec / 60) : signMin)); if (m != null && Number(m) > 0) pushToSign(it.id, Number(m), it.payload || {}); }} disabled={busy || ["queued", "uploading"].includes(it.payload?.sign_status)} style={{ ...btn, padding: "3px 8px", fontSize: 12, background: "#dbeafe", color: "#1e3a8a", marginTop: 2 }}>📺 ส่งขึ้นจอป้าย</button>
                       </div>}
                     </span>
                   )}
@@ -335,9 +335,9 @@ export default function SignageAdminPage({ currentUser }) {
               <div style={{ marginBottom: 6 }}>หรือใส่ลิงก์วิดีโอ (ไฟล์ .mp4 ที่ฝากไว้ที่อื่น เช่น Cloudflare R2 — Google Drive ใช้ไม่ได้) <input value={vidUrl} onChange={(e) => setVidUrl(e.target.value)} style={{ ...inp, width: 420 }} placeholder="https://.../promo.mp4 (ลิงก์ไฟล์ตรง เช่น Cloudflare R2)" disabled={!!vidFile} /></div>
               {isGoogleDrive(vidUrl) && <div style={{ fontSize: 12, color: "#b91c1c", marginBottom: 6 }}>⚠️ ลิงก์ Google Drive เล่นบนจอไม่ได้ (Google บล็อกการฝังจากเว็บอื่น) — ดาวน์โหลดไฟล์แล้วอัปโหลดเข้าระบบแทน</div>}
               <div style={{ marginBottom: 6, padding: "6px 8px", background: "#eff6ff", borderRadius: 6 }}>
-                <label><input type="checkbox" checked={pushSign} onChange={(e) => setPushSign(e.target.checked)} disabled={!vidFile && !!vidUrl.trim()} /> <b>📺 ส่งขึ้นจอป้าย 1 (32" หน้าร้าน) ด้วย</b></label>{" "}
+                <label><input type="checkbox" checked={pushSign} onChange={(e) => setPushSign(e.target.checked)} disabled={!vidFile && !!vidUrl.trim()} /> <b>📺 ส่งขึ้นจอป้ายด้วย (จอตามที่เลือกด้านบน)</b></label>{" "}
                 เล่นวน <input type="number" min={1} max={30} value={signMin} onChange={(e) => setSignMin(e.target.value)} style={{ ...inp, width: 60 }} /> นาที สลับกับรูป/ข้อความของจอ 1
-                <div style={{ fontSize: 12, color: "#1e3a8a", marginTop: 2 }}>จอป้าย 1 เล่นผ่านระบบของป้ายเอง (ไม่ผ่านหน้าเว็บ): เครื่องที่ร้านจะประกอบ "รูปภาพ + วิดีโอ" ของจอ 1 ตามลำดับในตารางเป็นรายการเดียวแล้วส่งขึ้นป้ายเอง ใช้เวลา 1–4 นาที — สไลด์ข้อความ/รถแนะนำ/คิว/QR ไม่ขึ้นจอป้าย 1 และลิงก์ภายนอกส่งขึ้นป้ายไม่ได้ (ต้องอัปโหลดไฟล์)</div>
+                <div style={{ fontSize: 12, color: "#1e3a8a", marginTop: 2 }}>จอป้ายเล่นผ่านระบบของป้ายเอง: เครื่องที่ร้านจะประกอบสไลด์ของแต่ละจอตามลำดับในตารางเป็นรายการเดียวแล้วส่งขึ้นป้ายเอง ใช้เวลา 1–4 นาที — รูป/วิดีโอเล่นแบบไฟล์ ส่วนข้อความ/รถแนะนำ/คิว/QR LINE ป้ายเปิดหน้าเว็บของสไลด์นั้นตามวินาทีที่ตั้ง; ลิงก์วิดีโอภายนอกส่งขึ้นป้ายไม่ได้ (ต้องอัปโหลดไฟล์)</div>
               </div>
               <div style={{ fontSize: 12, color: "#6b7280" }}>แนะนำคลิปแนวตั้ง 1080×1920 ยาว 15–30 วินาที (ความละเอียด 720p ก็พอ) — คีออส/PC เล่นจนจบคลิปแล้วไปสไลด์ถัดไป ปิดเสียงเป็นค่าเริ่มต้น (เปิดเสียงที่จอด้วย &sound=1)</div>
               {vidFile && <video src={vidFile.preview} controls muted style={{ height: 240, marginTop: 8, border: "1px solid #e5e7eb", borderRadius: 6, background: "#000" }} />}

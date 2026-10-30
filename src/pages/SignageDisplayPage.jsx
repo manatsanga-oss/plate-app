@@ -152,7 +152,9 @@ export default function SignageDisplayPage() {
     { id: -6, kind: "text", title: "โปรโมชั่นเดือนนี้", payload: { text: "เปลี่ยนถ่ายน้ำมันเครื่อง ฟรีค่าแรง" }, duration_sec: 8, zone: 3 },
   ] : null;
   // ป้าย Android (972S) เล่น <video> ในหน้าเว็บแล้วแอปล้ม → ข้ามสไลด์วิดีโอบนป้ายเสมอ (ป้ายเล่นคลิปผ่านโปรแกรม XiaoHui ที่ n8n ส่งให้แทน); คีออส/PC ยังเล่นได้
-  const list = (demo || items).filter((it) => !(IS_ANDROID && it.kind === "video"));
+  // ?item=<id> = โชว์สไลด์เดียวค้างไว้ (ป้าย 972S ใช้เป็น widget html ในโปรแกรม XiaoHui สำหรับสไลด์ชนิด ข้อความ/รถแนะนำ/คิว/LINE ที่ป้ายเล่นเองไม่ได้ 2026-10-30)
+  const only = (params.get("item") || "").trim();
+  const list = (demo || items).filter((it) => !(IS_ANDROID && it.kind === "video")).filter((it) => !only || String(it.id) === only);
   // แบ่งจอ (user 2026-10-29 จอ 2): ?split=3 → ส่วน 1 = สไลด์หลักด้านบน (75%) · ส่วน 2 = รูปเล็กมุมขวาบน (PiP) · ส่วน 3 = ข้อความด้านล่าง (25%)
   // ?split=2 → บน/ล่างครึ่งเท่ากัน; ส่วนที่ย่อใช้ CSS zoom ให้ layout เดิม (หน่วย vh/vw) พอดีความสูงของส่วน
   const split = Math.max(1, Math.min(3, Number(params.get("split")) || 1));
@@ -161,7 +163,7 @@ export default function SignageDisplayPage() {
   const bottomPct = Math.max(10, Math.min(50, Number(params.get("bottom")) || 18));
   const MAIN_H = 1 - bottomPct / 100;
   const zoneItems = (z) => list.filter((it) => (Number(it.zone) || 1) === z);
-  const reloadAfterVideo = IS_ANDROID && !params.get("noreload");
+  const reloadAfterVideo = IS_ANDROID && !params.get("noreload") && !only;
   const shared = { images, setImages, colorImgs, queue, log, sound, reloadAfterVideo, cashPrice: (id) => cashPrice(id), colorRow: (id) => colorRow(id) };
 
   // ราคาเงินสดของกลุ่มสาขา สำหรับ color_id
@@ -212,7 +214,7 @@ export default function SignageDisplayPage() {
       <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "1.2vh 2.5vw", display: "flex", justifyContent: "space-between", alignItems: "center", background: "linear-gradient(transparent, rgba(0,0,0,.55))", fontSize: "2.2vh", pointerEvents: "none" }}>
         <span style={{ opacity: .9 }}>{dateStr}</span>
         <span style={{ display: "flex", gap: "0.6vh" }}>
-          {split === 1 && Array.from({ length: pos.n }).map((_, i) => <span key={i} style={{ width: "1.1vh", height: "1.1vh", borderRadius: "50%", background: i === pos.idx ? "#fbbf24" : "rgba(255,255,255,.35)" }} />)}
+          {split === 1 && pos.n > 1 && Array.from({ length: pos.n }).map((_, i) => <span key={i} style={{ width: "1.1vh", height: "1.1vh", borderRadius: "50%", background: i === pos.idx ? "#fbbf24" : "rgba(255,255,255,.35)" }} />)}
         </span>
         <span style={{ fontWeight: 700, fontSize: "3vh" }}>{timeStr} น.</span>
       </div>

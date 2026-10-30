@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""signpush v2 — สร้างโปรแกรมจอ 1 (ป้าย Android 972S) ทั้งหมดจากสไลด์ในเมนูจอประชาสัมพันธ์ ผ่าน XiaoHui Cloud (led-cloud.com)
+"""signpush v3 — สร้างโปรแกรมป้าย Android 972S จอละ 1 โปรแกรม (จอ 1 แนวตั้ง = สไลด์ ทุกจอ/จอ 1 · จอ 2 แนวนอน = สไลด์ ทุกจอ/จอ 2) จากเมนูจอประชาสัมพันธ์ ผ่าน XiaoHui Cloud (led-cloud.com)
 
 รันบน shoppi (Raspberry Pi ที่ร้าน ป.เปา) เป็น systemd service signpush.service — n8n บน Render ทำงานนี้ไม่ไหว (CPU 100% → ล้ม 2026-10-29)
 ทำไมต้องทำแบบนี้ (2026-10-29):
   - WebView ของป้ายเล่น <video> ในหน้าเว็บแล้วแอป Magic Player ล้ม → วิดีโอต้องเล่นแบบ native
   - ป้ายไม่สลับระหว่างหลายโปรแกรมบนเครื่อง (เล่นแต่โปรแกรมแรก) → รูป+คลิปต้องอยู่ใน "โปรแกรมเดียว" ด้วยพื้นที่ Mixed Broadcast (type mixingArea)
 การทำงาน (poll ทุก POLL_SEC):
-  list_items → สไลด์ของจอ 1 ที่เปิดอยู่ (screen all/1, อยู่ในช่วงวันที่) เรียงตามลำดับ: image → รูป (วินาทีตาม duration_sec), video (ไฟล์ในระบบ) → คลิปซ้ำให้ครบ payload.sign_loop_sec
-  ชนิดอื่น (ข้อความ/รถแนะนำ/คิว/LINE) ป้ายแสดงไม่ได้ → ข้าม
+  list_items → สไลด์ของแต่ละจอที่เปิดอยู่ (screen all/จอนั้น, อยู่ในช่วงวันที่) เรียงตามลำดับ: image → รูป (วินาทีตาม duration_sec), video (ไฟล์ในระบบ) → คลิปซ้ำให้ครบ payload.sign_loop_sec
+  text/vehicle/queue/line → widget html เปิดหน้าเว็บสไลด์เดียว (?item=id) ตามวินาทีที่ตั้ง (ป้ายเล่น WebView ได้ ยกเว้นวิดีโอ)
   ลายเซ็นของชุดสไลด์เปลี่ยน (เพิ่ม/ลบ/แก้/หมดอายุ/กด "ส่งขึ้นจอป้าย") → อัปโหลดไฟล์ที่ยังไม่มีบนคลาวด์ป้าย → แก้โปรแกรม MIX → ถอดโปรแกรมอื่นออกจากเครื่อง → ส่งโปรแกรม (ส่งซ้ำกันพลาด) → ลบไฟล์ที่ไม่ใช้
   สถานะเขียนกลับ payload.sign_status ของสไลด์วิดีโอ (queued/uploading/done/error) ให้เมนูแสดง
 API led-cloud แกะจากหน้าเว็บ 2026-10-29 (ไม่มีเอกสาร): oauth/key + oauth/token (RSA PKCS#1 v1.5), resource/upload/multipart/{init,part,complete}, resource/list, resource/preview,
@@ -21,6 +21,8 @@ from cryptography.hazmat.primitives.asymmetric import padding
 
 SIGNAGE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-api"
 SIGNAGE_IMG = "https://n8n-new-project-gwf2.onrender.com/webhook/signage-image?id="
+DISPLAY_URL = "https://plate-app-y1z1.onrender.com/signage"   # หน้าเว็บจอประชาสัมพันธ์ (ใช้กับ widget html)
+WEB_KINDS = ("text", "vehicle", "queue", "line")
 BRANCH = os.environ.get("SIGNPUSH_BRANCH", "SCY06")
 POLL_SEC = int(os.environ.get("SIGNPUSH_POLL", "20"))
 SECRETS = os.path.expanduser("~/nvr/signpush_secrets.json")
@@ -30,11 +32,14 @@ CFG = {
     "base": "https://www.led-cloud.com",
     "oss": "https://dms-singapore.oss-ap-southeast-1.aliyuncs.com/",
     "client": "dms-browser2",
-    "device": "972S-2C6-00B9B",      # จอ 1 (32" หน้าร้าน ป.เปา)
-    "mix_program": 1293482,          # "PorPaor Mix (จอ 1)" — พื้นที่ Mixed Broadcast เต็มจอ (สร้างจากหน้าเว็บ 2026-10-29)
     "chunk": 5242880,
     "default_loop": 120,             # คลิปวนกี่วินาทีถ้าเมนูไม่ได้ตั้ง
 }
+# จอละ 1 โปรแกรม Mixed Broadcast (สร้างบนคลาวด์แล้ว: จอ 1 จากหน้าเว็บ 2026-10-29, จอ 2 ผ่าน POST /v1/program/add 2026-10-30) — คลาวด์ปฏิเสธส่งโปรแกรมที่ขนาดไม่ตรงกับที่เครื่องรายงาน (device/{sn}/info width/height/rotation)
+SCREENS = [
+    {"screen": "1", "name": "จอ 1 (32\" แนวตั้ง)", "device": "972S-2C6-00B9B", "program": 1293482, "width": 1080, "height": 1920},
+    {"screen": "2", "name": "จอ 2 (49\" แนวนอน)", "device": "972S-2C6-01204", "program": 1295100, "width": 1920, "height": 1080},
+]
 
 
 def log(*a):
@@ -45,7 +50,7 @@ def load_state():
     try:
         return json.load(open(STATE, encoding="utf-8"))
     except Exception:
-        return {"sig": "", "resources": {}}
+        return {"sigs": {}, "resources": {}}
 
 
 def save_state(st):
@@ -70,12 +75,12 @@ def set_status(item, **fields):
         log("set_status failed:", e)
 
 
-def screen1_slides(items):
-    """สไลด์ที่จอ 1 ควรแสดงตอนนี้ เรียงตามลำดับในเมนู → [(kind, item, seconds)]"""
+def screen_slides(items, screen):
+    """สไลด์ที่จอนี้ควรแสดงตอนนี้ (screen = ทุกจอ หรือจอนี้) เรียงตามลำดับในเมนู → [(kind, item, seconds)]"""
     today = time.strftime("%Y-%m-%d")
     out, skipped = [], []
     for it in sorted(items, key=lambda x: (int(x.get("sort_order") or 0), int(x.get("id") or 0))):
-        if not it.get("active") or str(it.get("screen") or "all") not in ("all", "1"):
+        if not it.get("active") or str(it.get("screen") or "all") not in ("all", screen):
             continue
         sd, ed = (it.get("start_date") or "")[:10], (it.get("end_date") or "")[:10]
         if (sd and sd > today) or (ed and ed < today):
@@ -87,6 +92,8 @@ def screen1_slides(items):
             p = it.get("payload") or {}
             loop = int(p.get("sign_loop_sec") or 0) or CFG["default_loop"]
             out.append(("video", it, max(10, min(1800, loop))))
+        elif kind in WEB_KINDS:   # ชนิดที่หน้าเว็บวาด (ข้อความ/รถแนะนำ/คิว/QR LINE) → ป้ายเปิดหน้าเว็บสไลด์เดียว (?item=id) เป็น widget html ใน mixingArea (2026-10-30 user ตั้งสไลด์พวกนี้ให้จอ 2)
+            out.append(("html", it, max(5, min(600, int(it.get("duration_sec") or 10)))))
         else:
             skipped.append(f"{kind}#{it.get('id')}")
     return out, skipped
@@ -97,8 +104,8 @@ def slide_key(kind, it):
     return f"{it['id']}@{it.get('updated_at')}" if kind == "image" else f"{it['id']}@{it.get('media_len')}"
 
 
-def signature(slides):
-    parts = [f"{k}:{slide_key(k, it)}:{sec}" for k, it, sec in slides]
+def signature(slides, sc):
+    parts = [f"{k}:{slide_key(k, it)}:{sec}" for k, it, sec in slides] + [f"dev:{sc['device']}:{sc['program']}"]   # เปลี่ยนเครื่อง/โปรแกรม → ส่งใหม่
     return hashlib.sha1("|".join(parts).encode()).hexdigest()
 
 
@@ -232,25 +239,35 @@ def widget_image(rec, sec):
                            "effect": {"duration": int(sec * 1000), "in": 0, "clearScreen": False, "inSpeed": 1000}, "keepAspectRatio": False}}
 
 
+def widget_html(it, screen, sec):
+    """widget หน้าเว็บใน mixingArea (โครงเดียวกับที่หน้าเว็บ led-cloud สร้าง: duration เป็นวินาที, refresh 0 = โหลดใหม่ทุกครั้งที่ถึงคิว)"""
+    url = f"{DISPLAY_URL}?branch={BRANCH}&screen={screen}&item={it['id']}&noreload=1"
+    return {"name": f"html_{it['id']}", "type": "html", "uuid": str(uuid.uuid4()),
+            "attributes": {"offsetX": 0, "offsetY": 0, "duration": int(sec), "refresh": 0, "style": 1, "url": url}}
+
+
 def widget_video(rec):
     return {"name": rec["name"], "type": "video", "uuid": str(uuid.uuid4()),
             "attributes": {"volume": 100, "preview": CFG["oss"] + rec["snapshot"], "duration": int(round(rec["duration"] * 1000)), "resourceId": rec["id"],
                            "src": CFG["oss"] + rec["path"], "originalVideo": False, "keepAspectRatio": False}}
 
 
-def rebuild(slides, skipped, st, creds):
+def rebuild(sc, slides, skipped, st, creds):
+    """อัปโหลดไฟล์ที่ขาด → เขียนโปรแกรมของจอนี้ใหม่ → ถอดโปรแกรมอื่นออกจากเครื่อง → ส่ง (ส่งซ้ำกันพลาด)"""
     videos = [it for k, it, _ in slides if k == "video"]
     for it in videos:
-        set_status(it, sign_status="uploading", sign_error=None, sign_at=time.strftime("%Y-%m-%d %H:%M"))
+        set_status(it, sign_status="uploading", sign_error=None, sign_screen=sc["screen"], sign_at=time.strftime("%Y-%m-%d %H:%M"))
     step = "login"
     try:
         lc = LedCloud(creds["user"], creds["pass"])
         lc.login()
-        widgets, total, used = [], 0.0, set()
+        widgets, total = [], 0.0
         for kind, it, sec in slides:
+            if kind == "html":
+                widgets.append(widget_html(it, sc["screen"], sec)); total += sec
+                continue
             step = f"upload #{it['id']}"
             rec = ensure_resource(lc, st, kind, it)
-            used.add(rec["id"])
             if kind == "image":
                 widgets.append(widget_image(rec, sec)); total += sec
             else:
@@ -259,74 +276,100 @@ def rebuild(slides, skipped, st, creds):
                 widgets += [widget_video(rec) for _ in range(copies)]; total += copies * dur
                 it["_copies"] = copies; it["_vsec"] = round(copies * dur, 1)
         step = "program"
-        p = lc.program(CFG["mix_program"])
+        p = lc.program(sc["program"])
         data = p["data"]
+        W, H = p.get("width") or sc["width"], p.get("height") or sc["height"]
+        if not isinstance(data, dict) or not data.get("attributes"):   # โปรแกรมที่สร้างผ่าน program/add มี data ว่าง → update ด้วย data ไม่ครบโครง = HTTP 500 (2026-10-30) ต้องใส่โครงเต็มเหมือนที่หน้าเว็บสร้าง
+            data = {"uuid": str(uuid.uuid4()), "version": 4, "doubleScreen": False, "backgroundMusic": {}, "children": [], "children2": [], "children3": [], "children4": [], "children5": [],
+                    "name": p["name"], "attributes": {"width": W, "height": H, "language": "en-US"}, "attributes2": {}, "attributes3": {}, "attributes4": {}, "attributes5": {}}
         area = next((c for c in data.get("children") or [] if c.get("type") == "mixingArea"), None)
         if area is None:
-            area = {"motion": True, "name": "mixingArea1", "attributes": {"x": 0, "y": 0, "width": p.get("width", 1080), "height": p.get("height", 1920)}, "type": "mixingArea", "widgets": [], "carousel": True, "uuid": str(uuid.uuid4())}
+            area = {"motion": True, "name": "mixingArea1", "attributes": {"x": 0, "y": 0, "width": W, "height": H}, "type": "mixingArea", "widgets": [], "carousel": True, "uuid": str(uuid.uuid4())}
             data["children"] = [area]
-        area["attributes"].update({"x": 0, "y": 0, "width": p.get("width", 1080), "height": p.get("height", 1920)})
+        area["attributes"].update({"x": 0, "y": 0, "width": W, "height": H})
         area["widgets"] = widgets
         area["dataSource"] = json.loads(json.dumps(widgets))
         area["carousel"] = True
-        lc.update_program(CFG["mix_program"], p["name"], round(total, 1), data)
+        lc.update_program(sc["program"], p["name"], round(total, 1), data)
         step = "device"
-        others = [d["uuid"] for d in lc.device_programs(CFG["device"]) if d.get("uuid") and d["uuid"] != p["uuid"]]
-        if others:
-            lc.remove_programs(CFG["device"], others)
-            log(f"  removed {len(others)} other program(s) from device")
-            time.sleep(10)
+        try:
+            others = [d["uuid"] for d in lc.device_programs(sc["device"]) if d.get("uuid") and d["uuid"] != p["uuid"]]
+            if others:   # ป้ายเล่นแต่โปรแกรมแรก → ถอดโปรแกรมอื่น (เช่น HDMI IN) ออกก่อน
+                lc.remove_programs(sc["device"], others)
+                log(f"  removed {len(others)} other program(s) from {sc['device']}")
+                time.sleep(10)
+        except Exception as e:
+            log(f"  remove on {sc['device']} skipped:", e)
         time.sleep(20)   # ให้ไฟล์กระจายขึ้น CDN ก่อน (ส่งทันทีป้ายเคยไม่รับ)
-        task = lc.send([CFG["mix_program"]], CFG["device"])
+        task = lc.send([sc["program"]], sc["device"])
         time.sleep(60)
         try:
-            lc.send([CFG["mix_program"]], CFG["device"])   # ส่งซ้ำกันพลาด
+            lc.send([sc["program"]], sc["device"])   # ส่งซ้ำกันพลาด
         except Exception as e:
             log("  resend skipped:", e)
-        step = "cleanup"
-        try:
-            dead = [r["id"] for r in lc.all_signage_resources() if r["id"] not in used]
-            lc.delete_resources(dead)
-            st["resources"] = {k: v for k, v in st["resources"].items() if v["id"] in used}
-        except Exception as e:
-            log("  cleanup skipped:", e)
         for it in videos:
-            set_status(it, sign_status="done", sign_error=None, sign_copies=it.get("_copies"), sign_video_sec=it.get("_vsec"), sign_task_id=task.get("id"),
+            set_status(it, sign_status="done", sign_error=None, sign_screen=sc["screen"], sign_copies=it.get("_copies"), sign_video_sec=it.get("_vsec"), sign_task_id=task.get("id"),
                        sign_done_at=time.strftime("%Y-%m-%d %H:%M"), sign_total_sec=round(total, 1), sign_skipped=skipped)
-        log(f"  done: {len(widgets)} widgets, {round(total)}s total, task {task.get('id')}, skipped {skipped}")
+        log(f"  {sc['name']} done: {len(widgets)} widgets, {round(total)}s total, task {task.get('id')}, skipped {skipped}")
         return True
     except Exception as e:
         err = f"{step}: {e}"[:300]
-        log("  ERROR", err)
+        log(f"  {sc['name']} ERROR", err)
         traceback.print_exc()
         for it in videos:
-            set_status(it, sign_status="error", sign_error=err)
+            set_status(it, sign_status="error", sign_error=err, sign_screen=sc["screen"])
         return False
+
+
+def cleanup(st, creds, used):
+    """ลบไฟล์ signage_* บนคลาวด์ที่ไม่มีจอไหนใช้แล้ว"""
+    try:
+        lc = LedCloud(creds["user"], creds["pass"])
+        lc.login()
+        dead = [r["id"] for r in lc.all_signage_resources() if r["id"] not in used]
+        lc.delete_resources(dead)
+        st["resources"] = {k: v for k, v in st["resources"].items() if v["id"] in used}
+        if dead:
+            log(f"  cleanup: deleted {len(dead)} unused resource(s)")
+    except Exception as e:
+        log("  cleanup skipped:", e)
 
 
 def tick(st, creds):
     items = api_items()
-    slides, skipped = screen1_slides(items)
-    if not slides:
-        return
-    sig = signature(slides)
-    queued = any((it.get("payload") or {}).get("sign_status") == "queued" for _, it, _ in slides)
-    if sig == st.get("sig") and not queued:
-        return
-    if sig == st.get("sig_error") and not queued:
-        return   # พังแล้วกับชุดนี้ รอให้เมนูเปลี่ยนก่อนค่อยลองใหม่
-    log(f"change detected: {[(k, it['id'], sec) for k, it, sec in slides]}")
-    if rebuild(slides, skipped, st, creds):
-        st["sig"] = sig; st.pop("sig_error", None)
-    else:
-        st["sig_error"] = sig
-    save_state(st)
+    sigs = st.setdefault("sigs", {})
+    errs = st.setdefault("sig_errors", {})
+    changed, used = False, set()
+    for sc in SCREENS:
+        slides, skipped = screen_slides(items, sc["screen"])
+        if not slides:
+            continue
+        sig = signature(slides, sc)
+        queued = any((it.get("payload") or {}).get("sign_status") == "queued" for _, it, _ in slides)
+        if (sig == sigs.get(sc["screen"]) or sig == errs.get(sc["screen"])) and not queued:
+            continue   # เหมือนเดิม หรือพังแล้วกับชุดนี้ รอให้เมนูเปลี่ยนก่อนค่อยลองใหม่
+        log(f"{sc['name']} change detected: {[(k, it['id'], sec) for k, it, sec in slides]}")
+        if rebuild(sc, slides, skipped, st, creds):
+            sigs[sc["screen"]] = sig; errs.pop(sc["screen"], None)
+        else:
+            errs[sc["screen"]] = sig
+        changed = True
+        save_state(st)
+    if changed:
+        used = set()
+        for sc in SCREENS:
+            for k, it, _ in screen_slides(items, sc["screen"])[0]:
+                rec = st["resources"].get(slide_key(k, it)) if k != "html" else None
+                if rec:
+                    used.add(rec["id"])
+        cleanup(st, creds, used)
+        save_state(st)
 
 
 def main():
     creds = json.load(open(SECRETS, encoding="utf-8"))
     st = load_state()
-    log(f"signpush v2 start branch={BRANCH} poll={POLL_SEC}s device={CFG['device']} program={CFG['mix_program']}")
+    log(f"signpush v3 start branch={BRANCH} poll={POLL_SEC}s screens={[(s['screen'], s['device'], s['program']) for s in SCREENS]}")
     while True:
         try:
             tick(st, creds)
@@ -340,7 +383,7 @@ if __name__ == "__main__":
         creds = json.load(open(SECRETS, encoding="utf-8"))
         st = load_state()
         if len(sys.argv) > 2 and sys.argv[2] == "force":
-            st["sig"] = ""; st.pop("sig_error", None)
+            st["sigs"] = {}; st["sig_errors"] = {}
         tick(st, creds)
     else:
         main()
