@@ -57,19 +57,25 @@ const sched = (action === 'save_schedule' && b.remote_id) ? { remote_id: String(
 return [{ json: { cfg, blasters: BLASTERS, action, slot: String(b.slot || ''), th, dow, today, cmd, sched } }];
 """.replace("__CID__", CLIENT_ID).replace("__SEC__", SECRET).replace("__BASE__", BASE)
 
-SCHED_SQL = """// ตารางเวลาต่ออุปกรณ์ใน Postgres: สร้างตาราง + seed ค่าเริ่มต้น (08:00 เปิด · 17:00 ปิดทีวี · 17:10 ปิดแอร์) + บันทึกเมื่อ save_schedule → คืนทุกแถว
+SCHED_SQL = ("""// ตารางเวลาต่ออุปกรณ์ใน Postgres: สร้างตาราง + seed ค่าเริ่มต้น (08:00 เปิด · 17:00 ปิดทีวี · 17:10 ปิดแอร์) + บันทึกเมื่อ save_schedule → คืนทุกแถว
 const d = $input.first().json;
 const esc = (s) => String(s == null ? '' : s).replace(/'/g, "''");
 const sTxt = (v) => (v == null || String(v).trim() === '') ? 'NULL' : `'${esc(v)}'`;
-let q = `__DDL__\\n__SEED__\\n`;
+let q = `__DDL__
+__SEED__
+`;
 if (d.sched) {
   const s = d.sched;
-  q += `INSERT INTO tuya_device_schedules (remote_id, blaster, kind, name, on_time, off_time, days, enabled, updated_at) VALUES ('${esc(s.remote_id)}', ${sTxt(s.blaster)}, ${sTxt(s.kind)}, ${sTxt(s.name)}, ${sTxt(s.on_time)}, ${sTxt(s.off_time)}, '${esc(s.days)}', ${s.enabled ? 'true' : 'false'}, now())\\n` +
-       `ON CONFLICT (remote_id) DO UPDATE SET blaster = COALESCE(EXCLUDED.blaster, tuya_device_schedules.blaster), kind = COALESCE(EXCLUDED.kind, tuya_device_schedules.kind), name = COALESCE(EXCLUDED.name, tuya_device_schedules.name), on_time = EXCLUDED.on_time, off_time = EXCLUDED.off_time, days = EXCLUDED.days, enabled = EXCLUDED.enabled, updated_at = now();\\n`;
+  q += `INSERT INTO tuya_device_schedules (remote_id, blaster, kind, name, on_time, off_time, days, enabled, updated_at) VALUES ('${esc(s.remote_id)}', ${sTxt(s.blaster)}, ${sTxt(s.kind)}, ${sTxt(s.name)}, ${sTxt(s.on_time)}, ${sTxt(s.off_time)}, '${esc(s.days)}', ${s.enabled ? 'true' : 'false'}, now())
+ON CONFLICT (remote_id) DO UPDATE SET blaster = COALESCE(EXCLUDED.blaster, tuya_device_schedules.blaster), kind = COALESCE(EXCLUDED.kind, tuya_device_schedules.kind), name = COALESCE(EXCLUDED.name, tuya_device_schedules.name), on_time = EXCLUDED.on_time, off_time = EXCLUDED.off_time, days = EXCLUDED.days, enabled = EXCLUDED.enabled, updated_at = now();
+`;
 }
 q += `SELECT remote_id, blaster, kind, name, on_time, off_time, days, enabled, last_fired, to_char(updated_at AT TIME ZONE 'Asia/Bangkok', 'DD/MM HH24:MI') AS updated_local FROM tuya_device_schedules ORDER BY kind, name;`;
 return [{ json: { query: q } }];
-""".replace("__DDL__", re.sub(r"--[^\n]*", "", DDL).replace("\n", " "))   # ตัด comment -- ก่อนยุบบรรทัด (comment กลืน SQL ที่เหลือ → Error in workflow 2026-10-30).replace("__SEED__", SEED)
+"""
+    # ตัด comment -- ก่อนยุบ DDL เป็นบรรทัดเดียว (comment กลืน SQL ที่เหลือ) และแทน __SEED__ ด้วย INSERT ค่าเริ่มต้น
+    .replace("__DDL__", re.sub(r"--[^\n]*", "", DDL).replace("\n", " "))
+    .replace("__SEED__", SEED))
 
 TOKEN_SIGN = HELPERS + """
 const d = $('Prepare').first().json; const t = String(Date.now());
