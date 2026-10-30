@@ -32,7 +32,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
   const [withdrawn, setWithdrawn] = useState([]);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef(null);
-  // รถในช่องซ่อมตอนนี้ (จากกล้อง) — ผู้เบิกเลือกคันที่เบิกให้; รถออกจากช่อง → หายจากรายการและยกเลิกการเลือกอัตโนมัติ (user 2026-10-27)
+  // รถล่าสุดสูงสุด 5 คัน (จากกล้อง, list_bays → vehicles): รถที่ยังอยู่ในช่องมาก่อนเสมอ + รถที่อ่านทะเบียนได้ใน 24 ชม. "ขึ้นค้าง" ไม่หายเองเมื่อออกจากช่อง; ครบ 5 ตัดคันเก่าสุดที่ไม่ได้อยู่ในช่อง; ✕ = เอาออกจากรายการ (user 2026-10-30)
   const [bays, setBays] = useState([]);
   const [baysLoaded, setBaysLoaded] = useState(false);
   const [selectedBay, setSelectedBay] = useState(null); // {zone_source, zone_name, plate_no, plate_province, event_id}
@@ -41,28 +41,25 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
     try {
       const res = await fetch(SQ_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bays" }) });
       const d = await res.json();
-      setBays(Array.isArray(d?.bays) ? d.bays : []);
+      setBays(Array.isArray(d?.vehicles) ? d.vehicles : Array.isArray(d?.bays) ? d.bays : []);
     } catch { /* คงรายการเดิม */ }
     setBaysLoaded(true);
   }
   useEffect(() => { loadBays(); const t = setInterval(loadBays, BAY_POLL_MS); return () => clearInterval(t); }, []);
   useEffect(() => {
     if (!selectedBay) return;
-    const cur = bays.find(b => b.zone_source === selectedBay.zone_source);
-    if (!cur) { // รถออกจากช่องแล้ว (หรือกล้องเห็นช่องว่าง)
-      setSelectedBay(null);
-      setBayNotice(`🚪 รถ ${selectedBay.plate_no || "ไม่ทราบทะเบียน"} ออกจาก${selectedBay.zone_name}แล้ว — ยกเลิกการเลือกรถ`);
-      setTimeout(() => setBayNotice(""), 8000);
-    } else if (cur.plate_no !== selectedBay.plate_no || cur.event_id !== selectedBay.event_id) {
-      setSelectedBay(cur); // กล้องอ่านทะเบียนได้ทีหลัง / คันใหม่เข้าช่องเดิม → อัปเดตตาม
-    }
+    const cur = bays.find(b => b.event_id === selectedBay.event_id) || bays.find(b => selectedBay.plate_no && b.plate_no === selectedBay.plate_no) || (!selectedBay.plate_no ? bays.find(b => b.in_bay && b.zone_source === selectedBay.zone_source) : null);
+    if (!cur) { setSelectedBay(null); setBayNotice(`รถ ${selectedBay.plate_no || "ไม่ทราบทะเบียน"} ถูกเอาออกจากรายการแล้ว — ยกเลิกการเลือกรถ`); setTimeout(() => setBayNotice(""), 8000); }
+    else if (cur !== selectedBay) setSelectedBay(cur); // กล้องอ่านทะเบียนได้ทีหลัง / สถานะในช่องเปลี่ยน → อัปเดตตาม
   }, [bays]); // eslint-disable-line react-hooks/exhaustive-deps
   async function clearBay(b) {
-    if (!window.confirm(`ยืนยันว่ารถ ${b.plate_no || "ไม่ทราบทะเบียน"} ออกจาก${b.zone_name}แล้ว?`)) return;
-    try { await fetch(SQ_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "clear_bay", zone_source: b.zone_source }) }); } catch { /* ignore */ }
+    if (!window.confirm(`เอารถ ${b.plate_no || "ไม่ทราบทะเบียน"} ออกจากรายการ?${b.in_bay ? ` (และถือว่าออกจาก${b.zone_name}แล้ว)` : ""}`)) return;
+    try { await fetch(SQ_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "clear_bay", zone_source: b.in_bay ? b.zone_source : undefined, event_id: b.event_id || undefined }) }); } catch { /* ignore */ }
     loadBays();
   }
   const bayLabel = (b) => `${b.plate_no || "ไม่ทราบทะเบียน"}${b.plate_province ? " " + b.plate_province : ""}`;
+  // กดเลือกรถ → ประวัติเบิกโชว์เฉพาะคันนั้น (จับคู่ด้วย event ของกล้อง หรือทะเบียน) — user 2026-10-30
+  const shown = selectedBay ? withdrawn.filter(w => (selectedBay.event_id && w.bay_event_id === selectedBay.event_id) || (selectedBay.plate_no && w.vehicle_plate === selectedBay.plate_no)) : withdrawn;
   // สกรีนเซฟเวอร์คีออส (user 2026-10-28): ไม่แตะ/ไม่ยิงบาร์โค้ด idle วิ → ซ้อนทับด้วยจอประชาสัมพันธ์ (/signage สไลด์เดียวกับจอหน้าร้าน)
   // แตะจอ/กดคีย์/ยิงบาร์โค้ด → ซ่อนทันที (ช่องสแกนยังโฟกัสอยู่ รหัสที่ยิงไม่หาย) — เฉพาะผู้ใช้ kiosk-*; ปรับเวลาได้ด้วย ?idle=วินาที (0 = ปิด)
   const isKiosk = /^kiosk-/.test(String(currentUser?.username || ""));
@@ -282,22 +279,22 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
             📦 เบิกทั่วไป<div style={{ fontSize: 12, fontWeight: 400, color: "#6b7280" }}>ไม่ระบุรถ</div>
           </button>
           {bays.map(b => {
-            const sel = selectedBay?.zone_source === b.zone_source;
+            const sel = selectedBay && (selectedBay.event_id === b.event_id || (selectedBay.plate_no && selectedBay.plate_no === b.plate_no));
             return (
-              <div key={b.zone_source} style={{ position: "relative" }}>
+              <div key={b.event_id || b.zone_source} style={{ position: "relative" }}>
                 <button onClick={() => { setSelectedBay(b); setTimeout(() => inputRef.current?.focus(), 50); }}
                   style={{ padding: "14px 18px", paddingRight: 36, borderRadius: 10, cursor: "pointer", textAlign: "left", minWidth: 220,
                     border: sel ? "3px solid #f59e0b" : "2px solid #d1d5db", background: sel ? "#fffbeb" : "#fff", color: "#1f2937" }}>
                   <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "monospace", color: b.plate_no ? "#072d6b" : "#9ca3af" }}>{b.plate_no || "ไม่ทราบทะเบียน"}</div>
                   <div style={{ fontSize: 13, color: "#374151" }}>{b.plate_province || ""}</div>
-                  <div style={{ fontSize: 12, color: "#6b7280" }}>{b.zone_name} · เข้า {b.since_local || "-"} น. ({b.minutes} นาที)</div>
+                  <div style={{ fontSize: 12, color: b.in_bay ? "#166534" : "#6b7280" }}>{b.in_bay ? `🟢 อยู่ใน${b.zone_name || "ช่องซ่อม"}` : `เข้ามา${b.zone_name ? " " + b.zone_name : ""}`} · {b.since_local || "-"} น. ({b.minutes} นาที)</div>
                 </button>
-                <button onClick={() => clearBay(b)} title="รถออกจากช่องแล้ว (เคลียร์ด้วยมือ)"
+                <button onClick={() => clearBay(b)} title="เอารถออกจากรายการ"
                   style={{ position: "absolute", top: 6, right: 6, width: 24, height: 24, border: "1px solid #fca5a5", background: "#fee2e2", color: "#b91c1c", borderRadius: 6, cursor: "pointer", fontSize: 12, lineHeight: "20px", padding: 0 }}>✕</button>
               </div>
             );
           })}
-          {baysLoaded && bays.length === 0 && <span style={{ alignSelf: "center", color: "#9ca3af", fontSize: 14 }}>ไม่มีรถในช่องซ่อมตอนนี้</span>}
+          {baysLoaded && bays.length === 0 && <span style={{ alignSelf: "center", color: "#9ca3af", fontSize: 14 }}>ยังไม่มีรถเข้าช่องซ่อมวันนี้</span>}
         </div>
       </div>
 
@@ -421,7 +418,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
       {/* Withdrawal log */}
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
         <div style={{ padding: "10px 14px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-          <strong>📋 ประวัติการเบิก ({withdrawn.length} รายการ)</strong>
+          <strong>📋 ประวัติการเบิก ({shown.length} รายการ{selectedBay ? ` · เฉพาะรถ ${selectedBay.plate_no || "ไม่ทราบทะเบียน"}` : ""})</strong>
               {copied && <span style={{ marginLeft: 10, fontSize: 12.5, color: "#065f46", background: "#d1fae5", border: "1px solid #6ee7b7", borderRadius: 6, padding: "3px 10px" }}>✅ {copied}</span>}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button onClick={() => {
@@ -438,8 +435,8 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
             <button onClick={loadHistory} style={{ padding: "5px 10px", background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>🔄 รีเฟรช</button>
           </div>
         </div>
-        {withdrawn.length === 0 ? (
-          <div style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>ยังไม่มีรายการ</div>
+        {shown.length === 0 ? (
+          <div style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>{selectedBay ? "รถคันนี้ยังไม่มีการเบิกในวันที่เลือก" : "ยังไม่มีรายการ"}</div>
         ) : (
           <div style={{ maxHeight: 500, overflowY: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -459,8 +456,8 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
                   // จัดกลุ่ม: ผู้เบิกคนเดิม สแกนห่างจากรายการก่อนหน้าไม่เกิน 60 วินาที = กลุ่มเดียวกัน แม้คนละ Batch (คีออสเคยออกเลขใหม่ทุกสแกน) — user 2026-10-12
                   const GROUP_GAP_MS = 60 * 1000;
                   const groups = []; const groupOf = [];
-                  withdrawn.forEach((w, i) => {
-                    const prev = i > 0 ? withdrawn[i - 1] : null;
+                  shown.forEach((w, i) => {
+                    const prev = i > 0 ? shown[i - 1] : null;
                     const gap = prev ? Math.abs(new Date(prev.withdrawn_at) - new Date(w.withdrawn_at)) : Infinity;
                     const same = !!prev && String(prev.withdrawn_by || "") === String(w.withdrawn_by || "") && (gap <= GROUP_GAP_MS || prev.batch_no === w.batch_no);
                     if (!same) groups.push({ start: i, batches: [], codes: [], keys: [] });
@@ -469,7 +466,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
                     if (w.part_code) { g.codes.push(String(w.part_code)); g.keys.push(rowKey(w, i)); }
                     groupOf[i] = g;
                   });
-                  return withdrawn.map((w, i) => {
+                  return shown.map((w, i) => {
                   const g = groupOf[i];
                   const isNewBatch = g.start === i;
                   const batchLabel = g.batches.length > 1 ? `${g.batches[g.batches.length - 1]} – ${g.batches[0]} (${g.batches.length} ชุด)` : (g.batches[0] || "-");
