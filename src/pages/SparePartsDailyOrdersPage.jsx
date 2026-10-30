@@ -68,6 +68,17 @@ const fmtYamahaCode = (s) => {
 const fmtCodeFor = (system, s) => system === "YAMAHA" ? fmtYamahaCode(s) : fmtPartCode(s);
 // รหัส YAMAHA เทียบกันด้วยรูป pad 12 หลัก
 const yamahaPad = (s) => { let c = strip(s); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
+// รหัสจากไฟล์ B2B ที่อัปโหลดก่อน 30/10/69 ถูก Excel แปลงเป็นเลขยกกำลัง (931022582400 → "9.31023E+11" หลักหาย) → เทียบกับรหัสที่สั่งในใบ
+// ด้วยความละเอียด 6 หลักเดียวกัน ถ้าตรงใช้รหัสที่สั่งแทน (ไฟล์ที่อัปโหลดใหม่อ่านค่าดิบแล้ว ไม่เกิดอีก)
+const SCI_RE = /^\d(?:\.\d+)?E[+-]?\d+$/i;
+const sciResolve = (code, orderCodes) => {
+  const t = String(code || "").trim();
+  if (!SCI_RE.test(t)) return code;
+  const v = Number(t);
+  if (!Number.isFinite(v)) return code;
+  const hit = orderCodes.find(oc => /^\d{6,}$/.test(oc) && Number(oc).toPrecision(6) === v.toPrecision(6));
+  return hit || code;
+};
 // รหัสสำหรับเทียบกับรายงานรับอะไหล่: ตัด pad 12→10 ของ YAMAHA (ตารางรับเก็บรูป 10 หลักมีขีด)
 const normReceiptCode = (system, s) => {
   let c = strip(s);
@@ -345,7 +356,14 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     )).then(res => {
       const m = {};
       // กรอง row ว่าง (n8n ตอบ {} เมื่อไม่มีข้อมูล) — ไม่งั้นนับเป็น "มีข้อมูล upload" ผิด
-      withPo.forEach((o, i) => { m[`${o.system}-${o.order_id}`] = (res[i] || []).filter(d => d && (d.part_number || d.received_part_number)); });
+      withPo.forEach((o, i) => {
+        let list = (res[i] || []).filter(d => d && (d.part_number || d.received_part_number));
+        if (o.system === "YAMAHA") {
+          const oc = (o.items || []).map(it => yamahaPad(it.part_code));
+          list = list.map(d => ({ ...d, part_number: sciResolve(d.part_number, oc), received_part_number: sciResolve(d.received_part_number, oc) }));
+        }
+        m[`${o.system}-${o.order_id}`] = list;
+      });
       setDcsByOrder(m);
     });
     // อะไหล่ค้างส่ง — HONDA: dcs_backorders · YAMAHA: b2b_backorders
