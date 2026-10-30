@@ -68,11 +68,16 @@ const calls = [];
 if (d.slot === 'ac') AC.forEach((r) => calls.push(acCmd(r, false)));
 if (d.slot === 'tv') TV.forEach((r) => calls.push(tvCmd(r)));
 if (d.slot === 'on') { AC.forEach((r) => calls.push(acCmd(r, true))); TV.forEach((r) => calls.push(tvCmd(r))); }   // ทีวี = ปุ่ม Power สลับ (ตอน 08:00 ทีวีควรปิดอยู่)
-if (d.slot === 'diag') {   // ตรวจว่า n8n ส่ง body ออกไปเป็นอะไรจริง ๆ (httpbin สะท้อนกลับ)
-  const body = { code: 'power', value: 0 }; const out = {};
-  try { const r1 = await this.helpers.httpRequest({ method: 'POST', url: 'https://httpbin.org/post', body, json: true, headers: { 'Content-Type': 'application/json' } }); out.objectBody = (typeof r1 === 'string' ? JSON.parse(r1) : r1).data; } catch (e) { out.objectBody = 'ERR ' + e.message; }
-  try { const r2 = await this.helpers.httpRequest({ method: 'POST', url: 'https://httpbin.org/post', body: JSON.stringify(body), json: false, headers: { 'Content-Type': 'application/json' } }); out.stringBody = (typeof r2 === 'string' ? JSON.parse(r2) : r2).data; } catch (e) { out.stringBody = 'ERR ' + e.message; }
-  return [{ json: { ok: true, slot: 'diag', expected: JSON.stringify(body), ...out } }];
+if (d.slot === 'diag') {   // ตรวจการลงนามใน n8n: ยิงปิดแอร์ตัวแรกจริง + คืนค่าที่ใช้ (ไม่คืน token) + sign เทียบด้วย token ทดสอบ
+  const r0 = AC[0]; if (!r0) return [{ json: { ok: false, slot: 'diag', error: 'no AC remote' } }];
+  const c = acCmd(r0, false); const t = String(Date.now()); const bodyStr = JSON.stringify(c.body);
+  const strToSign = c.method + '\\n' + sha256Hex(bodyStr) + '\\n\\n' + c.path;
+  const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + access + t + strToSign).toUpperCase();
+  const signTest = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + 'TESTTOKEN' + t + strToSign).toUpperCase();
+  const headers = { client_id: d.cfg.clientId, sign, t, sign_method: 'HMAC-SHA256', access_token: access, 'Content-Type': 'application/json', Accept: 'application/json' };
+  let resp = null;
+  try { resp = await this.helpers.httpRequest({ method: 'POST', url: d.cfg.base + c.path, body: c.body, json: true, headers }); } catch (e) { resp = { error: e.message }; }
+  return [{ json: { ok: true, slot: 'diag', name: r0.name, t, path: c.path, bodyStr, bodySha: sha256Hex(bodyStr), accessLen: String(access).length, accessHead: String(access).slice(0, 4), signTest, resp } }];
 }
 if (!calls.length) return [{ json: { ok: true, noop: true, slot: d.slot, th: d.th, sent: 0, remotes } }];
 // ยิงเองใน Code node ด้วย body string ตรงตัว (HTTP Request node แปลง body ทำให้ hash ไม่ตรง "sign invalid" 2026-10-29)
