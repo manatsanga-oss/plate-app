@@ -69,7 +69,7 @@ if (d.sched) {
 }
 q += `SELECT remote_id, blaster, kind, name, on_time, off_time, days, enabled, last_fired, to_char(updated_at AT TIME ZONE 'Asia/Bangkok', 'DD/MM HH24:MI') AS updated_local FROM tuya_device_schedules ORDER BY kind, name;`;
 return [{ json: { query: q } }];
-""".replace("__DDL__", DDL.replace("\n", " ")).replace("__SEED__", SEED)
+""".replace("__DDL__", re.sub(r"--[^\n]*", "", DDL).replace("\n", " "))   # ตัด comment -- ก่อนยุบบรรทัด (comment กลืน SQL ที่เหลือ → Error in workflow 2026-10-30).replace("__SEED__", SEED)
 
 TOKEN_SIGN = HELPERS + """
 const d = $('Prepare').first().json; const t = String(Date.now());
