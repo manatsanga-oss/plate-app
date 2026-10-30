@@ -32,7 +32,10 @@ const b = item.body || {{}};
 let slot = String(b.slot || '').trim();
 const th = new Intl.DateTimeFormat('en-GB', {{ timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit', hour12: false }}).format(new Date());
 if (!slot) slot = SLOTS[th] || Object.entries(SLOTS).find(([k]) => Math.abs(parseInt(k.slice(0, 2)) * 60 + parseInt(k.slice(3)) - (parseInt(th.slice(0, 2)) * 60 + parseInt(th.slice(3)))) <= 2)?.[1] || 'list';
-return [{{ json: {{ cfg, blasters: BLASTERS, slot, th, manual: !!b.action }} }}];
+// action 'cmd' จากหน้า Smart Office: {{action:'cmd', kind:'ac'|'tv', remote_id, power:0|1, key:'Power'}}
+const cmd = (b.action === 'cmd' && b.remote_id) ? {{ kind: String(b.kind || ''), remote_id: String(b.remote_id), power: Number(b.power) ? 1 : 0, key: String(b.key || 'Power') }} : null;
+if (cmd) slot = 'cmd';
+return [{{ json: {{ cfg, blasters: BLASTERS, slot, th, manual: !!b.action, cmd, schedule: SLOTS }} }}];
 """
 
 TOKEN_SIGN = HELPERS + """
@@ -65,6 +68,11 @@ const TV = remotes.filter((r) => r.category === '2');
 const acCmd = (r, on) => ({ kind: 'ac', name: r.name, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/air-conditioners/${r.id}/command`, body: { code: 'power', value: on ? 1 : 0 } });
 const tvCmd = (r) => ({ kind: 'tv', name: r.name, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/remotes/${r.id}/command`, body: { key: 'Power' } });
 const calls = [];
+if (d.slot === 'cmd' && d.cmd) {   // สั่งเดี่ยวจากหน้า Smart Office
+  const r = remotes.find((x) => x.id === d.cmd.remote_id);
+  if (!r) return [{ json: { ok: false, slot: 'cmd', error: 'remote not found: ' + d.cmd.remote_id, remotes } }];
+  calls.push(r.category === '5' ? acCmd(r, !!d.cmd.power) : { kind: 'tv', name: r.name, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/remotes/${r.id}/command`, body: { key: d.cmd.key || 'Power' } });
+}
 if (d.slot === 'ac') AC.forEach((r) => calls.push(acCmd(r, false)));
 if (d.slot === 'tv') TV.forEach((r) => calls.push(tvCmd(r)));
 if (d.slot === 'on') { AC.forEach((r) => calls.push(acCmd(r, true))); TV.forEach((r) => calls.push(tvCmd(r))); }   // ทีวี = ปุ่ม Power สลับ (ตอน 08:00 ทีวีควรปิดอยู่)
@@ -79,7 +87,7 @@ if (d.slot === 'diag') {   // ตรวจการลงนามใน n8n: �
   try { resp = await this.helpers.httpRequest({ method: 'POST', url: d.cfg.base + c.path, body: c.body, json: true, headers }); } catch (e) { resp = { error: e.message }; }
   return [{ json: { ok: true, slot: 'diag', name: r0.name, t, path: c.path, bodyStr, bodySha: sha256Hex(bodyStr), accessLen: String(access).length, accessHead: String(access).slice(0, 4), signTest, resp } }];
 }
-if (!calls.length) return [{ json: { ok: true, noop: true, slot: d.slot, th: d.th, sent: 0, remotes } }];
+if (!calls.length) return [{ json: { ok: true, noop: true, slot: d.slot, th: d.th, sent: 0, remotes, schedule: d.schedule } }];
 // ยิงเองใน Code node ด้วย body string ตรงตัว (HTTP Request node แปลง body ทำให้ hash ไม่ตรง "sign invalid" 2026-10-29)
 const results = [];
 for (const c of calls) {
