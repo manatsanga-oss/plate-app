@@ -68,6 +68,12 @@ const calls = [];
 if (d.slot === 'ac') AC.forEach((r) => calls.push(acCmd(r, false)));
 if (d.slot === 'tv') TV.forEach((r) => calls.push(tvCmd(r)));
 if (d.slot === 'on') { AC.forEach((r) => calls.push(acCmd(r, true))); TV.forEach((r) => calls.push(tvCmd(r))); }   // ทีวี = ปุ่ม Power สลับ (ตอน 08:00 ทีวีควรปิดอยู่)
+if (d.slot === 'diag') {   // ตรวจว่า n8n ส่ง body ออกไปเป็นอะไรจริง ๆ (httpbin สะท้อนกลับ)
+  const body = { code: 'power', value: 0 }; const out = {};
+  try { const r1 = await this.helpers.httpRequest({ method: 'POST', url: 'https://httpbin.org/post', body, json: true, headers: { 'Content-Type': 'application/json' } }); out.objectBody = (typeof r1 === 'string' ? JSON.parse(r1) : r1).data; } catch (e) { out.objectBody = 'ERR ' + e.message; }
+  try { const r2 = await this.helpers.httpRequest({ method: 'POST', url: 'https://httpbin.org/post', body: JSON.stringify(body), json: false, headers: { 'Content-Type': 'application/json' } }); out.stringBody = (typeof r2 === 'string' ? JSON.parse(r2) : r2).data; } catch (e) { out.stringBody = 'ERR ' + e.message; }
+  return [{ json: { ok: true, slot: 'diag', expected: JSON.stringify(body), ...out } }];
+}
 if (!calls.length) return [{ json: { ok: true, noop: true, slot: d.slot, th: d.th, sent: 0, remotes } }];
 // ยิงเองใน Code node ด้วย body string ตรงตัว (HTTP Request node แปลง body ทำให้ hash ไม่ตรง "sign invalid" 2026-10-29)
 const results = [];
@@ -77,7 +83,8 @@ for (const c of calls) {
   const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + access + t + strToSign).toUpperCase();
   let r = null;
   try {
-    r = await this.helpers.httpRequest({ method: c.method, url: d.cfg.base + c.path, body: bodyStr, json: false, returnFullResponse: false, timeout: 15000,
+    // ส่ง body เป็น object ให้ n8n/axios JSON.stringify เอง (ผลเหมือน bodyStr ที่ใช้ลงนาม) — ส่ง string ตรง ๆ n8n ห่อเป็น JSON string อีกชั้น hash ไม่ตรง
+    r = await this.helpers.httpRequest({ method: c.method, url: d.cfg.base + c.path, body: c.body, json: true, returnFullResponse: false, timeout: 15000,
       headers: { client_id: d.cfg.clientId, sign, t, sign_method: 'HMAC-SHA256', access_token: access, 'Content-Type': 'application/json', Accept: 'application/json' } });
     if (typeof r === 'string') { try { r = JSON.parse(r); } catch { r = { raw: String(r).slice(0, 200) }; } }
   } catch (e) { r = { success: false, msg: String(e && e.message || e).slice(0, 200) }; }
