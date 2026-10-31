@@ -12,7 +12,7 @@
   สถานะเขียนกลับ payload.sign_status ของสไลด์วิดีโอ (queued/uploading/done/error) ให้เมนูแสดง
 API led-cloud แกะจากหน้าเว็บ 2026-10-29 (ไม่มีเอกสาร): oauth/key + oauth/token (RSA PKCS#1 v1.5), resource/upload/multipart/{init,part,complete}, resource/list, resource/preview,
   program/{id}?format=2, program/update/{id}, task/add/program, task/add/removeProgram {programs:[program uuid], sn}, device/{sn}/programs, resource/delete
-secrets: ~/nvr/signpush_secrets.json {"user": "...", "pass": "..."} (chmod 600) · state: ~/nvr/signpush_state.json
+secrets: ~/nvr/signpush_secrets.json {"user", "pass", "refresh_token"} (chmod 600) — refresh_token จากการล็อกอินบนเว็บ (sessionStorage) เพราะ 2FA · state: ~/nvr/signpush_state.json
 """
 import base64, hashlib, json, os, sys, time, traceback, uuid
 import requests
@@ -63,6 +63,47 @@ def api_items():
     d = r.json()
     d = d[0] if isinstance(d, list) else d
     return json.loads(d.get("listjson") or "[]")
+
+
+def api(action, **body):
+    """เรียก signage-api action อื่น ๆ (คืน dict หรือ {} ถ้าพัง)"""
+    try:
+        r = requests.post(SIGNAGE_API, json={"action": action, **body}, timeout=60)
+        d = r.json()
+        d = d[0] if isinstance(d, list) else d
+        return d if isinstance(d, dict) else {}
+    except Exception as e:
+        log(f"api {action} failed:", e)
+        return {}
+
+
+def save_refresh_token(tok):
+    sec = json.load(open(SECRETS, encoding="utf-8"))
+    sec["refresh_token"] = tok
+    sec["refresh_saved_at"] = time.strftime("%Y-%m-%d %H:%M")
+    tmp = SECRETS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(sec, f, ensure_ascii=False, indent=1)
+    os.chmod(tmp, 0o600); os.replace(tmp, SECRETS)
+
+
+def pickup_led_token(st, creds):
+    """ผู้ใช้วางกุญแจ led-cloud ในเมนู (set_led_token) → รับมาครั้งเดียว → เก็บ → ทดสอบล็อกอิน → รายงานผลกลับเมนู (2026-10-31)"""
+    d = api("take_led_token")
+    tok = str(d.get("token") or "").strip()
+    if not tok:
+        return
+    log("  รับกุญแจ led-cloud ใหม่จากเมนู (%d ตัวอักษร)" % len(tok))
+    save_refresh_token(tok)
+    try:
+        lc = LedCloud(creds["user"], creds["pass"])
+        lc.login()
+        n = len(lc.device_programs(SCREENS[0]["device"]))
+        api("led_token_status", status="ok", message=f"ล็อกอินสำเร็จ เครื่องที่ร้านส่งขึ้นป้ายได้แล้ว (โปรแกรมบนจอ 1: {n})")
+        st["sig_errors"] = {}   # ชุดที่เคยพังเพราะล็อกอินไม่ได้ → ส่งใหม่รอบถัดไป
+        save_state(st)
+    except Exception as e:
+        api("led_token_status", status="error", message=f"ล็อกอินด้วยกุญแจไม่สำเร็จ: {str(e)[-160:]}")
 
 
 def set_status(item, **fields):
@@ -139,6 +180,28 @@ class LedCloud:
         return base64.b64encode(key.encrypt(text.encode("utf-8"), padding.PKCS1v15())).decode()
 
     def login(self):
+        """ล็อกอิน: ใช้ refresh_token ใน secrets ก่อน (ไม่ติด 2FA) ถ้าไม่มี/หมดอายุ ค่อยลองรหัสผ่าน (ติด 2FA ตั้งแต่ 30 ต.ค. 2026 → 400211)"""
+        sec = json.load(open(SECRETS, encoding="utf-8"))
+        rt = sec.get("refresh_token")
+        if rt:
+            form = {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"}
+            try:
+                ut = self._call("POST", "/oauth/token", auth=False, headers=form,
+                                data={"client_id": CFG["client"], "client_secret": CFG["client"], "grant_type": "refresh_token", "refresh_token": rt, "token_type": "bearer"})
+                self.token = ut["access_token"]
+                if ut.get("refresh_token") and ut["refresh_token"] != rt:   # เซิร์ฟเวอร์หมุน refresh token → เก็บตัวใหม่ทันที ตัวเก่าใช้ไม่ได้แล้ว
+                    sec["refresh_token"] = ut["refresh_token"]
+                    sec["refresh_saved_at"] = time.strftime("%Y-%m-%d %H:%M")
+                    tmp = SECRETS + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(sec, f, ensure_ascii=False, indent=1)
+                    os.chmod(tmp, 0o600); os.replace(tmp, SECRETS)
+                return self.token
+            except Exception as e:
+                log("  refresh_token login failed, falling back to password:", str(e)[:160])
+        return self.login_password()
+
+    def login_password(self):
         pub = self._call("POST", "/oauth/key", auth=False)["data"]
         form = {"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8"}
         ct = self._call("POST", "/oauth/token", auth=False, headers=form,
@@ -240,10 +303,11 @@ def widget_image(rec, sec):
 
 
 def widget_html(it, screen, sec):
-    """widget หน้าเว็บใน mixingArea (โครงเดียวกับที่หน้าเว็บ led-cloud สร้าง: duration เป็นวินาที, refresh 0 = โหลดใหม่ทุกครั้งที่ถึงคิว)"""
+    """widget หน้าเว็บใน mixingArea — โครงตามที่หน้าเว็บ led-cloud สร้าง (addmixareaHtml): src/saveSrc/http + duration (วินาที) + refresh (วินาที)
+    ⚠️ refresh 0 ทำให้ป้ายโหลดหน้าซ้ำตลอด → จอดำกระพริบ (2026-10-30) ใช้ค่าเท่ากับ duration (โหลดใหม่เมื่อถึงคิวรอบถัดไป)"""
     url = f"{DISPLAY_URL}?branch={BRANCH}&screen={screen}&item={it['id']}&noreload=1"
     return {"name": f"html_{it['id']}", "type": "html", "uuid": str(uuid.uuid4()),
-            "attributes": {"offsetX": 0, "offsetY": 0, "duration": int(sec), "refresh": 0, "style": 1, "url": url}}
+            "attributes": {"src": url, "url": url, "saveSrc": url.replace("https://", ""), "http": "https://", "duration": int(sec), "refresh": max(15, int(sec)), "style": 1, "offsetX": 0, "offsetY": 0}}
 
 
 def widget_video(rec):
@@ -315,6 +379,8 @@ def rebuild(sc, slides, skipped, st, creds):
     except Exception as e:
         err = f"{step}: {e}"[:300]
         log(f"  {sc['name']} ERROR", err)
+        if "two factor" in err.lower() or "400211" in err:
+            api("led_token_status", status="need_key", message="กุญแจ led-cloud หมดอายุหรือใช้ไม่ได้ ต้องวางกุญแจใหม่จากการล็อกอินเว็บ")
         traceback.print_exc()
         for it in videos:
             set_status(it, sign_status="error", sign_error=err, sign_screen=sc["screen"])
@@ -336,6 +402,7 @@ def cleanup(st, creds, used):
 
 
 def tick(st, creds):
+    pickup_led_token(st, creds)
     items = api_items()
     sigs = st.setdefault("sigs", {})
     errs = st.setdefault("sig_errors", {})

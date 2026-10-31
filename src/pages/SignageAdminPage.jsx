@@ -92,6 +92,32 @@ export default function SignageAdminPage({ currentUser }) {
   const [items, setItems] = useState([]);
   const [thumbs, setThumbs] = useState({});
   const [msg, setMsg] = useState("");
+  // กุญแจ led-cloud (2026-10-31): คลาวด์ป้ายบังคับ 2FA → เครื่องที่ร้านล็อกอินด้วยรหัสผ่านไม่ได้ ผู้ใช้ล็อกอินเว็บเองแล้ววาง refresh_token ที่นี่ เครื่องที่ร้านมารับไปภายใน 20 วิ แล้วรายงานผลกลับ
+  const [ledKey, setLedKey] = useState("");
+  const [ledStatus, setLedStatus] = useState(null);
+  const [ledOpen, setLedOpen] = useState(false);
+  const loadLedStatus = async () => { try { const r = await post(SIGNAGE_API, { action: "get_led_status" }); const d = Array.isArray(r) ? r[0] : r; if (d && (d.status || d.pending)) setLedStatus(d); } catch { /* ยังไม่มีข้อมูล */ } };
+  useEffect(() => { loadLedStatus(); }, []);
+  async function sendLedKey() {
+    const tok = ledKey.trim();
+    if (tok.length < 20) { setMsg("❌ กุญแจสั้นเกินไป ให้คัดลอกค่า refresh_token ทั้งหมด"); return; }
+    setBusy(true);
+    try {
+      const r = await post(SIGNAGE_API, { action: "set_led_token", token: tok });
+      const d = Array.isArray(r) ? r[0] : r;
+      if (d?.__error) throw new Error(d.__error);
+      setLedKey(""); setMsg("⏳ ส่งกุญแจแล้ว รอเครื่องที่ร้านมารับและทดสอบ (ไม่เกิน 1 นาที)");
+      for (let i = 0; i < 12; i++) {   // รอผลทดสอบจากเครื่องที่ร้าน
+        await new Promise((res) => setTimeout(res, 5000));
+        const q = await post(SIGNAGE_API, { action: "get_led_status" }).catch(() => null);
+        const st = Array.isArray(q) ? q[0] : q;
+        if (st) setLedStatus(st);
+        if (st?.status === "ok") { setMsg("✅ เครื่องที่ร้านล็อกอินด้วยกุญแจใหม่สำเร็จ"); break; }
+        if (st?.status === "error") { setMsg("❌ " + (st.message || "ล็อกอินไม่สำเร็จ")); break; }
+      }
+    } catch (e) { setMsg("❌ ส่งกุญแจไม่สำเร็จ: " + (e.message || e)); }
+    setBusy(false);
+  }
   const [busy, setBusy] = useState(false);
   const [kind, setKind] = useState("image");
   const [form, setForm] = useState({ title: "", duration_sec: 10, start_date: "", end_date: "", promo: "", note: "", text: "", screen: "all", zone: 1 });
@@ -257,6 +283,29 @@ export default function SignageAdminPage({ currentUser }) {
         <button onClick={() => window.open(`/signage?branch=${branch}&screen=2&split=3`, "_blank")} style={{ ...btn, background: "#7c3aed", color: "#fff" }}>▶ ดูตัวอย่างจอ 2 (แบ่ง 3 ส่วน)</button>
         <button onClick={load} style={{ ...btn, background: "#e5e7eb" }}>🔄</button>
         {msg && <span style={{ fontSize: 14, color: msg.startsWith("❌") ? "#b91c1c" : "#166534" }}>{msg}</span>}
+      </div>
+
+      {/* กุญแจ led-cloud */}
+      <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, padding: "8px 12px", marginBottom: 14, background: ledStatus?.status === "need_key" ? "#fef2f2" : "#f8fafc" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <b>🔑 กุญแจระบบป้าย (led-cloud)</b>
+          <span style={{ fontSize: 13, color: ledStatus?.status === "need_key" || ledStatus?.status === "error" ? "#b91c1c" : ledStatus?.status === "ok" ? "#166534" : "#92400e" }}>
+            {ledStatus ? `${ledStatus.status === "ok" ? "✅" : ledStatus.status === "need_key" ? "⚠️ ต้องใส่กุญแจใหม่" : ledStatus.status === "error" ? "❌" : "🕒"} ${ledStatus.message || ""} ${ledStatus.status_local ? `(${ledStatus.status_local})` : ""}` : "ยังไม่เคยใส่กุญแจผ่านเมนู"}
+          </span>
+          <button onClick={() => setLedOpen(!ledOpen)} style={{ ...btn, padding: "4px 10px", fontSize: 13, background: "#e5e7eb" }}>{ledOpen ? "ซ่อน" : "ใส่กุญแจใหม่"}</button>
+        </div>
+        {ledOpen && (
+          <div style={{ marginTop: 8 }}>
+            <div style={{ fontSize: 13, color: "#374151", marginBottom: 6 }}>
+              เมื่อสไลด์ขึ้น "ส่งขึ้นป้ายไม่สำเร็จ … two factor": 1) เปิด <a href="https://www.led-cloud.com" target="_blank" rel="noreferrer">www.led-cloud.com</a> ใน Chrome ล็อกอินด้วยรหัสผ่าน + รหัสจากอีเมล (อย่ากด Logout) ·
+              2) กด F12 → แท็บ Application → Session storage → https://www.led-cloud.com → พิมพ์ refresh ในช่อง Filter → คัดลอกค่าในแถว refresh_token · 3) วางที่นี่แล้วกดส่ง
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input type="password" value={ledKey} onChange={(e) => setLedKey(e.target.value)} placeholder="วางค่า refresh_token" autoComplete="off" style={{ ...inp, width: 340 }} />
+              <button onClick={sendLedKey} disabled={busy || ledKey.trim().length < 20} style={{ ...btn, background: "#1d4ed8", color: "#fff" }}>ส่งให้เครื่องที่ร้าน</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* รายการสไลด์ */}

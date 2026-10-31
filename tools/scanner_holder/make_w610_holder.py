@@ -1,16 +1,15 @@
 """
 แท่นแขวนผนังสำหรับเครื่องสแกนบาร์โค้ด Worrex W-610 (ทรงปืน) — พิมพ์ 3D ชิ้นเดียว (Bambu Lab A1)
 
-หลักการ: เสียบด้ามจากด้านหน้าเข้า "ปลอกคอ" รูปตัว C ที่ยื่นออกจากแผ่นผนัง หัวสแกนเนอร์ (กว้างกว่าด้าม)
-นั่งบนแขนปลอกคอ ปลายด้ามลงไปอยู่ใน "ถ้วยรับ" ด้านล่างกันแกว่ง/กันหลุด หัวหันออกจากผนัง (นอนราบ) เอาออกโดยยกขึ้นแล้วดึงมาด้านหน้า
+หลักการ (ทิศวางตามที่ user เลือก 2026-10-31): จมูกเครื่องและปุ่มไกหันเข้าผนัง เสียบด้ามจากด้านหน้าเข้าปลอกคอรูปตัว C
+หัวนั่งบนแขน จมูกแตะแผ่นที่ยื่นเหนือแขน (ตัวหยุด จึงไม่ดันปุ่มไก) ปลายด้ามโค้งเข้าหาผนังอยู่ในถ้วย ขอบถ้วยด้านหน้ากันด้ามหลุดออกมา
 
 วิธีรัน:  python tools/scanner_holder/make_w610_holder.py "<โฟลเดอร์ผลลัพธ์>"
 ผลลัพธ์:  w610_holder.stl (ตัวแท่น), w610_gauge.stl (แหวนทดสอบความพอดีของปลอกคอ พิมพ์ ~5 นาที), w610_holder_preview.png
 
 แกน: X = ซ้าย-ขวา (0 กลางแผ่น), Y = ยื่นออกจากผนัง (0 = ผิวผนัง), Z = ความสูง (0 = ขอบล่างแผ่น)
 
-⚠️ ขนาดเครื่องสแกน [ประมาณ] จากรูปสินค้า/รุ่นทรงเดียวกัน — ก่อนพิมพ์ตัวจริงให้วัดด้วยเวอร์เนียแล้วแก้ค่าในกลุ่ม "ขนาดเครื่อง" ด้านล่าง
-หรือพิมพ์ w610_gauge.stl ก่อน (สอดด้ามใต้หัวเข้าช่อง ถ้าหลวม/คับให้ปรับ GRIP_W / GRIP_D)
+ขนาดส่วนใหญ่อ่านจากรูปทดลองใส่แท่นที่พิมพ์จริง 2026-10-31 คลาดเคลื่อนได้ราว 5 มม.
 """
 import sys, os, math
 import numpy as np
@@ -18,14 +17,14 @@ from manifold3d import Manifold, CrossSection
 import trimesh
 
 # ================= ขนาดเครื่อง (วัดจริงแล้วแก้ที่นี่) =================
-GRIP_W = 33.0       # [ประมาณ] ความกว้างด้าม (ซ้าย-ขวา) วัดใต้หัวประมาณ 2 ซม.
-GRIP_D = 46.0       # [ประมาณ] ความหนาด้ามหน้า-หลัง ใต้หัว **รวมปุ่มไก** (ด้านหลังด้าม → ปลายไก)
+GRIP_W = 33.0       # วัดจริง 2026-10-30: ความกว้างด้าม (ซ้าย-ขวา) ใต้หัว
+GRIP_D = 40.0       # อ่านจากรูปทดลองใส่ 2026-10-31: หลังด้ามถึงปลายไก (ใช้วาดรูปแทนเครื่อง)
 HEAD_W = 67.0       # [ประมาณ] ความกว้างหัวสแกน (ส่วนกว้างสุด) — ต้องกว้างกว่าช่องปลอกคอจึงนั่งบนแขนได้
-HEAD_D = 90.0       # [ประมาณ] ความยาวหัว จากจมูก (ช่องยิง) ถึงท้ายหัว
+HEAD_D = 80.0       # อ่านจากรูปทดลองใส่แท่นพิมพ์จริง 2026-10-31
 HEAD_H = 36.0       # [ประมาณ] ความหนาหัว
-HEAD_BACK = 22.0    # [ประมาณ] ท้ายหัวยื่นเลยหลังด้ามเท่าไร (ด้ามอยู่ค่อนไปทางหน้าของหัว)
-GRIP_LEN = 130.0    # [ประมาณ] ความยาวด้าม จากใต้หัวถึงปลายด้าม
-GRIP_TIP_D = 50.0   # [ประมาณ] ปลายด้ามบานออก กว้างสุด (หน้า-หลัง) — ใช้กำหนดความลึกถ้วยรับ
+HEAD_FWD = 77.0     # อ่านจากรูปทดลองใส่ 2026-10-31: จมูกเครื่องถึงหลังด้าม ระดับใต้หัว
+GRIP_LEN = 105.0    # อ่านจากรูปทดลองใส่แท่นพิมพ์จริง 2026-10-31: ผิวบนแขนถึงปลายด้าม
+TIP_REACH = 30.0    # อ่านจากรูปทดลองใส่แท่นพิมพ์จริง 2026-10-31: หลังด้ามถึงปลายด้ามราว 22-27 บวกเผื่อ (ค่าวัด 70 ไม่ตรงกับรูป)
 
 # ================= ค่าออกแบบ =================
 CLEAR = 3.0         # ระยะหลวมรอบด้ามต่อด้าน (ปลอกคอไม่ต้องแน่น หัวเป็นตัวรับน้ำหนัก)
@@ -34,26 +33,35 @@ PLATE_W = 64.0      # ความกว้างแผ่นผนัง
 PLATE_R = 6.0       # มุมมนแผ่น
 ARM_W = 8.0         # ความกว้างแขนปลอกคอ (แต่ละข้าง)
 ARM_T = 10.0        # ความหนา (สูง) แขนปลอกคอ
-CUP_H = 16.0        # ความสูงขอบถ้วยรับปลายด้าม
+CUP_H = 12.0        # ความสูงขอบถ้วย เหนือพื้นถ้วย (user ขอให้ด้านล่างเล็กลง 2026-10-31)
 CUP_T = 3.0         # ความหนาผนังถ้วย
 FLOOR_T = 4.0       # ความหนาพื้นถ้วย
-TIP_GAP = 10.0      # เผื่อปลายด้ามลอยเหนือพื้นถ้วย (ถ้าด้ามยาวกว่าที่ประมาณ ปลายจะไปนั่งบนพื้นถ้วยแทน ใช้ได้ทั้งสองแบบ)
+TIP_GAP = 6.0       # ปลายด้ามลอยเหนือพื้นถ้วย จึงต่ำกว่าขอบถ้วยราว 6 มม.
 SEG = 48
 
 # ค่าที่คำนวณต่อ
-OPEN_W = GRIP_W + 2 * CLEAR            # ความกว้างช่องปลอกคอ (ด้ามสอดเข้าจากหน้า)
-OPEN_D = GRIP_D + 2 * CLEAR            # ความลึกช่องปลอกคอ (หน้า-หลัง)
-Y_CAV0 = PLATE_T + HEAD_BACK + CLEAR   # ผนังหลังของช่อง (เว้นที่ให้ท้ายหัวไม่ชนแผ่น)
-Y_CAV1 = Y_CAV0 + OPEN_D               # ปลายแขน (ด้านหน้า)
+PLATE_EXT = 15.0                       # แผ่นยื่นเหนือแขน ให้จมูกเครื่องแตะแทนผนัง
+BLOCK_D = 8.0                          # คานขวางยึดโคนแขนกับแผ่น
+RIB_H, RIB_D = 30.0, 30.0              # ครีบค้ำใต้แขนแต่ละข้าง สูง x ยาวตามแนวยื่น
+Y_BACK = PLATE_T + HEAD_FWD            # ตำแหน่งหลังด้ามเมื่อจมูกแตะแผ่น
+OPEN_W = GRIP_W + 2 * CLEAR            # ความกว้างช่องปลอกคอ
+Y_CAV0 = PLATE_T + BLOCK_D             # ก้นช่อง ลึกเลยปุ่มไกไปมาก จึงไม่มีอะไรดันไก
+Y_CAV1 = Y_BACK + 19.0                 # ปลายแขน ยาวเลยท้ายหัวและยาวกว่าถ้วย (user ขอให้ด้านบนยาวขึ้น 2026-10-31)
+OPEN_D = Y_CAV1 - Y_CAV0
 Z_FLOOR = FLOOR_T                      # ผิวพื้นถ้วย
 Z_ARM1 = Z_FLOOR + TIP_GAP + GRIP_LEN  # ผิวบนแขน (ใต้หัวนั่งตรงนี้)
 Z_ARM0 = Z_ARM1 - ARM_T
-PLATE_H = Z_ARM1                       # แผ่นจบเสมอผิวบนแขน (ไม่มีแผ่นอยู่หลังหัว → ท้ายหัวยื่นเท่าไรก็ไม่ชน)
-GUS_H = 26.0                           # ความสูงค้ำยันใต้บล็อกปลอกคอ
-Z_KEY_TOP = Z_ARM0 - GUS_H - 18.0      # รูกุญแจบน อยู่ใต้ค้ำยัน
-Z_KEY_BOT = FLOOR_T + CUP_H + 14.0     # รูกุญแจล่าง อยู่เหนือถ้วย
-CUP_IN_W = OPEN_W + 12.0               # ถ้วยกว้างกว่าช่องปลอกคอ (ปลายด้ามบาน)
-CUP_Y1 = PLATE_T + HEAD_BACK + GRIP_TIP_D + CLEAR + 4.0   # ถ้วยยื่นออกจากผนัง
+PLATE_H = Z_ARM1 + PLATE_EXT
+# รูกุญแจ 2 รูแนวตั้งกลางแผ่น ระหว่างขอบถ้วยกับคานขวาง (ครีบอยู่ด้านข้างจึงไม่ขวาง)
+_KEY_LO = FLOOR_T + CUP_H + 3 + 4.5
+_KEY_HI = Z_ARM0 - 3 - 12.3
+assert _KEY_HI - _KEY_LO >= 30, "ช่องวางรูกุญแจไม่พอ"
+KEYS = [(0.0, _KEY_LO), (0.0, _KEY_HI)]
+CUP_IN_W = OPEN_W                      # ถ้วยกว้างเท่าช่องปลอกคอ
+CUP_TOP = FLOOR_T + CUP_H              # ความสูงขอบถ้วย
+CUP_WALL_H = CUP_T * math.sqrt(2)      # ความหนาผนังหน้าเอียง 45° วัดตามแนว Y
+CUP_YF = Y_BACK + 3.0 + CUP_WALL_H - CUP_TOP   # ขอบบนด้านในอยู่เลยหลังด้ามระดับนั้น 3 มม. (ปลายด้ามโค้งเข้าหาผนัง ถ้วยจึงสั้นกว่าแขนได้)
+CUP_Y1 = CUP_YF + CUP_TOP                 # ถ้วยยื่นออกจากผนังสุดที่ขอบบน
 
 
 def box(x0, x1, y0, y1, z0, z1):
@@ -82,7 +90,8 @@ def prism_yz(pts, x0, x1):
 def build():
     hw = PLATE_W / 2
     plate = rrect_xz(-hw, hw, 0, PLATE_H, PLATE_R, 0, PLATE_T)
-    plate = plate - keyhole(0, Z_KEY_TOP, -1, PLATE_T + 1) - keyhole(0, Z_KEY_BOT, -1, PLATE_T + 1)
+    for kx, kz in KEYS:
+        plate = plate - keyhole(kx, kz, -1, PLATE_T + 1)
 
     # ปลอกคอรูป C: บล็อกหลัง (ตัวเว้นระยะจากแผ่น) + แขน 2 ข้างยื่นไปหน้า ปลายแขนมน
     ow = OPEN_W / 2 + ARM_W
@@ -92,20 +101,20 @@ def build():
         arm = box(x0, x1, Y_CAV0 - 0.5, Y_CAV1 - ARM_W / 2, Z_ARM0, Z_ARM1)
         tip = Manifold.cylinder(ARM_T, ARM_W / 2, ARM_W / 2, SEG).translate([sx * (OPEN_W / 2 + ARM_W / 2), Y_CAV1 - ARM_W / 2, Z_ARM0])
         collar = collar + arm + tip
-    # ค้ำยันใต้บล็อกหลัง (สามเหลี่ยม) รับน้ำหนักหัว
-    gusset = prism_yz([(PLATE_T - 0.5, Z_ARM0 + 0.5), (PLATE_T - 0.5, Z_ARM0 - GUS_H), (Y_CAV0, Z_ARM0 + 0.5)], -ow, ow)   # เรียงทวนเข็ม (manifold ไม่รับตามเข็ม)
+    # ครีบค้ำใต้แขน 2 ข้าง (ข้างด้าม ไม่ขวางรูกุญแจและตัวด้าม) รูปสามเหลี่ยมพิมพ์ได้โดยไม่ต้อง support
+    rib_pts = [(PLATE_T - 0.5, Z_ARM0 + 0.5), (PLATE_T - 0.5, Z_ARM0 - RIB_H), (PLATE_T + RIB_D, Z_ARM0 + 0.5)]
+    gusset = prism_yz(rib_pts, -ow, -OPEN_W / 2) + prism_yz(rib_pts, OPEN_W / 2, ow)
 
-    # ถ้วยรับปลายด้าม: พื้น + ขอบหน้า/ข้าง (เปิดด้านบน) มุมหน้ามน
+    # ถ้วยรับปลายด้าม: พื้น + ผนังข้าง + ผนังหน้าเอียง 45° (เปิดด้านบน)
+    # ท่าพิมพ์วางผิวผนังบนฐาน ผนังหน้าเป็น "หลังคา" — ถ้าตั้งฉากจะลอยกลางอากาศ (slicer เตือน floating cantilever 2026-10-30) จึงเอียง 45° ให้แต่ละชั้นต่อจากชั้นก่อน
     cw = CUP_IN_W / 2 + CUP_T
-    rc = 6.0
-    cup_outer = box(-cw, cw, PLATE_T - 0.5, CUP_Y1 - rc, 0, Z_FLOOR + CUP_H)
-    for sx in (-1, 1):
-        cup_outer = cup_outer + Manifold.cylinder(Z_FLOOR + CUP_H, rc, rc, SEG).translate([sx * (cw - rc), CUP_Y1 - rc, 0])
-    cup_outer = cup_outer.hull()
-    cup_inner = box(-CUP_IN_W / 2, CUP_IN_W / 2, PLATE_T, CUP_Y1 - CUP_T, Z_FLOOR, Z_FLOOR + CUP_H + 1)
+    cup_outer = prism_yz([(PLATE_T - 0.5, 0), (CUP_YF, 0), (CUP_YF + CUP_TOP, CUP_TOP), (PLATE_T - 0.5, CUP_TOP)], -cw, cw)
+    zi = CUP_TOP + 1.0
+    cup_inner = prism_yz([(PLATE_T, Z_FLOOR), (CUP_YF + Z_FLOOR - CUP_WALL_H, Z_FLOOR), (CUP_YF + zi - CUP_WALL_H, zi), (PLATE_T, zi)], -CUP_IN_W / 2, CUP_IN_W / 2)
     cup = cup_outer - cup_inner
-    # ร่องระบายน้ำ/ฝุ่นกลางพื้นถ้วย
-    cup = cup - box(-4, 4, PLATE_T + 6, CUP_Y1 - CUP_T - 6, -1, Z_FLOOR + 1)
+    # ร่องระบายน้ำ/ฝุ่นกลางพื้นถ้วย ปลายแหลม 45° พิมพ์ได้โดยไม่ต้อง support
+    y0, y1 = PLATE_T + 6, CUP_YF - 6
+    cup = cup - CrossSection([[(-4, y0), (4, y0), (4, y1 - 4), (0, y1), (-4, y1 - 4)]]).extrude(Z_FLOOR + 2).translate([0, 0, -1])
 
     holder = plate + collar + gusset + cup
 
@@ -121,12 +130,13 @@ def to_trimesh(m):
     return trimesh.Trimesh(vertices=np.asarray(mesh.vert_properties)[:, :3], faces=np.asarray(mesh.tri_verts), process=False)
 
 def scanner_ghost():
-    """รูปแทนเครื่องสแกน (หัว + ด้าม) วางในแท่น เพื่อดูตำแหน่ง"""
-    yc = Y_CAV0 + CLEAR            # หลังด้ามชิดผนังหลังช่อง (เว้น CLEAR)
-    head = box(-HEAD_W / 2, HEAD_W / 2, yc - HEAD_BACK, yc - HEAD_BACK + HEAD_D, Z_ARM1 + 0.5, Z_ARM1 + 0.5 + HEAD_H)
-    grip = box(-GRIP_W / 2, GRIP_W / 2, yc, yc + GRIP_D - 8, Z_ARM1 + 0.5 - GRIP_LEN, Z_ARM1 + 0.5)
-    trig = box(-GRIP_W / 2 + 4, GRIP_W / 2 - 4, yc + GRIP_D - 8, yc + GRIP_D, Z_ARM1 - 30, Z_ARM1 - 4)
-    return head + grip + trig
+    """รูปแทนเครื่องสแกนวางในแท่น: จมูกแตะแผ่นเหนือแขน ปุ่มไกและปลายด้ามหันเข้าผนัง"""
+    z0 = Z_ARM1 + 0.5
+    head = box(-HEAD_W / 2, HEAD_W / 2, Y_BACK - HEAD_FWD, Y_BACK - HEAD_FWD + HEAD_D, z0, z0 + HEAD_H)
+    grip = box(-GRIP_W / 2, GRIP_W / 2, Y_BACK - GRIP_D + 8, Y_BACK, z0 - GRIP_LEN + 20, z0)
+    trig = box(-GRIP_W / 2 + 4, GRIP_W / 2 - 4, Y_BACK - GRIP_D, Y_BACK - GRIP_D + 8, z0 - 30, z0 - 4)
+    tip = box(-GRIP_W / 2, GRIP_W / 2, Y_BACK - TIP_REACH, Y_BACK - 8, z0 - GRIP_LEN, z0 - GRIP_LEN + 20)
+    return head + grip + trig + tip
 
 def _rot(azim, elev):
     a, b = math.radians(azim), math.radians(elev)
@@ -192,16 +202,16 @@ def preview(path, holder_t, gauge_t):
     BODY, GHOST, GAUGE = (0.30, 0.52, 0.85), (0.35, 0.35, 0.38), (0.98, 0.62, 0.15)
     ghost_t = to_trimesh(scanner_ghost())
     views = [
-        ('1) ใส่เครื่องแล้ว — มองเฉียงหน้า (สีเทา = เครื่องสแกน หัวหันออกจากผนัง)', [(holder_t, BODY), (ghost_t, GHOST)], -30, 18),
-        ('2) แท่นเปล่า — ปลอกคอรูป C ด้านบน + ถ้วยรับปลายด้ามด้านล่าง', [(holder_t, BODY)], -30, 18),
-        ('3) ด้านข้าง (ซ้าย = ผนัง) — หัวนั่งบนแขน ปลายด้ามอยู่ในถ้วย', [(holder_t, BODY), (ghost_t, GHOST)], -90, 0),
+        ('1) ใส่เครื่องแล้ว — สีเทาคือรูปแทนเครื่อง จมูกหันเข้าผนัง', [(holder_t, BODY), (ghost_t, GHOST)], -30, 18),
+        ('2) แท่นเปล่า — แขนรูปตัว C ครีบค้ำ 2 ข้าง และถ้วยรับปลายด้าม', [(holder_t, BODY)], -30, 18),
+        ('3) ด้านข้าง (ซ้าย = ผนัง) — จมูกแตะแผ่น หัวนั่งบนแขน ปลายด้ามอยู่ในถ้วย', [(holder_t, BODY), (ghost_t, GHOST)], -90, 0),
         ('4) แหวนทดสอบ (สีส้ม) — สอดด้ามใต้หัวเข้าช่อง หัวต้องนั่งบนแขน ก่อนพิมพ์ตัวจริง', [(gauge_t, GAUGE)], -20, 40),
     ]
     fig, axs = plt.subplots(2, 2, figsize=(15.2, 13.4), dpi=100)
     for a, (title, ms, az, el) in zip(axs.ravel(), views):
         a.imshow(render(ms, az, el)); a.set_axis_off(); a.set_title(title, fontsize=15, fontname='Leelawadee UI')
     b = holder_t.bounds
-    fig.suptitle('แท่นแขวนผนัง Worrex W-610 (แบบร่าง — ขนาดเครื่องเป็นค่าประมาณ)   กว้าง %.0f x สูง %.0f x ยื่นจากผนัง %.0f มม.' % (b[1][0] - b[0][0], b[1][2] - b[0][2], b[1][1] - b[0][1]), fontsize=17, fontname='Leelawadee UI')
+    fig.suptitle('แท่นแขวนผนัง Worrex W-610 (ปรับตามรูปทดลองใส่ · สีเทาเป็นรูปแทนเครื่อง)   กว้าง %.0f x สูง %.0f x ยื่นจากผนัง %.0f มม.' % (b[1][0] - b[0][0], b[1][2] - b[0][2], b[1][1] - b[0][1]), fontsize=17, fontname='Leelawadee UI')
     plt.subplots_adjust(left=0.01, right=0.99, top=0.92, bottom=0.01, wspace=0.02, hspace=0.08)
     fig.savefig(path); plt.close(fig)
 
@@ -212,11 +222,12 @@ def main(out):
     tm = {}
     for name, m in (('w610_holder', holder), ('w610_gauge', gauge)):
         t = to_trimesh(m); tm[name] = t
-        t.export(os.path.join(out, name + '.stl'))
+        # ตัวแท่นหมุนเป็นท่าพิมพ์ให้แล้ว: ผิวที่ชนผนังราบบนฐาน เปิดใน slicer แล้วสั่งพิมพ์ได้เลย ไม่ต้องเปิด support
+        to_trimesh(m.rotate([90, 0, 0]) if name == 'w610_holder' else m).export(os.path.join(out, name + '.stl'))
         b = t.bounds
         print('%-12s %6.1f x %6.1f x %5.1f mm (กว้าง x ยื่นจากผนัง x สูง) | watertight=%s | bodies=%d | volume %.1f cm3' % (name, *(b[1] - b[0]), t.is_watertight, len(m.decompose()), t.volume / 1000.0))
-    print('ช่องปลอกคอ กว้าง %.1f ลึก %.1f | แขนบน Z=%.1f | พื้นถ้วย Z=%.1f | ถ้วยยื่น %.1f | รูกุญแจ 2 รู ห่างกัน %.1f มม. (น็อตหัว 4 มม. ก้าน 4.6)' % (
-        OPEN_W, OPEN_D, Z_ARM1, Z_FLOOR, CUP_Y1, Z_KEY_TOP - Z_KEY_BOT))
+    print('ช่องปลอกคอ กว้าง %.1f ลึก %.1f | แขนบน Z=%.1f | พื้นถ้วย Z=%.1f | ถ้วยยื่น %.1f | รูกุญแจ (x, สูงจากขอบล่าง) %s' % (
+        OPEN_W, OPEN_D, Z_ARM1, Z_FLOOR, CUP_Y1, KEYS))
     preview(os.path.join(out, 'w610_holder_preview.png'), tm['w610_holder'], tm['w610_gauge'])
     return tm
 

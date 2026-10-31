@@ -134,6 +134,25 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
 
   // Auto-focus input on mount + after each save
   useEffect(() => { inputRef.current?.focus(); }, []);
+  // ช่องสแกนต้อง "พร้อมยิง" ตลอด (คีออส SCY06 2026-10-31: กดเลือกรถแล้วต้องแตะช่องอีกที):
+  //  - ตอนเปิดหน้า ช่องยัง disabled (โหลด master) focus ไม่ติด → focus อีกทีเมื่อโหลดเสร็จ
+  //  - โฟกัสหลุดไปที่ปุ่ม/พื้นหลัง (แตะการ์ดรถ, ปิด confirm) → กลับมาเองใน 100 ms (ไม่แย่งจากช่องกรอกอื่น เช่น วันที่)
+  //  - สแกนเนอร์ USB ยิงตอนโฟกัสอยู่ที่อื่น → ดักปุ่มระดับเอกสาร ย้ายโฟกัสเข้าช่องก่อนตัวอักษรแรกลง
+  useEffect(() => { if (!loadingMaster) inputRef.current?.focus({ preventScroll: true }); }, [loadingMaster]);
+  useEffect(() => {
+    const isEditable = (el) => !!el && el !== inputRef.current && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable);
+    const refocus = () => { if (!isEditable(document.activeElement) && inputRef.current && !inputRef.current.disabled) inputRef.current.focus({ preventScroll: true }); };
+    const onKey = (e) => {
+      if (e.target === inputRef.current || isEditable(e.target) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key.length === 1 || e.key === "Enter") refocus();
+    };
+    const onBlur = () => setTimeout(refocus, 100);
+    const el = inputRef.current;
+    document.addEventListener("keydown", onKey, true);
+    el?.addEventListener("blur", onBlur);
+    window.addEventListener("focus", refocus);
+    return () => { document.removeEventListener("keydown", onKey, true); el?.removeEventListener("blur", onBlur); window.removeEventListener("focus", refocus); };
+  }, []);
 
   function lookup() {
     const raw = input.trim().toUpperCase();
@@ -273,7 +292,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
         </div>
         {bayNotice && <div style={{ background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontWeight: 600 }}>{bayNotice}</div>}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button onClick={() => { setSelectedBay(null); setTimeout(() => inputRef.current?.focus(), 50); }}
+          <button onClick={() => { setSelectedBay(null); inputRef.current?.focus({ preventScroll: true }); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }}
             style={{ padding: "14px 18px", borderRadius: 10, cursor: "pointer", fontSize: 16, fontWeight: 700, minWidth: 150,
               border: !selectedBay ? "3px solid #072d6b" : "2px solid #d1d5db", background: !selectedBay ? "#eef2ff" : "#fff", color: "#1f2937" }}>
             📦 เบิกทั่วไป<div style={{ fontSize: 12, fontWeight: 400, color: "#6b7280" }}>ไม่ระบุรถ</div>
@@ -282,7 +301,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
             const sel = selectedBay && (selectedBay.event_id === b.event_id || (selectedBay.plate_no && selectedBay.plate_no === b.plate_no));
             return (
               <div key={b.event_id || b.zone_source} style={{ position: "relative" }}>
-                <button onClick={() => { setSelectedBay(b); setTimeout(() => inputRef.current?.focus(), 50); }}
+                <button onClick={() => { setSelectedBay(b); inputRef.current?.focus({ preventScroll: true }); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }}
                   style={{ padding: "14px 18px", paddingRight: 36, borderRadius: 10, cursor: "pointer", textAlign: "left", minWidth: 220,
                     border: sel ? "3px solid #f59e0b" : "2px solid #d1d5db", background: sel ? "#fffbeb" : "#fff", color: "#1f2937" }}>
                   <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "monospace", color: b.plate_no ? "#072d6b" : "#9ca3af" }}>{b.plate_no || "ไม่ทราบทะเบียน"}</div>

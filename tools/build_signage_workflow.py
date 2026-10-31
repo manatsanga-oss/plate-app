@@ -26,10 +26,14 @@ DDL_SQL = """CREATE TABLE IF NOT EXISTS signage_items (
 );
 ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS screen TEXT NOT NULL DEFAULT 'all';
 ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS zone INT NOT NULL DEFAULT 1;
-ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS media_mime TEXT;"""
+ALTER TABLE signage_items ADD COLUMN IF NOT EXISTS media_mime TEXT;
+CREATE TABLE IF NOT EXISTS signage_settings (
+  key TEXT PRIMARY KEY,               -- led_refresh_token: กุญแจ led-cloud ที่ผู้ใช้วางจากเมนู รอเครื่องที่ร้านมารับ (รับแล้วลบค่าทันที)
+  value TEXT, status TEXT, message TEXT, status_at TIMESTAMPTZ, updated_at TIMESTAMPTZ DEFAULT now()
+);"""
 
 BUILD = r"""// signage-api: สไลด์จอประชาสัมพันธ์หน้าร้าน (signage_items) — user 2026-10-28
-// list_items (ไม่ส่งรูป) · get_image · save_item (insert/update) · delete_item · reorder — เส้นตรง Webhook→Code→PG→Shape→Respond
+// list_items (ไม่ส่งรูป) · get_image · save_item (insert/update) · delete_item · reorder · set_led_token/take_led_token/led_token_status/get_led_status — เส้นตรง Webhook→Code→PG→Shape→Respond
 const b = $input.first().json.body || {};
 const action = String(b.action || '').trim();
 const esc = (s) => String(s == null ? '' : s).replace(/'/g, "''");
@@ -111,6 +115,30 @@ if (action === 'reorder') {
   const vals = ids.map((id, i) => `(${id}, ${i + 1})`).join(', ');
   return [{ json: { query: `${DDL}
 UPDATE signage_items s SET sort_order = v.ord, updated_at = now() FROM (VALUES ${vals}) AS v(id, ord) WHERE s.id = v.id RETURNING s.id, s.sort_order;` } }];
+}
+
+// ---- กุญแจ led-cloud (2026-10-31: คลาวด์ป้ายบังคับ 2FA ล็อกอินด้วยรหัสผ่านไม่ได้ → ผู้ใช้วาง refresh_token จากเมนู เครื่องที่ร้าน (signpush) มารับไปใช้แล้วรายงานผล) ----
+const KEY = "'led_refresh_token'";
+if (action === 'set_led_token') {
+  const tok = String(b.token || '').trim();
+  if (tok.length < 20 || tok.length > 200) return [{ json: { query: "SELECT 'bad token' AS __error" } }];
+  return [{ json: { query: `${DDL}
+INSERT INTO signage_settings (key, value, status, message, status_at, updated_at) VALUES (${KEY}, '${esc(tok)}', 'pending', 'รอเครื่องที่ร้านมารับ (ภายใน 20 วินาที)', now(), now())
+ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, status = 'pending', message = EXCLUDED.message, status_at = now(), updated_at = now() RETURNING key, status;` } }];
+}
+if (action === 'take_led_token') {   // เครื่องที่ร้านรับกุญแจครั้งเดียว แล้วลบออกจากฐานทันที
+  return [{ json: { query: `${DDL}
+UPDATE signage_settings SET value = NULL, status = 'taken', message = 'เครื่องที่ร้านรับกุญแจแล้ว กำลังทดสอบ', status_at = now() WHERE key = ${KEY} AND value IS NOT NULL RETURNING value AS token;` } }];
+}
+if (action === 'led_token_status') {   // เครื่องที่ร้านรายงานผล: ok / error / need_key
+  const st = ['ok', 'error', 'need_key', 'taken'].includes(String(b.status)) ? String(b.status) : 'error';
+  return [{ json: { query: `${DDL}
+INSERT INTO signage_settings (key, status, message, status_at, updated_at) VALUES (${KEY}, '${st}', ${sTxt(String(b.message || '').slice(0, 300))}, now(), now())
+ON CONFLICT (key) DO UPDATE SET status = EXCLUDED.status, message = EXCLUDED.message, status_at = now() RETURNING key, status;` } }];
+}
+if (action === 'get_led_status') {
+  return [{ json: { query: `${DDL}
+SELECT status, message, to_char(status_at AT TIME ZONE 'Asia/Bangkok', 'DD/MM/YYYY HH24:MI') AS status_local, (value IS NOT NULL) AS pending FROM signage_settings WHERE key = ${KEY};` } }];
 }
 
 return [{ json: { query: "SELECT 'unknown action' AS __error" } }];
