@@ -91,6 +91,12 @@ export default function YamahaOrderPage({ currentUser }) {
   const PAGE_SIZE = 15;
   const [ocrMenuOpen, setOcrMenuOpen] = useState(false);
   const ocrMenuRef = useRef(null);
+  // เปิด Job: เลข Job (ใบแจ้งซ่อม DMS) ของใบสั่งซื้อ — ใบที่ DMS เปิดงาน+ตัดสต๊อกแล้วแต่ยังไม่รับเงิน ไม่ใช่ "มาไม่ครบ" (user 2026-10-31)
+  const [showJobModal, setShowJobModal] = useState(null);
+  const [jobNumber, setJobNumber] = useState("");
+  const [savingJob, setSavingJob] = useState(false);
+  const [dispByOrder, setDispByOrder] = useState({}); // order_id → {job_no, matched, total, doc_date} จากรายงานการจ่ายอะไหล่ (yamaha_part_dispense)
+  const JOB_STATUSES = ["สั่งซื้อแล้ว", "อะไหล่ค้างส่ง", "มาครบ", "มาไม่ครบ", "เปิดงาน"];
   const [showPOModal, setShowPOModal] = useState(null);
   const [poNumber, setPoNumber] = useState("");
   const [savingPO, setSavingPO] = useState(false);
@@ -143,6 +149,7 @@ export default function YamahaOrderPage({ currentUser }) {
       const r = await api("get_yamaha_orders", { status: statusParam, parking_status: filterParking, search });
       const allOrders = norm(r);
       setOrders(allOrders);
+      detectDispenses(allOrders);
       // เช็คสถานะอัตโนมัติ: จับคู่ yamaha_spare_items กับ yamaha_b2b_orders
       // apc_order_no ตรงกับ vendor_po_no + part_number ตรงกับ part_code
       // เช็คใบสถานะ สั่งซื้อแล้ว / อะไหล่ค้างส่ง / มาครบ / มาไม่ครบ
@@ -294,6 +301,62 @@ export default function YamahaOrderPage({ currentUser }) {
       setMessage("❌ ส่ง LINE ไม่สำเร็จ: " + (e.message || e));
     }
     setNotifyingId(null);
+  }
+
+  // เดาเลข Job จากรายงานการจ่ายอะไหล่ YAMAHA (yamaha_part_dispense: ref_doc_no = เลข Job ใน DMS):
+  // ใบที่ยังไม่มีเลข Job แต่ DMS เบิกอะไหล่ในใบไปแล้ว (ตั้งแต่วันมัดจำ) = เปิดงาน+ตัดสต๊อกแล้ว → แนะนำเลข Job ให้กดบันทึก (user 2026-10-31)
+  // ข้อมูลมีถึงวันที่อัปโหลดรายงานการจ่ายอะไหล่ล่าสุดเท่านั้น
+  async function detectDispenses(list) {
+    try {
+      const open = (list || []).filter(o => o && ["สั่งซื้อแล้ว", "อะไหล่ค้างส่ง", "มาครบ", "มาไม่ครบ"].includes(o.status) && !(o.job_no && o.job_no !== "null"));
+      if (!open.length) { setDispByOrder({}); return; }
+      const padY = s => { let c = String(s || "").replace(/[-\s]/g, "").toUpperCase(); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
+      const itemsBy = {};
+      for (let i = 0; i < open.length; i += 4) await Promise.all(open.slice(i, i + 4).map(async o => {
+        try { itemsBy[o.order_id] = norm(await api("get_yamaha_order_detail", { order_id: o.order_id })); } catch { itemsBy[o.order_id] = []; }
+      }));
+      const allCodes = [...new Set(Object.values(itemsBy).flat().map(it => padY(it.part_code)).filter(Boolean))];
+      if (!allCodes.length) { setDispByOrder({}); return; }
+      const since = open.map(o => String(o.deposit_date || o.created_at || "").slice(0, 10)).filter(Boolean).sort()[0] || "";
+      const rows = norm(await api("search_yamaha_dispenses", { codes_csv: allCodes.join(","), since }));
+      const m = {};
+      for (const o of open) {
+        const codes = new Set((itemsBy[o.order_id] || []).map(it => padY(it.part_code)).filter(Boolean));
+        if (!codes.size) continue;
+        const from = String(o.deposit_date || o.created_at || "").slice(0, 10);
+        const byJob = {};
+        for (const r of rows) {
+          if (!r || !r.ref_doc_no || !codes.has(padY(r.part_code))) continue;
+          const dd = String(r.doc_date || "").slice(0, 10);
+          if (from && dd && dd < from) continue;
+          const j = String(r.ref_doc_no).trim();
+          (byJob[j] = byJob[j] || { job_no: j, codes: new Set(), doc_date: dd }).codes.add(padY(r.part_code));
+        }
+        const best = Object.values(byJob).sort((a, b) => b.codes.size - a.codes.size)[0];
+        if (best) m[o.order_id] = { job_no: best.job_no, matched: best.codes.size, total: codes.size, doc_date: best.doc_date };
+      }
+      setDispByOrder(m);
+    } catch { /* เดาไม่ได้ไม่เป็นไร — ใส่เลข Job เองได้ */ }
+  }
+
+  function openJobModal(o) {
+    setShowJobModal(o);
+    setJobNumber(o.job_no && o.job_no !== "null" ? o.job_no : (dispByOrder[o.order_id]?.job_no || ""));
+    setMessage("");
+  }
+
+  async function handleSaveJob() {
+    if (!jobNumber.trim()) { setMessage("กรุณากรอกเลข Job"); return; }
+    setSavingJob(true);
+    setMessage("");
+    try {
+      await api("save_yamaha_job_no", { order_id: showJobModal.order_id, job_no: jobNumber.trim() });
+      setShowJobModal(null);
+      setJobNumber("");
+      setMessage("บันทึกเลข Job สำเร็จ — สถานะเป็น เปิดงาน");
+      loadAll();
+    } catch { setMessage("เกิดข้อผิดพลาด"); }
+    setSavingJob(false);
   }
 
   async function handleSaveAppointment() {
@@ -884,6 +947,7 @@ export default function YamahaOrderPage({ currentUser }) {
               <th style={th}>สถานะ</th>
               <th style={th}>วันที่สั่งซื้อ</th>
               <th style={th}>เลขที่ใบรับสั่งซื้อ</th>
+              <th style={th}>เลข Job</th>
               <th style={th}>วันที่นัดหมาย</th>
               <th style={th}>จัดการ</th>
             </tr>
@@ -939,6 +1003,16 @@ export default function YamahaOrderPage({ currentUser }) {
                 </td>
                 <td style={td}>{fmtDate(o.created_at)}</td>
                 <td style={td}>{o.vendor_po_no || "-"}</td>
+                <td style={td}>{o.job_no && o.job_no !== "null" ? (
+                  <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#be185d" }}>{o.job_no}</span>
+                ) : dispByOrder[o.order_id] ? (
+                  // DMS เบิกอะไหล่ในใบนี้ไปแล้ว (รายงานการจ่ายอะไหล่) แต่ยังไม่ได้ใส่เลข Job → กดเพื่อบันทึก
+                  <button onClick={() => openJobModal(o)}
+                    title={`รายงานการจ่ายอะไหล่ YAMAHA พบ Job ${dispByOrder[o.order_id].job_no} เบิกอะไหล่ในใบนี้ ${dispByOrder[o.order_id].matched}/${dispByOrder[o.order_id].total} รายการ (${fmtDate(dispByOrder[o.order_id].doc_date)}) — กดเพื่อบันทึกเลข Job`}
+                    style={{ background: "#fef3c7", color: "#92400e", border: "1px solid #f59e0b", borderRadius: 6, padding: "2px 8px", fontSize: 11, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>
+                    📦 เบิกแล้ว {dispByOrder[o.order_id].job_no}
+                  </button>
+                ) : "-"}</td>
                 <td style={td}>{o.appointment_date
                   ? (o.appointment_by === "customer"
                     ? <span style={{ color: "#059669", fontWeight: 700 }} title="ลูกค้าแจ้งวันนัดเองผ่าน LINE">📲 {fmtDate(o.appointment_date)}</span>
@@ -962,7 +1036,13 @@ export default function YamahaOrderPage({ currentUser }) {
                       ✏️ แก้ PO
                     </button>
                   )}
-                  {!isClosed && (o.status === "มาครบ" || o.status === "มาไม่ครบ") && (
+                  {!isClosed && JOB_STATUSES.includes(o.status) && (
+                    <button onClick={() => openJobModal(o)} title={o.job_no && o.job_no !== "null" ? "แก้ไขเลข Job" : "DMS เปิด Job แล้ว → ใส่เลข Job สถานะจะเป็น เปิดงาน"}
+                      style={{ background: "#be185d", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>
+                      {o.job_no && o.job_no !== "null" ? "แก้ Job" : "เปิด Job"}
+                    </button>
+                  )}
+                  {!isClosed && (o.status === "มาครบ" || o.status === "มาไม่ครบ" || o.status === "เปิดงาน") && (
                     <button onClick={() => { setShowAppointmentModal(o); setAppointmentDate(o.appointment_date || ""); setMessage(""); }}
                       style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>นัดหมาย</button>
                   )}
@@ -1406,6 +1486,38 @@ export default function YamahaOrderPage({ currentUser }) {
                 {savingPO ? "กำลังบันทึก..." : "ยืนยันสั่งซื้อ"}
               </button>
               <button onClick={() => { setShowPOModal(null); setPoNumber(""); }}
+                style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Modal เปิด Job (เลขใบแจ้งซ่อม DMS) ===== */}
+      {showJobModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 12, padding: 28, width: 440, boxShadow: "0 8px 32px rgba(0,0,0,0.18)" }}>
+            <h3 style={{ marginTop: 0, color: "#be185d" }}>{showJobModal.job_no && showJobModal.job_no !== "null" ? "แก้ไขเลข Job" : "เปิด Job"} - {showJobModal.deposit_doc_no || showJobModal.order_no || `#${showJobModal.order_id}`}</h3>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>{showJobModal.customer_name} · {showJobModal.model_name || "-"} {showJobModal.license_plate ? `· ${showJobModal.license_plate}` : ""}</div>
+            {message && <div style={{ color: message.includes("สำเร็จ") ? "#15803d" : "#b91c1c", marginBottom: 8, fontSize: 13 }}>{message}</div>}
+            {dispByOrder[showJobModal.order_id] && (
+              <div style={{ fontSize: 12, background: "#fef3c7", color: "#92400e", border: "1px solid #f59e0b", borderRadius: 8, padding: "6px 10px", marginBottom: 10 }}>
+                📦 รายงานการจ่ายอะไหล่ YAMAHA พบ Job <b>{dispByOrder[showJobModal.order_id].job_no}</b> เบิกอะไหล่ในใบนี้ {dispByOrder[showJobModal.order_id].matched}/{dispByOrder[showJobModal.order_id].total} รายการ เมื่อ {fmtDate(dispByOrder[showJobModal.order_id].doc_date)} (เติมให้แล้ว ตรวจก่อนบันทึก)
+              </div>
+            )}
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", marginBottom: 4, fontWeight: 600, fontSize: 14 }}>เลข Job (ใบแจ้งซ่อม DMS) *</label>
+              <input value={jobNumber} onChange={e => setJobNumber(e.target.value)} placeholder="เช่น 69S0001234"
+                style={{ width: "100%", padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontSize: 14, boxSizing: "border-box", fontFamily: "monospace" }} />
+              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4 }}>บันทึกแล้วสถานะใบเป็น "เปิดงาน" = อะไหล่มาครบและตัดสต๊อกเข้างานแล้ว · เมื่อรับชำระค่าอะไหล่/บริการด้วยเลข Job นี้ ระบบปิดงานซ่อมให้อัตโนมัติ</div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={handleSaveJob} disabled={savingJob}
+                style={{ flex: 1, padding: "9px 0", background: "#be185d", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
+                {savingJob ? "กำลังบันทึก..." : "บันทึก"}
+              </button>
+              <button onClick={() => { setShowJobModal(null); setJobNumber(""); }}
                 style={{ flex: 1, padding: "9px 0", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer", fontFamily: "Tahoma", fontSize: 15 }}>
                 ยกเลิก
               </button>
