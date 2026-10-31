@@ -470,7 +470,7 @@ export function buildDailyCashItems(src, ctx) {
     if (split.transfer > 0) addTransferBy(split, [], d.payment_account || partDepositAccountByBranch(d.branch_code));
     return {
       kind: "part_deposit", category: "รายได้เงินมัดจำอะไหล่/บริการ",
-      doc_no: d.deposit_doc_no, date: d.deposit_date, ref_no: "",
+      doc_no: d.deposit_doc_no, date: d.deposit_date, ref_no: d.book_no || "",
       customer_name: d.customer_name, seller: d.recorded_by || "", saleAmount: 0,
       split, received: amt,
       branch_key: bc5(d.branch_code), branch_name: d.branch_code || "ไม่ระบุสาขา",

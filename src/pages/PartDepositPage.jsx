@@ -444,7 +444,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
           <div style={{ background: "#5eb3bd", color: "#fff", fontWeight: 700, padding: "10px 16px", fontSize: 15 }}>➕ {tabTitle} — เพิ่มข้อมูล</div>
           <div style={{ padding: 16 }}>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
-              <div style={{ flex: "1 1 320px" }}>
+              <div style={{ flex: "0 1 250px" }}>
                 <label style={lbl}>ประเภทใบมัดจำ *</label>
                 <div style={{ display: "flex", gap: 18, alignItems: "center", padding: "6px 0" }}>
                   <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 14, fontWeight: docKind === "receive" ? 700 : 400 }}>
@@ -470,6 +470,12 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   <input value={savedDocNo} readOnly placeholder={`ออกอัตโนมัติเมื่อบันทึก (${docPrefix}-YYMM-XXXXX)`} style={roInp} />
                 )}
               </div>
+              {!isRefund && (
+                <div style={{ flex: "0 1 180px" }}>
+                  <label style={lbl}>เลขที่/เล่มที่</label>
+                  <input value={form.book_no} onChange={(e) => setF("book_no", e.target.value)} placeholder="เลขที่/เล่มที่ สมุดมัดจำ" style={inp} />
+                </div>
+              )}
             </div>
 
             {!isRefund ? (
@@ -493,10 +499,6 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                       <option value="HONDA">HONDA</option>
                       <option value="YAMAHA">YAMAHA</option>
                     </select>
-                  </div>
-                  <div style={{ flex: "0 1 170px" }}>
-                    <label style={lbl}>เลขที่/เล่มที่</label>
-                    <input value={form.book_no} onChange={(e) => setF("book_no", e.target.value)} placeholder="เลขที่/เล่มที่ สมุดมัดจำ" style={inp} />
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
