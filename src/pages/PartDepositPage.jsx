@@ -47,7 +47,7 @@ const thaiDate = (iso) => {
   return isNaN(d) ? String(iso).slice(0, 10) : d.toLocaleDateString("th-TH", { day: "numeric", month: "short", year: "numeric" });
 };
 
-const FORM0 = { deposit_date: todayStr(), customer_code: "", customer_name: "", customer_phone: "", line_user_id: "", vin: "", brand: "", deposit_amount: "", payment_method: "เงินสด", remark: "" };
+const FORM0 = { deposit_date: todayStr(), customer_code: "", customer_name: "", customer_phone: "", line_user_id: "", vin: "", book_no: "", brand: "", deposit_amount: "", payment_method: "เงินสด", remark: "" };
 
 export default function PartDepositPage({ currentUser }) {
   const [tab, setTab] = useState("บริการ");
@@ -192,6 +192,7 @@ table{width:100%;border-collapse:collapse}td{border:1px solid #999;padding:6px 1
 <tr><td class="l">ลูกค้า</td><td>${esc(r.customer_name)}${r.customer_code ? " (" + esc(r.customer_code) + ")" : ""}</td></tr>
 <tr><td class="l">เบอร์โทร</td><td>${esc(r.customer_phone || "-")}</td></tr>
 ${r.vin ? `<tr><td class="l">หมายเลขตัวถัง</td><td>${esc(r.vin)}</td></tr>` : ""}
+${r.book_no ? `<tr><td class="l">เลขที่/เล่มที่</td><td>${esc(r.book_no)}</td></tr>` : ""}
 <tr><td class="l">ยอดเงินมัดจำ</td><td><b>${fmt(r.deposit_amount)} บาท</b> (${esc(payLabel(r))})</td></tr>
 ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้ว</td><td>${fmt(r.refunded_amount)} บาท${r.refund_method ? " (" + esc(r.refund_method) + ")" : ""}</td></tr>` : ""}
 <tr><td class="l">ยอดมัดจำคงเหลือ</td><td><b>${fmt(r.remaining_amount)} บาท</b></td></tr>
@@ -294,6 +295,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
         customer_code: form.customer_code, customer_name: form.customer_name, customer_phone: form.customer_phone,
         line_user_id: lineUserId,
         vin: form.vin, // แท็บสั่งซื้อใส่เลขถังได้ถ้ามี (ไม่บังคับ)
+        book_no: form.book_no, // เลขที่/เล่มที่ สมุดใบมัดจำกระดาษ (user 2026-10-31)
         deposit_amount: num(payAmount),
         payment_method: payMethodLabel(),
         payment_breakdowns: payLinesClean(), // หลายวิธีชำระ: [{method, amount}] รวม = deposit_amount
@@ -492,6 +494,10 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                       <option value="YAMAHA">YAMAHA</option>
                     </select>
                   </div>
+                  <div style={{ flex: "0 1 170px" }}>
+                    <label style={lbl}>เลขที่/เล่มที่</label>
+                    <input value={form.book_no} onChange={(e) => setF("book_no", e.target.value)} placeholder="เลขที่/เล่มที่ สมุดมัดจำ" style={inp} />
+                  </div>
                 </div>
                 <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>
                   <div style={{ flex: "0 1 200px" }}>
@@ -684,6 +690,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                         <div style={{ flex: "1 1 210px", minWidth: 0 }}>
                           {line("เลขที่ใบมัดจำ", r.deposit_doc_no)}
                           {line("วันที่มัดจำ", dmyBE(c.date))}
+                          {r.book_no ? line("เลขที่/เล่มที่", r.book_no) : null}
                           {line("สถานะ", statusLabel(r))}
                         </div>
                       </div>
@@ -721,6 +728,10 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                 <div style={{ flex: "0 1 180px" }}>
                   <label style={lbl}>วันที่มัดจำ</label>
                   <input value={thaiDate(selDoc.deposit_date)} readOnly style={roInp} />
+                </div>
+                <div style={{ flex: "0 1 170px" }}>
+                  <label style={lbl}>เลขที่/เล่มที่</label>
+                  <input value={selDoc.book_no || "-"} readOnly style={roInp} />
                 </div>
               </div>
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 12 }}>

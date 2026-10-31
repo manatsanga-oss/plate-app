@@ -67,6 +67,7 @@ import PettyCashOfferingPage from "./pages/PettyCashOfferingPage";
 import PayDepositPage from "./pages/PayDepositPage";
 import ClaimPage from "./pages/ClaimPage";
 import AeroxCampaignPopup, { isAeroxCampaignActive } from "./pages/AeroxCampaignPopup"; // POP UP แคมเปญ AEROX ตอนเข้าระบบ (ก.ย.–ต.ค. 69)
+import AiSimAwardPopup, { isAiSimAwardActive } from "./pages/AiSimAwardPopup"; // POP UP ประกาศผลรางวัลฝึกตอบลูกค้า (1–7 พ.ย. 69)
 import RepairDepositPage from "./pages/RepairDepositPage";
 import ProductGroupPage from "./pages/ProductGroupPage";
 import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
@@ -286,6 +287,14 @@ export default function App() {
   }, [currentUser]);
   const closeAerox = () => { setShowAerox(false); try { sessionStorage.setItem("aerox_popup_shown", "1"); } catch {} };
 
+  // POP UP ประกาศผลรางวัลฝึกตอบลูกค้า — ขึ้นครั้งเดียวต่อการเข้าระบบ เฉพาะช่วงประกาศผล (user 2026-10-31)
+  const [showAiSimAward, setShowAiSimAward] = useState(false);
+  useEffect(() => {
+    if (!currentUser || !isAiSimAwardActive()) return;
+    try { if (!sessionStorage.getItem("aisim_award_popup_shown")) setShowAiSimAward(true); } catch { setShowAiSimAward(true); }
+  }, [currentUser]);
+  const closeAiSimAward = () => { setShowAiSimAward(false); try { sessionStorage.setItem("aisim_award_popup_shown", "1"); } catch {} };
+
   const handleLogin = (user) => {
     setCurrentUser(user);
   };
@@ -400,6 +409,7 @@ export default function App() {
   return (
     <div className="app-layout">
       {showAerox && <AeroxCampaignPopup onClose={closeAerox} />}
+      {showAiSimAward && <AiSimAwardPopup onClose={closeAiSimAward} />}
       {newVersion && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, background: "#b91c1c", color: "#fff", padding: "9px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, fontFamily: "Tahoma", fontSize: 14, boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>
           <span>⚠️ มีโปรแกรมเวอร์ชันใหม่ — กรุณารีเฟรชก่อนบันทึกข้อมูล ไม่เช่นนั้นข้อมูลบางช่องอาจไม่ถูกเก็บ</span>

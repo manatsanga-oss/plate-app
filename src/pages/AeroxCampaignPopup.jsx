@@ -18,7 +18,7 @@ export const AEROX_CAMPAIGN = {
     { min: 20, max: Infinity, rate: 3000, label: "20 Unit Up" },
   ],
 };
-export const isAeroxCampaignActive = (iso = new Date().toISOString().slice(0, 10)) => iso >= AEROX_CAMPAIGN.from && iso <= AEROX_CAMPAIGN.to;
+export const isAeroxCampaignActive = (iso = new Date().toLocaleDateString("en-CA")) => iso >= AEROX_CAMPAIGN.from && iso <= AEROX_CAMPAIGN.to;
 
 const fmt = (n) => Number(n || 0).toLocaleString("th-TH");
 const tierOf = (units) => AEROX_CAMPAIGN.tiers.find((t) => units >= t.min && units <= t.max) || null;
