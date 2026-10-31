@@ -373,7 +373,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         idx++;
         body += `<tr>
 <td class="c">${idx}</td><td>${esc(it.doc_no || "-")}</td><td class="c">${esc(thaiDate(it.date))}</td>
-<td>${esc(it.ref_no || "-")}</td><td>${esc(it.customer_name || "")}<br><span style="font-size:9.5px;color:#555">${esc(it.category)}${it.refunded ? " · คืนเงินแล้ว" : ""}</span>${it.finance ? `<br><span style="font-size:9.5px;color:#7c3aed">ไฟแนนซ์: ${esc(it.finance)}</span>` : ""}${it.note ? `<br><span style="font-size:9.5px;color:#92400e">หมายเหตุ: ${esc(it.note)}</span>` : ""}</td><td class="r">${it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
+<td>${esc(it.ref_no || "-")}</td><td>${esc(it.customer_name || "")}<br><span style="font-size:9.5px;color:#555">${esc(it.category)}${it.refunded ? " · คืนเงินแล้ว" : ""}</span>${it.finance ? `<br><span style="font-size:9.5px;color:#7c3aed">ไฟแนนซ์: ${esc(it.finance)}</span>` : ""}${it.red_plate ? `<br><span style="font-size:9.5px;color:#b91c1c;font-weight:700">ป้ายแดง: ${esc(it.red_plate)}</span>` : ""}${it.note ? `<br><span style="font-size:9.5px;color:#92400e">หมายเหตุ: ${esc(it.note)}</span>` : ""}</td><td class="r">${it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
 ${METHOD_COLS.map((c) => `<td class="r">${it.split[c.key] ? fmt(it.split[c.key]) : "-"}${c.key === "cheque" && it.split.cheque_nos ? `<br><span style="font-size:9px;color:#555">เลขที่ ${esc(it.split.cheque_nos)}</span>` : ""}${c.key === "transfer" ? trAccts(it).map(([no, v]) => `<br><span style="font-size:9px;color:#555">${esc(no)}${v != null ? " " + fmt(v) : ""}</span>`).join("") : ""}</td>`).join("")}
 <td class="r b">${fmt(it.received)}</td></tr>`;
       }
@@ -498,6 +498,7 @@ ${depSection}
                       <td style={td}>{it.customer_name || "-"}
                         <div style={{ fontSize: 10.5, color: it.kind === "deposit" ? "#b45309" : it.kind === "part_deposit" ? "#9333ea" : it.kind === "part_service" ? "#0d9488" : it.kind === "used_moto" ? "#c2410c" : "#0369a1" }}>{it.category}</div>
                         {it.finance && <div style={{ fontSize: 10.5, color: "#7c3aed" }}>ไฟแนนซ์: {it.finance}</div>}
+                        {it.red_plate && <div style={{ fontSize: 10.5, color: "#b91c1c", fontWeight: 700 }}>ป้ายแดง: {it.red_plate}</div>}
                         {it.note && <div style={{ fontSize: 10.5, color: "#92400e" }}>หมายเหตุ: {it.note}</div>}
                       </td>
                       <td style={{ ...td, textAlign: "center" }}>{dispSeller(it.seller)}</td>

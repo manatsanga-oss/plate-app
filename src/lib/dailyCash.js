@@ -377,6 +377,7 @@ export function buildDailyCashItems(src, ctx) {
       split, received,
       branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
       note: it.payment_received_note || "", finance: it.finance_type === "moto" ? it.finance_company_name : "",
+      red_plate: it.red_plate_no || "", // เลขป้ายแดงของใบขาย (user 2026-10-31: โชว์ในสรุปรายวันรับเงิน จอ+ใบพิมพ์)
     });
   }
   const deps = depItems.map((d) => {
