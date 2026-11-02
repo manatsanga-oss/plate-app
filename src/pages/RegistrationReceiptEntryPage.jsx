@@ -158,6 +158,7 @@ const stripBranchCode = (v) => String(v || "").trim().split(/\s+/)[0] || "";
 
 const blankHeader = (currentUser) => ({
   receipt_no: "",
+  book_no: "", // เลขที่/เล่มที่ สมุดรับเรื่อง (user กรอกเอง — โชว์ในสรุปรายวันรับเงินช่องเอกสารอ้างอิง)
   receive_date: todayISO(),
   receipt_type: "",
   receive_status: "ปกติ",
@@ -910,7 +911,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
         @media print { body { margin: 10mm; } }
       </style></head><body>
       <h2>📥 ใบรับเรื่องงานทะเบียน</h2>
-      <div class="muted">เลขที่ <b>${header.receipt_no || "-"}</b> · วันที่ ${fmtBE(header.receive_date) || "-"} · สาขา ${header.branch_code || "-"} · ประเภทงาน ${header.receipt_type || "-"}</div>
+      <div class="muted">เลขที่ <b>${header.receipt_no || "-"}</b>${header.book_no ? ` · เลขที่/เล่มที่ <b>${header.book_no}</b>` : ""} · วันที่ ${fmtBE(header.receive_date) || "-"} · สาขา ${header.branch_code || "-"} · ประเภทงาน ${header.receipt_type || "-"}</div>
       <div class="grid">
         <div><span class="muted">ลูกค้า:</span> <b>${header.customer_name || "-"}</b> ${header.customer_phone ? `(${header.customer_phone})` : ""}</div>
         <div><span class="muted">รถ:</span> <b>${[header.brand, header.model_series, header.color].filter(Boolean).join(" · ") || "-"}</b></div>
@@ -1027,6 +1028,7 @@ export default function RegistrationReceiptEntryPage({ currentUser }) {
           <div style={sec}>📌 ข้อมูลเอกสาร</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10, marginBottom: 14 }}>
             <Field label="เลขที่รับเรื่อง *"><input value={header.receipt_no} onChange={e => setHeader({ ...header, receipt_no: e.target.value })} style={{ ...inp, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }} readOnly={!editMode} /></Field>
+            <Field label="เลขที่/เล่มที่"><input value={header.book_no || ""} onChange={e => setHeader({ ...header, book_no: e.target.value })} style={inp} placeholder="เลขที่/เล่มที่ สมุดรับเรื่อง" /></Field>
             <Field label="วันที่รับเรื่อง *"><input type="date" value={header.receive_date} onChange={e => setHeader({ ...header, receive_date: e.target.value })} style={inp} /></Field>
             <Field label="ประเภทงาน *">
               <select value={header.receipt_type} onChange={e => onJobTypeChange(e.target.value)} style={inp}>

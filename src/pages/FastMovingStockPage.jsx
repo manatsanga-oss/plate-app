@@ -165,10 +165,12 @@ export default function FastMovingStockPage({ currentUser }) {
       if (!m) continue;
       const name = m[1].trim();
       const qty = m[2];
-      if (name.includes("นครหลวง")) result.nakhonluang = qty;
-      else if (name.includes("ป.เปา") || name.includes("ป เปา")) result.ppao = qty;
-      else if (name.includes("ห้าห้อง") || name.includes("ห้าน้อง")) result.haahong = qty;
-      else if (name.includes("สช") || name.includes("ศช")) result.sachtalad = qty;
+      // รหัสเดียวกันมีได้หลายที่เก็บในร้านเดียว — รวมยอดทุกที่เก็บ (เช่น 5YPE34400000 ห้าห้อง 104 + 14 = 118)
+      const add = (key) => { result[key] = result[key] === "-" ? qty : String(Number(result[key]) + Number(qty)); };
+      if (name.includes("นครหลวง")) add("nakhonluang");
+      else if (name.includes("ป.เปา") || name.includes("ป เปา")) add("ppao");
+      else if (name.includes("ห้าห้อง") || name.includes("ห้าน้อง")) add("haahong");
+      else if (name.includes("สช") || name.includes("ศช")) add("sachtalad");
     }
     return result;
   }

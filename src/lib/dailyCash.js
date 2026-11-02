@@ -411,7 +411,7 @@ export function buildDailyCashItems(src, ctx) {
     addTransferBy(split, bks, r2.payment_account);
     return {
       kind: "receipt", category: `รายได้รับเรื่อง (${r2.receipt_type || "งานทะเบียน"})`,
-      doc_no: r2.receipt_no, date: r2.paid_date || r2.paid_at, ref_no: "",
+      doc_no: r2.receipt_no, date: r2.paid_date || r2.paid_at, ref_no: r2.book_no || "", // เลขที่/เล่มที่ สมุดรับเรื่อง (list_receipt_payments ส่ง book_no)
       customer_name: r2.customer_name, seller: r2.payment_received_by || "", saleAmount: 0,
       split, received: amt,
       branch_key: bc5(r2.branch_code), branch_name: r2.branch_code || "ไม่ระบุสาขา",
@@ -485,7 +485,7 @@ export function buildDailyCashItems(src, ctx) {
     addTransferBy(split, [], r.payment_account);
     return {
       kind: "deposit_income", category: r.income_kind === "other" ? "รายได้อื่นๆ (หน้าร้าน)" : "รายได้รับฝากชำระค่างวด",
-      doc_no: r.receipt_no, date: String(r.receipt_date || "").slice(0, 10), ref_no: "",
+      doc_no: r.receipt_no, date: String(r.receipt_date || "").slice(0, 10), ref_no: r.book_no || "", // เลขที่/เล่มที่ สมุดใบเสร็จ (list_deposit_income ส่ง book_no)
       customer_name: r.customer_name, seller: r.received_by || "", saleAmount: 0,
       split, received: amt,
       branch_key: bc5(r.branch_code), branch_name: r.branch_code || "ไม่ระบุสาขา",

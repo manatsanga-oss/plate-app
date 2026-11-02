@@ -40,10 +40,11 @@ export default function DepositIncomePage({ currentUser }) {
   const [dateTo, setDateTo] = useState(todayStr());
   const [form, setForm] = useState({
     company: "กรุ๊ปลีส", receipt_date: todayStr(), customer_name: "", contract_no: "", amount: "", fee: DEFAULT_FEE,
-    method: "เงินสด", account: "",
+    method: "เงินสด", account: "", book_no: "", // book_no = เลขที่/เล่มที่ สมุดใบเสร็จ (กรอกเอง — โชว์ในสรุปรายวันรับเงินช่องเอกสารอ้างอิง)
   });
   // การ์ดรายได้อื่นๆ: เลือกหมวดจาก master (จำนวนเงิน default เติมให้ ว่าง=กรอกเอง) — user 2026-08-25
-  const [oform, setOform] = useState({ receipt_date: todayStr(), customer_name: "", income_code: "", income_name: "", detail: "", amount: "", vat_rate: 0, method: "เงินสด", account: "" });
+  const OFORM0 = { receipt_date: todayStr(), customer_name: "", income_code: "", income_name: "", detail: "", amount: "", vat_rate: 0, method: "เงินสด", account: "", book_no: "" };
+  const [oform, setOform] = useState(OFORM0);
   // วิธีชำระเงินโอน (user 2026-09-16): เก็บบัญชีเป็นข้อความ "ธนาคาร · เลขบัญชี · ชื่อบัญชี" แบบเดียวกับใบเสร็จค่าอะไหล่ → รายงานเคลื่อนไหวบัญชีจับคู่ด้วยเลขบัญชี
   const [bankAccounts, setBankAccounts] = useState([]);
   const bankLabelOf = (a) => [a.bank_name, a.account_no, a.account_name].filter(Boolean).join(" · ");
@@ -169,7 +170,7 @@ export default function DepositIncomePage({ currentUser }) {
       const r = await post(API, {
         action: "save_deposit_income",
         company: f.company, contract_no: f.contract_no.trim(), customer_name: f.customer_name.trim(),
-        amount: num(f.amount), fee: num(f.fee), receipt_date: f.receipt_date,
+        amount: num(f.amount), fee: num(f.fee), receipt_date: f.receipt_date, book_no: f.book_no.trim(),
         affiliation: myAffiliation,
         branch_code: myBranch || currentUser?.branch || "",
         payment_method: "เงินสด", payment_account: "",
@@ -178,7 +179,7 @@ export default function DepositIncomePage({ currentUser }) {
       const rc = r && r.receipt;
       if (!rc || !rc.receipt_no) throw new Error(r?.__error || r?.error || "บันทึกไม่สำเร็จ (ตรวจว่า import workflow deposit-income-api แล้ว)");
       setMessage(`✅ บันทึกรับฝากค่างวดแล้ว เลขที่ใบเสร็จ ${rc.receipt_no} — เข้าแท็บ "รับฝากค้างโอน" ของเมนูชำระเงินรับฝากแล้ว`);
-      setForm((p) => ({ ...p, customer_name: "", contract_no: "", amount: "", fee: DEFAULT_FEE }));
+      setForm((p) => ({ ...p, customer_name: "", contract_no: "", amount: "", fee: DEFAULT_FEE, book_no: "" }));
       load();
     } catch (e) { setMessage("❌ " + (e.message || e)); }
     finally { setSaving(false); }
@@ -197,7 +198,7 @@ export default function DepositIncomePage({ currentUser }) {
         action: "save_deposit_income", income_type: "other",
         income_name: f.income_name.trim(), detail: f.detail.trim(), vat_rate: num(f.vat_rate),
         customer_name: f.customer_name.trim() || "-",
-        amount: num(f.amount), fee: 0, receipt_date: f.receipt_date,
+        amount: num(f.amount), fee: 0, receipt_date: f.receipt_date, book_no: f.book_no.trim(),
         affiliation: myAffiliation,
         branch_code: myBranch || currentUser?.branch || "",
         payment_method: f.method || "เงินสด", payment_account: f.method === "เงินโอน" ? f.account : "",
@@ -206,7 +207,7 @@ export default function DepositIncomePage({ currentUser }) {
       const rc = r && r.receipt;
       if (!rc || !rc.receipt_no) throw new Error(r?.__error || r?.error || "บันทึกไม่สำเร็จ (ตรวจว่า import workflow deposit-income-api เวอร์ชันล่าสุดแล้ว)");
       setMessage(`✅ บันทึกรายได้อื่นๆ แล้ว เลขที่ใบเสร็จ ${rc.receipt_no}`);
-      setOform({ receipt_date: todayStr(), customer_name: "", income_code: "", income_name: "", detail: "", amount: "", vat_rate: 0, method: "เงินสด", account: "" });
+      setOform({ ...OFORM0, receipt_date: todayStr() });
       load();
     } catch (e) { setMessage("❌ " + (e.message || e)); }
     finally { setSaving(false); }
@@ -272,6 +273,8 @@ export default function DepositIncomePage({ currentUser }) {
           </div>
           <label>วันที่รับเงิน *</label>
           <input type="date" value={form.receipt_date} onChange={(e) => setForm((f) => ({ ...f, receipt_date: e.target.value }))} style={inp} />
+          <label>เลขที่/เล่มที่</label>
+          <input value={form.book_no} onChange={(e) => setForm((f) => ({ ...f, book_no: e.target.value }))} placeholder="เลขที่/เล่มที่ สมุดใบเสร็จ (ไม่บังคับ)" style={inp} />
           <label>ชื่อลูกค้า *</label>
           <div style={{ display: "flex", gap: 6 }}>
             <input value={form.customer_name} onChange={(e) => setForm((f) => ({ ...f, customer_name: e.target.value }))}
@@ -312,6 +315,8 @@ export default function DepositIncomePage({ currentUser }) {
           </select>
           <label>วันที่รับเงิน *</label>
           <input type="date" value={oform.receipt_date} onChange={(e) => setOform((f) => ({ ...f, receipt_date: e.target.value }))} style={inp} />
+          <label>เลขที่/เล่มที่</label>
+          <input value={oform.book_no} onChange={(e) => setOform((f) => ({ ...f, book_no: e.target.value }))} placeholder="เลขที่/เล่มที่ สมุดใบเสร็จ (ไม่บังคับ)" style={inp} />
           <label>ชื่อลูกค้า</label>
           <div style={{ display: "flex", gap: 6 }}>
             <input value={oform.customer_name} onChange={(e) => setOform((f) => ({ ...f, customer_name: e.target.value }))}
@@ -368,7 +373,7 @@ export default function DepositIncomePage({ currentUser }) {
             {rows.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 22 }}>{loading ? "กำลังโหลด..." : "ไม่มีรายการในช่วงวันที่"}</td></tr>}
             {rows.map((r) => (
               <tr key={r.receipt_no}>
-                <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.receipt_no}</td>
+                <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.receipt_no}{r.book_no ? <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 400, fontFamily: "Tahoma" }}>เล่มที่ {r.book_no}</div> : null}</td>
                 <td style={td}>{thaiDate(r.receipt_date)}</td>
                 <td style={td}>{r.customer_name}</td>
                 <td style={{ ...td, color: "#6b7280" }}>{r.description}</td>
