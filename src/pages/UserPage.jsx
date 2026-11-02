@@ -34,6 +34,7 @@ const PAGE_GROUPS = [
       { key: "deliveryfee", label: "🚚 รายงานค่านำพา" },
       { key: "fuelwithdraw", label: "⛽ บันทึกเบิกค่าน้ำมันรถใช้จ่าย" },
       { key: "maildispatch", label: "✉️ บันทึกส่งเอกสารทางไปรษณีย์" },
+      { key: "financecustody", label: "🏍️ บันทึกรับฝากรถยึดไฟแนนท์" },
       { key: "pricemarkup", label: "➕ ราคาขายบวกเพิ่ม" },
       { key: "receiptqr",  label: "🔳 พิมพ์ QR ออกใบเสร็จ" },
       { key: "receiptissue", label: "🧾 ออกใบเสร็จจาก QR" },
