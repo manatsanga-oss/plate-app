@@ -288,13 +288,15 @@ export default function App() {
   }, [currentUser]);
   const closeAerox = () => { setShowAerox(false); try { sessionStorage.setItem("aerox_popup_shown", "1"); } catch {} };
 
-  // POP UP ประกาศผลรางวัลฝึกตอบลูกค้า — ขึ้นครั้งเดียวต่อการเข้าระบบ เฉพาะช่วงประกาศผล (user 2026-10-31)
+  // POP UP ประกาศผลรางวัลฝึกตอบลูกค้า — เฉพาะช่วงประกาศผล 1–7 พ.ย. (user 2026-10-31)
+  // ขึ้นวันละครั้งต่อแท็บ (key มีวันที่): เดิมครั้งเดียวต่อ session ทำให้ปิดแล้วไม่ขึ้นอีกเลยทั้งที่ยังอยู่ในช่วงประกาศ (user 2026-11-02 "POP UP หาย")
   const [showAiSimAward, setShowAiSimAward] = useState(false);
+  const aiSimAwardKey = () => "aisim_award_popup_shown_" + new Date().toLocaleDateString("en-CA");
   useEffect(() => {
     if (!currentUser || !isAiSimAwardActive()) return;
-    try { if (!sessionStorage.getItem("aisim_award_popup_shown")) setShowAiSimAward(true); } catch { setShowAiSimAward(true); }
+    try { if (!sessionStorage.getItem(aiSimAwardKey())) setShowAiSimAward(true); } catch { setShowAiSimAward(true); }
   }, [currentUser]);
-  const closeAiSimAward = () => { setShowAiSimAward(false); try { sessionStorage.setItem("aisim_award_popup_shown", "1"); } catch {} };
+  const closeAiSimAward = () => { setShowAiSimAward(false); try { sessionStorage.setItem(aiSimAwardKey(), "1"); } catch {} };
 
   const handleLogin = (user) => {
     setCurrentUser(user);
