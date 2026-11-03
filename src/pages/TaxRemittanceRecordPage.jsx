@@ -191,6 +191,8 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
   // สังกัดของค่าแนะนำ/ค่านำพา = ยี่ห้อรถที่ขาย ไม่ใช่สาขาที่บันทึก (user 2026-09-01): YAMAHA → สิงห์ชัย, HONDA → ป.เปา
   // อ่านจากรหัสเครื่องในหมายเหตุใบจ่าย — YAMAHA = อักษร+ตัวเลข (E34SE, E35NE, G3V4E, H345E XMAX) · HONDA = อักษร+อักษร (JA74E, JK16E, KF50E, JC93E, NF09E NSS350)
   // ยืนยันจาก moto_sales 2026-09-01: H345E ยามาฮ่าทั้ง 50 ใบ, NF09E ฮอนด้าทั้ง 38 ใบ
+  // คีย์เลขเครื่องจากข้อความ (หมายเหตุใบค่าแนะนำ / engine_no ใบขาย) → "KF50E2303104" ใช้จับคู่ว่าค่าแนะนำกับค่านำพาเป็นรถคันเดียวกัน
+  const engineKeyOf = (s) => { const m = String(s || "").toUpperCase().match(/([A-Z][A-Z0-9]{3}E)[-\s]?(\d{6,8})/); return m ? m[1] + m[2] : ""; };
   function affByEngineNote(note) {
     // รหัสเครื่องยาว 5 ตัวลงท้าย E เสมอ (ไม่ใช้ \b เพราะบางแถวพิมพ์ติดกับรหัสรุ่น เช่น "AFS110MCBT 3THJA74E-1534196")
     const m = String(note || "").toUpperCase().match(/([A-Z][A-Z0-9]{3}E)[-\s]?\d{6,8}/);
@@ -211,9 +213,10 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const aff = affByEngineNote(r.note) || r.affiliation || "(ไม่ระบุสังกัด)";
       const pm = periodOf(r.payment_date);
       const key = `${tt}|${pm}|${aff}`;
-      if (!map[key]) map[key] = { source_id: `ref|${key}`, kind: "referral", pndType: tt, sourceLabel: "ค่าแนะนำ", affiliation: aff, paid_at: `${yymm(r.payment_date)}-01`, period_month: pm, amount: 0, count: 0, vendor_name: "ค่าแนะนำ", details: [] };
+      if (!map[key]) map[key] = { source_id: `ref|${key}`, kind: "referral", pndType: tt, sourceLabel: "ค่าแนะนำ", affiliation: aff, paid_at: `${yymm(r.payment_date)}-01`, period_month: pm, amount: 0, count: 0, vendor_name: "ค่าแนะนำ", details: [], engines: [] };
       map[key].amount += wht; map[key].count += 1;
       map[key].details.push({ payment_no: r.payment_no, payment_date: r.payment_date, pay_to: r.pay_to, total_amount: Number(r.total_amount || 0), withholding_tax: wht });
+      const eng = engineKeyOf(r.note); if (eng) map[key].engines.push(eng);
     });
     return Object.values(map).map(b => ({ ...b, doc_refs: `${b.pndType} ค่าแนะนำ ${b.count} ราย (หัก ณ ที่จ่าย)` }));
   }
@@ -278,14 +281,22 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const empAff = d.affiliation;                              // สังกัดพนักงาน (ใช้ match รายคน)
       const payAff = payAffOfBrand(d.brand_filter, d.affiliation); // สังกัด "ที่จ่าย" = เจ้าของแบรนด์ (สำหรับแสดง/ยื่นภาษี)
       const persons = (personMap[d.save_group] || []).filter(p => p.affiliation === empAff && p.brand === d.brand_filter);
+      // ยอดรายคนจาก wht_persons = ยอด "สุทธิ" ที่พนักงานได้รับ (รวม = net_to_pay) ส่วนใบ expense เก็บฐาน gross (subtotal) ที่ gross-up แล้ว
+      // → ต้องคูณกลับเป็น gross ก่อนคิดภาษี (เช่น 2,400 สุทธิ → ฐาน 2,474.23 ภาษี 74.23 ตรงใบแนบ ภ.ง.ด.3 สนง.บัญชี) และปรับเศษให้รวมเท่ายอดภาษีของใบ
+      const netSum = persons.reduce((s2, p) => s2 + Number(p.amount || 0), 0);
+      const grossFactor = netSum > 0 && subtotal > 0 ? subtotal / netSum : 1;
       const details = persons.length
         ? persons.map(p => {
-            const amt = Number(p.amount || 0);
+            const net = Number(p.amount || 0), gross = Math.round(net * grossFactor * 100) / 100;
             return { payment_date: d.paid_at, payment_no: d.paid_doc_no || d.expense_doc_no || "-",
-              pay_to: p.employee_name || "-", total_amount: amt, withholding_tax: Math.round(amt * pct * 100) / 100 };
+              pay_to: p.employee_name || "-", total_amount: gross, withholding_tax: Math.round(gross * pct * 100) / 100 };
           })
         : [{ payment_date: d.paid_at, payment_no: d.paid_doc_no || d.expense_doc_no || "-",
             pay_to: d.vendor_name || "-", total_amount: subtotal, withholding_tax: wht }];
+      if (persons.length) { // เศษสตางค์จากการปัดรายคน → ใส่คนที่ยอดมากสุด ให้ผลรวมรายคน = ภาษีของใบพอดี
+        const resid = Math.round((wht - details.reduce((s2, x) => s2 + x.withholding_tax, 0)) * 100) / 100;
+        if (resid) { const top = details.reduce((a, x) => (x.total_amount > a.total_amount ? x : a), details[0]); top.withholding_tax = Math.round((top.withholding_tax + resid) * 100) / 100; }
+      }
       return {
         source_id: `comm|${d.expense_doc_id}`,
         kind: "commission", pndType: tt, sourceLabel: "ค่านายหน้า",
@@ -377,7 +388,7 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       if (!map[key]) map[key] = { source_id: `deliv|${key}`, kind: "delivery", pndType: "ภ.ง.ด.3", sourceLabel: "ค่านำพา (ใบขาย NEW)", affiliation: aff, paid_at: `${yymm(s.sale_date)}-01`, period_month: pm, amount: 0, count: 0, details: [], items: [] };
       const payee = s.delivery_payee_name || `ผู้นำพา (ลูกค้า ${s.customer_name || "-"})`;
       map[key].amount = Math.round((map[key].amount + wht) * 100) / 100; map[key].count += 1;
-      map[key].details.push({ payment_no: s.invoice_no, payment_date: s.sale_date, pay_to: payee, total_amount: fee, withholding_tax: wht });
+      map[key].details.push({ payment_no: s.invoice_no, payment_date: s.sale_date, pay_to: payee, total_amount: fee, withholding_tax: wht, engine_key: engineKeyOf(s.engine_no) });
       map[key].items.push({ source_table: "retail_sales_delivery", source_id: deliverySrcId(s.invoice_no), amount: wht, vendor_name: `${payee} · ${s.invoice_no}`, doc_date: String(s.sale_date || "").slice(0, 10), affiliation: aff });
     });
     return Object.values(map).map(b => ({ ...b, vendor_name: `ผู้นำพา ${b.count} คัน`, doc_refs: `ภ.ง.ด.3 ค่านำพา ใบขาย NEW ${b.count} คัน (หัก ณ ที่จ่าย 3%)` }));
@@ -404,8 +415,11 @@ export default function TaxRemittanceRecordPage({ currentUser, lockTaxType }) {
       const expDone = new Set(done.flatMap(h => itemsOf(h).map(i => `${i.source_table}|${i.source_id}`)));
       const refRows = referral.filter(b => !refDone.has(`${b.pndType}|${b.period_month}|${b.affiliation}`));
       // ค่านำพาใบขาย NEW: ตัดคันที่นำส่งแล้ว (itemized รายคัน) ออกจากก้อนเดือน — เหลือ 0 คัน = ไม่แสดง
+      // + ตัดคันที่จ่ายค่านำพาผ่านใบ "ค่าแนะนำ" (daily_expenses) ไปแล้ว — จับคู่เลขเครื่องในหมายเหตุใบค่าแนะนำกับ engine_no ใบขาย
+      //   (ต้น ก.ย.69 มี 6 คันจ่ายซ้ำสองทาง ระบบนับ ภ.ง.ด.3 เกินบริษัทละ 60 บาท — เทียบใบแนบ สนง.บัญชี 2026-11-03; ให้คงฝั่งค่าแนะนำที่มีชื่อผู้รับ)
+      const refEngines = new Set(referral.flatMap(b => b.engines || []));
       const deliveryRows = delivery.map(b => {
-        const keep = b.items.map((it, i) => ({ it, d: b.details[i] })).filter(x => !expDone.has(`${x.it.source_table}|${x.it.source_id}`));
+        const keep = b.items.map((it, i) => ({ it, d: b.details[i] })).filter(x => !expDone.has(`${x.it.source_table}|${x.it.source_id}`) && !(x.d.engine_key && refEngines.has(x.d.engine_key)));
         if (!keep.length) return null;
         const amount = Math.round(keep.reduce((s2, x) => s2 + x.it.amount, 0) * 100) / 100;
         return { ...b, items: keep.map(x => x.it), details: keep.map(x => x.d), amount, count: keep.length, vendor_name: `ผู้นำพา ${keep.length} คัน`, doc_refs: `ภ.ง.ด.3 ค่านำพา ใบขาย NEW ${keep.length} คัน (หัก ณ ที่จ่าย 3%)` };
