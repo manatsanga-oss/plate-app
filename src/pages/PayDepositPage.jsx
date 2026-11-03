@@ -517,6 +517,14 @@ export default function PayDepositPage({ currentUser }) {
         body: JSON.stringify(body),
       });
       const data = await res.json();
+      // n8n ตอบ error เมื่อรายการที่เลือกเคยสร้างใบโอนแล้ว (กันบันทึกซ้ำ — user 2026-11-03 เคส GLP691009051255/1347) → ไม่ปิดหน้าต่าง โหลดรายการค้างโอนใหม่
+      if (data?.error) {
+        setMessage("❌ " + data.error);
+        setShowTransfer(false);
+        fetchPending();
+        setSaving(false);
+        return;
+      }
       if (data?.payment_no || data?.id) {
         setMessage(isEdit ? `✅ แก้ไขเรียบร้อย` : `✅ บันทึกแล้ว ${data.payment_no || ""}`);
         setShowTransfer(false);
@@ -526,6 +534,10 @@ export default function PayDepositPage({ currentUser }) {
           fetchPayments();
         } else {
           const printObj = { payment_no: data.payment_no, payment_date: body.payment_date, items: body.items };
+          // ตัดรายการที่เพิ่งบันทึกออกจากตารางค้างโอนทันที (ไม่รอ fetchPending ที่อาจช้าหลายวินาที) — กันกด "สร้างใบโอน" ซ้ำระหว่างรอโหลด (user 2026-11-03)
+          const savedIds = new Set(body.items.map((i) => i.source_item_id));
+          setPendingItems((prev) => prev.filter((r) => !savedIds.has(r.item_id)));
+          setSelected((prev) => { const s = { ...prev }; savedIds.forEach((id) => { if (s[id]) s[id] = { ...s[id], checked: false }; }); return s; });
           if (window.confirm("บันทึกสำเร็จ — ต้องการพิมพ์ใบโอนหรือไม่?")) printPayment(printObj);
           fetchPending();
         }
@@ -704,7 +716,7 @@ export default function PayDepositPage({ currentUser }) {
               เลือก: {selectedList.length} รายการ | รวม: {fmt(totalSelected)} บาท
             </div>
             <button onClick={printSelected} style={btnPrint} disabled={selectedList.length === 0}>🖨️ พิมพ์รายการ</button>
-            <button onClick={openTransfer} style={btnSuccess} disabled={selectedList.length === 0}>💰 สร้างใบโอน</button>
+            <button onClick={openTransfer} style={btnSuccess} disabled={selectedList.length === 0 || pendingLoading || saving}>💰 สร้างใบโอน</button>
           </div>
 
           {pendingLoading ? <p>กำลังโหลด...</p> : pendingItems.length === 0 ? (
