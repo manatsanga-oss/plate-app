@@ -997,15 +997,13 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="giveawayreceipt" label="พิมพ์ใบรับของแถม (เกิน 45 วัน)" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
       </MenuGroup>
 
-      <MenuGroup title="Report Admin" pages={["reportadmin","partservicereceiptreport","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","generalreceiptpivot","salesbypayment","otherincometaxreport","promoincomebyvehicle","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","deliveryfee","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
-        <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
+      <MenuGroup title="Report Admin" pages={["partservicereceiptreport","retailsalereport","taxinvoicesalesreport","creditnotereport","carpaymentreport","carpaymentreportnew","salesbypayment","otherincometaxreport","promoincomebyvehicle","registrationsummaryreport","receipttransferreport","vehiclepurchasereport","deliveryfee","partreceiptreport","receiptqrreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="retailsalereport" label="รายงานใบขายปลีก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="taxinvoicesalesreport" label="รายงานการขายตามใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="creditnotereport" label="รายงานใบลดหนี้รับ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="carpaymentreport" label="รายงานรับชำระเงินรายคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        {/* รายงานรับชำระเงินรายคัน (ตัวเก่า จาก upload DMS) ซ่อนจากเมนู 2026-11-04 — เลิกใช้แล้ว ใช้ "รายงานรับชำระเงินรายคัน NEW" แทน (หน้า/route ยังอยู่) */}
         <MenuItem page="carpaymentreportnew" label="รายงานรับชำระเงินรายคัน NEW" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="generalreceiptpivot" label="สรุปรับชำระเงินทั่วไป (รายเดือน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
-        <MenuItem page="salesbypayment" label="รายงานการขายตามการชำระเงิน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        {/* รายงานการขายตามการชำระเงิน (salesbypayment) ซ่อนจากเมนู 2026-11-04 — เลิกใช้แล้ว (หน้า/route ยังอยู่) */}
         <MenuItem page="otherincometaxreport" label="รายงานใบกำกับภาษีรายได้อื่นๆ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="promoincomebyvehicle" label="รายงานค่าส่งเสริมรายคัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="registrationsummaryreport" label="รายงานสรุปใบปะหน้า คชจ. ขายรถ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -1026,6 +1024,12 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hondaquota" label="โควต้า HONDA (DOSS)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="marketregistration" label="ข้อมูลจดทะเบียนรถในตลาด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="profitloss" label="งบกำไรขาดทุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+      </MenuGroup>
+
+      {/* Report for FlowAcc — รายงานสำหรับบันทึกบัญชีใน FlowAccount (user 2026-11-04) — ย้าย "รายงานสรุปขายรถบันทึก FLOW ACC" จาก Report Admin มาไว้ที่นี่ (เปิดให้ทุก user เหมือนเดิม) */}
+      <MenuGroup title="Report for FlowAcc" pages={["reportadmin", "generalreceiptpivot"]} activeMenu={activeMenu} onChange={onChange} canAccess={(p) => (p === "reportadmin" ? true : canAccess(p))}>
+        <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
+        <MenuItem page="generalreceiptpivot" label="สรุปรับชำระเงินทั่วไป (รายเดือน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Sales" pages={salesPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
