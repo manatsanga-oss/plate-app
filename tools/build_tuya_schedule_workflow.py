@@ -1,4 +1,4 @@
-# สร้าง n8n workflow "Tuya Schedule" — ตั้งเวลาเปิด/ปิด แอร์/ทีวี รายอุปกรณ์ (ตารางเก็บใน Postgres tuya_device_schedules แก้จากหน้า Smart Office) ผ่าน Tuya IR Control Hub API
+# สร้าง n8n workflow "Tuya Schedule" — ตั้งเวลาเปิด/ปิด แอร์/ทีวี/ปลั๊ก รายอุปกรณ์ (ตารางเก็บใน Postgres tuya_device_schedules แก้จากหน้า Smart Office) ผ่าน Tuya IR Control Hub API
 # v2 (user 2026-10-30 "ตั้งเวลาเปิดปิดอุปกรณ์แต่ละตัวได้"): Schedule trigger ทุก 1 นาที → อ่านตาราง → ยิงคำสั่งของอุปกรณ์ที่ถึงเวลา (เวลาไทย, วันที่เลือก)
 # ใช้โค้ดเซ็น HMAC-SHA256 แบบ JS ล้วน + ค่า client/secret/base เดียวกับ Door_Control_Workflow.json (Code node n8n require('crypto') ไม่ได้)
 # โครง: Schedule (ทุกนาที) + Webhook tuya-schedule-api → Prepare → Build Sched SQL → PG Schedules → Token Sign → Tuya Token → List Prep → Tuya List → Command Prep (ยิงคำสั่งเองใน Code node) → Build Fired SQL → PG Fired → Result
@@ -21,7 +21,7 @@ HELPERS = sign_js[:sign_js.index("\nconst d = $input")]   # utf8/sha256/hmac hel
 
 DDL = """CREATE TABLE IF NOT EXISTS tuya_device_schedules (
   remote_id TEXT PRIMARY KEY,        -- remote_id ของ Tuya (= device id อุปกรณ์เสมือนใต้ IR blaster)
-  blaster TEXT, kind TEXT,           -- kind: ac | tv
+  blaster TEXT, kind TEXT,           -- kind: ac | tv | plug (ปลั๊ก WiFi สั่งตรง ไม่ผ่าน IR)
   name TEXT,
   on_time TEXT, off_time TEXT,       -- 'HH:MM' เวลาไทย หรือ NULL = ไม่ตั้ง
   days TEXT NOT NULL DEFAULT '1234567',   -- วันที่ทำงาน 1=จันทร์ … 7=อาทิตย์
@@ -33,13 +33,18 @@ SEED = ("INSERT INTO tuya_device_schedules (remote_id, blaster, kind, name, on_t
         "('ebe6c6996c7797e91f5g3p','eb57949ab6012fb6644pat','ac','Air TCL','08:00','17:10'), "
         "('ebcaecc68ae13e7545wnqh','eb57949ab6012fb6644pat','ac','Air Mitsubishi ตัวกลาง','08:00','17:10'), "
         "('eb827759879924b32aqxzr','eb619bef17ce0d7e9behnb','ac','Air1','08:00','17:10'), "
-        "('eb070b3f31c73fee51vth8','eb57949ab6012fb6644pat','tv','TV','08:00','17:00') ON CONFLICT (remote_id) DO NOTHING;")
+        "('eb070b3f31c73fee51vth8','eb57949ab6012fb6644pat','tv','TV','08:00','17:00'), "
+        "('eb009dfb93fb11e468r3xb','','plug','ไฟศาลเจ้า','18:00','06:00') ON CONFLICT (remote_id) DO NOTHING;")   # ไฟศาลเจ้า: เปิดค่ำ ปิดเช้า (ข้ามคืนได้ เพราะเวลาเปิด/ปิดเช็คแยกกัน)
 
 PREPARE = """// Tuya Schedule v2 — action: tick (จาก Schedule ทุกนาที) · list · save_schedule · cmd · run(slot on/ac/tv)
 const cfg = { clientId: '__CID__', secret: '__SEC__', base: '__BASE__' };
 const BLASTERS = [
   { id: 'eb57949ab6012fb6644pat', name: 'Smart IR (HMS06WB3S)' },
   { id: 'eb619bef17ce0d7e9behnb', name: 'LCD temp/humidity IR' },
+];
+// ปลั๊ก WiFi (category cz) สั่งตรงด้วย /v1.0/iot-03/devices/{id}/commands switch_1 — ต้องเปลี่ยนสิทธิ์เป็น Control ใน iot.tuya.com ก่อน (user กด Confirm Conversion 2026-11-04)
+const PLUGS = [
+  { id: 'eb009dfb93fb11e468r3xb', name: 'ไฟศาลเจ้า' },
 ];
 const item = $input.first().json || {};
 const b = item.body || {};
@@ -54,7 +59,7 @@ const cmd = (action === 'cmd' && b.remote_id) ? { remote_id: String(b.remote_id)
 const hhmm = (v) => { const m = String(v || '').trim().match(/^(\\d{1,2}):(\\d{2})$/); return m ? (m[1].padStart(2, '0') + ':' + m[2]) : null; };
 const sched = (action === 'save_schedule' && b.remote_id) ? { remote_id: String(b.remote_id).slice(0, 40), blaster: String(b.blaster || '').slice(0, 40), kind: String(b.kind || '').slice(0, 8), name: String(b.name || '').slice(0, 80),
   on_time: hhmm(b.on_time), off_time: hhmm(b.off_time), days: String(b.days || '1234567').replace(/[^1-7]/g, '') || '1234567', enabled: b.enabled !== false && b.enabled !== 'false' } : null;
-return [{ json: { cfg, blasters: BLASTERS, action, slot: String(b.slot || ''), th, dow, today, cmd, sched } }];
+return [{ json: { cfg, blasters: BLASTERS, plugs: PLUGS, action, slot: String(b.slot || ''), th, dow, today, cmd, sched } }];
 """.replace("__CID__", CLIENT_ID).replace("__SEC__", SECRET).replace("__BASE__", BASE)
 
 SCHED_SQL = ("""// ตารางเวลาต่ออุปกรณ์ใน Postgres: สร้างตาราง + seed ค่าเริ่มต้น (08:00 เปิด · 17:00 ปิดทีวี · 17:10 ปิดแอร์) + บันทึกเมื่อ save_schedule → คืนทุกแถว
@@ -103,15 +108,19 @@ const schedules = $('PG Schedules').all().map((x) => x.json).filter((r) => r && 
 const access = lists[0].access;
 const remotes = [];
 res.forEach((r, i) => { const bl = lists[i] || {}; (r.result || []).forEach((rm) => remotes.push({ blaster: bl.blaster, blasterName: bl.blasterName, id: rm.remote_id, name: rm.remote_name, category: String(rm.category_id), brand: rm.brand_name })); });
+(d.plugs || []).forEach((p) => remotes.push({ blaster: '', blasterName: '', id: p.id, name: p.name, category: 'plug', brand: 'Smart Plug' }));
 const AC = remotes.filter((r) => r.category === '5');
 const TV = remotes.filter((r) => r.category === '2');
+const PLUG = remotes.filter((r) => r.category === 'plug');
+const plugCmd = (r, on) => ({ kind: 'plug', name: r.name, remote_id: r.id, method: 'POST', path: `/v1.0/iot-03/devices/${r.id}/commands`, body: { commands: [{ code: 'switch_1', value: !!on }] }, what: on ? 'on' : 'off' });
+const cmdFor = (r, on, what) => r.category === '5' ? acCmd(r, on) : (r.category === 'plug' ? plugCmd(r, on) : tvCmd(r, what));
 const acCmd = (r, on) => ({ kind: 'ac', name: r.name, remote_id: r.id, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/air-conditioners/${r.id}/command`, body: { code: 'power', value: on ? 1 : 0 }, what: on ? 'on' : 'off' });
 const tvCmd = (r, what) => ({ kind: 'tv', name: r.name, remote_id: r.id, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/remotes/${r.id}/command`, body: { key: 'Power' }, what: what || 'power' });
 const calls = [];
 if (d.action === 'cmd' && d.cmd) {   // สั่งเดี่ยวจากหน้า Smart Office
   const r = remotes.find((x) => x.id === d.cmd.remote_id);
   if (!r) return [{ json: { ok: false, action: 'cmd', error: 'remote not found: ' + d.cmd.remote_id, remotes, schedules } }];
-  calls.push(r.category === '5' ? acCmd(r, !!d.cmd.power) : tvCmd(r));
+  calls.push(cmdFor(r, !!d.cmd.power));
 }
 if (d.action === 'run') {   // ปุ่มสั่งทั้งหมด
   if (d.slot === 'ac') AC.forEach((r) => calls.push(acCmd(r, false)));
@@ -124,7 +133,19 @@ if (d.action === 'tick') {   // ตารางรายอุปกรณ์: �
     const r = remotes.find((x) => x.id === s.remote_id); if (!r) continue;
     const what = s.on_time === d.th ? 'on' : (s.off_time === d.th ? 'off' : null); if (!what) continue;
     const stamp = d.today + ' ' + d.th + ' ' + what; if (s.last_fired === stamp) continue;
-    calls.push(Object.assign(r.category === '5' ? acCmd(r, what === 'on') : tvCmd(r, what), { stamp }));
+    calls.push(Object.assign(cmdFor(r, what === 'on', what), { stamp }));
+  }
+}
+if (d.action === 'list') {   // สถานะปลั๊ก (เปิด/ปิดอยู่) ให้หน้า Smart Office โชว์ — GET status เซ็นด้วย body ว่าง
+  for (const r of PLUG) {
+    try {
+      const t = String(Date.now()); const path = `/v1.0/iot-03/devices/${r.id}/status`;
+      const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + access + t + 'GET\\n' + sha256Hex('') + '\\n\\n' + path).toUpperCase();
+      let st = await this.helpers.httpRequest({ method: 'GET', url: d.cfg.base + path, json: true, timeout: 10000, headers: { client_id: d.cfg.clientId, sign, t, sign_method: 'HMAC-SHA256', access_token: access, Accept: 'application/json' } });
+      if (typeof st === 'string') { try { st = JSON.parse(st); } catch { st = null; } }
+      const sw = (st && Array.isArray(st.result) ? st.result : []).find((x) => x.code === 'switch_1');
+      r.state = sw ? (sw.value ? 'on' : 'off') : null; r.online = !!(st && st.success);
+    } catch (e) { r.state = null; r.online = false; }
   }
 }
 if (!calls.length) return [{ json: { ok: true, noop: true, action: d.action, slot: d.slot, th: d.th, dow: d.dow, sent: 0, remotes, schedules, saved: !!d.sched } }];

@@ -128,7 +128,8 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, status = 'pending', mess
 }
 if (action === 'take_led_token') {   // เครื่องที่ร้านรับกุญแจครั้งเดียว แล้วลบออกจากฐานทันที
   return [{ json: { query: `${DDL}
-UPDATE signage_settings SET value = NULL, status = 'taken', message = 'เครื่องที่ร้านรับกุญแจแล้ว กำลังทดสอบ', status_at = now() WHERE key = ${KEY} AND value IS NOT NULL RETURNING value AS token;` } }];
+WITH old AS (SELECT value FROM signage_settings WHERE key = ${KEY} AND value IS NOT NULL FOR UPDATE)
+UPDATE signage_settings s SET value = NULL, status = 'taken', message = 'เครื่องที่ร้านรับกุญแจแล้ว กำลังทดสอบ', status_at = now() FROM old WHERE s.key = ${KEY} RETURNING old.value AS token;` } }];   // RETURNING ต้องเอาค่าเก่าจาก CTE (RETURNING value ตรง ๆ ได้ค่าหลังอัปเดต = NULL → Pi ไม่เคยได้กุญแจ 2026-11-04)
 }
 if (action === 'led_token_status') {   // เครื่องที่ร้านรายงานผล: ok / error / need_key
   const st = ['ok', 'error', 'need_key', 'taken'].includes(String(b.status)) ? String(b.status) : 'error';

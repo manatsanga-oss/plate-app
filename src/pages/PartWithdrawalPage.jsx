@@ -3,6 +3,114 @@ import React, { useState, useEffect, useRef } from "react";
 const FAST_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-stock-api";
 const PW_API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-withdrawal-api";
 const SQ_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-queue-api"; // สถานะช่องซ่อม (รถในช่อง) จากกล้อง NVR ผ่าน Pi — action list_bays / clear_bay
+const SVC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api"; // รายละเอียดรถ + ประวัติงานบริการ (user 2026-10-31: กดเลือกรถที่คีออสแล้วดูประวัติบริการล่าสุด)
+
+const txt = (v) => (v == null ? "" : String(v).trim());
+const fmtDateTH = (d) => { const t = txt(d).slice(0, 10); if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return t || "-"; const [y, m, dd] = t.split("-"); return `${dd}/${m}/${Number(y) + 543}`; };
+const fmtMoney = (n) => Number(n || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// แผงรายละเอียดรถ + ประวัติเข้ารับบริการล่าสุด ของรถที่เลือกในคีออส
+// ขั้น 1 search_vehicles ด้วยทะเบียน (หมวด+เลข ไม่มีช่องว่าง) → ได้เลขถัง/เลขเครื่อง/ลูกค้า/รุ่น · ขั้น 2 service_history ด้วยเลขถัง/เลขเครื่อง (API จับคู่ด้วยเลขถัง/เครื่องเท่านั้น ทะเบียนอย่างเดียวไม่ได้)
+function VehicleServicePanel({ plate, province, maxJobs = 5 }) {
+  const [st, setSt] = useState({ stage: "idle" });
+  useEffect(() => {
+    const key = txt(plate).replace(/\s+/g, "");
+    if (!key) return;   // ไม่มีทะเบียน → หน้าจอโชว์ข้อความ "เลือกรถ" จากค่า plate ตรง ๆ
+    let alive = true;
+    (async () => {
+      setSt({ stage: "loading" }); // eslint-disable-line react-hooks/set-state-in-effect
+      try {
+        // ค้นด้วย "เลข" ทะเบียนอย่างเดียว (หมวดในฐานมีทั้ง "2กฉ" และ "2 กฉ" ค้นทั้งป้ายไม่เจอ) แล้วค่อยเทียบหมวดเอง
+        const num = (key.match(/\d+$/) || [key])[0];
+        const r1 = await fetch(SVC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "search_vehicles", field: "plate_number", keyword: num }) });
+        const d1 = await r1.json();
+        const cands = (Array.isArray(d1) ? d1 : (Array.isArray(d1?.data) ? d1.data : [])).filter(v => txt(v.plate_number).replace(/\s+/g, "") === num);
+        const pk = (v) => `${txt(v.plate_category)}${txt(v.plate_number)}`.replace(/\s+/g, "");
+        const diff = (x, y) => x.length === y.length ? [...x].filter((c, i) => c !== y[i]).length : 99;
+        const exact = cands.filter(v => pk(v) === key);
+        const near = cands.filter(v => diff(pk(v), key) === 1);   // กล้องอ่านอักษรหมวดเพี้ยน 1 ตัว (ช/ข/ฉ/ณ) — ยอมรับเมื่อเลขตรงและต่างแค่ตัวเดียว
+        const nearPlates = [...new Set(near.map(pk))];
+        const v = (exact.length ? exact : nearPlates.length === 1 ? near : [])[0] || null;   // ใกล้เคียงต้องมีป้ายเดียว (เลข 956 มี 1กฬ/1กส/1กภ ต่าง 1 ตัวทั้งหมด → ไม่เดา); API เรียงใบขายก่อนทะเบียน Excel/ใบซ่อม
+        if (!alive) return;
+        if (!v) { setSt({ stage: "done", vehicle: null, jobs: [], cands }); return; }
+        const r2 = await fetch(SVC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "service_history", chassis: v.frame_no, engine: v.engine_no, plate: pk(v), customer: v.customer_name }) });
+        const d2 = await r2.json();
+        const rows = Array.isArray(d2) ? d2 : (Array.isArray(d2?.data) ? d2.data : []);
+        const map = new Map();   // รายชิ้น → รายใบงาน (logic เดียวกับหน้าค้นหาประวัติ)
+        for (const r of rows) {
+          const k = `${r.brand}|${r.job_no}`;
+          if (!map.has(k)) map.set(k, { brand: r.brand, job_no: r.job_no, service_date: r.service_date, repair_type: r.repair_type, mechanic_name: r.mechanic_name, mileage: r.mileage, job_amount: r.job_amount, parts: [], _ps: 0 });
+          const g = map.get(k);
+          if (txt(r.part_code) || txt(r.part_name)) { g.parts.push({ part_code: r.part_code, part_name: r.part_name, qty: r.qty, part_amount: r.part_amount }); g._ps += Number(r.part_amount || 0); }
+        }
+        const jobs = [...map.values()].map(g => ({ ...g, total: g.job_amount != null ? Number(g.job_amount) : g._ps }))
+          .sort((x, y) => (String(x.service_date) < String(y.service_date) ? 1 : -1));
+        if (alive) setSt({ stage: "done", vehicle: v, jobs, total: jobs.length });
+      } catch {
+        if (alive) setSt({ stage: "error" });
+      }
+    })();
+    return () => { alive = false; };
+  }, [plate]);
+
+  const box = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: "12px 14px" };
+  if (!txt(plate)) return <div style={{ ...box, color: "#9ca3af", textAlign: "center" }}>เลือกรถด้านบน (ที่อ่านทะเบียนได้) เพื่อดูรายละเอียดรถและประวัติบริการ</div>;
+  if (st.stage === "loading") return <div style={{ ...box, color: "#6b7280", textAlign: "center" }}>⏳ กำลังค้นหารถ {plate} …</div>;
+  if (st.stage === "error") return <div style={{ ...box, color: "#b91c1c" }}>โหลดประวัติไม่สำเร็จ (เช็กว่า Service History API ยัง Active)</div>;
+  if (st.stage !== "done") return null;
+  const v = st.vehicle;
+  if (!v) return <div style={{ ...box, color: "#92400e", background: "#fffbeb" }}>ไม่พบรถทะเบียน <b>{plate}{province ? " " + province : ""}</b> ในระบบ (ใบขาย/ทะเบียน Excel/ใบซ่อม) — อาจเป็นรถที่ไม่ได้ซื้อจากร้าน หรือกล้องอ่านทะเบียนผิด{st.cands?.length ? <div style={{ fontSize: 13, marginTop: 4 }}>เลข {txt(plate).match(/\d+$/)?.[0]} ในระบบมี: {st.cands.map(c => `${txt(c.plate_category)} ${txt(c.plate_number)}`.trim()).filter((x, i, arr) => arr.indexOf(x) === i).slice(0, 6).join(", ")}</div> : null}</div>;
+  const model = [txt(v.brand), txt(v.model_series), txt(v.model_code) || txt(v.model_text), txt(v.vehicle_type)].filter(Boolean).join(" ");
+  const jobs = st.jobs.slice(0, maxJobs);
+  const cell = { padding: "3px 10px 3px 0", fontSize: 14, verticalAlign: "top" };
+  const lab = { ...cell, color: "#6b7280", whiteSpace: "nowrap" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div style={box}>
+        <div style={{ fontWeight: 800, color: "#072d6b", fontSize: 15, marginBottom: 6 }}>🏍️ รายละเอียดรถ {plate}{province ? " " + province : ""}</div>
+        <table style={{ borderCollapse: "collapse" }}><tbody>
+          <tr><td style={lab}>รุ่น</td><td style={cell}><b>{model || "-"}</b>{txt(v.color) ? ` · สี${txt(v.color)}` : ""}</td></tr>
+          <tr><td style={lab}>ลูกค้า</td><td style={cell}>{txt(v.customer_name) || "-"}{txt(v.customer_phone) ? ` · ${txt(v.customer_phone)}` : ""}</td></tr>
+          <tr><td style={lab}>ซื้อเมื่อ</td><td style={cell}>{fmtDateTH(v.sale_date)}{txt(v.sale_doc_no) ? ` · ใบขาย ${txt(v.sale_doc_no)}` : ""}{txt(v.source) ? ` · ที่มา: ${{ sale: "ใบขาย", registry: "ทะเบียน Excel", repair: "ใบซ่อม" }[txt(v.source)] || txt(v.source)}` : ""}</td></tr>
+          <tr><td style={lab}>เลขถัง / เครื่อง</td><td style={{ ...cell, fontFamily: "monospace" }}>{txt(v.frame_no) || "-"} / {txt(v.engine_no) || "-"}</td></tr>
+        </tbody></table>
+      </div>
+      <div style={{ ...box, padding: 0, overflow: "hidden" }}>
+        <div style={{ padding: "8px 14px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", fontWeight: 700 }}>🔧 ประวัติเข้ารับบริการล่าสุด {st.total ? `(${Math.min(st.total, maxJobs)} จาก ${st.total} ครั้ง)` : ""}</div>
+        {jobs.length === 0 ? <div style={{ padding: 16, color: "#9ca3af", textAlign: "center" }}>ยังไม่มีประวัติงานบริการของรถคันนี้ในระบบ</div> : jobs.map((j, i) => (
+          <div key={`${j.brand}-${j.job_no}-${i}`} style={{ borderBottom: i < jobs.length - 1 ? "1px solid #f1f5f9" : "none" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, padding: "8px 14px", background: i === 0 ? "#fffbeb" : "#fff" }}>
+              <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", fontSize: 13.5 }}>
+                {i === 0 && <span style={{ background: "#f59e0b", color: "#fff", borderRadius: 6, padding: "1px 8px", fontSize: 12, fontWeight: 700 }}>ล่าสุด</span>}
+                <span style={{ color: j.brand === "HONDA" ? "#e2231a" : "#0a4ea2", fontWeight: 800 }}>{j.brand}</span>
+                <span>📅 {fmtDateTH(j.service_date)}</span>
+                <span style={{ fontFamily: "monospace", color: "#0369a1", fontWeight: 600 }}>{txt(j.job_no)}</span>
+                {txt(j.repair_type) && <span>🔧 {txt(j.repair_type)}</span>}
+                {txt(j.mechanic_name) && <span>👨‍🔧 {txt(j.mechanic_name)}</span>}
+                {txt(j.mileage) && <span>📏 {txt(j.mileage)} กม.</span>}
+              </div>
+              <div style={{ fontWeight: 800, color: "#065f46" }}>{fmtMoney(j.total)} บาท</div>
+            </div>
+            {j.parts.length > 0 && (
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+                <tbody>
+                  {j.parts.map((pt, k) => (
+                    <tr key={k} style={{ borderTop: "1px solid #f8fafc" }}>
+                      <td style={{ padding: "3px 14px", fontFamily: "monospace", width: 150 }}>{txt(pt.part_code) || "-"}</td>
+                      <td style={{ padding: "3px 6px" }}>{txt(pt.part_name) || "-"}</td>
+                      <td style={{ padding: "3px 6px", textAlign: "right", width: 60 }}>{Number(pt.qty || 0).toLocaleString()}</td>
+                      <td style={{ padding: "3px 14px", textAlign: "right", width: 110 }}>{fmtMoney(pt.part_amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 const BAY_POLL_MS = 10000;
 
 function parseStores(storesStr) {
@@ -36,6 +144,8 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
   const [bays, setBays] = useState([]);
   const [baysLoaded, setBaysLoaded] = useState(false);
   const [selectedBay, setSelectedBay] = useState(null); // {zone_source, zone_name, plate_no, plate_province, event_id}
+  const [tab, setTab] = useState("log");   // แท็บใต้ช่องยิง: log = ประวัติการเบิก · svc = รถ & ประวัติบริการ (เลือกรถที่อ่านทะเบียนได้ → เด้งไป svc เอง)
+  useEffect(() => { setTab(selectedBay && selectedBay.plate_no ? "svc" : "log"); }, [selectedBay && selectedBay.plate_no]); // eslint-disable-line
   const [bayNotice, setBayNotice] = useState("");
   async function loadBays() {
     try {
@@ -434,8 +544,19 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
         </div>
       )}
 
+      {/* แท็บใต้ช่องยิง (user 2026-10-31): ประวัติการเบิก | รถ & ประวัติบริการ */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        {[["log", "📋 ประวัติการเบิก"], ["svc", `🏍️ รถ & ประวัติบริการ${selectedBay?.plate_no ? ` · ${selectedBay.plate_no}` : ""}`]].map(([k, label]) => (
+          <button key={k} onClick={() => { setTab(k); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }}
+            style={{ padding: "10px 18px", borderRadius: "10px 10px 0 0", border: "1px solid #e5e7eb", borderBottom: tab === k ? "1px solid #fff" : "1px solid #e5e7eb", background: tab === k ? "#fff" : "#f3f4f6", color: tab === k ? "#072d6b" : "#6b7280", fontWeight: 700, fontSize: 15, cursor: "pointer", marginBottom: -9 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "svc" && <VehicleServicePanel plate={selectedBay?.plate_no || ""} province={selectedBay?.plate_province || ""} />}
+
       {/* Withdrawal log */}
-      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
+      <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", display: tab === "log" ? "block" : "none" }}>
         <div style={{ padding: "10px 14px", background: "#f9fafb", borderBottom: "1px solid #e5e7eb", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
           <strong>📋 ประวัติการเบิก ({shown.length} รายการ{selectedBay ? ` · เฉพาะรถ ${selectedBay.plate_no || "ไม่ทราบทะเบียน"}` : ""})</strong>
               {copied && <span style={{ marginLeft: 10, fontSize: 12.5, color: "#065f46", background: "#d1fae5", border: "1px solid #6ee7b7", borderRadius: 6, padding: "3px 10px" }}>✅ {copied}</span>}

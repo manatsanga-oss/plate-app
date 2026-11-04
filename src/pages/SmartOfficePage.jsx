@@ -24,7 +24,7 @@ function ScheduleEditor({ r, sched, onSaved, busy, setBusy, setMsg }) {
   async function save() {
     setBusy("save" + r.id); setMsg("");
     try {
-      const d = await post({ action: "save_schedule", remote_id: r.id, blaster: r.blaster, kind: r.category === "5" ? "ac" : "tv", name: r.name, on_time: onTime || null, off_time: offTime || null, days, enabled });
+      const d = await post({ action: "save_schedule", remote_id: r.id, blaster: r.blaster, kind: r.category === "5" ? "ac" : r.category === "plug" ? "plug" : "tv", name: r.name, on_time: onTime || null, off_time: offTime || null, days, enabled });
       if (!d || d.ok === false) throw new Error(d?.error || "บันทึกไม่สำเร็จ");
       setMsg(`✅ บันทึกเวลา ${r.name} แล้ว`); onSaved(d.schedules || []);
     } catch (e) { setMsg("❌ " + e.message); }
@@ -70,7 +70,7 @@ export default function SmartOfficePage() {
   useEffect(() => { load(true); }, []); // eslint-disable-line
 
   async function send(r, power, key) {
-    const label = r.category === "5" ? (power ? "เปิด" : "ปิด") : "กด Power";
+    const label = r.category === "5" || r.category === "plug" ? (power ? "เปิด" : "ปิด") : "กด Power";
     setBusy(r.id + label); setMsg("");
     try {
       const d = await post({ action: "cmd", remote_id: r.id, power, key });
@@ -94,6 +94,7 @@ export default function SmartOfficePage() {
 
   const acs = remotes.filter((r) => r.category === "5");
   const tvs = remotes.filter((r) => r.category === "2");
+  const plugs = remotes.filter((r) => r.category === "plug");   // ปลั๊ก WiFi สั่งตรง (ไฟศาลเจ้า) — list ส่ง state on/off มาด้วย
   const schedOf = (r) => schedules.find((s) => s.remote_id === r.id);
   const btn = { padding: "10px 18px", borderRadius: 10, border: "none", fontWeight: 700, cursor: "pointer", fontSize: 15 };
   const card = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, minWidth: 300, maxWidth: 360 };
@@ -101,7 +102,7 @@ export default function SmartOfficePage() {
 
   return (
     <div style={{ padding: 20, fontFamily: "Tahoma, sans-serif" }}>
-      <h2 style={{ margin: "0 0 4px" }}>🏢 Smart Office — ควบคุมแอร์ / ทีวี</h2>
+      <h2 style={{ margin: "0 0 4px" }}>🏢 Smart Office — ควบคุมแอร์ / ทีวี / ปลั๊กไฟ</h2>
       <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 12 }}>
         สั่งผ่านตัวยิงรีโมท IR (Smart Life) · ตั้งเวลาเปิด/ปิดได้รายเครื่อง (ระบบเช็คทุก 1 นาที เวลาไทย){summary ? ` · ตอนนี้: ${summary}` : ""}
       </div>
@@ -139,6 +140,27 @@ export default function SmartOfficePage() {
           </div>
         ))}
         {!loading && tvs.length === 0 && <span style={{ color: "#9ca3af" }}>ไม่พบรีโมททีวี</span>}
+      </div>
+
+      <h3 style={{ margin: "16px 0 6px" }}>🏮 ปลั๊กไฟ ({plugs.length})</h3>
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        {plugs.map((r) => (
+          <div key={r.id} style={card}>
+            <div style={{ fontWeight: 800, fontSize: 17, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>{r.name}</span>
+              <span style={{ fontSize: 13, fontWeight: 700, padding: "2px 10px", borderRadius: 999, background: r.state === "on" ? "#dcfce7" : r.state === "off" ? "#f3f4f6" : "#fef3c7", color: r.state === "on" ? "#166534" : r.state === "off" ? "#6b7280" : "#92400e" }}>
+                {r.state === "on" ? "● เปิดอยู่" : r.state === "off" ? "○ ปิดอยู่" : r.online === false ? "ออฟไลน์" : "ไม่ทราบสถานะ"}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>ปลั๊ก WiFi (Smart Life) สั่งตรง ไม่ผ่านตัวยิง IR · เวลาปิดตั้งข้ามคืนได้ เช่น เปิด 18:00 ปิด 06:00</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => send(r, 1)} disabled={!!busy} style={{ ...btn, background: "#16a34a", color: "#fff", flex: 1 }}>{busy === r.id + "เปิด" ? "…" : "เปิด"}</button>
+              <button onClick={() => send(r, 0)} disabled={!!busy} style={{ ...btn, background: "#dc2626", color: "#fff", flex: 1 }}>{busy === r.id + "ปิด" ? "…" : "ปิด"}</button>
+            </div>
+            <ScheduleEditor r={r} sched={schedOf(r)} onSaved={setSchedules} busy={busy} setBusy={setBusy} setMsg={setMsg} />
+          </div>
+        ))}
+        {!loading && plugs.length === 0 && <span style={{ color: "#9ca3af" }}>ไม่พบปลั๊กไฟ (ต้อง re-import Tuya Schedule ที่มีรายการปลั๊ก)</span>}
       </div>
 
       {log.length > 0 && (
