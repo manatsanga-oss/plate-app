@@ -18,7 +18,7 @@ const prevMonths = (ym, n) => { const [y, m] = ym.split("-").map(Number); return
 /** เงินโอนจากไฟแนนท์ (finance_transfers) ตามวันที่โอนในเดือน → items แบบเดียวกับ dailyCash
  *  - จับคู่แล้ว (matched_items): ค่ารถ (vehicle_price) ต่อคัน → kind ft_vehicle สาขาจากใบกำกับ; ค่าส่งเสริม (promotion_fee − wht) → kind ft_promo
  *  - ยังไม่จับคู่ (pending): ทั้งยอด → ft_vehicle สาขา "ยังไม่จับคู่คัน" (เงินเข้าบัญชีแล้วแต่ยังไม่รู้คัน) */
-function buildFtItems(transfers, taxMap, from, to) {
+function buildFtItems(transfers, taxMap, from, to, vehicleFinSet = new Set()) {
   const out = [];
   for (const t of transfers) {
     if (!t || String(t.status || "active") !== "active") continue;
@@ -45,6 +45,10 @@ function buildFtItems(transfers, taxMap, from, to) {
       // จับคู่กับใบรับเงินรายได้ IRC- (เมนูบันทึกรับเงินรายได้อื่นๆ วิธี "เงินโอนไฟแนนท์ (รอตัดรับ)") = ค่าส่งเสริม/ค่าคอมจากไฟแนนท์ ไม่ใช่ค่ารถ (user 2026-11-04 เคส FT-261029-005 221,607.48)
       const amt = num(t.amount);
       if (amt > 0) out.push({ ...base, kind: "ft_income", category: "รายได้จากไฟแนนท์ (ตัดรับใบรายได้)", ref_no: t.matched_doc_no, customer_name: base.finance || "-", branch_key: "ไม่ระบุสาขา", saleAmount: 0, split: mkSplit(amt), received: amt, note: `ใบรายได้ ${t.matched_doc_no} · โอนเข้า ${t.bank_name || ""} ${t.account_no || ""}` + (t.note ? ` · ${t.note}` : "") });
+    } else if (!vehicleFinSet.has(base.finance) || /ธนบรรณ/.test(base.finance)) {
+      // ยังไม่จับคู่ แต่บริษัทนี้ไม่เคยจัดไฟแนนท์รถในใบขาย (เช่น ธนบรรณ = ค่าคอมรับฝากค่างวด) → เป็นค่าส่งเสริม/ค่าคอมที่รอตัดรับใบรายได้ ไม่ใช่ค่ารถ (user 2026-11-04 เคส FT-261022-004 1,943.93)
+      const amt = num(t.amount);
+      if (amt > 0) out.push({ ...base, kind: "ft_income_pending", category: "รายได้จากไฟแนนท์ (รอตัดรับใบรายได้)", ref_no: "", customer_name: base.finance || "-", branch_key: "ไม่ระบุสาขา", saleAmount: 0, split: mkSplit(amt), received: amt, note: `โอนเข้า ${t.bank_name || ""} ${t.account_no || ""} · ยังไม่ตัดรับในเมนูบันทึกรับเงินรายได้` + (t.note ? ` · ${t.note}` : "") });
     } else {
       const amt = num(t.amount);
       if (amt > 0) out.push({ ...base, kind: "ft_vehicle", category: "ค่ารถจากไฟแนนท์ (FT)", ref_no: "", customer_name: "(ยังไม่จับคู่คัน)", branch_key: "ยังไม่จับคู่คัน", saleAmount: 0, split: mkSplit(amt), received: amt, note: `โอนเข้า ${t.bank_name || ""} ${t.account_no || ""} · ยังไม่บันทึกรับชำระไฟแนนท์` + (t.note ? ` · ${t.note}` : "") });
@@ -68,7 +72,8 @@ function classify(it) {
   // เงินโอนจากบริษัทไฟแนนท์ (finance_transfers ตามวันที่โอน): ค่ารถ → กลุ่มขายรถ ประเภทตามบริษัท · ค่าส่งเสริมการขาย → รับชำระอื่นๆ (user 2026-11-04)
   if (k === "ft_vehicle") return ["ขายรถจักรยานยนต์ (หน้าร้าน + ไฟแนนท์โอน)", it.finance || "ไฟแนนท์ (ไม่ระบุบริษัท)"];
   if (k === "ft_promo") return ["รับชำระอื่นๆ", "ค่าส่งเสริมการขายจากไฟแนนท์ (FT)"];
-  if (k === "ft_income") return ["รับชำระอื่นๆ", "รายได้จากไฟแนนท์ ตัดรับใบรายได้ IRC (ค่าส่งเสริม/ค่าคอม)"]; // FT ที่จับคู่กับใบรับเงินรายได้ (IncomeRecordPage) ไม่ใช่ค่ารถ // รถมือสองไม่แยกประเภท รวมในขายเงินสด (user 2026-11-04) — รายการใน drill ยังเห็นเลข UM-
+  if (k === "ft_income") return ["รับชำระอื่นๆ", "รายได้จากไฟแนนท์ ตัดรับใบรายได้ IRC (ค่าส่งเสริม/ค่าคอม)"];
+  if (k === "ft_income_pending") return ["รับชำระอื่นๆ", "รายได้จากไฟแนนท์ (ค่าส่งเสริม/ค่าคอม) ยังไม่ตัดรับใบรายได้"]; // เงินโอน pending จากบริษัทที่ไม่ได้จัดไฟแนนท์รถ (เช่น ธนบรรณ) = ค่าส่งเสริม (user 2026-11-04) // FT ที่จับคู่กับใบรับเงินรายได้ (IncomeRecordPage) ไม่ใช่ค่ารถ // รถมือสองไม่แยกประเภท รวมในขายเงินสด (user 2026-11-04) — รายการใน drill ยังเห็นเลข UM-
   if (k === "deposit") return ["เงินมัดจำ", "เงินมัดจำรถ"];
   if (k === "red_plate") return ["เงินมัดจำ", "เงินมัดจำป้ายแดง (Excel = เงินมัดจำทั่วไป)"];
   if (k === "part_deposit") return ["เงินมัดจำ", "เงินมัดจำอะไหล่"];
@@ -190,7 +195,9 @@ export default function GeneralReceiptPivotPage() {
           : "ไม่พบใบกำกับ (ยังไม่ออก / เกิน 3 เดือน)";
         return { inv_affil: affil, inv_month: month }; // ไม่พบใบกำกับ → สังกัดจากบัญชีรับโอน/สาขา (ชั้นเดือนบอกอยู่แล้วว่าไม่พบใบกำกับ)
       };
-      const merged = [...all, ...buildFtItems(transfers, taxMap, from, to)]
+      // บริษัทที่จัดไฟแนนท์รถจริง = ที่ปรากฏในใบขาย NEW (เดือนนี้) + ใบกำกับ 3 เดือน (sale_finance_company)
+      const vehicleFinSet = new Set([...all.map((it) => String(it.finance || "").trim()), ...[...taxMap.values()].map((x) => String(x.sale_finance_company || "").trim())].filter((f) => f && f !== "เงินสด"));
+      const merged = [...all, ...buildFtItems(transfers, taxMap, from, to, vehicleFinSet)]
         .filter((it) => !(it.kind === "cust_refund" && tiRefundNos.has(String(it.doc_no || "")))) // ใบคืนส่วนต่างรถเทิร์น (เงินสด) ถูกหักสุทธิในแถวรถเทิร์นแล้ว ไม่โชว์ซ้ำในจ่ายออก
         .map((it) => ({ ...it, ...invInfo(it), tradein_refund: it.kind === "sale" ? tiRefundBySale.get(String(it.ref_no || "").trim()) || 0 : 0 }));
       setItems(merged);
