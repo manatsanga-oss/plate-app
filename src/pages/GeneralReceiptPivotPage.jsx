@@ -6,8 +6,12 @@ import { loadDailyCashSources, buildDailyCashItems, num, fmt, makeAcctResolver }
 // โครง: กลุ่มรับชำระ → ประเภท → สาขา → วิธีรับเงิน (เงินสด / เงินโอน <บัญชี> / เงินมัดจำ / เช็ค / หัก ณ ที่จ่าย / E-คูปอง / รถเทิร์น)
 // ส่วนที่ต่างจาก Excel แสดงไว้ในกล่องท้ายหน้า (Excel แถว "ขายรถจักรยานยนต์" = มูลค่าขาย, "เงินมัดจำรถ SCY10" = ไฟแนนซ์โอน — ไม่ใช่เงินรับหน้าร้าน)
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
-const TAXINV_API = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-invoices"; // หาสาขา (branch_codes) ของใบกำกับที่ FT จับคู่
+const TAXINV_API = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-invoices";
+const CUST_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/customer-refund-api"; // คืนส่วนต่างรถเทิร์น → รถเทิร์นโชว์ยอดสุทธิ (user 2026-11-04) // หาสาขา (branch_codes) ของใบกำกับที่ FT จับคู่
 const FT_COMPANIES = ["PAPAO", "NAKORNLUANG", "SINGCHAI"];
+const AFFIL_LABEL = { PAPAO: "บจ. ป.เปา มอเตอร์เซอร์วิส", NAKORNLUANG: "บจ. ป.เปา มอเตอร์เซอร์วิส", SINGCHAI: "หจก. สิงห์ชัยสยามยนต์" };
+// สังกัดจากรูปแบบเลขที่ใบกำกับ (user 2026-11-04): 69MC/0001615 = ป.เปา (รวมนครหลวง) · MC016910/0163 = สิงห์ชัย — ใช้เมื่อใบกำกับเดือนนั้นยังไม่ upload ไฟล์ภาษีขาย
+const affilFromInvoiceNo = (no) => { const v = String(no || "").trim().toUpperCase(); if (/^\d{2}MC\//.test(v)) return AFFIL_LABEL.PAPAO; if (/^MC\d{6}\//.test(v)) return AFFIL_LABEL.SINGCHAI; return ""; }; // สังกัดตามบริษัทผู้ออกใบกำกับ (นครหลวง = สาขาของ ป.เปา)
 const postJson = (u, b) => fetch(u, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }).then((r) => r.text()).then((t) => { try { const d = JSON.parse(t); return Array.isArray(d) ? d : d?.rows || (typeof d?.listjson === "string" ? JSON.parse(d.listjson) : []); } catch { return []; } }).catch(() => []);
 const prevMonths = (ym, n) => { const [y, m] = ym.split("-").map(Number); return Array.from({ length: n }, (_, i) => { const d = new Date(y, m - 1 - i, 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; }); };
 
@@ -21,7 +25,8 @@ function buildFtItems(transfers, taxMap, from, to) {
     const d = String(t.transfer_date || "").slice(0, 10);
     if (!d || d < from || d > to) continue;
     const acctLbl = Number(t.to_account_id) > 0 ? "#" + Number(t.to_account_id) : (t.account_no || "ไม่ระบุบัญชี");
-    const base = { date: d, doc_no: t.doc_no || `FT-${t.ft_id}`, seller: t.matched_by || t.created_by || "", finance: String(t.finance_company || "").trim(), branch_name: "" };
+    const acctName = String(t.account_name || "");
+    const base = { date: d, doc_no: t.doc_no || `FT-${t.ft_id}`, seller: t.matched_by || t.created_by || "", finance: String(t.finance_company || "").trim(), branch_name: "", affil_hint: /สิงห์ชัย/.test(acctName) ? AFFIL_LABEL.SINGCHAI : /ป\.?เปา/.test(acctName) ? AFFIL_LABEL.PAPAO : "" };
     let items = t.matched_items; if (typeof items === "string") { try { items = JSON.parse(items); } catch { items = []; } }
     if (!Array.isArray(items)) items = [];
     const mkSplit = (transfer, wht = 0) => ({ cash: 0, transfer, card: 0, finance: 0, deposit: 0, coupon: 0, tradein: 0, wht, cheque: 0, other: 0, transfer_by: { [acctLbl]: transfer } });
@@ -32,9 +37,14 @@ function buildFtItems(transfers, taxMap, from, to) {
         const tx = taxMap.get(String(it.tax_invoice_no || "").trim());
         const br = tx && tx.branch_codes ? String(tx.branch_codes).slice(0, 5) : (it.branch === "NAKORNLUANG" ? "SCY05" : "ไม่ระบุสาขา");
         const noteBase = [it.tax_invoice_no ? `ใบกำกับ ${it.tax_invoice_no}` : "", it.engine_no ? `เครื่อง ${it.engine_no}` : "", `โอนเข้า ${t.bank_name || ""} ${t.account_no || ""}`.trim()].filter(Boolean).join(" · ");
-        if (veh > 0) out.push({ ...base, kind: "ft_vehicle", category: "ค่ารถจากไฟแนนท์ (FT)", ref_no: it.tax_invoice_no || "", customer_name: it.customer_name || "-", branch_key: br, saleAmount: 0, split: mkSplit(veh), received: veh, note: noteBase });
-        if (promo > 0) out.push({ ...base, kind: "ft_promo", category: "ค่าส่งเสริมการขายจากไฟแนนท์ (FT)", ref_no: it.tax_invoice_no || "", customer_name: it.customer_name || "-", branch_key: br, saleAmount: 0, split: mkSplit(Math.max(promo - wht, 0), wht), received: promo, note: noteBase + (wht > 0 ? ` · หัก ณ ที่จ่าย ${fmt(wht)}` : "") });
+        const invCo = AFFIL_LABEL[String(it.branch || "").toUpperCase()] || ""; // matched_items.branch = บริษัทผู้ออกใบกำกับ (PAPAO/NAKORNLUANG/SINGCHAI)
+        if (veh > 0) out.push({ ...base, kind: "ft_vehicle", category: "ค่ารถจากไฟแนนท์ (FT)", ref_no: it.tax_invoice_no || "", inv_company: invCo, customer_name: it.customer_name || "-", branch_key: br, saleAmount: 0, split: mkSplit(veh), received: veh, note: noteBase });
+        if (promo > 0) out.push({ ...base, kind: "ft_promo", category: "ค่าส่งเสริมการขายจากไฟแนนท์ (FT)", ref_no: it.tax_invoice_no || "", inv_company: invCo, customer_name: it.customer_name || "-", branch_key: br, saleAmount: 0, split: mkSplit(Math.max(promo - wht, 0), wht), received: promo, note: noteBase + (wht > 0 ? ` · หัก ณ ที่จ่าย ${fmt(wht)}` : "") });
       }
+    } else if (t.match_status === "matched" && /^IRC/i.test(String(t.matched_doc_no || ""))) {
+      // จับคู่กับใบรับเงินรายได้ IRC- (เมนูบันทึกรับเงินรายได้อื่นๆ วิธี "เงินโอนไฟแนนท์ (รอตัดรับ)") = ค่าส่งเสริม/ค่าคอมจากไฟแนนท์ ไม่ใช่ค่ารถ (user 2026-11-04 เคส FT-261029-005 221,607.48)
+      const amt = num(t.amount);
+      if (amt > 0) out.push({ ...base, kind: "ft_income", category: "รายได้จากไฟแนนท์ (ตัดรับใบรายได้)", ref_no: t.matched_doc_no, customer_name: base.finance || "-", branch_key: "ไม่ระบุสาขา", saleAmount: 0, split: mkSplit(amt), received: amt, note: `ใบรายได้ ${t.matched_doc_no} · โอนเข้า ${t.bank_name || ""} ${t.account_no || ""}` + (t.note ? ` · ${t.note}` : "") });
     } else {
       const amt = num(t.amount);
       if (amt > 0) out.push({ ...base, kind: "ft_vehicle", category: "ค่ารถจากไฟแนนท์ (FT)", ref_no: "", customer_name: "(ยังไม่จับคู่คัน)", branch_key: "ยังไม่จับคู่คัน", saleAmount: 0, split: mkSplit(amt), received: amt, note: `โอนเข้า ${t.bank_name || ""} ${t.account_no || ""} · ยังไม่บันทึกรับชำระไฟแนนท์` + (t.note ? ` · ${t.note}` : "") });
@@ -57,7 +67,8 @@ function classify(it) {
   if (k === "used_moto") return ["ขายรถจักรยานยนต์ (หน้าร้าน + ไฟแนนท์โอน)", "ขายเงินสด"];
   // เงินโอนจากบริษัทไฟแนนท์ (finance_transfers ตามวันที่โอน): ค่ารถ → กลุ่มขายรถ ประเภทตามบริษัท · ค่าส่งเสริมการขาย → รับชำระอื่นๆ (user 2026-11-04)
   if (k === "ft_vehicle") return ["ขายรถจักรยานยนต์ (หน้าร้าน + ไฟแนนท์โอน)", it.finance || "ไฟแนนท์ (ไม่ระบุบริษัท)"];
-  if (k === "ft_promo") return ["รับชำระอื่นๆ", "ค่าส่งเสริมการขายจากไฟแนนท์ (FT)"]; // รถมือสองไม่แยกประเภท รวมในขายเงินสด (user 2026-11-04) — รายการใน drill ยังเห็นเลข UM-
+  if (k === "ft_promo") return ["รับชำระอื่นๆ", "ค่าส่งเสริมการขายจากไฟแนนท์ (FT)"];
+  if (k === "ft_income") return ["รับชำระอื่นๆ", "รายได้จากไฟแนนท์ ตัดรับใบรายได้ IRC (ค่าส่งเสริม/ค่าคอม)"]; // FT ที่จับคู่กับใบรับเงินรายได้ (IncomeRecordPage) ไม่ใช่ค่ารถ // รถมือสองไม่แยกประเภท รวมในขายเงินสด (user 2026-11-04) — รายการใน drill ยังเห็นเลข UM-
   if (k === "deposit") return ["เงินมัดจำ", "เงินมัดจำรถ"];
   if (k === "red_plate") return ["เงินมัดจำ", "เงินมัดจำป้ายแดง (Excel = เงินมัดจำทั่วไป)"];
   if (k === "part_deposit") return ["เงินมัดจำ", "เงินมัดจำอะไหล่"];
@@ -88,11 +99,13 @@ function methodRows(it, acctNo) {
   if (num(s.cheque)) out.push(["เช็ค", num(s.cheque)]);
   if (num(s.wht)) out.push(["หัก ณ ที่จ่าย", num(s.wht)]);
   if (num(s.coupon)) out.push(["E-คูปอง", num(s.coupon)]);
-  if (num(s.tradein)) out.push(["รถเทิร์น", num(s.tradein)]);
+  // รถเทิร์น: ถ้ามีใบคืนเงิน "คืนส่วนต่างรถเทิร์น" ของใบขายนี้ (ลูกค้าได้เงินคืนเพราะรถเทิร์นมีค่ามากกว่ายอดที่ต้องจ่าย) → โชว์ยอดสุทธิ (user 2026-11-04 เคส SCY01-MCSA-2610-00076 เทิร์น 34,200 คืน 21,000 = 13,200)
+  const tiRefund = Math.min(num(it.tradein_refund), num(s.tradein));
+  if (num(s.tradein)) out.push([tiRefund > 0 ? `รถเทิร์น (สุทธิ · หักคืนส่วนต่าง ${fmt(tiRefund)})` : "รถเทิร์น", num(s.tradein) - tiRefund]);
   if (num(s.finance)) out.push(["ไฟแนนซ์", num(s.finance)]);
   if (num(s.other)) out.push(["อื่นๆ", num(s.other)]);
   const sum = out.reduce((a, [, v]) => a + v, 0);
-  const diff = Math.round((num(it.received) - sum) * 100) / 100;
+  const diff = Math.round((num(it.received) - tiRefund - sum) * 100) / 100;
   if (Math.abs(diff) > 0.004) out.push(["ไม่ระบุวิธี", diff]);
   // ค่าใช้จ่ายร้านที่ "ออกแทน" ลูกค้าในใบขายรถ — ไม่ใช่เงินเข้า แต่ต้องโชว์เป็นรายการรับชำระเพื่อบันทึกปิดยอดใบกำกับใน FlowAccount (user 2026-11-04)
   //   ยอดมาจากใบขาย NEW: down_payout_amount (เงินดาวน์/ค่างวดออกแทน) + theft_insurance_amount เฉพาะ source โปรโมชั่นออกแทน/ไฟแนนซ์หัก (ลูกค้าจ่ายเอง = อยู่ในเงินรับแล้ว)
@@ -136,28 +149,51 @@ export default function GeneralReceiptPivotPage() {
       const [from, to] = monthRange(ym);
       // เงินโอนไฟแนนท์ (ทุกสถานะ) + ใบกำกับ 3 เดือนย้อนหลังไว้หาสาขาของคันที่ FT จับคู่ (FT เดือนนี้มักเป็นรถที่ขาย/ออกใบกำกับเดือนก่อน)
       // ⚠️ n8n มี RAM จำกัด (เคยล่มเมื่อยิงพร้อมกันหลายสิบคำขอ 2026-11-04) → โหลดชุดหลักก่อน แล้วค่อยดึงใบกำกับทีละเดือน (3 บริษัทพร้อมกัน) ไม่ยิงรวดเดียว
-      const [src, transfers] = await Promise.all([loadDailyCashSources(from, to), postJson(ACC_API, { action: "list_finance_transfers", match_status: "" })]);
+      const [src, transfers, custRefunds] = await Promise.all([
+        loadDailyCashSources(from, to),
+        postJson(ACC_API, { action: "list_finance_transfers", match_status: "" }),
+        postJson(CUST_REFUND_API, { action: "list_refunds", source_type: "vehicle", status: "คืนเงินแล้ว", limit: 5000 }),
+      ]);
+      // คืนส่วนต่างรถเทิร์น (ทุกวิธีคืน ทุกวันที่) → ยอดรวมต่อใบขาย + เลขใบคืนที่นำไปหักสุทธิแล้ว
+      const tiRefundBySale = new Map(), tiRefundNos = new Set();
+      (Array.isArray(custRefunds) ? custRefunds : []).forEach((rf) => {
+        if (!rf || rf.status !== "คืนเงินแล้ว" || !/เทิร์น/.test(String(rf.reason || "") + String(rf.reason_note || ""))) return;
+        const k = String(rf.ref_doc_no || "").trim(); if (!k) return;
+        tiRefundBySale.set(k, (tiRefundBySale.get(k) || 0) + num(rf.refund_amount)); tiRefundNos.add(String(rf.refund_no || ""));
+      });
       const taxMap = new Map();
       for (const m of prevMonths(ym, 3)) {
         const [y, mm] = m.split("-");
         const arrs = await Promise.all(FT_COMPANIES.map((br) => postJson(TAXINV_API, { action: "list_tax_invoices", branch: br, year_month: `${Number(y) + 543}${mm}` })));
-        arrs.flat().forEach((x) => { if (x && x.tax_invoice_no) taxMap.set(String(x.tax_invoice_no).trim(), x); });
+        arrs.forEach((arr, ci) => arr.forEach((x) => { if (x && x.tax_invoice_no) taxMap.set(String(x.tax_invoice_no).trim(), { ...x, _company: FT_COMPANIES[ci] }); }));
       }
       const all = buildDailyCashItems(src, { dateFrom: from, dateTo: to, branch: "", isAdmin: true, myBranch: "" });
       // แถวย่อยใต้วิธีรับเงิน = "ใบกำกับเปิดเดือนไหน" (user 2026-11-04): หน้าร้านหาใบกำกับจากเลขใบขาย, FT จากเลขใบกำกับใน matched_items
       const bySale = new Map(), byChassis = new Map(); const nk = (v) => String(v || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
       taxMap.forEach((x) => { if (x.sale_invoice_no) bySale.set(String(x.sale_invoice_no).trim(), x); if (nk(x.chassis_no)) byChassis.set(nk(x.chassis_no), x); if (nk(x.engine_no)) byChassis.set(nk(x.engine_no), x); });
-      const invLabel = (it) => {
+      // กลุ่มขายรถเรียงชั้นใหม่ (user 2026-11-04): สังกัดตามใบกำกับ → เดือนที่ออกใบกำกับ → ประเภทการขาย → สาขา → วิธีรับชำระ
+      const SALE_KINDS = ["sale", "deposit_applied", "used_moto", "ft_vehicle", "ft_promo"];
+      const invInfo = (it) => {
         const k = String(it.kind || "");
-        if (!["sale", "deposit_applied", "used_moto", "ft_vehicle", "ft_promo"].includes(k)) return "";
-        if (k.startsWith("ft_") && it.branch_key === "ยังไม่จับคู่คัน") return "ยังไม่จับคู่คัน (ไม่รู้ใบกำกับ)";
+        if (!SALE_KINDS.includes(k)) return {};
         const tx = k.startsWith("ft_") ? taxMap.get(String(it.ref_no || "").trim())
           : k === "used_moto" ? (byChassis.get(nk(it.chassis_no)) || byChassis.get(nk(it.engine_no))) // รถมือสองไม่มีเลขใบขาย NEW → เทียบเลขถัง/เลขเครื่องกับใบกำกับ
           : bySale.get(String(it.ref_no || "").trim());
         const d = tx && String(tx.invoice_date || "").slice(0, 7);
-        return d ? `ใบกำกับ ${thMonth(d)}` : "ไม่พบใบกำกับ (ยังไม่ออก / เกิน 3 เดือน)";
+        // สังกัด: บริษัทผู้ออกใบกำกับ (ไฟล์ภาษีขาย) → รูปแบบเลขที่ใบกำกับ (FT ที่จับคู่แล้วมีเลขใบกำกับแม้ไฟล์เดือนนั้นยังไม่ upload) → บริษัทใน matched_items → บัญชีรับโอน → สาขา
+        const ftInvNo = k.startsWith("ft_") ? String(it.ref_no || "") : "";
+        const affil = (tx && (AFFIL_LABEL[tx._company] || tx._company)) || affilFromInvoiceNo(ftInvNo) || it.inv_company || it.affil_hint
+          || (/SCY0[56]/.test(String(it.branch_key || "")) ? AFFIL_LABEL.PAPAO : AFFIL_LABEL.SINGCHAI);
+        const month = d ? thMonth(d)
+          : (k.startsWith("ft_") && it.branch_key === "ยังไม่จับคู่คัน") ? "ยังไม่จับคู่คัน (ไม่รู้ใบกำกับ)"
+          : ftInvNo ? `ใบกำกับ ${ftInvNo.split("/")[0]} (ยังไม่ upload ไฟล์ภาษีขายเดือนนั้น)` // รู้เลขใบกำกับจาก FT แต่ไม่รู้วันที่
+          : "ไม่พบใบกำกับ (ยังไม่ออก / เกิน 3 เดือน)";
+        return { inv_affil: affil, inv_month: month }; // ไม่พบใบกำกับ → สังกัดจากบัญชีรับโอน/สาขา (ชั้นเดือนบอกอยู่แล้วว่าไม่พบใบกำกับ)
       };
-      setItems([...all, ...buildFtItems(transfers, taxMap, from, to)].map((it) => ({ ...it, inv_label: invLabel(it) })));
+      const merged = [...all, ...buildFtItems(transfers, taxMap, from, to)]
+        .filter((it) => !(it.kind === "cust_refund" && tiRefundNos.has(String(it.doc_no || "")))) // ใบคืนส่วนต่างรถเทิร์น (เงินสด) ถูกหักสุทธิในแถวรถเทิร์นแล้ว ไม่โชว์ซ้ำในจ่ายออก
+        .map((it) => ({ ...it, ...invInfo(it), tradein_refund: it.kind === "sale" ? tiRefundBySale.get(String(it.ref_no || "").trim()) || 0 : 0 }));
+      setItems(merged);
       if (!all.length) setMessage("ไม่มีข้อมูลในเดือนนี้");
     } catch (e) { setItems([]); setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + String(e?.message || e).slice(0, 120)); }
     setLoading(false);
@@ -167,8 +203,21 @@ export default function GeneralReceiptPivotPage() {
   const branches = useMemo(() => [...new Set(items.map((it) => it.branch_key).filter(Boolean))].sort(), [items]);
 
   // tree: group → type → branch → method → {amount, count}
+  const SALE_GROUP = GROUP_ORDER[0];
+  // tree แบบทั่วไป: node = { amount, count, children } · leaf = { amount, count, rows, meta:{g,ty,m} }
+  //   กลุ่มขายรถ: กลุ่ม → สังกัด (ตามใบกำกับ) → เดือนใบกำกับ → ประเภทการขาย → สาขา → วิธีรับชำระ (user 2026-11-04)
+  //   กลุ่มอื่น:  กลุ่ม → ประเภท → สาขา → วิธีรับเงิน
   const tree = useMemo(() => {
     const t = {};
+    const addPath = (path, v, row, meta) => {
+      let lvl = t;
+      path.forEach((lbl, i) => {
+        const isLeaf = i === path.length - 1;
+        const node = (lvl[lbl] = lvl[lbl] || (isLeaf ? { amount: 0, count: 0, rows: [], meta } : { amount: 0, count: 0, children: {} }));
+        node.amount += v; node.count++;
+        if (isLeaf) node.rows.push(row); else lvl = node.children;
+      });
+    };
     for (const it of items) {
       if (branch && it.branch_key !== branch) continue;
       const [g, ty] = classify(it);
@@ -191,54 +240,59 @@ export default function GeneralReceiptPivotPage() {
       }
       const methods = methodRows(it, acctNo);
       const used = methods.map(() => 0); // ยอดของแต่ละวิธีที่จัดสรรไปแล้ว (ส่วนสุดท้ายรับเศษปัด)
-      const G = (t[g] = t[g] || { amount: 0, count: 0, children: {} });
-      G.count++;
       parts.forEach(([pty, pamt], pi) => {
-        const T = (G.children[pty] = G.children[pty] || { amount: 0, count: 0, children: {} });
-        const B = (T.children[b] = T.children[b] || { amount: 0, count: 0, children: {} });
-        T.count++; B.count++;
         const ratio = total !== 0 ? pamt / total : 1;
         methods.forEach(([m, v0], mi) => {
           const v = pi === parts.length - 1 ? Math.round((v0 - used[mi]) * 100) / 100 : Math.round(v0 * ratio * 100) / 100;
           used[mi] += v;
           if (Math.abs(v) < 0.005) return;
-          G.amount += v; T.amount += v; B.amount += v;
-          const M = (B.children[m] = B.children[m] || { amount: 0, count: 0, rows: [] }); M.amount += v; M.count++;
           const row = { date: String(it.date || "").slice(0, 10), doc_no: it.doc_no || "-", ref_no: it.ref_no || "", customer: it.customer_name || "-", seller: it.seller || "", note: it.note || "", amount: v, kind: it.kind };
-          M.rows.push(row);
-          if (it.inv_label) { const K = (M.byInv = M.byInv || {}); const Z = (K[it.inv_label] = K[it.inv_label] || { amount: 0, count: 0, rows: [] }); Z.amount += v; Z.count++; Z.rows.push(row); }
+          const path = g === SALE_GROUP ? [g, it.inv_affil || "ไม่ทราบสังกัด", it.inv_month || "ไม่พบใบกำกับ", pty, b, m] : [g, pty, b, m];
+          addPath(path, v, row, { g, ty: pty, b, m });
         });
       });
     }
     return t;
   }, [items, branch, acctNo]);
+  // เดินทุก leaf (ใช้สรุปตามวิธี / ยอดออกแทน / CSV)
+  const walkLeaves = (node, path, fn) => { for (const [lbl, ch] of Object.entries(node.children || {})) { const pth = [...path, lbl]; if (ch.rows) fn(ch, pth); else walkLeaves(ch, pth, fn); } };
+  const leaves = useMemo(() => { const out = []; for (const [g, G] of Object.entries(tree)) walkLeaves(G, [g], (leaf, pth) => out.push({ leaf, path: pth })); return out; }, [tree]);
   const grand = useMemo(() => Object.values(tree).reduce((s, g) => s + g.amount, 0), [tree]);
   const grandIn = useMemo(() => Object.entries(tree).filter(([g]) => !g.startsWith("จ่ายออก")).reduce((s, [, g]) => s + g.amount, 0), [tree]);
   // ยอดค่าใช้จ่ายออกแทนที่ปนอยู่ในกลุ่มขายรถ (ไม่ใช่เงินเข้าจริง) — โชว์แยกให้บัญชีเห็น
-  const payoutTotal = useMemo(() => { let t = 0; for (const G of Object.values(tree)) for (const T of Object.values(G.children)) for (const B of Object.values(T.children)) for (const [m, M] of Object.entries(B.children)) if (isPayoutMethod(m)) t += M.amount; return t; }, [tree]);
+  const payoutTotal = useMemo(() => leaves.reduce((s, { leaf }) => s + (isPayoutMethod(leaf.meta.m) ? leaf.amount : 0), 0), [leaves]);
 
   // สรุปตามวิธีรับชำระ (แบบแผ่น "PRIVOT-สรุปตามการรับชำระ" ของ Excel — user 2026-10-04): วิธีรับเงิน → กลุ่มรับชำระ → ประเภท (รวมทุกสาขา)
   //   กลุ่มจ่ายออก/คืนเงิน (ไม่มีใน Excel) แยกเป็นบล็อกท้ายตาราง ไม่ปนกับยอดรับของแต่ละวิธี
   const OUT_KEY = "จ่ายออก/คืนเงิน (ไม่มีใน Excel)";
   const methodTree = useMemo(() => {
     const mt = {};
-    for (const [g, G] of Object.entries(tree)) for (const [ty, T] of Object.entries(G.children)) for (const B of Object.values(T.children)) for (const [m, M] of Object.entries(B.children)) {
+    for (const { leaf } of leaves) {
+      const { g, ty, m } = leaf.meta;
       const isOut = g.startsWith("จ่ายออก");
       const top = isOut ? OUT_KEY : m;           // ระดับ 0: วิธีรับเงิน (หรือบล็อกจ่ายออก)
       const mid = isOut ? m : g;                  // ระดับ 1: กลุ่มรับชำระ (จ่ายออก: วิธีจ่าย)
       const X = (mt[top] = mt[top] || { amount: 0, count: 0, children: {} });
       const Y = (X.children[mid] = X.children[mid] || { amount: 0, count: 0, children: {} });
       const Z = (Y.children[ty] = Y.children[ty] || { amount: 0, count: 0, rows: [] });
-      X.amount += M.amount; Y.amount += M.amount; Z.amount += M.amount;
-      X.count += M.count; Y.count += M.count; Z.count += M.count; Z.rows.push(...M.rows);
+      X.amount += leaf.amount; Y.amount += leaf.amount; Z.amount += leaf.amount;
+      X.count += leaf.count; Y.count += leaf.count; Z.count += leaf.count; Z.rows.push(...leaf.rows);
     }
     return mt;
-  }, [tree]);
+  }, [leaves]);
   const methodKeys = useMemo(() => Object.keys(methodTree).sort((x, y) => (x === OUT_KEY) - (y === OUT_KEY) || x.localeCompare(y, "th")), [methodTree]);
   const groupRank = (g) => { const i = GROUP_ORDER.indexOf(g); return i < 0 ? 99 : i; };
   const isOpen = (key, depth) => (open[key] === undefined ? depth < 2 : open[key]);
   const toggle = (key) => setOpen((o) => ({ ...o, [key]: !isOpen(key, 9) }));
   const sortedGroups = Object.keys(tree).sort((a, b) => (GROUP_ORDER.indexOf(a) + 100) % 100 - (GROUP_ORDER.indexOf(b) + 100) % 100 || a.localeCompare(b, "th"));
+  // ลำดับลูกในแต่ละชั้น: เดือนใบกำกับล่าสุดก่อน (ไม่พบ/ยังไม่จับคู่ไว้ท้าย) · สังกัด ป.เปา ก่อน · อื่น ๆ ตามตัวอักษร
+  const invRank = (lbl) => { const mm = String(lbl).match(/^(\S+) (\d{4})$/); if (!mm || TH_MONTHS.indexOf(mm[1]) < 0) return "0"; return `1${mm[2]}${String(TH_MONTHS.indexOf(mm[1]) + 1).padStart(2, "0")}`; };
+  const childKeys = (node, depth, g) => Object.keys(node.children).sort((x, y) => {
+    if (g === SALE_GROUP && depth === 1) return invRank(y).localeCompare(invRank(x)) || x.localeCompare(y, "th"); // ชั้นเดือนใบกำกับ
+    if (g === SALE_GROUP && depth === 0) return x.localeCompare(y, "th"); // ชั้นสังกัด (บจ. ป.เปา มาก่อน หจก. สิงห์ชัย)
+    return x.localeCompare(y, "th");
+  });
+  const allKeys = () => { const o = {}; const walk = (node, key, depth, g) => { for (const lbl of Object.keys(node.children || {})) { const ch = node.children[lbl]; const k = key + "|" + lbl; if (!ch.rows) { o[k] = true; walk(ch, k, depth + 1, g); } } }; for (const g of sortedGroups) { o[g] = true; walk(tree[g], g, 0, g); } return o; };
 
   function rowsFlat() {
     const out = [];
@@ -254,26 +308,18 @@ export default function GeneralReceiptPivotPage() {
       }
       return out;
     }
-    for (const g of sortedGroups) {
-      const G = tree[g]; out.push({ depth: 0, key: g, label: g, ...G });
-      if (!isOpen(g, 0)) continue;
-      for (const ty of Object.keys(G.children).sort((a, b) => a.localeCompare(b, "th"))) {
-        const T = G.children[ty]; const kT = g + "|" + ty; out.push({ depth: 1, key: kT, label: ty, ...T });
-        if (!isOpen(kT, 1)) continue;
-        for (const b of Object.keys(T.children).sort()) {
-          const B = T.children[b]; const kB = kT + "|" + b; out.push({ depth: 2, key: kB, label: b, ...B });
-          if (!isOpen(kB, 2)) continue;
-          for (const m of Object.keys(B.children).sort((a, b2) => a.localeCompare(b2, "th"))) {
-            const M = B.children[m]; const kM = kB + "|" + m;
-            if (!M.byInv) { out.push({ depth: 3, key: kM, label: m, amount: M.amount, count: M.count, leaf: true, rows: M.rows, path: `${g} › ${ty} › ${b}` }); continue; }
-            out.push({ depth: 3, key: kM, label: m, amount: M.amount, count: M.count, hasInv: true });
-            if (!isOpen(kM, 3)) continue;
-            // เรียงเดือนใบกำกับล่าสุดก่อน · "ไม่พบ/ยังไม่จับคู่" ไว้ท้าย
-            const invRank = (lbl) => { const mm = lbl.match(/ใบกำกับ (\S+) (\d{4})/); if (!mm) return "0"; const mi = TH_MONTHS.indexOf(mm[1]); return `1${mm[2]}${String(mi + 1).padStart(2, "0")}`; };
-            for (const lbl of Object.keys(M.byInv).sort((x, y) => invRank(y).localeCompare(invRank(x)))) { const Z = M.byInv[lbl]; out.push({ depth: 4, key: kM + "|" + lbl, label: lbl, amount: Z.amount, count: Z.count, leaf: true, rows: Z.rows, path: `${g} › ${ty} › ${b} › ${m}` }); }
-          }
-        }
+    const walk = (node, key, depth, g, pathLbl) => {
+      for (const lbl of childKeys(node, depth, g)) {
+        const ch = node.children[lbl]; const k = key + "|" + lbl;
+        if (ch.rows) { out.push({ depth: depth + 1, key: k, label: lbl, amount: ch.amount, count: ch.count, leaf: true, rows: ch.rows, path: pathLbl }); continue; }
+        out.push({ depth: depth + 1, key: k, label: lbl, amount: ch.amount, count: ch.count });
+        if (isOpen(k, depth + 1)) walk(ch, k, depth + 1, g, pathLbl + " › " + lbl);
       }
+    };
+    for (const g of sortedGroups) {
+      const G = tree[g]; out.push({ depth: 0, key: g, label: g, amount: G.amount, count: G.count });
+      if (!isOpen(g, 0)) continue;
+      walk(G, g, 0, g, g);
     }
     return out;
   }
@@ -287,9 +333,9 @@ export default function GeneralReceiptPivotPage() {
       const a2 = document.createElement("a"); a2.href = URL.createObjectURL(new Blob([csv2], { type: "text/csv;charset=utf-8" })); a2.download = `สรุปตามการรับชำระ_${ym}${branch ? "_" + branch : ""}.csv`; a2.click();
       return;
     }
-    const lines = [["กลุ่มรับชำระ", "ประเภท", "สาขา", "วิธีรับเงิน", "จำนวนรายการ", "ยอดเงิน"]];
-    for (const g of sortedGroups) for (const [ty, T] of Object.entries(tree[g].children)) for (const [b, B] of Object.entries(T.children)) for (const [m, M] of Object.entries(B.children)) lines.push([g, ty, b, m, M.count, M.amount.toFixed(2)]);
-    const csv = "﻿" + lines.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const lines = [["กลุ่มรับชำระ", "สังกัด (ตามใบกำกับ)", "เดือนใบกำกับ", "ประเภท", "สาขา", "วิธีรับเงิน", "จำนวนรายการ", "ยอดเงิน"]];
+    for (const { leaf, path } of leaves) { const r = path.length === 6 ? path : [path[0], "", "", path[1], path[2], path[3]]; lines.push([...r, leaf.count, leaf.amount.toFixed(2)]); }
+    const csv = "\uFEFF" + lines.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
     const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" })); a.download = `สรุปรับชำระเงินทั่วไป_${ym}${branch ? "_" + branch : ""}.csv`; a.click();
   }
   function printReport() {
@@ -299,34 +345,27 @@ export default function GeneralReceiptPivotPage() {
     if (viewMode === "method") {
       for (const m of methodKeys) {
         const X = methodTree[m];
-        rows.push(`<tr class="g"><td colspan="3">${esc(m)}</td><td class="r">${fmt(X.amount)}</td></tr>`);
+        rows.push(`<tr class="d0"><td>${esc(m)}</td><td class="r">${fmt(X.amount)}</td></tr>`);
         for (const g of Object.keys(X.children).sort((x, y) => groupRank(x) - groupRank(y) || x.localeCompare(y, "th"))) {
           const Y = X.children[g];
-          rows.push(`<tr class="t"><td></td><td colspan="2">${esc(g)}</td><td class="r">${fmt(Y.amount)}</td></tr>`);
-          for (const [ty, Z] of Object.entries(Y.children).sort()) rows.push(`<tr class="m"><td></td><td></td><td class="in">${esc(ty)}</td><td class="r">${fmt(Z.amount)}</td></tr>`);
+          rows.push(`<tr class="d1"><td style="padding-left:24px">${esc(g)}</td><td class="r">${fmt(Y.amount)}</td></tr>`);
+          for (const [ty, Z] of Object.entries(Y.children).sort()) rows.push(`<tr class="d3"><td style="padding-left:48px">${esc(ty)}</td><td class="r">${fmt(Z.amount)}</td></tr>`);
         }
       }
-    } else
-    for (const g of sortedGroups) {
-      const G = tree[g]; rows.push(`<tr class="g"><td>${esc(g)}</td><td></td><td></td><td class="r">${fmt(G.amount)}</td></tr>`);
-      for (const [ty, T] of Object.entries(G.children).sort()) {
-        rows.push(`<tr class="t"><td></td><td>${esc(ty)}</td><td></td><td class="r">${fmt(T.amount)}</td></tr>`);
-        for (const [b, B] of Object.entries(T.children).sort()) {
-          rows.push(`<tr class="b"><td></td><td></td><td>${esc(b)}</td><td class="r">${fmt(B.amount)}</td></tr>`);
-          for (const [m, M] of Object.entries(B.children).sort()) rows.push(`<tr class="m"><td></td><td></td><td class="in">${esc(m)}</td><td class="r">${fmt(M.amount)}</td></tr>`);
-        }
-      }
+    } else {
+      const walk = (node, depth, g) => { for (const lbl of childKeys(node, depth, g)) { const ch = node.children[lbl]; const d = depth + 1; rows.push(`<tr class="d${ch.rows ? 9 : Math.min(d, 3)}"><td style="padding-left:${6 + d * 22}px">${esc(lbl)}</td><td class="r">${fmt(ch.amount)}</td></tr>`); if (!ch.rows) walk(ch, d, g); } };
+      for (const g of sortedGroups) { rows.push(`<tr class="d0"><td>${esc(g)}</td><td class="r">${fmt(tree[g].amount)}</td></tr>`); walk(tree[g], 0, g); }
     }
     w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>สรุปรับชำระเงินทั่วไป ${esc(thMonth(ym))}</title>
 <style>@page{size:A4;margin:12mm} body{font-family:'TH Sarabun New',Tahoma,sans-serif;font-size:13pt;color:#111} h2{margin:0 0 2px} .sub{color:#555;font-size:11pt;margin-bottom:8px}
-table{border-collapse:collapse;width:100%} td{padding:2px 6px;border-bottom:1px solid #eee} .r{text-align:right;font-family:monospace} tr.g td{font-weight:800;background:#e2e8f0;border-top:2px solid #94a3b8} tr.t td{font-weight:700} tr.b td{font-weight:600;color:#1e3a8a} tr.m td{color:#444;font-size:12pt} td.in{padding-left:28px}
+table{border-collapse:collapse;width:100%} td{padding:2px 6px;border-bottom:1px solid #eee;text-align:left} .r{text-align:right;font-family:monospace;white-space:nowrap} tr.d0 td{font-weight:800;background:#e2e8f0;border-top:2px solid #94a3b8} tr.d1 td{font-weight:700} tr.d2 td{font-weight:700;color:#1e3a8a} tr.d3 td{font-weight:600;color:#334155} tr.d9 td{color:#444;font-size:12pt}
 tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{position:fixed;top:6px;right:8px} @media print{.tb{display:none}}</style></head><body>
 <div class="tb"><button onclick="window.print()">🖨️ พิมพ์</button></div>
 <h2>สรุปรับชำระเงินทั่วไป — ${esc(thMonth(ym))}${branch ? " · " + esc(branch) : " · ทุกสาขา"}</h2>
-<div class="sub">ข้อมูลจากระบบ (ชุดเดียวกับสรุปรายวันรับเงิน) · กลุ่ม → ประเภท → สาขา → วิธีรับเงิน · พิมพ์ ${new Date().toLocaleString("th-TH")}</div>
-<table><thead><tr><td><b>กลุ่มรับชำระ</b></td><td><b>ประเภท</b></td><td><b>สาขา / วิธีรับเงิน</b></td><td class="r"><b>ยอดเงิน</b></td></tr></thead><tbody>${rows.join("")}
-<tr class="total"><td colspan="3">รวมรับเข้า (ไม่รวมจ่ายออก)</td><td class="r">${fmt(grandIn)}</td></tr>
-<tr class="total"><td colspan="3">รวมสุทธิ (หักจ่ายออก/คืนเงิน)</td><td class="r">${fmt(grand)}</td></tr></tbody></table></body></html>`);
+<div class="sub">ข้อมูลจากระบบ (ชุดเดียวกับสรุปรายวันรับเงิน) · ขายรถ: สังกัดตามใบกำกับ → เดือนใบกำกับ → ประเภท → สาขา → วิธีรับชำระ · กลุ่มอื่น: ประเภท → สาขา → วิธีรับเงิน · พิมพ์ ${new Date().toLocaleString("th-TH")}</div>
+<table><thead><tr><td><b>รายการ</b></td><td class="r"><b>ยอดเงิน</b></td></tr></thead><tbody>${rows.join("")}
+<tr class="total"><td>รวมรับเข้า (ไม่รวมจ่ายออก)</td><td class="r">${fmt(grandIn)}</td></tr>
+<tr class="total"><td>รวมสุทธิ (หักจ่ายออก/คืนเงิน)</td><td class="r">${fmt(grand)}</td></tr></tbody></table></body></html>`);
     w.document.close();
   }
 
@@ -336,7 +375,7 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
     <div style={{ padding: 16, maxWidth: 1200, margin: "0 auto" }}>
       <h2 style={{ margin: "0 0 4px", color: "#072d6b" }}>📊 สรุปรับชำระเงินทั่วไป (รายเดือน)</h2>
       <div style={{ fontSize: 12.5, color: "#6b7280", marginBottom: 12 }}>
-        โครงเดียวกับ pivot ของบัญชี: กลุ่มรับชำระ → ประเภท → สาขา → วิธีรับเงิน (เงินโอนแยกตามบัญชี) · ใช้ข้อมูลชุดเดียวกับหน้า "สรุปรายวันรับเงิน" ตามวันที่รับเงินจริง · ขายรถรวมเงินโอนค่ารถจากไฟแนนท์ตามวันที่โอน (บรรทัด "เงินโอนไฟแนนท์ + เลขบัญชีที่รับโอน") และบรรทัด "ออกแทน" (เงินดาวน์/ประกันรถหาย = ค่าใช้จ่ายร้าน ไม่ใช่เงินเข้า) ไว้บันทึกปิดยอดใบกำกับใน FlowAccount · คลิกแถวเพื่อย่อ/ขยาย
+        โครงเดียวกับ pivot ของบัญชี: กลุ่มรับชำระ → ประเภท → สาขา → วิธีรับเงิน (เงินโอนแยกตามบัญชี) · กลุ่มขายรถเรียง สังกัดตามใบกำกับ → เดือนที่ออกใบกำกับ → ประเภทการขาย → สาขา → วิธีรับชำระ · ใช้ข้อมูลชุดเดียวกับหน้า "สรุปรายวันรับเงิน" ตามวันที่รับเงินจริง · ขายรถรวมเงินโอนค่ารถจากไฟแนนท์ตามวันที่โอน (บรรทัด "เงินโอนไฟแนนท์ + เลขบัญชีที่รับโอน") และบรรทัด "ออกแทน" (เงินดาวน์/ประกันรถหาย = ค่าใช้จ่ายร้าน ไม่ใช่เงินเข้า) ไว้บันทึกปิดยอดใบกำกับใน FlowAccount · คลิกแถวเพื่อย่อ/ขยาย
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 12 }}>
         <div><div style={{ fontSize: 12, color: "#4b5563", fontWeight: 600 }}>เดือน</div><input type="month" value={ym} onChange={(e) => setYm(e.target.value)} style={inp} /></div>
@@ -349,7 +388,7 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
             <option value="method">สรุปตามการรับชำระ (วิธีรับเงิน → กลุ่ม → ประเภท)</option>
           </select></div>
         <button onClick={() => setOpen({})} style={btn("#6b7280")}>ย่อ/ขยายค่าเริ่มต้น</button>
-        <button onClick={() => { const o = {}; for (const r of flat) o[r.key] = true; for (const g of sortedGroups) { o[g] = true; for (const [ty, T] of Object.entries(tree[g].children)) { o[g + "|" + ty] = true; for (const [b, B] of Object.entries(T.children)) { o[g + "|" + ty + "|" + b] = true; for (const m of Object.keys(B.children)) o[g + "|" + ty + "|" + b + "|" + m] = true; } } } setOpen(o); }} style={btn("#6b7280")}>ขยายทั้งหมด</button>
+        <button onClick={() => setOpen(allKeys())} style={btn("#6b7280")}>ขยายทั้งหมด</button>
         <button onClick={exportCsv} disabled={!flat.length} style={btn("#16a34a")}>⬇️ CSV</button>
         <button onClick={printReport} disabled={!flat.length} style={btn("#4b5563")}>🖨️ พิมพ์</button>
         <label style={{ fontSize: 12.5, color: "#374151", marginLeft: "auto" }}><input type="checkbox" checked={showDetail} onChange={(e) => setShowDetail(e.target.checked)} /> แสดงจำนวนรายการ</label>
@@ -371,18 +410,18 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead style={{ background: "#072d6b", color: "#fff" }}><tr>
-            <th style={{ ...cell, textAlign: "left" }}>{viewMode === "method" ? "วิธีรับเงิน / กลุ่มรับชำระ / ประเภท" : "กลุ่มรับชำระ / ประเภท / สาขา / วิธีรับเงิน"}</th>
+            <th style={{ ...cell, textAlign: "left" }}>{viewMode === "method" ? "วิธีรับเงิน / กลุ่มรับชำระ / ประเภท" : "กลุ่มรับชำระ / (ขายรถ: สังกัดตามใบกำกับ › เดือนใบกำกับ) / ประเภท / สาขา / วิธีรับเงิน"}</th>
             {showDetail && <th style={{ ...numCell }}>รายการ</th>}
             <th style={{ ...numCell }}>ยอดเงิน</th>
           </tr></thead>
           <tbody>
             {flat.map((r) => {
               const bg = r.depth === 0 ? "#e2e8f0" : r.depth === 1 ? "#f8fafc" : "#fff";
-              const color = r.depth === 0 ? "#0f172a" : r.depth === 1 ? "#1e3a8a" : r.depth === 2 ? "#334155" : "#64748b";
-              const weight = r.depth === 0 ? 800 : r.depth === 1 ? 700 : r.depth === 2 ? 600 : 400;
+              const color = r.leaf ? "#64748b" : ["#0f172a", "#1e3a8a", "#0f766e", "#334155", "#334155", "#334155"][Math.min(r.depth, 5)];
+              const weight = r.leaf ? 400 : r.depth === 0 ? 800 : r.depth <= 2 ? 700 : 600;
               return (
                 <tr key={r.key} onClick={() => r.leaf ? setDrill({ title: `${r.path} › ${r.label}`, rows: [...r.rows].sort((a, b2) => a.date.localeCompare(b2.date) || String(a.doc_no).localeCompare(String(b2.doc_no))) }) : toggle(r.key)} style={{ background: bg, cursor: "pointer" }} title={r.leaf ? "คลิกดูรายการ" : undefined}>
-                  <td style={{ ...cell, paddingLeft: 10 + r.depth * 24, color: isPayoutMethod(r.label) ? "#b45309" : r.depth === 4 ? "#64748b" : color, fontWeight: weight }}>
+                  <td style={{ ...cell, paddingLeft: 10 + r.depth * 24, color: isPayoutMethod(r.label) ? "#b45309" : color, fontWeight: weight }}>
                     {!r.leaf && <span style={{ display: "inline-block", width: 14, color: "#94a3b8" }}>{isOpen(r.key, r.depth) ? "▾" : "▸"}</span>}{r.label}{r.leaf && <span style={{ marginLeft: 6, fontSize: 11, color: "#94a3b8" }}>🔍 {r.count} รายการ</span>}
                   </td>
                   {showDetail && <td style={{ ...numCell, color: "#94a3b8" }}>{r.count}</td>}
