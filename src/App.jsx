@@ -137,6 +137,7 @@ import MyMotoReportPage from "./pages/MyMotoReportPage";
 import MyMotorRegisterPage from "./pages/MyMotorRegisterPage";
 import ReportAdminPage from "./pages/ReportAdminPage";
 import GeneralReceiptPivotPage from "./pages/GeneralReceiptPivotPage";
+import SalesByTaxInvoicePage from "./pages/SalesByTaxInvoicePage";
 import ProfitLossReportPage from "./pages/ProfitLossReportPage";
 import HondaQuotaSnapshotPage from "./pages/HondaQuotaSnapshotPage"; // โควต้า HONDA (DOSS) snapshot (user 2026-10-24)
 import MotoStockOnHandReportPage from "./pages/MotoStockOnHandReportPage";
@@ -364,7 +365,8 @@ export default function App() {
     if (page === "otherincometaxreport") return false;  // เฉพาะ admin (รายงานใบกำกับรายได้อื่นๆ)
     if (page === "registrationsummaryreport") return false;  // เฉพาะ admin (รายงานสรุปใบปะหน้า คชจ. ขายรถ)
     if (page === "retailsalereport") return false;  // เฉพาะ admin (รายงานใบขายปลีก)
-    if (page === "generalreceiptpivot") return false;         // เฉพาะ admin (สรุปรับชำระเงินทั่วไปรายเดือน — แทน pivot Excel ของบัญชี 2026-10-03)
+    if (page === "generalreceiptpivot") return false;
+    if (page === "salesbytaxinvoice") return false;           // เฉพาะ admin (รายงานการขายตามวันที่ใบกำกับภาษี — Report for FlowAcc 2026-11-04)         // เฉพาะ admin (สรุปรับชำระเงินทั่วไปรายเดือน — แทน pivot Excel ของบัญชี 2026-10-03)
     if (page === "receipttransferreport") return false;       // เฉพาะ admin (รายงานสรุปรับชำระเงิน)
     if (page === "vehiclepurchasereport") return false;       // เฉพาะ admin (รายงานรับรถจักรยานยนต์)
     if (page === "deliveryfee") return false;                 // เฉพาะ admin (รายงานค่านำพาจากระบบ — ย้ายมา Report Admin 2026-08-29)
@@ -517,6 +519,9 @@ export default function App() {
         )}
         {activeMenu === "generalreceiptpivot" && canAccess("generalreceiptpivot") && (
           <GeneralReceiptPivotPage currentUser={currentUser} />
+        )}
+        {activeMenu === "salesbytaxinvoice" && canAccess("salesbytaxinvoice") && (
+          <SalesByTaxInvoicePage currentUser={currentUser} />
         )}
         {activeMenu === "promoincomebyvehicle" && canAccess("promoincomebyvehicle") && (
           <PromoIncomeByVehiclePage currentUser={currentUser} />
@@ -1027,9 +1032,10 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
       </MenuGroup>
 
       {/* Report for FlowAcc — รายงานสำหรับบันทึกบัญชีใน FlowAccount (user 2026-11-04) — ย้าย "รายงานสรุปขายรถบันทึก FLOW ACC" จาก Report Admin มาไว้ที่นี่ (เปิดให้ทุก user เหมือนเดิม) */}
-      <MenuGroup title="Report for FlowAcc" pages={["reportadmin", "generalreceiptpivot"]} activeMenu={activeMenu} onChange={onChange} canAccess={(p) => (p === "reportadmin" ? true : canAccess(p))}>
+      <MenuGroup title="Report for FlowAcc" pages={["reportadmin", "generalreceiptpivot", "salesbytaxinvoice"]} activeMenu={activeMenu} onChange={onChange} canAccess={(p) => (p === "reportadmin" ? true : canAccess(p))}>
         <MenuItem page="reportadmin" label="รายงานสรุปขายรถบันทึก FLOW ACC" activeMenu={activeMenu} onChange={onChange} canAccess={() => true} />
         <MenuItem page="generalreceiptpivot" label="สรุปรับชำระเงินทั่วไป (รายเดือน)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="salesbytaxinvoice" label="รายงานการขายตามวันที่ใบกำกับภาษี" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       <MenuGroup title="Sales" pages={salesPages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
