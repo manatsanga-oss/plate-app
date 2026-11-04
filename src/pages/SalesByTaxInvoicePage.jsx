@@ -4,8 +4,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 // ใช้บันทึกยอดขายรถใน FlowAccount: กรองเป็นเดือน (ตามวันที่ใบกำกับ) → แยกสังกัด → แยกร้าน (รหัสสาขา) → แยกประเภทการขาย
 // เงินสด / ไฟแนนท์ (แยกตามบริษัทไฟแนนท์) · ข้อมูลจาก list-tax-invoices (ไฟล์ภาษีขายที่ upload) join ใบขาย NEW เพื่อรู้บริษัทไฟแนนท์/สาขา
 const TAXINV_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-invoices";
-const RETAIL_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api"; // ใบขาย NEW → วิธีรับชำระ (เงินสด/โอนบัญชี/มัดจำจอง/ดาวน์ออกแทน/ไฟแนนท์) สำหรับแถวย่อย ▾ (user 2026-11-04)
-const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api"; // บัญชีธนาคาร → ป้ายชื่อบัญชีที่รับโอน
 const USED_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api"; // รถมือสองที่ขายแล้ว (used_moto_stock) — ใบกำกับที่ไม่มีใบขาย NEW แต่เลขถัง/เลขเครื่องตรง = ขายรถมือสอง (user 2026-11-04 เคส 69MC/0001523, 69MC/0001454)
 const COMPANIES = ["PAPAO", "NAKORNLUANG", "SINGCHAI"];
 // สังกัดตามบริษัทผู้ออกใบกำกับ (ป.เปา = PAPAO + นครหลวง สาขา 00001)
@@ -43,11 +41,6 @@ export default function SalesByTaxInvoicePage({ currentUser }) {
   const [month, setMonth] = useState(thisMonth());
   const [rows, setRows] = useState([]);
   const [usedMap, setUsedMap] = useState(new Map()); // normKey(เลขถัง/เลขเครื่อง) → แถวรถมือสองที่ขายแล้ว
-  const [retailMap, setRetailMap] = useState(new Map()); // sale_no → ใบขาย NEW (วิธีรับชำระ)
-  const [acctMap, setAcctMap] = useState(new Map()); // account_id → "ธนาคาร เลขบัญชี ชื่อบัญชี"
-  const [openPay, setOpenPay] = useState({}); // key แถวประเภท → true = กางแถวย่อยวิธีรับชำระ
-  const [payLoading, setPayLoading] = useState(false);
-  const retailLoadedFor = useRef(""); // เดือนที่โหลดใบขาย NEW ไว้แล้ว
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState("");
   const [showCancelled, setShowCancelled] = useState(false);
@@ -63,8 +56,6 @@ export default function SalesByTaxInvoicePage({ currentUser }) {
     const ym = `${Number(yy) + 543}${mm}`; // list_tax_invoices ใช้ปี พ.ศ.
     try {
       // รถมือสองที่ขายแล้วทั้งหมด (โหลดคู่กัน ถ้าพังให้รายงานยังใช้ได้)
-      const acctP = acctMap.size ? Promise.resolve(null) : fetch(ACC_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "true" }) })
-        .then((r) => r.json()).then((d) => { if (!Array.isArray(d)) d = [d]; if (d[0] && d[0].listjson) d = JSON.parse(d[0].listjson); return d; }).catch(() => []);
       const usedP = fetch(USED_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_sales", date_from: "2026-01-01", date_to: "2099-12-31" }) })
         .then((r) => r.text()).then((t) => { let d = JSON.parse(t); if (!Array.isArray(d)) d = [d]; if (d[0] && d[0].listjson) d = JSON.parse(d[0].listjson); return d.filter((u) => u && u.status === "sold"); }).catch(() => []);
       const all = await Promise.all(COMPANIES.map(async (br) => {
@@ -73,10 +64,8 @@ export default function SalesByTaxInvoicePage({ currentUser }) {
         let d = []; try { const j = JSON.parse(t); d = Array.isArray(j) ? j : (j?.rows || []); } catch { d = []; }
         return d.map((x) => ({ ...x, _company: br }));
       }));
-      const [usedRows, acctRows] = await Promise.all([usedP, acctP]);
+      const usedRows = await usedP;
       if (reqId !== reqRef.current) return; // มีการเปลี่ยนเดือนระหว่างรอ → ทิ้งผลชุดนี้
-      retailLoadedFor.current = ""; setRetailMap(new Map()); setOpenPay({}); // วิธีรับชำระโหลดเมื่อกด ▸ ครั้งแรก (list_retail_sales หนัก ~1 MB/เดือน)
-      if (acctRows) { const am = new Map(); acctRows.forEach((a) => { if (a && a.account_id != null) am.set(Number(a.account_id), [a.bank_name && a.bank_name !== "-" ? a.bank_name : "", a.account_no, a.account_name].filter(Boolean).join(" ")); }); setAcctMap(am); }
       const um = new Map();
       usedRows.forEach((u) => { if (normKey(u.chassis_no)) um.set(normKey(u.chassis_no), u); if (normKey(u.engine_no)) um.set(normKey(u.engine_no), u); });
       setUsedMap(um);
@@ -128,63 +117,6 @@ export default function SalesByTaxInvoicePage({ currentUser }) {
     const types = [...typeSet].sort((a, b) => typeOrder(a).localeCompare(typeOrder(b), "th"));
     return { affils, grand, cancelledCnt, types };
   }, [rows, usedMap, showCancelled, affilFilter]);
-
-  /** แถวย่อยวิธีรับชำระของกลุ่มประเภทการขาย (รวมทุกใบในกลุ่ม) — ใช้ใบขาย NEW (retail_sales) หรือรถมือสอง (payment_breakdowns) */
-  function payBreakdown(list) {
-    const acc = {}; // key → { label, order, amount, invs }
-    const add = (key, label, order, amt, inv) => { if (!(num(amt) > 0)) return; const x = (acc[key] = acc[key] || { key, label, order, amount: 0, invs: new Set() }); x.amount += num(amt); x.invs.add(inv); };
-    let noData = 0, noDataAmt = 0, theftCnt = 0, theftAmt = 0;
-    for (const r of list) {
-      if (r.status === "cancelled") continue;
-      const inv = r.tax_invoice_no;
-      const sale = r.sale_invoice_no ? retailMap.get(r.sale_invoice_no) : null;
-      const u = usedOf(r, usedMap);
-      let covered = 0;
-      if (sale) {
-        (Array.isArray(sale.payment_methods) ? sale.payment_methods : []).forEach((m) => {
-          const method = String(m.method || "").trim();
-          if (/โอน/.test(method)) { const lbl = acctMap.get(Number(m.account_id)) || m.account_name || "ไม่ระบุบัญชี"; add("tr|" + lbl, "เงินโอน · " + lbl, 2, m.amount, inv); }
-          else if (method === "เงินสด") add("cash", "เงินสด", 1, m.amount, inv);
-          else add("m|" + method, method, 3, m.amount, inv);
-          covered += num(m.amount);
-        });
-        add("booking", "เงินมัดจำจอง (ตัดจากใบจอง)", 4, sale.booking_deposit, inv); covered += num(sale.booking_deposit);
-        add("downpay", "เงินดาวน์/ค่างวดออกแทน", 5, sale.down_payout_amount, inv); covered += num(sale.down_payout_amount);
-        add("finance", "ยอดจัดไฟแนนท์ (รับจากไฟแนนท์)", 6, sale.finance_amount, inv); covered += num(sale.finance_amount);
-        if (num(sale.theft_insurance_amount) > 0 && /ออกแทน|โปร/.test(String(sale.theft_insurance_source || ""))) { theftCnt += 1; theftAmt += num(sale.theft_insurance_amount); }
-      } else if (u) {
-        let pb = []; try { pb = typeof u.payment_breakdowns === "string" ? JSON.parse(u.payment_breakdowns) : (u.payment_breakdowns || []); } catch { pb = []; }
-        if (!pb.length && num(u.sold_price) > 0) pb = [{ method: u.payment_method || "เงินสด", amount: u.sold_price }];
-        // ชื่อบัญชีในรถมือสองเก็บเป็น "ธนาคาร · เลขบัญชี · ชื่อ" → ตัด "·" ให้ตรงรูปแบบบัญชีธนาคาร (รวมแถวกับใบขาย NEW)
-        pb.forEach((m) => { const method = String(m.method || "").trim(); const accLbl = String(m.account || "ไม่ระบุบัญชี").replace(/\s*·\s*/g, " ").trim(); if (/โอน/.test(method)) add("tr|" + accLbl, "เงินโอน · " + accLbl, 2, m.amount, inv); else if (/สด/.test(method)) add("cash", "เงินสด", 1, m.amount, inv); else add("m|" + method, method, 3, m.amount, inv); covered += num(m.amount); });
-      } else { noData += 1; noDataAmt += num(r.total_amount); continue; }
-      const rest = Math.round((num(r.total_amount) - covered) * 100) / 100;
-      if (rest > 0.5) add("unpaid", "ยังไม่บันทึกรับชำระ / ค้างรับ", 8, rest, inv);
-      else if (rest < -0.5) add("over", "ยอดรับมากกว่าใบกำกับ (ค่าใช้จ่ายอื่นในใบเสร็จ / ส่วนต่างราคา)", 9, -rest, inv);
-    }
-    const rows = Object.values(acc).sort((a, b) => a.order - b.order || a.label.localeCompare(b.label, "th")).map((x) => ({ ...x, cnt: x.invs.size }));
-    if (noData) rows.push({ key: "nodata", label: "ไม่พบข้อมูลรับชำระในระบบ", cnt: noData, amount: noDataAmt, warn: true });
-    if (theftCnt) rows.push({ key: "theft", label: "ประกันรถหายออกแทน (โปรโมชั่น) — ค่าใช้จ่าย ไม่รวมในยอดรับ", cnt: theftCnt, amount: theftAmt, info: true });
-    return rows;
-  }
-  /** โหลดใบขาย NEW เฉพาะช่วงวันขายของใบกำกับในเดือนนี้ (ครั้งเดียวต่อเดือน) — ไม่โหลดตอนเปิดหน้าเพื่อให้รายงานหลักเร็ว */
-  async function ensureRetail() {
-    if (retailLoadedFor.current === month || payLoading) return;
-    setPayLoading(true);
-    try {
-      const ds = rows.map((r) => String(r.sale_date || "").slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
-      const [yy, mm] = month.split("-").map(Number);
-      const last = new Date(yy, mm, 0).getDate();
-      const from = ds[0] && ds[0] < `${month}-01` ? ds[0] : `${month}-01`;
-      const to = ds.length && ds[ds.length - 1] > `${month}-${pad(last)}` ? ds[ds.length - 1] : `${month}-${pad(last)}`;
-      const res = await fetch(RETAIL_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_retail_sales", date_from: from, date_to: to, limit: 6000 }) });
-      const d = await res.json();
-      const rm = new Map(); (Array.isArray(d) ? d : []).forEach((x) => { if (x && x.invoice_no) rm.set(x.invoice_no, x); });
-      setRetailMap(rm); retailLoadedFor.current = month;
-    } catch { /* แถวย่อยจะขึ้น "ไม่พบข้อมูลรับชำระ" */ }
-    setPayLoading(false);
-  }
-  const togglePay = (k) => { setOpenPay((o) => ({ ...o, [k]: !o[k] })); ensureRetail(); };
 
   useEffect(() => { if (!detail) return; const onKey = (e) => { if (e.key === "Escape") setDetail(null); }; window.addEventListener("keydown", onKey); return () => window.removeEventListener("keydown", onKey); }, [detail]);
 
@@ -304,23 +236,13 @@ tr.aff td{background:#dbeafe;font-weight:700}tr.typeall td{background:#eff6ff;co
                       const k = `${A.key}|${B.br}|${T.type}`;
                       return (
                         <React.Fragment key={k}>
-                          <tr onClick={() => setDetail({ A, B, T })} style={{ cursor: "pointer", borderBottom: "1px solid #f1f5f9" }} title="คลิกเพื่อดูรายใบ · กดลูกศรเพื่อดูวิธีรับชำระ"
+                          <tr onClick={() => setDetail({ A, B, T })} style={{ cursor: "pointer", borderBottom: "1px solid #f1f5f9" }} title="คลิกเพื่อดูรายใบ"
                             onMouseEnter={(e) => (e.currentTarget.style.background = "#f8fafc")} onMouseLeave={(e) => (e.currentTarget.style.background = "")}>
-                            <td style={{ padding: "5px 10px 5px 40px", textAlign: "left" }}>
-                              <button onClick={(e) => { e.stopPropagation(); togglePay(k); }} title="วิธีรับชำระ" style={{ border: "1px solid #cbd5e1", background: openPay[k] ? "#e0f2fe" : "#fff", borderRadius: 5, width: 22, height: 22, cursor: "pointer", marginRight: 8, fontSize: 11, color: "#334155", verticalAlign: "middle" }}>{openPay[k] ? "▾" : "▸"}</button>
+                            <td style={{ padding: "5px 10px 5px 56px", textAlign: "left" }}>
                               <TypeLabel t={T.type} full /> <span style={{ color: "#94a3b8", fontSize: 11, marginLeft: 6 }}>🔍 ดูรายใบ</span>
                             </td>
                             <NumCells x={T} />
                           </tr>
-                          {openPay[k] && payLoading && <tr style={{ background: "#f8fafc" }}><td colSpan={5} style={{ padding: "4px 10px 4px 86px", textAlign: "left", color: "#64748b", fontSize: 12.5 }}>⏳ กำลังโหลดวิธีรับชำระจากใบขาย NEW…</td></tr>}
-                          {openPay[k] && !payLoading && payBreakdown(T.rows).map((pr) => (
-                            <tr key={k + "|" + pr.key} style={{ background: pr.warn ? "#fff7ed" : pr.info ? "#fafafa" : "#f8fafc", borderBottom: "1px solid #f1f5f9", color: pr.warn ? "#9a3412" : pr.info ? "#64748b" : "#334155", fontSize: 12.5 }}>
-                              <td style={{ padding: "3px 10px 3px 86px", textAlign: "left" }}>{pr.warn ? "⚠️ " : pr.info ? "ℹ️ " : "↳ "}{pr.label}</td>
-                              <td style={{ ...tdR, padding: "3px 10px" }}>{pr.cnt}</td>
-                              <td style={{ ...tdR, padding: "3px 10px", color: "#94a3b8" }}>{pr.info ? "" : "·"}</td>
-                              <td style={{ ...tdR, padding: "3px 10px", color: "#94a3b8" }}>{pr.info ? "" : "·"}</td>
-                              <td style={{ ...tdR, padding: "3px 10px", fontWeight: pr.info ? 400 : 600 }}>{fmt(pr.amount)}</td>
-                            </tr>))}
                         </React.Fragment>);
                     })}
                   </React.Fragment>))}
@@ -330,7 +252,7 @@ tr.aff td{background:#dbeafe;font-weight:700}tr.typeall td{background:#eff6ff;co
         </table>
       </div>
       <div style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
-        ที่มา: ไฟล์ภาษีขาย (ใบกำกับรถ) ของ ป.เปา / นครหลวง / สิงห์ชัย ที่ upload ในระบบ · ประเภทการขายและร้านมาจากใบขาย NEW ที่จับคู่กับใบกำกับ (เลขถัง) · เลขถัง/เลขเครื่องที่ตรงกับรถมือสองที่ขายแล้ว (เมนูรถมือสอง) = นับรวมในเงินสด (มีหมายเหตุ "รถมือสอง" ในรายใบ) · ใบที่ไม่พบทั้งสองทางขึ้น "ไม่ทราบประเภท" ให้ตรวจเอง · ยอดไม่รวมใบยกเลิก · กด ▸ หน้าประเภทการขายเพื่อดูวิธีรับชำระ (เงินสด / เงินโอนรายบัญชี / มัดจำจอง / เงินดาวน์ออกแทน / ยอดจัดไฟแนนท์) จากใบขาย NEW และใบขายรถมือสอง
+        ที่มา: ไฟล์ภาษีขาย (ใบกำกับรถ) ของ ป.เปา / นครหลวง / สิงห์ชัย ที่ upload ในระบบ · ประเภทการขายและร้านมาจากใบขาย NEW ที่จับคู่กับใบกำกับ (เลขถัง) · เลขถัง/เลขเครื่องที่ตรงกับรถมือสองที่ขายแล้ว (เมนูรถมือสอง) = นับรวมในเงินสด (มีหมายเหตุ "รถมือสอง" ในรายใบ) · ใบที่ไม่พบทั้งสองทางขึ้น "ไม่ทราบประเภท" ให้ตรวจเอง · ยอดไม่รวมใบยกเลิก
       </div>
 
       {detail && (

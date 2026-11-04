@@ -378,6 +378,8 @@ export function buildDailyCashItems(src, ctx) {
       branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
       note: it.payment_received_note || "", finance: it.finance_type === "moto" ? it.finance_company_name : "",
       red_plate: it.red_plate_no || "", // เลขป้ายแดงของใบขาย (user 2026-10-31: โชว์ในสรุปรายวันรับเงิน จอ+ใบพิมพ์)
+      // ค่าใช้จ่ายร้านออกแทนในใบขาย (ไม่รวมใน received) — หน้าสรุปรับชำระเงินทั่วไปใช้โชว์บรรทัด "ออกแทน" เพื่อปิดยอดใบกำกับใน FlowAccount (user 2026-11-04); list_sale_payments ต้องส่งคอลัมน์เหล่านี้
+      down_payout_amount: it.down_payout_amount, theft_insurance_amount: it.theft_insurance_amount, theft_insurance_source: it.theft_insurance_source, finance_amount: it.finance_amount,
     });
   }
   const deps = depItems.map((d) => {
@@ -453,6 +455,7 @@ export function buildDailyCashItems(src, ctx) {
       split, received: amt,
       branch_key: bc5(u.branch_code), branch_name: u.branch_code || "ไม่ระบุสาขา",
       note: [[u.brand, u.model_series, u.color_name].filter(Boolean).join(" "), u.license_plate, u.payment_note].filter(Boolean).join(" · "),
+      chassis_no: u.chassis_no || "", engine_no: u.engine_no || "", // ไว้จับคู่ใบกำกับรถมือสอง (DMS ออกใบกำกับตามเลขถัง) ในหน้าสรุปรับชำระเงินทั่วไป (2026-11-04)
     };
   });
   const partDeps = partDepItems.map((d) => {
