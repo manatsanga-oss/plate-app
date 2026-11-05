@@ -230,18 +230,26 @@ class LedCloud:
         return next((r for r in lst if r.get("name") == fname), None)
 
     def wait_ready(self, fname, rtype, max_sec=420):
+        """รอจนคลาวด์แปลงไฟล์ (transcodeState 2) และสแกนไฟล์เสร็จ (scanState 1) — preview ก่อนสแกนเสร็จได้ 400803 "Resource not scanned" (2026-11-04)"""
         t0 = time.time()
         while time.time() - t0 < max_sec:
             time.sleep(5)
             res = self.find_resource(fname, rtype)
-            if res and (rtype == 1 or res.get("transcodeState") == 2):
-                return res
             if res and res.get("transcodeState") == 3:
                 raise RuntimeError("transcode failed")
+            if res and (rtype == 1 or res.get("transcodeState") == 2) and res.get("scanState", 1) == 1:
+                return res
         raise RuntimeError("resource not ready (timeout)")
 
-    def preview(self, rid):
-        return self._call("POST", "/v1/resource/preview", json=[rid])["data"][0]
+    def preview(self, rid, max_sec=240):
+        t0 = time.time()
+        while True:
+            try:
+                return self._call("POST", "/v1/resource/preview", json=[rid])["data"][0]
+            except RuntimeError as e:
+                if "400803" in str(e) and time.time() - t0 < max_sec:   # สแกนยังไม่เสร็จ → รอแล้วลองใหม่
+                    time.sleep(10); continue
+                raise
 
     def program(self, pid):
         return self._call("GET", f"/v1/program/{pid}?format=2")["data"]
@@ -278,20 +286,28 @@ def ensure_resource(lc, st, kind, it):
     rtype = 1 if kind == "image" else 2
     if cached and lc.find_resource(cached["name"], rtype):
         return cached
-    r = requests.get(SIGNAGE_IMG + str(it["id"]) + "&v=" + str(int(time.time())), timeout=180)
-    r.raise_for_status()
-    data = r.content
-    if len(data) < 500:
-        raise RuntimeError(f"slide #{it['id']} file empty")
-    ext = "jpg" if kind == "image" else ("webm" if "webm" in str(it.get("media_mime") or "") else "mp4")
-    fname = f"signage_{it['id']}_{int(time.time())}.{ext}"
-    log(f"  upload #{it['id']} {kind} {len(data) / 1048576:.1f} MB → {fname}")
-    lc.upload(fname, data)
+    pend = st.setdefault("pending_uploads", {}).get(key)   # อัปโหลดไปแล้วแต่รอบก่อนพังตอน preview → ใช้ไฟล์เดิม ไม่อัปซ้ำ
+    if pend and lc.find_resource(pend, rtype):
+        fname = pend
+        log(f"  reuse uploaded #{it['id']} {fname}")
+    else:
+        r = requests.get(SIGNAGE_IMG + str(it["id"]) + "&v=" + str(int(time.time())), timeout=180)
+        r.raise_for_status()
+        data = r.content
+        if len(data) < 500:
+            raise RuntimeError(f"slide #{it['id']} file empty")
+        ext = "jpg" if kind == "image" else ("webm" if "webm" in str(it.get("media_mime") or "") else "mp4")
+        fname = f"signage_{it['id']}_{int(time.time())}.{ext}"
+        log(f"  upload #{it['id']} {kind} {len(data) / 1048576:.1f} MB → {fname}")
+        lc.upload(fname, data)
+        st["pending_uploads"][key] = fname
+        save_state(st)
     res = lc.wait_ready(fname, rtype)
     info = lc.preview(res["id"])
     rec = {"id": res["id"], "name": fname, "path": info["path"], "snapshot": info.get("snapshot") or info["path"], "duration": float(info.get("duration") or 0),
            "width": info.get("width"), "height": info.get("height")}
     st["resources"][key] = rec
+    st["pending_uploads"].pop(key, None)
     save_state(st)
     return rec
 
