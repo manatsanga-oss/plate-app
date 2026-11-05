@@ -26,6 +26,9 @@ function fmtMonthLabel(ym) {
   return `${names[m-1]} ${y+543}`;
 }
 
+// สาขาที่ขาย = รหัส SCYxx นำหน้าเลขใบขาย NEW (ใบเก่า/รถมือสองไม่มี → "ไม่ระบุ")
+const SHOP_LABEL = { SCY01: "SCY01 สำนักงานใหญ่", SCY04: "SCY04 ตลาดสีขวา", SCY05: "SCY05 นครหลวง", SCY06: "SCY06 ป.เปาวังน้อย", SCY07: "SCY07 ตลาดวังน้อย", SCY10: "SCY10 สง่าศรีบุ๊ชเซ็นเตอร์" };
+const shopOf = (r) => { const m = String(r.sale_invoice_no || "").match(/^(SCY\d{2})/i); return m ? m[1].toUpperCase() : ""; };
 const BRANCH_LABEL = {
   PAPAO: { label: "ป.เปา", bg: "#dbeafe", color: "#1e40af" },
   NAKORNLUANG: { label: "นครหลวง", bg: "#fef3c7", color: "#92400e" },
@@ -36,7 +39,8 @@ export default function RegistrationSummaryReportPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [invoiceMonth, setInvoiceMonth] = useState(() => new Date().toISOString().slice(0, 7)); // YYYY-MM
-  const [branchFilter, setBranchFilter] = useState("all");
+  const [branchFilter, setBranchFilter] = useState("all"); // สังกัด (บริษัทผู้ออกใบกำกับ PAPAO/NAKORNLUANG/SINGCHAI)
+  const [shopFilter, setShopFilter] = useState("all");     // สาขาที่ขาย (SCYxx จากเลขใบขาย NEW) — user 2026-11-05 แยกจากสังกัด
   const [regPaidMonth, setRegPaidMonth] = useState("");  // YYYY-MM
   const [insPaidMonth, setInsPaidMonth] = useState("");  // YYYY-MM
   const [search, setSearch] = useState("");
@@ -72,9 +76,11 @@ export default function RegistrationSummaryReportPage() {
   useEffect(() => { fetchData(); /* eslint-disable-next-line */ }, [invoiceMonth]);
 
   const kw = search.trim().toLowerCase();
+  const shopOptions = [...new Set(rows.map(shopOf).filter(Boolean))].sort();
   const monthOf = (v) => v ? String(v).slice(0, 7) : "";  // YYYY-MM
   const filtered = rows.filter(r => {
     if (branchFilter !== "all" && r.branch !== branchFilter) return false;
+    if (shopFilter !== "all" && shopOf(r) !== shopFilter) return false;
     if (regPaidMonth && monthOf(r.reg_paid_at) !== regPaidMonth) return false;
     if (insPaidMonth && monthOf(r.ins_paid_at) !== insPaidMonth) return false;
     if (!kw) return true;
@@ -169,7 +175,8 @@ export default function RegistrationSummaryReportPage() {
   function printReport() {
     if (filtered.length === 0) { setMessage("ไม่มีข้อมูลให้พิมพ์"); return; }
     const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-    const branchLabel = filtered.length && branchFilter !== "all" ? (BRANCH_LABEL[branchFilter]?.label || branchFilter) : "ทุกสาขา";
+    const branchLabel = filtered.length && branchFilter !== "all" ? (BRANCH_LABEL[branchFilter]?.label || branchFilter) : "ทุกสังกัด";
+    const shopLabel = shopFilter !== "all" ? (SHOP_LABEL[shopFilter] || shopFilter) : "ทุกสาขา";
     const body = filtered.map((r, i) => `<tr>
         <td class="c">${i + 1}</td>
         <td class="c">${esc(BRANCH_LABEL[r.branch]?.label || r.branch || "-")}</td>
@@ -209,7 +216,7 @@ export default function RegistrationSummaryReportPage() {
         @media print{body{margin:0}}
       </style></head><body>
       <h1>📋 รายงานสรุปใบปะหน้า คชจ. ขายรถ</h1>
-      <div class="sub2">เดือนใบกำกับ: ${esc(invoiceMonth ? fmtMonthLabel(invoiceMonth) : "ทั้งหมด")} · สาขา: ${esc(branchLabel)}${regPaidMonth ? ` · จ่ายทะเบียน: ${esc(fmtMonth(regPaidMonth))}` : ""}${insPaidMonth ? ` · จ่าย พรบ.: ${esc(fmtMonth(insPaidMonth))}` : ""}</div>
+      <div class="sub2">เดือนใบกำกับ: ${esc(invoiceMonth ? fmtMonthLabel(invoiceMonth) : "ทั้งหมด")} · สังกัด: ${esc(branchLabel)} · สาขา: ${esc(shopLabel)}${regPaidMonth ? ` · จ่ายทะเบียน: ${esc(fmtMonth(regPaidMonth))}` : ""}${insPaidMonth ? ` · จ่าย พรบ.: ${esc(fmtMonth(insPaidMonth))}` : ""}</div>
       <div class="totals">
         <span>จำนวน <b>${filtered.length}</b> ใบ</span>
         <span>ค่าดำเนินการ-จดทะเบียนรวม <b>${fmt(totalRegOperation)}</b></span>
@@ -263,10 +270,15 @@ export default function RegistrationSummaryReportPage() {
         <span style={{ fontSize: 11, color: "#6b7280" }}>{invoiceMonth ? fmtMonthLabel(invoiceMonth) : ""}</span>
         <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)}
           style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}>
-          <option value="all">ทุกสาขา</option>
+          <option value="all">ทุกสังกัด</option>
           <option value="PAPAO">ป.เปา</option>
           <option value="NAKORNLUANG">นครหลวง</option>
           <option value="SINGCHAI">สิงห์ชัย</option>
+        </select>
+        <select value={shopFilter} onChange={e => setShopFilter(e.target.value)} title="สาขาที่ขาย (จากเลขใบขาย NEW)"
+          style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 13 }}>
+          <option value="all">ทุกสาขา</option>
+          {shopOptions.map(c => <option key={c} value={c}>{SHOP_LABEL[c] || c}</option>)}
         </select>
         <select value={regPaidMonth} onChange={e => setRegPaidMonth(e.target.value)}
           title="กรองเดือนที่จ่ายค่าจดทะเบียน"
