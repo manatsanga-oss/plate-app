@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import BankAccountSelect from "../utils/BankAccountSelect";
 import { loadSubs } from "../utils/usePartStockHints"; // คู่รหัสทดแทน ใช้เทียบสถานะ B2B (user 2026-10-22) // เลือกบัญชีโอนออกตอนคืนมัดจำแบบเงินโอน (user 2026-10-22)
-import usePartStockHints, { useAutoStockCheck, PartStockHintRow, useFastMovingFlag, FastMovingBadge } from "../utils/usePartStockHints";
+import usePartStockHints, { useAutoStockCheck, PartStockHintRow, useFastMovingFlag, FastMovingBadge, fastMovingNoteHtml } from "../utils/usePartStockHints";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
@@ -792,7 +792,7 @@ export default function YamahaOrderPage({ currentUser }) {
         const q = st.reduce((t, x) => t + Number(x.qty || 0), 0);
         return `<div class="sub-line${q > 0 ? ' has' : ''}">↳ ${sb.rel || 'ทดแทน'} ${sb.code || ''}${q > 0 ? ` — มีของ ${q} ชิ้น (${st.map((x) => `${x.source} ${x.qty}${x.location ? ' ' + x.location : ''}`).join(', ')})` : ' — ไม่มีของในสต๊อก'}</div>`;
       }).join('');
-      return `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}</td><td>${it.part_name || ''}${subsHtml}</td><td class="center">${it.quantity || 0}</td><td>${srcCell}</td><td class="center">${qtyCell}</td><td>${locCell}</td></tr>`;
+      return `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}${fastMovingNoteHtml(it.part_code)}</td><td>${it.part_name || ''}${subsHtml}</td><td class="center">${it.quantity || 0}</td><td>${srcCell}</td><td class="center">${qtyCell}</td><td>${locCell}</td></tr>`;
     }).join('')}
   </tbody>
 </table>
@@ -1277,16 +1277,17 @@ export default function YamahaOrderPage({ currentUser }) {
               <div style={{ gridColumn: "1 / -1" }}><b>หมายเหตุ:</b> {showDetail.deposit_note || showDetail.note || "-"}</div>
             </div>
             <label style={{ fontWeight: 600, fontSize: 14, color: "#072d6b" }}>รายการอะไหล่</label>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, marginTop: 8 }}>
+            {/* tableLayout fixed + กำหนดความกว้างคอลัมน์ — ป้ายหมุนเร็ว/บรรทัดทดแทนยาว ๆ ต้องตัดบรรทัดในช่อง ไม่ดันคอลัมน์จำนวน/สต๊อกหลุดขอบ modal (user 2026-11-05) */}
+            <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", fontSize: 13, marginTop: 8, wordBreak: "break-word" }}>
               <thead>
                 <tr style={{ background: "#f1f5f9" }}>
-                  <th style={th}>#</th>
-                  <th style={th}>รหัสสินค้า</th>
-                  <th style={th}>ชื่ออะไหล่</th>
-                  <th style={{ ...th, textAlign: "center" }}>จำนวน</th>
-                  <th style={th}>สต๊อก</th>
-                  <th style={{ ...th, textAlign: "center" }}>คงเหลือ</th>
-                  <th style={th}>ที่เก็บ</th>
+                  <th style={{ ...th, width: "4%" }}>#</th>
+                  <th style={{ ...th, width: "24%" }}>รหัสสินค้า</th>
+                  <th style={{ ...th, width: "34%" }}>ชื่ออะไหล่</th>
+                  <th style={{ ...th, width: "8%", textAlign: "center" }}>จำนวน</th>
+                  <th style={{ ...th, width: "10%" }}>สต๊อก</th>
+                  <th style={{ ...th, width: "8%", textAlign: "center" }}>คงเหลือ</th>
+                  <th style={{ ...th, width: "12%" }}>ที่เก็บ</th>
                 </tr>
               </thead>
               <tbody>
