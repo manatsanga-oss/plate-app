@@ -9,6 +9,8 @@ const BRAND_META = {
   YAMAHA: { label: "YAMAHA", color: "#1d4ed8", bg: "#dbeafe" },
   OTHERS: { label: "อื่นๆ", color: "#374151", bg: "#e5e7eb" },
 };
+// ยี่ห้อที่ไม่ใช่ HONDA/YAMAHA (OTHERS, VESPA, GPX, LAMBRETTA, SUZUKI …) รวมเป็น "อื่นๆ" ทั้งการ์ด/ตารางประเภท/ตัวกรอง (2026-11-05: หน้าสรุปรายยี่ห้อแยก VESPA/GPX/LAMBRETTA ออกจาก OTHERS)
+const brandKey = (b) => (b === "HONDA" || b === "YAMAHA" ? b : "OTHERS");
 const CAT_LABEL = { AT: "AT (ออโตเมติก)", EV: "EV (ไฟฟ้า)", MP: "MP (ครอบครัว)", SP: "SP (สปอร์ต)" };
 const TH_MON = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 const periodLabel = (p) => { const m = String(p || "").match(/^(\d{4})-(\d{2})$/); return m ? `${TH_MON[Number(m[2]) - 1]} ${Number(m[1]) + 543}` : p || "-"; };
@@ -79,7 +81,7 @@ export default function MarketRegistrationReportPage() {
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rows
-      .filter((r) => (cat === "all" || r.category === cat) && (brand === "all" || r.brand === brand) && (!q || String(r.model).toLowerCase().includes(q)))
+      .filter((r) => (cat === "all" || r.category === cat) && (brand === "all" || brandKey(r.brand) === brand) && (!q || String(r.model).toLowerCase().includes(q)))
       .map((r) => ({ ...r, registered: Number(r.registered) || 0, transferred: Number(r.transferred) || 0, prev: hasPrev ? (prevMap[keyOf(r)] ?? 0) : null }))
       .sort((a, b) => b.registered - a.registered || a.brand.localeCompare(b.brand) || a.model.localeCompare(b.model));
   }, [rows, cat, brand, search, prevMap, hasPrev]);
@@ -88,15 +90,15 @@ export default function MarketRegistrationReportPage() {
   const totalAll = rows.reduce((s, r) => s + (Number(r.registered) || 0), 0);
   const prevTotalAll = prevRows.reduce((s, r) => s + (Number(r.registered) || 0), 0);
   const byBrand = useMemo(() => {
-    const m = {}; rows.forEach((r) => { m[r.brand] = (m[r.brand] || 0) + (Number(r.registered) || 0); });
-    const pm = {}; prevRows.forEach((r) => { pm[r.brand] = (pm[r.brand] || 0) + (Number(r.registered) || 0); });
+    const m = {}; rows.forEach((r) => { const k = brandKey(r.brand); m[k] = (m[k] || 0) + (Number(r.registered) || 0); });
+    const pm = {}; prevRows.forEach((r) => { const k = brandKey(r.brand); pm[k] = (pm[k] || 0) + (Number(r.registered) || 0); });
     return ["HONDA", "YAMAHA", "OTHERS"].map((b) => ({ brand: b, n: m[b] || 0, prev: pm[b] || 0 }));
   }, [rows, prevRows]);
   const byCat = useMemo(() => {
     const m = {};
     rows.forEach((r) => {
       const c = r.category; m[c] = m[c] || { total: 0, HONDA: 0, YAMAHA: 0, OTHERS: 0 };
-      m[c].total += Number(r.registered) || 0; m[c][r.brand] = (m[c][r.brand] || 0) + (Number(r.registered) || 0);
+      m[c].total += Number(r.registered) || 0; m[c][brandKey(r.brand)] = (m[c][brandKey(r.brand)] || 0) + (Number(r.registered) || 0);
     });
     return ["AT", "MP", "SP", "EV"].filter((c) => m[c]).map((c) => ({ cat: c, ...m[c] }));
   }, [rows]);
@@ -209,7 +211,7 @@ export default function MarketRegistrationReportPage() {
             {loading && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 22 }}>กำลังโหลด...</td></tr>}
             {!loading && filtered.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 22 }}>ไม่มีข้อมูล</td></tr>}
             {!loading && filtered.map((r, i) => {
-              const bm = BRAND_META[r.brand] || BRAND_META.OTHERS;
+              const bm = BRAND_META[r.brand] || { ...BRAND_META.OTHERS, label: r.brand }; // ยี่ห้อย่อย (VESPA/GPX…) โชว์ชื่อจริง สีของอื่นๆ
               return (
                 <tr key={keyOf(r)} style={{ background: i % 2 ? "#f9fafb" : "#fff" }}>
                   <td style={{ ...td, textAlign: "center", fontWeight: 700, color: i < 3 ? "#b45309" : "#374151" }}>{i + 1}</td>
@@ -292,13 +294,13 @@ function ShopVsMarketTab({ periods, period, setPeriod, marketRows, prevMarketRow
   // แถวเทียบ: ทุกรุ่นในตลาด (HONDA/YAMAHA/OTHERS) — ร้านมีเฉพาะ 2 ยี่ห้อ
   const list = marketRows
     .map((r) => { const k = marketKey(r); return { key: k, brand: r.brand, category: r.category, model: r.model, market: Number(r.registered) || 0, shop: sc[k] || 0, marketPrev: hasPrev ? (mkPrev[k] || 0) : null, shopPrev: hasPrev ? (sp[k] || 0) : null }; })
-    .filter((r) => brand === "all" || r.brand === brand)
+    .filter((r) => brand === "all" || brandKey(r.brand) === brand)
     .sort((a, b) => b.market - a.market || b.shop - a.shop);
   const unmatched = Object.entries(sc).filter(([k]) => !known.has(k)).map(([k, n]) => ({ key: k, brand: k.split("|")[0], n, series: [...new Set(shopCur.filter((r) => `${r.brand}|${normModel(r.model)}` === k).map((r) => r.series))].join(", ") }));
   const sum = (arr, f) => arr.reduce((t, r) => t + (f(r) || 0), 0);
   const brandRow = (b) => {
-    const mk = marketRows.filter((r) => r.brand === b).reduce((t, r) => t + (Number(r.registered) || 0), 0);
-    const mkp = prevMarketRows.filter((r) => r.brand === b).reduce((t, r) => t + (Number(r.registered) || 0), 0);
+    const mk = marketRows.filter((r) => brandKey(r.brand) === b).reduce((t, r) => t + (Number(r.registered) || 0), 0);
+    const mkp = prevMarketRows.filter((r) => brandKey(r.brand) === b).reduce((t, r) => t + (Number(r.registered) || 0), 0);
     return { brand: b, market: mk, shop: shopCur.filter((r) => r.brand === b).length, marketPrev: mkp, shopPrev: shopPrev.filter((r) => r.brand === b).length };
   };
   const brands = ["HONDA", "YAMAHA"].map(brandRow);
@@ -390,7 +392,7 @@ function ShopVsMarketTab({ periods, period, setPeriod, marketRows, prevMarketRow
           <tbody>
             {list.length === 0 && <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 22 }}>ไม่มีข้อมูล</td></tr>}
             {list.map((r, i) => {
-              const bm = BRAND_META[r.brand] || BRAND_META.OTHERS;
+              const bm = BRAND_META[r.brand] || { ...BRAND_META.OTHERS, label: r.brand };
               return (
                 <tr key={r.key} style={{ background: r.shop > 0 ? (i % 2 ? "#f9fafb" : "#fff") : "#fafafa", color: r.shop > 0 ? undefined : "#9ca3af" }}>
                   <td style={{ ...td, textAlign: "center", fontWeight: 700 }}>{i + 1}</td>

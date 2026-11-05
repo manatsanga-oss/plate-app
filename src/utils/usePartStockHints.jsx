@@ -140,10 +140,15 @@ let _fastCache = null, _fastPromise = null;
 // "กลุ่มอะไหล่" ไม่ต้องตรงรหัสเป๊ะ (user 2026-11-05): ใช้รหัสฟังก์ชันของอะไหล่เป็นตัวแทนกลุ่ม
 //   HONDA 23100-K36-J01 → 23100 (สายพาน), 31500-… แบต, 06430-… ผ้าเบรค · YAMAHA 2BL-E7641-00 → E7641 (สายพาน), 1PB-E4451 ไส้กรอง · อะไหล่มาตรฐาน 90506-12001-00 → 90506
 const funcKey = (code) => { const c = strip(code); if (c.length < 8) return ""; return /^\d{5}/.test(c) ? c.slice(0, 5) : c.slice(3, 8); };
+const FAST_LS_KEY = "fm_codes_cache_v1", FAST_LS_TTL = 24 * 60 * 60 * 1000; // cache ในเครื่อง 24 ชม. — ลดการยิง n8n ทุกครั้งที่เปิดหน้าสั่งซื้อ (CPU n8n 2026-11-05)
+function readFastLs() { try { const o = JSON.parse(localStorage.getItem(FAST_LS_KEY) || "null"); return o && Array.isArray(o.rows) && Date.now() - Number(o.ts || 0) < FAST_LS_TTL ? o.rows : null; } catch { return null; } }
+function writeFastLs(rows) { try { localStorage.setItem(FAST_LS_KEY, JSON.stringify({ ts: Date.now(), rows: rows.map((r) => ({ part_code: r.part_code, ref_code: r.ref_code, product_group: r.product_group, custom_name: r.custom_name, brand: r.brand, is_discontinued: !!r.is_discontinued })) })); } catch { /* เต็ม/ปิด localStorage ก็ไม่เป็นไร */ } }
 export function loadFastMoving() {
   if (_fastCache) return Promise.resolve(_fastCache);
   if (_fastPromise) return _fastPromise;
-  _fastPromise = postJson(FAST_API, { action: "get_fast_moving_report" }).then((rows) => {
+  const cached = readFastLs();
+  // action เบา get_fast_moving_codes (Fast_Moving_API.json) — ก่อน re-import n8n จะตกไป default = report เต็ม ก็ยังได้ part_code/product_group ครบ
+  _fastPromise = (cached ? Promise.resolve(cached) : postJson(FAST_API, { action: "get_fast_moving_codes" }).then((rows) => { if (Array.isArray(rows) && rows.length) writeFastLs(rows); return rows; })).then((rows) => {
     const m = new Map(); const groups = new Map(); // funcKey → { group, count }
     (rows || []).forEach((r) => {
       if (!r || !r.part_code) return;
@@ -178,12 +183,12 @@ export function useFastMovingFlag() {
 export function FastMovingBadge({ info, block }) {
   if (!info) return null;
   return (
-    <div style={{ display: block ? "block" : "inline-block", color: "#dc2626", fontWeight: 700, fontSize: 11, marginTop: block ? 2 : 0, marginLeft: block ? 0 : 6, whiteSpace: "nowrap" }} title={`${info.code} ${info.name}${info.group ? " · " + info.group : ""}`}>
+    <div style={{ display: block ? "block" : "inline-block", color: "#dc2626", fontWeight: 700, fontSize: 11, marginTop: block ? 2 : 0, marginLeft: block ? 0 : 6, lineHeight: 1.3 }} title={`${info.code} ${info.name}${info.group ? " · " + info.group : ""}`}>
       ⚠ อะไหล่หมุนเร็ว{info.group ? ` (${info.group})` : ""} — มีสต๊อกประจำ ไม่ต้องสั่งซื้อ
     </div>
   );
 }
 export function fastMovingNoteHtml(code) {
   const r = fastMovingInfo(code);
-  return r ? `<div style="color:#dc2626;font-weight:700;font-size:11px">⚠ อะไหล่หมุนเร็ว${r.group ? " (" + r.group + ")" : ""}</div>` : "";
+  return r ? `<div style="color:#dc2626;font-weight:700;font-size:10px;white-space:normal;line-height:1.2">⚠ หมุนเร็ว${r.group ? " " + r.group : ""}</div>` : "";
 }

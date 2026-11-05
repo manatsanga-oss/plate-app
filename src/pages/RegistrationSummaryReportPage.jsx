@@ -96,8 +96,16 @@ export default function RegistrationSummaryReportPage() {
   // แยกยอด: ค่าดำเนินการ-จดทะเบียน / ค่าจดทะเบียนตามใบเสร็จ (ค่าจดทะเบียน+ขอใช้-ค่าจดทะเบียน)
   // ถ้าค่าจาก DB ว่าง ใช้ค่าที่กรอกเอง (manualFees) แทน — สำหรับแสดง/พิมพ์เท่านั้น
   const rowKey = (r) => `${r.branch}|${r.tax_invoice_no}`;
-  const effOp = (r) => { const v = Number(r.reg_fee_operation || 0); return v !== 0 ? v : Number(manualFees[rowKey(r)]?.op || 0); };
-  const effRc = (r) => { const v = Number(r.reg_fee_receipt || 0); return v > 0 ? v : Number(manualFees[rowKey(r)]?.rc || 0); };
+  // ลำดับ: ยอดจริงจากงานจดทะเบียน/วางบิล → ยอดที่กรอกเอง → ยอด "ตามระบบ" (กฎค่าใช้จ่ายการขาย สมมติจดอยุธยา — sys_reg_fee_* จาก n8n) (user 2026-11-05: ขึ้นตามระบบก่อน จดจริงแล้วค่อยขึ้นยอดจริง + หมายเหตุถ้าไม่ตรง)
+  const sysOp = (r) => Number(r.sys_reg_fee_operation || 0);
+  const sysRc = (r) => Number(r.sys_reg_fee_receipt || 0);
+  const hasActualOp = (r) => Number(r.reg_fee_operation || 0) !== 0;
+  const hasActualRc = (r) => Number(r.reg_fee_receipt || 0) > 0;
+  const effOp = (r) => { if (hasActualOp(r)) return Number(r.reg_fee_operation); const m = manualFees[rowKey(r)]?.op; return m !== undefined && m !== "" ? Number(m || 0) : sysOp(r); };
+  const effRc = (r) => { if (hasActualRc(r)) return Number(r.reg_fee_receipt); const m = manualFees[rowKey(r)]?.rc; return m !== undefined && m !== "" ? Number(m || 0) : sysRc(r); };
+  // ยอดจริงต่างจากระบบ → หมายเหตุ
+  const diffOp = (r) => (hasActualOp(r) && sysOp(r) > 0 && Math.abs(Number(r.reg_fee_operation) - sysOp(r)) > 0.5 ? sysOp(r) : null);
+  const diffRc = (r) => (hasActualRc(r) && sysRc(r) > 0 && Math.abs(Number(r.reg_fee_receipt) - sysRc(r)) > 0.5 ? sysRc(r) : null);
   const setManual = (r, field, value) => setManualFees(p => ({ ...p, [rowKey(r)]: { ...p[rowKey(r)], [field]: value } }));
   // ประกันรถหายออกแทน: แถวที่กดตัดออก → คิดเป็น 0 (แสดง/พิมพ์/CSV เท่านั้น ไม่บันทึก)
   const effCn = (r) => (removedTheft[rowKey(r)] ? 0 : Number(r.credit_note_total || 0));
@@ -173,8 +181,8 @@ export default function RegistrationSummaryReportPage() {
         <td>${esc(r.model_name || "-")}</td>
         <td class="m">${esc(r.sale_invoice_no || "-")}</td>
         <td class="c">${esc(fmtDate(r.sale_date))}</td>
-        <td class="r">${effOp(r) !== 0 ? fmt(effOp(r)) + (Number(r.reg_fee_operation || 0) === 0 ? " *" : "") : "-"}${r.reg_paid_at ? `<div class="sub">จ่าย: ${esc(fmtDate(r.reg_paid_at))}</div>` : ""}</td>
-        <td class="r">${effRc(r) > 0 ? fmt(effRc(r)) + (Number(r.reg_fee_receipt || 0) <= 0 ? " *" : "") : "-"}</td>
+        <td class="r">${effOp(r) !== 0 ? fmt(effOp(r)) + (hasActualOp(r) ? "" : " *") : "-"}${diffOp(r) !== null ? `<div class="sub" style="color:#dc2626">ระบบ ${fmt(diffOp(r))}</div>` : ""}${r.reg_paid_at ? `<div class="sub">จ่าย: ${esc(fmtDate(r.reg_paid_at))}</div>` : ""}</td>
+        <td class="r">${effRc(r) > 0 ? fmt(effRc(r)) + (hasActualRc(r) ? "" : " *") : "-"}${diffRc(r) !== null ? `<div class="sub" style="color:#dc2626">ระบบ ${fmt(diffRc(r))}</div>` : ""}</td>
         <td class="r">${Number(r.total_insurance_premium) > 0 ? fmt(r.total_insurance_premium) : "-"}${r.ins_paid_at ? `<div class="sub">จ่าย: ${esc(fmtDate(r.ins_paid_at))}</div>` : ""}</td>
         <td class="r">${effCn(r) > 0 ? fmt(effCn(r)) : "-"}</td>
         <td class="r">${Number(r.coupon_total) > 0 ? fmt(r.coupon_total) : "-"}</td>
@@ -228,7 +236,7 @@ export default function RegistrationSummaryReportPage() {
         </tr></tfoot>
       </table>
       ${filtered.some(r => (Number(r.reg_fee_operation || 0) === 0 && effOp(r) !== 0) || (Number(r.reg_fee_receipt || 0) <= 0 && effRc(r) > 0))
-        ? '<div class="sub" style="margin-top:6px;font-size:10px">* ยอดที่กรอกเองหน้ารายงาน (ไม่ได้บันทึกในระบบ)</div>' : ""}
+        ? '<div class="sub" style="margin-top:6px;font-size:10px">* ยอดตามระบบ (ยังไม่จดทะเบียนจริง/ยังไม่วางบิล) หรือยอดที่กรอกเองหน้ารายงาน — ไม่ได้บันทึกในระบบ · "ระบบ x" = ยอดจริงต่างจากกฎในระบบ</div>' : ""}
       ${filtered.some(r => removedTheft[rowKey(r)] && Number(r.credit_note_total || 0) > 0)
         ? '<div class="sub" style="margin-top:4px;font-size:10px">* มีการตัดยอดประกันรถหายออกแทนออกบางแถว (เฉพาะรายงานนี้ ไม่ได้บันทึกในระบบ)</div>' : ""}
     </body></html>`;
@@ -377,12 +385,16 @@ export default function RegistrationSummaryReportPage() {
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11 }}>{r.sale_invoice_no || "-"}</td>
                     <td style={td}>{fmtDate(r.sale_date)}</td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.reg_fee_operation) > 0 ? "#92400e" : "#9ca3af" }}>
-                      {Number(r.reg_fee_operation) !== 0 ? fmt(r.reg_fee_operation) : (
+                      {hasActualOp(r) ? (<>
+                        {fmt(r.reg_fee_operation)}
+                        {diffOp(r) !== null && <div style={{ fontSize: 10, color: "#dc2626", fontFamily: "Tahoma", fontWeight: 600 }} title="ยอดจริงไม่ตรงกับกฎค่าใช้จ่ายในระบบ">⚠ ระบบ {fmt(diffOp(r))}</div>}
+                      </>) : (<>
                         <input type="number" step="0.01" value={manualFees[rowKey(r)]?.op ?? ""}
                           onChange={e => setManual(r, "op", e.target.value)}
-                          placeholder="-" title="กรอกเองสำหรับพิมพ์ (ไม่บันทึก)"
+                          placeholder={sysOp(r) > 0 ? fmt(sysOp(r)) : "-"} title={sysOp(r) > 0 ? "ยอดตามระบบ (ยังไม่จดจริง) — พิมพ์ทับได้ ไม่บันทึก" : "กรอกเองสำหรับพิมพ์ (ไม่บันทึก)"}
                           style={{ width: 80, padding: "3px 5px", textAlign: "right", fontFamily: "monospace", fontSize: 12, border: "1px dashed #fbbf24", borderRadius: 4, background: "#fffbeb", color: "#92400e" }} />
-                      )}
+                        {sysOp(r) > 0 && <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Tahoma", fontWeight: 400 }}>ตามระบบ (ยังไม่จด)</div>}
+                      </>)}
                       {r.reg_paid_at && (
                         <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "Tahoma", fontWeight: 400 }}>
                           จ่าย: {fmtDate(r.reg_paid_at)}
@@ -390,12 +402,16 @@ export default function RegistrationSummaryReportPage() {
                       )}
                     </td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.reg_fee_receipt) > 0 ? "#5b21b6" : "#9ca3af" }}>
-                      {Number(r.reg_fee_receipt) > 0 ? fmt(r.reg_fee_receipt) : (
+                      {hasActualRc(r) ? (<>
+                        {fmt(r.reg_fee_receipt)}
+                        {diffRc(r) !== null && <div style={{ fontSize: 10, color: "#dc2626", fontFamily: "Tahoma", fontWeight: 600 }} title="ยอดจริงไม่ตรงกับกฎค่าใช้จ่ายในระบบ">⚠ ระบบ {fmt(diffRc(r))}</div>}
+                      </>) : (<>
                         <input type="number" step="0.01" value={manualFees[rowKey(r)]?.rc ?? ""}
                           onChange={e => setManual(r, "rc", e.target.value)}
-                          placeholder="-" title="กรอกเองสำหรับพิมพ์ (ไม่บันทึก)"
+                          placeholder={sysRc(r) > 0 ? fmt(sysRc(r)) : "-"} title={sysRc(r) > 0 ? "ยอดตามระบบ (ยังไม่จดจริง) — พิมพ์ทับได้ ไม่บันทึก" : "กรอกเองสำหรับพิมพ์ (ไม่บันทึก)"}
                           style={{ width: 80, padding: "3px 5px", textAlign: "right", fontFamily: "monospace", fontSize: 12, border: "1px dashed #c4b5fd", borderRadius: 4, background: "#f5f3ff", color: "#5b21b6" }} />
-                      )}
+                        {sysRc(r) > 0 && <div style={{ fontSize: 10, color: "#9ca3af", fontFamily: "Tahoma", fontWeight: 400 }}>ตามระบบ (ยังไม่จด)</div>}
+                      </>)}
                     </td>
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: Number(r.total_insurance_premium) > 0 ? "#065f46" : "#9ca3af" }}>
                       {Number(r.total_insurance_premium) > 0 ? fmt(r.total_insurance_premium) : "-"}
