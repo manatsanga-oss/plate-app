@@ -394,9 +394,9 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
       {/* เลือกรถที่เบิกให้ — จากช่องซ่อมที่กล้องเห็นว่ามีรถ */}
       <div style={{ background: "#fff", border: selectedBay ? "3px solid #f59e0b" : "2px solid #e5e7eb", borderRadius: 12, padding: 14, marginBottom: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-          <strong style={{ fontSize: 16 }}>🏍️ เลือกรถที่เบิกอะไหล่ให้ <span style={{ fontSize: 12, fontWeight: 400, color: "#6b7280" }}>(รถในช่องซ่อมตอนนี้ จากกล้อง · อัปเดตทุก {BAY_POLL_MS / 1000} วิ)</span></strong>
+          <strong style={{ fontSize: 18 }}>🏍️ เลือกรถที่เบิกอะไหล่ให้ <span style={{ fontSize: 13, fontWeight: 400, color: "#6b7280" }}>(รถในช่องซ่อมตอนนี้ จากกล้อง · อัปเดตทุก {BAY_POLL_MS / 1000} วิ)</span></strong>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {selectedBay && <span style={{ fontSize: 14, fontWeight: 700, color: "#b45309" }}>กำลังเบิกให้: {bayLabel(selectedBay)} · {selectedBay.zone_name}</span>}
+            {selectedBay && <span style={{ fontSize: 17, fontWeight: 700, color: "#b45309" }}>กำลังเบิกให้: {bayLabel(selectedBay)} · {selectedBay.zone_name}</span>}
             <button onClick={loadBays} style={{ padding: "5px 10px", background: "#fff", border: "1px solid #d1d5db", borderRadius: 6, fontSize: 13, cursor: "pointer" }}>🔄</button>
           </div>
         </div>
@@ -405,7 +405,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
           <button onClick={() => { setSelectedBay(null); inputRef.current?.focus({ preventScroll: true }); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }}
             style={{ padding: "14px 18px", borderRadius: 10, cursor: "pointer", fontSize: 16, fontWeight: 700, minWidth: 150,
               border: !selectedBay ? "3px solid #072d6b" : "2px solid #d1d5db", background: !selectedBay ? "#eef2ff" : "#fff", color: "#1f2937" }}>
-            📦 เบิกทั่วไป<div style={{ fontSize: 12, fontWeight: 400, color: "#6b7280" }}>ไม่ระบุรถ</div>
+            📦 เบิกทั่วไป<div style={{ fontSize: 14, fontWeight: 400, color: "#6b7280" }}>ไม่ระบุรถ</div>
           </button>
           {bays.map(b => {
             const sel = selectedBay && (selectedBay.event_id === b.event_id || (selectedBay.plate_no && selectedBay.plate_no === b.plate_no));
@@ -414,9 +414,9 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
                 <button onClick={() => { setSelectedBay(b); inputRef.current?.focus({ preventScroll: true }); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }}
                   style={{ padding: "14px 18px", paddingRight: 36, borderRadius: 10, cursor: "pointer", textAlign: "left", minWidth: 220,
                     border: sel ? "3px solid #f59e0b" : "2px solid #d1d5db", background: sel ? "#fffbeb" : "#fff", color: "#1f2937" }}>
-                  <div style={{ fontSize: 22, fontWeight: 800, fontFamily: "monospace", color: b.plate_no ? "#072d6b" : "#9ca3af" }}>{b.plate_no || "ไม่ทราบทะเบียน"}</div>
-                  <div style={{ fontSize: 13, color: "#374151" }}>{b.plate_province || ""}</div>
-                  <div style={{ fontSize: 12, color: b.in_bay ? "#166534" : "#6b7280" }}>{b.in_bay ? `🟢 อยู่ใน${b.zone_name || "ช่องซ่อม"}` : `เข้ามา${b.zone_name ? " " + b.zone_name : ""}`} · {b.since_local || "-"} น. ({b.minutes} นาที)</div>
+                  <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "monospace", color: b.plate_no ? "#072d6b" : "#9ca3af" }}>{b.plate_no || "ไม่ทราบทะเบียน"}</div>
+                  <div style={{ fontSize: 16, color: "#374151" }}>{b.plate_province || ""}</div>
+                  <div style={{ fontSize: 14, color: b.in_bay ? "#166534" : "#6b7280" }}>{b.in_bay ? `🟢 อยู่ใน${b.zone_name || "ช่องซ่อม"}` : `เข้ามา${b.zone_name ? " " + b.zone_name : ""}`} · {b.since_local || "-"} น. ({b.minutes} นาที)</div>
                 </button>
                 <button onClick={() => clearBay(b)} title="เอารถออกจากรายการ"
                   style={{ position: "absolute", top: 6, right: 6, width: 24, height: 24, border: "1px solid #fca5a5", background: "#fee2e2", color: "#b91c1c", borderRadius: 6, cursor: "pointer", fontSize: 12, lineHeight: "20px", padding: 0 }}>✕</button>
@@ -428,36 +428,40 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
       </div>
 
       {/* Scan input */}
-      <div style={{ background: "#072d6b", padding: 20, borderRadius: 12, marginBottom: 16, color: "#fff" }}>
-        <label style={{ display: "block", fontSize: 14, fontWeight: 700, marginBottom: 8 }}>
-          📷 สแกน / พิมพ์รหัสอะไหล่
-        </label>
-        <div style={{ display: "flex", gap: 10 }}>
+      {/* คีออส (user 2026-11-05): กล่องเตี้ยลง + ปุ่มบันทึกอยู่ข้างช่องยิง กดได้ทันทีไม่ต้องเลื่อนลงล่าง */}
+      <div style={{ background: "#072d6b", padding: "10px 14px", borderRadius: 12, marginBottom: 12, color: "#fff" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "stretch" }}>
+          <label style={{ display: "flex", alignItems: "center", fontSize: 16, fontWeight: 700, whiteSpace: "nowrap" }}>📷 สแกน</label>
           <input
             ref={inputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === "Enter") lookup(); }}
-            placeholder={loadingMaster ? "กำลังโหลดข้อมูล..." : ""}
+            placeholder={loadingMaster ? "กำลังโหลดข้อมูล..." : "ยิงบาร์โค้ด / พิมพ์รหัส"}
             disabled={loadingMaster}
             autoFocus
             style={{
-              flex: 1, padding: "16px 20px", fontSize: 24, fontWeight: 700,
+              flex: 1, minWidth: 0, padding: "8px 14px", fontSize: 24, fontWeight: 700,
               fontFamily: "monospace", border: "3px solid #fff", borderRadius: 10,
               background: "#fff", color: "#072d6b", letterSpacing: 1,
             }}
           />
           <button onClick={lookup} disabled={loadingMaster || !input.trim()}
             style={{
-              padding: "0 28px", background: "#10b981", color: "#fff",
+              padding: "0 18px", background: "#10b981", color: "#fff",
               border: "none", borderRadius: 10, fontSize: 18, fontWeight: 700, cursor: "pointer",
-              minWidth: 120,
             }}>
             🔍 ค้นหา
           </button>
-        </div>
-        <div style={{ marginTop: 8, fontSize: 12, opacity: 0.8 }}>
-          กด <strong>Enter</strong> หลังสแกน · มี <strong>{allRows.length}</strong> รายการในระบบ
+          <button onClick={saveWithdrawal} disabled={scanned.length === 0}
+            title={scanned.length ? `บันทึกการเบิก ${scanned.length} รายการ${selectedBay ? ` ให้รถ ${selectedBay.plate_no || "ไม่ทราบทะเบียน"}` : " (เบิกทั่วไป)"}` : "ยิงรหัสอะไหล่ก่อน"}
+            style={{
+              padding: "0 22px", background: scanned.length ? "#f59e0b" : "#475569", color: "#fff",
+              border: "none", borderRadius: 10, fontSize: 20, fontWeight: 800, cursor: scanned.length ? "pointer" : "not-allowed",
+              boxShadow: scanned.length ? "0 3px 10px rgba(245,158,11,0.5)" : "none", whiteSpace: "nowrap",
+            }}>
+            ✅ บันทึกเบิก{scanned.length ? ` (${scanned.length})` : ""}
+          </button>
         </div>
       </div>
 
@@ -476,7 +480,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
       {/* Scanned list */}
       {scanned.length > 0 && (
         <div style={{ background: "#f0fdf4", border: "3px solid #10b981", borderRadius: 12, marginBottom: 16, overflow: "hidden" }}>
-          <div style={{ padding: "10px 16px", background: "#10b981", color: "#fff", fontWeight: 700, fontSize: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ padding: "8px 16px", background: "#10b981", color: "#fff", fontWeight: 700, fontSize: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <span>📋 รายการที่สแกนแล้ว ({scanned.length} รายการ)</span>
             <button onClick={clearScanned} style={{ padding: "5px 12px", background: "rgba(255,255,255,0.2)", color: "#fff", border: "1px solid #fff", borderRadius: 6, cursor: "pointer", fontSize: 12 }}>
               🗑 ล้างทั้งหมด
@@ -512,14 +516,14 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
                         background: "#dcfce7", border: "1px solid #10b981",
                         display: "flex", alignItems: "center", gap: 6,
                       }}>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>{label}</span>
-                        <span style={{ fontSize: 18, fontWeight: 800, color: "#059669", fontFamily: "monospace" }}>{st.qty}</span>
-                        {st.loc && <span style={{ fontSize: 13, fontWeight: 700, color: "#072d6b" }}>📍 {st.loc}</span>}
+                        <span style={{ fontSize: 15, fontWeight: 600, color: "#374151" }}>{label}</span>
+                        <span style={{ fontSize: 20, fontWeight: 800, color: "#059669", fontFamily: "monospace" }}>{st.qty}</span>
+                        {st.loc && <span style={{ fontSize: 15, fontWeight: 700, color: "#072d6b" }}>📍 {st.loc}</span>}
                       </div>
                     );
                   })}
                   {Object.values(s.stores).every(v => !v || v === "-" || Number(v.qty || 0) === 0) && (
-                    <span style={{ fontSize: 13, color: "#dc2626", fontWeight: 600 }}>⚠️ ไม่มีของในทุกร้าน</span>
+                    <span style={{ fontSize: 15, color: "#dc2626", fontWeight: 600 }}>⚠️ ไม่มีของในทุกร้าน</span>
                   )}
                 </div>
               </div>
@@ -531,16 +535,6 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
             </div>
           ))}
 
-          {/* Big save button */}
-          <div style={{ padding: 12, background: "#f0fdf4", borderTop: "2px solid #10b981" }}>
-            <button onClick={saveWithdrawal} style={{
-              width: "100%", padding: "18px 24px", background: "#10b981", color: "#fff",
-              border: "none", borderRadius: 12, fontSize: 22, fontWeight: 800, cursor: "pointer",
-              boxShadow: "0 4px 12px rgba(16,185,129,0.4)",
-            }}>
-              ✅ บันทึกการเบิก ({scanned.length} รายการ){selectedBay ? ` ให้รถ ${selectedBay.plate_no || "ไม่ทราบทะเบียน"}` : " (เบิกทั่วไป)"}
-            </button>
-          </div>
         </div>
       )}
 
@@ -548,7 +542,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
         {[["log", "📋 ประวัติการเบิก"], ["svc", `🏍️ รถ & ประวัติบริการ${selectedBay?.plate_no ? ` · ${selectedBay.plate_no}` : ""}`]].map(([k, label]) => (
           <button key={k} onClick={() => { setTab(k); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }}
-            style={{ padding: "10px 18px", borderRadius: "10px 10px 0 0", border: "1px solid #e5e7eb", borderBottom: tab === k ? "1px solid #fff" : "1px solid #e5e7eb", background: tab === k ? "#fff" : "#f3f4f6", color: tab === k ? "#072d6b" : "#6b7280", fontWeight: 700, fontSize: 15, cursor: "pointer", marginBottom: -9 }}>
+            style={{ padding: "10px 18px", borderRadius: "10px 10px 0 0", border: "1px solid #e5e7eb", borderBottom: tab === k ? "1px solid #fff" : "1px solid #e5e7eb", background: tab === k ? "#fff" : "#f3f4f6", color: tab === k ? "#072d6b" : "#6b7280", fontWeight: 700, fontSize: 17, cursor: "pointer", marginBottom: -9 }}>
             {label}
           </button>
         ))}
@@ -642,5 +636,5 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
   );
 }
 
-const th = { padding: "7px 10px", textAlign: "left", fontWeight: 700, fontSize: 12, color: "#374151" };
-const td = { padding: "6px 10px", fontSize: 12 };
+const th = { padding: "7px 10px", textAlign: "left", fontWeight: 700, fontSize: 14, color: "#374151" };
+const td = { padding: "6px 10px", fontSize: 14 };

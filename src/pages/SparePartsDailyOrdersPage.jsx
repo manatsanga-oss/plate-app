@@ -1,11 +1,14 @@
 import React, { useEffect, useState } from "react";
 
 // รายการสั่งอะไหล่รายวัน — รวม 3 ระบบ: HONDA / YAMAHA / นอกเงินมัดจำ (เลือกวันย้อนหลังได้)
+// 2026-11-05 ลดโหลด (user: "หน้านี้ใช้ CPU มาก หลัก ๆ คือตรวจสอบรหัสอะไหล่ทดแทนพอ"):
+//   เหลือเฉพาะ ใบสั่งซื้อของวัน + รายการในใบ + ใบรับสั่งซื้อ (DCS/B2B) + ตารางอะไหล่ทดแทน
+//   ตัดออก: เช็คสต๊อกรายรหัส (search_inventory ×N), รับเข้า (search_part_receipts), เบิกเข้า Job (search_part_dispenses),
+//           ประวัติเบิกตามรุ่น (part_model_usage ของ Service History API — หนักสุด), อะไหล่ค้างส่ง (backorders)
+//   และยิง n8n ทีละไม่เกิน 3 คำขอ (เดิม Promise.all ยิงพร้อมกันหลายสิบคำขอ → n8n บน Render CPU เต็ม ทุก execution ใช้ 80+ วิแล้ว error)
 const HONDA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const YAMAHA_API = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
 const OUTSIDE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/outside-deposit-api";
-// ประวัติเบิกอะไหล่แยกตามรุ่นรถ (รายงานรหัสอะไหล่ใช้กับรุ่น) — ใช้ติ๊ก ✓ ว่าอะไหล่ที่สั่งเคยใช้กับแบบรถนี้จริง
-const SERVICE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
 
 async function post(url, body) {
   const res = await fetch(url, {
@@ -21,6 +24,15 @@ function norm(d) {
   if (Array.isArray(d?.rows)) return d.rows;
   return [];
 }
+// ยิงคำขอทีละไม่เกิน limit (คืนผลตามลำดับเดิม) — กัน n8n รับงานพร้อมกันเป็นสิบ
+async function mapLimit(list, limit, fn) {
+  const out = new Array(list.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, list.length) }, async () => {
+    while (i < list.length) { const k = i++; out[k] = await fn(list[k], k); }
+  }));
+  return out;
+}
 function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -32,13 +44,6 @@ function thaiDateOf(ts) {
   if (isNaN(d)) return String(ts).slice(0, 10);
   const t = new Date(d.getTime() + 7 * 60 * 60 * 1000);
   return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, "0")}-${String(t.getUTCDate()).padStart(2, "0")}`;
-}
-function thaiTimeOf(ts) {
-  if (!ts) return "-";
-  const d = new Date(ts);
-  if (isNaN(d)) return "-";
-  const t = new Date(d.getTime() + 7 * 60 * 60 * 1000);
-  return `${String(t.getUTCHours()).padStart(2, "0")}:${String(t.getUTCMinutes()).padStart(2, "0")}`;
 }
 function fmtThaiDate(iso) {
   if (!iso) return "-";
@@ -58,7 +63,7 @@ const fmtPartCode = (s) => {
   const c = strip(s);
   return c.length >= 10 ? `${c.slice(0, 5)}-${c.slice(5, 8)}-${c.slice(8)}` : String(s || "");
 };
-// รหัส YAMAHA จาก B2B ถูก pad ท้ายด้วย 0 เป็น 12 หลัก — ตัด pad แล้วใส่ขีด: 3 ตัวแรกมีตัวอักษร (B74/54P) = 3-5-2, เลขนำ (93210) = 5-5
+// รหัส YAMAHA จาก B2B ถูก pad ท้ายด้วย 0 เป็น 12 หลัก — ตัด pad แล้วใส่ขีด: 3 ตัวแรกมีตัวอักษร = 3-5-2, ไม่มี = 5-5
 const fmtYamahaCode = (s) => {
   let c = strip(s);
   if (c.length === 12 && c.endsWith("00")) c = c.slice(0, 10);
@@ -68,8 +73,8 @@ const fmtYamahaCode = (s) => {
 const fmtCodeFor = (system, s) => system === "YAMAHA" ? fmtYamahaCode(s) : fmtPartCode(s);
 // รหัส YAMAHA เทียบกันด้วยรูป pad 12 หลัก
 const yamahaPad = (s) => { let c = strip(s); if (c && c.length < 12) c = c.padEnd(12, "0"); return c; };
-// รหัสจากไฟล์ B2B ที่อัปโหลดก่อน 30/10/69 ถูก Excel แปลงเป็นเลขยกกำลัง (931022582400 → "9.31023E+11" หลักหาย) → เทียบกับรหัสที่สั่งในใบ
-// ด้วยความละเอียด 6 หลักเดียวกัน ถ้าตรงใช้รหัสที่สั่งแทน (ไฟล์ที่อัปโหลดใหม่อ่านค่าดิบแล้ว ไม่เกิดอีก)
+// รหัสจากไฟล์ B2B ที่อัปโหลดก่อน 30/10/69 ถูก Excel แปลงเป็นเลขยกกำลัง (931022582400 → "9.31023E+11") — เทียบกับรหัสที่สั่ง
+// ด้วยความละเอียด 6 หลักเดียวกัน ถ้าตรงใช้รหัสที่สั่งแทน (ไฟล์ที่อัปโหลดหลังแก้ Upload_All อ่าน Raw Data แล้วไม่มีปัญหานี้)
 const SCI_RE = /^\d(?:\.\d+)?E[+-]?\d+$/i;
 const sciResolve = (code, orderCodes) => {
   const t = String(code || "").trim();
@@ -79,334 +84,103 @@ const sciResolve = (code, orderCodes) => {
   const hit = orderCodes.find(oc => /^\d{6,}$/.test(oc) && Number(oc).toPrecision(6) === v.toPrecision(6));
   return hit || code;
 };
-// รหัสสำหรับเทียบกับรายงานรับอะไหล่: ตัด pad 12→10 ของ YAMAHA (ตารางรับเก็บรูป 10 หลักมีขีด)
-const normReceiptCode = (system, s) => {
-  let c = strip(s);
-  if (system === "YAMAHA" && c.length === 12 && c.endsWith("00")) c = c.slice(0, 10);
-  return c;
-};
-const fmtShortDate = (v) => {
-  const m = String(v || "").match(/^(\d{4})-(\d{2})-(\d{2})/);
-  return m ? `${Number(m[3])}/${Number(m[2])}` : String(v || "");
-};
 
 export default function SparePartsDailyOrdersPage({ currentUser }) {
   const [date, setDate] = useState(todayISO());
   const [rows, setRows] = useState([]);        // order + system + items
   const [loading, setLoading] = useState(false);
+  const [dcsLoading, setDcsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [filterSystem, setFilterSystem] = useState("all");
-  // โหมด "เฉพาะใบที่ยังมีรหัสไม่จับคู่": ดึงใบ HONDA/YAMAHA ที่มีเลขใบรับสั่งซื้อย้อนหลัง N วัน (ไม่ใช่แค่วันที่เลือก) แล้วโชว์เฉพาะใบที่มีรายการ ✗ (user 2026-10-25 ไม่ได้ย้อนกลับไปดูใบเก่า)
+  // โหมด "เฉพาะใบที่ยังมีรหัสไม่จับคู่": ดึงใบ HONDA/YAMAHA ที่มีเลขใบรับสั่งซื้อย้อนหลัง N วัน แล้วกรองเฉพาะใบที่ยังมี ✗
   const [unmatchedOnly, setUnmatchedOnly] = useState(false);
   const UNMATCHED_LOOKBACK_DAYS = 30; // user 2026-10-25: 90 วันนานไป
-  const [usageMap, setUsageMap] = useState(null); // strip(part_code) → [{base, type}] จาก part_model_usage
-  const [dcsByOrder, setDcsByOrder] = useState({});   // order_id → รายการอะไหล่จากใบรับสั่งซื้อที่ upload (dcs_spare_orders)
-  const [boByOrder, setBoByOrder] = useState({});     // order_id → รายการอะไหล่ค้างส่ง (dcs/b2b backorders)
-  const [subsOrders, setSubsOrders] = useState(new Set()); // order_id ที่บันทึกอะไหล่ทดแทนแล้ว (part_substitutes)
+  const [dcsByOrder, setDcsByOrder] = useState({});   // order_id → รายการอะไหล่จากใบรับสั่งซื้อที่ upload (dcs_spare_orders / yamaha_b2b_orders)
   const [subsByOrder, setSubsByOrder] = useState({});      // order_id → คู่อะไหล่ทดแทนที่บันทึกแล้ว (ไว้โชว์รหัส)
-  const [knownPairs, setKnownPairs] = useState(new Set()); // "เดิม|ทดแทน" ทุกคู่ที่เคยบันทึกจากใบไหนก็ได้ — กันบันทึกซ้ำ
+  const [knownPairs, setKnownPairs] = useState(new Set()); // "เดิม|ทดแทน" ทุกคู่ที่เคยบันทึกจากใบไหนก็ได้ — กันบันทึกซ้ำ + ใช้จับคู่อัตโนมัติ
   const [savingSub, setSavingSub] = useState(null);
-  const [stockCache, setStockCache] = useState({});        // strip(code) → {total, parts:[{source,qty,location}]} ของตัวที่ยังไม่สั่ง
-  const [receiptMap, setReceiptMap] = useState({});        // `${system}|${normCode}` → {date, doc} รับเข้าครั้งแรกตั้งแต่วันที่เลือก (รายงานรับอะไหล่)
-  const [dispenseMap, setDispenseMap] = useState({});      // `${job_no}|${strip(code)}` → {date, qty} เบิกเข้างานซ่อมแล้ว (honda_part_sales)
   const [selItem, setSelItem] = useState({});              // orderKey → strip(part_code) ของตัว ✗ ที่ติ๊กเลือกไว้รอจับคู่
   const [pendingPairs, setPendingPairs] = useState({});    // orderKey → [{original_code, original_name, substitute_code, substitute_name}] คู่ที่จับเองแล้วยังไม่บันทึก
-
-  // ตัวที่ยังไม่สั่ง (✗) → เช็คสต๊อกให้อัตโนมัติ ไว้โชว์ ที่เก็บ/สาขา/จำนวน ในคอลัมน์สถานะ
-  useEffect(() => {
-    if (!rows.length) return;
-    const need = new Set();
-    for (const r of rows) {
-      if (r.system !== "HONDA" && r.system !== "YAMAHA") continue;
-      for (const it of r.items || []) {
-        if (orderedInDcs(r, it) === false) {
-          const c = strip(it.part_code);
-          if (c && stockCache[c] === undefined) need.add(c);
-        }
-      }
-    }
-    if (!need.size) return;
-    let alive = true;
-    (async () => {
-      const codes = [...need];
-      const results = await Promise.all(codes.map(c =>
-        post(HONDA_API, { action: "search_inventory", code: c }).then(norm).catch(() => [])
-      ));
-      if (!alive) return;
-      setStockCache(prev => {
-        const nx = { ...prev };
-        codes.forEach((c, i) => {
-          const parts = (results[i] || []).filter(f => Number(f.quantity || 0) > 0)
-            .map(f => ({ source: f.source || "-", qty: Number(f.quantity || 0), location: f.location || "" }));
-          nx[c] = { total: parts.reduce((s, p) => s + p.qty, 0), parts };
-        });
-        return nx;
-      });
-    })();
-    return () => { alive = false; };
-    // eslint-disable-next-line
-  }, [rows, dcsByOrder, subsByOrder, knownPairs]);
-
-  useEffect(() => { load(date); /* eslint-disable-next-line */ }, [date, unmatchedOnly]);
-
-  // เช็คของถึง: รวมรหัสที่สั่ง + รหัสในใบรับสั่งซื้อ (เผื่อรับเป็นอะไหล่ทดแทน) → ถามรายงานรับอะไหล่ตั้งแต่วันที่สั่ง
-  useEffect(() => {
-    if (!rows.length) { setReceiptMap({}); return; }
-    const codes = { HONDA: new Set(), YAMAHA: new Set() };
-    for (const r of rows) {
-      if (r.system !== "HONDA" && r.system !== "YAMAHA") continue;
-      for (const it of r.items || []) codes[r.system].add(normReceiptCode(r.system, it.part_code));
-      for (const d of dcsByOrder[`${r.system}-${r.order_id}`] || []) {
-        if (d.part_number) codes[r.system].add(normReceiptCode(r.system, d.part_number));
-        if (d.received_part_number) codes[r.system].add(normReceiptCode(r.system, d.received_part_number));
-      }
-    }
-    let alive = true;
-    (async () => {
-      const jobs = [];
-      for (const sys of ["HONDA", "YAMAHA"]) {
-        const list = [...codes[sys]].filter(Boolean);
-        if (!list.length) continue;
-        jobs.push(
-          post(sys === "HONDA" ? HONDA_API : YAMAHA_API, { action: "search_part_receipts", codes_csv: list.join(","), since: date })
-            .then(norm).catch(() => [])
-            .then(res => ({ sys, res }))
-        );
-      }
-      const done = await Promise.all(jobs);
-      if (!alive) return;
-      const m = {};
-      for (const { sys, res } of done) {
-        for (const rec of res) {
-          if (!rec || !rec.part_code) continue;
-          const key = `${sys}|${normReceiptCode(sys, rec.part_code)}`;
-          if (!m[key]) m[key] = { date: rec.receipt_date, doc: rec.pd_no || rec.receipt_no || "" };
-        }
-      }
-      setReceiptMap(m);
-    })();
-    return () => { alive = false; };
-    // eslint-disable-next-line
-  }, [rows, dcsByOrder, date]);
-
-  // เช็คเบิกเข้า Job: ใบที่ผูกเลข Job แล้ว → ถามการเบิกอะไหล่งานซ่อม (honda_part_sales: sale_doc_no = เลข Job)
-  useEffect(() => {
-    const withJob = rows.filter(r => r.system === "HONDA" && String(r.job_no || "").trim() && r.job_no !== "null");
-    if (!withJob.length) { setDispenseMap({}); return; }
-    const codes = new Set(), jobs = new Set();
-    for (const r of withJob) {
-      jobs.add(String(r.job_no).trim());
-      for (const it of r.items || []) { const c = strip(it.part_code); if (c) codes.add(c); }
-    }
-    if (!codes.size) return;
-    let alive = true;
-    post(HONDA_API, { action: "search_part_dispenses", codes_csv: [...codes].join(","), jobs_csv: [...jobs].join(",") })
-      .then(norm).catch(() => [])
-      .then(res => {
-        if (!alive) return;
-        const m = {};
-        for (const d of res) {
-          if (!d || !d.part_code) continue;
-          m[`${String(d.job_no || "").trim()}|${strip(d.part_code)}`] = { date: d.dispense_date, qty: d.qty };
-        }
-        setDispenseMap(m);
-      });
-    return () => { alive = false; };
-    // eslint-disable-next-line
-  }, [rows]);
-
-  // สถานะเบิกเข้า Job ของรายการ — null = ใบยังไม่ผูกเลข Job (โชว์ "-")
-  function dispenseOf(r, it) {
-    const job = String(r.job_no || "").trim();
-    if (r.system !== "HONDA" || !job || job === "null") return null;
-    // เช็ครหัสที่สั่งก่อน แล้วค่อยเช็ครหัสอะไหล่ทดแทน — งานซ่อมเบิกด้วยรหัสใหม่ (เช่น สั่ง 88210-K03-H31 เบิก 88210-K03-H33) user 2026-10-08
-    const direct = dispenseMap[`${job}|${strip(it.part_code)}`];
-    if (direct) return { job, hit: direct };
-    const sub = substituteFor(r, it);
-    const viaSub = sub ? dispenseMap[`${job}|${strip(sub)}`] : null;
-    return { job, hit: viaSub ? { ...viaSub, viaSub: true, subCode: sub } : null };
-  }
-
-  // เกณฑ์สำรองแบบ DCS: รับเข้าแล้ว + สต๊อกคงเหลือ = 0 → ถือว่าเบิกออกไปแล้ว (รอปิดงานค่อยขึ้นบันทึกขาย)
-  // (รายงานยอดขายรายตัวใส่เฉพาะงานที่ปิดบิลแล้ว — ใบ SVIS เบิกภายในจะยังไม่โผล่)
-  const [stockQtyMap, setStockQtyMap] = useState({}); // strip(code) → จำนวนคงเหลือรวมทุกสาขา
-  useEffect(() => {
-    const codes = new Set();
-    for (const r of rows) {
-      if (r.system !== "HONDA") continue;
-      const job = String(r.job_no || "").trim();
-      if (!job || job === "null") continue;
-      for (const it of r.items || []) {
-        const c = strip(it.part_code);
-        if (!c || dispenseMap[`${job}|${c}`]) continue;
-        if (receiptMap[`HONDA|${normReceiptCode("HONDA", it.part_code)}`]) codes.add(c); // เช็คเฉพาะตัวที่ของถึงแล้ว
-        const sub = substituteFor(r, it); // รหัสทดแทนที่ของถึงแล้ว เช็คสต๊อกด้วย
-        if (sub && !dispenseMap[`${job}|${strip(sub)}`] && receiptMap[`HONDA|${normReceiptCode("HONDA", sub)}`]) codes.add(strip(sub));
-      }
-    }
-    if (!codes.size) { setStockQtyMap({}); return; }
-    let alive = true;
-    Promise.all([...codes].map(async (c) => {
-      try {
-        const found = norm(await post(HONDA_API, { action: "search_inventory", code: c }));
-        const qty = found.reduce((s, f) => s + Number(f?.quantity || 0), 0);
-        return [c, qty];
-      } catch { return [c, null]; }
-    })).then(pairs => { if (alive) setStockQtyMap(Object.fromEntries(pairs.filter(p => p[1] !== null))); });
-    return () => { alive = false; };
-    // eslint-disable-next-line
-  }, [rows, dispenseMap, receiptMap, subsByOrder]);
-
-  // เบิกแล้วตามเกณฑ์รับเข้า+คงเหลือหมด (ใช้เมื่อยังไม่พบในบันทึกขาย)
-  function likelyDispensed(r, it) {
-    const c = strip(it.part_code);
-    if (!c) return false;
-    const arrived = receiptMap[`HONDA|${normReceiptCode("HONDA", it.part_code)}`];
-    if (!!arrived && stockQtyMap[c] === 0) return true;
-    const sub = substituteFor(r, it); // ของมาเป็นรหัสทดแทนและสต๊อกรหัสทดแทนหมด = เบิกแล้ว
-    return !!sub && !!receiptMap[`HONDA|${normReceiptCode("HONDA", sub)}`] && stockQtyMap[strip(sub)] === 0;
-  }
-
-  // ของถึงแล้วหรือยัง — เช็ครหัสที่สั่งตรง ๆ ก่อน แล้วค่อยเช็ครหัสอะไหล่ทดแทน (ถ้ามีคู่)
-  function arrivalOf(r, it) {
-    if (r.system !== "HONDA" && r.system !== "YAMAHA" && r.system !== "OUTSIDE") return null;
-    const direct = receiptMap[`${r.system}|${normReceiptCode(r.system, it.part_code)}`];
-    if (direct) return { ...direct, viaSub: false };
-    const sub = substituteFor(r, it);
-    if (sub) {
-      const viaSub = receiptMap[`${r.system}|${normReceiptCode(r.system, sub)}`];
-      if (viaSub) return { ...viaSub, viaSub: true, subCode: sub };
-    }
-    return null;
-  }
-
-  // โหลดประวัติเบิกอะไหล่ตามรุ่นครั้งเดียว — ไว้เทียบกับ รุ่น/แบบ/type ที่บันทึกในใบสั่งซื้อ
-  useEffect(() => {
-    let alive = true;
-    fetch(SERVICE_API, {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "part_model_usage" }),
-    })
-      .then(res => res.json())
-      .then(d => {
-        if (!alive) return;
-        const rows = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : [];
-        const map = {};
-        for (const r of rows) {
-          const code = String(r.part_code || "").replace(/[-\s]/g, "").toUpperCase();
-          if (!code) continue;
-          // model_code เช่น "ACB160CATN (TH)" → base=ACB160CATN, type=TH
-          const m = String(r.model_code || "").match(/^(\S+)\s*(?:\(([^)]*)\))?/);
-          if (!m || !m[1]) continue;
-          (map[code] = map[code] || []).push({ base: m[1].toUpperCase(), type: (m[2] || "").trim().toUpperCase() });
-        }
-        setUsageMap(map);
-      })
-      .catch(() => { if (alive) setUsageMap({}); });
-    return () => { alive = false; };
-  }, []);
-
-  // อะไหล่ตัวนี้เคยเบิกกับแบบรถของใบสั่งซื้อนี้ไหม — ไม่เคย/ไม่มีข้อมูลรถ = ไม่แสดงอะไร
-  function partMatchesVehicle(order, item) {
-    if (!usageMap || !order.vehicle_variant) return false;
-    const code = String(item.part_code || "").replace(/[-\s]/g, "").toUpperCase();
-    const list = usageMap[code];
-    if (!list) return false;
-    const variant = String(order.vehicle_variant).toUpperCase();
-    const vtype = String(order.vehicle_type || "").trim().toUpperCase();
-    return list.some(u => u.base === variant && (!u.type || !vtype || u.type === vtype));
-  }
 
   async function load(day) {
     setLoading(true);
     setMessage("");
+    setDcsByOrder({});
     const out = [];
-    // โหลด 3 ระบบพร้อมกัน — ระบบไหนพังไม่ล้มทั้งหน้า
-    const [honda, yamaha, outside] = await Promise.all([
-      post(HONDA_API, { action: "get_spare_orders" }).then(norm).catch(() => []),
-      post(YAMAHA_API, { action: "get_yamaha_orders" }).then(norm).catch(() => []),
-      post(OUTSIDE_API, { action: "get_orders" }).then(norm).catch(() => []),
-    ]);
     const cutoff = (() => { const d = new Date(); d.setDate(d.getDate() - UNMATCHED_LOOKBACK_DAYS); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; })();
+    // โหลดรายการใบ: HONDA ใช้ scope active + closed(light) แบบหน้าสั่งซื้อ (เบากว่าดึงทุกใบเต็ม) · YAMAHA/นอกเงินมัดจำ ตามเดิม
+    const [hondaActive, hondaClosed, yamaha, outside] = await Promise.all([
+      post(HONDA_API, { action: "get_spare_orders", scope: "active" }).then(norm).catch(() => []),
+      post(HONDA_API, { action: "get_spare_orders", scope: "closed", light: true }).then(norm).catch(() => []),
+      post(YAMAHA_API, { action: "get_yamaha_orders" }).then(norm).catch(() => []),
+      unmatchedOnly ? Promise.resolve([]) : post(OUTSIDE_API, { action: "get_orders" }).then(norm).catch(() => []),
+    ]);
+    const seen = new Set();
+    const honda = [...hondaActive, ...hondaClosed].filter(o => { const k = String(o.order_id); if (seen.has(k)) return false; seen.add(k); return true; });
     const pick = (list) => unmatchedOnly
       ? list.filter(o => o.vendor_po_no && String(o.created_at || "").slice(0, 10) >= cutoff) // โหมดไม่จับคู่: ย้อนหลัง N วัน เฉพาะใบที่สั่งเข้า DCS/B2B แล้ว
       : list.filter(o => thaiDateOf(o.created_at) === day);
     const hondaDay = pick(honda), yamahaDay = pick(yamaha), outsideDay = unmatchedOnly ? [] : pick(outside);
-    // ดึงรายการอะไหล่ของใบที่อยู่ในวันนั้น (รายวันมีไม่กี่ใบ)
-    const detail = (url, action, o) =>
-      post(url, { action, order_id: o.order_id }).then(norm).catch(() => []);
-    const [hi, yi, oi] = await Promise.all([
-      Promise.all(hondaDay.map(o => detail(HONDA_API, "get_spare_order_detail", o))),
-      Promise.all(yamahaDay.map(o => detail(YAMAHA_API, "get_yamaha_order_detail", o))),
-      Promise.all(outsideDay.map(o => detail(OUTSIDE_API, "get_order_detail", o))),
-    ]);
+    // ดึงรายการอะไหล่ของใบที่อยู่ในวันนั้น — ทีละ 3 ใบ
+    const detail = (url, action, o) => post(url, { action, order_id: o.order_id }).then(norm).catch(() => []);
+    const hi = await mapLimit(hondaDay, 3, o => detail(HONDA_API, "get_spare_order_detail", o));
+    const yi = await mapLimit(yamahaDay, 3, o => detail(YAMAHA_API, "get_yamaha_order_detail", o));
+    const oi = await mapLimit(outsideDay, 3, o => detail(OUTSIDE_API, "get_order_detail", o));
     hondaDay.forEach((o, i) => out.push({ ...o, system: "HONDA", items: hi[i] }));
     yamahaDay.forEach((o, i) => out.push({ ...o, system: "YAMAHA", items: yi[i] }));
-    // ใบนอกเงินมัดจำเก็บเลขใบสั่งซื้อ DCS ไว้ใน po_no (หน้าเดิมแสดง/เทียบด้วย vendor_po_no → ขึ้น "-" ทั้งที่บันทึกแล้ว) — user 2026-10-27 เคส OD6910-00002 M321166A2655
+    // ใบนอกเงินมัดจำเก็บเลขใบสั่งซื้อ DCS ไว้ใน po_no
     outsideDay.forEach((o, i) => out.push({ ...o, system: "OUTSIDE", vendor_po_no: o.vendor_po_no || o.po_no || "", items: oi[i] }));
     out.sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")));
     setRows(out);
     setLoading(false);
-    // เทียบกับใบรับสั่งซื้อที่ upload — HONDA: dcs_spare_orders · YAMAHA: yamaha_b2b_orders (จับคู่ด้วยเลขที่ใบรับสั่งซื้อ)
-    const withPo = out.filter(r => (r.system === "HONDA" || r.system === "YAMAHA" || r.system === "OUTSIDE") && r.vendor_po_no); // OUTSIDE = สั่งผ่าน DCS ฮอนด้าเหมือน HONDA
-    Promise.all(withPo.map(o =>
-      o.system !== "YAMAHA"
-        ? post(HONDA_API, { action: "search_dcs_orders", vendor_po_no: o.vendor_po_no }).then(norm).catch(() => [])
-        : post(YAMAHA_API, { action: "search_yamaha_b2b_orders", vendor_po_no: o.vendor_po_no }).then(norm).catch(() => [])
-    )).then(res => {
-      const m = {};
-      // กรอง row ว่าง (n8n ตอบ {} เมื่อไม่มีข้อมูล) — ไม่งั้นนับเป็น "มีข้อมูล upload" ผิด
-      withPo.forEach((o, i) => {
-        let list = (res[i] || []).filter(d => d && (d.part_number || d.received_part_number));
-        if (o.system === "YAMAHA") {
-          const oc = (o.items || []).map(it => yamahaPad(it.part_code));
-          list = list.map(d => ({ ...d, part_number: sciResolve(d.part_number, oc), received_part_number: sciResolve(d.received_part_number, oc) }));
-        }
-        m[`${o.system}-${o.order_id}`] = list;
-      });
-      setDcsByOrder(m);
-    });
-    // อะไหล่ค้างส่ง — HONDA: dcs_backorders · YAMAHA: b2b_backorders
-    Promise.all(withPo.map(o =>
-      (o.system !== "YAMAHA"
-        ? post(HONDA_API, { action: "search_dcs_backorders", vendor_po_no: o.vendor_po_no })
-        : post(YAMAHA_API, { action: "search_yamaha_b2b_backorders", vendor_po_no: o.vendor_po_no })
-      ).then(norm).catch(() => [])
-    )).then(res => {
-      const m = {};
-      withPo.forEach((o, i) => {
-        m[`${o.system}-${o.order_id}`] = (res[i] || []).filter(b => b && (b.part_number || b.received_part_number) && Number(b.backorder_qty || 0) > 0);
-      });
-      setBoByOrder(m);
-    });
-    // ใบที่เคยบันทึกอะไหล่ทดแทนแล้ว — เก็บคู่รหัสไว้แสดงด้วย
+    // ใบที่เคยบันทึกอะไหล่ทดแทนแล้ว — เก็บคู่รหัสไว้แสดงและจับคู่อัตโนมัติ
     post(HONDA_API, { action: "get_part_substitutes" }).then(norm)
       .then(list => {
-        setSubsOrders(new Set(list.map(s => String(s.order_id))));
         const m = {};
         for (const s of list) (m[String(s.order_id)] = m[String(s.order_id)] || []).push(s);
         setSubsByOrder(m);
         setKnownPairs(new Set(list.map(s => `${strip(s.original_code)}|${strip(s.substitute_code)}`)));
       })
       .catch(() => {});
+    // เทียบกับใบรับสั่งซื้อที่ upload — HONDA/OUTSIDE: dcs_spare_orders · YAMAHA: yamaha_b2b_orders (จับคู่ด้วยเลขที่ใบรับสั่งซื้อ) — ทีละ 3 ใบ
+    const withPo = out.filter(r => r.vendor_po_no);
+    setDcsLoading(withPo.length > 0);
+    const res = await mapLimit(withPo, 3, o =>
+      o.system !== "YAMAHA"
+        ? post(HONDA_API, { action: "search_dcs_orders", vendor_po_no: o.vendor_po_no }).then(norm).catch(() => [])
+        : post(YAMAHA_API, { action: "search_yamaha_b2b_orders", vendor_po_no: o.vendor_po_no }).then(norm).catch(() => [])
+    );
+    const m = {};
+    withPo.forEach((o, i) => {
+      // กรอง row ว่าง (n8n ตอบ {} เมื่อไม่มีข้อมูล) — ไม่งั้นนับเป็น "มีข้อมูล upload" ผิด
+      let list = (res[i] || []).filter(d => d && (d.part_number || d.received_part_number));
+      if (o.system === "YAMAHA") {
+        const oc = (o.items || []).map(it => yamahaPad(it.part_code));
+        list = list.map(d => ({ ...d, part_number: sciResolve(d.part_number, oc), received_part_number: sciResolve(d.received_part_number, oc) }));
+      }
+      m[`${o.system}-${o.order_id}`] = list;
+    });
+    setDcsByOrder(m);
+    setDcsLoading(false);
   }
 
-  // เลขที่ใบรับสั่งซื้อเพิ่มเติม (ใบสั่งตามหลัง) — จับด้วยเลขสั่งซื้อลูกค้า/ผู้จำหน่ายฐานเดียวกัน (เลขเดิม+อักษรท้าย) แต่ apc คนละใบ
-  // HONDA = dcs_spare_orders, YAMAHA = yamaha_b2b_orders (ทั้งคู่มี apc_order_no + customer_order_no)
+  useEffect(() => { load(date); }, [date, unmatchedOnly]); // eslint-disable-line react-hooks/exhaustive-deps, react-hooks/set-state-in-effect
+
+  // เลขที่ใบรับสั่งซื้อเพิ่มเติม (ใบสั่งตามหลัง) — apc_order_no อื่นที่พบในใบรับสั่งซื้อเดียวกัน
   function extraPoNos(r) {
-    if ((r.system !== "HONDA" && r.system !== "YAMAHA" && r.system !== "OUTSIDE") || !r.vendor_po_no) return [];
+    if (!r.vendor_po_no) return [];
     const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
     return [...new Set(dcs.map(d => d.apc_order_no).filter(a => a && String(a) !== String(r.vendor_po_no)))];
   }
 
-  // รายการในใบรับสั่งซื้อที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ตัวที่ศูนย์ส่งมาแทน/ส่งเกิน (HONDA=DCS, YAMAHA=B2B)
+  // รายการในใบรับสั่งซื้อที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ตัวที่ศูนย์ส่งมาแทน/ส่งเกิน
   function unmatchedDcs(r) {
-    if ((r.system !== "HONDA" && r.system !== "YAMAHA" && r.system !== "OUTSIDE") || !r.vendor_po_no) return [];
+    if (!r.vendor_po_no) return [];
     const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
     if (r.system === "YAMAHA") {
       const orderCodes = (r.items || []).map(it => yamahaPad(it.part_code));
       const out = dcs.filter(d => !orderCodes.includes(yamahaPad(d.part_number)) && !orderCodes.includes(yamahaPad(d.received_part_number)));
-      // B2B ส่งรหัสอื่นมาแทนรหัสที่สั่ง (received_part_number ≠ part_number) → โชว์รหัสที่ส่งมาเป็นรายการให้จับคู่/บันทึก (user 2026-10-25 เคส 2BL-H2310-00 → B8B-H2310-01)
+      // B2B ส่งรหัสอื่นมาแทนรหัสที่สั่ง (received_part_number ≠ part_number) → โชว์รหัสที่ส่งมาเป็นรายการให้จับคู่/บันทึกได้
       dcs.forEach(d => {
         const rc = yamahaPad(d.received_part_number);
         if (rc && rc !== yamahaPad(d.part_number) && orderCodes.includes(yamahaPad(d.part_number)) && !orderCodes.includes(rc) && !out.some(x => yamahaPad(x.part_number) === rc)) {
@@ -431,37 +205,23 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   // คู่นี้เคยบันทึกลงตารางอะไหล่ใช้แทนกันแล้วหรือยัง (จากใบไหนก็ได้)
   const pairKnown = (p) => knownPairs.has(`${strip(p.original_code)}|${strip(p.substitute_code)}`);
 
-  // อะไหล่ตัวนี้ถูกสั่งเข้าใบรับสั่งซื้อแล้วหรือยัง (HONDA=DCS, YAMAHA=B2B): true=สั่งแล้ว, false=ยังไม่พบ, null=ไม่เช็ค (นอกเงินมัดจำ)
+  // อะไหล่ตัวนี้ถูกสั่งเข้าใบรับสั่งซื้อแล้วหรือยัง (HONDA=DCS, YAMAHA=B2B): true=สั่งแล้ว, false=ยังไม่พบ, null=ยังไม่โหลด
   function orderedInDcs(r, it) {
-    if (r.system !== "HONDA" && r.system !== "YAMAHA" && r.system !== "OUTSIDE") return null;
     if (!r.vendor_po_no) return false;                 // ยังไม่ระบุเลขใบรับสั่งซื้อ = ยังไม่ได้สั่ง
-    const dcs = dcsByOrder[`${r.system}-${r.order_id}`] || [];
+    const key = `${r.system}-${r.order_id}`;
+    if (!(key in dcsByOrder)) return null;             // ยังโหลดใบรับสั่งซื้อไม่เสร็จ
+    const dcs = dcsByOrder[key] || [];
     if (!dcs.length) return false;                     // มีเลขแล้วแต่ยังไม่พบในไฟล์ที่ upload
     if (r.system === "YAMAHA") {
-      // รหัส YAMAHA ใน B2B ถูก pad เป็น 12 หลักท้ายด้วย 0 + มี received_part_number (ตัวที่ส่งมาแทน) ด้วย
       const code = yamahaPad(it.part_code);
       if (dcs.some(d => yamahaPad(d.part_number) === code || yamahaPad(d.received_part_number) === code)) return true;
-      if (substituteFor(r, it)) return true;             // มีอะไหล่ทดแทนส่งมาแทนแล้ว
-      return false;
+      return !!substituteFor(r, it);                   // มีอะไหล่ทดแทนส่งมาแทนแล้ว
     }
     if (dcs.some(d => strip(d.part_number) === strip(it.part_code))) return true;
-    if (substituteFor(r, it)) return true;             // มีอะไหล่ทดแทนส่งมาแทนแล้ว
-    return false;
+    return !!substituteFor(r, it);
   }
 
-  // อะไหล่ตัวนี้ติดค้างส่งอยู่ไหม (ตารางอะไหล่ค้างส่ง) — สั่งแล้วแต่ของยังไม่มา
-  function isBackordered(r, it) {
-    const bo = boByOrder[`${r.system}-${r.order_id}`] || [];
-    if (!bo.length) return false;
-    if (r.system === "YAMAHA") {
-      const code = yamahaPad(it.part_code);
-      return bo.some(b => yamahaPad(b.part_number) === code || yamahaPad(b.received_part_number) === code);
-    }
-    return bo.some(b => strip(b.part_number) === strip(it.part_code));
-  }
-
-  // รหัสทดแทนของอะไหล่ตัวนี้ (ถ้ามี) — ไว้แสดงต่อท้ายบรรทัดอะไหล่ที่ถูกแทน
-  // ดูจากคู่ที่บันทึกแล้วของใบนี้ → คู่ที่เคยบันทึกจากใบอื่น (เทียบกับ DCS ใบนี้) → คู่ที่จับเองรอบันทึก
+  // รหัสทดแทนของอะไหล่ตัวนี้ (ถ้ามี): คู่ที่บันทึกแล้วของใบนี้ → คู่ที่เคยบันทึกจากใบอื่น (เทียบกับ DCS ใบนี้) → คู่ที่จับเองรอบันทึก
   function substituteFor(r, it) {
     const key = `${r.system}-${r.order_id}`;
     const oc = strip(it.part_code);
@@ -474,9 +234,9 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     return pend ? pend.substitute_code : null;
   }
 
-  // เสนอคู่ทดแทนอัตโนมัติจาก B2B (YAMAHA) — ไม่ต้องรอพนักงานกดจับคู่เอง (user 2026-10-25):
+  // เสนอคู่ทดแทนอัตโนมัติจาก B2B (YAMAHA) — user 2026-10-25:
   //   (A) B2B ส่งรหัสอื่นมาแทนรหัสที่สั่ง (received_part_number ≠ part_number) เช่น 2BL-H2310-00 → B8B-H2310-01
-  //   (B) รหัสในใบสั่งที่ไม่พบใน B2B แต่มีรายการ B2B ที่ไม่ตรงใบสั่งซึ่ง "เลขกลาง+ท้าย" เท่ากัน (ยามาฮ่าเปลี่ยนแค่รหัสรุ่นนำหน้า) เช่น 2BL-E3585-00 → 2BM-E3585-00
+  //   (B) รหัสในใบสั่งที่ไม่พบใน B2B แต่มีรายการ B2B ที่ไม่ตรงใบสั่งซึ่ง "เลขกลาง+ท้าย" เท่ากัน (ยามาฮ่าเปลี่ยนเฉพาะ 3 ตัวแรก)
   //   ใส่เป็นคู่รอบันทึก (พนักงานกด "บันทึกอะไหล่ทดแทน" หรือ × ยกเลิกได้) ไม่ทับคู่ที่จับเอง/บันทึกแล้ว
   const yamahaMid = (c) => { const p = yamahaPad(c); return p.length === 12 ? p.slice(3) : ""; }; // 2BLE35850000 → E35850000
   useEffect(() => {
@@ -493,10 +253,8 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
         const oc = strip(it.part_code), pc = yamahaPad(it.part_code);
         if (!oc || savedOrig.has(oc) || pendOrig.has(oc)) return;
         let cand = null;
-        // (A) รหัสที่สั่งตรง แต่ส่งรหัสอื่นมา
         const a = dcs.find(d => yamahaPad(d.part_number) === pc && d.received_part_number && yamahaPad(d.received_part_number) !== pc);
         if (a) cand = { code: a.received_part_number, name: a.part_description || "" };
-        // (B) ไม่พบใน B2B เลย → หา B2B ที่ไม่ตรงใบสั่งและเลขกลาง+ท้ายเท่ากัน
         if (!cand && !dcs.some(d => yamahaPad(d.part_number) === pc || yamahaPad(d.received_part_number) === pc)) {
           const b = dcs.find(d => !orderCodes.includes(yamahaPad(d.part_number)) && !orderCodes.includes(yamahaPad(d.received_part_number)) && yamahaMid(d.part_number) && yamahaMid(d.part_number) === yamahaMid(it.part_code));
           if (b) cand = { code: b.received_part_number || b.part_number, name: b.part_description || "" };
@@ -508,7 +266,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
       });
     });
     if (!Object.keys(add).length) return;
-    setPendingPairs(prev => {
+    setPendingPairs(prev => { // eslint-disable-line react-hooks/set-state-in-effect
       const next = { ...prev };
       for (const [key, list] of Object.entries(add)) next[key] = [...(prev[key] || []), ...list];
       return next;
@@ -526,13 +284,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     setMessage("");
     setPendingPairs(prev => {
       const list = (prev[key] || []).filter(p => strip(p.substitute_code) !== strip(d.part_number) && strip(p.original_code) !== oc);
-      return {
-        ...prev,
-        [key]: [...list, {
-          original_code: it.part_code, original_name: it.part_name || "",
-          substitute_code: d.part_number, substitute_name: d.part_description || "",
-        }],
-      };
+      return { ...prev, [key]: [...list, { original_code: it.part_code, original_name: it.part_name || "", substitute_code: d.part_number, substitute_name: d.part_description || "" }] };
     });
     setSelItem(prev => ({ ...prev, [key]: null }));
   }
@@ -551,16 +303,14 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     setMessage("");
     try {
       // ตัดคู่ที่เคยบันทึกไว้แล้ว (จากใบไหนก็ได้) — กันข้อมูลซ้ำในตาราง
-      const pairs = all.filter(p => !pairKnown(p)).map(({ auto, ...p }) => p); // ตัด flag auto ก่อนส่ง
+      const pairs = all.filter(p => !pairKnown(p)).map(({ auto, ...p }) => p); // eslint-disable-line no-unused-vars
       if (!pairs.length) {
-        setSubsOrders(prev => new Set([...prev, String(r.order_id)]));
         setPendingPairs(prev => ({ ...prev, [key]: [] }));
         setMessage("คู่อะไหล่ทดแทนนี้เคยบันทึกไว้แล้ว — ไม่บันทึกซ้ำ");
         setSavingSub(null);
         return;
       }
       await post(HONDA_API, { action: "save_part_substitutes", order_id: r.order_id, pairs, approved_by: currentUser?.name || "" });
-      setSubsOrders(prev => new Set([...prev, String(r.order_id)]));
       setSubsByOrder(prev => ({ ...prev, [String(r.order_id)]: [...(prev[String(r.order_id)] || []), ...pairs] }));
       setKnownPairs(prev => new Set([...prev, ...pairs.map(p => `${strip(p.original_code)}|${strip(p.substitute_code)}`)]));
       setPendingPairs(prev => ({ ...prev, [key]: [] }));
@@ -578,7 +328,7 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   const hasUnmatched = (r) => {
     const key = `${r.system}-${r.order_id}`;
     if (!(key in dcsByOrder)) return false; // ยังโหลดใบรับสั่งซื้อไม่เสร็จ — รอก่อน
-    return (r.items || []).some(it => orderedInDcs(r, it) === false && !isBackordered(r, it));
+    return (r.items || []).some(it => orderedInDcs(r, it) === false);
   };
   const filtered = rows.filter(r => (filterSystem === "all" || r.system === filterSystem) && (!unmatchedOnly || hasUnmatched(r)));
   const totalItems = filtered.reduce((s, r) => s + (r.items || []).reduce((s2, it) => s2 + (Number(it.quantity) || 0), 0), 0);
@@ -591,26 +341,11 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
       const items = (r.items || []).map((it, k) => {
         const sub = substituteFor(r, it);
         const notOrdered = orderedInDcs(r, it) === false;
-        return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${esc(it.part_code || "-")} · ${esc(it.part_name || "-")} × ${Number(it.quantity) || 0}${partMatchesVehicle(r, it) ? ' <span style="color:#059669;font-weight:800">&#10003;</span>' : ""}${sub ? ` <span style="color:#d97706;font-weight:700">&#8594; ${esc(fmtCodeFor(r.system, sub))}</span>` : ""}${notOrdered ? ' <span style="color:#dc2626;font-weight:800">&#10007;</span>' : ""}</div>`;
+        return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${esc(it.part_code || "-")} · ${esc(it.part_name || "-")} × ${Number(it.quantity) || 0}${sub ? ` <span style="color:#d97706;font-weight:700">&#8594; ${esc(fmtCodeFor(r.system, sub))}</span>` : ""}${notOrdered ? ' <span style="color:#dc2626;font-weight:800">&#10007;</span>' : ""}</div>`;
       }).join("");
       const itemStatus = (r.items || []).map((it, k) => {
         const st = orderedInDcs(r, it);
-        const stock = st === false ? stockCache[strip(it.part_code)] : null;
-        const stockTxt = stock && stock.total > 0
-          ? ` <span style="color:#0369a1">สต๊อก: ${esc(stock.parts.map(p => `${p.source}(${p.qty})${p.location ? ` ${p.location}` : ""}`).join(", "))}</span>` : "";
-        const txt = isBackordered(r, it) ? '<span style="color:#059669;font-weight:800">&#10003;</span> <span style="color:#ea580c;font-weight:700">ค้างส่ง</span>'
-          : st === true ? '<span style="color:#059669;font-weight:800">&#10003;</span>'
-          : st === false ? `<span style="color:#dc2626;font-weight:800">&#10007;</span>${stockTxt}` : "-";
-        const arr = arrivalOf(r, it);
-        const arrTxt = arr ? ` <span style="color:#0d9488;font-weight:700">&#128230; ถึงแล้ว ${esc(fmtShortDate(arr.date))}${arr.viaSub ? " (ทดแทน)" : ""}</span>` : "";
-        return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${txt}${arrTxt}</div>`;
-      }).join("");
-      const itemDispense = (r.items || []).map((it, k) => {
-        const dp = dispenseOf(r, it);
-        const txt = dp === null ? "-"
-          : dp.hit ? `<span style="color:#059669;font-weight:700">&#10003; เบิก ${esc(dp.job)}</span>`
-          : likelyDispensed(r, it) ? `<span style="color:#0d9488;font-weight:700">&#10003; เบิก ${esc(dp.job)} (สต๊อกหมด)</span>`
-          : '<span style="color:#d97706;font-weight:700">ยังไม่เบิก</span>';
+        const txt = st === true ? '<span style="color:#059669;font-weight:800">&#10003;</span>' : st === false ? '<span style="color:#dc2626;font-weight:800">&#10007;</span>' : "-";
         return `<div class="it${k < (r.items || []).length - 1 ? " sep" : ""}">${txt}</div>`;
       }).join("");
       body += `<tr>
@@ -621,7 +356,6 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
         <td>${esc(r.model_name || "-")}${(r.vehicle_series || r.vehicle_variant) ? `<div style="font-size:9px;color:#555">${esc([r.vehicle_series, r.vehicle_variant, r.vehicle_type].filter(Boolean).join(" / "))}${r.vehicle_color ? ` · สี ${esc(r.vehicle_color)}` : ""}</div>` : ""}</td>
         <td class="items">${items || "-"}</td>
         <td class="items">${itemStatus || "-"}</td>
-        <td class="items">${itemDispense || "-"}</td>
         <td class="items">${(() => {
           const un = unmatchedDcs(r);
           if (!un.length) return "";
@@ -644,10 +378,10 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
 .items{padding:0} .it{text-align:left;padding:3px 6px} .sep{border-bottom:1px solid #ddd}
 @media print{body{padding:0}}</style></head><body>
 <h2>รายการสั่งอะไหล่รายวัน</h2>
-<div class="info">วันที่: ${fmtThaiDate(date)} | ระบบ: ${filterSystem === "all" ? "ทั้งหมด" : (SYSTEMS.find(s => s.key === filterSystem)?.label || filterSystem)} | ${filtered.length} ใบ · ${totalItems} ชิ้น | พิมพ์: ${new Date().toLocaleString("th-TH")}</div>
-<div class="info"><span style="color:#059669;font-weight:800">&#10003;</span> = เคยเบิกกับรุ่นรถนี้ (ตรงรุ่น) &nbsp;·&nbsp; <span style="color:#d97706;font-weight:700">&#8594; รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน &nbsp;·&nbsp; <span style="color:#dc2626;font-weight:800">&#10007;</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS) &nbsp;·&nbsp; <span style="color:#059669;font-weight:800">&#10003;</span> <span style="color:#ea580c;font-weight:700">ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์ &nbsp;·&nbsp; <span style="color:#0d9488;font-weight:700">&#128230; ถึงแล้ว</span> = มีรับเข้าในรายงานรับอะไหล่ตั้งแต่วันที่สั่ง (รวมรับเป็นอะไหล่ทดแทน)</div>
-<table><thead><tr><th>#</th><th>ระบบ</th><th>เลขที่ใบมัดจำ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th><th>สถานะ</th><th>สถานะเบิกอะไหล่</th><th>สถานะอะไหล่ทดแทน</th></tr></thead>
-<tbody>${body || `<tr><td colspan="9" class="c">ไม่มีรายการ</td></tr>`}</tbody></table>
+<div class="info">วันที่: ${fmtThaiDate(date)} | ระบบ: ${filterSystem === "all" ? "ทั้งหมด" : (SYSTEMS.find(s => s.key === filterSystem)?.label || filterSystem)} | ${filtered.length} ใบ · ${totalItems} ชิ้น | พิมพ์เมื่อ ${new Date().toLocaleString("th-TH")}</div>
+<div class="info"><span style="color:#d97706;font-weight:700">&#8594; รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน &nbsp;·&nbsp; <span style="color:#059669;font-weight:800">&#10003;</span> = สั่งเข้าใบรับสั่งซื้อแล้ว &nbsp;·&nbsp; <span style="color:#dc2626;font-weight:800">&#10007;</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS)</div>
+<table><thead><tr><th>#</th><th>ระบบ</th><th>เลขที่ใบมัดจำ</th><th>เลขที่ใบรับสั่งซื้อ</th><th>รุ่นรถ</th><th>รายการอะไหล่</th><th>สถานะ</th><th>สถานะอะไหล่ทดแทน</th></tr></thead>
+<tbody>${body || `<tr><td colspan="8" class="c">ไม่มีรายการ</td></tr>`}</tbody></table>
 </body></html>`);
     w.document.close();
     setTimeout(() => w.print(), 300);
@@ -672,16 +406,17 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
         <button onClick={() => shiftDay(1)} disabled={date >= todayISO()}
           style={{ ...btn, background: date >= todayISO() ? "#f3f4f6" : "#e5e7eb", color: date >= todayISO() ? "#9ca3af" : "#111", cursor: date >= todayISO() ? "not-allowed" : "pointer" }} title="วันถัดไป">▶</button>
         <button onClick={() => setDate(todayISO())} style={{ ...btn, background: "#072d6b", color: "#fff" }}>วันนี้</button>
-        <button onClick={() => load(date)} style={{ ...btn, background: "#0e7490", color: "#fff" }}>รีเฟรช</button>
+        <button onClick={() => load(date)} disabled={loading} style={{ ...btn, background: "#0e7490", color: "#fff" }}>รีเฟรช</button>
         <button onClick={printReport} disabled={loading || filtered.length === 0} style={{ ...btn, background: "#6b7280", color: "#fff" }}>พิมพ์</button>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, padding: "6px 10px", border: "1px solid #fca5a5", borderRadius: 8, background: unmatchedOnly ? "#fee2e2" : "#fff", cursor: "pointer" }}
-          title={`แสดงเฉพาะใบสั่งซื้อ HONDA/YAMAHA ที่ยังมีรหัสอะไหล่ ✗ (สั่งแล้วแต่ไม่พบในใบรับสั่งซื้อ และยังไม่จับคู่อะไหล่ทดแทน) ย้อนหลัง ${UNMATCHED_LOOKBACK_DAYS} วัน ไม่สนวันที่เลือก`}>
+          title={`แสดงเฉพาะใบสั่งซื้อ HONDA/YAMAHA ที่ยังมีรหัสอะไหล่ ✗ (สั่งแล้วแต่ไม่พบในใบรับสั่งซื้อ) ย้อนหลัง ${UNMATCHED_LOOKBACK_DAYS} วัน`}>
           <input type="checkbox" checked={unmatchedOnly} onChange={e => setUnmatchedOnly(e.target.checked)} />
           <span style={{ color: "#b91c1c", fontWeight: 700 }}>✗ เฉพาะใบที่ยังมีรหัสไม่จับคู่</span>
           <span style={{ color: "#6b7280" }}>(ย้อนหลัง {UNMATCHED_LOOKBACK_DAYS} วัน)</span>
         </label>
         <span style={{ fontSize: 14, fontWeight: 700, color: "#072d6b" }}>
-          {unmatchedOnly ? `ย้อนหลัง ${UNMATCHED_LOOKBACK_DAYS} วัน (ถึง ${fmtThaiDate(todayISO())})` : fmtThaiDate(date)} — {filtered.length} ใบ · {totalItems} ชิ้น{unmatchedOnly && loading ? " · กำลังโหลด…" : ""}
+          {unmatchedOnly ? `ย้อนหลัง ${UNMATCHED_LOOKBACK_DAYS} วัน (ถึง ${fmtThaiDate(todayISO())})` : fmtThaiDate(date)} — {filtered.length} ใบ · {totalItems} ชิ้น
+          {dcsLoading ? <span style={{ color: "#6b7280", fontWeight: 400 }}> · กำลังเทียบใบรับสั่งซื้อ…</span> : null}
         </span>
       </div>
 
@@ -701,14 +436,11 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
 
       {message && <div style={{ marginBottom: 10, color: "#b91c1c", fontSize: 13 }}>{message}</div>}
 
-      {/* คำอธิบายเครื่องหมายในคอลัมน์รายการอะไหล่ */}
+      {/* คำอธิบายเครื่องหมาย */}
       <div style={{ display: "flex", gap: 18, fontSize: 12, color: "#475569", marginBottom: 8, flexWrap: "wrap", alignItems: "center" }}>
-        <span><span style={{ color: "#059669", fontWeight: 800 }}>✓</span> = เคยเบิกกับรุ่นรถนี้ (ตรงรุ่น)</span>
         <span><span style={{ color: "#d97706", fontWeight: 700, fontFamily: "monospace" }}>→ รหัส</span> = อะไหล่ทดแทนที่ส่งมาแทน</span>
-        <span><span style={{ color: "#dc2626", fontWeight: 800 }}>✗</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS)</span>
-        <span><span style={{ color: "#059669", fontWeight: 800 }}>✓</span> <span style={{ color: "#ea580c", fontWeight: 700 }}>ค้างส่ง</span> = สั่งแล้วแต่ติดค้างส่ง รอของจากศูนย์</span>
-        <span><span style={{ color: "#0d9488", fontWeight: 700 }}>📦 ถึงแล้ว</span> = มีรับเข้าในรายงานรับอะไหล่ตั้งแต่วันที่สั่ง (จับคู่รหัส+วันที่ · รวมกรณีรับเป็นอะไหล่ทดแทน)</span>
-        <span><span style={{ color: "#059669", fontWeight: 700 }}>✓ เบิก + เลข Job</span> = รหัสนี้ถูกเบิกเข้างานซ่อมแล้ว (บันทึกขายแล้ว) · <span style={{ color: "#0d9488", fontWeight: 700 }}>✓ เบิก + เลข Job (สต๊อกหมด)</span> = รับเข้าแล้ว+สต๊อกคงเหลือ 0 รอปิดงานค่อยขึ้นบันทึกขาย · <span style={{ color: "#d97706", fontWeight: 700 }}>ยังไม่เบิก</span> = ผูก Job แล้วแต่ยังไม่มีการเบิก</span>
+        <span><span style={{ color: "#059669", fontWeight: 800 }}>✓</span> = สั่งเข้าใบรับสั่งซื้อแล้ว</span>
+        <span><span style={{ color: "#dc2626", fontWeight: 800 }}>✗</span> = สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS/B2B)</span>
         <span>ช่องสถานะอะไหล่ทดแทน = รายการในใบรับสั่งซื้อที่ไม่ตรงกับรหัสที่สั่ง — ติ๊กปุ่มหน้ารหัส ✗ แล้วกด "จับคู่" เพื่อเลือกอะไหล่ทดแทนเอง</span>
       </div>
 
@@ -723,17 +455,17 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
               <th style={th}>รุ่นรถ</th>
               <th style={th}>รายการอะไหล่</th>
               <th style={th}>สถานะ</th>
-              <th style={th}>สถานะเบิกอะไหล่</th>
               <th style={th}>สถานะอะไหล่ทดแทน</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} style={center}>กำลังโหลด...</td></tr>
+              <tr><td colSpan={8} style={center}>กำลังโหลด...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={9} style={center}>ไม่มีรายการสั่งอะไหล่ในวันนี้</td></tr>
+              <tr><td colSpan={8} style={center}>{unmatchedOnly && dcsLoading ? "กำลังเทียบใบรับสั่งซื้อ…" : "ไม่มีรายการสั่งอะไหล่ในวันนี้"}</td></tr>
             ) : filtered.map((r, i) => {
               const sys = SYSTEMS.find(s => s.key === r.system);
+              const rowH = { padding: "0 10px", height: 32, display: "flex", alignItems: "center" };
               return (
                 <tr key={`${r.system}-${r.order_id}`} style={{ background: i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                   <td style={{ ...td, textAlign: "center" }}>{i + 1}</td>
@@ -754,7 +486,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                   <td style={td}>
                     {r.vendor_po_no || "-"}
                     {extraPoNos(r).map(po => (
-                      <div key={po} title="ใบรับสั่งซื้อเพิ่ม — สั่งตามหลังด้วยเลขสั่งซื้อลูกค้าเดิมต่อท้ายอักษร"
+                      <div key={po} title="ใบรับสั่งซื้อเพิ่ม — สั่งตามหลังด้วยเลขสั่งซื้อลูกค้าเดิม"
                         style={{ fontSize: 11, color: "#059669", fontWeight: 700, marginTop: 2 }}>
                         + {po}
                       </div>
@@ -762,7 +494,6 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                   </td>
                   <td style={td}>
                     <div>{r.model_name || "-"}</div>
-                    {/* รุ่น/แบบ/type/สี ที่บันทึกไว้ในใบสั่งซื้อ (ค้นจากเลขตัวถังใบมัดจำ — มีเฉพาะระบบ HONDA) */}
                     {(r.vehicle_series || r.vehicle_variant) && (
                       <div style={{ fontSize: 11, color: "#475569", marginTop: 2 }}>
                         {[r.vehicle_series, r.vehicle_variant, r.vehicle_type].filter(Boolean).join(" / ")}
@@ -771,107 +502,53 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                     )}
                   </td>
                   <td style={{ ...td, textAlign: "left", padding: 0 }}>
-                    {(r.items || []).length === 0 ? <div style={{ padding: "6px 10px" }}>-</div> : (r.items || []).map((it, k) => (
-                      <div key={k} style={{ padding: "0 10px", height: 32, display: "flex", alignItems: "center", borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
-                        <span style={{ whiteSpace: "nowrap" }}>
-                          {/* ปุ่มเลือกตัว ✗ ไว้จับคู่กับอะไหล่ทดแทนในช่องขวา (เฉพาะใบที่มี DCS ไม่ตรง) */}
-                          {orderedInDcs(r, it) === false && unmatchedDcs(r).length > 0 && (() => {
-                            const key = `${r.system}-${r.order_id}`;
-                            const oc = strip(it.part_code);
-                            return (
+                    {(r.items || []).length === 0 ? <div style={{ padding: "6px 10px" }}>-</div> : (r.items || []).map((it, k) => {
+                      const st = orderedInDcs(r, it);
+                      const sub = substituteFor(r, it);
+                      const key = `${r.system}-${r.order_id}`;
+                      const oc = strip(it.part_code);
+                      return (
+                        <div key={k} style={{ ...rowH, borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
+                          <span style={{ whiteSpace: "nowrap" }}>
+                            {/* ปุ่มเลือกตัว ✗ ไว้จับคู่กับอะไหล่ทดแทนในช่องขวา (เฉพาะใบที่มี DCS ไม่ตรง) */}
+                            {st === false && unmatchedDcs(r).length > 0 && (
                               <input type="radio" name={`selsub-${key}`} checked={selItem[key] === oc}
                                 onChange={() => {}}
                                 onClick={() => setSelItem(prev => ({ ...prev, [key]: prev[key] === oc ? null : oc }))}
                                 title="เลือกตัวนี้ แล้วกดปุ่ม 'จับคู่' ที่รายการในช่องสถานะอะไหล่ทดแทน"
                                 style={{ marginRight: 6, cursor: "pointer", accentColor: "#d97706" }} />
-                            );
-                          })()}
-                          <span style={{ fontFamily: "monospace", fontSize: 12 }}>{it.part_code || "-"}</span>
-                          {" · "}{it.part_name || "-"}{" × "}<b>{Number(it.quantity) || 0}</b>
-                          {partMatchesVehicle(r, it) && (
-                            <span title="เคยเบิกอะไหล่ตัวนี้กับแบบรถนี้ในประวัติซ่อม — ตรงรุ่น" style={{ color: "#059669", fontWeight: 800, marginLeft: 6 }}>✓</span>
-                          )}
-                          {(() => {
-                            const sub = substituteFor(r, it);
-                            return sub ? (
+                            )}
+                            <span style={{ fontFamily: "monospace", fontSize: 12 }}>{it.part_code || "-"}</span>
+                            {" · "}{it.part_name || "-"}{" × "}<b>{Number(it.quantity) || 0}</b>
+                            {sub ? (
                               <span title="อะไหล่ทดแทนที่ใบรับสั่งซื้อส่งมาแทนตัวนี้" style={{ color: "#d97706", fontWeight: 700, marginLeft: 8, fontFamily: "monospace", fontSize: 12 }}>
                                 → {fmtCodeFor(r.system, sub)}
                               </span>
-                            ) : null;
-                          })()}
-                          {orderedInDcs(r, it) === false && (
-                            <span title="สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS)" style={{ color: "#dc2626", fontWeight: 800, marginLeft: 6 }}>✗</span>
-                          )}
-                        </span>
-                      </div>
-                    ))}
-                  </td>
-                  {/* คอลัมน์สถานะรายตัว — บรรทัดตรงกับรายการอะไหล่ (สูง 32px เท่ากัน) */}
-                  <td style={{ ...td, textAlign: "left", padding: 0 }}>
-                    {(r.items || []).length === 0 ? <div style={{ padding: "6px 10px" }}>-</div> : (r.items || []).map((it, k) => {
-                      const st = orderedInDcs(r, it);
-                      const stock = st === false ? stockCache[strip(it.part_code)] : null;
-                      return (
-                        <div key={k} style={{ padding: "0 10px", height: 32, display: "flex", alignItems: "center", fontSize: 12, borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
-                          <span style={{ whiteSpace: "nowrap" }}>
-                            {isBackordered(r, it) ? (
-                              <span title="สั่งแล้วแต่ติดค้างส่ง — รอของจากศูนย์ (ตารางอะไหล่ค้างส่ง)">
-                                <span style={{ color: "#059669", fontWeight: 800 }}>✓</span>
-                                <span style={{ color: "#ea580c", fontWeight: 700, marginLeft: 4 }}>ค้างส่ง</span>
-                              </span>
-                            ) : st === true ? (
-                              <span title="สั่งเข้าใบรับสั่งซื้อแล้ว" style={{ color: "#059669", fontWeight: 800 }}>✓</span>
-                            ) : st === false ? (
-                              <>
-                                <span title="สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ" style={{ color: "#dc2626", fontWeight: 800 }}>✗</span>
-                                {stock && stock.total > 0 && (
-                                  <span style={{ color: "#0369a1", marginLeft: 6 }} title="มีของในสต๊อก — สาขา(จำนวน) ที่เก็บ">
-                                    สต๊อก: {stock.parts.map(p => `${p.source}(${p.qty})${p.location ? ` ${p.location}` : ""}`).join(", ")}
-                                  </span>
-                                )}
-                              </>
-                            ) : (
-                              <span style={{ color: "#9ca3af" }}>-</span>
+                            ) : null}
+                            {st === false && (
+                              <span title="สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ (DCS)" style={{ color: "#dc2626", fontWeight: 800, marginLeft: 6 }}>✗</span>
                             )}
-                            {(() => {
-                              const arr = arrivalOf(r, it);
-                              return arr ? (
-                                <span title={`มีรับเข้าในรายงานรับอะไหล่ ${arr.doc ? `(${arr.doc})` : ""}${arr.viaSub ? ` — รับเป็นอะไหล่ทดแทน ${fmtCodeFor(r.system, arr.subCode)}` : ""}`}
-                                  style={{ color: "#0d9488", fontWeight: 700, marginLeft: 8 }}>
-                                  📦 ถึงแล้ว {fmtShortDate(arr.date)}{arr.viaSub ? " (ทดแทน)" : ""}
-                                </span>
-                              ) : null;
-                            })()}
                           </span>
                         </div>
                       );
                     })}
                   </td>
-                  {/* คอลัมน์เบิกเข้า Job — บรรทัดตรงกับรายการอะไหล่ (สูง 32px เท่ากัน) */}
+                  {/* คอลัมน์สถานะรายตัว — บรรทัดตรงกับรายการอะไหล่ (สูง 32px เท่ากัน) */}
                   <td style={{ ...td, textAlign: "left", padding: 0 }}>
                     {(r.items || []).length === 0 ? <div style={{ padding: "6px 10px" }}>-</div> : (r.items || []).map((it, k) => {
-                      const dp = dispenseOf(r, it);
+                      const st = orderedInDcs(r, it);
                       return (
-                        <div key={k} style={{ padding: "0 10px", height: 32, display: "flex", alignItems: "center", fontSize: 12, borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
-                          {dp === null ? (
-                            <span title="ใบสั่งซื้อยังไม่ผูกเลข Job" style={{ color: "#9ca3af" }}>-</span>
-                          ) : dp.hit ? (
-                            <span title={`เบิกเข้างาน ${dp.job} เมื่อ ${fmtShortDate(dp.hit.date)} (บันทึกขายแล้ว)${dp.hit.viaSub ? ` ด้วยรหัสทดแทน ${dp.hit.subCode}` : ""}`} style={{ color: "#059669", fontWeight: 700, whiteSpace: "nowrap" }}>
-                              ✓ เบิก {dp.job}{dp.hit.viaSub ? " (ทดแทน)" : ""}
-                            </span>
-                          ) : likelyDispensed(r, it) ? (
-                            <span title={`รับเข้าแล้วและสต๊อกคงเหลือ 0 — ของถูกเบิกออกไปแล้ว (จะขึ้นบันทึกขายเมื่อปิดงาน ${dp.job})`}
-                              style={{ color: "#0d9488", fontWeight: 700, whiteSpace: "nowrap" }}>✓ เบิก {dp.job} (สต๊อกหมด)</span>
-                          ) : (
-                            <span title={`ผูกเลข Job ${dp.job} แล้ว แต่ยังไม่พบการเบิกรหัสนี้ในงานซ่อม`} style={{ color: "#d97706", fontWeight: 700 }}>ยังไม่เบิก</span>
-                          )}
+                        <div key={k} style={{ ...rowH, fontSize: 12, borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
+                          {st === true ? <span title="สั่งเข้าใบรับสั่งซื้อแล้ว" style={{ color: "#059669", fontWeight: 800 }}>✓</span>
+                            : st === false ? <span title="สั่งซื้อในใบแล้ว แต่ยังไม่พบในใบรับสั่งซื้อ" style={{ color: "#dc2626", fontWeight: 800 }}>✗</span>
+                            : <span style={{ color: "#9ca3af" }}>{r.vendor_po_no ? "…" : "-"}</span>}
                         </div>
                       );
                     })}
                   </td>
                   <td style={{ ...td, textAlign: "left", fontSize: 12 }}>
                     {(() => {
-                      // แสดงรายการในใบรับสั่งซื้อ (DCS) ที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ให้เลือกจับคู่เอง
+                      // รายการในใบรับสั่งซื้อ (DCS) ที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ให้เลือกจับคู่/บันทึก
                       const un = unmatchedDcs(r);
                       if (!un.length) return null;
                       const key = `${r.system}-${r.order_id}`;
@@ -890,7 +567,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                                     ✓ แทน {savedOrig}
                                   </span>
                                 ) : pendPair ? (
-                                  <span style={{ color: "#d97706", fontWeight: 700, marginLeft: 6 }} title={pendPair.auto ? "B2B เสนอให้อัตโนมัติ (รหัสที่ส่งมาแทน / เลขกลางเดียวกัน) — กดบันทึกเพื่อยืนยัน หรือ × ถ้าไม่ใช่" : "จับคู่แล้ว — รอกดบันทึก"}>
+                                  <span style={{ color: "#d97706", fontWeight: 700, marginLeft: 6 }} title={pendPair.auto ? "B2B เสนอให้อัตโนมัติ (รหัสที่ส่งมาแทน / เลขกลาง+ท้ายตรงกัน) — กด × ถ้าไม่ใช่" : "คู่ที่จับเอง รอบันทึก"}>
                                     → แทน {pendPair.original_code}{pendPair.auto ? " (B2B)" : ""}
                                     <button onClick={() => unpair(r, d)} title="ยกเลิกคู่นี้"
                                       style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer", fontWeight: 800, marginLeft: 2 }}>×</button>
@@ -908,7 +585,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                           {pend.length > 0 && (
                             <button onClick={() => saveSubstitute(r)} disabled={savingSub === r.order_id}
                               title="บันทึกคู่ที่จับไว้ลงตารางอะไหล่ใช้แทนกัน"
-                              style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: savingSub === r.order_id ? "wait" : "pointer", whiteSpace: "nowrap", marginTop: 2 }}>
+                              style={{ background: "#059669", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 600, cursor: savingSub === r.order_id ? "wait" : "pointer", whiteSpace: "nowrap", marginTop: 4 }}>
                               {savingSub === r.order_id ? "กำลังบันทึก…" : `บันทึกอะไหล่ทดแทน (${pend.length} คู่)`}
                             </button>
                           )}
