@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import BankAccountSelect from "../utils/BankAccountSelect"; // เลือกบัญชีโอนออกตอนคืนมัดจำแบบเงินโอน (user 2026-10-22)
-import usePartStockHints, { useAutoStockCheck, PartStockHintRow, fetchLoanStock, LOAN_STORE } from "../utils/usePartStockHints";
+import usePartStockHints, { useAutoStockCheck, PartStockHintRow, fetchLoanStock, LOAN_STORE, useFastMovingFlag, FastMovingBadge, fastMovingNoteHtml } from "../utils/usePartStockHints";
 
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
@@ -107,6 +107,7 @@ export default function SparePartsOrderPage({ currentUser }) {
   const [partSubstitutes, setPartSubstitutes] = useState([]);
   // เช็คสต๊อก + อะไหล่ทดแทนในฟอร์มสั่งซื้อ (ก่อนบันทึก) — ดู utils/usePartStockHints (user 2026-09-21)
   const stockHints = usePartStockHints(API, "HONDA");
+  const fastFlag = useFastMovingFlag(); // รหัสอยู่ในอะไหล่หมุนเร็ว (ยกเว้นสายพาน 23100) → หมายเหตุแดง + ถามยืนยันตอนบันทึก (user 2026-11-05)
   useAutoStockCheck(showForm, form.items, stockHints.ensure, stockHints.reset);
   const [pdoSoldMap, setPdoSoldMap] = useState({}); // order_id → ผลเช็คบิลขายปลีก DCS (honda_part_sales RTSL) ของใบ PDO
   const [vehInfo, setVehInfo] = useState(null); // รุ่น/แบบ/type ของรถลูกค้า — ค้นจากเลขตัวถังในใบมัดจำ (ประวัติขาย moto_sales)
@@ -608,6 +609,9 @@ export default function SparePartsOrderPage({ currentUser }) {
     if (validItems.length === 0) { setMessage("กรุณาเพิ่มรายการอะไหล่อย่างน้อย 1 รายการ"); return; }
     // ก่อนบันทึกใบใหม่: เช็คสต๊อก + อะไหล่ทดแทนทุกบรรทัด — ร้านมีของอยู่แล้วให้ถามยืนยัน (ไม่บล็อก เผื่อตั้งใจสั่งเพิ่ม) — user 2026-09-21
     if (!editId) {
+      // อะไหล่หมุนเร็ว (ยกเว้นสายพาน) ควรมีสต๊อกประจำ → ถามยืนยันก่อนสั่ง (user 2026-11-05)
+      const fastHits = validItems.filter((it) => fastFlag(it.part_code)).map((it) => `• ${it.part_code} ${it.part_name || ""} — อะไหล่หมุนเร็ว${fastFlag(it.part_code).group ? " (" + fastFlag(it.part_code).group + ")" : ""}`);
+      if (fastHits.length && !window.confirm(`⚠️ มีอะไหล่หมุนเร็วในใบสั่งซื้อ (ควรมีสต๊อกประจำ ไม่ต้องสั่งซื้อ):\n\n${fastHits.join("\n")}\n\nยืนยันสั่งซื้อต่อหรือไม่?`)) return;
       setSaving(true);
       let inStock = [];
       try { inStock = await stockHints.checkAll(validItems); } catch { inStock = []; }
@@ -1168,7 +1172,7 @@ export default function SparePartsOrderPage({ currentUser }) {
 <table>
   <thead><tr><th class="center">#</th><th>รหัสสินค้า</th><th>ชื่ออะไหล่</th><th class="center">จำนวน</th><th class="stock">สต๊อก</th><th class="stock center">คงเหลือ</th><th class="stock">ที่เก็บ</th></tr></thead>
   <tbody>
-    ${items.length === 0 ? '<tr><td colspan="7" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}${(it.substitutes || []).map((sb) => `<div class="sub-line${Number(sb.stock_qty) > 0 ? ' has' : ''}">↳ ${sb.code || ''}</div>`).join('')}</td><td>${it.part_name || ''}${(it.substitutes || []).map((sb) => `<div class="sub-line${Number(sb.stock_qty) > 0 ? ' has' : ''}">ทดแทน: ${sb.name || '(อะไหล่ทดแทน)'}${Number(sb.stock_qty) > 0 ? ` — มีของ ${sb.stock_qty} ชิ้น (${sb.stock_name || '-'})` : ' — ไม่มีของในสต๊อก'}</div>`).join('')}</td><td class="center">${it.quantity || 0}</td><td class="stock">${it.stock_name || '-'}${Number(it.loan_qty) > 0 ? `<br>${LOAN_STORE}(${it.loan_qty})` : ''}</td><td class="stock center">${it.stock_qty != null ? it.stock_qty : '-'}</td><td class="stock">${it.stock_location || '-'}</td></tr>`).join('')}
+    ${items.length === 0 ? '<tr><td colspan="7" class="center">ไม่มีรายการ</td></tr>' : items.map((it, i) => `<tr><td class="center">${i + 1}</td><td>${it.part_code || ''}${fastMovingNoteHtml(it.part_code)}${(it.substitutes || []).map((sb) => `<div class="sub-line${Number(sb.stock_qty) > 0 ? ' has' : ''}">↳ ${sb.code || ''}</div>`).join('')}</td><td>${it.part_name || ''}${(it.substitutes || []).map((sb) => `<div class="sub-line${Number(sb.stock_qty) > 0 ? ' has' : ''}">ทดแทน: ${sb.name || '(อะไหล่ทดแทน)'}${Number(sb.stock_qty) > 0 ? ` — มีของ ${sb.stock_qty} ชิ้น (${sb.stock_name || '-'})` : ' — ไม่มีของในสต๊อก'}</div>`).join('')}</td><td class="center">${it.quantity || 0}</td><td class="stock">${it.stock_name || '-'}${Number(it.loan_qty) > 0 ? `<br>${LOAN_STORE}(${it.loan_qty})` : ''}</td><td class="stock center">${it.stock_qty != null ? it.stock_qty : '-'}</td><td class="stock">${it.stock_location || '-'}</td></tr>`).join('')}
   </tbody>
 </table>
 <div class="footer">
@@ -1741,6 +1745,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                       <td style={{ padding: 4, textAlign: "center", fontSize: 12, color: "#6b7280" }}>{idx + 1}</td>
                       <td style={{ padding: 4 }}>
                         <input value={it.part_code} onChange={e => updateItem(idx, "part_code", e.target.value.toUpperCase())} onBlur={() => stockHints.ensure(it.part_code)} placeholder="รหัสสินค้า" style={{ ...inputStyle, width: "100%", fontSize: 12 }} />
+                        <FastMovingBadge info={fastFlag(it.part_code)} block />
                       </td>
                       <td style={{ padding: 4 }}>
                         <input value={it.part_name} onChange={e => updateItem(idx, "part_name", e.target.value)} placeholder="ชื่ออะไหล่" style={{ ...inputStyle, width: "100%", fontSize: 12 }} />
@@ -1828,6 +1833,7 @@ export default function SparePartsOrderPage({ currentUser }) {
                     {/* อะไหล่ทดแทน (ตารางอะไหล่ใช้แทนกัน): แสดงในแถวเดียวกัน บรรทัดย่อยสีส้ม */}
                     <td style={td}>
                       <div>{it.part_code}</div>
+                      <FastMovingBadge info={fastFlag(it.part_code)} block />
                       {(it.substitutes || []).map((s, k) => (
                         <div key={k} style={{ color: "#d97706", fontWeight: 600 }}>→ {s.code}</div>
                       ))}

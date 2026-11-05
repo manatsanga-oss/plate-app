@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import BankAccountSelect from "../utils/BankAccountSelect";
 import { loadSubs } from "../utils/usePartStockHints"; // คู่รหัสทดแทน ใช้เทียบสถานะ B2B (user 2026-10-22) // เลือกบัญชีโอนออกตอนคืนมัดจำแบบเงินโอน (user 2026-10-22)
-import usePartStockHints, { useAutoStockCheck, PartStockHintRow } from "../utils/usePartStockHints";
+import usePartStockHints, { useAutoStockCheck, PartStockHintRow, useFastMovingFlag, FastMovingBadge } from "../utils/usePartStockHints";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
 const USER_API = "https://n8n-new-project-gwf2.onrender.com/webhook/office-login";
@@ -114,6 +114,7 @@ export default function YamahaOrderPage({ currentUser }) {
 
   // เช็คสต๊อก + อะไหล่ทดแทนในฟอร์มสั่งซื้อ (ก่อนบันทึก) — ดู utils/usePartStockHints
   const stockHints = usePartStockHints(API_URL, "YAMAHA");
+  const fastFlag = useFastMovingFlag(); // รหัสอยู่ในอะไหล่หมุนเร็ว (ยกเว้นสายพาน) → หมายเหตุแดง + ถามยืนยันตอนบันทึก (user 2026-11-05)
   useAutoStockCheck(showForm, form.items, stockHints.ensure, stockHints.reset);
 
   async function api(action, extra = {}) {
@@ -565,6 +566,9 @@ export default function YamahaOrderPage({ currentUser }) {
     if (validItems.length === 0) { setMessage("กรุณาเพิ่มรายการอะไหล่อย่างน้อย 1 รายการ"); return; }
     // ก่อนบันทึกใบใหม่: เช็คสต๊อก + อะไหล่ทดแทนทุกบรรทัด — ร้านมีของอยู่แล้วให้ถามยืนยัน (ไม่บล็อก เผื่อตั้งใจสั่งเพิ่ม) — user 2026-09-21
     if (!editId) {
+      // อะไหล่หมุนเร็ว (ยกเว้นสายพาน) ควรมีสต๊อกประจำ → ถามยืนยันก่อนสั่ง (user 2026-11-05)
+      const fastHits = validItems.filter((it) => fastFlag(it.part_code)).map((it) => `• ${it.part_code} ${it.part_name || ""} — อะไหล่หมุนเร็ว${fastFlag(it.part_code).group ? " (" + fastFlag(it.part_code).group + ")" : ""}`);
+      if (fastHits.length && !window.confirm(`⚠️ มีอะไหล่หมุนเร็วในใบสั่งซื้อ (ควรมีสต๊อกประจำ ไม่ต้องสั่งซื้อ):\n\n${fastHits.join("\n")}\n\nยืนยันสั่งซื้อต่อหรือไม่?`)) return;
       setSaving(true);
       let inStock = [];
       try { inStock = await stockHints.checkAll(validItems); } catch { inStock = []; }
@@ -1216,7 +1220,7 @@ export default function YamahaOrderPage({ currentUser }) {
                     <React.Fragment key={idx}>
                     <tr style={{ borderBottom: stockHints.hintOf(it.part_code) ? "none" : "1px solid #e5e7eb" }}>
                       <td style={{ padding: 4, textAlign: "center", fontSize: 12, color: "#6b7280" }}>{idx + 1}</td>
-                      <td style={{ padding: 4 }}><input value={it.part_code} onChange={e => updateItem(idx, "part_code", e.target.value.toUpperCase())} onBlur={() => stockHints.ensure(it.part_code)} placeholder="รหัสสินค้า" style={{ ...inputStyle, width: "100%", fontSize: 12 }} /></td>
+                      <td style={{ padding: 4 }}><input value={it.part_code} onChange={e => updateItem(idx, "part_code", e.target.value.toUpperCase())} onBlur={() => stockHints.ensure(it.part_code)} placeholder="รหัสสินค้า" style={{ ...inputStyle, width: "100%", fontSize: 12 }} /><FastMovingBadge info={fastFlag(it.part_code)} block /></td>
                       <td style={{ padding: 4 }}><input value={it.part_name} onChange={e => updateItem(idx, "part_name", e.target.value)} placeholder="ชื่ออะไหล่" style={{ ...inputStyle, width: "100%", fontSize: 12 }} /></td>
                       <td style={{ padding: 4 }}><input type="number" min={1} value={it.quantity} onChange={e => updateItem(idx, "quantity", Number(e.target.value))} style={{ ...inputStyle, width: "100%", textAlign: "center", fontSize: 12 }} /></td>
                       <td style={{ padding: 4, textAlign: "center" }}><button onClick={() => removeItem(idx)} style={{ background: "none", border: "none", color: "#b91c1c", cursor: "pointer", fontSize: 16 }}>×</button></td>
@@ -1294,7 +1298,7 @@ export default function YamahaOrderPage({ currentUser }) {
                   return (
                   <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
-                    <td style={td}>{it.part_code}</td>
+                    <td style={td}>{it.part_code}<FastMovingBadge info={fastFlag(it.part_code)} block /></td>
                     <td style={td}>{it.part_name}
                       {(it.substitutes || []).map((sb) => {
                         const q = sb.stock.reduce((t, x) => t + x.qty, 0);

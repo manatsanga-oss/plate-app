@@ -130,3 +130,60 @@ export function PartStockHintRow({ hint, colSpan }) {
     </tr>
   );
 }
+
+// ===== อะไหล่หมุนเร็ว — เตือนในใบสั่งซื้อ (user 2026-11-05) =====
+// รหัสที่อยู่ในรายการอะไหล่หมุนเร็ว (fast_moving_parts ยังผลิต) ควรมีสต๊อกประจำ ไม่ควรสั่งซื้อพิเศษ → โชว์หมายเหตุสีแดงข้างรหัส + ถามยืนยันตอนบันทึก
+// ยกเว้นเฉพาะกลุ่ม "อะไหล่แท้" (PG-031) ที่สั่งตามรุ่นได้ตามปกติ — สายพาน/แบต/ผ้าเบรค ฯลฯ ที่อยู่ในหมุนเร็วต้องเตือนทั้งหมด
+const FAST_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-api";
+export const FAST_EXEMPT_PREFIXES = []; // ไม่มีรหัสยกเว้นเพิ่ม (เคยใส่ 23100 แล้ว user ยืนยัน 2026-11-05 ว่าสายพานต้องเตือน)
+let _fastCache = null, _fastPromise = null;
+// "กลุ่มอะไหล่" ไม่ต้องตรงรหัสเป๊ะ (user 2026-11-05): ใช้รหัสฟังก์ชันของอะไหล่เป็นตัวแทนกลุ่ม
+//   HONDA 23100-K36-J01 → 23100 (สายพาน), 31500-… แบต, 06430-… ผ้าเบรค · YAMAHA 2BL-E7641-00 → E7641 (สายพาน), 1PB-E4451 ไส้กรอง · อะไหล่มาตรฐาน 90506-12001-00 → 90506
+const funcKey = (code) => { const c = strip(code); if (c.length < 8) return ""; return /^\d{5}/.test(c) ? c.slice(0, 5) : c.slice(3, 8); };
+export function loadFastMoving() {
+  if (_fastCache) return Promise.resolve(_fastCache);
+  if (_fastPromise) return _fastPromise;
+  _fastPromise = postJson(FAST_API, { action: "get_fast_moving_report" }).then((rows) => {
+    const m = new Map(); const groups = new Map(); // funcKey → { group, count }
+    (rows || []).forEach((r) => {
+      if (!r || !r.part_code) return;
+      const info = { code: r.part_code, name: r.custom_name || r.product_name || "", group: r.product_group || "", brand: r.brand || "", discontinued: !!r.is_discontinued };
+      m.set(baseKey(r.part_code), info);
+      if (r.ref_code) m.set(baseKey(r.ref_code), info);
+      if (!info.discontinued && !/อะไหล่แท้/.test(info.group)) {
+        const k = funcKey(r.part_code); if (!k) return;
+        const g = groups.get(k) || { group: info.group, count: 0 }; g.count += 1; groups.set(k, g); // กลุ่มของรหัสฟังก์ชันนั้น (ใช้กลุ่มแรกที่พบ)
+      }
+    });
+    m.groups = groups;
+    _fastCache = m; return m;
+  }).catch(() => { _fastPromise = null; return new Map(); });
+  return _fastPromise;
+}
+export function fastMovingInfo(code, map = _fastCache) {
+  if (!map) return null;
+  if (FAST_EXEMPT_PREFIXES.some((p) => strip(code).startsWith(p))) return null;
+  const r = map.get(baseKey(code));
+  // รหัสตรงกับรายการหมุนเร็ว: ยกเว้นเฉพาะกลุ่ม "อะไหล่แท้" (PG-031 สั่งตามรุ่นปกติ — เคส 2BL-E7465-00 ซีลน้ำมัน) · สายพาน 23100 ต้องเตือน (user 2026-11-05 ยืนยันกับ 23100-K36-J01)
+  if (r) return r.discontinued || /อะไหล่แท้/.test(r.group) ? null : r;
+  // รหัสไม่ตรง แต่เป็น "กลุ่มเดียวกัน" กับอะไหล่หมุนเร็ว (รหัสฟังก์ชันเดียวกัน) → เตือนเหมือนกัน (user 2026-11-05: กลุ่มอะไหล่คือทุกรหัส)
+  const g = map.groups && map.groups.get(funcKey(code));
+  return g ? { code: strip(code), name: "", group: g.group, byGroup: true } : null;
+}
+export function useFastMovingFlag() {
+  const [map, setMap] = useState(_fastCache);
+  useEffect(() => { let alive = true; loadFastMoving().then((m) => { if (alive) setMap(m); }); return () => { alive = false; }; }, []);
+  return useCallback((code) => fastMovingInfo(code, map), [map]);
+}
+export function FastMovingBadge({ info, block }) {
+  if (!info) return null;
+  return (
+    <div style={{ display: block ? "block" : "inline-block", color: "#dc2626", fontWeight: 700, fontSize: 11, marginTop: block ? 2 : 0, marginLeft: block ? 0 : 6, whiteSpace: "nowrap" }} title={`${info.code} ${info.name}${info.group ? " · " + info.group : ""}`}>
+      ⚠ อะไหล่หมุนเร็ว{info.group ? ` (${info.group})` : ""} — มีสต๊อกประจำ ไม่ต้องสั่งซื้อ
+    </div>
+  );
+}
+export function fastMovingNoteHtml(code) {
+  const r = fastMovingInfo(code);
+  return r ? `<div style="color:#dc2626;font-weight:700;font-size:11px">⚠ อะไหล่หมุนเร็ว${r.group ? " (" + r.group + ")" : ""}</div>` : "";
+}
