@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+const WEIGHT_K = 10; // น้ำหนักของจำนวนข้อในคะแนนถ่วงน้ำหนัก (เทียบเท่าตอบ 10 ข้อที่ค่าเฉลี่ยรวม)
 
 // รายงานฝึกตอบลูกค้า (AI ลูกค้าจำลอง "น้องเปาเปา") — user 2026-10-02
 // แท็บ 1 สรุปการเข้าใช้ + คะแนนเฉลี่ยรายพนักงาน · แท็บ 2 รายละเอียดคำถาม-คำตอบ-คะแนนรายข้อ
@@ -55,7 +56,13 @@ export default function AiSimReportPage() {
       if (r.score !== null) { s.scored++; s.sum += r.score; s.min = s.min === null ? r.score : Math.min(s.min, r.score); s.max = s.max === null ? r.score : Math.max(s.max, r.score); }
       if (String(r.created_at) > s.last) s.last = String(r.created_at);
     }
-    return [...map.values()].map(s => ({ ...s, avg: s.scored ? s.sum / s.scored : null })).sort((a, b) => (b.avg ?? -1) - (a.avg ?? -1) || b.answers - a.answers);
+    // คะแนนถ่วงน้ำหนักตามจำนวนข้อ (user 2026-11-05 "ให้น้ำหนัก"): Bayesian average = (ผลรวมคะแนน + K×ค่าเฉลี่ยรวม) ÷ (จำนวนข้อ + K), K = WEIGHT_K ข้อ
+    // คนตอบน้อยข้อจะถูกดึงเข้าหาค่าเฉลี่ยรวม ต้องตอบเยอะถึงจะขยับขึ้นได้ → จัดอันดับด้วยคะแนนนี้
+    const all = [...map.values()];
+    const totScored = all.reduce((t, s) => t + s.scored, 0), totSum = all.reduce((t, s) => t + s.sum, 0);
+    const C = totScored ? totSum / totScored : 0;
+    return all.map(s => ({ ...s, avg: s.scored ? s.sum / s.scored : null, wavg: s.scored ? (s.sum + WEIGHT_K * C) / (s.scored + WEIGHT_K) : null }))
+      .sort((a, b) => (b.wavg ?? -1) - (a.wavg ?? -1) || (b.avg ?? -1) - (a.avg ?? -1) || b.answers - a.answers);
   }, [rows, branchFilter]);
 
   const total = useMemo(() => {
@@ -104,7 +111,7 @@ export default function AiSimReportPage() {
           <table style={{ borderCollapse: "collapse", width: "100%", background: "#fff" }}>
             <thead><tr>
               <th style={th}>#</th><th style={th}>พนักงาน</th><th style={th}>สาขา</th><th style={{ ...th, textAlign: "right" }}>วันที่เข้าใช้ (วัน)</th><th style={{ ...th, textAlign: "right" }}>ลูกค้าจำลอง (ราย)</th>
-              <th style={{ ...th, textAlign: "right" }}>คำตอบ (ข้อ)</th><th style={{ ...th, textAlign: "right" }}>ตอบด้วยเสียง</th><th style={{ ...th, textAlign: "center" }}>คะแนนเฉลี่ย</th><th style={{ ...th, textAlign: "center" }}>ต่ำสุด</th><th style={{ ...th, textAlign: "center" }}>สูงสุด</th><th style={th}>ใช้ล่าสุด</th><th style={th}></th>
+              <th style={{ ...th, textAlign: "right" }}>คำตอบ (ข้อ)</th><th style={{ ...th, textAlign: "right" }}>ตอบด้วยเสียง</th><th style={{ ...th, textAlign: "center" }}>คะแนนเฉลี่ย</th><th style={{ ...th, textAlign: "center", background: "#7c2d12" }} title={`ถ่วงน้ำหนักตามจำนวนข้อ: (ผลรวมคะแนน + ${WEIGHT_K}×ค่าเฉลี่ยรวม) ÷ (จำนวนข้อ + ${WEIGHT_K}) — ตอบน้อยข้อคะแนนจะเข้าใกล้ค่าเฉลี่ยรวม`}>คะแนนถ่วงน้ำหนัก<br /><span style={{ fontSize: 11, fontWeight: 400 }}>(ตามจำนวนข้อ)</span></th><th style={{ ...th, textAlign: "center" }}>ต่ำสุด</th><th style={{ ...th, textAlign: "center" }}>สูงสุด</th><th style={th}>ใช้ล่าสุด</th><th style={th}></th>
             </tr></thead>
             <tbody>
               {summary.map((s, i) => (
@@ -117,16 +124,18 @@ export default function AiSimReportPage() {
                   <td style={num}>{s.answers}</td>
                   <td style={num}>{s.voice}</td>
                   <td style={{ ...td, textAlign: "center" }}><Score v={s.avg} digits={1} /></td>
+                  <td style={{ ...td, textAlign: "center", fontWeight: 800, color: "#7c2d12", fontSize: 16 }}>{s.wavg === null ? "-" : s.wavg.toFixed(2)}</td>
                   <td style={{ ...td, textAlign: "center" }}>{s.min ?? "-"}</td>
                   <td style={{ ...td, textAlign: "center" }}>{s.max ?? "-"}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDateTime(s.last)}</td>
                   <td style={td}><button onClick={() => { setStaffFilter(s.staff); setTab("detail"); }} style={{ cursor: "pointer" }}>ดูคำตอบ</button></td>
                 </tr>
               ))}
-              {!summary.length && <tr><td style={{ ...td, textAlign: "center", opacity: .6 }} colSpan={12}>{loading ? "กำลังโหลด..." : "ยังไม่มีข้อมูล"}</td></tr>}
+              {!summary.length && <tr><td style={{ ...td, textAlign: "center", opacity: .6 }} colSpan={13}>{loading ? "กำลังโหลด..." : "ยังไม่มีข้อมูล"}</td></tr>}
             </tbody>
           </table>
-          <div style={{ fontSize: 13, opacity: .7, marginTop: 8 }}>คะแนนให้โดย AI ต่อคำตอบแต่ละข้อ (เต็ม 10): ตอบตรงคำถาม 4 · ข้อมูลครบ/ชัดเจน 3 · สุภาพ 1 · ชวนคุยต่อ/ปิดการขาย 2 — คำตอบที่บันทึกก่อนเปิดระบบให้คะแนนจะไม่มีคะแนน</div>
+          <div style={{ fontSize: 13, opacity: .7, marginTop: 8 }}>อันดับเรียงตาม <b>คะแนนถ่วงน้ำหนัก</b> = (ผลรวมคะแนนทุกข้อ + {WEIGHT_K} × คะแนนเฉลี่ยรวมทุกคน) ÷ (จำนวนข้อที่ตอบ + {WEIGHT_K}) — คนที่ตอบน้อยข้อจะถูกดึงเข้าหาค่าเฉลี่ยรวม ต้องตอบมากข้อและคะแนนดีจึงจะขึ้นอันดับ</div>
+          <div style={{ fontSize: 13, opacity: .7, marginTop: 4 }}>คะแนนให้โดย AI ต่อคำตอบแต่ละข้อ (เต็ม 10): ตอบตรงคำถาม 4 · ข้อมูลครบ/ชัดเจน 3 · สุภาพ 1 · ชวนคุยต่อ/ปิดการขาย 2 — คำตอบที่บันทึกก่อนเปิดระบบให้คะแนนจะไม่มีคะแนน</div>
         </div>
       )}
 
