@@ -111,6 +111,7 @@ export default function TrialBalancePage() {
   const [progress, setProgress] = useState("");
   const [err, setErr] = useState("");
   const [loadedYm, setLoadedYm] = useState("");
+  const [loadedCompany, setLoadedCompany] = useState(null); // สังกัดที่โหลดมา (null = ยังไม่เคยโหลด)
 
   useEffect(() => {
     post({ action: "list_bank_accounts", include_inactive: "false" }).then(arr => setAccounts(arr.filter(a => a && a.account_id && isBank(a)))).catch(() => setAccounts([]));
@@ -121,9 +122,11 @@ export default function TrialBalancePage() {
     if (ym < START_MONTH) { setErr(`งบทดลองเริ่มรอบ ${thMonthLong(START_MONTH)} (บัญชีธนาคารตรวจสอบกับ Flow ตั้งแต่เดือนนี้)`); return; }
     setLoading(true); setErr(""); setRows([]);
     const [from, to] = monthRange(ym); const prev = prevDayOf(from);
+    // ดึงเฉพาะบัญชีของสังกัดที่เลือก (ทุกสังกัด = ทั้งหมด) — ลดจำนวน request ที่ยิง n8n (user 2026-11-06: เลือกก่อนค่อยดึง)
+    const targets = accounts.filter(a => !company || companyOf(a) === company);
     try {
       let done = 0;
-      const out = await mapLimit(accounts, 3, async (a) => {
+      const out = await mapLimit(targets, 3, async (a) => {
         const id = Number(a.account_id);
         const fo = flowOpeningOf(a);
         // มียอด Flow 31/08 → ยกมา = ยอด Flow + รายการตั้งแต่ 01/09 ถึงวันก่อนต้นงวด (รอบ ก.ย. = ยอด Flow ตรง ๆ) · ไม่มี → ยอดตั้งต้นบัญชี + รายการสะสมทั้งหมด
@@ -133,21 +136,23 @@ export default function TrialBalancePage() {
         const opening = r2((fo !== null ? fo : Number(a.opening_balance || 0)) + sum(prior, v => v));
         const dr = r2(sum(cur, v => (v > 0 ? v : 0)));
         const cr = r2(sum(cur, v => (v < 0 ? -v : 0)));
-        done++; setProgress(`${done}/${accounts.length} บัญชี`);
+        done++; setProgress(`${done}/${targets.length} บัญชี`);
         return { ...a, company: companyOf(a), code: flowCodeOf(a), flowOpening: fo, opening, dr, cr, closing: r2(opening + dr - cr), count: cur.filter(m => m && m.movement_date).length };
       });
       setProgress("เงินสดย่อย…");
       let petty = [];
-      try { petty = await loadPettyRows(from, to); } catch { petty = []; }
+      try { petty = (await loadPettyRows(from, to)).filter(p => !company || p.company === company); } catch { petty = []; }
       const all = [...out, ...petty];
       all.sort((x, y) => COMPANIES.indexOf(x.company) - COMPANIES.indexOf(y.company) || (x.code || "zz").localeCompare(y.code || "zz") || String(x.account_no).localeCompare(String(y.account_no)));
-      setRows(all); setLoadedYm(ym);
+      setRows(all); setLoadedYm(ym); setLoadedCompany(company);
     } catch { setErr("❌ โหลดข้อมูลไม่สำเร็จ"); }
     setLoading(false); setProgress("");
   }
-  useEffect(() => { if (accounts.length) load(); /* eslint-disable-next-line */ }, [accounts]);
+  // ไม่โหลดอัตโนมัติตอนเปิดหน้า — เลือกเดือน/สังกัดก่อนแล้วกด "แสดงผลรายงาน" (user 2026-11-06)
 
+  // ถ้าเปลี่ยนสังกัดหลังโหลด: กรองจากที่มีได้เฉพาะเมื่อโหลดมาทุกสังกัด ไม่งั้นต้องกดแสดงใหม่
   const shown = useMemo(() => rows.filter(r => !company || r.company === company), [rows, company]);
+  const needReload = loadedCompany !== null && (loadedYm !== ym || (loadedCompany && loadedCompany !== company));
   const groups = useMemo(() => [...COMPANIES, "อื่น ๆ"].map(g => ({ g, list: shown.filter(r => r.company === g) })).filter(x => x.list.length), [shown]);
   const sumOf = (list) => {
     const t = { oDr: 0, oCr: 0, dr: 0, cr: 0, cDr: 0, cCr: 0 };
@@ -208,8 +213,9 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
             <option value="">ทุกสังกัด (รวม)</option>
             {COMPANIES.map(c => <option key={c} value={c}>{COMPANY_FULL[c]}</option>)}
           </select></label>
-        <button onClick={load} disabled={loading || !accounts.length} style={{ ...btn("#0ea5e9"), opacity: loading ? 0.6 : 1 }}>{loading ? `กำลังโหลด… ${progress}` : "แสดงผลรายงาน"}</button>
-        {loadedYm && loadedYm !== ym && !loading && <span style={{ fontSize: 12, color: "#b45309" }}>แสดงข้อมูลรอบ {thMonthLong(loadedYm)} อยู่ — กด "แสดงผลรายงาน" เพื่อโหลดรอบใหม่</span>}
+        <button onClick={load} disabled={loading || !accounts.length} style={{ ...btn(loadedCompany === null ? "#059669" : "#0ea5e9"), opacity: loading ? 0.6 : 1, boxShadow: loadedCompany === null && !loading ? "0 0 0 3px #a7f3d0" : "none" }}>{loading ? `กำลังโหลด… ${progress}` : loadedCompany === null ? "▶ แสดงผลรายงาน" : "🔄 แสดงผลรายงาน"}</button>
+        {loadedCompany === null && !loading && <span style={{ fontSize: 12.5, color: "#b45309", fontWeight: 600 }}>ยังไม่ได้ดึงข้อมูล — เลือกรอบและสังกัดแล้วกด "แสดงผลรายงาน"</span>}
+        {needReload && !loading && <span style={{ fontSize: 12, color: "#b45309" }}>แสดงข้อมูลรอบ {thMonthLong(loadedYm)}{loadedCompany ? ` · ${loadedCompany}` : ""} อยู่ — กด "แสดงผลรายงาน" เพื่อโหลดตามตัวเลือกใหม่</span>}
       </div>
       {err && <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8, background: "#fee2e2", color: "#991b1b" }}>{err}</div>}
 
@@ -232,7 +238,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
             </thead>
             <tbody>
               {loading && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: 30 }}>กำลังโหลด {progress}…</td></tr>}
-              {!loading && !shown.length && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: 30 }}>ไม่มีข้อมูล</td></tr>}
+              {!loading && !shown.length && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: 30 }}>{loadedCompany === null ? "เลือกรอบระยะเวลาและสังกัด แล้วกด \"แสดงผลรายงาน\"" : "ไม่มีข้อมูล"}</td></tr>}
               {!loading && groups.map(({ g, list }) => {
                 const t = sumOf(list);
                 return (

@@ -290,6 +290,7 @@ export default function ProfitLossReportPage() {
   const [flowAccAgg, setFlowAccAgg] = useState(zeroAgg); const [flowAccRows, setFlowAccRows] = useState([]);
   const [sbtAgg, setSbtAgg] = useState(zeroAgg); const [sbtRows, setSbtRows] = useState([]);
 
+  const [loaded, setLoaded] = useState(false); // กด "ดูรายงาน" แล้วอย่างน้อย 1 ครั้ง
   async function loadReport(targetYm = ym) {
     setLoading(true);
     setMessage("");
@@ -1106,11 +1107,11 @@ export default function ProfitLossReportPage() {
       setMessage("❌ โหลดข้อมูลไม่สำเร็จ: " + (e.message || e));
       setVehicleRows([]); setPartSvcRows([]); setFeeRows([]); setPostRows([]); setTheftRows([]); setRegRows([]); setPromoRows([]); setOtherInvRows([]); setManualRows([]); setPartsCostAgg(zeroAgg()); setTheftCostAgg(zeroAgg()); setRegCostAgg(zeroAgg()); setTheftCostRows([]); setRegCostRows([]); setSaleExpAgg(zeroAgg()); setSaleExpRows([]); setDelivFeeAgg(zeroAgg()); setDelivFeeRows([]); setCosmosExpAgg(zeroAgg()); setCosmosExpRows([]); setSpecCommAgg(zeroAgg()); setSpecCommRows([]); setGiveCostAgg(zeroAgg()); setGiveCostRows([]); setPayrollAgg(zeroAgg()); setPayrollRows([]); setGenExpAgg(zeroAgg()); setGenExpRows([]); setFuelExpAgg(zeroAgg()); setFuelExpRows([]); setLoanIntAgg(zeroAgg()); setLoanIntRows([]); setCardFeeAgg(zeroAgg()); setCardFeeRows([]); setFlowAccAgg(zeroAgg()); setFlowAccRows([]); setSbtAgg(zeroAgg()); setSbtRows([]);
     }
-    setLoading(false);
+    setLoading(false); setLoaded(true);
   }
 
+  // ไม่ดึงข้อมูลอัตโนมัติตอนเปิดหน้า — ให้เลือกเดือนก่อนแล้วกด "ดูรายงาน" (งบนี้ยิงหลายสิบ request; user 2026-11-06 ขอให้เลือกก่อนค่อยดึง)
   useEffect(() => {
-    loadReport();
     // โหลดชื่อสาขาจริงจาก branch_master (พลาดได้ — ใช้ label เริ่มต้นแทน)
     post(MASTER_URL, { action: "get_branches", include_inactive: "true" })
       .then(asArray)
@@ -1199,9 +1200,10 @@ export default function ProfitLossReportPage() {
             <input type="month" value={ym} onChange={(e) => setYm(e.target.value)} style={{ ...inp, minWidth: 160 }} />
           </div>
           <button onClick={() => loadReport()} disabled={loading}
-            style={{ padding: "8px 18px", background: loading ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: loading ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600 }}>
-            🔄 {loading ? "กำลังคิดยอด..." : "ดูรายงาน"}
+            style={{ padding: "8px 18px", background: loading ? "#9ca3af" : loaded ? "#072d6b" : "#059669", color: "#fff", border: "none", borderRadius: 8, cursor: loading ? "not-allowed" : "pointer", fontSize: 13, fontWeight: 600, boxShadow: loaded || loading ? "none" : "0 0 0 3px #a7f3d0" }}>
+            {loading ? "⏳ กำลังคิดยอด..." : loaded ? "🔄 ดูรายงาน" : "▶ ดูรายงาน"}
           </button>
+          {!loaded && !loading && <span style={{ fontSize: 12.5, color: "#b45309", fontWeight: 600 }}>ยังไม่ได้ดึงข้อมูล — เลือกเดือนแล้วกด "ดูรายงาน"</span>}
           <div style={{ fontSize: 12, color: "#6b7280", maxWidth: 460 }}>
             ยอดรายได้ = มูลค่าก่อน VAT · รายได้ที่ระบุสาขาไม่ได้แสดงเฉพาะช่อง "รายได้รวม" — คลิกที่หมวดเพื่อดูรายละเอียด
           </div>
