@@ -48,6 +48,8 @@ export default function RegistrationSummaryReportPage() {
   }, []);
   const usedOf = (r) => usedByChassis[String(r?.chassis_no || "").trim().toUpperCase()] || null;
   // ขายส่ง (ขายให้ดีลเลอร์/ผู้ค้า sale_invoice_type = "ขายส่ง" จาก list_car_payment_receipts ชุดเดียวกับรายงานใบกำกับ) — ไม่คิดค่าจดทะเบียน/ค่าดำเนินการตามระบบ (user 2026-11-06 "ขายส่ง ขายรถมือสอง ไม่ต้องขึ้นประมาณการจดทะเบียนรถใหม่")
+  const [loading, setLoading] = useState(false);
+  const [invoiceMonth, setInvoiceMonth] = useState(() => new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [wholesaleSet, setWholesaleSet] = useState(() => new Set());
   useEffect(() => {
     if (!invoiceMonth) return;
@@ -63,8 +65,6 @@ export default function RegistrationSummaryReportPage() {
   }, [invoiceMonth]);
   const isWholesale = (r) => wholesaleSet.has(String(r?.sale_invoice_no || "").trim().toUpperCase()) || wholesaleSet.has("TI:" + String(r?.tax_invoice_no || "").trim().toUpperCase());
   const noSysFee = (r) => !!usedOf(r) || isWholesale(r); // ไม่ประมาณการค่าจดทะเบียนรถใหม่
-  const [loading, setLoading] = useState(false);
-  const [invoiceMonth, setInvoiceMonth] = useState(() => new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [branchFilter, setBranchFilter] = useState("all"); // สังกัด (บริษัทผู้ออกใบกำกับ PAPAO/NAKORNLUANG/SINGCHAI)
   const [shopFilter, setShopFilter] = useState("all");     // สาขาที่ขาย (SCYxx จากเลขใบขาย NEW) — user 2026-11-05 แยกจากสังกัด
   const [regPaidMonth, setRegPaidMonth] = useState("");  // YYYY-MM
