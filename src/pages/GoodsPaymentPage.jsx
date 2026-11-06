@@ -3,8 +3,8 @@ import React, { useState, useEffect, useMemo } from "react";
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/goods-payment-api";
 const ACCOUNTING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const FINANCE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
-// วันเริ่มใช้เมนูชำระค่ารถ/อะไหล่ (ใบ GP ใบแรก 04–05/05/2569) — ใบกำกับก่อนวันนี้จ่ายจริงไปแล้วแต่ไม่มีใบ GP ในระบบ จึงซ่อนจากรายการค้างชำระ (user 2026-11-06) ติ๊กแสดงได้
-const GP_START = "2026-05-01";
+// วันเริ่มใช้ระบบบันทึกจ่ายจริงจัง = ก.ย. 2569 (user 2026-11-06 "ซ่อนเลย เพราะระบบเริ่มใช้กันยา") — ใบกำกับก่อนวันนี้จ่ายจริงไปแล้วแต่ไม่มีใบ GP ในระบบ จึงซ่อนจากรายการค้างชำระ ติ๊กแสดงได้
+const GP_START = "2026-09-01";
 const beforeStart = (r) => { const d = String(r.invoice_date || "").slice(0, 10); return !!d && d < GP_START; };
 
 function fmtMoney(v) {
@@ -354,7 +354,7 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                   <label style={{ fontSize: 12, color: "#6b7280", display: "flex", alignItems: "center", gap: 5, marginRight: 10, cursor: "pointer" }}
                     title="ใบกำกับก่อนเริ่มใช้เมนูนี้ จ่ายจริงไปแล้วแต่ไม่มีใบ GP ในระบบ">
                     <input type="checkbox" checked={showOld} onChange={e => { setShowOld(e.target.checked); setSelectedIds(new Set()); }} />
-                    แสดงใบก่อน 1 พ.ค. 69 ({oldUnpaid.length} ใบ · {fmtMoney(oldUnpaid.reduce((s, r) => s + (Number(r.amount) || 0), 0))})
+                    แสดงใบก่อน 1 ก.ย. 69 ({oldUnpaid.length} ใบ · {fmtMoney(oldUnpaid.reduce((s, r) => s + (Number(r.amount) || 0), 0))})
                   </label>
                 )}
                 <button onClick={openPayForm} disabled={!selectedIds.size}
