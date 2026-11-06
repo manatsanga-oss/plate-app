@@ -30,8 +30,22 @@ async function post(url, body) {
 const asArray = (d) => (Array.isArray(d) ? d : d && Array.isArray(d.rows) ? d.rows : d && Array.isArray(d.data) ? d.data : []);
 
 // อ่านไฟล์ DOSS (HTML table / xls / xlsx) → แถว {model_code, type, color_code, est_w1..4, est_total, est_direct, current_quota, adjusted_quota, delivery, pending}
+// อ่าน bytes ของไฟล์แบบทนทาน: เบราว์เซอร์โยน NotReadableError ("The requested file could not be read, typically due to permission problems…")
+// เมื่อไฟล์ถูกเปิดค้างใน Excel / ยังดาวน์โหลดไม่เสร็จ / เป็น placeholder ของ OneDrive / ถูกแก้หลังเลือก → ลองซ้ำ 3 ครั้ง (arrayBuffer → FileReader) แล้วค่อยแจ้งวิธีแก้เป็นภาษาไทย (user 2026-11-06)
+async function readFileBuffer(file) {
+  const viaReader = () => new Promise((res, rej) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => rej(fr.error || new Error("FileReader error")); fr.readAsArrayBuffer(file); });
+  let lastErr = null;
+  for (let i = 0; i < 3; i++) {
+    try { return i % 2 === 0 ? await file.arrayBuffer() : await viaReader(); }
+    catch (e) { lastErr = e; await new Promise(r => setTimeout(r, 600 * (i + 1))); }
+  }
+  const notReadable = lastErr && (lastErr.name === "NotReadableError" || /could not be read|permission/i.test(String(lastErr.message || lastErr)));
+  throw new Error(notReadable
+    ? `อ่านไฟล์ "${file.name}" ไม่ได้ — ไฟล์ถูกเปิดค้างอยู่ (Excel/เบราว์เซอร์ที่ดาวน์โหลด) หรืออยู่ใน OneDrive แบบยังไม่ดาวน์โหลดลงเครื่อง หรือถูกแก้ไขหลังเลือก · วิธีแก้: ปิดไฟล์ใน Excel รอดาวน์โหลดเสร็จ (หรือคัดลอกไฟล์มาไว้ในเครื่อง เช่น Desktop) แล้วกดอัปโหลดเลือกไฟล์ใหม่อีกครั้ง`
+    : (lastErr?.message || String(lastErr)));
+}
 async function parseDossFile(file) {
-  const buf = await file.arrayBuffer();
+  const buf = await readFileBuffer(file);
   const text = new TextDecoder("utf-8").decode(buf.slice(0, 4000));
   let rows;
   if (/<table/i.test(text)) {
