@@ -37,6 +37,16 @@ const BRANCH_LABEL = {
 
 export default function RegistrationSummaryReportPage() {
   const [rows, setRows] = useState([]);
+  // รถมือสอง (used-moto-api list_used): ใบกำกับที่ไม่มีใบขาย NEW แต่เป็นการขายรถมือสอง (เช่น MC016910/0085 UM-2610-0001) → ใช้ชื่อผู้ซื้อจากระบบรถมือสอง
+  //   และไม่คิดค่าจดทะเบียน/ค่าดำเนินการ "ตามระบบ" (กฎค่าใช้จ่ายการขายใช้กับรถใหม่) (user 2026-11-06 "ทำไมไม่มีชื่อลูกค้า")
+  const [usedByChassis, setUsedByChassis] = useState({});
+  useEffect(() => {
+    fetch("https://n8n-new-project-gwf2.onrender.com/webhook/used-moto-api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_used" }) })
+      .then(r => r.text()).then(t => { let d = JSON.parse(t); if (!Array.isArray(d)) d = d?.rows || [d]; if (d[0]?.listjson) d = JSON.parse(d[0].listjson);
+        const m = {}; d.forEach(u => { const k = String(u?.chassis_no || "").trim().toUpperCase(); if (k) m[k] = u; }); setUsedByChassis(m); })
+      .catch(() => setUsedByChassis({}));
+  }, []);
+  const usedOf = (r) => usedByChassis[String(r?.chassis_no || "").trim().toUpperCase()] || null;
   const [loading, setLoading] = useState(false);
   const [invoiceMonth, setInvoiceMonth] = useState(() => new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [branchFilter, setBranchFilter] = useState("all"); // สังกัด (บริษัทผู้ออกใบกำกับ PAPAO/NAKORNLUANG/SINGCHAI)
@@ -84,7 +94,7 @@ export default function RegistrationSummaryReportPage() {
     if (regPaidMonth && monthOf(r.reg_paid_at) !== regPaidMonth) return false;
     if (insPaidMonth && monthOf(r.ins_paid_at) !== insPaidMonth) return false;
     if (!kw) return true;
-    const hay = [r.tax_invoice_no, r.customer_name, r.sale_customer_name, r.chassis_no, r.engine_no, r.model_name, r.sale_finance_company, r.sale_invoice_no]
+    const hay = [r.tax_invoice_no, r.customer_name, r.sale_customer_name, usedOf(r)?.sold_customer, usedOf(r)?.doc_no, r.chassis_no, r.engine_no, r.model_name, r.sale_finance_company, r.sale_invoice_no]
       .filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
   });
@@ -103,8 +113,9 @@ export default function RegistrationSummaryReportPage() {
   // ถ้าค่าจาก DB ว่าง ใช้ค่าที่กรอกเอง (manualFees) แทน — สำหรับแสดง/พิมพ์เท่านั้น
   const rowKey = (r) => `${r.branch}|${r.tax_invoice_no}`;
   // ลำดับ: ยอดจริงจากงานจดทะเบียน/วางบิล → ยอดที่กรอกเอง → ยอด "ตามระบบ" (กฎค่าใช้จ่ายการขาย สมมติจดอยุธยา — sys_reg_fee_* จาก n8n) (user 2026-11-05: ขึ้นตามระบบก่อน จดจริงแล้วค่อยขึ้นยอดจริง + หมายเหตุถ้าไม่ตรง)
-  const sysOp = (r) => Number(r.sys_reg_fee_operation || 0);
-  const sysRc = (r) => Number(r.sys_reg_fee_receipt || 0);
+  const sysOp = (r) => (usedOf(r) ? 0 : Number(r.sys_reg_fee_operation || 0));
+  const sysRc = (r) => (usedOf(r) ? 0 : Number(r.sys_reg_fee_receipt || 0));
+  const nameOf = (r) => r.sale_customer_name || r.customer_name || usedOf(r)?.sold_customer || "";
   const hasActualOp = (r) => Number(r.reg_fee_operation || 0) !== 0;
   const hasActualRc = (r) => Number(r.reg_fee_receipt || 0) > 0;
   const effOp = (r) => { if (hasActualOp(r)) return Number(r.reg_fee_operation); const m = manualFees[rowKey(r)]?.op; return m !== undefined && m !== "" ? Number(m || 0) : sysOp(r); };
@@ -147,7 +158,7 @@ export default function RegistrationSummaryReportPage() {
         BRANCH_LABEL[r.branch]?.label || r.branch || "",
         r.tax_invoice_no || "",
         r.invoice_date ? String(r.invoice_date).slice(0, 10) : "",
-        (r.sale_customer_name || r.customer_name || "").replace(/,/g, " "),
+        (nameOf(r) || "").replace(/,/g, " "),
         (r.sale_finance_company || "").replace(/,/g, " "),
         r.chassis_no || "",
         r.engine_no || "",
@@ -182,7 +193,7 @@ export default function RegistrationSummaryReportPage() {
         <td class="c">${esc(BRANCH_LABEL[r.branch]?.label || r.branch || "-")}</td>
         <td class="m">${esc(r.tax_invoice_no || "-")}</td>
         <td class="c">${esc(fmtDate(r.invoice_date))}</td>
-        <td>${esc(r.sale_customer_name || r.customer_name || "-")}${r.sale_finance_company ? `<div class="sub">${esc(r.sale_finance_company)}</div>` : ""}</td>
+        <td>${esc(nameOf(r) || "-")}${usedOf(r) ? `<div class="sub">รถมือสอง ${esc(usedOf(r).doc_no)}</div>` : ""}${r.sale_finance_company ? `<div class="sub">${esc(r.sale_finance_company)}</div>` : ""}</td>
         <td class="m">${esc(r.chassis_no || "-")}</td>
         <td class="m">${esc(r.engine_no || "-")}</td>
         <td>${esc(r.model_name || "-")}</td>
@@ -386,7 +397,7 @@ export default function RegistrationSummaryReportPage() {
                     <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#072d6b" }}>{r.tax_invoice_no || "-"}</td>
                     <td style={td}>{fmtDate(r.invoice_date)}</td>
                     <td style={td}>
-                      <div style={{ fontWeight: 600 }}>{r.sale_customer_name || r.customer_name || "-"}</div>
+                      <div style={{ fontWeight: 600 }}>{nameOf(r) || "-"}{usedOf(r) && <span title={`ขายรถมือสอง ${usedOf(r).doc_no} ทะเบียน ${usedOf(r).license_plate || "-"} ไม่คิดค่าจดทะเบียนตามระบบ`} style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 4, background: "#fef3c7", color: "#92400e", fontSize: 10.5, fontWeight: 700 }}>รถมือสอง {usedOf(r).doc_no}</span>}</div>
                       {r.sale_finance_company && (
                         <div style={{ fontSize: 11, color: "#6b7280" }}>📋 {r.sale_finance_company}</div>
                       )}
