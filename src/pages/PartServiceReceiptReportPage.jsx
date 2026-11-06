@@ -41,14 +41,14 @@ const beforePsrStart = (r) => { const d = String(r.receipt_date || "").slice(0, 
   const st = PSR_START[`${br}|${k}`] || PSR_START[`${br}|ALL`]; return !!(st && d && d < st); };
 // ชื่อลูกค้าแบบตัดคำนำหน้า/ช่องว่าง ใช้เทียบใบเสร็จ NIDS กับรายการยึดมัดจำ
 const normName = (v) => String(v || "").replace(/^(นางสาว|น\.ส\.|นาย|นาง|คุณ|MR\.?|MRS\.?|MISS|MS\.?)\s*/i, "").replace(/[\s.\-]+/g, "").toUpperCase();
-// ใบขายส่ง NIDS (อ้างอิง 69WHSL/… ทุกใบ) ปกติไม่ผ่านหน้ารับชำระ PSR (ไป Finance ใบ WSR) — ไม่นำมาเทียบ (user 2026-09-17)
-// ยกเว้นเมื่อสาขาบันทึก PSR อ้างอิงใบ WHSL นั้นจริง → เทียบตามปกติด้วยเลขอ้างอิง/เลขท้าย (ไม่ใช้กฎ วัน+ยอด); ตัดทิ้งเฉพาะใบ WHSL ที่ไม่มี PSR คู่ (user 2026-11-06 เคส PSR-2611-00119 ↔ 69WHSL/0000013 ขึ้น "ไม่มีในไฟล์" ทั้งที่ยอดตรง)
+// ใบขายส่ง NIDS (อ้างอิง 69WHSL/… ทุกใบ) ไม่ผ่านหน้ารับชำระ PSR — ไม่นำมาเทียบ (user 2026-09-17)
+// 2026-11-06 เคยแก้ให้เทียบใบ WHSL ที่มี PSR อ้างอิง แล้ว user สั่งเอากลับแบบเดิม: ขายส่งรับเงินที่ Finance (ใบ WSR) เท่านั้น PSR ที่อ้าง WHSL = พนักงานลงซ้ำ ให้ขึ้น "ไม่มีในไฟล์" เพื่อตรวจจับ (เคส PSR-2611-00119 ↔ 69WHSL/0000013 ซ้ำกับ WSR-2609-0001)
 const isWholesale = (r) => { const refs = refsOf(r); return refs.length > 0 && refs.every(x => /WHSL\//i.test(x)); };
 // ฝั่ง PSR ก็ตัดใบก่อนวันเริ่มเหมือนกัน ไม่งั้นจะโผล่เป็น "ไม่มีในไฟล์"
 const psrBeforeStart = (p) => { const d = String(p.paid_date || "").slice(0, 10); const br = p.branch_code || ""; const k = kindOfRef(p.doc_no || "");
   const st = PSR_START[`${br}|${k}`] || PSR_START[`${br}|ALL`]; return !!(st && d && d < st); };
 function reconcile(uploadRows, psrRows, seizures = []) {
-  const ups = uploadRows.filter(r => (!r.status || r.status === "ปกติ") && !beforePsrStart(r));
+  const ups = uploadRows.filter(r => (!r.status || r.status === "ปกติ") && !beforePsrStart(r) && !isWholesale(r));
   const psr = psrRows.filter(p => String(p.status || "active") === "active" && !psrBeforeStart(p));
   const byDoc = new Map(), byTail = new Map(), byDayAmt = new Map();
   psr.forEach(p => {
@@ -63,12 +63,11 @@ function reconcile(uploadRows, psrRows, seizures = []) {
   const out = ups.map(r => ({ r, br: r.branch_code || "", refs: refsOf(r), d: String(r.receipt_date || "").slice(0, 10), p: null, how: "" }));
   out.forEach(x => { for (const ref of x.refs) { x.p = take(byDoc.get(`${x.br}|${normDoc(ref)}`)); if (x.p) { x.how = "เลขอ้างอิง"; break; } } });
   out.filter(x => !x.p).forEach(x => { for (const ref of x.refs) { const t = tailKey(ref); if (!t) continue; x.p = take(byTail.get(`${x.br}|${t}`), y => eq(y.paid_amount, x.r.total_amount)); if (x.p) { x.how = "เลขท้าย+ยอด"; break; } } });
-  out.filter(x => !x.p && !isWholesale(x.r)).forEach(x => { x.p = take(byDayAmt.get(`${x.br}|${x.d}|${num(x.r.total_amount).toFixed(2)}`)); if (x.p) x.how = "วัน+ยอด"; });
+  out.filter(x => !x.p).forEach(x => { x.p = take(byDayAmt.get(`${x.br}|${x.d}|${num(x.r.total_amount).toFixed(2)}`)); if (x.p) x.how = "วัน+ยอด"; });
   // ใบ NIDS ที่ไม่มี PSR: ถ้าลูกค้าคนเดียวกันมีรายการยึดมัดจำ (active) วันยึด ≤ วันใบเสร็จ และยอดใบเสร็จ ≤ ยอดมัดจำ = เคลียร์มัดจำเก่าที่ยึดแล้ว ไม่ใช่เงินรับจริง
   const seizeOf = (r, d) => String(r.source || "").startsWith("NIDS") ? (seizures.find(z => String(z.status || "active") === "active" && normName(z.customer_name) && normName(z.customer_name) === normName(r.customer_name)
     && String(z.seizure_date || "").slice(0, 10) <= d && num(r.total_amount) <= num(z.deposit_amount) + 0.005) || null) : null;
-  // ใบขายส่งที่ไม่มี PSR คู่ → ไม่นำมาเทียบ (ไม่ขึ้น "ไม่พบในระบบ")
-  const result = out.filter(x => x.p || !isWholesale(x.r)).map(({ r, br, refs, d, p, how }) => {
+  const result = out.map(({ r, br, refs, d, p, how }) => {
     const sz = p ? null : seizeOf(r, d);
     if (sz) how = `ยึดมัดจำ ${sz.deposit_doc_no}`;
     const diff = sz ? 0 : p ? num(r.total_amount) - num(p.paid_amount) : num(r.total_amount);
@@ -152,7 +151,7 @@ export default function PartServiceReceiptReportPage() {
 
   // ---------- โหมดเทียบกับรับชำระในระบบ ----------
   const recon = useMemo(() => reconcile(rows, psrRows, seizures), [rows, psrRows, seizures]);
-  const skippedWholesale = useMemo(() => { const inRecon = new Set(recon.map(x => x.key)); return rows.filter(r => (!r.status || r.status === "ปกติ") && isWholesale(r) && !inRecon.has(`U|${r.source}|${r.branch_code || ""}|${r.receipt_no}`) && (!fBranch || r.branch_code === fBranch)); }, [rows, recon, fBranch]);
+  const skippedWholesale = useMemo(() => rows.filter(r => (!r.status || r.status === "ปกติ") && isWholesale(r) && (!fBranch || r.branch_code === fBranch)), [rows, fBranch]);
   const skippedBeforeStart = useMemo(() => rows.filter(r => (!r.status || r.status === "ปกติ") && beforePsrStart(r) && (!fBranch || r.branch_code === fBranch)), [rows, fBranch]);
   const reconFiltered = useMemo(() => recon.filter(x => {
     if (fBranch && x.branch !== fBranch) return false;
@@ -255,7 +254,7 @@ export default function PartServiceReceiptReportPage() {
           <div style={{ fontSize: 12.5, color: "#475569", marginBottom: 8, padding: "8px 12px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8 }}>
             เทียบใบเสร็จจากไฟล์ upload (DMS/NIDS) กับใบรับชำระ <b>PSR</b> ที่พนักงานบันทึกในหน้า "รับชำระเงินค่าอะไหล่และบริการ" ช่วงวันที่เดียวกัน · จับคู่ด้วย <b>เลขอ้างอิง</b> (JOB/ใบขาย) → <b>เลขท้าย+ยอด</b> (พิมพ์ prefix ผิด) → <b>วัน+ยอด</b> · ไม่นับใบยกเลิกทั้ง 2 ฝั่ง · ใบ NIDS ที่ลูกค้ามีรายการ<b>ยึดเงินมัดจำ</b>ในระบบ = เคลียร์มัดจำเก่า ไม่นับเป็นผลต่าง
             {psrRows.length === 0 && !loading && <span style={{ color: "#b91c1c", marginLeft: 8 }}>⚠ ยังไม่ได้ข้อมูล PSR ในช่วงนี้ (กด แสดง อีกครั้ง)</span>}
-            {skippedWholesale.length > 0 && <div style={{ marginTop: 4, color: "#6b7280" }}>ℹ ไม่นำมาเทียบ ใบขายส่ง (69WHSL) ที่ไม่มี PSR อ้างอิง {skippedWholesale.length} ใบ ({baht(skippedWholesale.reduce((a, r) => a + num(r.total_amount), 0))})</div>}
+            {skippedWholesale.length > 0 && <div style={{ marginTop: 4, color: "#6b7280" }}>ℹ ไม่นำมาเทียบ ใบขายส่ง (69WHSL) {skippedWholesale.length} ใบ ({baht(skippedWholesale.reduce((a, r) => a + num(r.total_amount), 0))})</div>}
             {skippedBeforeStart.length > 0 && <div style={{ marginTop: 4, color: "#6b7280" }}>ℹ ไม่นำมาเทียบ {skippedBeforeStart.length} ใบ ({baht(skippedBeforeStart.reduce((a, r) => a + num(r.total_amount), 0))}) — ก่อนวันเริ่มรับชำระด้วยระบบ: {Object.entries(PSR_START).map(([k, v]) => `${k.replace("|", " ")} ตั้งแต่ ${thaiDate(v)}`).join(", ")}</div>}
           </div>
           <div style={{ overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 10, background: "#fff", marginBottom: 12 }}>
