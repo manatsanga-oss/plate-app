@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { loadDailyCashSources, buildDailyCashItems, num, fmt, makeAcctResolver } from "../lib/dailyCash";
-import DepositSummarySection from "./DepositSummarySection"; // สรุปยอดเงินมัดจำแยกประเภท (user 2026-11-06)
 
 // สรุปรับชำระเงินทั่วไป (รายเดือน) — Report Admin (user 2026-10-03)
 // แทน pivot ใน Excel "สรุปรับชำระเงินทั่วไป.3.xlsx" แผ่น PRIVOT-สรุปรับชำระเงินทั่วไป ของบัญชี โดยใช้ข้อมูลจากระบบชุดเดียวกับหน้า "สรุปรายวันรับเงิน" (dailyCash.js)
@@ -475,7 +474,6 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
             </div>
           </div>
         </div>)}
-      <DepositSummarySection ym={ym} branchFilter={branch} />
       <div style={{ marginTop: 14, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#78350f" }}>
         <b>ข้อแตกต่างจาก pivot ใน Excel ของบัญชี</b>
         <ul style={{ margin: "6px 0 0 18px", padding: 0, lineHeight: 1.6 }}>
