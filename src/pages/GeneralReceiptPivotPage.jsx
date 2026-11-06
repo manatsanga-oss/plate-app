@@ -57,7 +57,7 @@ function buildFtItems(transfers, taxMap, from, to, vehicleFinSet = new Set()) {
   return out;
 }
 const pad = (n) => String(n).padStart(2, "0");
-const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+const prevMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; }; // ค่าเริ่มต้น = เดือนก่อน (บัญชีปิดงบเดือนที่แล้ว — user 2026-11-04)
 const monthRange = (ym) => { const [y, m] = ym.split("-").map(Number); const last = new Date(y, m, 0).getDate(); return [`${ym}-01`, `${ym}-${pad(last)}`]; };
 const TH_MONTHS = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.", "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."];
 const thMonth = (ym) => { const [y, m] = ym.split("-").map(Number); return `${TH_MONTHS[m - 1]} ${y + 543}`; };
@@ -130,7 +130,7 @@ const cell = { padding: "5px 10px", borderBottom: "1px solid #f1f5f9", fontSize:
 const numCell = { ...cell, textAlign: "right", fontFamily: "monospace", whiteSpace: "nowrap" };
 
 export default function GeneralReceiptPivotPage() {
-  const [ym, setYm] = useState(thisMonth());
+  const [ym, setYm] = useState(prevMonth());
   const [branch, setBranch] = useState("");
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -477,8 +477,8 @@ tr.total td{font-weight:800;border-top:2px solid #111;font-size:14pt} .tb{positi
       <div style={{ marginTop: 14, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px", fontSize: 12.5, color: "#78350f" }}>
         <b>ข้อแตกต่างจาก pivot ใน Excel ของบัญชี</b>
         <ul style={{ margin: "6px 0 0 18px", padding: 0, lineHeight: 1.6 }}>
-          <li>Excel แถว "ขายรถจักรยานยนต์" คือมูลค่าขายตามใบกำกับ (รวมส่วนที่ไฟแนนซ์จ่าย) — รายงานนี้แสดงเฉพาะเงินที่รับหน้าร้านจริง</li>
-          <li>Excel "เงินมัดจำรถ สาขา SCY10" คือยอดไฟแนนซ์โอนเข้าบัญชี ไม่ใช่เงินรับหน้าร้าน — ไม่อยู่ในรายงานนี้ (ดูที่รายงานรับชำระไฟแนนซ์)</li>
+          <li>Excel แถว "ขายรถจักรยานยนต์" คือมูลค่าขายตามใบกำกับของเดือนนั้น — รายงานนี้คือเงินที่รับจริงตามวันที่รับ (หน้าร้าน + ไฟแนนท์โอนตามวันที่โอน + บรรทัดออกแทน) จึงต่างกันเมื่อขาย/ออกใบกำกับคนละเดือนกับที่รับเงิน (ดูชั้น "เดือนใบกำกับ")</li>
+          <li>Excel "เงินมัดจำรถ สาขา SCY10" คือยอดไฟแนนซ์โอนเข้าบัญชี — รายงานนี้อยู่ในกลุ่มขายรถเป็นวิธีรับเงิน "เงินโอนไฟแนนท์ + เลขบัญชี" แยกตามบริษัท/สาขาของคัน ส่วนค่าส่งเสริม/ค่าคอมจากไฟแนนท์อยู่กลุ่มรับชำระอื่นๆ</li>
           <li>มัดจำป้ายแดง 200 ระบบแยกเป็นประเภทของตัวเอง — Excel รวมอยู่ใน "เงินมัดจำทั่วไป" ร่วมกับมัดจำจองรถบางใบของระบบเก่า</li>
           <li>งานทะเบียน (ต่อภาษี+ทะเบียนรถใหม่) / งานพรบ. / งานประกัน แยกตามรายการย่อยในใบรับเรื่องเหมือน Excel (ต้อง import Receipt Entry API เวอร์ชันที่คืนยอดแยก ไม่อย่างนั้นจะแยกตามประเภทใบ)</li>
           <li>E-คูปอง และยอดที่ตัดจากเงินมัดจำแสดงเป็นวิธีรับเงินแยก (Excel ไม่นับ E-คูปอง)</li>

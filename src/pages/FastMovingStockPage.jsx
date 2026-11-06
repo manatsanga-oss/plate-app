@@ -43,6 +43,9 @@ export default function FastMovingStockPage({ currentUser }) {
       }).catch(() => setSubMap({}));
   }, []);
   const subOf = (r) => subMap[padCode(r.part_code)] || null;
+  // รหัสทั้งกลุ่มที่ n8n รวมยอดให้แล้ว (สต๊อก/จ่ายเฉลี่ย/ค้างส่ง/JOB/ให้ยืม/สั่ง-รับล่าสุด) = รหัสเดิม + ref + รหัสทดแทน (part_substitutes 2 ทิศ) — alt_codes จาก fast-moving-stock-api (user 2026-11-06: ขึ้นรหัสทดแทน แต่ตัวเลขใช้รหัสเก่า+ใหม่รวมกัน)
+  const altCodes = (r) => String(r.alt_codes || "").split(",").map(x => x.trim()).filter(Boolean);
+  const codeGroup = (r) => [...new Set([r.part_code, r.ref_code, ...altCodes(r)].map(x => String(x || "").trim()).filter(Boolean))];
   const [filterStockType, setFilterStockType] = useState("all");
   const [filterBackorder, setFilterBackorder] = useState("all");
   const [filterPendingJob, setFilterPendingJob] = useState("all");
@@ -93,12 +96,12 @@ export default function FastMovingStockPage({ currentUser }) {
     loadManualOrders();
   }
 
-  async function openJobDetail(part_code, product_name) {
+  async function openJobDetail(part_code, product_name, item_codes) {
     setJobDetail({ part_code, product_name, loading: true, rows: [] });
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_pending_jobs", item_code: part_code }),
+        body: JSON.stringify({ action: "list_pending_jobs", item_code: part_code, item_codes: item_codes && item_codes.length ? item_codes : [part_code] }),
       });
       const data = await res.json();
       setJobDetail({ part_code, product_name, loading: false, rows: Array.isArray(data) ? data.filter(r => r) : [] });
@@ -107,12 +110,12 @@ export default function FastMovingStockPage({ currentUser }) {
     }
   }
 
-  async function openLoanDetail(part_code, product_name) {
+  async function openLoanDetail(part_code, product_name, item_codes) {
     setLoanDetail({ part_code, product_name, loading: true, rows: [] });
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_part_loans", item_code: part_code }),
+        body: JSON.stringify({ action: "list_part_loans", item_code: part_code, item_codes: item_codes && item_codes.length ? item_codes : [part_code] }),
       });
       const data = await res.json();
       setLoanDetail({ part_code, product_name, loading: false, rows: Array.isArray(data) ? data.filter(r => r) : [] });
@@ -238,7 +241,7 @@ export default function FastMovingStockPage({ currentUser }) {
     }
     if (search) {
       const q = search.toLowerCase();
-      const hit = [r.part_code, r.product_name, r.product_group, subOf(r)?.code]
+      const hit = [r.part_code, r.product_name, r.product_group, subOf(r)?.code, ...altCodes(r)]
         .filter(Boolean).some(v => String(v).toLowerCase().includes(q) || normCode(v).toLowerCase().includes(normCode(q).toLowerCase()));
       if (!hit) return false;
     }
@@ -289,7 +292,7 @@ export default function FastMovingStockPage({ currentUser }) {
       return `<tr>
         <td class="c">${i + 1}</td>
         <td>${r.product_group || "-"}</td>
-        <td>${subOf(r) ? `${fmtSubCode(subOf(r).code)} (ทดแทน ${r.part_code})` : r.part_code}</td>
+        <td>${subOf(r) ? `${fmtSubCode(subOf(r).code)} (ทดแทน ${r.part_code})` : r.part_code}${altCodes(r).length ? `<div style="font-size:9px;color:#0e7490">รวม ${altCodes(r).join(", ")}</div>` : ""}</td>
         <td>${r.product_name || "-"}</td>
         <td class="r">${Number(r.quantity || 0)}</td>
         <td class="r">${s.ppao}</td>
@@ -505,6 +508,11 @@ export default function FastMovingStockPage({ currentUser }) {
                         <div style={{ fontSize: 10.5, color: "#9ca3af" }}>เดิม {r.part_code}</div>
                       </span>
                     ) : r.part_code}
+                    {altCodes(r).length > 0 && (
+                      <div style={{ fontSize: 10, color: "#0e7490" }} title="ตัวเลขสต๊อก/จ่ายเฉลี่ย/ค้างส่ง/JOB/ให้ยืม/วันสั่ง-รับ ในแถวนี้รวมของรหัสเหล่านี้ด้วย (รหัสเดิม + รหัสทดแทน)">
+                        Σ รวม {altCodes(r).join(", ")}
+                      </div>
+                    )}
                   </td>
                   <td style={{ ...td, whiteSpace: "normal", maxWidth: 240 }}>{r.product_name || "-"}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: qty <= 0 ? "#ef4444" : "#065f46" }}>{fmtQty(qty)}</td>
@@ -514,7 +522,7 @@ export default function FastMovingStockPage({ currentUser }) {
                   <td style={{ ...td, textAlign: "right" }}>{s.nakhonluang}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.loan_qty || 0) > 0 ? "#ea580c" : undefined, fontWeight: Number(r.loan_qty || 0) > 0 ? 700 : undefined }}>
                     {Number(r.loan_qty || 0) > 0 ? (
-                      <span onClick={() => openLoanDetail(r.part_code, r.product_name)}
+                      <span onClick={() => openLoanDetail(r.part_code, r.product_name, codeGroup(r))}
                         style={{ cursor: "pointer", textDecoration: "underline" }}
                         title="คลิกดูเลขที่ใบให้ยืม">{fmtQty(r.loan_qty)}</span>
                     ) : ""}
@@ -545,7 +553,7 @@ export default function FastMovingStockPage({ currentUser }) {
                   <td style={td}>{r.expected_date ? new Date(r.expected_date).toLocaleDateString("th-TH") : ""}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.pending_job_qty || 0) > 0 ? "#7c3aed" : undefined, fontWeight: Number(r.pending_job_qty || 0) > 0 ? 700 : undefined }}>
                     {Number(r.pending_job_qty || 0) > 0 ? (
-                      <span onClick={() => openJobDetail(r.part_code, r.product_name)}
+                      <span onClick={() => openJobDetail(r.part_code, r.product_name, codeGroup(r))}
                         style={{ cursor: "pointer", textDecoration: "underline" }}
                         title="คลิกดูรายละเอียด JOB">{fmtQty(r.pending_job_qty)}</span>
                     ) : ""}
@@ -647,7 +655,7 @@ export default function FastMovingStockPage({ currentUser }) {
                       <td style={{ padding: 7 }}>{r.open_date ? new Date(r.open_date).toLocaleDateString("th-TH") : "-"}</td>
                       <td style={{ padding: 7 }}>{r.customer_name || "-"}</td>
                       <td style={{ padding: 7 }}>{r.issue_date ? new Date(r.issue_date).toLocaleDateString("th-TH") : "-"}</td>
-                      <td style={{ padding: 7 }}>{r.part_name || "-"}</td>
+                      <td style={{ padding: 7 }}>{r.part_name || "-"}{r.part_code && normCode(r.part_code) !== normCode(jobDetail.part_code) ? <div style={{ fontSize: 10, color: "#0e7490", fontFamily: "monospace" }}>{r.part_code}</div> : null}</td>
                       <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: "#7c3aed" }}>{Number(r.qty || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>
                       <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.unit_price || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.total_price || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -701,7 +709,7 @@ export default function FastMovingStockPage({ currentUser }) {
                       <td style={{ padding: 7, fontFamily: "monospace", fontWeight: 600, color: "#0369a1" }}>{r.loan_no || "-"}</td>
                       <td style={{ padding: 7 }}>{r.loan_date ? new Date(r.loan_date).toLocaleDateString("th-TH") : "-"}</td>
                       <td style={{ padding: 7 }}>{r.borrower || "-"}</td>
-                      <td style={{ padding: 7 }}>{r.part_name || "-"}</td>
+                      <td style={{ padding: 7 }}>{r.part_name || "-"}{r.part_code && normCode(r.part_code) !== normCode(loanDetail.part_code) ? <div style={{ fontSize: 10, color: "#0e7490", fontFamily: "monospace" }}>{r.part_code}</div> : null}</td>
                       <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace", fontWeight: 600, color: "#ea580c" }}>{Number(r.qty || 0).toLocaleString("th-TH", { minimumFractionDigits: 0, maximumFractionDigits: 2 })}</td>
                       <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.unit_cost || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                       <td style={{ padding: 7, textAlign: "right", fontFamily: "monospace" }}>{Number(r.total_amount || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
