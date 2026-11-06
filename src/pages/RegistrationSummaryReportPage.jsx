@@ -47,6 +47,22 @@ export default function RegistrationSummaryReportPage() {
       .catch(() => setUsedByChassis({}));
   }, []);
   const usedOf = (r) => usedByChassis[String(r?.chassis_no || "").trim().toUpperCase()] || null;
+  // ขายส่ง (ขายให้ดีลเลอร์/ผู้ค้า sale_invoice_type = "ขายส่ง" จาก list_car_payment_receipts ชุดเดียวกับรายงานใบกำกับ) — ไม่คิดค่าจดทะเบียน/ค่าดำเนินการตามระบบ (user 2026-11-06 "ขายส่ง ขายรถมือสอง ไม่ต้องขึ้นประมาณการจดทะเบียนรถใหม่")
+  const [wholesaleSet, setWholesaleSet] = useState(() => new Set());
+  useEffect(() => {
+    if (!invoiceMonth) return;
+    const [y, m] = invoiceMonth.split("-").map(Number);
+    const pad2 = (n) => String(n).padStart(2, "0");
+    const fromD = new Date(y, m - 4, 1), toD = new Date(y, m + 1, 0); // ใบขายอาจเกิดก่อนใบกำกับหลายเดือน
+    const iso = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    fetch("https://n8n-new-project-gwf2.onrender.com/webhook/accounting-report-api", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "list_car_payment_receipts", date_from: iso(fromD), date_to: iso(toD) }) })
+      .then(r => r.json()).then(d => { const arr = Array.isArray(d) ? d : (d?.rows || []); const st = new Set();
+        arr.forEach(x => { if (String(x?.sale_invoice_type || "").trim() === "ขายส่ง") { if (x.sale_invoice_no) st.add(String(x.sale_invoice_no).trim().toUpperCase()); if (x.tax_invoice_no) st.add("TI:" + String(x.tax_invoice_no).trim().toUpperCase()); } });
+        setWholesaleSet(st); })
+      .catch(() => {});
+  }, [invoiceMonth]);
+  const isWholesale = (r) => wholesaleSet.has(String(r?.sale_invoice_no || "").trim().toUpperCase()) || wholesaleSet.has("TI:" + String(r?.tax_invoice_no || "").trim().toUpperCase());
+  const noSysFee = (r) => !!usedOf(r) || isWholesale(r); // ไม่ประมาณการค่าจดทะเบียนรถใหม่
   const [loading, setLoading] = useState(false);
   const [invoiceMonth, setInvoiceMonth] = useState(() => new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [branchFilter, setBranchFilter] = useState("all"); // สังกัด (บริษัทผู้ออกใบกำกับ PAPAO/NAKORNLUANG/SINGCHAI)
@@ -113,8 +129,8 @@ export default function RegistrationSummaryReportPage() {
   // ถ้าค่าจาก DB ว่าง ใช้ค่าที่กรอกเอง (manualFees) แทน — สำหรับแสดง/พิมพ์เท่านั้น
   const rowKey = (r) => `${r.branch}|${r.tax_invoice_no}`;
   // ลำดับ: ยอดจริงจากงานจดทะเบียน/วางบิล → ยอดที่กรอกเอง → ยอด "ตามระบบ" (กฎค่าใช้จ่ายการขาย สมมติจดอยุธยา — sys_reg_fee_* จาก n8n) (user 2026-11-05: ขึ้นตามระบบก่อน จดจริงแล้วค่อยขึ้นยอดจริง + หมายเหตุถ้าไม่ตรง)
-  const sysOp = (r) => (usedOf(r) ? 0 : Number(r.sys_reg_fee_operation || 0));
-  const sysRc = (r) => (usedOf(r) ? 0 : Number(r.sys_reg_fee_receipt || 0));
+  const sysOp = (r) => (noSysFee(r) ? 0 : Number(r.sys_reg_fee_operation || 0));
+  const sysRc = (r) => (noSysFee(r) ? 0 : Number(r.sys_reg_fee_receipt || 0));
   const nameOf = (r) => r.sale_customer_name || r.customer_name || usedOf(r)?.sold_customer || "";
   const hasActualOp = (r) => Number(r.reg_fee_operation || 0) !== 0;
   const hasActualRc = (r) => Number(r.reg_fee_receipt || 0) > 0;
@@ -193,7 +209,7 @@ export default function RegistrationSummaryReportPage() {
         <td class="c">${esc(BRANCH_LABEL[r.branch]?.label || r.branch || "-")}</td>
         <td class="m">${esc(r.tax_invoice_no || "-")}</td>
         <td class="c">${esc(fmtDate(r.invoice_date))}</td>
-        <td>${esc(nameOf(r) || "-")}${usedOf(r) ? `<div class="sub">รถมือสอง ${esc(usedOf(r).doc_no)}</div>` : ""}${r.sale_finance_company ? `<div class="sub">${esc(r.sale_finance_company)}</div>` : ""}</td>
+        <td>${esc(nameOf(r) || "-")}${usedOf(r) ? `<div class="sub">รถมือสอง ${esc(usedOf(r).doc_no)}</div>` : isWholesale(r) ? `<div class="sub">ขายส่ง</div>` : ""}${r.sale_finance_company ? `<div class="sub">${esc(r.sale_finance_company)}</div>` : ""}</td>
         <td class="m">${esc(r.chassis_no || "-")}</td>
         <td class="m">${esc(r.engine_no || "-")}</td>
         <td>${esc(r.model_name || "-")}</td>
@@ -397,7 +413,7 @@ export default function RegistrationSummaryReportPage() {
                     <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, color: "#072d6b" }}>{r.tax_invoice_no || "-"}</td>
                     <td style={td}>{fmtDate(r.invoice_date)}</td>
                     <td style={td}>
-                      <div style={{ fontWeight: 600 }}>{nameOf(r) || "-"}{usedOf(r) && <span title={`ขายรถมือสอง ${usedOf(r).doc_no} ทะเบียน ${usedOf(r).license_plate || "-"} ไม่คิดค่าจดทะเบียนตามระบบ`} style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 4, background: "#fef3c7", color: "#92400e", fontSize: 10.5, fontWeight: 700 }}>รถมือสอง {usedOf(r).doc_no}</span>}</div>
+                      <div style={{ fontWeight: 600 }}>{nameOf(r) || "-"}{usedOf(r) && <span title={`ขายรถมือสอง ${usedOf(r).doc_no} ทะเบียน ${usedOf(r).license_plate || "-"} ไม่คิดค่าจดทะเบียนตามระบบ`} style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 4, background: "#fef3c7", color: "#92400e", fontSize: 10.5, fontWeight: 700 }}>รถมือสอง {usedOf(r).doc_no}</span>}{!usedOf(r) && isWholesale(r) && <span title="ขายส่ง (ขายให้ดีลเลอร์/ผู้ค้า) ไม่คิดค่าจดทะเบียนตามระบบ" style={{ marginLeft: 6, padding: "1px 6px", borderRadius: 4, background: "#e0e7ff", color: "#3730a3", fontSize: 10.5, fontWeight: 700 }}>ขายส่ง</span>}</div>
                       {r.sale_finance_company && (
                         <div style={{ fontSize: 11, color: "#6b7280" }}>📋 {r.sale_finance_company}</div>
                       )}
