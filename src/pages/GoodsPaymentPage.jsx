@@ -3,6 +3,9 @@ import React, { useState, useEffect, useMemo } from "react";
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/goods-payment-api";
 const ACCOUNTING_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const FINANCE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/finance-api";
+// วันเริ่มใช้เมนูชำระค่ารถ/อะไหล่ (ใบ GP ใบแรก 04–05/05/2569) — ใบกำกับก่อนวันนี้จ่ายจริงไปแล้วแต่ไม่มีใบ GP ในระบบ จึงซ่อนจากรายการค้างชำระ (user 2026-11-06) ติ๊กแสดงได้
+const GP_START = "2026-05-01";
+const beforeStart = (r) => { const d = String(r.invoice_date || "").slice(0, 10); return !!d && d < GP_START; };
 
 function fmtMoney(v) {
   const n = Number(v) || 0;
@@ -110,7 +113,10 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
     return brandTab === "YAMAHA" ? "vehicle_purchase_receipts_singchai" : "vehicle_purchase_receipts_papao";
   };
 
-  const unpaidInvoices = useMemo(() => invoices.filter(r => r.payment_status !== "paid"), [invoices]);
+  const [showOld, setShowOld] = useState(false);
+  const unpaidAll = useMemo(() => invoices.filter(r => r.payment_status !== "paid"), [invoices]);
+  const oldUnpaid = useMemo(() => unpaidAll.filter(beforeStart), [unpaidAll]);
+  const unpaidInvoices = useMemo(() => showOld ? unpaidAll : unpaidAll.filter(r => !beforeStart(r)), [unpaidAll, showOld]);
 
   function toggleSelect(id) {
     const ns = new Set(selectedIds);
@@ -344,6 +350,13 @@ export default function GoodsPaymentPage({ currentUser } = {}) {
                   </button>
                 ))}
                 <div style={{ flex: 1 }} />
+                {oldUnpaid.length > 0 && (
+                  <label style={{ fontSize: 12, color: "#6b7280", display: "flex", alignItems: "center", gap: 5, marginRight: 10, cursor: "pointer" }}
+                    title="ใบกำกับก่อนเริ่มใช้เมนูนี้ จ่ายจริงไปแล้วแต่ไม่มีใบ GP ในระบบ">
+                    <input type="checkbox" checked={showOld} onChange={e => { setShowOld(e.target.checked); setSelectedIds(new Set()); }} />
+                    แสดงใบก่อน 1 พ.ค. 69 ({oldUnpaid.length} ใบ · {fmtMoney(oldUnpaid.reduce((s, r) => s + (Number(r.amount) || 0), 0))})
+                  </label>
+                )}
                 <button onClick={openPayForm} disabled={!selectedIds.size}
                   style={{ padding: "8px 22px", background: selectedIds.size ? "#059669" : "#9ca3af",
                     color: "#fff", border: "none", borderRadius: 8, fontWeight: 700,
