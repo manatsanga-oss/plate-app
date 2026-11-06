@@ -58,29 +58,55 @@ const INTERCO_CODE = "11451";
 // ป.เปา = HONDA · สิงห์ชัย = YAMAHA · ยกมา = มูลค่าระบบ ณ สิ้นเดือนก่อน · งวด = ผลต่างสุทธิ (เพิ่ม = เดบิต / ลด = เครดิต) แบบเดียวกับ JV ปรับยอดสิ้นเดือนของ Flow
 // ⚠️ Flow ก.ย.69 ยกมา 15,054,600 / คงเหลือ 16,968,900 (สิงห์ชัย) ต่างจากระบบ 79,000 / 1,768,200 — รอสำนักงานบัญชีเทียบรายคันจากไฟล์ "สต๊อกรถใหม่ YAMAHA ณ 30-09-2569 (ระบบ).xlsx"
 const STOCK_API = "https://n8n-new-project-gwf2.onrender.com/webhook/stock-turnover-api";
-// ---- เงินมัดจำ 11921 (user 2026-11-06 "เพิ่มเงินมัดจำคงเหลือ ไม่ต้องแยก") ----
-// Flow ใช้บัญชี 11921 "เงินมัดจำ" พักเงินโอนจากบริษัทไฟแนนท์ที่รับเข้าบัญชี (JV "บันทึกเงินมัดจำ เงินโอนบัญชี …" เดบิต) แล้วตัดออก (เครดิต) เมื่อจับคู่ใบกำกับ/ใบขาย
-//   ระบบ = finance_transfers (accounting-api list_finance_transfers): เดบิต = ยอดโอนตาม transfer_date ในงวด · เครดิต = ยอดที่จับคู่แล้วตาม matched_at ในงวด
-//   ยกมา/คงค้าง = เงินโอนที่ยังไม่จับคู่ ณ วันนั้น (transfer_date ≤ วัน และ matched_at ว่าง/หลังวันนั้น) · สังกัดตามบัญชีที่รับโอน
-//   ⚠️ Flow ก.ย.69 เดบิต 10,583,269 / เครดิต 10,559,301 / คงเหลือ 2,806,944.69 ต่างจากระบบ (ระบบ สิงห์ชัย รับ 10,926,618.89 คงค้าง 1,338,100) เพราะ Flow ตัดตามวันออกใบกำกับ ระบบตัดตามวันที่ Finance กดจับคู่
+// ---- เงินมัดจำ 11921 — เงินมัดจำรับจากลูกค้า ตามระบบ (user 2026-11-06 "เพิ่มเงินมัดจำคงเหลือ ไม่ต้องแยก · เอาจากระบบ ไม่ต้องดูยอดจาก Flow") ----
+// รวม 3 ประเภทเป็นบรรทัดเดียวต่อสังกัด: มัดจำจองรถ (booking-deposit-api) + มัดจำป้ายแดง (retail-sale-api) + มัดจำอะไหล่ บริการ/สั่งซื้อ (part-deposit-api)
+//   เป็นหนี้สิน (เงินรับล่วงหน้า): เครดิต = รับใหม่ในงวด · เดบิต = ตัดใช้ชำระ + คืนเงิน ในงวด · ยกมา/คงค้าง = ยอดที่ยังไม่ตัด/ไม่คืน ณ วันนั้น (แสดงฝั่งเครดิต)
+//   ตัดใช้จองรถ = ใบขาย NEW ที่อ้างใบมัดจำ DEP- ตามวันที่ขาย · ตัดใช้อะไหล่ = มัดจำ − คงเหลือ − คืน ลงวันที่ปรับปรุงใบล่าสุด (ระบบไม่เก็บวันตัด) · ใบยกเลิกไม่นับ
+//   สังกัดตามรหัสสาขาของใบ: SCY05/SCY06 = ป.เปา · SCY01/SCY04/SCY07/SCY10 = สิงห์ชัย
 const FT_DEPOSIT_CODE = "11921";
-async function loadFinanceTransfers() {
-  const d = await post({ action: "list_finance_transfers", match_status: "" });
-  return d.filter(x => x && x.ft_id && x.status !== "cancelled");
+const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api";
+const companyOfBranch = (b) => { const m = String(b || "").toUpperCase().match(/SCY\d\d/); const c = m ? m[0] : ""; return ["SCY05", "SCY06"].includes(c) ? "ป.เปา" : ["SCY01", "SCY04", "SCY07", "SCY10"].includes(c) ? "สิงห์ชัย" : "อื่น ๆ"; };
+async function postAny(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const t = (await res.text()).trim(); if (!t) return [];
+  let d; try { d = JSON.parse(t); } catch { return []; }
+  if (!Array.isArray(d)) d = d?.rows || d?.data || [d];
+  if (d[0] && typeof d[0].listjson === "string") { try { d = JSON.parse(d[0].listjson); } catch { d = []; } }
+  return Array.isArray(d) ? d.filter(Boolean) : [];
 }
-function ftDepositRow(c, list, from, to, prev) {
-  const mine = list.filter(x => companyOf({ account_name: x.account_name }) === c);
-  const d10 = (v) => String(v || "").slice(0, 10);
-  const amt = (x) => Number(x.amount || 0);
-  const openAt = (day) => r2(mine.filter(x => d10(x.transfer_date) <= day && (!x.matched_at || d10(x.matched_at) > day)).reduce((t, x) => t + amt(x), 0));
-  const dr = r2(mine.filter(x => d10(x.transfer_date) >= from && d10(x.transfer_date) <= to).reduce((t, x) => t + amt(x), 0));
-  const cr = r2(mine.filter(x => x.matched_at && d10(x.matched_at) >= from && d10(x.matched_at) <= to).reduce((t, x) => t + amt(x), 0));
-  const opening = openAt(prev), closing = openAt(to);
-  const nOpen = mine.filter(x => d10(x.transfer_date) <= to && (!x.matched_at || d10(x.matched_at) > to)).length;
-  return { account_id: "ftdep-" + c, kind: "ftdeposit", company: c, code: FT_DEPOSIT_CODE, bank_name: "เงินมัดจำ", account_no: "",
-    account_name: `เงินโอนไฟแนนท์รอตัดรับ · รับ ${mine.filter(x => d10(x.transfer_date) >= from && d10(x.transfer_date) <= to).length} ใบ · จับคู่ ${mine.filter(x => x.matched_at && d10(x.matched_at) >= from && d10(x.matched_at) <= to).length} ใบ · ค้างปลายงวด ${nOpen} ใบ`,
-    account_type: "เดบิต = วันที่โอน · เครดิต = วันที่จับคู่ใบขาย/ใบกำกับ (ระบบ)", flowOpening: null, opening, dr, cr, closing, count: mine.length };
+async function loadCustomerDeposits(to) {
+  const [booking, sales, redPlate, parts] = await Promise.all([
+    postAny("https://n8n-new-project-gwf2.onrender.com/webhook/booking-deposit-api", { action: "get_deposits", keyword: "", status: "all" }),
+    postAny(RETAIL_API, { action: "list_retail_sales", date_from: "2026-01-01", date_to: to, limit: 5000 }),
+    postAny(RETAIL_API, { action: "list_red_plate_deposits", status: "all" }),
+    postAny("https://n8n-new-project-gwf2.onrender.com/webhook/part-deposit-api", { action: "list_deposits", limit: 5000 }),
+  ]);
+  return { booking, sales, redPlate, parts };
 }
+// events = [[date, amount, company]] → {before, inPeriod, upTo}
+function sumEvents(events, c, from, to) {
+  const o = { before: 0, inPeriod: 0, upTo: 0 };
+  events.forEach(([d, a, cc]) => { if (!d || cc !== c) return; const v = Number(a || 0); if (d < from) o.before += v; if (d >= from && d <= to) o.inPeriod += v; if (d <= to) o.upTo += v; });
+  return o;
+}
+function customerDepositRow(c, src, from, to) {
+  const d10 = (v) => String(v || "").slice(0, 10); const n = (v) => Number(v || 0);
+  const recv = [], used = [], ref = [];
+  src.booking.filter(x => x && x.deposit_no).forEach(x => { const cc = companyOfBranch(x.branch_code); recv.push([d10(x.deposit_date), x.deposit_amount, cc]); if (x.status === "refunded" || n(x.refund_amount) > 0) ref.push([d10(x.refunded_at || x.updated_at), n(x.refund_amount) || n(x.deposit_amount), cc]); });
+  src.sales.filter(x => x && x.bd_deposit_no && x.sale_status !== "cancelled" && n(x.booking_deposit) > 0).forEach(x => used.push([d10(x.sale_date), x.booking_deposit, companyOfBranch(x.branch_code)]));
+  src.redPlate.filter(x => x && x.deposit_no && x.status !== "cancelled").forEach(x => { const cc = companyOfBranch(x.branch_code); recv.push([d10(x.received_date), x.amount, cc]); if (x.status === "refunded" || n(x.refund_amount) > 0) ref.push([d10(x.refund_date || x.updated_at), n(x.refund_amount) || n(x.amount), cc]); });
+  src.parts.filter(x => x && x.deposit_doc_no && x.status !== "cancelled" && !x.cancelled_at).forEach(x => { const cc = companyOfBranch(x.branch_code); recv.push([d10(x.deposit_date), x.deposit_amount, cc]);
+    if (n(x.refunded_amount) > 0) ref.push([d10(x.refunded_at || x.updated_at), x.refunded_amount, cc]);
+    const u = Math.max(n(x.deposit_amount) - n(x.remaining_amount) - n(x.refunded_amount), 0); if (u > 0.004) used.push([d10(x.updated_at || x.deposit_date), u, cc]); });
+  const R = sumEvents(recv, c, from, to), U = sumEvents(used, c, from, to), F = sumEvents(ref, c, from, to);
+  const bal = (k) => r2(R[k] - U[k] - F[k]);
+  const cnt = (ev) => ev.filter(([d, , cc]) => cc === c && d >= from && d <= to).length;
+  return { account_id: "custdep-" + c, kind: "ftdeposit", company: c, code: FT_DEPOSIT_CODE, bank_name: "เงินมัดจำรับจากลูกค้า", account_no: "",
+    account_name: `จองรถ + ป้ายแดง + อะไหล่ · รับ ${cnt(recv)} ใบ ${fmt(R.inPeriod)} · ตัดใช้ ${cnt(used)} ใบ ${fmt(U.inPeriod)} · คืน ${cnt(ref)} ใบ ${fmt(F.inPeriod)}`,
+    account_type: "หนี้สิน (ยอดคงค้างฝั่งเครดิต) · ตามเอกสารมัดจำในระบบ", flowOpening: null,
+    opening: -bal("before"), dr: r2(U.inPeriod + F.inPeriod), cr: r2(R.inPeriod), closing: -bal("upTo"), count: cnt(recv) + cnt(used) + cnt(ref) };
+}
+
 const INVENTORY_CODE = "11513";
 const BRAND_OF_COMPANY = { "ป.เปา": "HONDA", "สิงห์ชัย": "YAMAHA" };
 async function stockValueAt(brand, asOf) {
@@ -253,7 +279,7 @@ export default function TrialBalancePage() {
       // ---- เงินมัดจำ 11921 (เงินโอนไฟแนนท์รอตัดรับ) ต่อสังกัด ----
       setProgress("เงินมัดจำ…");
       let ftdep = [];
-      try { const ftList = await loadFinanceTransfers(); ftdep = COMPANIES.filter(c => !company || c === company).map(c => ftDepositRow(c, ftList, from, to, prev)); } catch { ftdep = []; }
+      try { const src = await loadCustomerDeposits(to); ftdep = COMPANIES.filter(c => !company || c === company).map(c => customerDepositRow(c, src, from, to)); } catch { ftdep = []; }
       const all = [...out, ...petty, ...interco, ...inventory, ...ftdep];
       all.sort((x, y) => COMPANIES.indexOf(x.company) - COMPANIES.indexOf(y.company) || (x.code || "zz").localeCompare(y.code || "zz") || String(x.account_no).localeCompare(String(y.account_no)));
       setRows(all); setLoadedYm(ym); setLoadedCompany(company);
@@ -357,7 +383,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
                   <React.Fragment key={g}>
                     <tr><td colSpan={8} style={{ ...td, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>▾ สินทรัพย์ · {COMPANY_FULL[g] || g} · {list.filter(r => !r.kind).length} บัญชีธนาคาร{list.some(r => r.kind === "petty") ? " + เงินสดย่อย" : ""}{list.some(r => r.kind === "interco") ? " + เงินกู้ยืมระหว่างบริษัท" : ""}{list.some(r => r.kind === "inventory") ? " + สินค้าคงเหลือรถ" : ""}{list.some(r => r.kind === "ftdeposit") ? " + เงินมัดจำ" : ""}</td></tr>
                     {list.map(r => { const [a, b] = drcr(r.opening); const [c, d] = drcr(r.closing); return (
-                      <tr key={r.account_id} style={r.kind === "petty" ? { background: "#fffbeb" } : r.kind === "interco" ? { background: "#f0f9ff" } : r.kind === "inventory" ? { background: "#f0fdf4" } : r.kind === "ftdeposit" ? { background: "#fdf4ff" } : undefined} title={r.kind === "ftdeposit" ? `เงินโอนจากบริษัทไฟแนนท์ที่รับเข้าบัญชีแล้วยังไม่ตัดกับใบขาย/ใบกำกับ (เดบิต = วันที่โอน, เครดิต = วันที่จับคู่) — Flow ใช้บัญชี 11921 พักยอดนี้` : r.kind === "inventory" ? `สต๊อกรถใหม่ในระบบ ณ สิ้นงวด × ต้นทุนใบกำกับซื้อ ÷ 1.07 · ยกมา = มูลค่า ณ สิ้นเดือนก่อน · งวด = ผลต่างสุทธิ (เพิ่ม=เดบิต ลด=เครดิต)` : r.kind === "interco" ? `ยกมา = Flow 31/08/69 · โอนข้ามสังกัด (BTR) + ขายส่งตัดบัญชีกู้ยืม · ไม่รวมเงินสดสาขาฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow` : r.kind === "petty" ? `เงินสดย่อยรวมทุกสาขา ${r.count} เอกสาร · ยกมา = วงเงินตาม Flow 31/08/69 · เดบิต (เติมเงิน) ถือว่าเท่ากับที่เบิก (ระบบไม่มีบันทึกเติมเงิน)` : `รายการในงวด ${r.count} รายการ · ${r.flowOpening !== null ? `ยกมาอิงยอด Flow 31/08/69 = ${fmt(r.flowOpening)} + รายการตั้งแต่ 01/09/69` : `ยกมา = ยอดตั้งต้นบัญชี ${fmt(r.opening_balance)} (${r.opening_date ? String(r.opening_date).slice(0, 10) : "-"}) + รายการสะสมทั้งหมด (ยังไม่มียอด Flow 31/08)`}`}>
+                      <tr key={r.account_id} style={r.kind === "petty" ? { background: "#fffbeb" } : r.kind === "interco" ? { background: "#f0f9ff" } : r.kind === "inventory" ? { background: "#f0fdf4" } : r.kind === "ftdeposit" ? { background: "#fdf4ff" } : undefined} title={r.kind === "ftdeposit" ? `เงินมัดจำรับจากลูกค้าตามเอกสารในระบบ (จองรถ DEP- / ป้ายแดง RPD- / อะไหล่ PDS- PDO-) · เครดิต = รับใหม่ · เดบิต = ตัดใช้ชำระ + คืนเงิน · คงค้าง = ยังไม่ตัด/ไม่คืน` : r.kind === "inventory" ? `สต๊อกรถใหม่ในระบบ ณ สิ้นงวด × ต้นทุนใบกำกับซื้อ ÷ 1.07 · ยกมา = มูลค่า ณ สิ้นเดือนก่อน · งวด = ผลต่างสุทธิ (เพิ่ม=เดบิต ลด=เครดิต)` : r.kind === "interco" ? `ยกมา = Flow 31/08/69 · โอนข้ามสังกัด (BTR) + ขายส่งตัดบัญชีกู้ยืม · ไม่รวมเงินสดสาขาฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow` : r.kind === "petty" ? `เงินสดย่อยรวมทุกสาขา ${r.count} เอกสาร · ยกมา = วงเงินตาม Flow 31/08/69 · เดบิต (เติมเงิน) ถือว่าเท่ากับที่เบิก (ระบบไม่มีบันทึกเติมเงิน)` : `รายการในงวด ${r.count} รายการ · ${r.flowOpening !== null ? `ยกมาอิงยอด Flow 31/08/69 = ${fmt(r.flowOpening)} + รายการตั้งแต่ 01/09/69` : `ยกมา = ยอดตั้งต้นบัญชี ${fmt(r.opening_balance)} (${r.opening_date ? String(r.opening_date).slice(0, 10) : "-"}) + รายการสะสมทั้งหมด (ยังไม่มียอด Flow 31/08)`}`}>
                         <td style={{ ...td, fontFamily: "monospace", color: r.code ? "#0369a1" : "#9ca3af", fontWeight: 600 }}>{r.code || "—"}{r.flowOpening === null && r.kind !== "inventory" && r.kind !== "ftdeposit" && <span title="ยังไม่มียอดยกมาจาก Flow 31/08/69 — ใช้ยอดตั้งต้นบัญชีในระบบ" style={{ marginLeft: 4, color: "#f59e0b" }}>*</span>}</td>
                         <td style={td}><div style={{ fontWeight: 600 }}>{r.bank_name} <span style={{ fontFamily: "monospace" }}>{r.account_no}</span></div><div style={{ fontSize: 11, color: "#64748b" }}>{r.account_name}{r.account_type ? ` · ${r.account_type}` : ""}</div></td>
                         <td style={num}>{cellNum(a)}</td><td style={{ ...num, color: "#0891b2" }}>{cellNum(b)}</td>
@@ -380,7 +406,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
           </table>
         </div>
         <div style={{ fontSize: 11.5, color: "#64748b", padding: "10px 0 6px", lineHeight: 1.6 }}>
-          ยอดยกมา = ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ) · ยอดประจำงวดจากรายงานการเคลื่อนไหว · เงินสดย่อย (11149.00) รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่ ระบบไม่มีบันทึกเติมเงิน) · เงินให้กู้ยืมระหว่างบริษัท (11451) = โอนเงินข้ามสังกัด + ขายส่งอะไหล่ที่ตัดผ่านบัญชีกู้ยืม (ยกมา Flow 31/08) ยังไม่รวมเงินสดสาขาที่ฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow · สินค้าคงเหลือรถ (11513) = สต๊อกรถใหม่ในระบบ ณ สิ้นงวด (รับรถ − ขาย) × ต้นทุนใบกำกับซื้อ ÷ 1.07 ยกมา = มูลค่า ณ สิ้นเดือนก่อน งวด = ผลต่างสุทธิ · เงินมัดจำ (11921) = เงินโอนไฟแนนท์ที่รับแล้วยังไม่ตัดกับใบขาย/ใบกำกับ (เดบิตตามวันโอน เครดิตตามวันจับคู่ในระบบ) · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
+          ยอดยกมา = ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ) · ยอดประจำงวดจากรายงานการเคลื่อนไหว · เงินสดย่อย (11149.00) รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่ ระบบไม่มีบันทึกเติมเงิน) · เงินให้กู้ยืมระหว่างบริษัท (11451) = โอนเงินข้ามสังกัด + ขายส่งอะไหล่ที่ตัดผ่านบัญชีกู้ยืม (ยกมา Flow 31/08) ยังไม่รวมเงินสดสาขาที่ฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow · สินค้าคงเหลือรถ (11513) = สต๊อกรถใหม่ในระบบ ณ สิ้นงวด (รับรถ − ขาย) × ต้นทุนใบกำกับซื้อ ÷ 1.07 ยกมา = มูลค่า ณ สิ้นเดือนก่อน งวด = ผลต่างสุทธิ · เงินมัดจำ (11921) = เงินมัดจำรับจากลูกค้าตามเอกสารในระบบ รวมจองรถ/ป้ายแดง/อะไหล่ (เครดิต = รับใหม่, เดบิต = ตัดใช้ + คืน, คงค้างฝั่งเครดิต) ไม่ได้อิงยอด Flow · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
         </div>
       </div>
     </div>
