@@ -2,7 +2,9 @@ import React, { useEffect, useMemo, useState } from "react";
 
 // บันทึกรับชำระเงินขายส่งอะไหล่ (Finance — user 2026-09-17)
 // เลือกใบขายส่ง HONDA (honda_part_sales เลขใบขาย 69WHSL/…) ที่ค้างชำระ ได้หลายใบต่อการรับ 1 ครั้ง → ออกใบรับชำระ WSR-YYMM-NNNN
-// ⚠️ รับได้เฉพาะ "เงินโอน" ห้ามรับเงินสด (บังคับทั้งหน้านี้และ workflow) · เงินเข้ารายงานเคลื่อนไหวบัญชีผ่าน CTE whsl_movements (Accounting API)
+// ⚠️ ห้ามรับเงินสด (บังคับทั้งหน้านี้และ workflow) · เงินเข้ารายงานเคลื่อนไหวบัญชีผ่าน CTE whsl_movements (Accounting API)
+// วิธีรับชำระ (2026-11-06): เงินโอน (เลือกบัญชีธนาคาร) · หักบัญชีกู้ยืมระหว่างบริษัท (ขายส่งให้ หจก.สิงห์ชัย — ไม่มีเงินโอนจริง Flow ตัดผ่านบัญชี 11451 → ระบบลงบัญชีเสมือน
+//   ประเภท "กู้ยืมระหว่างบริษัท" ในเมนูบัญชีธนาคาร ให้ขึ้นรายงานเคลื่อนไหวของบัญชีนั้น) · ส่วนลดเงินสด (ปิดเศษที่ลูกค้าโอนขาด เช่น 118.87 ของ 69WHSL/0000013 ไม่มีเงินเข้า)
 // backend: part-wholesale-payment-api — list_outstanding / save_payment / list_payments / cancel_payment
 const API = "https://n8n-new-project-gwf2.onrender.com/webhook/part-wholesale-payment-api";
 const ACC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
@@ -21,25 +23,32 @@ const firstOfMonth = () => { const d = new Date(); return `${d.getFullYear()}-${
 const thaiDate = (iso) => { if (!iso) return "-"; const s = String(iso).slice(0, 10); const [y, m, d] = s.split("-"); return y && m && d ? `${d}/${m}/${Number(y) + 543}` : s; };
 const unwrapList = (d) => { try { return typeof d?.listjson === "string" ? JSON.parse(d.listjson) : Array.isArray(d?.listjson) ? d.listjson : Array.isArray(d) ? d : []; } catch { return []; } };
 const docKey = (r) => `${r.sale_branch || ""}|${r.sale_doc_no}`;
-const bankLabelOf = (a) => [a.bank_name, a.account_no, a.account_name].filter(Boolean).join(" · ");
+const bankLabelOf = (a) => [a.bank_name, a.account_no, a.account_name].filter((v) => v && v !== "-").join(" · ");
+const INTERCO_TYPE = "กู้ยืมระหว่างบริษัท"; // account_type ของบัญชีเสมือนเงินให้กู้ยืมระหว่างบริษัท (เมนูบัญชีธนาคาร)
+const METHODS = [
+  { k: "เงินโอน", label: "🏦 เงินโอน", hint: "เลือกบัญชีธนาคารที่รับโอน" },
+  { k: "หักบัญชีกู้ยืมระหว่างบริษัท", label: "🔁 หักบัญชีกู้ยืมระหว่างบริษัท", hint: "ขายส่งให้สิงห์ชัย ตัดผ่านบัญชีเสมือนเงินให้กู้ยืมระหว่างบริษัท (ตรงกับ Flow 11451)" },
+  { k: "ส่วนลดเงินสด", label: "🏷 ส่วนลดเงินสด (ปิดยอด)", hint: "ปิดเศษยอดค้างที่ลูกค้าโอนขาด ไม่มีเงินเข้า" },
+];
 
 export default function PartWholesalePaymentPage({ currentUser }) {
   const myBranch = String(currentUser?.branch_code || currentUser?.branch || "").substring(0, 5).toUpperCase();
   const [docs, setDocs] = useState([]);
   const [payments, setPayments] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
+  const [intercoAccounts, setIntercoAccounts] = useState([]); // บัญชีเสมือนประเภท กู้ยืมระหว่างบริษัท
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [selected, setSelected] = useState({}); // docKey → ยอดรับ (string)
-  const [form, setForm] = useState({ paid_date: todayStr(), account_id: "", note: "" });
+  const [form, setForm] = useState({ paid_date: todayStr(), account_id: "", note: "", method: "เงินโอน" });
   const [dateFrom, setDateFrom] = useState(firstOfMonth());
   const [dateTo, setDateTo] = useState(todayStr());
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     post(ACC_API, { action: "list_bank_accounts", include_inactive: "false" })
-      .then((d) => setBankAccounts((Array.isArray(d) ? d : []).filter((a) => a && a.account_id && a.account_type !== "เงินสดย่อย" && a.account_type !== "ลูกหนี้")))
+      .then((d) => { const all = (Array.isArray(d) ? d : []).filter((a) => a && a.account_id); setIntercoAccounts(all.filter((a) => a.account_type === INTERCO_TYPE)); setBankAccounts(all.filter((a) => a.account_type !== "เงินสดย่อย" && a.account_type !== "ลูกหนี้" && a.account_type !== INTERCO_TYPE)); })
       .catch(() => {});
   }, []);
 
@@ -116,18 +125,20 @@ table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:4p
   async function save() {
     if (!selectedDocs.length) { setMessage("❌ ยังไม่ได้เลือกใบขายส่ง"); return; }
     if (!form.paid_date) { setMessage("❌ ระบุวันที่รับเงิน"); return; }
-    const acc = bankAccounts.find((a) => String(a.account_id) === String(form.account_id));
-    if (!acc) { setMessage("❌ เลือกบัญชีที่รับโอน (รับได้เฉพาะเงินโอน)"); return; }
+    const method = form.method || "เงินโอน";
+    let acc = null;
+    if (method === "เงินโอน") { acc = bankAccounts.find((a) => String(a.account_id) === String(form.account_id)); if (!acc) { setMessage("❌ เลือกบัญชีที่รับโอน"); return; } }
+    if (method === "หักบัญชีกู้ยืมระหว่างบริษัท") { acc = intercoAccounts[0] || null; if (!acc) { setMessage(`❌ ยังไม่มีบัญชีเสมือนประเภท "${INTERCO_TYPE}" — เพิ่มในเมนูบัญชีธนาคารก่อน`); return; } }
     for (const r of selectedDocs) {
       const amt = num(selected[docKey(r)]);
       if (!(amt > 0)) { setMessage(`❌ ยอดรับของ ${r.sale_doc_no} ต้องมากกว่า 0`); return; }
       if (amt > num(r.outstanding) + 0.005) { setMessage(`❌ ยอดรับของ ${r.sale_doc_no} เกินยอดค้างชำระ (${baht(r.outstanding)})`); return; }
     }
-    if (!window.confirm(`บันทึกรับชำระเงินขายส่งอะไหล่\nลูกค้า: ${selectedCustomer}\n${selectedDocs.length} ใบ รวม ${baht(totalPay)} บาท\nเงินโอนเข้า: ${bankLabelOf(acc)}\nวันที่ ${thaiDate(form.paid_date)}`)) return;
+    if (!window.confirm(`บันทึกรับชำระเงินขายส่งอะไหล่\nลูกค้า: ${selectedCustomer}\n${selectedDocs.length} ใบ รวม ${baht(totalPay)} บาท\nวิธี: ${method}${acc ? "\nบัญชี: " + bankLabelOf(acc) : ""}\nวันที่ ${thaiDate(form.paid_date)}`)) return;
     setSaving(true); setMessage("");
     try {
       const d = await post(API, {
-        action: "save_payment", method: "เงินโอน", paid_date: form.paid_date, account_id: acc.account_id, account_name: bankLabelOf(acc),
+        action: "save_payment", method, paid_date: form.paid_date, account_id: acc ? acc.account_id : null, account_name: acc ? bankLabelOf(acc) : method,
         customer_name: selectedCustomer, note: form.note, branch_code: myBranch, received_by: currentUser?.name || currentUser?.username || "",
         items: selectedDocs.map((r) => ({ sale_branch: r.sale_branch || "", sale_doc_no: r.sale_doc_no, sale_date: String(r.sale_date || "").slice(0, 10), customer_name: r.customer_name, doc_amount: num(r.doc_amount), paid_amount: num(selected[docKey(r)]) })),
       });
@@ -215,12 +226,27 @@ table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:4p
           <label>วันที่รับเงิน *</label>
           <input type="date" value={form.paid_date} onChange={(e) => setForm((f) => ({ ...f, paid_date: e.target.value }))} style={{ ...inp, width: 190 }} />
           <label>วิธีรับชำระ</label>
-          <div><span style={{ padding: "7px 14px", borderRadius: 8, fontWeight: 700, background: "#072d6b", color: "#fff", display: "inline-block" }}>🏦 เงินโอน</span> <span style={{ fontSize: 12.5, color: "#b91c1c", marginLeft: 8 }}>ขายส่งรับได้เฉพาะเงินโอน ห้ามรับเงินสด</span></div>
-          <label>บัญชีที่รับโอน *</label>
-          <select value={form.account_id} onChange={(e) => setForm((f) => ({ ...f, account_id: e.target.value }))} style={{ ...inp, background: form.account_id ? "#fff" : "#fffbeb" }}>
-            <option value="">— เลือกบัญชีรับโอน —</option>
-            {bankAccounts.map((a) => <option key={a.account_id} value={a.account_id}>{bankLabelOf(a)}</option>)}
-          </select>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            {METHODS.map((m) => (
+              <button key={m.k} type="button" onClick={() => setForm((f) => ({ ...f, method: m.k }))} title={m.hint}
+                style={{ padding: "7px 14px", borderRadius: 8, fontWeight: 700, border: "1.5px solid #072d6b", cursor: "pointer", fontFamily: "Tahoma", fontSize: 13,
+                  background: (form.method || "เงินโอน") === m.k ? "#072d6b" : "#fff", color: (form.method || "เงินโอน") === m.k ? "#fff" : "#072d6b" }}>{m.label}</button>
+            ))}
+            <span style={{ fontSize: 12, color: "#b91c1c" }}>ห้ามรับเงินสด</span>
+          </div>
+          <label>{(form.method || "เงินโอน") === "เงินโอน" ? "บัญชีที่รับโอน *" : "ลงบัญชี"}</label>
+          {(form.method || "เงินโอน") === "เงินโอน" ? (
+            <select value={form.account_id} onChange={(e) => setForm((f) => ({ ...f, account_id: e.target.value }))} style={{ ...inp, background: form.account_id ? "#fff" : "#fffbeb" }}>
+              <option value="">— เลือกบัญชีรับโอน —</option>
+              {bankAccounts.map((a) => <option key={a.account_id} value={a.account_id}>{bankLabelOf(a)}</option>)}
+            </select>
+          ) : form.method === "หักบัญชีกู้ยืมระหว่างบริษัท" ? (
+            intercoAccounts[0]
+              ? <div style={{ fontSize: 13.5, color: "#065f46", fontWeight: 600 }}>🔁 {bankLabelOf(intercoAccounts[0])} <span style={{ fontWeight: 400, color: "#64748b", fontSize: 12 }}>· ขึ้นรายงานเคลื่อนไหวของบัญชีนี้เป็น "รับชำระเงินขายส่งอะไหล่"</span></div>
+              : <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 600 }}>ยังไม่มีบัญชีเสมือนประเภท "{INTERCO_TYPE}" — เพิ่มในเมนู บัญชีธนาคาร (ประเภทบัญชี = {INTERCO_TYPE}) ก่อน</div>
+          ) : (
+            <div style={{ fontSize: 13, color: "#92400e" }}>🏷 ไม่มีเงินเข้าบัญชี — ใช้ปิดเศษยอดค้างที่ลูกค้าโอนขาด (บันทึกเป็นส่วนลดเงินสด)</div>
+          )}
           <label>หมายเหตุ</label>
           <input value={form.note} onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))} placeholder="เช่น เลขอ้างอิงโอน" style={inp} />
           <label>ยอดรับรวม</label>
