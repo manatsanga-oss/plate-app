@@ -45,7 +45,37 @@ const FLOW_OPENING_DATE = "2026-09-01";
 // ยอดยกมา 31/08/69 = ผลรวมบัญชี 11149.xx ในงบทดลอง Flow (จากภาพที่ user ส่ง 2026-11-06)
 const PETTY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api";
 const PETTY_OPENING_0831 = { "สิงห์ชัย": 4230.00, "ป.เปา": 8120.00 }; // สิงห์ชัย: .03 −40 .05 620 .07 530 .08 370 .09 1,500 .10 250 .11 1,000 · ป.เปา: .01 1,070 .06 1,000 .07 3,000 .08 1,640 .10 580 .11 400 .12 430
-const PETTY_CODE = "11149.00"; // รหัสบัญชีรวมเงินสดย่อยตามที่ user ระบุ 2026-11-06
+const PETTY_CODE = "11149.00";
+// ---- เงินให้กู้ยืมระหว่างบริษัท 11451 (user 2026-11-06 "เพิ่มส่วนนี้ให้ด้วย") ----
+// ระบบไม่มีสมุดบัญชีกู้ยืมระหว่างกันโดยตรง จึงประกอบจาก: (1) โอนเงินข้ามสังกัด (BTR บัญชีธนาคาร ป.เปา ↔ สิงห์ชัย: ป.เปาโอนให้ = ป.เปา เดบิต/สิงห์ชัย เครดิต, โอนคืน = กลับด้าน)
+//   (2) ขายส่งอะไหล่ให้สิงห์ชัยที่ตัดผ่านบัญชีเสมือน "เงินให้กู้ยืมระหว่างบริษัท" (account_type กู้ยืมระหว่างบริษัท, WSR วิธีหักบัญชีกู้ยืม) = ป.เปา เดบิต/สิงห์ชัย เครดิต
+//   ⚠️ ไม่รวม: เงินสดสาขาสิงห์ชัยที่ฝากเข้าบัญชี ป.เปา และ JV ปิดยอดเงินสด/เงินสดย่อยสิ้นเดือนของ Flow (378,792 / 209,968.32 ก.ย.) → ตัวเลขงวดจะต่างจาก Flow ส่วนนี้
+//   คู่รายการโอนผิดบัญชีไป-กลับวันเดียวกันยอดเท่ากัน (เช่น 2,247 05/09) หักกันเอง ไม่แสดง (user: dr กับ cr เท่ากันไม่ต้องแสดง)
+// ยอดยกมา 31/08/69 ตาม Flow: ป.เปา 11451 เดบิต 5,687,807.91 · สิงห์ชัย 11451 เครดิต 5,664,715.04 (2 เล่มต่างกัน 23,092.87 — สำนักงานบัญชีต้องไล่เอง)
+const INTERCO_CODE = "11451";
+const INTERCO_TYPE = "กู้ยืมระหว่างบริษัท";
+const INTERCO_OPENING_0831 = { "ป.เปา": 5687807.91, "สิงห์ชัย": -5664715.04 };
+const otherCompanyRe = (c) => (c === "ป.เปา" ? /สิงห์ชัย/ : /เปา/);
+// จากรายการเคลื่อนไหวของบัญชีธนาคารสังกัด c: คืน {dr, cr} ของบัญชี 11451 มุมมองสังกัด c (หักคู่ไป-กลับวันเดียวกันออกแล้ว)
+function intercoFromMovements(rows, c) {
+  const other = otherCompanyRe(c);
+  const list = rows.filter(m => m && m.movement_date && /โอนระหว่างบัญชี/.test(String(m.movement_type || "")) && other.test(String(m.counterparty || "")) && !/เงินสดย่อย|กู้ยืมกรรม/.test(String(m.counterparty || "")));
+  const used = new Set();
+  list.forEach((m, i) => {
+    if (used.has(i)) return;
+    const amt = Math.abs(Number(m.amount || 0)); const d = String(m.movement_date).slice(0, 10);
+    const j = list.findIndex((x, k) => k !== i && !used.has(k) && String(x.movement_date).slice(0, 10) === d && Math.abs(Math.abs(Number(x.amount || 0)) - amt) < 0.005 && Math.sign(Number(x.amount)) === -Math.sign(Number(m.amount)));
+    if (j >= 0) { used.add(i); used.add(j); }
+  });
+  let dr = 0, cr = 0;
+  list.forEach((m, i) => {
+    if (used.has(i)) return;
+    const a = Number(m.amount || 0);
+    // ป.เปา: โอนออกให้สิงห์ชัย = ให้กู้ (เดบิต), รับเข้าจากสิงห์ชัย = รับคืน (เครดิต) · สิงห์ชัย: รับเข้าจาก ป.เปา = กู้ (เครดิต), โอนออกให้ ป.เปา = คืน (เดบิต)
+    if (c === "ป.เปา") { if (a < 0) dr += -a; else cr += a; } else { if (a > 0) cr += a; else dr += -a; }
+  });
+  return { dr: r2(dr), cr: r2(cr) };
+} // รหัสบัญชีรวมเงินสดย่อยตามที่ user ระบุ 2026-11-06
 const compOfName = (v) => /สิงห์ชัย/.test(String(v || "")) ? "สิงห์ชัย" : /เปา/.test(String(v || "")) ? "ป.เปา" : "อื่น ๆ";
 async function postPetty(body) {
   const res = await fetch(PETTY_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -106,6 +136,7 @@ export default function TrialBalancePage() {
   const [ym, setYm] = useState(prevMonth());
   const [company, setCompany] = useState("");
   const [accounts, setAccounts] = useState([]);
+  const [allAccounts, setAllAccounts] = useState([]); // รวมบัญชีเสมือน (ใช้หาบัญชีกู้ยืมระหว่างบริษัท)
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState("");
@@ -114,7 +145,7 @@ export default function TrialBalancePage() {
   const [loadedCompany, setLoadedCompany] = useState(null); // สังกัดที่โหลดมา (null = ยังไม่เคยโหลด)
 
   useEffect(() => {
-    post({ action: "list_bank_accounts", include_inactive: "false" }).then(arr => setAccounts(arr.filter(a => a && a.account_id && isBank(a)))).catch(() => setAccounts([]));
+    post({ action: "list_bank_accounts", include_inactive: "false" }).then(arr => { const ok = arr.filter(a => a && a.account_id); setAllAccounts(ok); setAccounts(ok.filter(isBank)); }).catch(() => setAccounts([]));
   }, []);
 
   async function load() {
@@ -137,12 +168,38 @@ export default function TrialBalancePage() {
         const dr = r2(sum(cur, v => (v > 0 ? v : 0)));
         const cr = r2(sum(cur, v => (v < 0 ? -v : 0)));
         done++; setProgress(`${done}/${targets.length} บัญชี`);
-        return { ...a, company: companyOf(a), code: flowCodeOf(a), flowOpening: fo, opening, dr, cr, closing: r2(opening + dr - cr), count: cur.filter(m => m && m.movement_date).length };
+        return { ...a, company: companyOf(a), code: flowCodeOf(a), flowOpening: fo, opening, dr, cr, closing: r2(opening + dr - cr), count: cur.filter(m => m && m.movement_date).length, _prior: prior, _cur: cur };
       });
       setProgress("เงินสดย่อย…");
       let petty = [];
       try { petty = (await loadPettyRows(from, to)).filter(p => !company || p.company === company); } catch { petty = []; }
-      const all = [...out, ...petty];
+      // ---- เงินให้กู้ยืมระหว่างบริษัท 11451 ต่อสังกัด ----
+      setProgress("เงินกู้ยืมระหว่างบริษัท…");
+      let interco = [];
+      try {
+        const icoAcc = allAccounts.find(a => a.account_type === INTERCO_TYPE);
+        const icoPrior = icoAcc && prev >= FLOW_OPENING_DATE ? await post({ action: "list_bank_movements", account_id: Number(icoAcc.account_id), date_from: FLOW_OPENING_DATE, date_to: prev }) : [];
+        const icoCur = icoAcc ? await post({ action: "list_bank_movements", account_id: Number(icoAcc.account_id), date_from: from, date_to: to }) : [];
+        const sumIn = (arr) => r2(arr.reduce((t, m) => t + (m && m.movement_date && Number(m.amount) > 0 ? Number(m.amount) : 0), 0));
+        const sumOut = (arr) => r2(arr.reduce((t, m) => t + (m && m.movement_date && Number(m.amount) < 0 ? -Number(m.amount) : 0), 0));
+        interco = COMPANIES.filter(c => !company || c === company).map(c => {
+          const mine = out.filter(r => r.company === c);
+          const curT = mine.reduce((t, r) => { const x = intercoFromMovements(r._cur || [], c); t.dr += x.dr; t.cr += x.cr; return t; }, { dr: 0, cr: 0 });
+          const priT = mine.reduce((t, r) => { const x = intercoFromMovements(r._prior || [], c); t.dr += x.dr; t.cr += x.cr; return t; }, { dr: 0, cr: 0 });
+          // ขายส่งตัดบัญชีกู้ยืม (บัญชีเสมือน): รับเข้า = ป.เปา เดบิต / สิงห์ชัย เครดิต, จ่ายออก = กลับด้าน
+          const wIn = sumIn(icoCur), wOut = sumOut(icoCur), wInP = sumIn(icoPrior), wOutP = sumOut(icoPrior);
+          const wDr = c === "ป.เปา" ? wIn : wOut, wCr = c === "ป.เปา" ? wOut : wIn, wDrP = c === "ป.เปา" ? wInP : wOutP, wCrP = c === "ป.เปา" ? wOutP : wInP;
+          const base = Object.prototype.hasOwnProperty.call(INTERCO_OPENING_0831, c) ? INTERCO_OPENING_0831[c] : 0;
+          const opening = r2(base + (priT.dr + wDrP) - (priT.cr + wCrP));
+          const dr = r2(curT.dr + wDr), cr = r2(curT.cr + wCr);
+          const partner = c === "ป.เปา" ? "สิงห์ชัย" : "ป.เปา";
+          return { account_id: "interco-" + c, kind: "interco", company: c, code: INTERCO_CODE, bank_name: "เงินให้กู้ยืมระหว่างบริษัท", account_no: "",
+            account_name: `${c} ↔ ${partner} · โอนข้ามสังกัด ${fmt(curT.dr)} / ${fmt(curT.cr)} · ขายส่งตัดบัญชี ${fmt(wDr)} / ${fmt(wCr)}`,
+            account_type: "ไม่รวมเงินสดสาขาฝากข้ามสังกัด และ JV ปิดยอดเงินสดสิ้นเดือนของ Flow", flowOpening: base, opening, dr, cr, closing: r2(opening + dr - cr), count: 0 };
+        });
+      } catch { interco = []; }
+      out.forEach(r => { delete r._prior; delete r._cur; });
+      const all = [...out, ...petty, ...interco];
       all.sort((x, y) => COMPANIES.indexOf(x.company) - COMPANIES.indexOf(y.company) || (x.code || "zz").localeCompare(y.code || "zz") || String(x.account_no).localeCompare(String(y.account_no)));
       setRows(all); setLoadedYm(ym); setLoadedCompany(company);
     } catch { setErr("❌ โหลดข้อมูลไม่สำเร็จ"); }
@@ -180,7 +237,7 @@ export default function TrialBalancePage() {
 <style>@page{size:A4 landscape;margin:12mm}body{font-family:Tahoma,sans-serif;font-size:11pt;color:#111}h1{font-size:16pt;margin:0 0 2px}h2{font-size:12pt;margin:0;font-weight:400}.meta{font-size:9.5pt;color:#555;margin:2px 0 10px}
 table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #ddd;padding:4px 6px;vertical-align:top}th{background:#f1f5f9;font-size:10pt}th.grp{border-bottom:2px solid #94a3b8}td.r,th.r{text-align:right;font-family:Consolas,monospace;white-space:nowrap}td.code{font-family:Consolas,monospace;white-space:nowrap}.sub{font-size:8.5pt;color:#666}
 tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:700;background:#f8fafc}tr.total td{font-weight:800;border-top:2px solid #111;border-bottom:3px double #111;font-size:11.5pt}.note{margin-top:10px;font-size:9pt;color:#666}</style></head><body>
-<h1>งบทดลอง (เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — บัญชีธนาคาร + เงินสดย่อย)</h1><h2>${esc(title)}</h2>
+<h1>งบทดลอง (เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — บัญชีธนาคาร + เงินสดย่อย + เงินกู้ยืมระหว่างบริษัท)</h1><h2>${esc(title)}</h2>
 <div class="meta">รอบ ${esc(thMonthLong(loadedYm || ym))} · สิ้นสุด ณ วันที่ ${esc(thDateLong(to))} · พิมพ์ ${new Date().toLocaleString("th-TH")}</div>
 <table><thead><tr><th rowspan="2" style="text-align:left">รหัส</th><th rowspan="2" style="text-align:left">บัญชี</th><th colspan="2" class="grp">ยอดยกมา ${esc(thDateLong(prevDayOf(from)))}</th><th colspan="2" class="grp">ยอดประจำงวด</th><th colspan="2" class="grp">ยอดสะสม ${esc(thDateLong(to))}</th></tr>
 <tr><th class="r">เดบิต</th><th class="r">เครดิต</th><th class="r">เดบิต</th><th class="r">เครดิต</th><th class="r">เดบิต</th><th class="r">เครดิต</th></tr></thead>
@@ -199,7 +256,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
     <div style={{ fontFamily: "Tahoma, sans-serif", padding: 20, background: "#f8fafc", minHeight: "100vh" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
         <h2 style={{ margin: 0, color: "#1e3a8a" }}>📒 งบทดลอง</h2>
-        <span style={{ fontSize: 12.5, color: "#64748b" }}>เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — ตอนนี้: บัญชีธนาคาร + เงินสดย่อย (เริ่มรอบ {thMonthLong(START_MONTH)})</span>
+        <span style={{ fontSize: 12.5, color: "#64748b" }}>เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — ตอนนี้: บัญชีธนาคาร + เงินสดย่อย + เงินกู้ยืมระหว่างบริษัท (เริ่มรอบ {thMonthLong(START_MONTH)})</span>
         <div style={{ flex: 1 }} />
         <button onClick={exportCsv} disabled={!shown.length} style={{ ...btn("#fff"), color: "#1e3a8a", border: "1px solid #1e3a8a" }}>⬇ Excel/CSV</button>
         <button onClick={printReport} disabled={!shown.length} style={btn("#1e3a8a")}>🖨 พิมพ์รายงาน</button>
@@ -243,9 +300,9 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
                 const t = sumOf(list);
                 return (
                   <React.Fragment key={g}>
-                    <tr><td colSpan={8} style={{ ...td, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>▾ สินทรัพย์ · {COMPANY_FULL[g] || g} · {list.filter(r => r.kind !== "petty").length} บัญชีธนาคาร{list.some(r => r.kind === "petty") ? " + เงินสดย่อย" : ""}</td></tr>
+                    <tr><td colSpan={8} style={{ ...td, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>▾ สินทรัพย์ · {COMPANY_FULL[g] || g} · {list.filter(r => !r.kind).length} บัญชีธนาคาร{list.some(r => r.kind === "petty") ? " + เงินสดย่อย" : ""}{list.some(r => r.kind === "interco") ? " + เงินกู้ยืมระหว่างบริษัท" : ""}</td></tr>
                     {list.map(r => { const [a, b] = drcr(r.opening); const [c, d] = drcr(r.closing); return (
-                      <tr key={r.account_id} style={r.kind === "petty" ? { background: "#fffbeb" } : undefined} title={r.kind === "petty" ? `เงินสดย่อยรวมทุกสาขา ${r.count} เอกสาร · ยกมา = วงเงินตาม Flow 31/08/69 · เดบิต (เติมเงิน) ถือว่าเท่ากับที่เบิก (ระบบไม่มีบันทึกเติมเงิน)` : `รายการในงวด ${r.count} รายการ · ${r.flowOpening !== null ? `ยกมาอิงยอด Flow 31/08/69 = ${fmt(r.flowOpening)} + รายการตั้งแต่ 01/09/69` : `ยกมา = ยอดตั้งต้นบัญชี ${fmt(r.opening_balance)} (${r.opening_date ? String(r.opening_date).slice(0, 10) : "-"}) + รายการสะสมทั้งหมด (ยังไม่มียอด Flow 31/08)`}`}>
+                      <tr key={r.account_id} style={r.kind === "petty" ? { background: "#fffbeb" } : r.kind === "interco" ? { background: "#f0f9ff" } : undefined} title={r.kind === "interco" ? `ยกมา = Flow 31/08/69 · โอนข้ามสังกัด (BTR) + ขายส่งตัดบัญชีกู้ยืม · ไม่รวมเงินสดสาขาฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow` : r.kind === "petty" ? `เงินสดย่อยรวมทุกสาขา ${r.count} เอกสาร · ยกมา = วงเงินตาม Flow 31/08/69 · เดบิต (เติมเงิน) ถือว่าเท่ากับที่เบิก (ระบบไม่มีบันทึกเติมเงิน)` : `รายการในงวด ${r.count} รายการ · ${r.flowOpening !== null ? `ยกมาอิงยอด Flow 31/08/69 = ${fmt(r.flowOpening)} + รายการตั้งแต่ 01/09/69` : `ยกมา = ยอดตั้งต้นบัญชี ${fmt(r.opening_balance)} (${r.opening_date ? String(r.opening_date).slice(0, 10) : "-"}) + รายการสะสมทั้งหมด (ยังไม่มียอด Flow 31/08)`}`}>
                         <td style={{ ...td, fontFamily: "monospace", color: r.code ? "#0369a1" : "#9ca3af", fontWeight: 600 }}>{r.code || "—"}{r.flowOpening === null && <span title="ยังไม่มียอดยกมาจาก Flow 31/08/69 — ใช้ยอดตั้งต้นบัญชีในระบบ" style={{ marginLeft: 4, color: "#f59e0b" }}>*</span>}</td>
                         <td style={td}><div style={{ fontWeight: 600 }}>{r.bank_name} <span style={{ fontFamily: "monospace" }}>{r.account_no}</span></div><div style={{ fontSize: 11, color: "#64748b" }}>{r.account_name}{r.account_type ? ` · ${r.account_type}` : ""}</div></td>
                         <td style={num}>{cellNum(a)}</td><td style={{ ...num, color: "#0891b2" }}>{cellNum(b)}</td>
@@ -268,7 +325,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
           </table>
         </div>
         <div style={{ fontSize: 11.5, color: "#64748b", padding: "10px 0 6px", lineHeight: 1.6 }}>
-          ยอดยกมา = ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ) · ยอดประจำงวดจากรายงานการเคลื่อนไหว · เงินสดย่อย (11149.00) รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่ ระบบไม่มีบันทึกเติมเงิน) · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
+          ยอดยกมา = ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ) · ยอดประจำงวดจากรายงานการเคลื่อนไหว · เงินสดย่อย (11149.00) รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่ ระบบไม่มีบันทึกเติมเงิน) · เงินให้กู้ยืมระหว่างบริษัท (11451) = โอนเงินข้ามสังกัด + ขายส่งอะไหล่ที่ตัดผ่านบัญชีกู้ยืม (ยกมา Flow 31/08) ยังไม่รวมเงินสดสาขาที่ฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
         </div>
       </div>
     </div>
