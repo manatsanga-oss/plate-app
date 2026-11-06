@@ -139,6 +139,7 @@ import ReportAdminPage from "./pages/ReportAdminPage";
 import GeneralReceiptPivotPage from "./pages/GeneralReceiptPivotPage";
 import SalesByTaxInvoicePage from "./pages/SalesByTaxInvoicePage";
 import ProfitLossReportPage from "./pages/ProfitLossReportPage";
+import TrialBalancePage from "./pages/TrialBalancePage";
 import HondaQuotaSnapshotPage from "./pages/HondaQuotaSnapshotPage"; // โควต้า HONDA (DOSS) snapshot (user 2026-10-24)
 import MotoStockOnHandReportPage from "./pages/MotoStockOnHandReportPage";
 import MotoTransferPage from "./pages/MotoTransferPage";
@@ -332,6 +333,7 @@ export default function App() {
     }
     // งบกำไรขาดทุน — เห็นเฉพาะ user "admin" คนเดียว (จำกัดก่อนเช็ค role admin ทั่วไป)
     if (page === "profitloss") return currentUser.username === "admin";
+    if (page === "trialbalance") return currentUser.username === "admin"; // งบทดลอง (เฉพาะบัญชีที่ตรวจกับ Flow แล้ว)
     // Report Manager — เฉพาะ user admin (มนัส สง่าศรี) เท่านั้น ไม่รวม admin คนอื่น (user 2026-10-15)
     if (["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "marketregistration", "hondaquota"].includes(page)) return currentUser.username === "admin";
     // บันทึกแก้ไขราคาขายเฉพาะคัน — เฉพาะ admin (user 2026-09-01)
@@ -450,6 +452,7 @@ export default function App() {
         {activeMenu === "partreceiptreport" && canAccess("partreceiptreport") && <PartReceiptReportPage currentUser={currentUser} />}
         {activeMenu === "receiptqrreport" && canAccess("receiptqrreport") && <ReceiptQrCustomerReportPage currentUser={currentUser} />}
         {activeMenu === "profitloss" && canAccess("profitloss") && <ProfitLossReportPage currentUser={currentUser} />}
+        {activeMenu === "trialbalance" && canAccess("trialbalance") && <TrialBalancePage currentUser={currentUser} />}
         {activeMenu === "dashboard" && canAccess("dashboard") && <DashboardPage currentUser={currentUser} />}
         {activeMenu === "receive" && canAccess("receive") && <ReceivePage currentUser={currentUser} />}
         {activeMenu === "issue" && canAccess("issue") && <IssuePage currentUser={currentUser} />}
@@ -1021,7 +1024,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
       </MenuGroup>
 
       {/* Report Manager — รายงานวิเคราะห์สำหรับผู้บริหาร เห็นเฉพาะ user admin (มนัส สง่าศรี) — user 2026-10-15 */}
-      <MenuGroup title="Report Manager" pages={["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "hondaquota", "marketregistration", "profitloss"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Report Manager" pages={["pricepromoadvice", "priceimpact", "stockturnover", "hondasalesreport", "hondaquota", "marketregistration", "profitloss", "trialbalance"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="pricepromoadvice" label="แนะนำราคา/ค่าส่งเสริม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="priceimpact" label="วิเคราะห์ผลราคา/โปร ต่อยอดขาย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="stockturnover" label="สินค้าคงเหลือ & อัตราการหมุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -1029,6 +1032,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hondaquota" label="โควต้า HONDA (DOSS)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="marketregistration" label="ข้อมูลจดทะเบียนรถในตลาด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="profitloss" label="งบกำไรขาดทุน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="trialbalance" label="งบทดลอง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
       {/* Report for FlowAcc — รายงานสำหรับบันทึกบัญชีใน FlowAccount (user 2026-11-04) — ย้าย "รายงานสรุปขายรถบันทึก FLOW ACC" จาก Report Admin มาไว้ที่นี่ (เปิดให้ทุก user เหมือนเดิม) */}

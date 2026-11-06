@@ -1,0 +1,233 @@
+import React, { useEffect, useMemo, useState } from "react";
+
+// ============================================================================
+// หน้า "งบทดลอง" (รายเดือน) — เทียบรูปแบบงบทดลองของ FlowAccount (user 2026-11-06)
+// ----------------------------------------------------------------------------
+// หลักการ: ใส่เฉพาะบัญชีที่ "ตรวจสอบกับ Flow แล้ว" เท่านั้น — เฟสแรก = บัญชีธนาคาร (เริ่มรอบ ก.ย. 2569)
+//   รวมทั้ง 2 สังกัด (ป.เปา / สิงห์ชัย) ในรายงานเดียว เลือกสังกัดเป็นตัวกรองได้
+// ตัวเลข: ใช้ action list_bank_movements ชุดเดียวกับรายงานการเคลื่อนไหว/ยอดคงเหลือ (เลขตรงกันแน่นอน)
+//   ยอดยกมา  = ยอดตั้งต้นบัญชี + ผลรวมรายการก่อนวันแรกของเดือน
+//   ยอดประจำงวด = เดบิต (รับเข้า) / เครดิต (จ่ายออก) ภายในเดือน
+//   ยอดสะสม  = ยกมา + เดบิต − เครดิต   (ยอดติดลบ = คงเหลือฝั่งเครดิต เช่น บัญชี OD)
+// รหัสบัญชีตามผังบัญชี Flow แมปจากเลขบัญชีธนาคาร (FLOW_CODES) — บัญชีที่ยังไม่รู้รหัสแสดง "—"
+// ============================================================================
+
+const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
+const START_MONTH = "2026-09"; // เดือนแรกที่ตรวจสอบบัญชีธนาคารกับ Flow ครบ
+
+// รหัสบัญชี Flow ตามเลขบัญชีธนาคาร (ตรวจจาก GL ที่สำนักงานบัญชีส่งมา พ.ย. 2569)
+const FLOW_CODES = {
+  // บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด
+  "4691003766": "11121.01", // กสิกรไทย กระแสรายวัน
+  "7393004545": "11121.02", // ไทยพาณิชย์
+  "9898991615": "11121.03", // กรุงไทย
+  "2490391139": "11122.01", // กรุงเทพ
+  // ห้างหุ้นส่วนจำกัด สิงห์ชัยสยามยนต์
+  "7393004553": "11121.01", // ไทยพาณิชย์
+  "4691006757": "11121.02", // กสิกรไทย กระแสรายวัน
+  "1881036188": "11121.05", // ทหารไทยธนชาต (OD)
+  "0170342026": "11121.08", // กรุงไทย (OD)
+  "2490309131": "11122.01", // กรุงเทพ
+  "211-3-80125-8": "11122.06", // กสิกรไทย ออมทรัพย์ (Flow เขียน 2113801258)
+};
+// ยอดยกมา ณ 31/08/2569 ตามงบทดลอง/GL ของ Flow (สำนักงานบัญชีปิดงบถึง ส.ค. แล้ว) — รอบ ก.ย. เป็นต้นไปใช้ยอดนี้ + รายการในระบบตั้งแต่ 01/09/2569
+// (ยอดตั้งต้นบัญชี + รายการ เม.ย.–ส.ค. ในระบบยังไม่ได้กระทบกับ Flow จึงไม่ใช้) · บัญชีที่ไม่มีในตารางนี้ใช้วิธีเดิม = ยอดตั้งต้น + รายการสะสมทั้งหมด
+const FLOW_OPENING_0831 = {
+  "4691003766": 2080938.74, "7393004545": 217045.78, "9898991615": 1963466.14, "2490391139": 202420.16,
+  "7393004553": 33159.70, "4691006757": 1071531.92, "1881036188": -7272232.75, "0170342026": -7799916.08, "2490309131": 535136.90, "211-3-80125-8": 166.23,
+};
+const FLOW_OPENING_DATE = "2026-09-01";
+const flowOpeningOf = (a) => { const k = String(a.account_no || "").trim(); return Object.prototype.hasOwnProperty.call(FLOW_OPENING_0831, k) ? FLOW_OPENING_0831[k] : (Object.prototype.hasOwnProperty.call(FLOW_OPENING_0831, normNo(k)) ? FLOW_OPENING_0831[normNo(k)] : null); };
+const COMPANIES = ["ป.เปา", "สิงห์ชัย"];
+const COMPANY_FULL = { "ป.เปา": "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด", "สิงห์ชัย": "ห้างหุ้นส่วนจำกัด สิงห์ชัยสยามยนต์" };
+const companyOf = (a) => /สิงห์ชัย/.test(String(a.account_name || "")) ? "สิงห์ชัย" : /เปา/.test(String(a.account_name || "")) ? "ป.เปา" : "อื่น ๆ";
+const isBank = (a) => String(a.bank_name || "").trim() && String(a.bank_name || "").trim() !== "-" && !/เงินสดย่อย|ลูกหนี้/.test(String(a.account_type || ""));
+const normNo = (v) => String(v || "").replace(/[^0-9]/g, "");
+const flowCodeOf = (a) => FLOW_CODES[String(a.account_no || "").trim()] || FLOW_CODES[normNo(a.account_no)] || "";
+
+const pad = (n) => String(n).padStart(2, "0");
+const prevMonth = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); const ym = `${d.getFullYear()}-${pad(d.getMonth() + 1)}`; return ym < START_MONTH ? START_MONTH : ym; };
+const monthRange = (ym) => { const [y, m] = ym.split("-").map(Number); const last = new Date(y, m, 0).getDate(); return [`${ym}-01`, `${ym}-${pad(last)}`]; };
+const prevDayOf = (iso) => { const d = new Date(iso + "T00:00:00"); d.setDate(d.getDate() - 1); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const TH_MONTHS = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+const thMonthLong = (ym) => { const [y, m] = ym.split("-").map(Number); return `${TH_MONTHS[m - 1]} ${y + 543}`; };
+const thDateLong = (iso) => { const [y, m, d] = iso.split("-").map(Number); return `${d} ${TH_MONTHS[m - 1]} ${y + 543}`; };
+const fmt = (v) => Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const r2 = (v) => Math.round(Number(v || 0) * 100) / 100;
+// แยกเดบิต/เครดิตจากยอดคงเหลือ: บวก = เดบิต, ลบ = เครดิต
+const drcr = (v) => (v >= 0.005 ? [v, 0] : v <= -0.005 ? [0, -v] : [0, 0]);
+const cellNum = (v) => (v > 0.004 ? fmt(v) : "-");
+
+async function post(body) {
+  const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const t = await res.text(); try { const j = JSON.parse(t); return Array.isArray(j) ? j : j ? [j] : []; } catch { return []; }
+}
+// ยิงทีละไม่เกิน 3 บัญชีพร้อมกัน (n8n ล้มเมื่อโดนยิงพร้อมกันมาก ๆ — เหตุ 06/11/69)
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length); let i = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => { while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); } }));
+  return out;
+}
+
+export default function TrialBalancePage() {
+  const [ym, setYm] = useState(prevMonth());
+  const [company, setCompany] = useState("");
+  const [accounts, setAccounts] = useState([]);
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [err, setErr] = useState("");
+  const [loadedYm, setLoadedYm] = useState("");
+
+  useEffect(() => {
+    post({ action: "list_bank_accounts", include_inactive: "false" }).then(arr => setAccounts(arr.filter(a => a && a.account_id && isBank(a)))).catch(() => setAccounts([]));
+  }, []);
+
+  async function load() {
+    if (!accounts.length) return;
+    if (ym < START_MONTH) { setErr(`งบทดลองเริ่มรอบ ${thMonthLong(START_MONTH)} (บัญชีธนาคารตรวจสอบกับ Flow ตั้งแต่เดือนนี้)`); return; }
+    setLoading(true); setErr(""); setRows([]);
+    const [from, to] = monthRange(ym); const prev = prevDayOf(from);
+    try {
+      let done = 0;
+      const out = await mapLimit(accounts, 3, async (a) => {
+        const id = Number(a.account_id);
+        const fo = flowOpeningOf(a);
+        // มียอด Flow 31/08 → ยกมา = ยอด Flow + รายการตั้งแต่ 01/09 ถึงวันก่อนต้นงวด (รอบ ก.ย. = ยอด Flow ตรง ๆ) · ไม่มี → ยอดตั้งต้นบัญชี + รายการสะสมทั้งหมด
+        const prior = (fo !== null && prev < FLOW_OPENING_DATE) ? [] : await post({ action: "list_bank_movements", account_id: id, date_from: fo !== null ? FLOW_OPENING_DATE : "2000-01-01", date_to: prev });
+        const cur = await post({ action: "list_bank_movements", account_id: id, date_from: from, date_to: to });
+        const sum = (arr, f) => arr.reduce((s, m) => s + (m && m.movement_date ? f(Number(m.amount || 0)) : 0), 0);
+        const opening = r2((fo !== null ? fo : Number(a.opening_balance || 0)) + sum(prior, v => v));
+        const dr = r2(sum(cur, v => (v > 0 ? v : 0)));
+        const cr = r2(sum(cur, v => (v < 0 ? -v : 0)));
+        done++; setProgress(`${done}/${accounts.length} บัญชี`);
+        return { ...a, company: companyOf(a), code: flowCodeOf(a), flowOpening: fo, opening, dr, cr, closing: r2(opening + dr - cr), count: cur.filter(m => m && m.movement_date).length };
+      });
+      out.sort((x, y) => COMPANIES.indexOf(x.company) - COMPANIES.indexOf(y.company) || (x.code || "zz").localeCompare(y.code || "zz") || String(x.account_no).localeCompare(String(y.account_no)));
+      setRows(out); setLoadedYm(ym);
+    } catch { setErr("❌ โหลดข้อมูลไม่สำเร็จ"); }
+    setLoading(false); setProgress("");
+  }
+  useEffect(() => { if (accounts.length) load(); /* eslint-disable-next-line */ }, [accounts]);
+
+  const shown = useMemo(() => rows.filter(r => !company || r.company === company), [rows, company]);
+  const groups = useMemo(() => [...COMPANIES, "อื่น ๆ"].map(g => ({ g, list: shown.filter(r => r.company === g) })).filter(x => x.list.length), [shown]);
+  const sumOf = (list) => {
+    const t = { oDr: 0, oCr: 0, dr: 0, cr: 0, cDr: 0, cCr: 0 };
+    list.forEach(r => { const [a, b] = drcr(r.opening); const [c, d] = drcr(r.closing); t.oDr += a; t.oCr += b; t.dr += r.dr; t.cr += r.cr; t.cDr += c; t.cCr += d; });
+    return t;
+  };
+  const grand = sumOf(shown);
+  const [from, to] = monthRange(loadedYm || ym);
+  const title = company ? COMPANY_FULL[company] : "ทุกสังกัด (ป.เปา + สิงห์ชัย)";
+
+  function exportCsv() {
+    const head = ["สังกัด", "รหัสบัญชี Flow", "ธนาคาร", "เลขบัญชี", "ชื่อบัญชี", "ยกมา เดบิต", "ยกมา เครดิต", "งวด เดบิต", "งวด เครดิต", "สะสม เดบิต", "สะสม เครดิต"];
+    const lines = shown.map(r => { const [a, b] = drcr(r.opening); const [c, d] = drcr(r.closing); return [r.company, r.code || "", r.bank_name, r.account_no, r.account_name, a.toFixed(2), b.toFixed(2), r.dr.toFixed(2), r.cr.toFixed(2), c.toFixed(2), d.toFixed(2)]; });
+    const csv = [head, ...lines].map(l => l.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `trial_balance_${loadedYm || ym}${company ? "_" + company : ""}.csv`; a.click();
+  }
+
+  function printReport() {
+    const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    const row = (r) => { const [a, b] = drcr(r.opening); const [c, d] = drcr(r.closing); return `<tr><td class="code">${esc(r.code || "—")}</td><td>${esc(r.bank_name)} ${esc(r.account_no)}<div class="sub">${esc(r.account_name)}</div></td><td class="r">${cellNum(a)}</td><td class="r">${cellNum(b)}</td><td class="r">${cellNum(r.dr)}</td><td class="r">${cellNum(r.cr)}</td><td class="r">${cellNum(c)}</td><td class="r">${cellNum(d)}</td></tr>`; };
+    const tot = (label, t, cls) => `<tr class="${cls}"><td colspan="2">${esc(label)}</td><td class="r">${fmt(t.oDr)}</td><td class="r">${fmt(t.oCr)}</td><td class="r">${fmt(t.dr)}</td><td class="r">${fmt(t.cr)}</td><td class="r">${fmt(t.cDr)}</td><td class="r">${fmt(t.cCr)}</td></tr>`;
+    const body = groups.map(({ g, list }) => `<tr class="grp"><td colspan="8">${esc(COMPANY_FULL[g] || g)}</td></tr>${list.map(row).join("")}${groups.length > 1 ? tot(`รวม ${g}`, sumOf(list), "sub") : ""}`).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>งบทดลอง ${esc(thMonthLong(loadedYm || ym))}</title>
+<style>@page{size:A4 landscape;margin:12mm}body{font-family:Tahoma,sans-serif;font-size:11pt;color:#111}h1{font-size:16pt;margin:0 0 2px}h2{font-size:12pt;margin:0;font-weight:400}.meta{font-size:9.5pt;color:#555;margin:2px 0 10px}
+table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #ddd;padding:4px 6px;vertical-align:top}th{background:#f1f5f9;font-size:10pt}th.grp{border-bottom:2px solid #94a3b8}td.r,th.r{text-align:right;font-family:Consolas,monospace;white-space:nowrap}td.code{font-family:Consolas,monospace;white-space:nowrap}.sub{font-size:8.5pt;color:#666}
+tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:700;background:#f8fafc}tr.total td{font-weight:800;border-top:2px solid #111;border-bottom:3px double #111;font-size:11.5pt}.note{margin-top:10px;font-size:9pt;color:#666}</style></head><body>
+<h1>งบทดลอง (เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — บัญชีธนาคาร)</h1><h2>${esc(title)}</h2>
+<div class="meta">รอบ ${esc(thMonthLong(loadedYm || ym))} · สิ้นสุด ณ วันที่ ${esc(thDateLong(to))} · พิมพ์ ${new Date().toLocaleString("th-TH")}</div>
+<table><thead><tr><th rowspan="2" style="text-align:left">รหัส</th><th rowspan="2" style="text-align:left">บัญชี</th><th colspan="2" class="grp">ยอดยกมา ${esc(thDateLong(prevDayOf(from)))}</th><th colspan="2" class="grp">ยอดประจำงวด</th><th colspan="2" class="grp">ยอดสะสม ${esc(thDateLong(to))}</th></tr>
+<tr><th class="r">เดบิต</th><th class="r">เครดิต</th><th class="r">เดบิต</th><th class="r">เครดิต</th><th class="r">เดบิต</th><th class="r">เครดิต</th></tr></thead>
+<tbody>${body}${tot("รวมทั้งสิ้น", grand, "total")}</tbody></table>
+<div class="note">ที่มา: รายงานการเคลื่อนไหวบัญชีธนาคารในระบบ (ยอดยกมา = งบทดลอง Flow 31/08/69 + รายการตั้งแต่ 01/09/69 ถึงก่อนต้นงวด) · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount</div>
+<script>window.onload=function(){window.print()}</script></body></html>`;
+    const w = window.open("", "_blank"); if (!w) return; w.document.write(html); w.document.close();
+  }
+
+  const th = { padding: "7px 10px", fontSize: 12.5, fontWeight: 700, color: "#334155", background: "#f1f5f9", borderBottom: "1px solid #e2e8f0", whiteSpace: "nowrap" };
+  const td = { padding: "6px 10px", fontSize: 13, borderBottom: "1px solid #f1f5f9", verticalAlign: "top" };
+  const num = { ...td, textAlign: "right", fontFamily: "monospace", whiteSpace: "nowrap" };
+  const btn = (bg) => ({ padding: "8px 14px", borderRadius: 8, border: "none", background: bg, color: "#fff", fontWeight: 700, cursor: "pointer", fontFamily: "Tahoma", fontSize: 13 });
+
+  return (
+    <div style={{ fontFamily: "Tahoma, sans-serif", padding: 20, background: "#f8fafc", minHeight: "100vh" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+        <h2 style={{ margin: 0, color: "#1e3a8a" }}>📒 งบทดลอง</h2>
+        <span style={{ fontSize: 12.5, color: "#64748b" }}>เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — ตอนนี้: บัญชีธนาคาร (เริ่มรอบ {thMonthLong(START_MONTH)})</span>
+        <div style={{ flex: 1 }} />
+        <button onClick={exportCsv} disabled={!shown.length} style={{ ...btn("#fff"), color: "#1e3a8a", border: "1px solid #1e3a8a" }}>⬇ Excel/CSV</button>
+        <button onClick={printReport} disabled={!shown.length} style={btn("#1e3a8a")}>🖨 พิมพ์รายงาน</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 14, alignItems: "flex-end", flexWrap: "wrap", padding: "12px 14px", background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", marginBottom: 14 }}>
+        <label style={{ fontSize: 12.5, fontWeight: 600, display: "grid", gap: 4 }}>รอบระยะเวลารายงาน
+          <input type="month" value={ym} min={START_MONTH} onChange={e => setYm(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontFamily: "Tahoma", fontSize: 13 }} /></label>
+        <label style={{ fontSize: 12.5, fontWeight: 600, display: "grid", gap: 4 }}>สังกัด
+          <select value={company} onChange={e => setCompany(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontFamily: "Tahoma", fontSize: 13, minWidth: 220 }}>
+            <option value="">ทุกสังกัด (รวม)</option>
+            {COMPANIES.map(c => <option key={c} value={c}>{COMPANY_FULL[c]}</option>)}
+          </select></label>
+        <button onClick={load} disabled={loading || !accounts.length} style={{ ...btn("#0ea5e9"), opacity: loading ? 0.6 : 1 }}>{loading ? `กำลังโหลด… ${progress}` : "แสดงผลรายงาน"}</button>
+        {loadedYm && loadedYm !== ym && !loading && <span style={{ fontSize: 12, color: "#b45309" }}>แสดงข้อมูลรอบ {thMonthLong(loadedYm)} อยู่ — กด "แสดงผลรายงาน" เพื่อโหลดรอบใหม่</span>}
+      </div>
+      {err && <div style={{ padding: "10px 14px", marginBottom: 12, borderRadius: 8, background: "#fee2e2", color: "#991b1b" }}>{err}</div>}
+
+      <div style={{ background: "#fff", borderRadius: 10, border: "1px solid #e5e7eb", padding: "14px 16px 6px" }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: "#0369a1" }}>{title}</div>
+        <div style={{ fontSize: 12.5, color: "#475569", marginBottom: 10 }}>สิ้นสุด ณ วันที่ {thDateLong(to)} · ยอดยกมา ณ {thDateLong(prevDayOf(from))}</div>
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+            <thead>
+              <tr>
+                <th rowSpan={2} style={{ ...th, textAlign: "left" }}>รหัส</th>
+                <th rowSpan={2} style={{ ...th, textAlign: "left" }}>บัญชี</th>
+                <th colSpan={2} style={{ ...th, textAlign: "center", borderBottom: "2px solid #94a3b8" }}>ยอดยกมา</th>
+                <th colSpan={2} style={{ ...th, textAlign: "center", borderBottom: "2px solid #22c55e", background: "#f0fdf4" }}>ยอดประจำงวด</th>
+                <th colSpan={2} style={{ ...th, textAlign: "center", borderBottom: "2px solid #94a3b8" }}>ยอดสะสม</th>
+              </tr>
+              <tr>
+                {["เดบิต", "เครดิต", "เดบิต", "เครดิต", "เดบิต", "เครดิต"].map((h, i) => <th key={i} style={{ ...th, textAlign: "right", color: i % 2 ? "#0891b2" : "#2563eb", background: i === 2 || i === 3 ? "#f0fdf4" : th.background }}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {loading && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: 30 }}>กำลังโหลด {progress}…</td></tr>}
+              {!loading && !shown.length && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#94a3b8", padding: 30 }}>ไม่มีข้อมูล</td></tr>}
+              {!loading && groups.map(({ g, list }) => {
+                const t = sumOf(list);
+                return (
+                  <React.Fragment key={g}>
+                    <tr><td colSpan={8} style={{ ...td, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>▾ สินทรัพย์ · {COMPANY_FULL[g] || g} · {list.length} บัญชี</td></tr>
+                    {list.map(r => { const [a, b] = drcr(r.opening); const [c, d] = drcr(r.closing); return (
+                      <tr key={r.account_id} title={`รายการในงวด ${r.count} รายการ · ${r.flowOpening !== null ? `ยกมาอิงยอด Flow 31/08/69 = ${fmt(r.flowOpening)} + รายการตั้งแต่ 01/09/69` : `ยกมา = ยอดตั้งต้นบัญชี ${fmt(r.opening_balance)} (${r.opening_date ? String(r.opening_date).slice(0, 10) : "-"}) + รายการสะสมทั้งหมด (ยังไม่มียอด Flow 31/08)`}`}>
+                        <td style={{ ...td, fontFamily: "monospace", color: r.code ? "#0369a1" : "#9ca3af", fontWeight: 600 }}>{r.code || "—"}{r.flowOpening === null && <span title="ยังไม่มียอดยกมาจาก Flow 31/08/69 — ใช้ยอดตั้งต้นบัญชีในระบบ" style={{ marginLeft: 4, color: "#f59e0b" }}>*</span>}</td>
+                        <td style={td}><div style={{ fontWeight: 600 }}>{r.bank_name} <span style={{ fontFamily: "monospace" }}>{r.account_no}</span></div><div style={{ fontSize: 11, color: "#64748b" }}>{r.account_name}{r.account_type ? ` · ${r.account_type}` : ""}</div></td>
+                        <td style={num}>{cellNum(a)}</td><td style={{ ...num, color: "#0891b2" }}>{cellNum(b)}</td>
+                        <td style={{ ...num, background: "#f7fef9" }}>{cellNum(r.dr)}</td><td style={{ ...num, background: "#f7fef9", color: "#0891b2" }}>{cellNum(r.cr)}</td>
+                        <td style={{ ...num, fontWeight: 700, color: "#1d4ed8" }}>{cellNum(c)}</td><td style={{ ...num, fontWeight: 700, color: "#0891b2" }}>{cellNum(d)}</td>
+                      </tr>); })}
+                    {groups.length > 1 && (
+                      <tr style={{ background: "#f8fafc", fontWeight: 700 }}>
+                        <td colSpan={2} style={td}>รวม {g}</td>
+                        <td style={num}>{fmt(t.oDr)}</td><td style={num}>{fmt(t.oCr)}</td><td style={num}>{fmt(t.dr)}</td><td style={num}>{fmt(t.cr)}</td><td style={num}>{fmt(t.cDr)}</td><td style={num}>{fmt(t.cCr)}</td>
+                      </tr>)}
+                  </React.Fragment>);
+              })}
+              {!loading && shown.length > 0 && (
+                <tr style={{ background: "#fef9c3", fontWeight: 800, borderTop: "2px solid #111" }}>
+                  <td colSpan={2} style={td}>รวมทั้งสิ้น</td>
+                  <td style={num}>{fmt(grand.oDr)}</td><td style={num}>{fmt(grand.oCr)}</td><td style={num}>{fmt(grand.dr)}</td><td style={num}>{fmt(grand.cr)}</td><td style={num}>{fmt(grand.cDr)}</td><td style={num}>{fmt(grand.cCr)}</td>
+                </tr>)}
+            </tbody>
+          </table>
+        </div>
+        <div style={{ fontSize: 11.5, color: "#64748b", padding: "10px 0 6px", lineHeight: 1.6 }}>
+          ยอดยกมา = ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ) · ยอดประจำงวดจากรายงานการเคลื่อนไหว · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
+        </div>
+      </div>
+    </div>
+  );
+}
