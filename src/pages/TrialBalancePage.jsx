@@ -38,6 +38,38 @@ const FLOW_OPENING_0831 = {
   "7393004553": 33159.70, "4691006757": 1071531.92, "1881036188": -7272232.75, "0170342026": -7799916.08, "2490309131": 535136.90, "211-3-80125-8": 166.23,
 };
 const FLOW_OPENING_DATE = "2026-09-01";
+// ---- เงินสดย่อย (รวมทุกรายการเป็นบรรทัดเดียวต่อสังกัด — user 2026-11-06 "ไม่ต้องแยกรายการ") ----
+// ตรวจกับ Flow ก.ย.69 แล้วตรงทุกบัญชี 11149.xx: ฝั่งจ่าย (เครดิต) = ค่าน้ำมันรถใหม่ (EXP ตามวันที่ใบ) + ค่าของไหว้ (OFR ตามวันที่ใบ)
+//   + ค่าใช้จ่ายทั่วไป/ค่าไปรษณีย์ ตามวันที่กดเบิก PCW (ไม่ใช่วันที่ใบ) — เกณฑ์เดียวกับสรุปรายวันเงินสด
+// ฝั่งเติมเงิน (เดบิต): ระบบไม่มีบันทึกเติมเงินสดย่อย → ถือเป็นระบบวงเงินคงที่ (imprest) เติมเท่าที่เบิก = เดบิต = เครดิต ยอดคงเหลือ = วงเงินตาม Flow 31/08
+// ยอดยกมา 31/08/69 = ผลรวมบัญชี 11149.xx ในงบทดลอง Flow (จากภาพที่ user ส่ง 2026-11-06)
+const PETTY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api";
+const PETTY_OPENING_0831 = { "สิงห์ชัย": 4230.00, "ป.เปา": 8120.00 }; // สิงห์ชัย: .03 −40 .05 620 .07 530 .08 370 .09 1,500 .10 250 .11 1,000 · ป.เปา: .01 1,070 .06 1,000 .07 3,000 .08 1,640 .10 580 .11 400 .12 430
+const PETTY_CODE = "11149.00"; // รหัสบัญชีรวมเงินสดย่อยตามที่ user ระบุ 2026-11-06
+const compOfName = (v) => /สิงห์ชัย/.test(String(v || "")) ? "สิงห์ชัย" : /เปา/.test(String(v || "")) ? "ป.เปา" : "อื่น ๆ";
+async function postPetty(body) {
+  const res = await fetch(PETTY_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const t = await res.text(); try { const j = JSON.parse(t); return Array.isArray(j) ? j : j ? [j] : []; } catch { return []; }
+}
+// คืน rows เงินสดย่อยต่อสังกัด สำหรับเดือน [from,to]
+async function loadPettyRows(from, to) {
+  const inRange = (d) => { const x = String(d || "").slice(0, 10); return x >= from && x <= to; };
+  const [fuel, offering, pcw] = await Promise.all([
+    postPetty({ action: "get_fuel_docs", limit: 2000 }), postPetty({ action: "get_offering_docs" }), postPetty({ action: "list_petty_withdrawals", limit: 2000 }),
+  ]);
+  const acc = {};
+  const add = (c, k, v) => { if (!acc[c]) acc[c] = { fuel: 0, offering: 0, general: 0, postage: 0, n: 0 }; acc[c][k] += Number(v || 0); acc[c].n++; };
+  fuel.forEach(d => { if (d && d.status === "approved" && inRange(d.doc_date)) add(compOfName(d.branch_name || d.company_name), "fuel", d.total_amount); });
+  offering.forEach(d => { if (d && d.status === "approved" && inRange(d.doc_date)) add(compOfName(d.company_name), "offering", d.total_amount); });
+  pcw.forEach(p => { if (p && p.status === "active" && inRange(p.withdraw_date)) add(compOfName(p.company_name), /ไปรษณีย์/.test(String(p.petty_type || "")) ? "postage" : "general", p.total_amount); });
+  return COMPANIES.map(c => {
+    const b = acc[c] || { fuel: 0, offering: 0, general: 0, postage: 0, n: 0 };
+    const cr = r2(b.fuel + b.offering + b.general + b.postage);
+    const opening = Object.prototype.hasOwnProperty.call(PETTY_OPENING_0831, c) ? PETTY_OPENING_0831[c] : 0;
+    return { account_id: "petty-" + c, kind: "petty", company: c, code: PETTY_CODE, bank_name: "เงินสดย่อย", account_no: "", account_name: `รวมทุกสาขา · ค่าน้ำมันรถใหม่ ${fmt(b.fuel)} · ของไหว้ ${fmt(b.offering)} · ค่าใช้จ่ายทั่วไป ${fmt(b.general)} · ไปรษณีย์ ${fmt(b.postage)}`,
+      account_type: "วงเงินคงที่ (เติมเท่าที่เบิก)", flowOpening: opening, opening, dr: cr, cr, closing: opening, count: b.n, breakdown: b };
+  });
+}
 const flowOpeningOf = (a) => { const k = String(a.account_no || "").trim(); return Object.prototype.hasOwnProperty.call(FLOW_OPENING_0831, k) ? FLOW_OPENING_0831[k] : (Object.prototype.hasOwnProperty.call(FLOW_OPENING_0831, normNo(k)) ? FLOW_OPENING_0831[normNo(k)] : null); };
 const COMPANIES = ["ป.เปา", "สิงห์ชัย"];
 const COMPANY_FULL = { "ป.เปา": "บริษัท ป.เปา มอเตอร์เซอร์วิส จำกัด", "สิงห์ชัย": "ห้างหุ้นส่วนจำกัด สิงห์ชัยสยามยนต์" };
@@ -104,8 +136,12 @@ export default function TrialBalancePage() {
         done++; setProgress(`${done}/${accounts.length} บัญชี`);
         return { ...a, company: companyOf(a), code: flowCodeOf(a), flowOpening: fo, opening, dr, cr, closing: r2(opening + dr - cr), count: cur.filter(m => m && m.movement_date).length };
       });
-      out.sort((x, y) => COMPANIES.indexOf(x.company) - COMPANIES.indexOf(y.company) || (x.code || "zz").localeCompare(y.code || "zz") || String(x.account_no).localeCompare(String(y.account_no)));
-      setRows(out); setLoadedYm(ym);
+      setProgress("เงินสดย่อย…");
+      let petty = [];
+      try { petty = await loadPettyRows(from, to); } catch { petty = []; }
+      const all = [...out, ...petty];
+      all.sort((x, y) => COMPANIES.indexOf(x.company) - COMPANIES.indexOf(y.company) || (x.code || "zz").localeCompare(y.code || "zz") || String(x.account_no).localeCompare(String(y.account_no)));
+      setRows(all); setLoadedYm(ym);
     } catch { setErr("❌ โหลดข้อมูลไม่สำเร็จ"); }
     setLoading(false); setProgress("");
   }
@@ -139,12 +175,12 @@ export default function TrialBalancePage() {
 <style>@page{size:A4 landscape;margin:12mm}body{font-family:Tahoma,sans-serif;font-size:11pt;color:#111}h1{font-size:16pt;margin:0 0 2px}h2{font-size:12pt;margin:0;font-weight:400}.meta{font-size:9.5pt;color:#555;margin:2px 0 10px}
 table{width:100%;border-collapse:collapse}th,td{border-bottom:1px solid #ddd;padding:4px 6px;vertical-align:top}th{background:#f1f5f9;font-size:10pt}th.grp{border-bottom:2px solid #94a3b8}td.r,th.r{text-align:right;font-family:Consolas,monospace;white-space:nowrap}td.code{font-family:Consolas,monospace;white-space:nowrap}.sub{font-size:8.5pt;color:#666}
 tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:700;background:#f8fafc}tr.total td{font-weight:800;border-top:2px solid #111;border-bottom:3px double #111;font-size:11.5pt}.note{margin-top:10px;font-size:9pt;color:#666}</style></head><body>
-<h1>งบทดลอง (เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — บัญชีธนาคาร)</h1><h2>${esc(title)}</h2>
+<h1>งบทดลอง (เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — บัญชีธนาคาร + เงินสดย่อย)</h1><h2>${esc(title)}</h2>
 <div class="meta">รอบ ${esc(thMonthLong(loadedYm || ym))} · สิ้นสุด ณ วันที่ ${esc(thDateLong(to))} · พิมพ์ ${new Date().toLocaleString("th-TH")}</div>
 <table><thead><tr><th rowspan="2" style="text-align:left">รหัส</th><th rowspan="2" style="text-align:left">บัญชี</th><th colspan="2" class="grp">ยอดยกมา ${esc(thDateLong(prevDayOf(from)))}</th><th colspan="2" class="grp">ยอดประจำงวด</th><th colspan="2" class="grp">ยอดสะสม ${esc(thDateLong(to))}</th></tr>
 <tr><th class="r">เดบิต</th><th class="r">เครดิต</th><th class="r">เดบิต</th><th class="r">เครดิต</th><th class="r">เดบิต</th><th class="r">เครดิต</th></tr></thead>
 <tbody>${body}${tot("รวมทั้งสิ้น", grand, "total")}</tbody></table>
-<div class="note">ที่มา: รายงานการเคลื่อนไหวบัญชีธนาคารในระบบ (ยอดยกมา = งบทดลอง Flow 31/08/69 + รายการตั้งแต่ 01/09/69 ถึงก่อนต้นงวด) · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount</div>
+<div class="note">ที่มา: รายงานการเคลื่อนไหวบัญชีธนาคารในระบบ (ยอดยกมา = งบทดลอง Flow 31/08/69 + รายการตั้งแต่ 01/09/69 ถึงก่อนต้นงวด) · เงินสดย่อย 11149.00 รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่) · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount</div>
 <script>window.onload=function(){window.print()}</script></body></html>`;
     const w = window.open("", "_blank"); if (!w) return; w.document.write(html); w.document.close();
   }
@@ -158,7 +194,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
     <div style={{ fontFamily: "Tahoma, sans-serif", padding: 20, background: "#f8fafc", minHeight: "100vh" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
         <h2 style={{ margin: 0, color: "#1e3a8a" }}>📒 งบทดลอง</h2>
-        <span style={{ fontSize: 12.5, color: "#64748b" }}>เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — ตอนนี้: บัญชีธนาคาร (เริ่มรอบ {thMonthLong(START_MONTH)})</span>
+        <span style={{ fontSize: 12.5, color: "#64748b" }}>เฉพาะบัญชีที่ตรวจสอบกับ FlowAccount แล้ว — ตอนนี้: บัญชีธนาคาร + เงินสดย่อย (เริ่มรอบ {thMonthLong(START_MONTH)})</span>
         <div style={{ flex: 1 }} />
         <button onClick={exportCsv} disabled={!shown.length} style={{ ...btn("#fff"), color: "#1e3a8a", border: "1px solid #1e3a8a" }}>⬇ Excel/CSV</button>
         <button onClick={printReport} disabled={!shown.length} style={btn("#1e3a8a")}>🖨 พิมพ์รายงาน</button>
@@ -201,9 +237,9 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
                 const t = sumOf(list);
                 return (
                   <React.Fragment key={g}>
-                    <tr><td colSpan={8} style={{ ...td, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>▾ สินทรัพย์ · {COMPANY_FULL[g] || g} · {list.length} บัญชี</td></tr>
+                    <tr><td colSpan={8} style={{ ...td, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>▾ สินทรัพย์ · {COMPANY_FULL[g] || g} · {list.filter(r => r.kind !== "petty").length} บัญชีธนาคาร{list.some(r => r.kind === "petty") ? " + เงินสดย่อย" : ""}</td></tr>
                     {list.map(r => { const [a, b] = drcr(r.opening); const [c, d] = drcr(r.closing); return (
-                      <tr key={r.account_id} title={`รายการในงวด ${r.count} รายการ · ${r.flowOpening !== null ? `ยกมาอิงยอด Flow 31/08/69 = ${fmt(r.flowOpening)} + รายการตั้งแต่ 01/09/69` : `ยกมา = ยอดตั้งต้นบัญชี ${fmt(r.opening_balance)} (${r.opening_date ? String(r.opening_date).slice(0, 10) : "-"}) + รายการสะสมทั้งหมด (ยังไม่มียอด Flow 31/08)`}`}>
+                      <tr key={r.account_id} style={r.kind === "petty" ? { background: "#fffbeb" } : undefined} title={r.kind === "petty" ? `เงินสดย่อยรวมทุกสาขา ${r.count} เอกสาร · ยกมา = วงเงินตาม Flow 31/08/69 · เดบิต (เติมเงิน) ถือว่าเท่ากับที่เบิก (ระบบไม่มีบันทึกเติมเงิน)` : `รายการในงวด ${r.count} รายการ · ${r.flowOpening !== null ? `ยกมาอิงยอด Flow 31/08/69 = ${fmt(r.flowOpening)} + รายการตั้งแต่ 01/09/69` : `ยกมา = ยอดตั้งต้นบัญชี ${fmt(r.opening_balance)} (${r.opening_date ? String(r.opening_date).slice(0, 10) : "-"}) + รายการสะสมทั้งหมด (ยังไม่มียอด Flow 31/08)`}`}>
                         <td style={{ ...td, fontFamily: "monospace", color: r.code ? "#0369a1" : "#9ca3af", fontWeight: 600 }}>{r.code || "—"}{r.flowOpening === null && <span title="ยังไม่มียอดยกมาจาก Flow 31/08/69 — ใช้ยอดตั้งต้นบัญชีในระบบ" style={{ marginLeft: 4, color: "#f59e0b" }}>*</span>}</td>
                         <td style={td}><div style={{ fontWeight: 600 }}>{r.bank_name} <span style={{ fontFamily: "monospace" }}>{r.account_no}</span></div><div style={{ fontSize: 11, color: "#64748b" }}>{r.account_name}{r.account_type ? ` · ${r.account_type}` : ""}</div></td>
                         <td style={num}>{cellNum(a)}</td><td style={{ ...num, color: "#0891b2" }}>{cellNum(b)}</td>
@@ -226,7 +262,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
           </table>
         </div>
         <div style={{ fontSize: 11.5, color: "#64748b", padding: "10px 0 6px", lineHeight: 1.6 }}>
-          ยอดยกมา = ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ) · ยอดประจำงวดจากรายงานการเคลื่อนไหว · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
+          ยอดยกมา = ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ) · ยอดประจำงวดจากรายงานการเคลื่อนไหว · เงินสดย่อย (11149.00) รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่ ระบบไม่มีบันทึกเติมเงิน) · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
         </div>
       </div>
     </div>
