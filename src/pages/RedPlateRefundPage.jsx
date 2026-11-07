@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 const BASE = "https://n8n-new-project-gwf2.onrender.com/webhook";
 const RETAIL_API = `${BASE}/retail-sale-api`;
 const ACC_API = `${BASE}/accounting-api`;
+const REG_API = `${BASE}/registrations-api`; // lookup_plates: ทะเบียนรถจริงตามเลขถัง (2026-11-07)
 // นำเข้ามัดจำป้ายแดงระบบเก่าจากข้อมูล upload เงินมัดจำคงเหลือ (มัดจำหลายประเภทปน — user เลือกเองว่าใบไหนคือป้ายแดง) (user 2026-09-01)
 
 async function post(url, body) {
@@ -74,6 +75,26 @@ export default function RedPlateRefundPage({ currentUser }) {
 
   const total = useMemo(() => rows.reduce((s, r) => s + num(tab === "refunded" ? r.refund_amount : r.amount), 0), [rows, tab]);
   const isHeld = tab === "held";
+  // ทะเบียนรถจริง (งานส่งจดทะเบียน) ตามเลขถัง — จดแล้ว = ลูกค้าควรคืนป้ายแดง (user 2026-11-07 "เพิ่มฟิลด์ทะเบียนรถ")
+  const [plateMap, setPlateMap] = useState({});
+  useEffect(() => {
+    const ch = [...new Set(rows.map(r => String(r.chassis_no || "").trim().toUpperCase()).filter(Boolean))];
+    if (!ch.length) { setPlateMap({}); return; }
+    let alive = true;
+    post(REG_API, { action: "lookup_plates", chassis_nos: ch }).then(d => {
+      if (!alive) return;
+      const m = {};
+      asArray(d).forEach(x => { if (x && x.chassis_no) m[String(x.chassis_no).toUpperCase()] = x; });
+      setPlateMap(m);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [rows]);
+  const plateOf = (r) => {
+    const x = plateMap[String(r.chassis_no || "").trim().toUpperCase()];
+    if (!x) return null;
+    const plate = [x.plate_category, x.plate_number].filter(Boolean).join(" ");
+    return { plate, province: x.plate_province || "", registered: !!plate, register_date: x.register_date, status: x.submission_status, run: x.run_code };
+  };
 
   function openRefund(r) {
     setModal(r);
@@ -170,7 +191,7 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
           <thead><tr>
             <th style={th}>เลขที่ใบรับมัดจำ</th><th style={th}>วันที่รับ</th>
             {isHeld ? <th style={th}>ค้าง (วัน)</th> : tab === "seized" ? <th style={th}>วันที่ยึด</th> : <><th style={th}>เลขที่ใบคืน</th><th style={th}>วันที่คืน</th></>}
-            <th style={th}>ทะเบียนป้ายแดง</th><th style={th}>ลูกค้า</th><th style={th}>รถ</th><th style={th}>ใบขาย</th><th style={th}>สาขา</th>
+            <th style={th}>ทะเบียนป้ายแดง</th><th style={th}>ทะเบียนรถ</th><th style={th}>ลูกค้า</th><th style={th}>รถ</th><th style={th}>ใบขาย</th><th style={th}>สาขา</th>
             <th style={{ ...th, textAlign: "right" }}>{isHeld ? "มัดจำ" : tab === "seized" ? "ยอดยึด" : "ยอดคืน"}</th>
             {tab === "refunded" && <th style={th}>วิธีคืน / ผู้คืน</th>}
             {tab === "seized" && <th style={th}>เหตุผล / ผู้ยึด</th>}
@@ -190,6 +211,7 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
                     : tab === "seized" ? <td style={td}>{thaiDate(r.seized_at)}</td>
                     : <><td style={{ ...td, fontFamily: "monospace" }}>{r.refund_doc_no || "-"}</td><td style={td}>{thaiDate(r.refund_date)}</td></>}
                   <td style={{ ...td, fontWeight: 700, color: "#b91c1c", fontSize: 15 }}>{r.plate_no || "-"}</td>
+                  <td style={td}>{(() => { const p = plateOf(r); if (!p) return <span style={{ color: "#9ca3af", fontSize: 12 }}>ยังไม่ส่งจด</span>; if (!p.registered) return <span style={{ color: "#b45309", fontSize: 12 }}>ส่งจดแล้ว รอป้าย{p.run ? ` (${p.run})` : ""}</span>; return <><b style={{ color: "#065f46", fontSize: 14 }}>{p.plate}</b><div style={{ fontSize: 11, color: "#6b7280" }}>{p.province}{p.register_date ? ` · จด ${thaiDate(p.register_date)}` : ""}</div></>; })()}</td>
                   <td style={td}>{r.customer_name || "-"}{(r.customer_phone || r.sale_phone) && <div style={{ fontSize: 12, color: "#6b7280" }}>{r.customer_phone || r.sale_phone}</div>}{(r.line_user_id || r.sale_line_user_id) && <span style={{ fontSize: 11, color: "#16a34a" }}> LINE ✓</span>}</td>
                   <td style={td}>{[r.brand, r.model_name, r.model_color].filter(Boolean).join(" ")}{r.engine_no && <div style={{ fontSize: 12, color: "#6b7280" }}>เครื่อง {r.engine_no}</div>}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontSize: 12 }}>{r.sale_no}<div style={{ color: "#6b7280" }}>{thaiDate(r.sale_date)}</div></td>
@@ -221,6 +243,7 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
             <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 12px", fontSize: 14, marginBottom: 12 }}>
               <div>ใบรับมัดจำ <b>{seizeModal.deposit_no}</b> · ทะเบียน <b style={{ color: "#b91c1c", fontSize: 16 }}>{seizeModal.plate_no || "-"}</b></div>
               <div>ลูกค้า <b>{seizeModal.customer_name || "-"}</b> · ใบขาย {seizeModal.sale_no}</div>
+              <div>ทะเบียนรถ: {(() => { const p = plateOf(seizeModal); return p && p.registered ? <b style={{ color: "#065f46" }}>{p.plate} {p.province}</b> : <span style={{ color: "#b45309" }}>{p ? "ส่งจดแล้ว รอป้าย" : "ยังไม่ส่งจด"}</span>; })()}</div>
               <div>มัดจำไว้ <b>{baht(seizeModal.amount)}</b> บาท (รับเมื่อ {thaiDate(seizeModal.received_date)} · ค้าง {num(seizeModal.days_held)} วัน)</div>
             </div>
             <div style={{ fontSize: 13, marginBottom: 6 }}>เหตุผลการยึด <span style={{ color: "#b91c1c" }}>*</span></div>
