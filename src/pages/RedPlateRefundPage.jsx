@@ -67,7 +67,7 @@ export default function RedPlateRefundPage({ currentUser }) {
       const body = { action: "list_red_plate_deposits", status: tab, keyword: keyword.trim() };
       if (tab === "refunded" || tab === "seized") { body.date_from = dateFrom; body.date_to = dateTo; }
       const d = await post(RETAIL_API, body);
-      setRows(asArray(d));
+      setRows(asArray(d).filter((r) => r && r.deposit_no)); // ไม่มีข้อมูล n8n ตอบ [{success:true}] → กันแถวว่าง (แท็บยึดแล้ว 2026-11-07)
     } catch (e) { setMessage("❌ โหลดไม่สำเร็จ: " + (e.message || e)); }
     finally { setLoading(false); }
   }
