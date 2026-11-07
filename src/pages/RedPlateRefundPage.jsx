@@ -77,20 +77,31 @@ export default function RedPlateRefundPage({ currentUser }) {
   const isHeld = tab === "held";
   // ทะเบียนรถจริง (งานส่งจดทะเบียน) ตามเลขถัง — จดแล้ว = ลูกค้าควรคืนป้ายแดง (user 2026-11-07 "เพิ่มฟิลด์ทะเบียนรถ")
   const [plateMap, setPlateMap] = useState({});
+  // ชื่อลูกค้าแบบเทียบ (ตัดคำนำหน้า/ช่องว่าง/จุด/ขีด) — ใบ import ระบบเก่าไม่มีเลขถัง ต้องเทียบด้วยชื่อ + เลือกใบขายที่วันขายใกล้วันรับมัดจำที่สุด (ไม่เกิน 120 วัน)
+  const normName = (v) => String(v || "").replace(/^(นางสาว|นาย|นาง|น\.ส\.|MRS\.?|MR\.?|MISS|MS\.?)\s*/i, "").replace(/[\s.\-]/g, "").toUpperCase();
+  const [nameRows, setNameRows] = useState([]);
   useEffect(() => {
     const ch = [...new Set(rows.map(r => String(r.chassis_no || "").trim().toUpperCase()).filter(Boolean))];
-    if (!ch.length) { setPlateMap({}); return; }
+    const names = [...new Set(rows.filter(r => !r.chassis_no && r.customer_name).map(r => r.customer_name))];
+    if (!ch.length && !names.length) { setPlateMap({}); setNameRows([]); return; }
     let alive = true;
-    post(REG_API, { action: "lookup_plates", chassis_nos: ch }).then(d => {
+    post(REG_API, { action: "lookup_plates", chassis_nos: ch, names }).then(d => {
       if (!alive) return;
-      const m = {};
-      asArray(d).forEach(x => { if (x && x.chassis_no) m[String(x.chassis_no).toUpperCase()] = x; });
-      setPlateMap(m);
+      const m = {}; const list = asArray(d).filter(x => x && (x.chassis_no || x.name_key));
+      list.forEach(x => { if (x.chassis_no) m[String(x.chassis_no).toUpperCase()] = x; });
+      setPlateMap(m); setNameRows(list);
     }).catch(() => {});
     return () => { alive = false; };
   }, [rows]);
   const plateOf = (r) => {
-    const x = plateMap[String(r.chassis_no || "").trim().toUpperCase()];
+    let x = plateMap[String(r.chassis_no || "").trim().toUpperCase()];
+    if (!x && !r.chassis_no && r.customer_name) {
+      const key = normName(r.customer_name); const t0 = new Date(String(r.received_date || "").slice(0, 10)).getTime();
+      const cands = nameRows.filter(y => (y.name_key || normName(y.customer_name)) === key && y.sale_date)
+        .map(y => ({ y, diff: Math.abs(new Date(String(y.sale_date).slice(0, 10)).getTime() - t0) / 86400000 }))
+        .filter(c => isFinite(c.diff) && c.diff <= 120).sort((a, b) => a.diff - b.diff);
+      x = cands[0]?.y || null;
+    }
     if (!x) return null;
     const plate = [x.plate_category, x.plate_number].filter(Boolean).join(" ");
     return { plate, province: x.plate_province || "", registered: !!plate, register_date: x.register_date, status: x.submission_status, run: x.run_code };
