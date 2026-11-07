@@ -668,6 +668,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
               <option value="active">ใช้งาน (ยังไม่คืน)</option>
               <option value="refunded">คืนเงินแล้ว</option>
               <option value="seized">ยึดเงินมัดจำ</option>
+              <option value="used">ใช้ชำระค่ารถแล้ว (DMS)</option>
             </select>
             <button onClick={() => loadRows()} disabled={loadingRows} style={btnBlueSm}>{loadingRows ? "..." : "🔍 ค้นหา"}</button>
           </div>
@@ -690,7 +691,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                 {loadingRows && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
                 {!loadingRows && rows.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
                 {rows.map((r, i) => (
-                  <tr key={r.deposit_no} style={{ borderTop: "1px solid #e5e7eb", opacity: r.status === "refunded" || r.status === "seized" ? 0.6 : 1 }}>
+                  <tr key={r.deposit_no} style={{ borderTop: "1px solid #e5e7eb", opacity: r.status === "refunded" || r.status === "seized" || r.status === "used" ? 0.6 : 1 }}>
                     <td style={td}>{i + 1}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.deposit_no}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDate(r.deposit_date)}</td>
@@ -704,6 +705,8 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       {r.status === "refunded"
                         ? <span style={{ color: "#dc2626" }}>คืนเงินแล้ว<div style={{ fontSize: 11, color: "#9ca3af" }}>{r.refund_method || ""} {thaiDate(r.refunded_at)}</div></span>
+                        : r.status === "used" /* ตัดชำระค่ารถไปแล้วใน DMS ช่วงก่อนเริ่มระบบขาย NEW (ปิดด้วย SQL ตามรายงาน DMS, user 2026-11-07) */
+                          ? <span style={{ color: "#1d4ed8", fontWeight: 600 }}>ใช้ชำระค่ารถแล้ว (DMS)<div style={{ fontSize: 11, color: "#6b7280", fontWeight: 400 }}>{r.used_ref || ""} · {thaiDate(r.used_at || r.updated_at)}</div></span>
                         : r.status === "seized" /* ยกเลิกใบจองแบบยึดเงินมัดจำ (เมนูจองรถจักรยานยนต์) — ปิดใบมัดจำ ไม่คืนเงิน (user 2026-11-07) */
                           ? <span style={{ color: "#b91c1c", fontWeight: 600 }}>ยึดเงินมัดจำ<div style={{ fontSize: 11, color: "#9ca3af", fontWeight: 400 }}>{thaiDate(r.seized_at || r.updated_at)}{r.refund_note ? " · " + r.refund_note : ""}</div></span>
                         : soldBooking(r)
@@ -712,7 +715,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       <button onClick={() => printDepositReceipt(r)} style={btnSmBlue} title="พิมพ์ใบเสร็จมัดจำ">🖨️</button>
-                      {r.status !== "refunded" && r.status !== "seized" && !soldBooking(r) && (
+                      {r.status !== "refunded" && r.status !== "seized" && r.status !== "used" && !soldBooking(r) && (
                         <>
                           <button onClick={() => createBookingFor(r)} style={btnSmGreen} title="สร้างใบจองในระบบจองรถ">📋 สร้างใบจอง</button>
                           {(isAdmin || isSameDay(r.deposit_date)) && (
@@ -727,7 +730,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                           )}
                         </>
                       )}
-                      {(r.status === "refunded" || r.status === "seized" || (r.status !== "refunded" && soldBooking(r))) && (
+                      {(r.status === "refunded" || r.status === "seized" || r.status === "used" || (r.status !== "refunded" && soldBooking(r))) && (
                         <button onClick={() => editRow({ ...r })} style={btnSmGray} title="เปิดดูอย่างเดียว">👁️ ดู</button>
                       )}
                     </td>

@@ -94,7 +94,9 @@ function customerDepositRow(c, src, from, to) {
   const recv = [], used = [], ref = [];
   src.booking.filter(x => x && x.deposit_no).forEach(x => { const cc = companyOfBranch(x.branch_code); recv.push([d10(x.deposit_date), x.deposit_amount, cc]); if (x.status === "refunded" || n(x.refund_amount) > 0) ref.push([d10(x.refunded_at || x.updated_at), n(x.refund_amount) || n(x.deposit_amount), cc]);
     // ยึดเงินมัดจำจองรถ (ยกเลิกใบจองแบบยึด → booking_deposits.status 'seized' 2026-11-07) → เดบิตตามวันยึด (หนี้สินลด กลายเป็นรายได้) นับรวมฝั่งตัดใช้
-    if (x.status === "seized") used.push([d10(x.seized_at || x.updated_at), x.deposit_amount, cc]); });
+    if (x.status === "seized") used.push([d10(x.seized_at || x.updated_at), x.deposit_amount, cc]);
+    // ตัดชำระค่ารถใน DMS ก่อนเริ่มระบบขาย NEW (status 'used' ปิดด้วย SQL ตามรายงาน DMS 2026-11-07) → ตัดใช้ตามวันขาย DMS
+    if (x.status === "used") used.push([d10(x.used_at || x.updated_at), x.deposit_amount, cc]); });
   src.sales.filter(x => x && x.bd_deposit_no && x.sale_status !== "cancelled" && n(x.booking_deposit) > 0).forEach(x => used.push([d10(x.sale_date), x.booking_deposit, companyOfBranch(x.branch_code)]));
   src.redPlate.filter(x => x && x.deposit_no && x.status !== "cancelled").forEach(x => { const cc = companyOfBranch(x.branch_code); recv.push([d10(x.received_date), x.amount, cc]); if (x.status === "refunded" || n(x.refund_amount) > 0) ref.push([d10(x.refund_date || x.updated_at), n(x.refund_amount) || n(x.amount), cc]); });
   src.parts.filter(x => x && x.deposit_doc_no && x.status !== "cancelled" && !x.cancelled_at).forEach(x => { const cc = companyOfBranch(x.branch_code); recv.push([d10(x.deposit_date), x.deposit_amount, cc]);
