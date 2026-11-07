@@ -195,7 +195,7 @@ export function depositedDaySet(days, depList, addDays) {
 
 /** โหลดข้อมูลดิบทุกแหล่งของช่วงวันที่ (เหมือน load() ของ SaleMoneyReportPage) */
 export async function loadDailyCashSources(dateFrom, dateTo) {
-  const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, resWhtRf, pettyRows, resCustRf, resSeiz] = await Promise.all([
+  const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, resWhtRf, pettyRows, resCustRf, resSeiz, resRpSeized] = await Promise.all([
     post(RETAIL_API, { action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
     post(DEPOSIT_API, { action: "get_deposits" }).catch(() => null),
     post(PART_DEPOSIT_API, { action: "list_deposits", limit: 2000 }).catch(() => null),
@@ -212,6 +212,7 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
     loadPettyRows(),
     post(CUST_REFUND_API, { action: "list_refunds", date_field: "refund_date", date_from: dateFrom, date_to: dateTo, status: "คืนเงินแล้ว", limit: 2000 }).catch(() => null),
     post(SPARE_API, { action: "list_deposit_seizures" }).catch(() => null),
+    post(RETAIL_API, { action: "list_red_plate_deposits", status: "seized", date_from: dateFrom, date_to: dateTo }).catch(() => null), // ยึดมัดจำป้ายแดง (2026-11-07)
   ]);
   const data = await res.json().catch(() => []);
   const paidRows = (Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no));
@@ -243,7 +244,9 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
   try { cr = typeof crRaw?.listjson === "string" ? JSON.parse(crRaw.listjson) : Array.isArray(crRaw) ? crRaw : []; } catch { cr = []; }
   const szRaw = resSeiz ? await resSeiz.json().catch(() => []) : [];
   const sz = Array.isArray(szRaw) ? szRaw : Array.isArray(szRaw?.items) ? szRaw.items : [];
+  const rpsRaw = resRpSeized ? await resRpSeized.json().catch(() => []) : [];
   return {
+    rpSeizedRows: (Array.isArray(rpsRaw) ? rpsRaw : []).filter(r => r && r.deposit_no && r.status === "seized"),
     seizureRows: sz.filter(r => r && r.seizure_id && r.status === "active"),
     whtRefundRows: wr.filter(r => r && r.id),
     pettyRows,
@@ -310,7 +313,7 @@ export function buildPartDepItems(partDepRows, ctx) {
 /** สร้างแถวรายการทั้งหมด (allItems) — ctx = { dateFrom, dateTo, branch, isAdmin, myBranch } */
 export function buildDailyCashItems(src, ctx) {
   const { dateFrom, dateTo } = ctx;
-  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], whtRefundRows = [], pettyRows = [], custRefundRows = [], seizureRows = [] } = src;
+  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], whtRefundRows = [], pettyRows = [], custRefundRows = [], seizureRows = [], rpSeizedRows = [] } = src;
   const items = buildSaleItems(src.rows || [], depRows, ctx);
   const depItems = buildDepItems(depRows, ctx);
   const partDepItems = buildPartDepItems(partDepRows, ctx);
@@ -726,6 +729,9 @@ export function buildDailyCashItems(src, ctx) {
       .map((s) => { const br = (String(s.deposit_doc_no || "").match(/^SCY\d\d/) || [])[0] || "SCY06"; return { s, br }; })
       .filter(({ br }) => inBranch(br, ctx))
       .map(({ s, br }) => seizedRow("ยึดมัดจำอะไหล่ระบบเก่า " + (s.brand || ""), s.deposit_doc_no, s.seizure_date, s.customer_name, num(s.seizure_amount), br, s.reason)),
+    // มัดจำป้ายแดงที่ยึด (หน้าคืนมัดจำป้ายแดง ปุ่มยึดเงิน admin 2026-11-07)
+    ...rpSeizedRows.filter((d) => inRange(d.seized_at) && inBranch(d.branch_code, ctx))
+      .map((d) => seizedRow("ยึดมัดจำป้ายแดง " + (d.plate_no || ""), d.deposit_no, d.seized_at, d.customer_name, num(d.amount), d.branch_code, [d.sale_no, d.refund_note].filter(Boolean).join(" · "))),
   ];
   return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...custRefundOuts, ...whtRefundIns, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...seizedIncomes, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds, ...sysRefunds, ...pettyOuts];
 }

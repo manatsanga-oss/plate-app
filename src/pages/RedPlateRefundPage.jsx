@@ -35,6 +35,24 @@ export default function RedPlateRefundPage({ currentUser }) {
   const [modal, setModal] = useState(null); // แถวที่กำลังคืนเงิน
   const [form, setForm] = useState({ refund_date: todayStr(), refund_amount: "", method: "cash", account_id: "", note: "", notify: true });
   const [saving, setSaving] = useState(false);
+  // ยึดเงินมัดจำป้ายแดง (admin) — ลูกค้าไม่คืนป้าย/ป้ายหาย → status seized ไม่มีเงินออก (user 2026-11-07)
+  const isAdmin = currentUser?.role === "admin";
+  const [seizeModal, setSeizeModal] = useState(null);
+  const [seizeReason, setSeizeReason] = useState("");
+  async function confirmSeize() {
+    if (!seizeModal || saving) return;
+    if (!seizeReason.trim()) { setMessage("❌ ระบุเหตุผลการยึด"); return; }
+    if (!window.confirm(`ยืนยันยึดเงินมัดจำป้ายแดง ${seizeModal.plate_no || "-"} ของ ${seizeModal.customer_name || "-"} จำนวน ${baht(seizeModal.amount)} บาท? (ไม่คืนเงิน ถือเป็นรายได้)`)) return;
+    setSaving(true); setMessage("");
+    try {
+      const res = await post(RETAIL_API, { action: "seize_red_plate", deposit_no: seizeModal.deposit_no, reason: seizeReason.trim(), seized_by: currentUser?.username || currentUser?.name || "admin" });
+      const dep = Array.isArray(res) ? res[0]?.deposit : res?.deposit;
+      if (res?.__error || !dep) throw new Error(res?.__error || "ยึดไม่สำเร็จ (ใบอาจถูกคืน/ยึดไปแล้ว)");
+      setMessage(`✅ ยึดเงินมัดจำป้ายแดง ${seizeModal.deposit_no} แล้ว ${baht(seizeModal.amount)} บาท`);
+      setSeizeModal(null); setSeizeReason(""); load();
+    } catch (e) { setMessage("❌ ยึดเงินไม่สำเร็จ: " + (e.message || e)); }
+    finally { setSaving(false); }
+  }
 
   useEffect(() => {
     post(ACC_API, { action: "list_bank_accounts", include_inactive: "false" })
@@ -46,7 +64,7 @@ export default function RedPlateRefundPage({ currentUser }) {
     setLoading(true); setMessage("");
     try {
       const body = { action: "list_red_plate_deposits", status: tab, keyword: keyword.trim() };
-      if (tab === "refunded") { body.date_from = dateFrom; body.date_to = dateTo; }
+      if (tab === "refunded" || tab === "seized") { body.date_from = dateFrom; body.date_to = dateTo; }
       const d = await post(RETAIL_API, body);
       setRows(asArray(d));
     } catch (e) { setMessage("❌ โหลดไม่สำเร็จ: " + (e.message || e)); }
@@ -55,6 +73,7 @@ export default function RedPlateRefundPage({ currentUser }) {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [tab]);
 
   const total = useMemo(() => rows.reduce((s, r) => s + num(tab === "refunded" ? r.refund_amount : r.amount), 0), [rows, tab]);
+  const isHeld = tab === "held";
 
   function openRefund(r) {
     setModal(r);
@@ -134,9 +153,9 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
     <div style={{ fontFamily: "Tahoma", padding: 16, maxWidth: 1200 }}>
       <h2 style={{ margin: "0 0 12px", color: "#072d6b" }}>🔴 คืนมัดจำป้ายแดง</h2>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-        {tabBtn("held", "ป้ายค้างคืน")}{tabBtn("refunded", "คืนแล้ว")}
+        {tabBtn("held", "ป้ายค้างคืน")}{tabBtn("refunded", "คืนแล้ว")}{tabBtn("seized", "ยึดแล้ว")}
         <input value={keyword} onChange={(e) => setKeyword(e.target.value)} onKeyDown={(e) => e.key === "Enter" && load()} placeholder="ค้นหา ทะเบียน / ชื่อลูกค้า / เบอร์ / เลขใบขาย" style={{ ...inp, width: 300 }} />
-        {tab === "refunded" && (<>
+        {(tab === "refunded" || tab === "seized") && (<>
           <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={inp} />
           <span>ถึง</span>
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={inp} />
@@ -150,14 +169,15 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>
             <th style={th}>เลขที่ใบรับมัดจำ</th><th style={th}>วันที่รับ</th>
-            {tab === "held" ? <th style={th}>ค้าง (วัน)</th> : <><th style={th}>เลขที่ใบคืน</th><th style={th}>วันที่คืน</th></>}
+            {isHeld ? <th style={th}>ค้าง (วัน)</th> : tab === "seized" ? <th style={th}>วันที่ยึด</th> : <><th style={th}>เลขที่ใบคืน</th><th style={th}>วันที่คืน</th></>}
             <th style={th}>ทะเบียนป้ายแดง</th><th style={th}>ลูกค้า</th><th style={th}>รถ</th><th style={th}>ใบขาย</th><th style={th}>สาขา</th>
-            <th style={{ ...th, textAlign: "right" }}>{tab === "held" ? "มัดจำ" : "ยอดคืน"}</th>
+            <th style={{ ...th, textAlign: "right" }}>{isHeld ? "มัดจำ" : tab === "seized" ? "ยอดยึด" : "ยอดคืน"}</th>
             {tab === "refunded" && <th style={th}>วิธีคืน / ผู้คืน</th>}
+            {tab === "seized" && <th style={th}>เหตุผล / ผู้ยึด</th>}
             <th style={th}></th>
           </tr></thead>
           <tbody>
-            {rows.length === 0 && <tr><td colSpan={12} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 24 }}>{loading ? "กำลังโหลด..." : tab === "held" ? "ไม่มีป้ายแดงค้างคืน" : "ไม่มีรายการคืนในช่วงนี้"}</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={12} style={{ ...td, textAlign: "center", color: "#9ca3af", padding: 24 }}>{loading ? "กำลังโหลด..." : isHeld ? "ไม่มีป้ายแดงค้างคืน" : tab === "seized" ? "ไม่มีรายการยึดในช่วงนี้" : "ไม่มีรายการคืนในช่วงนี้"}</td></tr>}
             {rows.map((r) => {
               const days = num(r.days_held);
               const late = tab === "held" && days >= 45;
@@ -165,19 +185,25 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
                 <tr key={r.deposit_no} style={{ background: late ? "#fff7ed" : "#fff" }}>
                   <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.deposit_no}{r.legacy && <div style={{ fontSize: 10.5, color: "#7c3aed", fontFamily: "Tahoma" }}>📥 ระบบเก่า</div>}</td>
                   <td style={td}>{thaiDate(r.received_date)}</td>
-                  {tab === "held"
+                  {isHeld
                     ? <td style={{ ...td, fontWeight: 700, color: late ? "#c2410c" : "#374151" }}>{days}{late ? " ⚠️" : ""}</td>
+                    : tab === "seized" ? <td style={td}>{thaiDate(r.seized_at)}</td>
                     : <><td style={{ ...td, fontFamily: "monospace" }}>{r.refund_doc_no || "-"}</td><td style={td}>{thaiDate(r.refund_date)}</td></>}
                   <td style={{ ...td, fontWeight: 700, color: "#b91c1c", fontSize: 15 }}>{r.plate_no || "-"}</td>
                   <td style={td}>{r.customer_name || "-"}{(r.customer_phone || r.sale_phone) && <div style={{ fontSize: 12, color: "#6b7280" }}>{r.customer_phone || r.sale_phone}</div>}{(r.line_user_id || r.sale_line_user_id) && <span style={{ fontSize: 11, color: "#16a34a" }}> LINE ✓</span>}</td>
                   <td style={td}>{[r.brand, r.model_name, r.model_color].filter(Boolean).join(" ")}{r.engine_no && <div style={{ fontSize: 12, color: "#6b7280" }}>เครื่อง {r.engine_no}</div>}</td>
                   <td style={{ ...td, fontFamily: "monospace", fontSize: 12 }}>{r.sale_no}<div style={{ color: "#6b7280" }}>{thaiDate(r.sale_date)}</div></td>
                   <td style={td}>{r.branch_name || r.branch_code || "-"}</td>
-                  <td style={{ ...td, textAlign: "right", fontWeight: 700 }}>{baht(tab === "held" ? r.amount : r.refund_amount)}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 700, color: tab === "seized" ? "#b91c1c" : undefined }}>{baht(tab === "refunded" ? r.refund_amount : r.amount)}</td>
                   {tab === "refunded" && <td style={td}>{r.refund_method || "-"}{r.refund_account_name ? ` · ${r.refund_account_name}` : ""}<div style={{ fontSize: 12, color: "#6b7280" }}>{r.refund_by || ""}{r.refund_note ? ` · ${r.refund_note}` : ""}</div></td>}
-                  <td style={td}>
-                    {tab === "held"
-                      ? <button onClick={() => openRefund(r)} style={{ padding: "6px 14px", background: "#0f766e", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>↩️ คืนเงิน</button>
+                  {tab === "seized" && <td style={td}>{r.refund_note || "-"}<div style={{ fontSize: 12, color: "#6b7280" }}>{r.seized_by || ""}</div></td>}
+                  <td style={{ ...td, whiteSpace: "nowrap" }}>
+                    {isHeld
+                      ? <>
+                          <button onClick={() => openRefund(r)} style={{ padding: "6px 14px", background: "#0f766e", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>↩️ คืนเงิน</button>
+                          {isAdmin && <button onClick={() => { setSeizeModal(r); setSeizeReason(""); }} title="ยึดเงินมัดจำ (ไม่คืนป้าย/ป้ายหาย) — ไม่คืนเงิน ถือเป็นรายได้" style={{ marginLeft: 6, padding: "6px 10px", background: "#b91c1c", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma", fontWeight: 700 }}>⛔ ยึดเงิน</button>}
+                        </>
+                      : tab === "seized" ? <span style={{ fontSize: 12, color: "#b91c1c", fontWeight: 700 }}>ยึดแล้ว</span>
                       : <button onClick={() => printRefund(r)} style={{ padding: "6px 12px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontFamily: "Tahoma" }}>🖨️ ใบคืนเงิน</button>}
                   </td>
                 </tr>
@@ -188,6 +214,25 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
       </div>
       <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 8 }}>ใบรับมัดจำป้ายแดง (RPD-) ออกอัตโนมัติตอนรับชำระเงินใบขาย NEW ที่กรอกทะเบียนป้ายแดง · แถวสีส้ม = ค้างคืนเกิน 45 วัน</div>
 
+      {seizeModal && (
+        <div onClick={() => !saving && setSeizeModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 460, maxWidth: "95vw", fontFamily: "Tahoma" }}>
+            <div style={{ fontWeight: 700, fontSize: 17, color: "#b91c1c", marginBottom: 10 }}>⛔ ยึดเงินมัดจำป้ายแดง</div>
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "8px 12px", fontSize: 14, marginBottom: 12 }}>
+              <div>ใบรับมัดจำ <b>{seizeModal.deposit_no}</b> · ทะเบียน <b style={{ color: "#b91c1c", fontSize: 16 }}>{seizeModal.plate_no || "-"}</b></div>
+              <div>ลูกค้า <b>{seizeModal.customer_name || "-"}</b> · ใบขาย {seizeModal.sale_no}</div>
+              <div>มัดจำไว้ <b>{baht(seizeModal.amount)}</b> บาท (รับเมื่อ {thaiDate(seizeModal.received_date)} · ค้าง {num(seizeModal.days_held)} วัน)</div>
+            </div>
+            <div style={{ fontSize: 13, marginBottom: 6 }}>เหตุผลการยึด <span style={{ color: "#b91c1c" }}>*</span></div>
+            <textarea value={seizeReason} onChange={(e) => setSeizeReason(e.target.value)} rows={3} placeholder="เช่น ลูกค้าไม่คืนป้ายแดงเกิน 45 วัน / ป้ายหาย" style={{ ...inp, width: "100%", boxSizing: "border-box", resize: "vertical" }} />
+            <div style={{ fontSize: 12, color: "#6b7280", margin: "8px 0 12px" }}>ยึดแล้วไม่มีเงินออก ยอดมัดจำจะลงเป็น "รายได้ยึดเงินมัดจำ" ในสรุปรายวันของวันนี้ และใบนี้ย้ายไปแท็บ "ยึดแล้ว"</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={confirmSeize} disabled={saving} style={{ flex: 1, padding: "11px 0", background: saving ? "#9ca3af" : "#b91c1c", color: "#fff", border: "none", borderRadius: 8, fontFamily: "Tahoma", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>{saving ? "กำลังบันทึก..." : "⛔ ยืนยันยึดเงิน"}</button>
+              <button onClick={() => setSeizeModal(null)} disabled={saving} style={{ padding: "11px 18px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, fontFamily: "Tahoma", cursor: "pointer" }}>ยกเลิก</button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal && (
         <div onClick={() => !saving && setModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 20, width: 460, maxWidth: "95vw", fontFamily: "Tahoma" }}>
