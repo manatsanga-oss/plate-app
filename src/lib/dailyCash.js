@@ -14,6 +14,7 @@ const FUEL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/fuel-withdra
 const INS_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/insurance-refund-api";
 const CUST_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/customer-refund-api"; // คืนเงินลูกค้า ลดหนี้/รับชำระผิด (user 2026-09-30)
 const WHT_REFUND_API = "https://n8n-new-project-gwf2.onrender.com/webhook/wht-refund-api"; // รับคืนหัก ณ ที่จ่ายจากผู้ขาย (เงินสด = แถวรับเงินสด)
+const SPARE_API = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api"; // list_deposit_seizures: ยึดมัดจำอะไหล่ระบบเก่า (SCY..-REC / DEPD-) → แถวรายได้ยึดเงินมัดจำ (user 2026-11-07)
 const PETTY_API = "https://n8n-new-project-gwf2.onrender.com/webhook/petty-cash-api"; // เบิกเงินสดย่อย 4 ประเภท → หักเงินสดในสรุปรายวัน (user 2026-09-07)
 
 export const METHOD_COLS = [
@@ -194,7 +195,7 @@ export function depositedDaySet(days, depList, addDays) {
 
 /** โหลดข้อมูลดิบทุกแหล่งของช่วงวันที่ (เหมือน load() ของ SaleMoneyReportPage) */
 export async function loadDailyCashSources(dateFrom, dateTo) {
-  const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, resWhtRf, pettyRows, resCustRf] = await Promise.all([
+  const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, resWhtRf, pettyRows, resCustRf, resSeiz] = await Promise.all([
     post(RETAIL_API, { action: "list_sale_payments", date_from: dateFrom, date_to: dateTo }),
     post(DEPOSIT_API, { action: "get_deposits" }).catch(() => null),
     post(PART_DEPOSIT_API, { action: "list_deposits", limit: 2000 }).catch(() => null),
@@ -210,6 +211,7 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
     post(WHT_REFUND_API, { action: "list_refunds", date_from: dateFrom, date_to: dateTo }).catch(() => null),
     loadPettyRows(),
     post(CUST_REFUND_API, { action: "list_refunds", date_field: "refund_date", date_from: dateFrom, date_to: dateTo, status: "คืนเงินแล้ว", limit: 2000 }).catch(() => null),
+    post(SPARE_API, { action: "list_deposit_seizures" }).catch(() => null),
   ]);
   const data = await res.json().catch(() => []);
   const paidRows = (Array.isArray(data) ? data : []).filter(r => r && (r.sale_no || r.receipt_no));
@@ -239,7 +241,10 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
   const crRaw = resCustRf ? await resCustRf.json().catch(() => ({})) : {};
   let cr = [];
   try { cr = typeof crRaw?.listjson === "string" ? JSON.parse(crRaw.listjson) : Array.isArray(crRaw) ? crRaw : []; } catch { cr = []; }
+  const szRaw = resSeiz ? await resSeiz.json().catch(() => []) : [];
+  const sz = Array.isArray(szRaw) ? szRaw : Array.isArray(szRaw?.items) ? szRaw.items : [];
   return {
+    seizureRows: sz.filter(r => r && r.seizure_id && r.status === "active"),
     whtRefundRows: wr.filter(r => r && r.id),
     pettyRows,
     hasData: Array.isArray(data) && data.length > 0,
@@ -305,7 +310,7 @@ export function buildPartDepItems(partDepRows, ctx) {
 /** สร้างแถวรายการทั้งหมด (allItems) — ctx = { dateFrom, dateTo, branch, isAdmin, myBranch } */
 export function buildDailyCashItems(src, ctx) {
   const { dateFrom, dateTo } = ctx;
-  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], whtRefundRows = [], pettyRows = [], custRefundRows = [] } = src;
+  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], whtRefundRows = [], pettyRows = [], custRefundRows = [], seizureRows = [] } = src;
   const items = buildSaleItems(src.rows || [], depRows, ctx);
   const depItems = buildDepItems(depRows, ctx);
   const partDepItems = buildPartDepItems(partDepRows, ctx);
@@ -700,7 +705,29 @@ export function buildDailyCashItems(src, ctx) {
         note: ["คืนเงินมัดจำ" + (d.deposit_type ? d.deposit_type : "") + " " + (d.brand || ""), reason].filter(Boolean).join(" · "),
       };
     });
-  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...custRefundOuts, ...whtRefundIns, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds, ...sysRefunds, ...pettyOuts];
+  // ---- รายได้ยึดเงินมัดจำ (user 2026-11-07 "รายการยึดเงินมัดจำ แสดงเป็นรายได้ด้วย") ----
+  //   เงินรับไว้แล้วตอนมัดจำ การยึดไม่มีเงินสดเข้าเพิ่ม → ลงเป็นรายได้ วิธีชำระ "เงินมัดจำ" (split.deposit) แบบเดียวกับใบขายที่ตัดมัดจำ
+  //   3 แหล่ง: มัดจำจองรถ DEP- (status seized ตามวันยึด) · มัดจำอะไหล่ PDS/PDO (seized_amount/seized_at) · มัดจำอะไหล่ระบบเก่า REC/DEPD จากเมนูยึดเงินมัดจำ (seizure_date; สาขาจากเลขใบ ไม่มี = ป.เปา SCY06)
+  const inRange = (d) => { const s = String(d || "").slice(0, 10); return s >= dateFrom && s <= dateTo; };
+  const seizedRow = (kindNote, doc, date, cust, amt, branchCode, note) => ({
+    kind: "deposit_seized", category: "รายได้ยึดเงินมัดจำ",
+    doc_no: doc, date: String(date || "").slice(0, 10), ref_no: "",
+    customer_name: cust || "", seller: "", saleAmount: 0,
+    split: { cash: 0, transfer: 0, card: 0, finance: 0, deposit: amt, coupon: 0, tradein: 0, wht: 0, cheque: 0, other: 0 }, received: amt,
+    branch_key: bc5(branchCode), branch_name: branchCode || "ไม่ระบุสาขา",
+    note: [kindNote, note].filter(Boolean).join(" · "),
+  });
+  const seizedIncomes = [
+    ...depRows.filter((d) => d.status === "seized" && inRange(d.seized_at || d.updated_at) && inBranch(d.branch_code, ctx))
+      .map((d) => seizedRow("ยึดมัดจำจองรถ", d.deposit_no, d.seized_at || d.updated_at, d.customer_name, num(d.deposit_amount), d.branch_code, d.refund_note)),
+    ...partDepRows.filter((d) => num(d.seized_amount) > 0 && inRange(d.seized_at || d.updated_at) && inBranch(d.branch_code, ctx))
+      .map((d) => seizedRow("ยึดมัดจำอะไหล่" + (d.deposit_type || ""), d.deposit_doc_no, d.seized_at || d.updated_at, d.customer_name, num(d.seized_amount), d.branch_code, d.remark)),
+    ...seizureRows.filter((s) => !/^PD[SO]-/i.test(String(s.deposit_doc_no || "")) && inRange(s.seizure_date))
+      .map((s) => { const br = (String(s.deposit_doc_no || "").match(/^SCY\d\d/) || [])[0] || "SCY06"; return { s, br }; })
+      .filter(({ br }) => inBranch(br, ctx))
+      .map(({ s, br }) => seizedRow("ยึดมัดจำอะไหล่ระบบเก่า " + (s.brand || ""), s.deposit_doc_no, s.seizure_date, s.customer_name, num(s.seizure_amount), br, s.reason)),
+  ];
+  return [...sales, ...rpItems, ...deliveryFees, ...fuelOuts, ...insRefundOuts, ...custRefundOuts, ...whtRefundIns, ...rpStandalones, ...depIncs, ...usedMotos, ...deps, ...partDeps, ...seizedIncomes, ...rcpts, ...partSvcs, ...rpRefunds, ...depRefunds, ...legacyRefunds, ...sysRefunds, ...pettyOuts];
 }
 
 /** ยอดเงินสดรับสุทธิ (นำฝากธนาคาร) แยกตามวัน+สาขา — ใช้ในหน้าบันทึกฝากเงิน */
