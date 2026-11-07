@@ -490,7 +490,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
       <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
         <button onClick={() => setView("form")} style={tabBtn(view === "form")}>📝 บันทึกมัดจำ</button>
         <button onClick={() => { setView("history"); loadRows(); }} style={tabBtn(view === "history")}>📜 ค้นหา / ประวัติการมัดจำ</button>
-        {isAdmin && <button onClick={() => { setView("merge"); loadRows("", "active"); }} style={tabBtn(view === "merge")}>🔗 รวมใบมัดจำ (admin)</button>}
+        {isAdmin && <button onClick={() => { setView("merge"); loadRows("", "all"); }} style={tabBtn(view === "merge")}>🔗 รวมใบมัดจำ (admin)</button>}
       </div>
 
       {/* รวมใบมัดจำ (admin) — ลูกค้าคนเดียวกันวางเงินเพิ่มเป็นงวดจนมีใบมัดจำ/ใบจองหลายใบ (เช่น ZAR YAR LIN 1,000 + 29,000) → รวมเข้าใบหลัก: ใบลูกเป็น merged, ใบจองลูกยกเลิก (คิวเหลือคันเดียว), หน้าขายตัดมัดจำรวมครั้งเดียว (user 2026-11-07) */}
@@ -509,7 +509,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
             const res = await postJson(DEPOSIT_API, { action: "merge_deposits", primary_deposit_no: primary.deposit_no, deposit_nos: kids.map(k => k.deposit_no), merged_by: currentUser?.username || currentUser?.name || "admin" });
             if (res?.__error) throw new Error(res.__error);
             setMessage(`✅ รวมใบมัดจำแล้ว ${res?.merged ?? kids.length} ใบ เข้า ${primary.deposit_no} (ปิดใบจอง ${res?.bookings_closed ?? 0} ใบ)`);
-            loadRows("", "active");
+            loadRows("", "all");
             postJson(MOTO_BOOKING_API, { action: "get_moto_bookings", status: "all" }).then((b) => setBookings(Array.isArray(b) ? b : [])).catch(() => {});
           } catch (e) { setMessage("❌ รวมใบมัดจำไม่สำเร็จ: " + (e.message || e)); }
         };
@@ -518,7 +518,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
           try {
             const res = await postJson(DEPOSIT_API, { action: "unmerge_deposits", deposit_nos: [r.deposit_no], merged_by: currentUser?.username || currentUser?.name || "admin" });
             if (res?.__error) throw new Error(res.__error);
-            setMessage(`✅ ยกเลิกรวมใบ ${r.deposit_no} แล้ว`); loadRows("", "active");
+            setMessage(`✅ ยกเลิกรวมใบ ${r.deposit_no} แล้ว`); loadRows("", "all");
             postJson(MOTO_BOOKING_API, { action: "get_moto_bookings", status: "all" }).then((b) => setBookings(Array.isArray(b) ? b : [])).catch(() => {});
           } catch (e) { setMessage("❌ ยกเลิกรวมไม่สำเร็จ: " + (e.message || e)); }
         };
@@ -551,16 +551,35 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                 </div>
               </div>
             ))}
+            {/* ประวัติการรวม (user 2026-11-07: อนุมัติแล้วให้ขึ้นเป็นประวัติดูครั้งต่อไปได้) — เรียงล่าสุดก่อน แสดงใบหลัก + ยอดรวมหลังรวม + สถานะใบหลักตอนนี้ */}
             {mergedRows.length > 0 && (
               <div style={{ marginTop: 16 }}>
-                <div style={{ fontWeight: 700, marginBottom: 6 }}>ใบที่รวมไปแล้ว</div>
-                {mergedRows.map(r => (
-                  <div key={r.deposit_no} style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 8px", borderTop: "1px solid #e5e7eb", fontSize: 13 }}>
-                    <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{r.deposit_no}</span><span>{r.customer_name}</span><span>{baht(r.deposit_amount)}</span>
-                    <span style={{ color: "#1d4ed8" }}>รวมเข้าใบ {r.merged_into} · {thaiDate(r.merged_at)}</span>
-                    <button onClick={() => doUnmerge(r)} style={{ ...btnSmGray, marginLeft: "auto" }}>↩️ ยกเลิกรวม</button>
-                  </div>
-                ))}
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>📜 ประวัติการรวมใบมัดจำ ({mergedRows.length} ใบ)</div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead style={{ background: "#072d6b", color: "#fff" }}>
+                    <tr><th style={th}>วันที่รวม</th><th style={th}>ลูกค้า</th><th style={th}>ใบที่รวม</th><th style={{ ...th, textAlign: "right" }}>ยอด</th><th style={th}>เข้าใบหลัก</th><th style={{ ...th, textAlign: "right" }}>มัดจำรวม</th><th style={th}>สถานะใบหลัก</th><th style={th}>โดย</th><th style={th}></th></tr>
+                  </thead>
+                  <tbody>
+                    {mergedRows.slice().sort((a, b) => String(b.merged_at || "").localeCompare(String(a.merged_at || ""))).map(r => {
+                      const p = rows.find(x => x.deposit_no === r.merged_into);
+                      const total = Number(p?.deposit_amount || 0) + mergedRows.filter(x => x.merged_into === r.merged_into).reduce((t, x) => t + Number(x.deposit_amount || 0), 0);
+                      const pst = !p ? "-" : p.status === "refunded" ? "คืนเงินแล้ว" : p.status === "seized" ? "ยึดมัดจำ" : p.status === "used" ? "ใช้ชำระค่ารถแล้ว" : soldBooking(p) ? `ใช้ชำระค่ารถแล้ว (${soldBooking(p).invoice_no || "-"})` : "ใช้งาน (รอรถ)";
+                      return (
+                        <tr key={r.deposit_no} style={{ borderTop: "1px solid #e5e7eb" }}>
+                          <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDate(r.merged_at)}</td>
+                          <td style={td}>{r.customer_name}</td>
+                          <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.deposit_no}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{baht(r.deposit_amount)}</td>
+                          <td style={{ ...td, fontFamily: "monospace", whiteSpace: "nowrap" }}>{r.merged_into}</td>
+                          <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{baht(total)}</td>
+                          <td style={{ ...td, fontSize: 12 }}>{pst}</td>
+                          <td style={{ ...td, fontSize: 12 }}>{r.merged_by || ""}</td>
+                          <td style={td}>{p && p.status === "active" && !soldBooking(p) && <button onClick={() => doUnmerge(r)} style={btnSmGray}>↩️ ยกเลิกรวม</button>}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
