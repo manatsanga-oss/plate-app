@@ -97,7 +97,9 @@ function customerDepositRow(c, src, from, to) {
   src.redPlate.filter(x => x && x.deposit_no && x.status !== "cancelled").forEach(x => { const cc = companyOfBranch(x.branch_code); recv.push([d10(x.received_date), x.amount, cc]); if (x.status === "refunded" || n(x.refund_amount) > 0) ref.push([d10(x.refund_date || x.updated_at), n(x.refund_amount) || n(x.amount), cc]); });
   src.parts.filter(x => x && x.deposit_doc_no && x.status !== "cancelled" && !x.cancelled_at).forEach(x => { const cc = companyOfBranch(x.branch_code); recv.push([d10(x.deposit_date), x.deposit_amount, cc]);
     if (n(x.refunded_amount) > 0) ref.push([d10(x.refunded_at || x.updated_at), x.refunded_amount, cc]);
-    const u = Math.max(n(x.deposit_amount) - n(x.remaining_amount) - n(x.refunded_amount), 0); if (u > 0.004) used.push([d10(x.updated_at || x.deposit_date), u, cc]); });
+    // ยึดมัดจำ (seized_amount จากเมนูยึดเงินมัดจำ ตัด remaining ตอนยึด 2026-11-07) → เดบิตตามวันที่ยึด (หนี้สินลด กลายเป็นรายได้) นับรวมในฝั่งตัดใช้
+    if (n(x.seized_amount) > 0) used.push([d10(x.seized_at || x.updated_at), x.seized_amount, cc]);
+    const u = Math.max(n(x.deposit_amount) - n(x.remaining_amount) - n(x.refunded_amount) - n(x.seized_amount), 0); if (u > 0.004) used.push([d10(x.updated_at || x.deposit_date), u, cc]); });
   const R = sumEvents(recv, c, from, to), U = sumEvents(used, c, from, to), F = sumEvents(ref, c, from, to);
   const bal = (k) => r2(R[k] - U[k] - F[k]);
   const cnt = (ev) => ev.filter(([d, , cc]) => cc === c && d >= from && d <= to).length;

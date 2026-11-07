@@ -112,7 +112,8 @@ export default function PartDepositPage({ currentUser }) {
   // ยอดที่คืนได้: ยังไม่สั่งซื้อ = คงเหลือ · สั่งซื้อแล้วแต่สินค้ายังไม่มา = ยอดรับ − ที่เคยคืน (ใบสั่งซื้อตัดใช้ไว้ คืนกลับได้)
   const orderOf = (r) => orderMap[r?.deposit_doc_no];
   const pendingOrder = (r) => { const o = orderOf(r); return !!(o && NOT_ARRIVED.includes(String(o.status || "").trim())); };
-  const refundAvail = (r) => { if (!r) return 0; if (num(r.remaining_amount) > 0) return num(r.remaining_amount); return pendingOrder(r) ? Math.max(num(r.deposit_amount) - num(r.refunded_amount), 0) : 0; };
+  // ยึดมัดจำแล้ว (seized_amount จากเมนูยึดเงินมัดจำ ตัด remaining ตอนยึด) → ไม่นับเป็นยอดคืนได้
+  const refundAvail = (r) => { if (!r) return 0; if (num(r.remaining_amount) > 0) return num(r.remaining_amount); return pendingOrder(r) ? Math.max(num(r.deposit_amount) - num(r.refunded_amount) - num(r.seized_amount), 0) : 0; };
   // คืนแล้ว → ยกเลิกใบสั่งซื้อที่ผูกอยู่ (สถานะ "ยกเลิก (คืนเงิน)")
   async function cancelLinkedOrder(r) {
     const o = orderOf(r); if (!o || !pendingOrder(r)) return "";
@@ -175,6 +176,7 @@ export default function PartDepositPage({ currentUser }) {
   }, [rows, searchQ, fltReceive, fltRefund]);
 
   const statusLabel = (r) => (r.status === "cancelled" ? "99 - ยกเลิก"
+    : num(r.seized_amount) > 0 && num(r.remaining_amount) <= 0 ? "90 - ปิดเอกสาร (ยึดมัดจำ)"
     : (r.status === "refunded" || num(r.remaining_amount) <= 0) ? "90 - ปิดเอกสาร" : "10 - เปิดเอกสาร");
 
   // พิมพ์ใบรับเงินมัดจำ
@@ -945,6 +947,7 @@ ${num(r.refunded_amount) > 0 ? `<tr><td class="l">คืนเงินแล้
                   <td style={{ ...td, fontFamily: "monospace", fontWeight: 600, color: "#1e40af", whiteSpace: "nowrap" }}>
                     {r.deposit_doc_no}
                     {r.status === "refunded" && <div style={{ fontSize: 10.5, color: "#c2410c", fontFamily: "Tahoma" }}>คืนเงินครบแล้ว</div>}
+                    {num(r.seized_amount) > 0 && <div style={{ fontSize: 10.5, color: "#b91c1c", fontFamily: "Tahoma" }}>ยึดมัดจำ {fmt(num(r.seized_amount))}{r.seized_at ? ` (${String(r.seized_at).slice(0, 10).split("-").reverse().join("/")})` : ""}</div>}
                   </td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDate(r.deposit_date)}</td>
                   <td style={td}>{r.customer_name}{r.customer_code ? <div style={{ fontSize: 11, color: "#94a3b8" }}>{r.customer_code}</div> : null}</td>
