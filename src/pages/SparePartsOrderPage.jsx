@@ -163,8 +163,10 @@ export default function SparePartsOrderPage({ currentUser }) {
         (async () => {
           const toClose = orders.filter(o => (o.status === "เปิดงาน" && o.job_no && o.job_no !== "null"
             && !String(o.deposit_doc_no || "").startsWith("PDO") && m[normJob(o.job_no)] && samePayer(o))
-            // ใบระบบเก่า (DEPD-/REC): มัดจำถูกตัดใช้ในใบรับชำระแล้ว → ปิดงานซ่อม (สถานะ "อะไหล่ค้างส่ง"/"เปิดงาน"/"มาครบ" ที่ยังไม่ปิด/ไม่ยกเลิก)
-            || (!/^PD[SO]-/i.test(String(o.deposit_doc_no || "")) && usedDep.has(String(o.deposit_doc_no || "").trim())
+            // มัดจำถูกตัดใช้ในใบรับชำระ (PSR active) แล้ว → ปิดงานซ่อม (สถานะ "อะไหล่ค้างส่ง"/"เปิดงาน"/"มาครบ"/"สั่งซื้อแล้ว" ที่ยังไม่ปิด/ไม่ยกเลิก)
+            //   เดิมจำกัดเฉพาะใบระบบเก่า (DEPD-/REC) → ใบ PDO ที่มัดจำถูกตัดในบิลงานบริการ (เช่น PDO-6910-00120 ตัดกับ 69SERV/0004107) ค้างโชว์เป็น "สั่งซื้อแล้ว" ทั้งที่จ่ายแล้ว (user 2026-11-07)
+            //   จับคู่ด้วยเลขใบมัดจำตรงตัว จึงไม่ติดปัญหาเลข Job ผิดเหมือนเคส #345
+            || (usedDep.has(String(o.deposit_doc_no || "").trim())
               && !/ปิดงาน|ปิดการขาย|ยกเลิก/.test(String(o.status || ""))));
           if (!toClose.length) return;
           const closedIds = [];
