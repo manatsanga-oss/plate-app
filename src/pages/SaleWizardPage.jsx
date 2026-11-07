@@ -818,6 +818,11 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       const rem = Number(d.deposit_amount || 0) - Number(d.used_amount || 0) - Number(d.refund_amount || 0);
       depositMap[d.deposit_no] = Math.max(0, rem);
     });
+    // ใบมัดจำที่ admin "รวมเข้าใบหลัก" (status merged, merged_into) → บวกยอดเข้าใบหลัก หักครั้งเดียวครบ (user 2026-11-07 เคส ZAR YAR LIN 1,000 + 29,000)
+    (bds || []).forEach(d => {
+      if (d.status !== "merged" || !d.merged_into || depositMap[d.merged_into] === undefined) return;
+      depositMap[d.merged_into] += Math.max(0, Number(d.deposit_amount || 0) - Number(d.refund_amount || 0));
+    });
 
     const queueGroups = {};
     bks.filter(b => b.status === "จอง").forEach(b => {
@@ -2266,6 +2271,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         </span>
                         <span style={{ marginLeft: 10, color: "#6b7280", fontSize: 13 }}>
                           มัดจำคงเหลือ {selBooking.remaining > 0 ? Number(selBooking.remaining).toLocaleString("th-TH") + " บาท" : "-"}
+                          {(() => { const kids = (bookingData?.bookingDeposits || []).filter(d => d.status === "merged" && d.merged_into === selBooking.deposit_no); return kids.length ? ` (รวมใบ ${kids.map(k => k.deposit_no + " " + Number(k.deposit_amount || 0).toLocaleString("th-TH")).join(", ")})` : ""; })()}
                         </span>
                         {selBooking.deposit_no && selBooking.depositFound === false && (
                           <div style={{ marginTop: 6, padding: "6px 10px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#b91c1c", fontSize: 12.5, fontWeight: 700 }}>

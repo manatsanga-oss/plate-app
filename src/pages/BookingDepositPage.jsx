@@ -490,7 +490,82 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
       <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
         <button onClick={() => setView("form")} style={tabBtn(view === "form")}>📝 บันทึกมัดจำ</button>
         <button onClick={() => { setView("history"); loadRows(); }} style={tabBtn(view === "history")}>📜 ค้นหา / ประวัติการมัดจำ</button>
+        {isAdmin && <button onClick={() => { setView("merge"); loadRows("", "active"); }} style={tabBtn(view === "merge")}>🔗 รวมใบมัดจำ (admin)</button>}
       </div>
+
+      {/* รวมใบมัดจำ (admin) — ลูกค้าคนเดียวกันวางเงินเพิ่มเป็นงวดจนมีใบมัดจำ/ใบจองหลายใบ (เช่น ZAR YAR LIN 1,000 + 29,000) → รวมเข้าใบหลัก: ใบลูกเป็น merged, ใบจองลูกยกเลิก (คิวเหลือคันเดียว), หน้าขายตัดมัดจำรวมครั้งเดียว (user 2026-11-07) */}
+      {view === "merge" && isAdmin && (() => {
+        const normName = (v) => String(v || "").replace(/^(นางสาว|นาย|นาง|น\.ส\.|MRS\.?|MR\.?|MISS|MS\.?)\s*/i, "").replace(/[\s.\-]/g, "").toUpperCase();
+        const openRows = rows.filter(r => r.status === "active" && !soldBooking(r));
+        const groups = {};
+        openRows.forEach(r => { const ph = String(r.customer_phone || "").replace(/[^0-9]/g, ""); const k = ph.length >= 9 ? "P" + ph : "N" + normName(r.customer_name); (groups[k] = groups[k] || []).push(r); });
+        const cands = Object.values(groups).filter(g => g.length > 1).map(g => g.sort((a, b) => String(a.deposit_date).localeCompare(String(b.deposit_date)) || String(a.deposit_no).localeCompare(String(b.deposit_no))));
+        const mergedRows = rows.filter(r => r.status === "merged");
+        const doMerge = async (g) => {
+          const primary = g[0], kids = g.slice(1);
+          const total = g.reduce((t, r) => t + Number(r.deposit_amount || 0), 0);
+          if (!window.confirm(`รวมใบมัดจำของ ${primary.customer_name}\n${kids.map(k => k.deposit_no + " " + baht(k.deposit_amount)).join("\n")}\nเข้าใบหลัก ${primary.deposit_no} (${baht(primary.deposit_amount)})\nยอดมัดจำรวม ${baht(total)} — ใบจองของใบที่รวมจะถูกปิด คิวเหลือคันเดียว?`)) return;
+          try {
+            const res = await postJson(DEPOSIT_API, { action: "merge_deposits", primary_deposit_no: primary.deposit_no, deposit_nos: kids.map(k => k.deposit_no), merged_by: currentUser?.username || currentUser?.name || "admin" });
+            if (res?.__error) throw new Error(res.__error);
+            setMessage(`✅ รวมใบมัดจำแล้ว ${res?.merged ?? kids.length} ใบ เข้า ${primary.deposit_no} (ปิดใบจอง ${res?.bookings_closed ?? 0} ใบ)`);
+            loadRows("", "active");
+            postJson(MOTO_BOOKING_API, { action: "get_moto_bookings", status: "all" }).then((b) => setBookings(Array.isArray(b) ? b : [])).catch(() => {});
+          } catch (e) { setMessage("❌ รวมใบมัดจำไม่สำเร็จ: " + (e.message || e)); }
+        };
+        const doUnmerge = async (r) => {
+          if (!window.confirm(`ยกเลิกการรวม ${r.deposit_no} ออกจากใบหลัก ${r.merged_into}? (ใบนี้กลับเป็นใช้งาน + ใบจองกลับมา)`)) return;
+          try {
+            const res = await postJson(DEPOSIT_API, { action: "unmerge_deposits", deposit_nos: [r.deposit_no], merged_by: currentUser?.username || currentUser?.name || "admin" });
+            if (res?.__error) throw new Error(res.__error);
+            setMessage(`✅ ยกเลิกรวมใบ ${r.deposit_no} แล้ว`); loadRows("", "active");
+            postJson(MOTO_BOOKING_API, { action: "get_moto_bookings", status: "all" }).then((b) => setBookings(Array.isArray(b) ? b : [])).catch(() => {});
+          } catch (e) { setMessage("❌ ยกเลิกรวมไม่สำเร็จ: " + (e.message || e)); }
+        };
+        return (
+          <div style={cardSt}>
+            <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 10 }}>
+              ระบบหาลูกค้าที่มีใบมัดจำจองรถค้างมากกว่า 1 ใบ (เบอร์เดียวกัน หรือชื่อตรงกัน) — กดอนุมัติเพื่อรวมเข้าใบแรกสุด: ใบที่รวมจะเปลี่ยนเป็น "รวมเข้าใบ…" (ยอดรับ/วันที่รับคงเดิม) ใบจองของใบที่รวมถูกปิด และหน้าขาย NEW จะหักมัดจำรวมทั้งหมดในครั้งเดียว
+              {loadingRows ? " · กำลังโหลด..." : ` · พบ ${cands.length} ราย`}
+            </div>
+            {cands.length === 0 && !loadingRows && <div style={{ padding: 16, color: "#9ca3af", textAlign: "center" }}>ไม่มีลูกค้าที่มีใบมัดจำค้างซ้ำ</div>}
+            {cands.map((g) => (
+              <div key={g[0].deposit_no} style={{ border: "1px solid #fcd34d", background: "#fffbeb", borderRadius: 8, padding: 12, marginBottom: 10 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>{g[0].customer_name} <span style={{ color: "#6b7280", fontWeight: 400, fontSize: 12 }}>{g[0].customer_phone || ""} · {String(g[0].branch_code || "").slice(0, 5)}</span></div>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <tbody>
+                    {g.map((r, i) => (
+                      <tr key={r.deposit_no} style={{ borderTop: i ? "1px solid #fde68a" : "none" }}>
+                        <td style={{ padding: "4px 6px", fontFamily: "monospace", fontWeight: 700 }}>{r.deposit_no}{i === 0 && <span style={{ marginLeft: 6, fontSize: 11, color: "#15803d" }}>ใบหลัก</span>}</td>
+                        <td style={{ padding: "4px 6px" }}>{thaiDate(r.deposit_date)}</td>
+                        <td style={{ padding: "4px 6px", fontSize: 12 }}>{carLabel(r)}</td>
+                        <td style={{ padding: "4px 6px", fontSize: 12 }}>{r.payment_method || ""}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{baht(r.deposit_amount)}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: "2px solid #f59e0b" }}><td colSpan={4} style={{ padding: "4px 6px", textAlign: "right", fontWeight: 700 }}>รวมมัดจำ</td><td style={{ padding: "4px 6px", textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{baht(g.reduce((t, r) => t + Number(r.deposit_amount || 0), 0))}</td></tr>
+                  </tbody>
+                </table>
+                <div style={{ marginTop: 8, textAlign: "right" }}>
+                  <button onClick={() => doMerge(g)} style={{ ...btnSmGreen, padding: "6px 14px", fontSize: 13 }}>✅ อนุมัติรวมเข้าใบ {g[0].deposit_no}</button>
+                </div>
+              </div>
+            ))}
+            {mergedRows.length > 0 && (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ fontWeight: 700, marginBottom: 6 }}>ใบที่รวมไปแล้ว</div>
+                {mergedRows.map(r => (
+                  <div key={r.deposit_no} style={{ display: "flex", gap: 10, alignItems: "center", padding: "6px 8px", borderTop: "1px solid #e5e7eb", fontSize: 13 }}>
+                    <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{r.deposit_no}</span><span>{r.customer_name}</span><span>{baht(r.deposit_amount)}</span>
+                    <span style={{ color: "#1d4ed8" }}>รวมเข้าใบ {r.merged_into} · {thaiDate(r.merged_at)}</span>
+                    <button onClick={() => doUnmerge(r)} style={{ ...btnSmGray, marginLeft: "auto" }}>↩️ ยกเลิกรวม</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {view === "form" && (
         <div style={{ ...cardSt, marginBottom: 16 }}>
@@ -669,6 +744,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
               <option value="refunded">คืนเงินแล้ว</option>
               <option value="seized">ยึดเงินมัดจำ</option>
               <option value="used">ใช้ชำระค่ารถแล้ว (DMS)</option>
+              <option value="merged">รวมเข้าใบอื่น</option>
             </select>
             <button onClick={() => loadRows()} disabled={loadingRows} style={btnBlueSm}>{loadingRows ? "..." : "🔍 ค้นหา"}</button>
           </div>
@@ -691,7 +767,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                 {loadingRows && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
                 {!loadingRows && rows.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
                 {rows.map((r, i) => (
-                  <tr key={r.deposit_no} style={{ borderTop: "1px solid #e5e7eb", opacity: r.status === "refunded" || r.status === "seized" || r.status === "used" ? 0.6 : 1 }}>
+                  <tr key={r.deposit_no} style={{ borderTop: "1px solid #e5e7eb", opacity: ["refunded", "seized", "used", "merged"].includes(r.status) ? 0.6 : 1 }}>
                     <td style={td}>{i + 1}</td>
                     <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.deposit_no}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDate(r.deposit_date)}</td>
@@ -705,6 +781,8 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       {r.status === "refunded"
                         ? <span style={{ color: "#dc2626" }}>คืนเงินแล้ว<div style={{ fontSize: 11, color: "#9ca3af" }}>{r.refund_method || ""} {thaiDate(r.refunded_at)}</div></span>
+                        : r.status === "merged" /* รวมเข้าใบหลักของลูกค้าคนเดียวกัน (แท็บรวมใบมัดจำ admin 2026-11-07) */
+                          ? <span style={{ color: "#1d4ed8", fontWeight: 600 }}>รวมเข้าใบ {r.merged_into}<div style={{ fontSize: 11, color: "#6b7280", fontWeight: 400 }}>{thaiDate(r.merged_at)} · {r.merged_by || ""}</div></span>
                         : r.status === "used" /* ตัดชำระค่ารถไปแล้วใน DMS ช่วงก่อนเริ่มระบบขาย NEW (ปิดด้วย SQL ตามรายงาน DMS, user 2026-11-07) */
                           ? <span style={{ color: "#1d4ed8", fontWeight: 600 }}>ใช้ชำระค่ารถแล้ว (DMS)<div style={{ fontSize: 11, color: "#6b7280", fontWeight: 400 }}>{r.used_ref || ""} · {thaiDate(r.used_at || r.updated_at)}</div></span>
                         : r.status === "seized" /* ยกเลิกใบจองแบบยึดเงินมัดจำ (เมนูจองรถจักรยานยนต์) — ปิดใบมัดจำ ไม่คืนเงิน (user 2026-11-07) */
@@ -715,7 +793,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                     </td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>
                       <button onClick={() => printDepositReceipt(r)} style={btnSmBlue} title="พิมพ์ใบเสร็จมัดจำ">🖨️</button>
-                      {r.status !== "refunded" && r.status !== "seized" && r.status !== "used" && !soldBooking(r) && (
+                      {!["refunded", "seized", "used", "merged"].includes(r.status) && !soldBooking(r) && (
                         <>
                           <button onClick={() => createBookingFor(r)} style={btnSmGreen} title="สร้างใบจองในระบบจองรถ">📋 สร้างใบจอง</button>
                           {(isAdmin || isSameDay(r.deposit_date)) && (
@@ -730,7 +808,7 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                           )}
                         </>
                       )}
-                      {(r.status === "refunded" || r.status === "seized" || r.status === "used" || (r.status !== "refunded" && soldBooking(r))) && (
+                      {(["refunded", "seized", "used", "merged"].includes(r.status) || (r.status !== "refunded" && soldBooking(r))) && (
                         <button onClick={() => editRow({ ...r })} style={btnSmGray} title="เปิดดูอย่างเดียว">👁️ ดู</button>
                       )}
                     </td>
