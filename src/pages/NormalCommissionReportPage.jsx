@@ -1,5 +1,13 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { TH_MONTHS, SLIP_COMPANY, slipDateLabel, printSlips, sendSlipEmail, fetchSlipSendLog } from "../lib/payslip";
+import { aiSimMonthRounds, rankStaff as aiRankStaff } from "./AiSimAwardPopup";
+
+// รางวัลพิเศษตอบคำถาม AI ลูกค้าจำลอง (user 2026-11-09 "ค่าคอมปกติ เพิ่มรางวัลพิเศษตอบคำถาม AI ประจำเดือน 10 ด้วย")
+//   ยอดรางวัลเก็บเป็น adjustment col_key "ai_award" (original 0 → new = เงินรางวัล) ใน commission_normal_adjustments ของ snapshot นี้
+//   จึงเข้าเอกสารจ่าย (adjSub ตามกลุ่มสังกัด) / YTD สลิป โดยไม่ต้องเพิ่มตาราง — กดปุ่ม "🏆 รางวัล AI" เพื่อดึงผลจาก ai-reception-api แล้วบันทึก
+const AI_API = "https://n8n-new-project-gwf2.onrender.com/webhook/ai-reception-api";
+const AI_AWARD_COL = "ai_award";
+const aiNameKey = (v) => String(v || "").replace(/^(นางสาว|นาย|นาง|น\.ส\.|MRS\.?|MR\.?|MISS|MS\.?)\s*/i, "").replace(/[\s.-]/g, "").toUpperCase();
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/sales-extra-pay-api";
 
@@ -790,7 +798,8 @@ tr.excluded td { text-decoration: line-through; }
       const list = [...map.values()].map(g => {
         const adj = adjByEmp[g.name] || {};
         const eff = k => (adj[k] ? Number(adj[k].new_amount) : Number(g[k] || 0));
-        return { ...g, adj, special: Number(g.special || 0), total: eff("sales_commission") + eff("sales_brokerage") + eff("service") + eff("parts") + Number(g.special || 0) };
+        const aiAward = adj[AI_AWARD_COL] ? Number(adj[AI_AWARD_COL].new_amount || 0) : 0; // รางวัลตอบคำถาม AI (บันทึกไว้เป็น adjustment)
+        return { ...g, adj, special: Number(g.special || 0), ai_award: aiAward, ai_award_note: adj[AI_AWARD_COL]?.note || "", total: eff("sales_commission") + eff("sales_brokerage") + eff("service") + eff("parts") + Number(g.special || 0) + aiAward };
       });
       list.sort((a, b) => b.total - a.total);
       setCombinedEmployees(list);
@@ -835,7 +844,7 @@ tr.excluded td { text-decoration: line-through; }
 
       // 1) รายชื่อ + ยอดค่าคอมรอบนี้ (เฉพาะค่าคอมมิชั่น ไม่รวมค่านายหน้า)
       const rowsBase = combinedEmployees
-        .map(g => ({ g, commission: effVal(g, "sales_commission") + effVal(g, "service") + effVal(g, "parts") }))
+        .map(g => ({ g, commission: effVal(g, "sales_commission") + effVal(g, "service") + effVal(g, "parts") + Number(g.ai_award || 0) }))
         .filter(r => r.commission > 0);
 
       // 2) ข้อมูลพนักงาน (email, รหัส, แผนก, บัญชี, ยอดยกมา)
@@ -994,6 +1003,12 @@ tr.excluded td { text-decoration: line-through; }
 
   // หา (สังกัด, แบรนด์, group_no) ที่ delta ของ cell นี้ต้องไปบวกในเอกสารจ่าย
   function resolveAdjTarget(g, colKey) {
+    if (colKey === AI_AWARD_COL) {
+      // รางวัล AI เข้าใบค่าคอมมิชชั่น (ไม่หัก ณ ที่จ่าย) ตามสังกัดพนักงาน: สาขา → สังกัด ก่อน, ไม่ทราบ → HR, ไม่ทราบอีก → ป.เปา
+      const aff = ADJ_BRANCH_AFF[g.branch_code] || hrAffiliationOf(svcEmployees, g.name) || "ป.เปา";
+      if (String(aff).includes("สิงห์ชัย")) return { affiliation: "สิงห์ชัย", brand: "ยามาฮ่า", group_no: 4 };
+      return { affiliation: "ป.เปา", brand: "ฮอนด้า", group_no: 1 };
+    }
     if (colKey === "parts") {
       // ค่าคอมอะไหล่เข้าใบตามสังกัดพนักงาน (hr): สิงห์ชัย → กลุ่ม 4, ป.เปา/ไม่ทราบ → กลุ่ม 1 (ตรงกับ backend)
       const hr = svcEmployees.find(e => String(e.employee_name || "").trim() === String(g.name || "").trim());
@@ -1017,7 +1032,7 @@ tr.excluded td { text-decoration: line-through; }
   }
 
   async function saveAdjustment(g, colKey) {
-    const base = Number(g[colKey] || 0);
+    const base = colKey === AI_AWARD_COL ? 0 : Number(g[colKey] || 0);
     const raw = String(editValue).replace(/,/g, "").trim();
     const newAmt = raw === "" ? base : Number(raw);
     if (!isFinite(newAmt) || newAmt < 0) { alert("กรุณากรอกตัวเลขให้ถูกต้อง"); return; }
@@ -1047,6 +1062,73 @@ tr.excluded td { text-decoration: line-through; }
 
   // ยอดที่ใช้จริงของ cell (ถ้าแก้ไขไว้ใช้ยอดใหม่ ไม่งั้นใช้ยอดคำนวณ)
   const effVal = (g, k) => (g.adj && g.adj[k] ? Number(g.adj[k].new_amount) : Number(g[k] || 0));
+
+  // ===== รางวัลพิเศษตอบคำถาม AI ประจำเดือน → บันทึกเป็น adjustment ai_award =====
+  const [aiAwardModal, setAiAwardModal] = useState(null); // { label, rounds:[{label, winners:[{name,branch,amount,prize}]}], totals:[{name,branch,amount,notes,target,known}] }
+  const [aiAwardBusy, setAiAwardBusy] = useState(false);
+  async function openAiAwardModal() {
+    if (!snapshotInfo?.save_group) return;
+    const base = snapshotInfo.period_from || dateFrom;
+    const dt = base ? new Date(base) : NOW;
+    const y = dt.getFullYear(), m = dt.getMonth() + 1;
+    setAiAwardBusy(true);
+    try {
+      const rounds = [];
+      const byName = new Map();
+      for (const round of aiSimMonthRounds(y, m)) { // ทีละรอบ (n8n 1 CPU)
+        const res = await fetch(AI_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "sim_report", date_from: round.from, date_to: round.to }) });
+        const data = await res.json();
+        const winners = aiRankStaff(Array.isArray(data) ? data : [data], { weighted: round.weighted }).slice(0, round.prizes.length)
+          .map((w, i) => ({ name: w.name, branch: w.branch, amount: round.prizes[i].amount, prize: `${round.prizes[i].medal} ${round.prizes[i].label}`, avg: w.avg, wavg: w.wavg, scored: w.scored }));
+        rounds.push({ ...round, winners });
+        for (const w of winners) {
+          const k = aiNameKey(w.name);
+          if (!byName.has(k)) byName.set(k, { name: w.name, branch: w.branch, amount: 0, notes: [] });
+          const t = byName.get(k); t.amount += w.amount; t.notes.push(`${round.label} ${w.prize} ${w.amount.toLocaleString("th-TH")}`);
+        }
+      }
+      // จับคู่กับพนักงานในรายงานค่าคอม (ชื่อไม่ตรงเป๊ะ เทียบแบบตัดคำนำหน้า/ช่องว่าง) — ไม่พบ = เพิ่มเป็นคนใหม่ในเอกสารจ่ายตามสาขาที่ตอบ
+      const totals = [...byName.values()].map(t => {
+        const emp = combinedEmployees.find(g => aiNameKey(g.name) === aiNameKey(t.name));
+        const g = emp || { name: t.name, branch_code: t.branch || "", employee_id: null };
+        const target = resolveAdjTarget(g, AI_AWARD_COL);
+        return { ...t, empName: g.name, employee_id: g.employee_id || null, known: !!emp, target, current: emp ? Number(emp.ai_award || 0) : 0 };
+      });
+      // คนที่เคยบันทึกรางวัลไว้แต่รอบนี้ไม่ติดอันดับ → รีเซ็ตเป็น 0
+      const keys = new Set(totals.map(t => aiNameKey(t.name)));
+      for (const g of combinedEmployees) if (Number(g.ai_award || 0) > 0 && !keys.has(aiNameKey(g.name))) totals.push({ name: g.name, empName: g.name, employee_id: g.employee_id || null, branch: g.branch_code, amount: 0, notes: ["ไม่ติดอันดับในรอบนี้ → รีเซ็ต"], known: true, target: resolveAdjTarget(g, AI_AWARD_COL), current: Number(g.ai_award || 0) });
+      setAiAwardModal({ label: `${TH_MONTHS[m - 1]} ${y + 543}`, rounds, totals });
+    } catch (e) { alert("❌ ดึงผลรางวัล AI ไม่สำเร็จ: " + e.message); }
+    setAiAwardBusy(false);
+  }
+  async function saveAiAwards() {
+    if (!aiAwardModal || !snapshotInfo?.save_group) return;
+    const todo = aiAwardModal.totals.filter(t => Math.abs(Number(t.amount) - Number(t.current)) > 0.005);
+    if (!todo.length) { setAiAwardModal(null); setMessage("ยอดรางวัล AI ตรงกับที่บันทึกไว้แล้ว"); return; }
+    if (!window.confirm(`บันทึกรางวัล AI ${aiAwardModal.label} เข้าเอกสารจ่ายค่าคอม ${todo.length} คน?`)) return;
+    setAiAwardBusy(true);
+    let ok = 0, fail = [];
+    for (const t of todo) {
+      try {
+        const data = await postAPI({
+          action: "commission_normal_payables", mode: "save_adjustment",
+          save_group: snapshotInfo.save_group,
+          employee_name: t.empName, employee_id: t.employee_id || null,
+          col_key: AI_AWARD_COL, ...t.target,
+          original_amount: 0, new_amount: Number(t.amount),
+          note: t.notes.join(" · "),
+          adjusted_by: currentUser?.username || currentUser?.name || "",
+        });
+        const r = Array.isArray(data) ? data[0] : data;
+        if (r?.error || !r?.result) throw new Error(r?.error || "workflow ยังไม่รองรับ col_key ai_award — ต้อง re-import Sales Extra Pay API");
+        ok++;
+      } catch (e) { fail.push(`${t.empName}: ${e.message}`); }
+    }
+    setAiAwardBusy(false);
+    setAiAwardModal(null);
+    setMessage(fail.length ? `⚠️ บันทึกได้ ${ok} คน · ไม่สำเร็จ ${fail.length}: ${fail.join(" | ")}` : `✅ บันทึกรางวัล AI ${ok} คนแล้ว — ถ้าสร้างเอกสารจ่ายไว้ก่อนหน้านี้ ให้ยกเลิกแล้วสร้างใหม่เพื่อให้ยอดตรง`);
+    await fetchCombinedEmployees();
+  }
 
   function renderAdjCell(g, col) {
     const a = g.adj?.[col];
@@ -1329,6 +1411,11 @@ tr.excluded td { text-decoration: line-through; }
               <div style={{ fontSize: 11, color: "#b45309", marginTop: 2 }}>✏️ คลิกที่ตัวเลขเพื่อแก้ไขยอดได้ — ยอดที่แก้จะถูกใช้ในเอกสารจ่ายเงิน (กรอกเท่ายอดเดิมเพื่อรีเซ็ต)</div>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={openAiAwardModal} disabled={combinedLoading || aiAwardBusy}
+                title="ดึงผลรางวัลฝึกตอบลูกค้า AI ของเดือนนี้ (ตามกติกาเดียวกับ POP UP ประกาศผล) มาบันทึกเป็นรางวัลพิเศษในเอกสารจ่ายค่าคอม"
+                style={{ padding: "5px 14px", background: "#ca8a04", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                {aiAwardBusy ? "..." : "🏆 รางวัล AI"}
+              </button>
               <button onClick={openCommSlipPopup} disabled={combinedLoading || combinedEmployees.length === 0}
                 style={{ padding: "5px 14px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 5, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
                 🧾 สลิปค่าคอม
@@ -1351,12 +1438,13 @@ tr.excluded td { text-decoration: line-through; }
                   <th style={{ ...th, textAlign: "right" }}>ค่าคอมฯงานบริการ</th>
                   <th style={{ ...th, textAlign: "right" }}>ค่าคอมฯงานอะไหล่</th>
                   <th style={{ ...th, textAlign: "right", background: "#ede9fe", color: "#5b21b6" }} title="จาก snapshot หน้ารายงานค่าคอมพิเศษ ช่วงเดียวกัน — ตั้งเบิกรวมในเอกสารเดียวกัน">ค่าคอมพิเศษ</th>
+                  <th style={{ ...th, textAlign: "right", background: "#fef9c3", color: "#854d0e" }} title="รางวัลพิเศษตอบคำถาม AI ลูกค้าจำลอง ประจำเดือน — กดปุ่ม 🏆 รางวัล AI เพื่อดึงผล/บันทึก · คลิกตัวเลขเพื่อแก้เอง">รางวัล AI</th>
                   <th style={{ ...th, textAlign: "right" }}>รวม</th>
                 </tr>
               </thead>
               <tbody>
-                {combinedLoading && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
-                {!combinedLoading && combinedEmployees.length === 0 && <tr><td colSpan={9} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
+                {combinedLoading && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center" }}>กำลังโหลด...</td></tr>}
+                {!combinedLoading && combinedEmployees.length === 0 && <tr><td colSpan={10} style={{ padding: 20, textAlign: "center", color: "#9ca3af" }}>ไม่มีข้อมูล</td></tr>}
                 {combinedEmployees.map((g, i) => (
                   <tr key={i} style={{ borderTop: "1px solid #e5e7eb" }}>
                     <td style={td}>{i + 1}</td>
@@ -1367,6 +1455,20 @@ tr.excluded td { text-decoration: line-through; }
                     {renderAdjCell(g, "service")}
                     {renderAdjCell(g, "parts")}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6", background: "#f5f3ff" }}>{g.special ? fmt(g.special) : "-"}</td>
+                    {editCell && editCell.name === g.name && editCell.col === AI_AWARD_COL ? (
+                      <td style={{ ...td, textAlign: "right" }}>
+                        <input autoFocus value={editValue} disabled={adjSaving} onChange={e => setEditValue(e.target.value)}
+                          onKeyDown={e => { if (e.key === "Enter") saveAdjustment(g, AI_AWARD_COL); if (e.key === "Escape") setEditCell(null); }}
+                          onBlur={() => { if (!adjSaving) setEditCell(null); }}
+                          style={{ width: 90, padding: "3px 6px", border: "2px solid #f59e0b", borderRadius: 4, textAlign: "right", fontFamily: "monospace", fontSize: 12 }} />
+                        <div style={{ fontSize: 9, color: "#92400e", whiteSpace: "nowrap" }}>Enter=บันทึก · Esc=ยกเลิก · 0=ลบ</div>
+                      </td>
+                    ) : (
+                      <td title={g.ai_award_note || "คลิกเพื่อใส่รางวัล AI เอง"} onClick={() => { setEditCell({ name: g.name, col: AI_AWARD_COL }); setEditValue(g.ai_award ? String(g.ai_award) : ""); }}
+                        style={{ ...td, textAlign: "right", fontFamily: "monospace", cursor: "pointer", color: "#854d0e", background: "#fefce8", fontWeight: g.ai_award ? 700 : 400 }}>
+                        {g.ai_award ? `🏆 ${fmt(g.ai_award)}` : "-"}
+                      </td>
+                    )}
                     <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: "#059669" }}>{fmt(g.total)}</td>
                   </tr>
                 ))}
@@ -1376,7 +1478,8 @@ tr.excluded td { text-decoration: line-through; }
                   const sumService = combinedEmployees.reduce((s, g) => s + effVal(g, "service"), 0);
                   const sumParts = combinedEmployees.reduce((s, g) => s + effVal(g, "parts"), 0);
                   const sumSpecial = combinedEmployees.reduce((s, g) => s + Number(g.special || 0), 0);
-                  const sumTotal = sumComm + sumBrok + sumService + sumParts + sumSpecial;
+                  const sumAi = combinedEmployees.reduce((s, g) => s + Number(g.ai_award || 0), 0);
+                  const sumTotal = sumComm + sumBrok + sumService + sumParts + sumSpecial + sumAi;
                   return (
                     <tr style={{ background: "#fef9c3", fontWeight: 700 }}>
                       <td colSpan={3} style={{ ...td, textAlign: "right" }}>รวม {combinedEmployees.length} คน</td>
@@ -1385,6 +1488,7 @@ tr.excluded td { text-decoration: line-through; }
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumService)}</td>
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(sumParts)}</td>
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#5b21b6" }}>{fmt(sumSpecial)}</td>
+                      <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#854d0e" }}>{fmt(sumAi)}</td>
                       <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#059669" }}>{fmt(sumTotal)}</td>
                     </tr>
                   );
@@ -1392,6 +1496,42 @@ tr.excluded td { text-decoration: line-through; }
               </tbody>
             </table>
           </div>
+          {aiAwardModal && (
+            <div onClick={() => !aiAwardBusy && setAiAwardModal(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 9000, display: "flex", alignItems: "center", justifyContent: "center", padding: 12 }}>
+              <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 12, padding: 18, width: 760, maxWidth: "100%", maxHeight: "90vh", overflow: "auto", boxSizing: "border-box" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <h3 style={{ margin: 0, color: "#854d0e" }}>🏆 รางวัลพิเศษตอบคำถาม AI {aiAwardModal.label}</h3>
+                  <button onClick={() => setAiAwardModal(null)} disabled={aiAwardBusy} style={{ border: "none", background: "#e5e7eb", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontWeight: 700 }}>✕</button>
+                </div>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>ผลจาก ai-reception-api ตามกติกาเดียวกับ POP UP ประกาศผล · บันทึกเป็นรางวัลพิเศษ (คอลัมน์ รางวัล AI) เข้าเอกสารจ่ายค่าคอมมิชชั่นตามสังกัด ไม่หัก ณ ที่จ่าย</div>
+                {aiAwardModal.rounds.map(r => (
+                  <div key={r.from + r.kind} style={{ marginBottom: 8, padding: "6px 10px", background: r.kind === "month" ? "#fff7ed" : "#eff6ff", borderRadius: 8, fontSize: 12.5 }}>
+                    <b>{r.label}</b>{r.weighted ? "" : " (เฉลี่ยธรรมดา)"}: {r.winners.length === 0 ? <span style={{ color: "#9ca3af" }}>ไม่มีคะแนน</span>
+                      : r.winners.map(w => <span key={w.name} style={{ marginLeft: 8 }}>{w.prize} <b>{w.name}</b> ({w.scored} ข้อ · เฉลี่ย {w.avg.toFixed(1)}) = {w.amount.toLocaleString("th-TH")}</span>)}
+                  </div>
+                ))}
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5, marginTop: 10 }}>
+                  <thead style={{ background: "#f0f4f9" }}><tr><th style={th}>พนักงาน</th><th style={th}>สาขา</th><th style={th}>เข้าเอกสารจ่าย</th><th style={{ ...th, textAlign: "right" }}>บันทึกไว้</th><th style={{ ...th, textAlign: "right" }}>รางวัลรอบนี้</th></tr></thead>
+                  <tbody>
+                    {aiAwardModal.totals.length === 0 && <tr><td colSpan={5} style={{ padding: 14, textAlign: "center", color: "#9ca3af" }}>ไม่มีผู้ได้รางวัลในเดือนนี้</td></tr>}
+                    {aiAwardModal.totals.map(t => (
+                      <tr key={t.empName} style={{ borderTop: "1px solid #e5e7eb", background: Math.abs(t.amount - t.current) > 0.005 ? "#fffbeb" : "#fff" }}>
+                        <td style={td}><b>{t.empName}</b>{!t.known && <div style={{ fontSize: 11, color: "#b45309" }}>⚠️ ไม่มีในรายชื่อค่าคอมเดือนนี้ — จะเพิ่มเป็นรายการใหม่</div>}<div style={{ fontSize: 11, color: "#6b7280" }}>{t.notes.join(" · ")}</div></td>
+                        <td style={{ ...td, fontFamily: "monospace" }}>{t.branch || "-"}</td>
+                        <td style={{ ...td, fontSize: 11 }}>{t.target ? `กลุ่ม ${t.target.group_no} ${t.target.affiliation}` : "-"}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", color: "#9ca3af" }}>{t.current ? fmt(t.current) : "-"}</td>
+                        <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700, color: t.amount ? "#15803d" : "#dc2626" }}>{fmt(t.amount)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+                  <button onClick={() => setAiAwardModal(null)} disabled={aiAwardBusy} style={{ padding: "8px 16px", border: "1px solid #d1d5db", background: "#fff", borderRadius: 6, cursor: "pointer" }}>ปิด</button>
+                  <button onClick={saveAiAwards} disabled={aiAwardBusy || aiAwardModal.totals.length === 0} style={{ padding: "8px 18px", border: "none", background: "#ca8a04", color: "#fff", borderRadius: 6, cursor: "pointer", fontWeight: 700 }}>{aiAwardBusy ? "กำลังบันทึก..." : "💾 บันทึกรางวัลเข้าเอกสารจ่าย"}</button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

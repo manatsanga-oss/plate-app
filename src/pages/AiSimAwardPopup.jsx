@@ -44,7 +44,21 @@ export function aiSimRoundsFor(iso = todayIso()) {
 }
 export const isAiSimAwardActive = (iso = todayIso()) => aiSimRoundsFor(iso).length > 0;
 
-function rankStaff(rows) {
+/** รอบรางวัลทั้งหมดของเดือน y/m (ใช้รวมยอดรางวัลเข้ารายงานค่าคอมปกติ — user 2026-11-09 "ค่าคอมปกติ เพิ่มรางวัลพิเศษตอบคำถาม AI ประจำเดือน")
+ *  ก่อน พ.ย. 69 (ต.ค.) = ประกาศทั้งเดือนรอบเดียว จัดอันดับเฉลี่ยธรรมดา รางวัล prizes · ตั้งแต่ พ.ย. 69 = 4 รอบสัปดาห์ (prizes) + สรุปทั้งเดือน (monthlyPrizes) ถ่วงน้ำหนัก */
+export function aiSimMonthRounds(y, m) {
+  const ld = lastDay(y, m);
+  const mk = (a, b, kind, label) => ({ kind, from: `${y}-${pad(m)}-${pad(a)}`, to: `${y}-${pad(m)}-${pad(b)}`, label });
+  if (`${y}-${pad(m)}-01` < AI_SIM_AWARD.startIso) {
+    return [{ ...mk(1, ld, "month", `ประจำเดือน ${thM(y, m)}`), prizes: AI_SIM_AWARD.prizes, weighted: false }];
+  }
+  return [
+    ...[[1, 7], [8, 14], [15, 21], [22, ld]].map(([a, b]) => ({ ...mk(a, b, "week", `รอบ ${a}–${b} ${thM(y, m)}`), prizes: AI_SIM_AWARD.prizes, weighted: true })),
+    { ...mk(1, ld, "month", `สรุปทั้งเดือน ${thM(y, m)}`), prizes: AI_SIM_AWARD.monthlyPrizes, weighted: true },
+  ];
+}
+
+export function rankStaff(rows, { weighted = true } = {}) {
   const map = new Map();
   for (const r of rows) {
     const name = String(r?.staff_name || "").trim();
@@ -57,8 +71,9 @@ function rankStaff(rows) {
   const all = [...map.values()];
   const totScored = all.reduce((t, s) => t + s.scored, 0), totSum = all.reduce((t, s) => t + s.sum, 0);
   const C = totScored ? totSum / totScored : 0; // ค่าเฉลี่ยรวมทุกคนในรอบ
-  return all.map((s) => ({ ...s, avg: s.sum / s.scored, wavg: (s.sum + WEIGHT_K * C) / (s.scored + WEIGHT_K) }))
-    .sort((a, b) => b.wavg - a.wavg || b.avg - a.avg || b.scored - a.scored);
+  const ranked = all.map((s) => ({ ...s, avg: s.sum / s.scored, wavg: (s.sum + WEIGHT_K * C) / (s.scored + WEIGHT_K) }));
+  if (!weighted) return ranked.sort((a, b) => b.avg - a.avg || b.scored - a.scored); // รอบ ต.ค. 69 (ก่อนเปลี่ยนกติกา) ใช้เฉลี่ยธรรมดา
+  return ranked.sort((a, b) => b.wavg - a.wavg || b.avg - a.avg || b.scored - a.scored);
 }
 
 export default function AiSimAwardPopup({ onClose }) {
