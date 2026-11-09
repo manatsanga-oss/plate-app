@@ -309,6 +309,7 @@ export default function BankDepositPage({ currentUser }) {
       if (new Set(accIds).size !== accIds.length) { setMessage("❌ เลือกบัญชีซ้ำกัน"); return; }
       setSaving(true); setMessage("");
       try {
+        let dup = 0;
         for (let i = 0; i < valid.length; i++) {
           const l = valid[i];
           const body = {
@@ -319,9 +320,16 @@ export default function BankDepositPage({ currentUser }) {
             created_by: currentUser?.username || currentUser?.name || "system",
             branch_code: userBranchCode, branch_name: userBranchName,
           };
-          await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          // n8n ไม่ INSERT ถ้ามีใบฝากสาขา/บัญชี/ยอด/วันเงินสดเดียวกันภายใน 2 วัน (ตอบไม่มี deposit_doc_no) — กันกดบันทึกซ้ำ (user 2026-11-09 เคส DEP-261012-0011/0012)
+          const res = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json()).catch(() => null);
+          const row = Array.isArray(res) ? res[0] : res;
+          if (!row || !row.deposit_doc_no) dup++;
         }
+        // ตัดวันนี้ออกจาก dropdown ทันที ไม่ต้องรอคำนวณเงินสดรายวันใหม่ (ช้าหลายวินาที เคยกดซ้ำระหว่างรอ)
+        setCashDays(prev => prev.filter(d => d.date !== cashSel.date));
+        setCashDate("");
         setShowForm(false);
+        if (dup) { setMessage(`⚠️ ไม่ได้บันทึก ${dup} รายการ เพราะมีใบฝากยอดเดียวกันของวันที่ ${fmtDateShort(cashSel.date)} อยู่แล้ว (กันบันทึกซ้ำ) — ตรวจในรายการฝากเงินด้านล่าง`); fetchData(); setSaving(false); return; }
         setMessage(`✅ บันทึกฝากเงินวันที่ ${fmtDateShort(cashSel.date)} รวม ${fmt(linesTotal)} บาท (${valid.length} บัญชี)${remainAfter >= 0.01 ? ` · เหลือ ${fmt(remainAfter)} บาท ค้างฝากวันถัดไป` : ""}`);
         fetchData();
       } catch { setMessage("❌ บันทึกไม่สำเร็จ"); }
