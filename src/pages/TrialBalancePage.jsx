@@ -206,6 +206,9 @@ async function mapLimit(items, limit, fn) {
 export default function TrialBalancePage() {
   const [ym, setYm] = useState(prevMonth());
   const [company, setCompany] = useState("");
+  // ยอดยกมาบัญชีธนาคาร: "system" = ยอดตั้งต้นบัญชี + รายการสะสมทั้งหมดในระบบ (เท่ากับรายงานเคลื่อนไหวบัญชี/statement) · "flow" = งบทดลอง Flow 31/08/69 + รายการตั้งแต่ 01/09
+  //   user 2026-11-09 "งบทดลองยอดยกมายกไป ทำไมไม่เท่า statement" → ค่าเริ่มต้นใช้ระบบ (SCB สิงห์ชัย ก.ย.: ระบบ 33,797.82 / Flow 33,159.70 ต่าง 638.12 เป็นส่วนต่างก่อน ก.ย. ฝั่ง Flow)
+  const [openingMode, setOpeningMode] = useState("system");
   const [accounts, setAccounts] = useState([]);
   const [allAccounts, setAllAccounts] = useState([]); // รวมบัญชีเสมือน (ใช้หาบัญชีกู้ยืมระหว่างบริษัท)
   const [rows, setRows] = useState([]);
@@ -231,15 +234,18 @@ export default function TrialBalancePage() {
       const out = await mapLimit(targets, 3, async (a) => {
         const id = Number(a.account_id);
         const fo = flowOpeningOf(a);
-        // มียอด Flow 31/08 → ยกมา = ยอด Flow + รายการตั้งแต่ 01/09 ถึงวันก่อนต้นงวด (รอบ ก.ย. = ยอด Flow ตรง ๆ) · ไม่มี → ยอดตั้งต้นบัญชี + รายการสะสมทั้งหมด
-        const prior = (fo !== null && prev < FLOW_OPENING_DATE) ? [] : await post({ action: "list_bank_movements", account_id: id, date_from: fo !== null ? FLOW_OPENING_DATE : "2000-01-01", date_to: prev });
+        // ดึงรายการสะสมทั้งหมดก่อนต้นงวด แล้วคำนวณยอดยกมา 2 แบบ: ระบบ (ยอดตั้งต้น + ทุกรายการ = statement) และ Flow (ยอด Flow 31/08 + รายการตั้งแต่ 01/09)
+        const prior = await post({ action: "list_bank_movements", account_id: id, date_from: "2000-01-01", date_to: prev });
         const cur = await post({ action: "list_bank_movements", account_id: id, date_from: from, date_to: to });
         const sum = (arr, f) => arr.reduce((s, m) => s + (m && m.movement_date ? f(Number(m.amount || 0)) : 0), 0);
-        const opening = r2((fo !== null ? fo : Number(a.opening_balance || 0)) + sum(prior, v => v));
+        const openingSystem = r2(Number(a.opening_balance || 0) + sum(prior, v => v));
+        const sinceFlow = prior.filter(m => m && m.movement_date && String(m.movement_date).slice(0, 10) >= FLOW_OPENING_DATE);
+        const openingFlow = fo !== null ? r2(fo + sum(sinceFlow, v => v)) : null;
+        const opening = openingMode === "flow" && openingFlow !== null ? openingFlow : openingSystem;
         const dr = r2(sum(cur, v => (v > 0 ? v : 0)));
         const cr = r2(sum(cur, v => (v < 0 ? -v : 0)));
         done++; setProgress(`${done}/${targets.length} บัญชี`);
-        return { ...a, company: companyOf(a), code: flowCodeOf(a), flowOpening: fo, opening, dr, cr, closing: r2(opening + dr - cr), count: cur.filter(m => m && m.movement_date).length, _prior: prior, _cur: cur };
+        return { ...a, company: companyOf(a), code: flowCodeOf(a), flowOpening: fo, openingSystem, openingFlow, opening, dr, cr, closing: r2(opening + dr - cr), count: cur.filter(m => m && m.movement_date).length, _prior: prior, _cur: cur };
       });
       setProgress("เงินสดย่อย…");
       let petty = [];
@@ -330,7 +336,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
 <table><thead><tr><th rowspan="2" style="text-align:left">รหัส</th><th rowspan="2" style="text-align:left">บัญชี</th><th colspan="2" class="grp">ยอดยกมา ${esc(thDateLong(prevDayOf(from)))}</th><th colspan="2" class="grp">ยอดประจำงวด</th><th colspan="2" class="grp">ยอดสะสม ${esc(thDateLong(to))}</th></tr>
 <tr><th class="r">เดบิต</th><th class="r">เครดิต</th><th class="r">เดบิต</th><th class="r">เครดิต</th><th class="r">เดบิต</th><th class="r">เครดิต</th></tr></thead>
 <tbody>${body}${tot("รวมทั้งสิ้น", grand, "total")}</tbody></table>
-<div class="note">ที่มา: รายงานการเคลื่อนไหวบัญชีธนาคารในระบบ (ยอดยกมา = งบทดลอง Flow 31/08/69 + รายการตั้งแต่ 01/09/69 ถึงก่อนต้นงวด) · เงินสดย่อย 11149.00 รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่) · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount</div>
+<div class="note">ที่มา: รายงานการเคลื่อนไหวบัญชีธนาคารในระบบ (ยอดยกมา = ${openingMode === "flow" ? "งบทดลอง Flow 31/08/69 + รายการตั้งแต่ 01/09/69 ถึงก่อนต้นงวด" : "ยอดตั้งต้นบัญชี + รายการสะสมทั้งหมดในระบบ = statement"}) · เงินสดย่อย 11149.00 รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่) · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount</div>
 <script>window.onload=function(){window.print()}</script></body></html>`;
     const w = window.open("", "_blank"); if (!w) return; w.document.write(html); w.document.close();
   }
@@ -357,6 +363,11 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
           <select value={company} onChange={e => setCompany(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontFamily: "Tahoma", fontSize: 13, minWidth: 220 }}>
             <option value="">ทุกสังกัด (รวม)</option>
             {COMPANIES.map(c => <option key={c} value={c}>{COMPANY_FULL[c]}</option>)}
+          </select></label>
+        <label style={{ fontSize: 12.5, fontWeight: 600, display: "grid", gap: 4 }} title="ระบบ = ยอดตั้งต้นบัญชี + รายการสะสมทั้งหมด (เท่ารายงานเคลื่อนไหวบัญชี/statement) · Flow = งบทดลอง Flow 31/08/69 + รายการตั้งแต่ 01/09/69">ยอดยกมาธนาคาร
+          <select value={openingMode} onChange={e => setOpeningMode(e.target.value)} style={{ padding: "7px 10px", border: "1px solid #d1d5db", borderRadius: 6, fontFamily: "Tahoma", fontSize: 13 }}>
+            <option value="system">ตามระบบ (= statement)</option>
+            <option value="flow">ตาม Flow 31/08/69</option>
           </select></label>
         <button onClick={load} disabled={loading || !accounts.length} style={{ ...btn(loadedCompany === null ? "#059669" : "#0ea5e9"), opacity: loading ? 0.6 : 1, boxShadow: loadedCompany === null && !loading ? "0 0 0 3px #a7f3d0" : "none" }}>{loading ? `กำลังโหลด… ${progress}` : loadedCompany === null ? "▶ แสดงผลรายงาน" : "🔄 แสดงผลรายงาน"}</button>
         {loadedCompany === null && !loading && <span style={{ fontSize: 12.5, color: "#b45309", fontWeight: 600 }}>ยังไม่ได้ดึงข้อมูล — เลือกรอบและสังกัดแล้วกด "แสดงผลรายงาน"</span>}
@@ -390,8 +401,8 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
                   <React.Fragment key={g}>
                     <tr><td colSpan={8} style={{ ...td, background: "#eef2ff", color: "#3730a3", fontWeight: 700 }}>▾ สินทรัพย์ · {COMPANY_FULL[g] || g} · {list.filter(r => !r.kind).length} บัญชีธนาคาร{list.some(r => r.kind === "petty") ? " + เงินสดย่อย" : ""}{list.some(r => r.kind === "interco") ? " + เงินกู้ยืมระหว่างบริษัท" : ""}{list.some(r => r.kind === "inventory") ? " + สินค้าคงเหลือรถ" : ""}{list.some(r => r.kind === "ftdeposit") ? " + เงินมัดจำ" : ""}</td></tr>
                     {list.map(r => { const [a, b] = drcr(r.opening); const [c, d] = drcr(r.closing); return (
-                      <tr key={r.account_id} style={r.kind === "petty" ? { background: "#fffbeb" } : r.kind === "interco" ? { background: "#f0f9ff" } : r.kind === "inventory" ? { background: "#f0fdf4" } : r.kind === "ftdeposit" ? { background: "#fdf4ff" } : undefined} title={r.kind === "ftdeposit" ? `เงินมัดจำรับจากลูกค้าตามเอกสารในระบบ (จองรถ DEP- / ป้ายแดง RPD- / อะไหล่ PDS- PDO-) · เครดิต = รับใหม่ · เดบิต = ตัดใช้ชำระ + คืนเงิน · คงค้าง = ยังไม่ตัด/ไม่คืน` : r.kind === "inventory" ? `สต๊อกรถใหม่ในระบบ ณ สิ้นงวด × ต้นทุนใบกำกับซื้อ ÷ 1.07 · ยกมา = มูลค่า ณ สิ้นเดือนก่อน · งวด = ผลต่างสุทธิ (เพิ่ม=เดบิต ลด=เครดิต)` : r.kind === "interco" ? `ยกมา = Flow 31/08/69 · โอนข้ามสังกัด (BTR) + ขายส่งตัดบัญชีกู้ยืม · ไม่รวมเงินสดสาขาฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow` : r.kind === "petty" ? `เงินสดย่อยรวมทุกสาขา ${r.count} เอกสาร · ยกมา = วงเงินตาม Flow 31/08/69 · เดบิต (เติมเงิน) ถือว่าเท่ากับที่เบิก (ระบบไม่มีบันทึกเติมเงิน)` : `รายการในงวด ${r.count} รายการ · ${r.flowOpening !== null ? `ยกมาอิงยอด Flow 31/08/69 = ${fmt(r.flowOpening)} + รายการตั้งแต่ 01/09/69` : `ยกมา = ยอดตั้งต้นบัญชี ${fmt(r.opening_balance)} (${r.opening_date ? String(r.opening_date).slice(0, 10) : "-"}) + รายการสะสมทั้งหมด (ยังไม่มียอด Flow 31/08)`}`}>
-                        <td style={{ ...td, fontFamily: "monospace", color: r.code ? "#0369a1" : "#9ca3af", fontWeight: 600 }}>{r.code || "—"}{r.flowOpening === null && r.kind !== "inventory" && r.kind !== "ftdeposit" && <span title="ยังไม่มียอดยกมาจาก Flow 31/08/69 — ใช้ยอดตั้งต้นบัญชีในระบบ" style={{ marginLeft: 4, color: "#f59e0b" }}>*</span>}</td>
+                      <tr key={r.account_id} style={r.kind === "petty" ? { background: "#fffbeb" } : r.kind === "interco" ? { background: "#f0f9ff" } : r.kind === "inventory" ? { background: "#f0fdf4" } : r.kind === "ftdeposit" ? { background: "#fdf4ff" } : undefined} title={r.kind === "ftdeposit" ? `เงินมัดจำรับจากลูกค้าตามเอกสารในระบบ (จองรถ DEP- / ป้ายแดง RPD- / อะไหล่ PDS- PDO-) · เครดิต = รับใหม่ · เดบิต = ตัดใช้ชำระ + คืนเงิน · คงค้าง = ยังไม่ตัด/ไม่คืน` : r.kind === "inventory" ? `สต๊อกรถใหม่ในระบบ ณ สิ้นงวด × ต้นทุนใบกำกับซื้อ ÷ 1.07 · ยกมา = มูลค่า ณ สิ้นเดือนก่อน · งวด = ผลต่างสุทธิ (เพิ่ม=เดบิต ลด=เครดิต)` : r.kind === "interco" ? `ยกมา = Flow 31/08/69 · โอนข้ามสังกัด (BTR) + ขายส่งตัดบัญชีกู้ยืม · ไม่รวมเงินสดสาขาฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow` : r.kind === "petty" ? `เงินสดย่อยรวมทุกสาขา ${r.count} เอกสาร · ยกมา = วงเงินตาม Flow 31/08/69 · เดบิต (เติมเงิน) ถือว่าเท่ากับที่เบิก (ระบบไม่มีบันทึกเติมเงิน)` : `รายการในงวด ${r.count} รายการ · ยกมาตามระบบ (statement) = ${fmt(r.openingSystem)}${r.openingFlow !== null && r.openingFlow !== undefined ? ` · ยกมาตาม Flow 31/08/69 = ${fmt(r.openingFlow)} · ต่าง ${fmt(r2(r.openingSystem - r.openingFlow))} (ส่วนต่างก่อน ก.ย.69 ระหว่างระบบกับ Flow)` : " · ยังไม่มียอด Flow 31/08"} · กำลังใช้: ${openingMode === "flow" && r.openingFlow !== null && r.openingFlow !== undefined ? "Flow" : "ระบบ"}`}>
+                        <td style={{ ...td, fontFamily: "monospace", color: r.code ? "#0369a1" : "#9ca3af", fontWeight: 600 }}>{r.code || "—"}{openingMode === "flow" && r.flowOpening === null && r.kind !== "inventory" && r.kind !== "ftdeposit" && <span title="ยังไม่มียอดยกมาจาก Flow 31/08/69 — ใช้ยอดตั้งต้นบัญชีในระบบ" style={{ marginLeft: 4, color: "#f59e0b" }}>*</span>}</td>
                         <td style={td}><div style={{ fontWeight: 600 }}>{r.bank_name} <span style={{ fontFamily: "monospace" }}>{r.account_no}</span></div><div style={{ fontSize: 11, color: "#64748b" }}>{r.account_name}{r.account_type ? ` · ${r.account_type}` : ""}</div></td>
                         <td style={num}>{cellNum(a)}</td><td style={{ ...num, color: "#0891b2" }}>{cellNum(b)}</td>
                         <td style={{ ...num, background: "#f7fef9" }}>{cellNum(r.dr)}</td><td style={{ ...num, background: "#f7fef9", color: "#0891b2" }}>{cellNum(r.cr)}</td>
@@ -413,7 +424,7 @@ tr.grp td{background:#eef2ff;font-weight:700;padding:6px}tr.sub td{font-weight:7
           </table>
         </div>
         <div style={{ fontSize: 11.5, color: "#64748b", padding: "10px 0 6px", lineHeight: 1.6 }}>
-          ยอดยกมา = ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ) · ยอดประจำงวดจากรายงานการเคลื่อนไหว · เงินสดย่อย (11149.00) รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่ ระบบไม่มีบันทึกเติมเงิน) · เงินให้กู้ยืมระหว่างบริษัท (11451) = โอนเงินข้ามสังกัด + ขายส่งอะไหล่ที่ตัดผ่านบัญชีกู้ยืม (ยกมา Flow 31/08) ยังไม่รวมเงินสดสาขาที่ฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow · สินค้าคงเหลือรถ (11513) = สต๊อกรถใหม่ในระบบ ณ สิ้นงวด (รับรถ − ขาย) × ต้นทุนใบกำกับซื้อ ÷ 1.07 ยกมา = มูลค่า ณ สิ้นเดือนก่อน งวด = ผลต่างสุทธิ · เงินมัดจำ (11921) = เงินมัดจำรับจากลูกค้าตามเอกสารในระบบ รวมจองรถ/ป้ายแดง/อะไหล่ (เครดิต = รับใหม่, เดบิต = ตัดใช้ + คืน, คงค้างฝั่งเครดิต) ไม่ได้อิงยอด Flow · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
+          ยอดยกมาบัญชีธนาคาร = {openingMode === "flow" ? "ยอดตามงบทดลอง Flow ณ 31/08/69 + รายการในระบบตั้งแต่ 01/09/69 ถึงวันก่อนต้นงวด (บัญชีที่มี * ยังไม่มียอด Flow ใช้ยอดตั้งต้นบัญชีในระบบ)" : "ยอดตั้งต้นบัญชี + รายการสะสมทั้งหมดในระบบ (เท่ากับรายงานการเคลื่อนไหวบัญชี/statement) — ชี้ที่รหัสบัญชีเพื่อดูยอดตาม Flow และส่วนต่าง"} · ยอดประจำงวดจากรายงานการเคลื่อนไหว · เงินสดย่อย (11149.00) รวมทุกบัญชีย่อยของสังกัด: เครดิต = ค่าน้ำมันรถใหม่/ของไหว้ตามวันที่ใบ + ค่าใช้จ่ายทั่วไป/ไปรษณีย์ตามวันเบิก PCW, เดบิต = เติมเท่าที่เบิก (วงเงินคงที่ ระบบไม่มีบันทึกเติมเงิน) · เงินให้กู้ยืมระหว่างบริษัท (11451) = โอนเงินข้ามสังกัด + ขายส่งอะไหล่ที่ตัดผ่านบัญชีกู้ยืม (ยกมา Flow 31/08) ยังไม่รวมเงินสดสาขาที่ฝากข้ามสังกัดและ JV ปิดยอดสิ้นเดือนของ Flow · สินค้าคงเหลือรถ (11513) = สต๊อกรถใหม่ในระบบ ณ สิ้นงวด (รับรถ − ขาย) × ต้นทุนใบกำกับซื้อ ÷ 1.07 ยกมา = มูลค่า ณ สิ้นเดือนก่อน งวด = ผลต่างสุทธิ · เงินมัดจำ (11921) = เงินมัดจำรับจากลูกค้าตามเอกสารในระบบ รวมจองรถ/ป้ายแดง/อะไหล่ (เครดิต = รับใหม่, เดบิต = ตัดใช้ + คืน, คงค้างฝั่งเครดิต) ไม่ได้อิงยอด Flow · ยอดคงเหลือฝั่งเครดิต = บัญชีเงินเบิกเกินบัญชี (OD) · รหัสบัญชีตามผังบัญชี FlowAccount บัญชีที่แสดง "—" ยังไม่ได้ระบุรหัส
         </div>
       </div>
     </div>
