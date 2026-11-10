@@ -34,13 +34,26 @@ export default function DoorControlPage({ currentUser }) {
   async function loadStatus() { setBusy("status"); const r = await post({ action: "status" }); setStatus(r); if (r?.settings) setSettings(s => ({ ...s, ...r.settings })); setBusy(""); }
   async function loadUsers() { const r = await post({ action: "list_users" }); setUsers(r?.users || []); setPending(r?.pending || []); }
   async function loadLog() { const r = await post({ action: "list_log", limit: 200 }); setLog(r?.rows || []); }
-  useEffect(() => { const t = setTimeout(() => { loadStatus(); loadUsers(); loadLog(); }, 0); return () => clearTimeout(t); }, []);
+  // คิวปิดแบบตรวจกล้องก่อน (2026-11-10): กด "ปิด" → n8n เก็บคำขอ → Pi (doorguard) ตรวจ YOLO ที่ขอบประตู รอจนว่างแล้วสั่งปิดเอง → หน้านี้โพลล์สถานะทุก 3 วิ
+  const [closeReq, setCloseReq] = useState(null);
+  const CLOSE_ST = { pending: "🕒 รอเครื่องที่ร้านรับคำขอ", checking: "📷 กำลังตรวจกล้องขอบประตู…", waiting: "⏸ รอปิด: มีสิ่งกีดขวางที่ขอบประตู", closing: "▼ ขอบประตูว่าง กำลังสั่งปิด…", closed: "✅ ปิดประตูแล้ว", error: "❌ สั่งปิดไม่สำเร็จ", timeout: "⏱ รอเกิน 10 นาที ยังมีสิ่งกีดขวาง ไม่ได้ปิด", cancelled: "✖ ยกเลิกการรอปิดแล้ว" };
+  const closeActive = (st) => ["pending", "checking", "waiting", "closing"].includes(st);
+  async function loadCloseStatus() { const r = await post({ action: "close_status", with_image: true }); const q = r?.request; if (q && (closeActive(q.status) || (q.age_sec || 0) < 1800)) setCloseReq(q); else setCloseReq(null); return q; }
+  useEffect(() => {
+    if (!closeReq || !closeActive(closeReq.status)) return;
+    const t = setInterval(async () => { const q = await loadCloseStatus(); if (q && !closeActive(q.status)) { loadLog(); setTimeout(loadStatus, 1500); } }, 3000);
+    return () => clearInterval(t);
+  }, [closeReq?.id, closeReq?.status]); // eslint-disable-line
+  async function cancelClose() { setBusy("cancel"); await post({ action: "cancel_close", user: me }); await loadCloseStatus(); setBusy(""); loadLog(); }
+  useEffect(() => { const t = setTimeout(() => { loadStatus(); loadUsers(); loadLog(); loadCloseStatus(); }, 0); return () => clearTimeout(t); }, []); // eslint-disable-line
 
   async function command(action) {
     const label = { open: "เปิด", stop: "หยุด", close: "ปิด" }[action];
     if (!window.confirm(`${label}${SHUTTER_LABEL[shutter]} ตอนนี้?`)) return;
     setBusy(action); setMsg("");
     const r = await post({ action, shutter, user: me });
+    if (r?.queued) { setMsg("📷 ส่งคำขอปิดแล้ว — เครื่องที่ร้านกำลังตรวจกล้องขอบประตูก่อนปิด (ถ้ามีสิ่งกีดขวางจะรอจนว่าง)"); setCloseReq(r.request || null); setBusy(""); loadLog(); return; }
+    if (action === "stop") setCloseReq(null);
     setMsg(r?.ok ? `✅ สั่ง${label}ประตูแล้ว` : `❌ ไม่สำเร็จ: ${(r?.results || []).filter(x => !x.ok).map(x => `${x.name} ${x.msg}`).join(", ") || r?.error || ""}`);
     setBusy(""); loadLog(); setTimeout(loadStatus, 1500);
   }
@@ -63,7 +76,23 @@ export default function DoorControlPage({ currentUser }) {
   return (
     <div style={{ padding: 16, maxWidth: 1100 }}>
       <h2 style={{ margin: "0 0 12px" }}>🚪 ประตูร้าน</h2>
-      {msg && <div style={{ marginBottom: 10, color: msg.startsWith("✅") ? "#2e7d32" : "#c62828", fontWeight: 600 }}>{msg}</div>}
+      {msg && <div style={{ marginBottom: 10, color: msg.startsWith("✅") || msg.startsWith("📷") ? "#2e7d32" : "#c62828", fontWeight: 600 }}>{msg}</div>}
+      {closeReq && (
+        <div style={{ ...card, borderLeft: `6px solid ${closeReq.status === "closed" ? "#2e7d32" : closeActive(closeReq.status) ? "#f59e0b" : "#c62828"}`, background: closeReq.status === "waiting" || closeReq.status === "timeout" ? "#fff7ed" : "#fff" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <b style={{ fontSize: 16 }}>{CLOSE_ST[closeReq.status] || closeReq.status}</b>
+              <span style={{ marginLeft: 10, fontSize: 13, opacity: .75 }}>คำขอ #{closeReq.id} · {SHUTTER_LABEL[closeReq.shutter] || closeReq.shutter} · โดย {closeReq.requested_by || closeReq.source || "-"} · {closeReq.created_local} น.{closeActive(closeReq.status) && closeReq.age_sec != null ? ` · รอมาแล้ว ${Math.floor(closeReq.age_sec / 60)} นาที` : ""}</span>
+            </div>
+            {closeActive(closeReq.status) && <button onClick={cancelClose} disabled={!!busy} style={{ padding: "6px 14px", cursor: "pointer", background: "#fee2e2", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 8, fontWeight: 700 }}>ยกเลิกรอปิด</button>}
+          </div>
+          {closeReq.note && <div style={{ marginTop: 6, fontSize: 14 }}>{closeReq.note}</div>}
+          {closeReq.image_base64 && (closeReq.status === "waiting" || closeReq.status === "timeout") && (
+            <img src={`data:image/jpeg;base64,${closeReq.image_base64}`} alt="ขอบประตู" style={{ marginTop: 8, maxWidth: 480, width: "100%", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+          )}
+          <div style={{ marginTop: 6, fontSize: 12, opacity: .65 }}>ระบบตรวจกล้อง CH03/CH13 ด้วย AI ก่อนสั่งปิดเท่านั้น ไม่ใช่อุปกรณ์กันหนีบ — กด "หยุด" ได้ทุกเมื่อถ้าเห็นอันตราย</div>
+        </div>
+      )}
 
       <div style={card}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
