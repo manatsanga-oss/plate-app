@@ -3,6 +3,7 @@ import React, { useEffect, useState, useMemo } from "react";
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/service-api";
 
 function fmt(v) { return Number(v || 0).toLocaleString("th-TH", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+const TH_MONTHS_P = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
 function fmtDate(v) {
   if (!v) return "-";
   const d = new Date(v); if (isNaN(d)) return String(v).slice(0, 10);
@@ -102,6 +103,75 @@ export default function HondaRepairReportPage() {
     return [...map.values()].sort((a, b) => b.count - a.count);
   }, [rows]);
 
+  // พิมพ์รายงาน (user 2026-11-10): สรุปตัวเลข + ตารางช่างซ่อม × ประเภทบริการ + สรุปประเภทบริการ เปิดหน้าต่างใหม่แล้วสั่งพิมพ์ แนวนอน A4
+  function printReport() {
+    if (!rows.length) { setMessage("ไม่มีข้อมูลให้พิมพ์ — กดค้นหาก่อน"); return; }
+    const esc = (v) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const r = (v, extra = "") => `<td style="text-align:right;font-family:monospace;${extra}">${v}</td>`;
+    const period = month ? `${TH_MONTHS_P[Number(month) - 1]} ${Number(year) + 543}` : `ปี ${Number(year) + 543}`;
+    const filters = [serviceType && `ประเภทบริการ: ${serviceType}`, search && `ค้นหา: ${search}`].filter(Boolean).join(" · ");
+    const sumLabor = mechanicPivot.data.reduce((a, g) => a + g.total_labor, 0);
+    const cards = [
+      ["Jobs", totalJobs], ["ค่าสินค้ารวม", fmt(totalParts)], ["ค่าบริการรวม (รวม PDI×50)", fmt(sumLabor)],
+      ["ขายสุทธิรวม", fmt(totalNet)], ["ค่าคอมมิชชั่นรวม (65%)", fmt(sumLabor * 0.65)], ["มูลค่าสินค้า (honda_part_sales)", fmt(totalPartsValue)],
+    ].map(([l, v]) => `<div class="card"><div>${esc(l)}</div><b>${v}</b></div>`).join("");
+    const pivotHead = mechanicPivot.types.map(t => `<th style="text-align:right">${esc(t)}</th>`).join("");
+    const pivotRows = mechanicPivot.data.map((g, i) => {
+      const cells = mechanicPivot.types.map(t => {
+        const isPDI = t && t.toUpperCase().includes("PDI");
+        if (isPDI && g.is_pmotor) return r("-");
+        const c = g[t]?.count || 0;
+        if (!c) return r("-");
+        const v = isPDI ? c * 50 : (g[t]?.labor || 0);
+        return r(`${fmt(v)}<div class="sub">(${c} jobs${isPDI ? " ×50" : ""})</div>`);
+      }).join("");
+      return `<tr><td>${i + 1}</td><td><b>${esc(g.mechanic_name)}</b></td>${cells}${r(g.total_jobs, "background:#fef9c3;font-weight:700")}${r(fmt(g.total_labor), "background:#fef9c3;font-weight:700")}${r(fmt(g.total_labor * 0.65), "background:#dcfce7;font-weight:700")}${r(fmt(g.total_parts_value), "background:#cffafe")}</tr>`;
+    }).join("");
+    const pivotTot = `<tr class="tot"><td colspan="2">รวม ${mechanicPivot.data.length} คน</td>${mechanicPivot.types.map(t => {
+      const isPDI = t && t.toUpperCase().includes("PDI");
+      const v = mechanicPivot.data.reduce((a, g) => a + (isPDI ? (g.is_pmotor ? 0 : (g[t]?.count || 0) * 50) : (g[t]?.labor || 0)), 0);
+      const c = mechanicPivot.data.reduce((a, g) => a + (g[t]?.count || 0), 0);
+      return r(`${fmt(v)}<div class="sub">(${c} jobs)</div>`);
+    }).join("")}${r(totalJobs)}${r(fmt(sumLabor))}${r(fmt(sumLabor * 0.65))}${r(fmt(totalPartsValue))}</tr>`;
+    const svcRows = byService.map((g, i) => `<tr><td>${i + 1}</td><td>${esc(g.service_type)}</td>${r(g.count)}${r(fmt(g.parts))}${r(fmt(g.labor))}${r(fmt(g.net))}</tr>`).join("");
+    const svcTot = `<tr class="tot"><td colspan="2">รวม</td>${r(byService.reduce((a, g) => a + g.count, 0))}${r(fmt(byService.reduce((a, g) => a + g.parts, 0)))}${r(fmt(byService.reduce((a, g) => a + g.labor, 0)))}${r(fmt(byService.reduce((a, g) => a + g.net, 0)))}</tr>`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>รายงานใบแจ้งซ่อม HONDA ${esc(period)}</title><style>
+*{font-family:"Sarabun","TH Sarabun New",Tahoma,sans-serif;box-sizing:border-box}
+@page{size:A4 landscape;margin:10mm}
+body{margin:0;padding:8px;color:#111;font-size:12px}
+h1{font-size:18px;margin:0 0 2px;color:#072d6b}
+.meta{color:#555;font-size:11px;margin-bottom:8px}
+.cards{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.card{border:1px solid #cbd5e1;border-radius:6px;padding:6px 10px;min-width:140px;font-size:11px;color:#555}
+.card b{display:block;font-size:15px;color:#111;font-family:monospace;margin-top:2px}
+h2{font-size:14px;margin:12px 0 4px;color:#072d6b}
+table{width:100%;border-collapse:collapse;font-size:11px;page-break-inside:auto}
+th,td{border:1px solid #cbd5e1;padding:3px 5px;vertical-align:top}
+th{background:#f0f4f9;text-align:left}
+tr{page-break-inside:avoid}
+.sub{font-size:9px;color:#6b7280;font-weight:400}
+.tot td{background:#fef9c3;font-weight:700}
+.foot{margin-top:10px;font-size:10px;color:#777}
+@media print{.noprint{display:none}}
+</style></head><body>
+<div class="noprint" style="text-align:right;margin-bottom:6px"><button onclick="window.print()" style="padding:6px 16px;font-size:13px;cursor:pointer">🖨️ พิมพ์</button></div>
+<h1>🔧 รายงานใบแจ้งซ่อม HONDA — ${esc(period)}</h1>
+<div class="meta">${esc(filters || "ทุกประเภทบริการ")} · ${rows.length} ใบ · พิมพ์ ${new Date().toLocaleString("th-TH")}</div>
+<div class="cards">${cards}</div>
+<h2>สรุปยอด/จำนวน ของช่างซ่อม แยกตามประเภทบริการ</h2>
+<table><thead><tr><th>#</th><th>ช่างซ่อม</th>${pivotHead}<th style="text-align:right;background:#fef9c3">รวม Jobs</th><th style="text-align:right;background:#fef9c3">ค่าบริการรวม</th><th style="text-align:right;background:#dcfce7">ค่าคอมมิชชั่น (65%)</th><th style="text-align:right;background:#cffafe">มูลค่าสินค้า</th></tr></thead>
+<tbody>${pivotRows}${pivotTot}</tbody></table>
+<h2>สรุปประเภทบริการ</h2>
+<table style="width:auto;min-width:60%"><thead><tr><th>#</th><th>ประเภทบริการ</th><th style="text-align:right">Jobs</th><th style="text-align:right">ค่าสินค้า</th><th style="text-align:right">ค่าบริการ</th><th style="text-align:right">ขายสุทธิ</th></tr></thead>
+<tbody>${svcRows}${svcTot}</tbody></table>
+<div class="foot">PDI คิด 50 บาท/ใบ (ช่างสังกัด ป.เปา ไม่คิด PDI) · ค่าคอมมิชชั่น = ค่าบริการรวม × 65% · มูลค่าสินค้าจาก honda_part_sales</div>
+<script>window.onload=function(){setTimeout(function(){window.print()},300)}</script>
+</body></html>`;
+    const w = window.open("", "_blank", "width=1100,height=750");
+    if (!w) { setMessage("เบราว์เซอร์บล็อกหน้าต่างใหม่ — อนุญาต pop-up แล้วลองอีกครั้ง"); return; }
+    w.document.write(html); w.document.close(); w.focus();
+  }
+
   return (
     <div className="page-container">
       <div className="page-topbar">
@@ -119,6 +189,8 @@ export default function HondaRepairReportPage() {
         <input type="text" placeholder="ประเภทบริการ" value={serviceType} onChange={e => setServiceType(e.target.value)} style={{ ...inp, minWidth: 200 }} />
         <input type="text" placeholder="🔍 ค้นหา (JOB/ช่าง/บริการ)" value={search} onChange={e => setSearch(e.target.value)} style={{ ...inp, minWidth: 240 }} />
         <button onClick={fetchData} disabled={loading} style={btnBlue}>{loading ? "..." : "🔄 ค้นหา"}</button>
+        <button onClick={printReport} disabled={loading || rows.length === 0} title="พิมพ์สรุปช่างซ่อม + ประเภทบริการ (A4 แนวนอน)"
+          style={{ ...btnBlue, background: rows.length ? "#374151" : "#9ca3af" }}>🖨️ พิมพ์</button>
       </div>
 
       {message && <div style={{ padding: 10, marginBottom: 10, color: "#b91c1c" }}>{message}</div>}
