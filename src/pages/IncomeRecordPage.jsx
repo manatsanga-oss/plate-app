@@ -379,6 +379,7 @@ export default function IncomeRecordPage({ currentUser }) {
       wht_rate: Number(d.wht_rate) || 0,
       wht_amount: Number(d.wht_amount) || 0,
       payment_method: d.payment_method || "",
+      created_by: d.created_by || "", paid_by: d.paid_by || "", // ผู้สร้างใบ / ผู้บันทึกรับเงิน (เก็บตั้งแต่ 2026-11-10 ใบก่อนหน้าว่าง)
       paid_at: d.paid_at ? String(d.paid_at).slice(0, 10) : "",
       paid_doc_no: d.paid_doc_no || "",
       from_bank_account_id: d.from_bank_account_id || "",
@@ -814,7 +815,7 @@ export default function IncomeRecordPage({ currentUser }) {
   paidDocs.forEach(d => {
     const key = d.paid_doc_no || `_${d.income_doc_id}`;
     if (!paidGroups[key]) paidGroups[key] = {
-      paid_doc_no: d.paid_doc_no, paid_at: d.paid_at, payment_method: d.payment_method, from_bank_account_id: d.from_bank_account_id,
+      paid_doc_no: d.paid_doc_no, paid_at: d.paid_at, payment_method: d.payment_method, from_bank_account_id: d.from_bank_account_id, paid_by: d.paid_by || "",
       items: [], total: 0, net: 0, wht: 0, expected: 0,
       // ยอดเงินที่รับจริงของใบรับเงินนี้ (รวมจาก income_payment_breakdowns — ใบที่หักกลบบางส่วนมาก่อน จะน้อยกว่ายอดใบ)
       received: Number(d.paid_doc_amount || 0),
@@ -1253,6 +1254,7 @@ export default function IncomeRecordPage({ currentUser }) {
                   <span style={{ fontSize: 12 }}>📅 {fmtDate(g.paid_at)}</span>
                   <span style={{ fontSize: 12 }}>💳 {g.payment_method || "-"}</span>
                   {bank && <span style={{ fontSize: 12 }}>🏦 {bank.bank_name} · {bank.account_no}</span>}
+                  <span style={{ fontSize: 12, color: g.paid_by ? "#374151" : "#9ca3af" }} title="ผู้บันทึกรับเงิน (เก็บตั้งแต่ 10/11/69 ใบก่อนหน้าไม่มีข้อมูล)">👤 {g.paid_by || "ไม่ระบุผู้บันทึก"}</span>
                   <span style={{ marginLeft: "auto", fontWeight: 700, color: "#065f46" }}>
                     {g.items.length} ใบ · {fmt(receiptAmount(g))}
                     {receiptAmount(g) < g.net - 0.01 && (
