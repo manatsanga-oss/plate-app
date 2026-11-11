@@ -143,6 +143,8 @@ const funcKey = (code) => { const c = strip(code); if (c.length < 8) return ""; 
 const FAST_LS_KEY = "fm_codes_cache_v1", FAST_LS_TTL = 24 * 60 * 60 * 1000; // cache ในเครื่อง 24 ชม. — ลดการยิง n8n ทุกครั้งที่เปิดหน้าสั่งซื้อ (CPU n8n 2026-11-05)
 function readFastLs() { try { const o = JSON.parse(localStorage.getItem(FAST_LS_KEY) || "null"); return o && Array.isArray(o.rows) && Date.now() - Number(o.ts || 0) < FAST_LS_TTL ? o.rows : null; } catch { return null; } }
 function writeFastLs(rows) { try { localStorage.setItem(FAST_LS_KEY, JSON.stringify({ ts: Date.now(), rows: rows.map((r) => ({ part_code: r.part_code, ref_code: r.ref_code, product_group: r.product_group, custom_name: r.custom_name, brand: r.brand, is_discontinued: !!r.is_discontinued })) })); } catch { /* เต็ม/ปิด localStorage ก็ไม่เป็นไร */ } }
+// กลุ่มที่ไม่เตือน "มีสต๊อกประจำ": PG-032 ACCESSORIES / PG-033 หมวกกันน็อก (แท็บหมวกและอะไหล่ตกแต่ง) — สั่งตามลูกค้าได้ปกติ (user 2026-11-10 เคส BJK-F1511-00-P9 บังโคลนหน้าสีพิเศษ) + PG-031 อะไหล่แท้
+const isExemptGroup = (g) => /อะไหล่แท้/.test(String(g || "")) || /^PG-03[23]/i.test(String(g || "").trim());
 export function loadFastMoving() {
   if (_fastCache) return Promise.resolve(_fastCache);
   if (_fastPromise) return _fastPromise;
@@ -155,7 +157,7 @@ export function loadFastMoving() {
       const info = { code: r.part_code, name: r.custom_name || r.product_name || "", group: r.product_group || "", brand: r.brand || "", discontinued: !!r.is_discontinued };
       m.set(baseKey(r.part_code), info);
       if (r.ref_code) m.set(baseKey(r.ref_code), info);
-      if (!info.discontinued && !/อะไหล่แท้/.test(info.group)) {
+      if (!info.discontinued && !isExemptGroup(info.group)) {
         const k = funcKey(r.part_code); if (!k) return;
         const g = groups.get(k) || { group: info.group, count: 0 }; g.count += 1; groups.set(k, g); // กลุ่มของรหัสฟังก์ชันนั้น (ใช้กลุ่มแรกที่พบ)
       }
@@ -170,7 +172,7 @@ export function fastMovingInfo(code, map = _fastCache) {
   if (FAST_EXEMPT_PREFIXES.some((p) => strip(code).startsWith(p))) return null;
   const r = map.get(baseKey(code));
   // รหัสตรงกับรายการหมุนเร็ว: ยกเว้นเฉพาะกลุ่ม "อะไหล่แท้" (PG-031 สั่งตามรุ่นปกติ — เคส 2BL-E7465-00 ซีลน้ำมัน) · สายพาน 23100 ต้องเตือน (user 2026-11-05 ยืนยันกับ 23100-K36-J01)
-  if (r) return r.discontinued || /อะไหล่แท้/.test(r.group) ? null : r;
+  if (r) return r.discontinued || isExemptGroup(r.group) ? null : r;
   // รหัสไม่ตรง แต่เป็น "กลุ่มเดียวกัน" กับอะไหล่หมุนเร็ว (รหัสฟังก์ชันเดียวกัน) → เตือนเหมือนกัน (user 2026-11-05: กลุ่มอะไหล่คือทุกรหัส)
   const g = map.groups && map.groups.get(funcKey(code));
   return g ? { code: strip(code), name: "", group: g.group, byGroup: true } : null;

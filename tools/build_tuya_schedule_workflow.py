@@ -41,6 +41,7 @@ const cfg = { clientId: '__CID__', secret: '__SEC__', base: '__BASE__' };
 const BLASTERS = [
   { id: 'eb57949ab6012fb6644pat', name: 'Smart IR (HMS06WB3S)' },
   { id: 'eb619bef17ce0d7e9behnb', name: 'LCD temp/humidity IR' },
+  { id: 'ebe3a01a3f778426d3vsdn', name: 'IR ขาว (S06-T1-3S)' },   // ตัวยิงสีขาว เพิ่ม 2026-11-11 — รีโมท 'แอร์ mitsubisg ir ขาว' (Mitsubishi) อยู่ใต้ตัวนี้
 ];
 // ปลั๊ก WiFi (category cz) สั่งตรงด้วย /v1.0/iot-03/devices/{id}/commands switch_1 — ต้องเปลี่ยนสิทธิ์เป็น Control ใน iot.tuya.com ก่อน (user กด Confirm Conversion 2026-11-04)
 const PLUGS = [

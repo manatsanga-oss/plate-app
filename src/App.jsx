@@ -52,6 +52,7 @@ import FastMovingStockPage from "./pages/FastMovingStockPage";
 import HondaDepositPage from "./pages/HondaDepositPage";
 import SparePartsOrderPage from "./pages/SparePartsOrderPage";
 import SparePartsDailyOrdersPage from "./pages/SparePartsDailyOrdersPage";
+import SpareLeftoverPage from "./pages/SpareLeftoverPage"; // อะไหล่สั่งซื้อที่ค้างสต๊อก รายเดือน (user 2026-11-10)
 import PositionPage from "./pages/PositionPage";
 import YamahaDepositPage from "./pages/YamahaDepositPage";
 import YamahaOrderPage from "./pages/YamahaOrderPage";
@@ -349,7 +350,7 @@ export default function App() {
     const explicitPages = getExplicitUserPages(currentUser.pages);
     if (explicitPages) return explicitPages.includes(page);
     // booking และ moto เปิดให้ทุก user ที่ login แล้ว
-    if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "sparedailyorders" || page === "partreturn" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "chequereceive" || page === "mymotoreport" || page === "mymotoregister" || page === "fuelwithdraw" || page === "maildispatch" || page === "financecustody" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "redplaterefund" || page === "redplatedeposit" || page === "depositincome" || page === "salewizard" || page === "vehdressup" || page === "usedmoto" || page === "partgiveawayreport" || page === "receiptentry") return true;
+    if (page === "salesoverview" || page === "stockonhand" || page === "mototransfer" || page === "booking" || page === "moto" || page === "pricequote" || page === "spareorder" || page === "sparedailyorders" || page === "spareleftover" || page === "partreturn" || page === "hondadeposit" || page === "yamahaorder" || page === "yamahadeposit" || page === "repairdeposit" || page === "outsideorder" || page === "fastmoving" || page === "pettycash" || page === "postage" || page === "pettycashgeneral" || page === "pettycashoffering" || page === "claim" || page === "vehicleregistration" || page === "searchreceiptwork" || page === "bankdeposit" || page === "chequereceive" || page === "mymotoreport" || page === "mymotoregister" || page === "fuelwithdraw" || page === "maildispatch" || page === "financecustody" || page === "pricemarkup" || page === "payment" || page === "receiptqr" || page === "receiptissue" || page === "retailsale" || page === "bookingdeposit" || page === "redplaterefund" || page === "redplatedeposit" || page === "depositincome" || page === "salewizard" || page === "vehdressup" || page === "usedmoto" || page === "partgiveawayreport" || page === "receiptentry") return true;
     // Vehicle Registration management — admin only (ยกเว้น vehicleregistration ที่เป็น search อย่างเดียว)
     if (page === "registrationsubmit" || page === "registrationsubmitreceipt" || page === "registrationreceive" || page === "receiptreceive" || page === "registrationbilling" || page === "receiptbilling" || page === "motoinsurance" || page === "motoinsuranceextra" || page === "cosmosinsurance" || page === "cosmosadjust" || page === "cosmosbilling" || page === "insurancebilling" || page === "hrtimetracking" || page === "hremployees") return false;
     // upload, master data, convert เฉพาะ admin
@@ -760,6 +761,9 @@ export default function App() {
         {activeMenu === "sparedailyorders" && canAccess("sparedailyorders") && (
           <SparePartsDailyOrdersPage currentUser={currentUser} />
         )}
+        {activeMenu === "spareleftover" && canAccess("spareleftover") && (
+          <SpareLeftoverPage currentUser={currentUser} />
+        )}
         {activeMenu === "position" && canAccess("position") && (
           <PositionPage currentUser={currentUser} />
         )}
@@ -987,7 +991,7 @@ function MenuItem({ page, label, activeMenu, onChange, canAccess }) {
 
 function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
   const salesPages = ["moto", "booking", "pricecheck", "pricequote", "stockcheck", "motostock", "mototransfer", "customer", "fuelwithdraw", "maildispatch", "financecustody", "pricemarkup", "vehpriceoverride", "vehdressup", "receiptqr", "receiptissue", "retailsale", "bookingdeposit", "redplaterefund", "redplatedeposit", "depositincome"];
-  const sparePages = ["spareorder", "sparedailyorders", "partreturn", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "partdeposit", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "rfidstock", "partimagesearch", "productgroup", "partstatusinquiry", "partorderinquiry", "partwithdrawal", "partmodelusage"];
+  const sparePages = ["spareorder", "sparedailyorders", "spareleftover", "partreturn", "hondadeposit", "yamahaorder", "yamahadeposit", "repairdeposit", "outsideorder", "depositseize", "partdeposit", "hondainventory", "yamahainventory", "fastmoving", "fastmovingstock", "rfidstock", "partimagesearch", "productgroup", "partstatusinquiry", "partorderinquiry", "partwithdrawal", "partmodelusage"];
   const officePages = ["dashboard", "receive", "issue", "convert", "subunit", "officeadjust", "mailinbox"];
   const masterPages = ["motomodel", "motoprice", "motoexpense", "giveawayrules", "serviceexpense", "generalexpense", "incomecategory", "finance", "supplier", "driver", "position", "users", "branchmaster"];
   const uploadPages = ["upload", "uploadaccounting"];
@@ -1072,13 +1076,14 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
       </MenuGroup>
 
       <MenuGroup title="Spare Parts" pages={sparePages} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
-        <MenuSubGroup title="Order System" pages={["spareorder", "yamahaorder", "repairdeposit", "outsideorder", "depositseize", "partdeposit", "sparedailyorders", "partreturn"]} activeMenu={activeMenu}>
+        <MenuSubGroup title="Order System" pages={["spareorder", "yamahaorder", "repairdeposit", "outsideorder", "depositseize", "partdeposit", "sparedailyorders", "spareleftover", "partreturn"]} activeMenu={activeMenu}>
           <MenuItem page="spareorder" label="ระบบสั่งซื้ออะไหล่ HONDA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="yamahaorder" label="ระบบสั่งซื้ออะไหล่ YAMAHA" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="outsideorder" label="ระบบสั่งซื้ออะไหล่นอกเงินมัดจำ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="partdeposit" label="ระบบมัดจำอะไหล่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="depositseize" label="ยึดเงินมัดจำ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="sparedailyorders" label="รายการสั่งอะไหล่รายวัน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="spareleftover" label="อะไหล่สั่งซื้อที่ค้างสต๊อก" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="partreturn" label="บันทึกคืนสินค้า/สั่งใหม่" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         </MenuSubGroup>
         <MenuSubGroup title="Spare Inventory" pages={["fastmoving", "fastmovingstock", "rfidstock", "partimagesearch"]} activeMenu={activeMenu}>
