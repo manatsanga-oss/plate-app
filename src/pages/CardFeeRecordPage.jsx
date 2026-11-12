@@ -47,7 +47,7 @@ export default function CardFeeRecordPage({ currentUser }) {
   const [bankAccounts, setBankAccounts] = useState([]);
   const [form, setForm] = useState(EMPTY());
   const [cands, setCands] = useState([]);          // รายการรับชำระรูดบัตรที่ยังไม่จับคู่
-  const [candFrom, setCandFrom] = useState(shiftISO(todayISO(), -14));
+  const [candFrom, setCandFrom] = useState(shiftISO(todayISO(), -180)); // user 2026-11-11: เปิดหน้ามาเห็นทุกยอดรูดที่ยังรอใบเสร็จค่าธรรมเนียม (รายการรอมักมีไม่กี่ใบ)
   const [candTo, setCandTo] = useState(todayISO());
   const [candLoading, setCandLoading] = useState(false);
   const [sel, setSel] = useState({});              // key → true
@@ -91,6 +91,21 @@ export default function CardFeeRecordPage({ currentUser }) {
 
   const keyOf = (c) => `${c.source}|${c.doc_no}`;
   const selected = useMemo(() => cands.filter((c) => sel[keyOf(c)]), [cands, sel]);
+  // รอใบเสร็จค่าธรรมเนียม: รวมตามก้อน CC- (วันรูด + สาขา = ก้อนที่ธนาคารโอนเข้าบัญชีวันถัดไป) ให้เห็นทันทีว่ายอดไหนยังไม่ได้รับใบเสร็จ (user 2026-11-11)
+  const dayKey = (c) => String(c.paid_date || "").slice(0, 10);
+  const brOf = (c) => String(c.branch_code || "").split(" ")[0] || "-";
+  const ageDays = (iso) => Math.floor((new Date(todayISO() + "T00:00:00") - new Date(iso + "T00:00:00")) / 86400000);
+  const pendingGroups = useMemo(() => {
+    const m = new Map();
+    for (const c of cands) {
+      const k = `${dayKey(c)}|${brOf(c)}`;
+      const g = m.get(k) || { date: dayKey(c), branch: brOf(c), items: [], gross: 0, fee: 0 };
+      g.items.push(c); g.gross = r2(g.gross + num(c.gross)); g.fee = r2(g.fee + num(c.card_fee)); m.set(k, g);
+    }
+    return [...m.values()].sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.branch.localeCompare(b.branch)));
+  }, [cands]);
+  const pendingTotal = r2(cands.reduce((t, c) => t + num(c.gross), 0));
+  const toggleGroup = (g) => setSel((p) => { const all = g.items.every((c) => p[keyOf(c)]); const n = { ...p }; g.items.forEach((c) => { n[keyOf(c)] = !all; }); return n; });
   const selTotal = r2(selected.reduce((s, c) => s + num(c.gross), 0));
   const selFee = r2(selected.reduce((s, c) => s + num(c.card_fee), 0));
   const diff = r2(gross - selTotal);
@@ -109,7 +124,7 @@ export default function CardFeeRecordPage({ currentUser }) {
         action: "save", affiliation, bank_name: form.bank_name, bank_receipt_no: form.bank_receipt_no.trim(), bank_receipt_date: form.bank_receipt_date,
         merchant_no: form.merchant_no.trim(), bank_account_id: Number(form.bank_account_id),
         gross_amount: gross, fee_amount: fee, vat_amount: vat, net_amount: net, wht_rate: WHT_RATE, wht_amount: wht,
-        matched_items: selected.map((c) => ({ source: c.source, doc_no: c.doc_no, receipt_no: c.receipt_no, customer_name: c.customer_name, paid_date: c.paid_date, gross: num(c.gross), card_fee: num(c.card_fee) })),
+        matched_items: selected.map((c) => ({ source: c.source, doc_no: c.doc_no, receipt_no: c.receipt_no, customer_name: c.customer_name, paid_date: c.paid_date, gross: num(c.gross), card_fee: num(c.card_fee), branch_code: String(c.branch_code || "").split(" ")[0] || "" })), // branch_code: ให้รายงานเคลื่อนไหวบัญชีหักค่าธรรมเนียมเข้าก้อน CC- วัน/สาขาเดียวกัน (2026-11-11)
         note: form.note.trim(), created_by: userName,
       });
       const row = Array.isArray(d) ? d[0] : d;
@@ -185,6 +200,31 @@ export default function CardFeeRecordPage({ currentUser }) {
             {selFee > 0 && <span style={{ color: "#6b7280" }}> · ค่าธรรมเนียมที่เก็บลูกค้า {fmt(selFee)}</span>}
           </span>
         </div>
+        {/* ยอดรูดที่ยังไม่ได้รับใบเสร็จค่าธรรมเนียมจากธนาคาร — แยกตามก้อน CC- (วันรูด/สาขา) กดเพื่อเลือกทั้งก้อน (user 2026-11-11) */}
+        <div style={{ marginBottom: 8, padding: "8px 10px", background: cands.length ? "#fffbeb" : "#f0fdf4", border: `1px solid ${cands.length ? "#fcd34d" : "#86efac"}`, borderRadius: 8, fontSize: 13 }}>
+          {candLoading ? "กำลังตรวจรายการที่รอใบเสร็จ…" : cands.length === 0 ? (
+            <span style={{ color: "#166534" }}>✅ ยอดรูดบัตรทุกรายการในช่วง {fmtDate(candFrom)} – {fmtDate(candTo)} ได้รับใบเสร็จค่าธรรมเนียมจากธนาคารครบแล้ว</span>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 6 }}>
+                ⏳ ยังไม่ได้รับใบเสร็จค่าธรรมเนียมจากธนาคาร {cands.length} รายการ · {pendingGroups.length} ก้อน · รวมยอดรูด {fmt(pendingTotal)}
+                <span style={{ fontWeight: 400, color: "#6b7280" }}> (กดก้อนเพื่อเลือกทุกใบในก้อนนั้น · ก้อนเกิน 7 วันเป็นสีแดง)</span>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {pendingGroups.map((g) => {
+                  const allOn = g.items.every((c) => sel[keyOf(c)]);
+                  const old = ageDays(g.date) > 7;
+                  return (
+                    <button key={`${g.date}|${g.branch}`} onClick={() => toggleGroup(g)} title={g.items.map((c) => `${c.doc_no} ${c.customer_name || ""} ${fmt(c.gross)}`).join("\n")}
+                      style={{ padding: "4px 10px", borderRadius: 999, cursor: "pointer", fontFamily: "Tahoma", fontSize: 12.5, border: `1px solid ${allOn ? "#2563eb" : old ? "#fca5a5" : "#d1d5db"}`, background: allOn ? "#dbeafe" : old ? "#fef2f2" : "#fff", color: old ? "#b91c1c" : "#1f2937" }}>
+                      {allOn ? "☑ " : "☐ "}{fmtDate(g.date)} {g.branch} · <b>{fmt(g.gross)}</b> ({g.items.length} ใบ{g.fee > 0 ? ` · ค่าธรรมเนียมเก็บลูกค้า ${fmt(g.fee)}` : ""}){old ? ` · ${ageDays(g.date)} วัน` : ""}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
         <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 8 }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead><tr><th style={th}></th><th style={th}>วันที่รับชำระ</th><th style={th}>ประเภท</th><th style={th}>เลขเอกสาร / ใบเสร็จ</th><th style={th}>ลูกค้า</th><th style={th}>สาขา</th><th style={{ ...th, textAlign: "right" }}>ยอดรูด</th><th style={{ ...th, textAlign: "right" }}>ค่าธรรมเนียมที่บวก</th></tr></thead>
@@ -204,7 +244,7 @@ export default function CardFeeRecordPage({ currentUser }) {
                   </tr>
                 );
               })}
-              {cands.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{candLoading ? "กำลังโหลด…" : "ไม่พบรายการรับชำระที่รูดบัตรในช่วงวันที่ (ที่ยังไม่จับคู่)"}</td></tr>}
+              {cands.length === 0 && <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#9ca3af" }}>{candLoading ? "กำลังโหลด…" : "ไม่มียอดรูดบัตรที่รอใบเสร็จค่าธรรมเนียมในช่วงวันที่นี้ (ทุกรายการจับคู่ใบเสร็จธนาคารแล้ว)"}</td></tr>}
             </tbody>
           </table>
         </div>
