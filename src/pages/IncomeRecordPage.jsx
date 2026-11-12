@@ -183,9 +183,10 @@ export default function IncomeRecordPage({ currentUser }) {
     if (invs.length === 0) { alert("เลือกอย่างน้อย 1 รายการ"); return; }
     setTfImporting(true);
     try {
+      // created_by เก็บชื่อผู้ใช้ (username) ไม่ใช่รหัส — user 2026-11-11: ใบนำเข้า TF เคยเก็บเป็น "8"
       const res = await fetch(ACCOUNTING_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "import_tf_to_income", invoice_nos: invs, created_by: currentUser?.user_id || currentUser?.name || "" }),
+        body: JSON.stringify({ action: "import_tf_to_income", invoice_nos: invs, created_by: currentUser?.username || currentUser?.name || "" }),
       });
       const data = await res.json();
       const r = Array.isArray(data) ? data[0] : data;
@@ -297,7 +298,7 @@ export default function IncomeRecordPage({ currentUser }) {
             customer_name: l.customer_name, model: l.model,
             amount: Number(l.amount || 0), note: l.note || ""
           })),
-          created_by: currentUser?.user_id || currentUser?.name || "system",
+          created_by: currentUser?.username || currentUser?.name || "system", // ชื่อผู้ใช้ ให้ตรงกับใบรายได้
         }),
       });
       const data = await res.json();
