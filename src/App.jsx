@@ -67,8 +67,11 @@ import PettyCashGeneralPage from "./pages/PettyCashGeneralPage";
 import PettyCashOfferingPage from "./pages/PettyCashOfferingPage";
 import PayDepositPage from "./pages/PayDepositPage";
 import ClaimPage from "./pages/ClaimPage";
-import AeroxCampaignPopup, { isAeroxCampaignActive } from "./pages/AeroxCampaignPopup"; // POP UP แคมเปญ AEROX ตอนเข้าระบบ (ก.ย.–ต.ค. 69)
-import AiSimAwardPopup, { isAiSimAwardActive } from "./pages/AiSimAwardPopup"; // POP UP ประกาศผลรางวัลฝึกตอบลูกค้า (1–7 พ.ย. 69)
+import AeroxCampaignPopup from "./pages/AeroxCampaignPopup"; // POP UP แคมเปญ AEROX (ความคืบหน้ารอบที่กำลังดำเนินอยู่)
+import AeroxResultPopup from "./pages/AeroxResultPopup"; // POP UP ประกาศผลค่าคอมพิเศษเฉพาะรุ่น + วันเงินเข้า
+import { currentAeroxCampaign } from "./utils/aeroxCampaign";
+import { loginPopupFor, aeroxResultCampaignFor } from "./utils/loginPopups"; // สลับ POP UP ตอนเข้าระบบวันละ 1 เรื่อง
+import AiSimAwardPopup from "./pages/AiSimAwardPopup"; // POP UP ประกาศผลรางวัลฝึกตอบลูกค้า (1–7 พ.ย. 69)
 import RepairDepositPage from "./pages/RepairDepositPage";
 import ProductGroupPage from "./pages/ProductGroupPage";
 import OutsideDepositOrderPage from "./pages/OutsideDepositOrderPage";
@@ -192,6 +195,7 @@ import PartImageLookupPage from "./pages/PartImageLookupPage";
 import QuoteViewPage from "./pages/QuoteViewPage";
 import MailInboxPage from "./pages/MailInboxPage";
 import HrYtdReportPage from "./pages/HrYtdReportPage";
+import ModelSpecialCommissionPage from "./pages/ModelSpecialCommissionPage"; // HR → ค่าคอมพิเศษเฉพาะรุ่น (ผลแคมเปญ AEROX ก.ย.–ต.ค. 69)
 import ChequeReceivePage from "./pages/ChequeReceivePage";
 import DamageAssessPage from "./pages/DamageAssessPage";
 
@@ -283,23 +287,18 @@ export default function App() {
     return () => window.removeEventListener("nav-to-page", handler);
   }, []);
 
-  // POP UP แคมเปญค่าคอมพิเศษ AEROX — ขึ้นครั้งเดียวต่อการเข้าระบบ (sessionStorage) เฉพาะช่วงแคมเปญ (user 2026-09-08)
-  const [showAerox, setShowAerox] = useState(false);
+  // POP UP ตอนเข้าระบบ — สลับวันละ 1 เรื่อง (user 2026-11-12): ผลค่าคอมพิเศษเฉพาะรุ่น AEROX + วันเงินเข้า → ต่อแคมเปญ AEROX รอบใหม่ → ผลแข่งขัน AI ประจำสัปดาห์ → วน
+  //   เลือกเรื่องของวันนี้ใน utils/loginPopups.js (loginPopupFor) · ขึ้นวันละครั้งต่อแท็บ (sessionStorage key มีวันที่)
+  //   เดิม: AEROX ขึ้นครั้งเดียวต่อ session ช่วงแคมเปญ (2026-09-08) + ผล AI ขึ้นวันละครั้ง (2026-10-31) แยกกัน 2 ชุด
+  const [loginPopup, setLoginPopup] = useState(null); // "aerox-result" | "aerox-campaign" | "ai-award" | null
+  const loginPopupKey = () => "login_popup_shown_" + new Date().toLocaleDateString("en-CA");
   useEffect(() => {
-    if (!currentUser || !isAeroxCampaignActive()) return;
-    try { if (!sessionStorage.getItem("aerox_popup_shown")) setShowAerox(true); } catch { setShowAerox(true); }
+    if (!currentUser) return;
+    const kind = loginPopupFor();
+    if (!kind) return;
+    try { if (!sessionStorage.getItem(loginPopupKey())) setLoginPopup(kind); } catch { setLoginPopup(kind); }
   }, [currentUser]);
-  const closeAerox = () => { setShowAerox(false); try { sessionStorage.setItem("aerox_popup_shown", "1"); } catch {} };
-
-  // POP UP ประกาศผลรางวัลฝึกตอบลูกค้า — เฉพาะช่วงประกาศผล 1–7 พ.ย. (user 2026-10-31)
-  // ขึ้นวันละครั้งต่อแท็บ (key มีวันที่): เดิมครั้งเดียวต่อ session ทำให้ปิดแล้วไม่ขึ้นอีกเลยทั้งที่ยังอยู่ในช่วงประกาศ (user 2026-11-02 "POP UP หาย")
-  const [showAiSimAward, setShowAiSimAward] = useState(false);
-  const aiSimAwardKey = () => "aisim_award_popup_shown_" + new Date().toLocaleDateString("en-CA");
-  useEffect(() => {
-    if (!currentUser || !isAiSimAwardActive()) return;
-    try { if (!sessionStorage.getItem(aiSimAwardKey())) setShowAiSimAward(true); } catch { setShowAiSimAward(true); }
-  }, [currentUser]);
-  const closeAiSimAward = () => { setShowAiSimAward(false); try { sessionStorage.setItem(aiSimAwardKey(), "1"); } catch {} };
+  const closeLoginPopup = () => { setLoginPopup(null); try { sessionStorage.setItem(loginPopupKey(), "1"); } catch { /* ignore */ } };
 
   const handleLogin = (user) => {
     setCurrentUser(user);
@@ -318,7 +317,7 @@ export default function App() {
   function canAccess(page) {
     if (!currentUser) return false;
     // เมนู HR — เห็นเฉพาะ admin + WARUT เท่านั้น (ตัด SUKANYA ออก)
-    const HR_PAGES = ["hremployees", "hrsalaryadjust", "hrholidays", "hrmonthlyextras", "hrpayroll", "hrpayrollpayment", "hrpayrollaccounts", "hrtimetracking", "hrspecialcommission", "hrnormalcommission", "hrsalesrecord", "hrytdreport"];
+    const HR_PAGES = ["hremployees", "hrsalaryadjust", "hrholidays", "hrmonthlyextras", "hrpayroll", "hrpayrollpayment", "hrpayrollaccounts", "hrtimetracking", "hrspecialcommission", "hrnormalcommission", "hrsalesrecord", "hrytdreport", "hrmodelcommission"];
     const HR_USERS = ["admin", "WARUT"];
     if (HR_PAGES.includes(page)) {
       return HR_USERS.includes(currentUser.username);
@@ -416,8 +415,9 @@ export default function App() {
 
   return (
     <div className="app-layout">
-      {showAerox && <AeroxCampaignPopup onClose={closeAerox} />}
-      {showAiSimAward && <AiSimAwardPopup onClose={closeAiSimAward} />}
+      {loginPopup === "aerox-result" && aeroxResultCampaignFor(new Date().toLocaleDateString("en-CA")) && <AeroxResultPopup onClose={closeLoginPopup} campaign={aeroxResultCampaignFor(new Date().toLocaleDateString("en-CA"))} />}
+      {loginPopup === "aerox-campaign" && currentAeroxCampaign() && <AeroxCampaignPopup onClose={closeLoginPopup} campaign={currentAeroxCampaign()} continued={currentAeroxCampaign().key !== "aerox-2569-09"} />}
+      {loginPopup === "ai-award" && <AiSimAwardPopup onClose={closeLoginPopup} />}
       {newVersion && (
         <div style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999, background: "#b91c1c", color: "#fff", padding: "9px 16px", display: "flex", alignItems: "center", justifyContent: "center", gap: 12, fontFamily: "Tahoma", fontSize: 14, boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>
           <span>⚠️ มีโปรแกรมเวอร์ชันใหม่ — กรุณารีเฟรชก่อนบันทึกข้อมูล ไม่เช่นนั้นข้อมูลบางช่องอาจไม่ถูกเก็บ</span>
@@ -915,6 +915,9 @@ export default function App() {
         {activeMenu === "hrpayrollaccounts" && canAccess("hrpayrollaccounts") && (
           <HrPayrollAccountsPage currentUser={currentUser} />
         )}
+        {activeMenu === "hrmodelcommission" && canAccess("hrmodelcommission") && (
+          <ModelSpecialCommissionPage />
+        )}
         {activeMenu === "hrytdreport" && canAccess("hrytdreport") && (
           <HrYtdReportPage currentUser={currentUser} />
         )}
@@ -1205,7 +1208,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="servicerateimport" label="📤 นำเข้า FRT (Admin)" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="HR" pages={["hremployees","hrsalaryadjust","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrnormalcommission","hrspecialcommission","hrsalesrecord","hrtimetracking","hrytdreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="HR" pages={["hremployees","hrsalaryadjust","hrholidays","hrmonthlyextras","hrpayroll","hrpayrollpayment","hrpayrollaccounts","hrnormalcommission","hrspecialcommission","hrmodelcommission","hrsalesrecord","hrtimetracking","hrytdreport"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="hremployees" label="ข้อมูลพนักงาน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrsalaryadjust" label="ปรับเงินเดือน/เกรด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrholidays" label="ปฏิทินวันหยุด" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -1216,6 +1219,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="hrpayrollaccounts" label="ตั้งค่าบัญชีจ่าย" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrnormalcommission" label="รายงานค่าคอมปกติ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrspecialcommission" label="รายงานค่าคอมพิเศษ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuItem page="hrmodelcommission" label="ค่าคอมพิเศษเฉพาะรุ่น" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="hrytdreport" label="รายงานเงินเดือน/ค่าจ้างสะสม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
