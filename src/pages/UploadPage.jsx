@@ -33,7 +33,7 @@ const UPLOAD_GROUPS = [
       { key: "honda-part-sales", label: "รายงานขายอะไหล่รายตัว HONDA", desc: "ไฟล์ XLS (TIS-620) ยอดขายอะไหล่รายตัว · UPSERT (sale_doc_no + part_code)", db: "honda_part_sales", url: `${BASE}/upload-honda-part-sales` },
       { key: "yamaha-part-dispense", label: "รายงานการจ่ายอะไหล่ YAMAHA", desc: "ไฟล์ XLSX การจ่าย/ขายอะไหล่รายตัว · UPSERT (doc_no + part_code + ref_doc_no)", db: "yamaha_part_dispense", url: `${BASE}/upload-yamaha-part-dispense` },
       { key: "part-giveaway", label: "รายการสินค้าของแถม", desc: "ไฟล์ XLSX รายงานขายอะไหล่ — กรองเฉพาะ ของแถม · UPSERT (sale_doc_no + part_code)", db: "part_giveaway_items", url: `${BASE}/upload-part-giveaway` },
-      { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ · เลือกไฟล์ .csv ที่ download จาก B2B ได้เลย (ระบบแปลงเป็น xlsx ให้) หรือ .xlsx", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
+      { key: "yamaha-b2b-orders", label: "รายงานการสั่งอะไหล่ YAMAHA B2B", desc: "เพิ่มรายการใหม่ / อัปเดตรายการที่ซ้ำ · เลือกไฟล์ .csv ที่ download จาก B2B ได้เลย (ระบบแปลงเป็น xlsx ให้) หรือ .xlsx · รหัสตัวเลขล้วนเก็บเต็มหลัก ไม่เป็นเลขยกกำลัง", db: "yamaha_b2b_orders", url: `${BASE}/upload-yamaha-b2b-orders` },
       { key: "yamaha-b2b-backorders", label: "รายงานอะไหล่ค้างส่ง YAMAHA B2B", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "yamaha_b2b_backorders", url: `${BASE}/upload-yamaha-b2b-backorders` },
       { key: "pending-job", label: "รายการอะไหล่เบิกค้างปิด JOB", desc: "ดึงไฟล์ล่าสุดจาก OneDrive · ลบข้อมูลเก่าแล้วนำเข้าใหม่ (snapshot)", db: "pending_job_parts", url: `${BASE}/upload-pending-job` },
       { key: "yamaha-repair", label: "Upload ใบแจ้งซ่อม Yamaha", desc: "39 คอลัมน์ · UPSERT (job_no + item_type + repair_type_code + mechanic_code)", db: "yamaha_repair_invoices", url: `${BASE}/upload-yamaha-repair` },
@@ -103,8 +103,40 @@ async function csvToXlsxFile(file) {
     try { text = new TextDecoder("utf-8", { fatal: true }).decode(buf); } catch { text = new TextDecoder("windows-874").decode(buf); }
   }
   const wb = XLSX.read(text, { type: "string", raw: true });
+  textifyLongNumbers(wb);
   const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
   return new File([out], file.name.replace(/\.csv$/i, "") + ".xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+}
+// กันรหัสอะไหล่ตัวเลขล้วน (เช่น 931022581800) กลายเป็นเลขยกกำลัง 9.31023E+11 ตอน upload — user 2026-11-12
+//   (1) เซลล์ตัวเลขจำนวนเต็มยาว ≥ 10 หลัก (ไฟล์ที่ผ่าน Excel มา) → เปลี่ยนเป็นเซลล์ข้อความเต็มหลัก ฝั่ง n8n จะอ่านแบบไหนก็ไม่เพี้ยน
+//       (เลข serial วันที่ ~46,000 / จำนวน / ราคา ไม่ถึงเกณฑ์ จึงไม่ถูกแตะ)
+//   (2) เซลล์ที่เป็นข้อความเลขยกกำลังอยู่แล้ว (เปิดใน Excel แล้วบันทึกทับ — หลักท้ายหาย กู้ไม่ได้) → หยุด ไม่ส่งเข้าฐานข้อมูล
+function textifyLongNumbers(wb) {
+  const sci = [];
+  for (const name of wb.SheetNames) {
+    const ws = wb.Sheets[name];
+    for (const addr of Object.keys(ws)) {
+      if (addr[0] === "!") continue;
+      const c = ws[addr];
+      if (!c) continue;
+      if (c.t === "n" && Number.isInteger(c.v) && Math.abs(c.v) >= 1e9) {
+        c.t = "s"; c.v = String(c.v); delete c.w; delete c.z;
+      } else if (c.t === "s" && /^\d(\.\d+)?E\+\d+$/i.test(String(c.v).trim())) {
+        sci.push(`${addr}=${String(c.v).trim()}`);
+      }
+    }
+  }
+  if (sci.length) {
+    throw new Error(`ไฟล์นี้มีรหัสอะไหล่ ${sci.length} ช่องที่ถูก Excel แปลงเป็นเลขยกกำลังแล้ว (${sci.slice(0, 3).join(", ")}) หลักท้ายหายไปแล้ว กู้ไม่ได้ — ยังไม่ได้นำเข้า ให้ download ไฟล์ .csv จาก B2B ใหม่แล้ว upload ไฟล์นั้นโดยตรง (อย่าเปิดแล้วบันทึกทับด้วย Excel)`);
+  }
+}
+// ไฟล์ .xlsx/.xls ของรายการกลุ่มเดียวกัน (เช่น CSV ที่เปิดใน Excel แล้ว Save As xlsx) → ผ่านตัวกันเดียวกันก่อนส่ง
+async function xlsxToSafeXlsxFile(file) {
+  const XLSX = await import("xlsx");
+  const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+  textifyLongNumbers(wb);
+  const out = XLSX.write(wb, { type: "array", bookType: "xlsx" });
+  return new File([out], file.name.replace(/\.xlsx?$/i, "") + ".xlsx", { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
 }
 
 // ===== สต๊อกอะไหล่ สช.ตลาด (SCY07) จากไฟล์ DMS ทุกสาขา — แปลง xlsx ในเบราว์เซอร์ แล้วส่งเฉพาะรหัสที่มีในระบบ (user 2026-09-05: ต้องเร็ว ข้อมูลส่วนใหญ่ในไฟล์ไม่ใช้) =====
@@ -216,6 +248,9 @@ export default function UploadPage({ currentUser } = {}) {
         if (CSV_AUTO_XLSX_KEYS.has(item.key) && /\.csv$/i.test(f.name)) {
           setMessages(prev => ({ ...prev, [item.key]: "⏳ แปลง CSV เป็น XLSX…" }));
           f = await csvToXlsxFile(f);
+        } else if (CSV_AUTO_XLSX_KEYS.has(item.key) && /\.xlsx?$/i.test(f.name)) {
+          setMessages(prev => ({ ...prev, [item.key]: "⏳ ตรวจรหัสอะไหล่ในไฟล์…" }));
+          f = await xlsxToSafeXlsxFile(f);
         }
         fd.append("file", f, f.name);
         res = await fetch(url, { method: "POST", body: fd });
