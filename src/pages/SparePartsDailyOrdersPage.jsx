@@ -202,6 +202,13 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
     return it ? it.part_code : null;
   }
 
+  // รายการในใบรับสั่งซื้อที่ยังเหลือให้จับคู่ = ไม่ตรงรหัสในใบสั่ง + ยังไม่บันทึกเป็นอะไหล่ทดแทน + ยังไม่อยู่ในคู่รอบันทึก
+  // user 2026-11-12 (PDS-2610-00041): ใบที่รายการไม่ตรงถูกบันทึกครบแล้ว ปุ่มติ๊กหน้า ✗ ยังโผล่ แต่ไม่มีปุ่ม "จับคู่/บันทึก" ให้กด → ซ่อนปุ่มติ๊ก + บอกเหตุผล
+  function pairableDcs(r) {
+    const pend = pendingPairs[`${r.system}-${r.order_id}`] || [];
+    return unmatchedDcs(r).filter(d => !savedOriginalOf(r, d) && !pend.some(p => strip(p.substitute_code) === strip(d.part_number)));
+  }
+
   // คู่นี้เคยบันทึกลงตารางอะไหล่ใช้แทนกันแล้วหรือยัง (จากใบไหนก็ได้)
   const pairKnown = (p) => knownPairs.has(`${strip(p.original_code)}|${strip(p.substitute_code)}`);
 
@@ -510,8 +517,8 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                       return (
                         <div key={k} style={{ ...rowH, borderBottom: k < r.items.length - 1 ? "1px solid #e5e7eb" : "none" }}>
                           <span style={{ whiteSpace: "nowrap" }}>
-                            {/* ปุ่มเลือกตัว ✗ ไว้จับคู่กับอะไหล่ทดแทนในช่องขวา (เฉพาะใบที่มี DCS ไม่ตรง) */}
-                            {st === false && unmatchedDcs(r).length > 0 && (
+                            {/* ปุ่มเลือกตัว ✗ ไว้จับคู่กับอะไหล่ทดแทนในช่องขวา (เฉพาะใบที่ยังมีรายการในใบรับสั่งซื้อเหลือให้จับคู่) */}
+                            {st === false && pairableDcs(r).length > 0 && (
                               <input type="radio" name={`selsub-${key}`} checked={selItem[key] === oc}
                                 onChange={() => {}}
                                 onClick={() => setSelItem(prev => ({ ...prev, [key]: prev[key] === oc ? null : oc }))}
@@ -550,9 +557,17 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                     {(() => {
                       // รายการในใบรับสั่งซื้อ (DCS) ที่จับคู่กับรหัสในใบสั่งซื้อไม่ได้ — ให้เลือกจับคู่/บันทึก
                       const un = unmatchedDcs(r);
-                      if (!un.length) return null;
                       const key = `${r.system}-${r.order_id}`;
                       const pend = pendingPairs[key] || [];
+                      // รหัส ✗ ที่ไม่มีรายการในใบรับสั่งซื้อเหลือให้จับคู่ = ยังไม่ได้สั่งเข้าใบรับสั่งซื้อเลขนี้ (ไม่ใช่อะไหล่ทดแทน)
+                      const notOrdered = (key in dcsByOrder) ? (r.items || []).filter(it => orderedInDcs(r, it) === false).length : 0;
+                      const noPairHint = notOrdered > 0 && pairableDcs(r).length === 0 && pend.length === 0 ? (
+                        <div style={{ color: "#6b7280", marginTop: un.length ? 4 : 0, whiteSpace: "normal", maxWidth: 360 }}
+                          title="ทุกรายการในใบรับสั่งซื้อตรงกับรหัสที่สั่ง หรือบันทึกเป็นอะไหล่ทดแทนครบแล้ว">
+                          ไม่มีรายการในใบรับสั่งซื้อเหลือให้จับคู่ — รหัส <b style={{ color: "#dc2626" }}>✗ {notOrdered} ตัว</b> ยังไม่พบใน{r.system === "YAMAHA" ? " B2B" : " DCS"} เลขที่ {r.vendor_po_no} (ยังไม่ได้สั่ง หรือสั่งไว้ในใบอื่น)
+                        </div>
+                      ) : null;
+                      if (!un.length) return noPairHint;
                       return (
                         <div>
                           {un.map((d, k) => {
@@ -589,6 +604,7 @@ th{background:#072d6b;color:#fff;font-size:10px} .c{text-align:center}
                               {savingSub === r.order_id ? "กำลังบันทึก…" : `บันทึกอะไหล่ทดแทน (${pend.length} คู่)`}
                             </button>
                           )}
+                          {noPairHint}
                         </div>
                       );
                     })()}
