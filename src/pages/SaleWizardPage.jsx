@@ -420,6 +420,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     <tr><td class="c val">${esc(rp.doc_no || "-")}</td><td class="c">${esc(thaiDate(todayStr()))}</td></tr>
     <tr><td class="sec">อ้างอิงใบขาย</td><td class="sec">อ้างอิงใบเสร็จ</td></tr>
     <tr><td class="c">${esc(sale.sale_no)}</td><td class="c">${esc(receiptNo || "-")}</td></tr>
+    ${sale.red_plate_receipt_no ? `<tr><td class="sec" colspan="2">ใบเสร็จ เลขที่/เล่มที่</td></tr>
+    <tr><td class="c" colspan="2">${esc(sale.red_plate_receipt_no)}</td></tr>` : ""}
   </table></td>
 </tr></table>
 <table class="bx">
@@ -754,7 +756,7 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
     setFinDown(""); setFinRate(""); setFinN(""); setManualTheft("");
     setFinRound5(false); setFinInstOverride(""); setFinInstTouched(false); setFinAdvance("");
     setAdvSubsidyInput(""); // แบ่งโปรดาวน์ออกแทนไปช่วยค่างวดล่วงหน้า — เคลียร์พร้อมกัน
-    setRedPlateNo(""); // มัดจำป้ายแดง — เคลียร์พร้อมกัน
+    setRedPlateNo(""); setRedPlateRcpNo(""); // มัดจำป้ายแดง (+ เลขที่/เล่มที่ใบเสร็จ) — เคลียร์พร้อมกัน
     setWholesalePrice(""); // ราคาขายส่ง — เคลียร์พร้อมกัน
   }
 
@@ -1076,6 +1078,8 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
   // มัดจำป้ายแดง (user กำหนด 2026-08-21): กรอกทะเบียนป้ายแดง → มัดจำ 200 บาท อัตโนมัติ, ไม่กรอก = 0 — บวกเข้ายอดรับชำระ
   const RED_PLATE_DEPOSIT = 200;
   const [redPlateNo, setRedPlateNo] = useState("");
+  // เลขที่/เล่มที่ ใบเสร็จ (ใบเสร็จมือ) ของเงินมัดจำป้ายแดง — ช่องเดียว กรอกคู่กับทะเบียนป้ายแดง เก็บลงใบขายผ่าน action set_red_plate_receipt (user 2026-11-12)
+  const [redPlateRcpNo, setRedPlateRcpNo] = useState("");
   const redPlateDep = text(redPlateNo) ? RED_PLATE_DEPOSIT : 0;
   // (เปลี่ยน 2026-09-09) เงินดาวน์ออกแทนไม่ใช่ส่วนลดราคา — ราคาขาย/ใบกำกับคงเต็ม, ยอดทั้งก้อนเก็บเป็นค่าใช้จ่ายร้านออกแทน (down_payout_amount)
   // ลูกค้าจ่ายน้อยลงเท่าเดิม (หักตอนรับชำระ: ยอดสุทธิ = total_payment − down_payout_amount) และยอดจัดไฟแนนซ์เท่าเดิม
@@ -1267,6 +1271,14 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
       if (!sale || !sale.sale_no) throw new Error((row && (row.error || row.__error)) || "บันทึกไม่สำเร็จ");
 
       let msg = "✅ บันทึกใบขายเรียบร้อย เลขที่ " + sale.sale_no + " (ตัดออกจากสต๊อกแล้ว)";
+      // เลขที่/เล่มที่ ใบเสร็จมัดจำป้ายแดง → เก็บลงใบขาย (action แยก: ถ้ายังไม่รัน DDL/ยังไม่ re-import ใบขายยังบันทึกสำเร็จ แค่แจ้งเตือน)
+      const rpRcpNo = text(redPlateRcpNo);
+      if (redPlateDep > 0 && rpRcpNo) {
+        const rr = await post(RETAIL_API, { action: "set_red_plate_receipt", sale_no: sale.sale_no, receipt_no: rpRcpNo }).catch(() => null);
+        const ok = rr && (rr.sale_no || (Array.isArray(rr) && rr[0] && rr[0].sale_no));
+        if (ok) sale.red_plate_receipt_no = rpRcpNo;
+        else msg += " — ⚠️ บันทึกเลขที่/เล่มที่ใบเสร็จมัดจำป้ายแดงไม่สำเร็จ (แจ้งผู้ดูแลระบบ)";
+      }
       // ตัดใบจองเป็น "ขาย" อัตโนมัติ — action เดียวกับปุ่ม "ขาย" ในหน้าระบบจอง
       if (selBooking?.booking_id) {
         const r = await post(BOOKING_API, { action: "sell_moto_booking", booking_id: selBooking.booking_id, invoice_no: sale.sale_no });
@@ -2356,6 +2368,12 @@ ${sale.__test ? '<div style="margin-top:24px;color:#b45309;font-size:13px;text-a
                         <div style={{ minWidth: 110, padding: "8px 12px", background: redPlateDep ? "#fef2f2" : "#e9eef0", border: redPlateDep ? "1.5px solid #fecaca" : "1.5px solid transparent", borderRadius: 8, fontSize: 15, fontWeight: 700, color: redPlateDep ? "#b91c1c" : "#6b7280", textAlign: "right", boxSizing: "border-box" }}>
                           {redPlateDep.toLocaleString("th-TH")} บาท
                         </div>
+                      </div>
+                      {/* เลขที่/เล่มที่ ใบเสร็จมือของเงินมัดจำป้ายแดง — ช่องเดียว กรอกได้เมื่อใส่ทะเบียนป้ายแดงแล้ว (user 2026-11-12) */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontWeight: 600, fontSize: 14, whiteSpace: "nowrap" }}>ใบเสร็จ เลขที่/เล่มที่</span>
+                        <input value={redPlateRcpNo} disabled={!!savedSale || !redPlateDep} onChange={e => setRedPlateRcpNo(e.target.value)} placeholder="เช่น 15/3" maxLength={60}
+                          style={{ width: 150, padding: "8px 10px", border: "1.5px solid #d1d5db", borderRadius: 8, fontFamily: "Tahoma", fontSize: 14, boxSizing: "border-box", background: redPlateDep ? "#fff" : "#f3f4f6" }} />
                       </div>
                       <span style={{ fontSize: 12, color: "#9ca3af" }}>ไม่ใช้ป้ายแดง = เว้นว่าง (มัดจำ 0) · กรอกทะเบียนแล้วระบบคิดมัดจำ {RED_PLATE_DEPOSIT} บาทอัตโนมัติ</span>
                     </div>

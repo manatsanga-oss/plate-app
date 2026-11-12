@@ -215,7 +215,8 @@ ${r.refund_note ? `<tr><td class="sec">หมายเหตุ</td><td>${esc(r.
               const late = tab === "held" && days >= 45;
               return (
                 <tr key={r.deposit_no} style={{ background: late ? "#fff7ed" : "#fff" }}>
-                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.deposit_no}{r.legacy && <div style={{ fontSize: 10.5, color: "#7c3aed", fontFamily: "Tahoma" }}>📥 ระบบเก่า</div>}</td>
+                  <td style={{ ...td, fontFamily: "monospace", fontWeight: 700 }}>{r.deposit_no}{r.legacy && <div style={{ fontSize: 10.5, color: "#7c3aed", fontFamily: "Tahoma" }}>📥 ระบบเก่า</div>}
+                    {r.receipt_book_no && <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Tahoma", fontWeight: 400 }} title="ใบเสร็จมือของเงินมัดจำป้ายแดง (กรอกตอนบันทึกขาย)">ใบเสร็จ เลขที่/เล่มที่ {r.receipt_book_no}</div>}</td>
                   <td style={td}>{thaiDate(r.received_date)}</td>
                   {isHeld
                     ? <td style={{ ...td, fontWeight: 700, color: late ? "#c2410c" : "#374151" }}>{days}{late ? " ⚠️" : ""}</td>

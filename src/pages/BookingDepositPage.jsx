@@ -92,6 +92,7 @@ const emptyForm = {
   deposit_amount: "", payment_method: "เงินสด", payment_account: "", cash_amount: "", transfer_amount: "",
   pay_lines: [{ method: "เงินสด", amount: "", account: "" }], // วิธีรับชำระหลายแถว (+ เพิ่มวิธีรับชำระ) — user 2026-09-08
   purchase_type: "สด", finance_company: "", note: "",
+  manual_receipt_no: "", // เลขที่/เล่มที่ ใบเสร็จมือ (user 2026-11-12) — เก็บผ่าน action set_deposit_receipt_no หลัง save_deposit
 };
 
 export default function BookingDepositPage({ currentUser }) {
@@ -210,8 +211,18 @@ export default function BookingDepositPage({ currentUser }) {
       if (r && r.__error) throw new Error(r.__error);
       if (!r || !r.deposit_no) throw new Error(form.deposit_no ? "แก้ไขไม่สำเร็จ (รายการอาจถูกคืนเงินไปแล้ว)" : "ไม่ได้รับเลขที่มัดจำ");
       setForm((f) => ({ ...f, deposit_no: r.deposit_no }));
-      loadRows();
       const extras = [];
+      // เลขที่/เล่มที่ ใบเสร็จมือ → เก็บลงใบมัดจำ (action แยก: ถ้ายังไม่รัน DDL/ยังไม่ re-import ใบมัดจำยังบันทึกสำเร็จ แค่แจ้งเตือน)
+      //   ใบใหม่: ส่งเมื่อกรอก · แก้ไขใบเดิม: ส่งเมื่อค่าต่างจากเดิม (รวมถึงลบออก)
+      const rcpNo = String(form.manual_receipt_no || "").trim();
+      if (rcpNo !== String(form.manual_receipt_no_orig || "").trim()) { // manual_receipt_no_orig = ค่าตอนเปิดแก้ไข (ใบใหม่ = ว่าง)
+        try {
+          const rr = await postJson(DEPOSIT_API, { action: "set_deposit_receipt_no", deposit_no: r.deposit_no, receipt_no: rcpNo });
+          if (!rr || !rr.deposit_no) throw new Error("no row");
+          setForm((f) => ({ ...f, manual_receipt_no_orig: rcpNo }));
+        } catch { extras.push("⚠️ บันทึกเลขที่/เล่มที่ใบเสร็จไม่สำเร็จ (แจ้งผู้ดูแลระบบ)"); }
+      }
+      loadRows();
       // ใบมัดจำใหม่ → สร้างใบจองในระบบจองรถจักรยานยนต์อัตโนมัติ (สถานะ "จอง" อ้างเลขมัดจำ)
       if (isNew) {
         try {
@@ -303,6 +314,7 @@ export default function BookingDepositPage({ currentUser }) {
       pay_lines: fieldsToPayLines(r),
       purchase_type: r.purchase_type || "สด", finance_company: r.finance_company || "",
       note: r.note || "",
+      manual_receipt_no: r.manual_receipt_no || "", manual_receipt_no_orig: r.manual_receipt_no || "",
     });
     setMessage("");
     setView("form");
@@ -454,6 +466,8 @@ table.bx>tbody>tr>td{border:1px solid #047857;padding:5px 8px;font-size:12px;ver
     <tr><td class="c val">${esc(r.deposit_no) || "-"}</td><td class="c">${esc(thaiDate(r.deposit_date))}</td></tr>
     <tr><td class="sec">สาขา</td><td class="sec">ผู้บันทึก</td></tr>
     <tr><td class="c">${esc(String(r.branch_code || "").substring(0, 5) || "-")}</td><td class="c">${esc(r.created_by || "")}</td></tr>
+    ${r.manual_receipt_no ? `<tr><td class="sec" colspan="2">ใบเสร็จ เลขที่/เล่มที่</td></tr>
+    <tr><td class="c" colspan="2">${esc(r.manual_receipt_no)}</td></tr>` : ""}
   </table></td>
 </tr></table>
 
@@ -679,6 +693,10 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
               <Field label="จำนวนเงินมัดจำ (บาท) — รวมจากวิธีรับชำระ">
                 <input type="number" value={form.deposit_amount} readOnly style={{ ...inp, textAlign: "right", fontWeight: 700, background: "#f1f5f9" }} />
               </Field>
+              {/* เลขที่/เล่มที่ ใบเสร็จมือของเงินมัดจำ — ช่องเดียว ไม่บังคับ (user 2026-11-12) */}
+              <Field label="ใบเสร็จ เลขที่/เล่มที่">
+                <input value={form.manual_receipt_no || ""} onChange={(e) => setForm({ ...form, manual_receipt_no: e.target.value })} placeholder="เช่น 15/3" maxLength={60} style={inp} />
+              </Field>
               <div style={{ gridColumn: "1 / -1" }}>
                 <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>วิธีรับชำระ * <span style={{ fontWeight: 400, color: "#64748b" }}>(รับได้หลายวิธีในใบเดียว เช่น เงินสด + เงินโอน)</span></div>
                 {(form.pay_lines || []).map((l, idx) => {
@@ -788,7 +806,8 @@ ${refunded ? `<div class="refund">⚠ รายการนี้คืนเง
                 {rows.map((r, i) => (
                   <tr key={r.deposit_no} style={{ borderTop: "1px solid #e5e7eb", opacity: ["refunded", "seized", "used", "merged"].includes(r.status) ? 0.6 : 1 }}>
                     <td style={td}>{i + 1}</td>
-                    <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.deposit_no}</td>
+                    <td style={{ ...td, fontFamily: "monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{r.deposit_no}
+                      {r.manual_receipt_no && <div style={{ fontSize: 11, color: "#6b7280", fontFamily: "Tahoma", fontWeight: 400 }} title="ใบเสร็จมือของเงินมัดจำ">ใบเสร็จ {r.manual_receipt_no}</div>}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{thaiDate(r.deposit_date)}</td>
                     <td style={td}>
                       <div style={{ fontWeight: 600 }}>{r.customer_name}</div>
