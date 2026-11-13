@@ -193,6 +193,17 @@ export function depositedDaySet(days, depList, addDays) {
   return done;
 }
 
+/** เลขที่/เล่มที่ ใบเสร็จรับเงิน (ใบเสร็จมือ) ของเงินมัดจำป้ายแดง: เลขใบขาย → เลขที่/เล่มที่ — จาก list_red_plate_deposits (receipt_book_no = retail_sales.red_plate_receipt_no)
+ *  user 2026-11-13: รายงานสรุปรายวันรับเงินต้องแสดงเลขนี้ทั้งมัดจำที่รับพร้อมขายรถ และที่บันทึกติดป้ายทีหลัง */
+export function rpReceiptMap(list) {
+  const m = {};
+  for (const d of Array.isArray(list) ? list : []) {
+    const b = String(d?.receipt_book_no || "").trim();
+    if (b && d.sale_no) m[String(d.sale_no)] = b;
+  }
+  return m;
+}
+
 /** โหลดข้อมูลดิบทุกแหล่งของช่วงวันที่ (เหมือน load() ของ SaleMoneyReportPage) */
 export async function loadDailyCashSources(dateFrom, dateTo) {
   const [res, resDep, resPartDep, resRcpt, resPs, resUm, resRp, resRpAll, resDi, resFuel, resZero, resInsRf, resWhtRf, pettyRows, resCustRf, resSeiz, resRpSeized] = await Promise.all([
@@ -259,6 +270,7 @@ export async function loadDailyCashSources(dateFrom, dateTo) {
     umRows: Array.isArray(um) ? um.filter(u => u && u.id && u.status === "sold") : [],
     rpRefundRows: Array.isArray(rp) ? rp.filter(d => d && d.deposit_no && d.status === "refunded") : [],
     rpStandaloneRows: Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true && !d.legacy && d.status !== "cancelled") : [],
+    rpReceiptBySale: rpReceiptMap(rpa),
     depIncRows: Array.isArray(di) ? di.filter(x => x && x.receipt_no) : [],
     fuelRows: fuel.filter(f => f && f.doc_no && f.status !== "ยกเลิก"),
     insRefundRows: ir.filter(r => r && r.id),
@@ -313,7 +325,7 @@ export function buildPartDepItems(partDepRows, ctx) {
 /** สร้างแถวรายการทั้งหมด (allItems) — ctx = { dateFrom, dateTo, branch, isAdmin, myBranch } */
 export function buildDailyCashItems(src, ctx) {
   const { dateFrom, dateTo } = ctx;
-  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], whtRefundRows = [], pettyRows = [], custRefundRows = [], seizureRows = [], rpSeizedRows = [] } = src;
+  const { depRows = [], partDepRows = [], rcptRows = [], psRows = [], umRows = [], rpRefundRows = [], rpStandaloneRows = [], depIncRows = [], fuelRows = [], insRefundRows = [], whtRefundRows = [], pettyRows = [], custRefundRows = [], seizureRows = [], rpSeizedRows = [], rpReceiptBySale = {} } = src;
   const items = buildSaleItems(src.rows || [], depRows, ctx);
   const depItems = buildDepItems(depRows, ctx);
   const partDepItems = buildPartDepItems(partDepRows, ctx);
@@ -356,6 +368,7 @@ export function buildDailyCashItems(src, ctx) {
       rpItems.push({
         kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
         doc_no: it.red_plate_doc_no || "RPD-" + (it.sale_no || ""), date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
+        book_no: rpReceiptBySale[String(it.sale_no || "")] || "", // เลขที่/เล่มที่ ใบเสร็จมือ
         customer_name: it.customer_name, seller: it.seller, saleAmount: 0,
         split: rpSplit, received: rp,
         branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
@@ -372,6 +385,7 @@ export function buildDailyCashItems(src, ctx) {
       rpItems.push({
         kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
         doc_no: it.red_plate_doc_no || "RPD-" + (it.sale_no || ""), date: it.receipt_date || it.sale_date, ref_no: it.sale_no,
+        book_no: rpReceiptBySale[String(it.sale_no || "")] || "", // เลขที่/เล่มที่ ใบเสร็จมือ
         customer_name: it.customer_name, seller: it.seller, saleAmount: 0,
         split: rpSplit2, received: rpDep,
         branch_key: bc5(it.branch_code), branch_name: it.branch_name || it.branch_code || "ไม่ระบุสาขา",
@@ -584,6 +598,7 @@ export function buildDailyCashItems(src, ctx) {
       return {
         kind: "red_plate", category: "เงินมัดจำป้ายแดง (รับฝาก)",
         doc_no: d.deposit_no, date: String(d.received_date || "").slice(0, 10), ref_no: d.sale_no,
+        book_no: String(d.receipt_book_no || "").trim() || rpReceiptBySale[String(d.sale_no || "")] || "", // เลขที่/เล่มที่ ใบเสร็จมือ
         customer_name: d.customer_name, seller: d.received_by || "", saleAmount: 0,
         split, received: amt,
         branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",

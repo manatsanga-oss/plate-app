@@ -41,7 +41,10 @@ export default function BankAccountsPage({ currentUser }) {
     try {
       const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "list_bank_accounts", include_inactive: String(includeInactive) }),
+        // สถานะบัญชี (user 2026-11-12): active = ใช้งาน · dormant = ใช้งานแต่ไม่เคลื่อนไหว · inactive = ปิด
+        //   dormant ไม่ขึ้นในตัวเลือกบัญชีตอนรับ/จ่ายเงิน (หน้าพวกนั้นเรียก list_bank_accounts แบบเฉพาะ status = 'active') แต่ยังแสดงยอดในงบทดลอง
+        //   หน้านี้จึงดึงทุกสถานะเสมอแล้วกรองเอง ไม่งั้นบัญชี dormant จะหายจากหน้าจัดการ
+        body: JSON.stringify({ action: "list_bank_accounts", include_inactive: "true" }),
       });
       const data = await res.json();
       setRows(Array.isArray(data) ? data : []);
@@ -73,9 +76,12 @@ export default function BankAccountsPage({ currentUser }) {
     setSaving(false);
   }
 
-  async function toggleStatus(r) {
-    const newStatus = r.status === "active" ? "inactive" : "active";
-    if (!window.confirm(`${newStatus === "active" ? "เปิด" : "ปิด"}ใช้งาน "${r.account_name}"?`)) return;
+  async function toggleStatus(r, target) {
+    const newStatus = target || (r.status === "active" ? "inactive" : "active");
+    const ask = newStatus === "dormant"
+      ? `ตั้ง "${r.account_name}" เป็น "ใช้งานแต่ไม่เคลื่อนไหว"?\nบัญชีนี้จะไม่ขึ้นให้เลือกตอนรับชำระ/จ่ายเงิน แต่ยังแสดงยอดในงบทดลอง`
+      : `${newStatus === "active" ? "เปิด" : "ปิด"}ใช้งาน "${r.account_name}"?`;
+    if (!window.confirm(ask)) return;
     try {
       await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -114,6 +120,7 @@ export default function BankAccountsPage({ currentUser }) {
 
   const kw = search.trim().toLowerCase();
   const filtered = rows.filter(r => {
+    if (!includeInactive && r.status === "inactive") return false; // บัญชีปิด แสดงเมื่อติ๊ก "แสดงที่ปิด"
     if (!kw) return true;
     const hay = [r.account_name, r.bank_name, r.branch, r.account_no].filter(Boolean).join(" ").toLowerCase();
     return hay.includes(kw);
@@ -201,15 +208,20 @@ export default function BankAccountsPage({ currentUser }) {
                   </td>
                   <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{r.note || ""}</td>
                   <td style={td}>
-                    <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, background: r.status === "active" ? "#d1fae5" : "#fee2e2", color: r.status === "active" ? "#065f46" : "#991b1b" }}>
-                      {r.status === "active" ? "ใช้งาน" : "ปิด"}
+                    <span title={r.status === "dormant" ? "ไม่ขึ้นให้เลือกตอนรับชำระ/จ่ายเงิน แต่แสดงยอดในงบทดลอง" : ""}
+                      style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, whiteSpace: "nowrap", background: r.status === "active" ? "#d1fae5" : r.status === "dormant" ? "#fef3c7" : "#fee2e2", color: r.status === "active" ? "#065f46" : r.status === "dormant" ? "#92400e" : "#991b1b" }}>
+                      {r.status === "active" ? "ใช้งาน" : r.status === "dormant" ? "ใช้งานแต่ไม่เคลื่อนไหว" : "ปิด"}
                     </span>
                   </td>
                   <td style={td}>
                     <button onClick={() => openEdit(r)} style={btnEdit}>✏️</button>
                     <button onClick={() => toggleStatus(r)} style={r.status === "active" ? btnDel : btnReact}>
-                      {r.status === "active" ? "ปิด" : "เปิด"}
+                      {r.status === "active" ? "ปิด" : r.status === "dormant" ? "เปิดใช้งาน" : "เปิด"}
                     </button>
+                    {r.status === "active" && (
+                      <button onClick={() => toggleStatus(r, "dormant")} title="ตั้งเป็น ใช้งานแต่ไม่เคลื่อนไหว — ไม่ขึ้นให้เลือกตอนรับ/จ่ายเงิน แต่แสดงยอดในงบทดลอง"
+                        style={{ ...btnReact, background: "#d97706", marginLeft: 4 }}>💤 ไม่เคลื่อนไหว</button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -274,6 +286,7 @@ export default function BankAccountsPage({ currentUser }) {
                 <label style={lbl}>สถานะ</label>
                 <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inp}>
                   <option value="active">ใช้งาน</option>
+                  <option value="dormant">ใช้งานแต่ไม่เคลื่อนไหว (ไม่ขึ้นให้เลือกตอนรับ/จ่ายเงิน แต่แสดงในงบทดลอง)</option>
                   <option value="inactive">ปิด</option>
                 </select>
               </div>

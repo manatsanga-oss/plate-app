@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { buildDailyCashItems, loadPettyRows, makeAcctResolver, transferAccounts } from "../lib/dailyCash"; // ตรรกะสร้างแถวรายการ ย้ายไปไว้ที่เดียว ใช้ร่วมกับหน้าบันทึกฝากเงิน (user 2026-09-04)
+import { buildDailyCashItems, loadPettyRows, makeAcctResolver, rpReceiptMap, transferAccounts } from "../lib/dailyCash"; // ตรรกะสร้างแถวรายการ ย้ายไปไว้ที่เดียว ใช้ร่วมกับหน้าบันทึกฝากเงิน (user 2026-09-04)
 
 // สรุปรายวันรับเงิน: ยอดขาย + เงินที่รับ + แหล่งรับชำระ (เงินสด/โอน/บัตร/ไฟแนนซ์/มัดจำ) + รับชำระเงินมัดจำจองรถ
 // ข้อมูล: retail-sale-api list_sale_payments (ใบขายที่รับชำระแล้ว) + booking-deposit-api get_deposits (มัดจำจองรถ)
@@ -78,6 +78,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [rpRefundRows, setRpRefundRows] = useState([]); // คืนเงินมัดจำป้ายแดง (จ่ายออก) — หักจากเงินสด/โอนของวัน
+  const [rpReceiptBySale, setRpReceiptBySale] = useState({});    // เลขใบขาย → เลขที่/เล่มที่ ใบเสร็จมัดจำป้ายแดง (แสดงในช่องเอกสารอ้างอิง — user 2026-11-13)
   const [rpStandaloneRows, setRpStandaloneRows] = useState([]); // มัดจำป้ายแดงติดป้ายทีหลัง (standalone) — เงินรับแยกจากใบเสร็จขายรถ
   const [depIncRows, setDepIncRows] = useState([]); // รับฝากชำระค่างวด กรุ๊ปลีส/ธนบรรณ ที่บันทึกจากระบบ (RECS-)
   const [fuelRows, setFuelRows] = useState([]); // เบิกค่าน้ำมันรถใช้จ่าย (fuel_withdrawals) — แถวหักเงินสด
@@ -190,6 +191,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
       const rpa = resRpAll ? await resRpAll.json().catch(() => []) : [];
       // ใบ legacy (import มัดจำป้ายแดงระบบเก่า) ไม่ใช่เงินรับของวันนั้น — รับเงินไปนานแล้วในระบบเก่า ห้ามขึ้นสรุปรายวัน; ใบยกเลิกก็ไม่นับ
       setRpStandaloneRows(Array.isArray(rpa) ? rpa.filter(d => d && d.deposit_no && d.standalone === true && !d.legacy && d.status !== "cancelled") : []);
+      setRpReceiptBySale(rpReceiptMap(rpa));
       const diRaw = resDi ? await resDi.json().catch(() => []) : [];
       // list_deposit_income ตอบแถวเดียว {listjson: "[...]"} (รวมผ่าน json_agg ฝั่ง SQL)
       const di = Array.isArray(diRaw) ? diRaw : typeof diRaw?.listjson === "string" ? JSON.parse(diRaw.listjson) : [];
@@ -311,9 +313,9 @@ export default function SaleMoneyReportPage({ currentUser }) {
   // ===== รวมใบขาย + มัดจำจองรถ + มัดจำอะไหล่/บริการ เป็นตารางเดียว (สไตล์รายงานรับเงิน DMS) — แต่ละแถวติดประเภทรายได้ =====
   // ===== รวมทุกแหล่งเป็นตารางเดียว — ตรรกะอยู่ใน src/lib/dailyCash.js (buildDailyCashItems) ใช้ร่วมกับหน้าบันทึกฝากเงิน =====
   const allItems = useMemo(() => buildDailyCashItems(
-    { rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, whtRefundRows, pettyRows, custRefundRows },
+    { rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, rpReceiptBySale, depIncRows, fuelRows, insRefundRows, whtRefundRows, pettyRows, custRefundRows },
     { dateFrom, dateTo, branch, isAdmin, myBranch },
-  ), [rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, depIncRows, fuelRows, insRefundRows, whtRefundRows, pettyRows, custRefundRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
+  ), [rows, depRows, partDepRows, rcptRows, psRows, umRows, rpRefundRows, rpStandaloneRows, rpReceiptBySale, depIncRows, fuelRows, insRefundRows, whtRefundRows, pettyRows, custRefundRows, dateFrom, dateTo, branch, isAdmin, myBranch]);
 
   // group ตามสาขา — ในสาขาเรียงใบขายก่อนแล้วค่อยมัดจำ
   const groups = useMemo(() => {
@@ -373,7 +375,7 @@ export default function SaleMoneyReportPage({ currentUser }) {
         idx++;
         body += `<tr>
 <td class="c">${idx}</td><td>${esc(it.doc_no || "-")}</td><td class="c">${esc(thaiDate(it.date))}</td>
-<td>${esc(it.ref_no || "-")}</td><td>${esc(it.customer_name || "")}<br><span style="font-size:9.5px;color:#555">${esc(it.category)}${it.refunded ? " · คืนเงินแล้ว" : ""}</span>${it.finance ? `<br><span style="font-size:9.5px;color:#7c3aed">ไฟแนนซ์: ${esc(it.finance)}</span>` : ""}${it.red_plate ? `<br><span style="font-size:9.5px;color:#b91c1c;font-weight:700">ป้ายแดง: ${esc(it.red_plate)}</span>` : ""}${it.note ? `<br><span style="font-size:9.5px;color:#92400e">หมายเหตุ: ${esc(it.note)}</span>` : ""}</td><td class="r">${it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
+<td>${esc(it.ref_no || "-")}${it.book_no ? `<br><span style="font-size:9.5px;font-weight:700">ใบเสร็จ ${esc(it.book_no)}</span>` : ""}</td><td>${esc(it.customer_name || "")}<br><span style="font-size:9.5px;color:#555">${esc(it.category)}${it.refunded ? " · คืนเงินแล้ว" : ""}</span>${it.finance ? `<br><span style="font-size:9.5px;color:#7c3aed">ไฟแนนซ์: ${esc(it.finance)}</span>` : ""}${it.red_plate ? `<br><span style="font-size:9.5px;color:#b91c1c;font-weight:700">ป้ายแดง: ${esc(it.red_plate)}</span>` : ""}${it.note ? `<br><span style="font-size:9.5px;color:#92400e">หมายเหตุ: ${esc(it.note)}</span>` : ""}</td><td class="r">${it.saleAmount ? fmt(it.saleAmount) : "-"}</td>
 ${METHOD_COLS.map((c) => `<td class="r">${it.split[c.key] ? fmt(it.split[c.key]) : "-"}${c.key === "cheque" && it.split.cheque_nos ? `<br><span style="font-size:9px;color:#555">เลขที่ ${esc(it.split.cheque_nos)}</span>` : ""}${c.key === "transfer" ? trAccts(it).map(([no, v]) => `<br><span style="font-size:9px;color:#555">${esc(no)}${v != null ? " " + fmt(v) : ""}</span>`).join("") : ""}</td>`).join("")}
 <td class="r b">${fmt(it.received)}</td></tr>`;
       }
@@ -494,7 +496,8 @@ ${depSection}
                         {it.refunded && <div style={{ fontSize: 10.5, color: "#dc2626" }}>คืนเงินแล้ว</div>}
                       </td>
                       <td style={{ ...td, textAlign: "center" }}>{thaiDate(it.date)}</td>
-                      <td style={{ ...td, fontFamily: "monospace", color: "#1e40af" }}>{it.ref_no || "-"}</td>
+                      <td style={{ ...td, fontFamily: "monospace", color: "#1e40af" }}>{it.ref_no || "-"}
+                        {it.book_no && <div title="เลขที่/เล่มที่ ใบเสร็จรับเงิน (ใบเสร็จมือ) ของเงินมัดจำป้ายแดง" style={{ fontFamily: "Tahoma", fontSize: 11, color: "#b91c1c", fontWeight: 700 }}>ใบเสร็จ {it.book_no}</div>}</td>
                       <td style={td}>{it.customer_name || "-"}
                         <div style={{ fontSize: 10.5, color: it.kind === "deposit" ? "#b45309" : it.kind === "part_deposit" ? "#9333ea" : it.kind === "part_service" ? "#0d9488" : it.kind === "used_moto" ? "#c2410c" : "#0369a1" }}>{it.category}</div>
                         {it.finance && <div style={{ fontSize: 10.5, color: "#7c3aed" }}>ไฟแนนซ์: {it.finance}</div>}

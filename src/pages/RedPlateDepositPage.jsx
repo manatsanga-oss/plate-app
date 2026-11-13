@@ -38,7 +38,8 @@ export default function RedPlateDepositPage({ currentUser }) {
   const [message, setMessage] = useState("");
   const [bankAccounts, setBankAccounts] = useState([]);
   const [modal, setModal] = useState(null); // ใบขายที่เลือก
-  const [form, setForm] = useState({ plate_no: "", received_date: todayStr(), method: "เงินสด", account: "", notify: true });
+  // receipt_no = "เลขที่/เล่มที่" ใบเสร็จรับเงิน (ใบเสร็จมือ) ช่องเดียวแบบเดียวกับหน้าบันทึกขาย NEW (user 2026-11-13) — เก็บลง retail_sales.red_plate_receipt_no ผ่าน action set_red_plate_receipt
+  const [form, setForm] = useState({ plate_no: "", receipt_no: "", received_date: todayStr(), method: "เงินสด", account: "", notify: true });
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -79,7 +80,7 @@ export default function RedPlateDepositPage({ currentUser }) {
 
   function openModal(r) {
     setModal(r);
-    setForm({ plate_no: "", received_date: todayStr(), method: "เงินสด", account: "", notify: !!r.line_name });
+    setForm({ plate_no: "", receipt_no: "", received_date: todayStr(), method: "เงินสด", account: "", notify: !!r.line_name });
     setMessage("");
   }
 
@@ -109,6 +110,13 @@ export default function RedPlateDepositPage({ currentUser }) {
       const rpdNo = r && r.red_plate_doc_no;
       if (!sale || !sale.sale_no) throw new Error(r?.__error || r?.error || "บันทึกไม่สำเร็จ (ใบขายอาจมีป้ายแดงแล้ว)");
       let msg = `✅ บันทึกมัดจำป้ายแดง ${plate} เลขที่ใบรับ ${rpdNo || sale.red_plate_doc_no || "-"} แล้ว`;
+      // เลขที่/เล่มที่ ใบเสร็จรับเงิน → เก็บลงใบขายด้วย action แยก (มัดจำบันทึกสำเร็จแล้วแม้ขั้นนี้พลาด) · หน้าคืนมัดจำป้ายแดงแสดงเลขนี้ (receipt_book_no)
+      const rcpNo = String(form.receipt_no || "").trim();
+      if (rcpNo) {
+        const rr = await post(RETAIL_API, { action: "set_red_plate_receipt", sale_no: sale.sale_no, receipt_no: rcpNo }).catch(() => null);
+        const ok = rr && (rr.sale_no || (Array.isArray(rr) && rr[0] && rr[0].sale_no));
+        msg += ok ? ` · ใบเสร็จ เลขที่/เล่มที่ ${rcpNo}` : " — ⚠️ บันทึกเลขที่/เล่มที่ใบเสร็จไม่สำเร็จ (แจ้งผู้ดูแลระบบ)";
+      }
       // ส่งใบรับมัดจำเข้า LINE เมื่อชำระเงินแล้ว
       if (form.notify && sale.line_user_id) {
         try {
@@ -186,6 +194,9 @@ export default function RedPlateDepositPage({ currentUser }) {
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "10px 12px", alignItems: "center", fontSize: 14 }}>
               <label>ทะเบียนป้ายแดง *</label>
               <input value={form.plate_no} onChange={(e) => setForm((f) => ({ ...f, plate_no: e.target.value }))} placeholder="เช่น 99-025" style={{ ...inp, fontFamily: "monospace", fontWeight: 700 }} />
+              <label>ใบเสร็จ เลขที่/เล่มที่</label>
+              <input value={form.receipt_no} onChange={(e) => setForm((f) => ({ ...f, receipt_no: e.target.value }))} placeholder="เช่น 15/3" maxLength={60}
+                title="เลขที่/เล่มที่ ของใบเสร็จรับเงิน (ใบเสร็จมือ) ที่ออกให้ลูกค้าสำหรับเงินมัดจำป้ายแดง — ไม่บังคับ" style={inp} />
               <label>เงินมัดจำ</label>
               <div style={{ padding: "8px 12px", background: "#fef2f2", border: "1.5px solid #fecaca", borderRadius: 8, fontWeight: 700, color: "#b91c1c", width: 120, textAlign: "right" }}>{baht(RED_PLATE_DEPOSIT)} บาท</div>
               <label>วันที่รับเงิน</label>

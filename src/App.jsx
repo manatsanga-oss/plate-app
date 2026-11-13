@@ -13,6 +13,8 @@ import UploadAccountingPage from "./pages/UploadAccountingPage";
 import DirectorLoanPage from "./pages/DirectorLoanPage";
 import AssetCategoryPage from "./pages/AssetCategoryPage";
 import AssetListPage from "./pages/AssetListPage";
+import AccountsPayablePage from "./pages/AccountsPayablePage";
+import AccountsReceivablePage from "./pages/AccountsReceivablePage";
 import AssetDepreciationPage from "./pages/AssetDepreciationPage";
 import PartWithdrawalPage from "./pages/PartWithdrawalPage";
 import VehiclePurchaseReportPage from "./pages/VehiclePurchaseReportPage";
@@ -894,6 +896,9 @@ export default function App() {
         {activeMenu === "accassetcategory" && canAccess("accassetcategory") && (
           <AssetCategoryPage currentUser={currentUser} />
         )}
+        {/* Accounting → บัญชี: เจ้าหนี้/ลูกหนี้ตามเอกสาร (user 2026-11-12) — page key ขึ้นต้น acc = สิทธิ์ admin + WARUT */}
+        {activeMenu === "accpayable" && canAccess("accpayable") && <AccountsPayablePage currentUser={currentUser} />}
+        {activeMenu === "accreceivable" && canAccess("accreceivable") && <AccountsReceivablePage currentUser={currentUser} />}
         {activeMenu === "accassetlist" && canAccess("accassetlist") && (
           <AssetListPage currentUser={currentUser} />
         )}
@@ -1166,7 +1171,7 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="searchreceiptwork" label="ค้นหางานทะเบียนรับเรื่อง" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
       </MenuGroup>
 
-      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan","accflowrecon","accdepositrefund","accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
+      <MenuGroup title="Accounting" pages={["accbankaccounts","accloanaccounts","accbankmovements","accbanktransfer","accfinancetransfer","accdirectorloan","accflowrecon","accdepositrefund","accreceivable","accpayable","accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} onChange={onChange} canAccess={canAccess}>
         <MenuItem page="accbankaccounts" label="บัญชีธนาคาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accloanaccounts" label="บัญชีเงินกู้ยืม" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accbankmovements" label="รายงานการเคลื่อนไหว" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
@@ -1175,6 +1180,10 @@ function Sidebar({ activeMenu, onChange, currentUser, onLogout, canAccess }) {
         <MenuItem page="accdirectorloan" label="บันทึกเงินให้กู้ยืมกรรมการ" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accflowrecon" label="ตรวจสอบบันทึกบัญชี FLOW" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
         <MenuItem page="accdepositrefund" label="บันทึกคืนเงินมัดจำเป็นเงินโอน" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        <MenuSubGroup title="บัญชี" pages={["accreceivable","accpayable"]} activeMenu={activeMenu} canAccess={canAccess}>
+          <MenuItem page="accreceivable" label="ลูกหนี้ตามเอกสาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+          <MenuItem page="accpayable" label="เจ้าหนี้ตามเอกสาร" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
+        </MenuSubGroup>
         <MenuSubGroup title="จัดการทรัพย์สิน" pages={["accassetlist","accassetdepreciation","accassetcategory"]} activeMenu={activeMenu} canAccess={canAccess}>
           <MenuItem page="accassetlist" label="รายการสินทรัพย์" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />
           <MenuItem page="accassetdepreciation" label="บันทึกค่าเสื่อมราคา" activeMenu={activeMenu} onChange={onChange} canAccess={canAccess} />

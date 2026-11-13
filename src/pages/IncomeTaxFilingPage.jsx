@@ -22,6 +22,7 @@ function curBEYear() { return new Date().getFullYear() + 543; }
 const EMPTY = () => ({
   tax_form: "ภ.ง.ด.51", tax_year: String(curBEYear()), affiliation: "ป.เปา",
   filing_date: todayISO(), amount: "", payment_method: "โอน", from_bank_account_id: "", note: "",
+  wht_credit_amount: "", wht_credit_orig: "", // ภาษีถูกหัก ณ ที่จ่ายที่ใช้เครดิต (user 2026-11-12) — ภาษีตามแบบ = ยอดจ่าย + เครดิตนี้ · เก็บผ่าน action set_wht_credit
 });
 
 export default function IncomeTaxFilingPage({ currentUser }) {
@@ -73,6 +74,7 @@ export default function IncomeTaxFilingPage({ currentUser }) {
       affiliation: r.affiliation || "ป.เปา", filing_date: String(r.filing_date || "").slice(0, 10) || todayISO(),
       amount: r.amount != null ? String(r.amount) : "", payment_method: r.payment_method || "โอน",
       from_bank_account_id: r.from_bank_account_id ? String(r.from_bank_account_id) : "", note: r.note || "",
+      wht_credit_amount: Number(r.wht_credit_amount) > 0 ? String(r.wht_credit_amount) : "", wht_credit_orig: Number(r.wht_credit_amount) > 0 ? String(r.wht_credit_amount) : "",
     });
     setMsg("");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -103,7 +105,17 @@ export default function IncomeTaxFilingPage({ currentUser }) {
       const data = await res.json().catch(() => ({}));
       const ok = Array.isArray(data) ? data[0] : data;
       if (ok?.success === false) throw new Error(ok?.error || "บันทึกล้มเหลว");
-      setMsg(`✅ ${editId ? "แก้ไข" : "บันทึก"}การยื่น ${form.tax_form} แล้ว${ok?.doc_no ? ` (${ok.doc_no})` : ""}`);
+      // เครดิตภาษีถูกหัก ณ ที่จ่าย → เก็บด้วย action แยก (ใบยื่นบันทึกสำเร็จแล้วแม้ขั้นนี้พลาด เช่น ยังไม่รัน DDL/ยังไม่ re-import)
+      let creditWarn = "";
+      const credit = Number(form.wht_credit_amount) || 0, creditOrig = Number(form.wht_credit_orig) || 0, fid = editId || ok?.id;
+      if (fid && Math.abs(credit - creditOrig) > 0.004) {
+        try {
+          const r2 = await fetch(API_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "set_wht_credit", id: fid, wht_credit_amount: credit }) });
+          const d2 = await r2.json().catch(() => null); const o2 = Array.isArray(d2) ? d2[0] : d2;
+          if (!o2 || !o2.id) throw new Error("no row");
+        } catch { creditWarn = " — ⚠️ บันทึกเครดิตภาษีถูกหัก ณ ที่จ่ายไม่สำเร็จ (แจ้งผู้ดูแลระบบ)"; }
+      }
+      setMsg(`✅ ${editId ? "แก้ไข" : "บันทึก"}การยื่น ${form.tax_form} แล้ว${ok?.doc_no ? ` (${ok.doc_no})` : ""}${creditWarn}`);
       resetForm();
       fetchRows();
     } catch (e) {
@@ -176,6 +188,11 @@ export default function IncomeTaxFilingPage({ currentUser }) {
           <Field label="ยอดภาษีที่จ่าย (บาท) *">
             <input type="number" step="0.01" value={form.amount} onChange={e => set("amount", e.target.value)} style={{ ...inp, textAlign: "right", fontWeight: 700 }} placeholder="0.00" />
           </Field>
+          {/* ภาษีตามแบบ = ยอดที่จ่าย + ภาษีถูกหัก ณ ที่จ่ายที่นำมาเครดิต — ใช้ลงงบทดลอง 17130 (ภาษีตามแบบ) และ 17120 (เครดิตที่ใช้ไป) */}
+          <Field label="ภาษีถูกหัก ณ ที่จ่ายที่ใช้เครดิต (บาท)">
+            <input type="number" step="0.01" value={form.wht_credit_amount} onChange={e => set("wht_credit_amount", e.target.value)} style={{ ...inp, textAlign: "right" }} placeholder="0.00"
+              title={`ภาษีตามแบบ = ยอดที่จ่าย + เครดิตนี้ = ${fmt((Number(form.amount) || 0) + (Number(form.wht_credit_amount) || 0))}`} />
+          </Field>
           <Field label="วิธีจ่าย">
             <select value={form.payment_method} onChange={e => set("payment_method", e.target.value)} style={inp}>
               {PAY_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
@@ -246,7 +263,8 @@ export default function IncomeTaxFilingPage({ currentUser }) {
                     <td style={td}>{r.tax_year}</td>
                     <td style={td}>{r.affiliation || "-"}</td>
                     <td style={{ ...td, whiteSpace: "nowrap" }}>{fmtDate(r.filing_date)}</td>
-                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmt(r.amount)}</td>
+                    <td style={{ ...td, textAlign: "right", fontFamily: "monospace", fontWeight: 700 }}>{fmt(r.amount)}
+                      {Number(r.wht_credit_amount) > 0 && <div style={{ fontSize: 11, fontWeight: 400, color: "#6b7280", fontFamily: "Tahoma" }} title="ภาษีตามแบบ = ยอดจ่าย + ภาษีถูกหัก ณ ที่จ่ายที่ใช้เครดิต">+ เครดิตถูกหัก {fmt(r.wht_credit_amount)}<br />= ภาษีตามแบบ {fmt(Number(r.amount || 0) + Number(r.wht_credit_amount || 0))}</div>}</td>
                     <td style={{ ...td, fontSize: 12 }}>{r.payment_method === "โอน" ? bankLabel(r.from_bank_account_id) : (r.payment_method || "-")}</td>
                     <td style={td}>
                       <span style={{ padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 600, background: cancelled ? "#fee2e2" : "#d1fae5", color: cancelled ? "#991b1b" : "#065f46" }}>

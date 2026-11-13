@@ -335,6 +335,9 @@ export default function SparePartsDailyOrdersPage({ currentUser }) {
   const hasUnmatched = (r) => {
     const key = `${r.system}-${r.order_id}`;
     if (!(key in dcsByOrder)) return false; // ยังโหลดใบรับสั่งซื้อไม่เสร็จ — รอก่อน
+    // คู่ที่จับเองแล้วยังไม่กดบันทึก → ต้องค้างแถวไว้ให้กด "บันทึกอะไหล่ทดแทน" (user 2026-11-13 PDS-2611-00020: กดจับคู่แล้วแถวหายทันที
+    //   เพราะคู่รอบันทึกทำให้รหัสนั้นไม่นับเป็น ✗ แล้ว) — พอบันทึกเสร็จคู่รอบันทึกถูกล้าง แถวจึงหายตามปกติ
+    if ((pendingPairs[key] || []).some(p => !p.auto)) return true;
     return (r.items || []).some(it => orderedInDcs(r, it) === false);
   };
   const filtered = rows.filter(r => (filterSystem === "all" || r.system === filterSystem) && (!unmatchedOnly || hasUnmatched(r)));

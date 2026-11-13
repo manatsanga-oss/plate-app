@@ -516,8 +516,9 @@ export default function FastMovingStockPage({ currentUser }) {
                   </td>
                   <td style={{ ...td, whiteSpace: "normal", maxWidth: 240 }}>{r.product_name || "-"}</td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: qty <= 0 ? "#ef4444" : "#065f46" }}>{fmtQty(qty)}</td>
-                  <td style={{ ...td, textAlign: "right" }}>{s.ppao}</td>
-                  <td style={{ ...td, textAlign: "right" }}>{s.haahong}</td>
+                  {/* user 2026-11-13: สต๊อก ป.เปา = ตัวหนาสีแดง · ห้าห้อง = ตัวหนาสีน้ำเงิน */}
+                  <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#dc2626" }}>{s.ppao}</td>
+                  <td style={{ ...td, textAlign: "right", fontWeight: 700, color: "#1d4ed8" }}>{s.haahong}</td>
                   <td style={{ ...td, textAlign: "right" }}>{s.sachtalad}</td>
                   <td style={{ ...td, textAlign: "right" }}>{s.nakhonluang}</td>
                   <td style={{ ...td, textAlign: "right", color: Number(r.loan_qty || 0) > 0 ? "#ea580c" : undefined, fontWeight: Number(r.loan_qty || 0) > 0 ? 700 : undefined }}>
