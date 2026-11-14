@@ -144,8 +144,9 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
   const [bays, setBays] = useState([]);
   const [baysLoaded, setBaysLoaded] = useState(false);
   const [selectedBay, setSelectedBay] = useState(null); // {zone_source, zone_name, plate_no, plate_province, event_id}
-  const [tab, setTab] = useState("log");   // แท็บใต้ช่องยิง: log = ประวัติการเบิก · svc = รถ & ประวัติบริการ (เลือกรถที่อ่านทะเบียนได้ → เด้งไป svc เอง)
-  useEffect(() => { setTab(selectedBay && selectedBay.plate_no ? "svc" : "log"); }, [selectedBay && selectedBay.plate_no]); // eslint-disable-line
+  const [tab, setTab] = useState("day");   // แท็บใต้ช่องยิง: log = ประวัติการเบิก · svc = รถ & ประวัติบริการ (เลือกรถที่อ่านทะเบียนได้ → เด้งไป svc เอง)
+  // เลือกรถ: หน้าปกติเปิดแท็บรถ & ประวัติบริการ · คีออสไม่มีแท็บนั้น → เปิดประวัติการเบิกของคันนั้น · ไม่เลือกรถ = สรุปรถทั้งวัน
+  useEffect(() => { const kiosk = /^kiosk-/.test(String(currentUser?.username || "")); setTab(selectedBay && selectedBay.plate_no ? (kiosk ? "log" : "svc") : "day"); }, [selectedBay && selectedBay.plate_no]); // eslint-disable-line
   const [bayNotice, setBayNotice] = useState("");
   async function loadBays() {
     try {
@@ -424,25 +425,6 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
           </div>
         </div>
         {bayNotice && <div style={{ background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontWeight: 600 }}>{bayNotice}</div>}
-        {!selectedBay && dayVehicles.length > 0 && (
-          <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
-            <strong style={{ fontSize: 15, color: "#1e40af" }}>🔩 รถวันนี้ {dayVehicles.filter(v => v.plate).length} คัน · เบิกแล้ว {dayVehicles.filter(v => v.plate && v.rows.length).length} คัน {withdrawn.length} ชิ้น</strong>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 6, marginTop: 6 }}>
-              {dayVehicles.map(v => (
-                <div key={v.key} style={{ background: v.rows.length ? "#fff" : "#f8fafc", border: `1px solid ${v.rows.length ? "#bfdbfe" : "#e5e7eb"}`, borderRadius: 8, padding: "6px 10px", display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
-                  <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 18, color: v.plate ? "#072d6b" : "#9ca3af", whiteSpace: "nowrap" }}>{v.plate || (v.key === "general" ? "เบิกทั่วไป" : "ไม่ทราบทะเบียน")}</span>
-                  {v.province && <span style={{ fontSize: 12, color: "#6b7280" }}>{v.province}</span>}
-                  {v.first ? <span style={{ fontSize: 12, color: "#9ca3af" }}>เบิกแรก {new Date(v.first).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.</span> : (v.since ? <span style={{ fontSize: 12, color: "#9ca3af" }}>เข้ามา {v.since} น.{v.zone ? ` · ${v.zone}` : ""}</span> : null)}
-                  {v.rows.length > 0 ? (
-                    <span style={{ fontSize: 13, color: "#374151", flexBasis: "100%" }}>
-                      {summarizeParts(v.rows).map(g => `${g.code}${g.name ? " " + g.name : ""}${g.n > 1 ? " ×" + g.n : ""}`).join(" · ")}
-                    </span>
-                  ) : <span style={{ fontSize: 13, color: "#9ca3af", flexBasis: "100%" }}>ยังไม่เบิกอะไหล่</span>}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
         {selectedBay && (
           <div style={{ background: selParts.length ? "#eff6ff" : "#f9fafb", border: `1px solid ${selParts.length ? "#93c5fd" : "#e5e7eb"}`, borderRadius: 8, padding: "8px 12px", marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <strong style={{ fontSize: 15, color: "#1e40af", whiteSpace: "nowrap" }}>🔩 เบิกให้คันนี้แล้ววันนี้: {shown.length ? `${shown.length} ชิ้น` : "ยังไม่มี"}</strong>
@@ -595,14 +577,34 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
 
       {/* แท็บใต้ช่องยิง (user 2026-10-31): ประวัติการเบิก | รถ & ประวัติบริการ */}
       <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-        {[["log", "📋 ประวัติการเบิก"], ["svc", `🏍️ รถ & ประวัติบริการ${selectedBay?.plate_no ? ` · ${selectedBay.plate_no}` : ""}`]].map(([k, label]) => (
+        {[["day", `🔩 รถวันนี้ (${dayVehicles.filter(v => v.plate).length})`], ["log", "📋 ประวัติการเบิก"], ...(isKiosk ? [] : [["svc", `🏍️ รถ & ประวัติบริการ${selectedBay?.plate_no ? ` · ${selectedBay.plate_no}` : ""}`]])].map(([k, label]) => (
           <button key={k} onClick={() => { setTab(k); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }}
             style={{ padding: "10px 18px", borderRadius: "10px 10px 0 0", border: "1px solid #e5e7eb", borderBottom: tab === k ? "1px solid #fff" : "1px solid #e5e7eb", background: tab === k ? "#fff" : "#f3f4f6", color: tab === k ? "#072d6b" : "#6b7280", fontWeight: 700, fontSize: 17, cursor: "pointer", marginBottom: -9 }}>
             {label}
           </button>
         ))}
       </div>
-      {tab === "svc" && <VehicleServicePanel plate={selectedBay?.plate_no || ""} province={selectedBay?.plate_province || ""} />}
+      {/* สรุปรถทั้งวัน: ย้ายจากด้านบนมาเป็นแท็บใต้ช่องสแกน (2026-11-14) — ตอนอยู่บนสุดมันดันช่องสแกน/ปุ่มบันทึกตกขอบล่างจอคีออส 1280x800 */}
+      {tab === "day" && (dayVehicles.length > 0 ? (
+          <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+            <strong style={{ fontSize: 15, color: "#1e40af" }}>🔩 รถวันนี้ {dayVehicles.filter(v => v.plate).length} คัน · เบิกแล้ว {dayVehicles.filter(v => v.plate && v.rows.length).length} คัน {withdrawn.length} ชิ้น</strong>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 6, marginTop: 6 }}>
+              {dayVehicles.map(v => (
+                <div key={v.key} style={{ background: v.rows.length ? "#fff" : "#f8fafc", border: `1px solid ${v.rows.length ? "#bfdbfe" : "#e5e7eb"}`, borderRadius: 8, padding: "6px 10px", display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 18, color: v.plate ? "#072d6b" : "#9ca3af", whiteSpace: "nowrap" }}>{v.plate || (v.key === "general" ? "เบิกทั่วไป" : "ไม่ทราบทะเบียน")}</span>
+                  {v.province && <span style={{ fontSize: 12, color: "#6b7280" }}>{v.province}</span>}
+                  {v.first ? <span style={{ fontSize: 12, color: "#9ca3af" }}>เบิกแรก {new Date(v.first).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.</span> : (v.since ? <span style={{ fontSize: 12, color: "#9ca3af" }}>เข้ามา {v.since} น.{v.zone ? ` · ${v.zone}` : ""}</span> : null)}
+                  {v.rows.length > 0 ? (
+                    <span style={{ fontSize: 13, color: "#374151", flexBasis: "100%" }}>
+                      {summarizeParts(v.rows).map(g => `${g.code}${g.name ? " " + g.name : ""}${g.n > 1 ? " ×" + g.n : ""}`).join(" · ")}
+                    </span>
+                  ) : <span style={{ fontSize: 13, color: "#9ca3af", flexBasis: "100%" }}>ยังไม่เบิกอะไหล่</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 20, textAlign: "center", color: "#9ca3af" }}>ยังไม่มีรถเข้าช่องซ่อมหรือการเบิกวันนี้</div>)}
+      {tab === "svc" && !isKiosk && <VehicleServicePanel plate={selectedBay?.plate_no || ""} province={selectedBay?.plate_province || ""} />}
 
       {/* Withdrawal log */}
       <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", display: tab === "log" ? "block" : "none" }}>

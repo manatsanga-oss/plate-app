@@ -788,7 +788,7 @@ export default function App() {
         {activeMenu === "paydeposit" && canAccess("paydeposit") && <PayDepositPage currentUser={currentUser} />}
         {activeMenu === "claim" && canAccess("claim") && <ClaimPage currentUser={currentUser} />}
         {activeMenu === "fastmoving" && canAccess("fastmoving") && (
-          <FastMovingPage />
+          <FastMovingPage currentUser={currentUser} />
         )}
         {activeMenu === "rfidstock" && canAccess("rfidstock") && <RfidStockPage currentUser={currentUser} />}
         {activeMenu === "partimagesearch" && canAccess("partimagesearch") && (

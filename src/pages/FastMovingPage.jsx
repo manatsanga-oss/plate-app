@@ -7,7 +7,9 @@ const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-
 const DECOR_TAB_GROUPS = ["PG-032", "PG-033"]; // PG-032 ACCESSORIES (อะไหล่ตกแต่ง YAMAHA 108 รหัส เพิ่ม 2026-09-24), PG-033 หมวกกันน๊อก
 const isDecorRow = (r) => DECOR_TAB_GROUPS.some((g) => String(r?.product_group || "").toUpperCase().startsWith(g));
 
-export default function FastMovingPage() {
+export default function FastMovingPage({ currentUser }) {
+  // แก้ไข "ชื่อสินค้า" ได้เฉพาะ admin (user 2026-11-14 หลังพบชื่อยางพิมพ์ผิดหลายรายการ) — คนอื่นยังแก้กลุ่ม/ประเภท/เลิกผลิต และเพิ่มรหัสใหม่ได้ตามเดิม
+  const isAdmin = currentUser?.role === "admin";
   const [tab, setTab] = useState("main"); // main = อะไหล่หมุนเร็ว | decor = หมวกและอะไหล่ตกแต่ง
   const [rows, setRows] = useState([]);
   const [carModels, setCarModels] = useState([]);
@@ -76,6 +78,13 @@ export default function FastMovingPage() {
 
   async function saveNewPart() {
     if (!aPartCode.trim()) { setAError("กรุณากรอกรหัสอะไหล่"); return; }
+    // add_part กับรหัสที่มีอยู่แล้ว = อัปเดตทับ (รวมชื่อ) → ไม่ใช่ admin ให้คงชื่อเดิมของรายการนั้นไว้
+    const normCode = (c) => String(c || "").replace(/[-\s]/g, "").toUpperCase();
+    const existing = rows.find((r) => String(r.brand || "") === String(aBrand || "") && normCode(r.part_code) === normCode(aPartCode));
+    const nameToSave = (!isAdmin && existing) ? (existing.product_name || existing.custom_name || "") : aCustomName.trim();
+    if (!isAdmin && existing && aCustomName.trim() && aCustomName.trim() !== nameToSave
+      && !window.confirm(`รหัส ${existing.part_code} มีอยู่แล้วในชื่อ "${nameToSave}"
+การเปลี่ยนชื่อสินค้าทำได้เฉพาะ admin — ระบบจะบันทึกข้อมูลอื่นและคงชื่อเดิมไว้ ดำเนินการต่อหรือไม่?`)) return;
     setASaving(true);
     setAError("");
     try {
@@ -89,7 +98,7 @@ export default function FastMovingPage() {
           ref_code: (aRefCode || aPartCode).trim(),
           category: aCategory.trim(),
           product_group: aProductGroup,
-          custom_name: aCustomName.trim(),
+          custom_name: nameToSave,
           stock_type: aStockType,
           is_stock_nakhonluang: aStockNakhonluang,
           is_discontinued: aDiscontinued,
@@ -214,7 +223,7 @@ export default function FastMovingPage() {
       const res = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: iCustomName, stock_type: iStockType, is_stock_nakhonluang: iStockNakhonluang, is_discontinued: iDiscontinued }),
+        body: JSON.stringify({ action: "update_part_info", id: infoPopup.id, category: iCategory, product_group: iProductGroup, custom_name: isAdmin ? iCustomName : (infoPopup.product_name || ""), stock_type: iStockType, is_stock_nakhonluang: iStockNakhonluang, is_discontinued: iDiscontinued }),
       });
       const data = await res.json().catch(() => null);
       // Debug: log response to console
@@ -836,7 +845,10 @@ export default function FastMovingPage() {
             </div>
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 4, display: "block" }}>ชื่อสินค้า</label>
-              <input value={iCustomName} onChange={e => setICustomName(e.target.value)} style={selectStyle} />
+              <input value={iCustomName} onChange={e => { if (isAdmin) setICustomName(e.target.value); }} readOnly={!isAdmin}
+                title={isAdmin ? "" : "แก้ไขชื่อสินค้าได้เฉพาะผู้ดูแลระบบ (admin)"}
+                style={{ ...selectStyle, ...(isAdmin ? {} : { background: "#f3f4f6", color: "#6b7280", cursor: "not-allowed" }) }} />
+              {!isAdmin && <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 3 }}>🔒 แก้ไขชื่อสินค้าได้เฉพาะผู้ดูแลระบบ (admin)</div>}
             </div>
             <div style={{ marginBottom: 14 }}>
               <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 6, display: "block" }}>ประเภทอะไหล่</label>
