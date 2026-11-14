@@ -57,13 +57,16 @@ export default function SmartOfficePage() {
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
   const [log, setLog] = useState([]);
+  const [tuyaError, setTuyaError] = useState("");   // ข้อความผิดพลาดจาก Tuya Cloud (เช่น โควต้าหมด) — โชว์แถบเตือน
 
   async function load(initial) {
     if (!initial) setLoading(true);
     try {
-      const d = await post({ action: "list" });
+      // เปิดหน้า = ใช้รายการรีโมทที่ n8n จำไว้ (ไม่ยิง Tuya ดึงรายการใหม่) · กดปุ่ม "โหลดรายการ" = refresh ดึงจาก Tuya ใหม่ — ประหยัดโควต้า Tuya IoT Core (หมดเมื่อ 2026-11-13)
+      const d = await post({ action: "list", refresh: !initial });
       setRemotes(Array.isArray(d?.remotes) ? d.remotes : []);
       setSchedules(Array.isArray(d?.schedules) ? d.schedules : []);
+      setTuyaError(d?.tuya_error || "");
     } catch { setMsg("❌ ติดต่อระบบไม่ได้"); }
     setLoading(false);
   }
@@ -106,6 +109,12 @@ export default function SmartOfficePage() {
       <div style={{ color: "#6b7280", fontSize: 13, marginBottom: 12 }}>
         สั่งผ่านตัวยิงรีโมท IR (Smart Life) · ตั้งเวลาเปิด/ปิดได้รายเครื่อง (ระบบเช็คทุก 1 นาที เวลาไทย){summary ? ` · ตอนนี้: ${summary}` : ""}
       </div>
+      {tuyaError && (
+        <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", color: "#991b1b", borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 14, textAlign: "left" }}>
+          <b>⚠️ Tuya Cloud ไม่รับคำสั่ง:</b> {tuyaError}
+          {/quota/i.test(tuyaError) && <div style={{ marginTop: 4 }}>โควต้า API ของบัญชี Tuya (IoT Core รุ่นทดลอง) หมด — เปิด/ปิดจากหน้านี้และตารางเวลาจะไม่ทำงานจนกว่าโควต้าจะกลับมา · ระหว่างนี้สั่งจากแอป Smart Life ได้ตามปกติ</div>}
+        </div>
+      )}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
         <button onClick={() => load()} disabled={loading} style={{ ...btn, background: "#e5e7eb" }}>🔄 โหลดรายการ</button>
         <button onClick={() => runSlot("on")} disabled={!!busy} style={{ ...btn, background: "#dcfce7", color: "#166534" }}>▶ เปิดทั้งหมด</button>

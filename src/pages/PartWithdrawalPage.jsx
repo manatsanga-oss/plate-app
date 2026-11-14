@@ -170,12 +170,22 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
   const bayLabel = (b) => `${b.plate_no || "ไม่ทราบทะเบียน"}${b.plate_province ? " " + b.plate_province : ""}`;
   // กดเลือกรถ → ประวัติเบิกโชว์เฉพาะคันนั้น (จับคู่ด้วย event ของกล้อง หรือทะเบียน) — user 2026-10-30
   const shown = selectedBay ? withdrawn.filter(w => (selectedBay.event_id && w.bay_event_id === selectedBay.event_id) || (selectedBay.plate_no && w.vehicle_plate === selectedBay.plate_no)) : withdrawn;
+  // รายการที่เบิกให้รถคันนั้นแล้ววันนี้ (user 2026-11-12: กดเลือกรถแล้วอยากเห็นว่าเบิกอะไรไปแล้วบ้าง) — 1 แถว = 1 ชิ้น (qty ล็อค 1) จึงนับแถวต่อรหัส
+  const withdrawnFor = (b) => withdrawn.filter(w => (b.event_id && w.bay_event_id === b.event_id) || (b.plate_no && w.vehicle_plate === b.plate_no));
+  const summarizeParts = (rows) => { const m = new Map(); rows.forEach(w => { const k = String(w.part_code || "").trim() || "-"; const g = m.get(k) || { code: k, name: w.product_name || "", n: 0, last: "" }; g.n += 1; if (!g.name && w.product_name) g.name = w.product_name; if (!g.last || (w.withdrawn_at && w.withdrawn_at > g.last)) g.last = w.withdrawn_at || g.last; m.set(k, g); }); return [...m.values()]; };
+  const selParts = selectedBay ? summarizeParts(shown) : [];
+  // ไม่ได้เลือกรถ → สรุป "รถทั้งหมดของวัน" ที่มีการเบิก (user 2026-11-12) รวมคันที่ออกจากช่องซ่อมไปแล้ว (การ์ดด้านล่างโชว์เฉพาะคันที่ยังอยู่)
+  const dayVehicles = (() => { const m = new Map(); withdrawn.forEach(w => { const k = w.vehicle_plate ? `${w.vehicle_plate}|${w.vehicle_province || ""}` : (w.bay_event_id ? `ev|${w.bay_event_id}` : "general"); const g = m.get(k) || { key: k, plate: w.vehicle_plate || "", province: w.vehicle_province || "", zone: w.vehicle_zone || "", rows: [], first: w.withdrawn_at }; g.rows.push(w); if (w.withdrawn_at && (!g.first || w.withdrawn_at < g.first)) g.first = w.withdrawn_at; m.set(k, g); });
+    // รถที่กล้องเห็นวันนี้แต่ยังไม่เบิก (user 2026-11-12 'ไม่เบิกก็ขึ้น') — ใช้รายการเดียวกับการ์ด (list_bays) เติมเข้าไปเป็น 0 ชิ้น
+    bays.forEach(b => { if (!b.plate_no) return; const k = `${b.plate_no}|${b.plate_province || ""}`; const hit = m.get(k) || [...m.values()].find(g => g.plate === b.plate_no); if (hit) { if (!hit.zone) hit.zone = b.zone_name || ""; return; } m.set(k, { key: k, plate: b.plate_no, province: b.plate_province || "", zone: b.zone_name || "", rows: [], first: "", since: b.since_local || "" }); });
+    return [...m.values()].sort((a, b) => String(a.first || "").localeCompare(String(b.first || ""))); })();
   // สกรีนเซฟเวอร์คีออส (user 2026-10-28): ไม่แตะ/ไม่ยิงบาร์โค้ด idle วิ → ซ้อนทับด้วยจอประชาสัมพันธ์ (/signage สไลด์เดียวกับจอหน้าร้าน)
   // แตะจอ/กดคีย์/ยิงบาร์โค้ด → ซ่อนทันที (ช่องสแกนยังโฟกัสอยู่ รหัสที่ยิงไม่หาย) — เฉพาะผู้ใช้ kiosk-*; ปรับเวลาได้ด้วย ?idle=วินาที (0 = ปิด)
   const isKiosk = /^kiosk-/.test(String(currentUser?.username || ""));
   const kioskParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
   const idleSec = isKiosk ? Math.max(0, Number(kioskParams?.get("idle") ?? 120)) : 0;
   const saverBranch = (kioskParams?.get("branch") || "SCY06").toUpperCase();
+  const saverMode = (kioskParams?.get("saver") || "logo").toLowerCase();   // logo (ค่าเริ่มต้น 2026-11-14) | signage
   const [saverOn, setSaverOn] = useState(false);
   useEffect(() => {
     if (!idleSec) return;
@@ -378,6 +388,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
   return (
     <div className="page-container">
       {saverOn && (
+        saverMode === "signage" ? (
         <div onPointerDown={() => setSaverOn(false)} onTouchStart={() => setSaverOn(false)}
           style={{ position: "fixed", inset: 0, zIndex: 9999, background: "#000" }}>
           <iframe title="screensaver" src={`/signage?branch=${encodeURIComponent(saverBranch)}&screen=kiosk`}
@@ -386,6 +397,18 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
             แตะหน้าจอหรือยิงบาร์โค้ด เพื่อเริ่มเบิกอะไหล่
           </div>
         </div>
+        ) : (
+        /* สกรีนเซฟเวอร์โลโก้ปีกนก HONDA พื้นขาว (user 2026-11-14 คีออส ป.เปา) — โลโก้ลอยช้า ๆ กันจอค้างภาพ · ?saver=signage = กลับไปใช้จอประชาสัมพันธ์แบบเดิม */
+        <div onPointerDown={() => setSaverOn(false)} onTouchStart={() => setSaverOn(false)}
+          style={{ position: "fixed", inset: 0, zIndex: 9999, background: "#fff", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+          <style>{`@keyframes kioskLogoFloat { 0% { transform: translate(-3vw, -2vh) scale(1); } 25% { transform: translate(3vw, -1vh) scale(1.03); } 50% { transform: translate(2vw, 2vh) scale(1); } 75% { transform: translate(-2vw, 1.5vh) scale(0.98); } 100% { transform: translate(-3vw, -2vh) scale(1); } }`}</style>
+          <img src="/logos/honda-wing-kiosk.svg" alt="HONDA" draggable={false}
+            style={{ width: "min(62vw, 78vh)", maxHeight: "72vh", objectFit: "contain", animation: "kioskLogoFloat 40s ease-in-out infinite", pointerEvents: "none", userSelect: "none" }} />
+          <div style={{ position: "absolute", bottom: "4vh", left: 0, right: 0, textAlign: "center", color: "#6b7280", fontSize: "2.4vh" }}>
+            แตะหน้าจอหรือยิงบาร์โค้ด เพื่อเริ่มเบิกอะไหล่
+          </div>
+        </div>
+        )
       )}
       <div className="page-topbar">
         <h2 className="page-title">📦 บันทึกการเบิกอะไหล่</h2>
@@ -401,6 +424,37 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
           </div>
         </div>
         {bayNotice && <div style={{ background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontWeight: 600 }}>{bayNotice}</div>}
+        {!selectedBay && dayVehicles.length > 0 && (
+          <div style={{ background: "#eff6ff", border: "1px solid #93c5fd", borderRadius: 8, padding: "8px 12px", marginBottom: 10 }}>
+            <strong style={{ fontSize: 15, color: "#1e40af" }}>🔩 รถวันนี้ {dayVehicles.filter(v => v.plate).length} คัน · เบิกแล้ว {dayVehicles.filter(v => v.plate && v.rows.length).length} คัน {withdrawn.length} ชิ้น</strong>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(360px, 1fr))", gap: 6, marginTop: 6 }}>
+              {dayVehicles.map(v => (
+                <div key={v.key} style={{ background: v.rows.length ? "#fff" : "#f8fafc", border: `1px solid ${v.rows.length ? "#bfdbfe" : "#e5e7eb"}`, borderRadius: 8, padding: "6px 10px", display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: 18, color: v.plate ? "#072d6b" : "#9ca3af", whiteSpace: "nowrap" }}>{v.plate || (v.key === "general" ? "เบิกทั่วไป" : "ไม่ทราบทะเบียน")}</span>
+                  {v.province && <span style={{ fontSize: 12, color: "#6b7280" }}>{v.province}</span>}
+                  {v.first ? <span style={{ fontSize: 12, color: "#9ca3af" }}>เบิกแรก {new Date(v.first).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.</span> : (v.since ? <span style={{ fontSize: 12, color: "#9ca3af" }}>เข้ามา {v.since} น.{v.zone ? ` · ${v.zone}` : ""}</span> : null)}
+                  {v.rows.length > 0 ? (
+                    <span style={{ fontSize: 13, color: "#374151", flexBasis: "100%" }}>
+                      {summarizeParts(v.rows).map(g => `${g.code}${g.name ? " " + g.name : ""}${g.n > 1 ? " ×" + g.n : ""}`).join(" · ")}
+                    </span>
+                  ) : <span style={{ fontSize: 13, color: "#9ca3af", flexBasis: "100%" }}>ยังไม่เบิกอะไหล่</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {selectedBay && (
+          <div style={{ background: selParts.length ? "#eff6ff" : "#f9fafb", border: `1px solid ${selParts.length ? "#93c5fd" : "#e5e7eb"}`, borderRadius: 8, padding: "8px 12px", marginBottom: 10, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+            <strong style={{ fontSize: 15, color: "#1e40af", whiteSpace: "nowrap" }}>🔩 เบิกให้คันนี้แล้ววันนี้: {shown.length ? `${shown.length} ชิ้น` : "ยังไม่มี"}</strong>
+            {selParts.map(g => (
+              <span key={g.code} title={g.last ? `ล่าสุด ${new Date(g.last).toLocaleTimeString("th-TH", { hour: "2-digit", minute: "2-digit" })} น.` : ""}
+                style={{ fontSize: 14, background: "#fff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "3px 10px" }}>
+                <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#072d6b" }}>{g.code}</span>{g.name ? <span style={{ color: "#374151" }}> {g.name}</span> : null}{g.n > 1 ? <b style={{ color: "#b45309" }}> ×{g.n}</b> : null}
+              </span>
+            ))}
+            {shown.length > 0 && tab !== "log" && <button onClick={() => { setTab("log"); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }} style={{ marginLeft: "auto", padding: "4px 12px", fontSize: 13, background: "#fff", border: "1px solid #93c5fd", color: "#1e40af", borderRadius: 6, cursor: "pointer" }}>ดูเวลา/ผู้เบิก ›</button>}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button onClick={() => { setSelectedBay(null); inputRef.current?.focus({ preventScroll: true }); setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 50); }}
             style={{ padding: "14px 18px", borderRadius: 10, cursor: "pointer", fontSize: 16, fontWeight: 700, minWidth: 150,
@@ -416,6 +470,7 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
                     border: sel ? "3px solid #f59e0b" : "2px solid #d1d5db", background: sel ? "#fffbeb" : "#fff", color: "#1f2937" }}>
                   <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "monospace", color: b.plate_no ? "#072d6b" : "#9ca3af" }}>{b.plate_no || "ไม่ทราบทะเบียน"}</div>
                   <div style={{ fontSize: 16, color: "#374151" }}>{b.plate_province || ""}</div>
+                  {(() => { const n = withdrawnFor(b).length; return n > 0 ? <div style={{ position: "absolute", top: 6, right: 36, fontSize: 12, fontWeight: 700, color: "#1e40af", background: "#dbeafe", border: "1px solid #93c5fd", borderRadius: 999, padding: "1px 8px" }}>🔩 เบิกแล้ว {n}</div> : null; })()}
                   <div style={{ fontSize: 14, color: b.in_bay ? "#166534" : "#6b7280" }}>{b.in_bay ? `🟢 อยู่ใน${b.zone_name || "ช่องซ่อม"}` : `เข้ามา${b.zone_name ? " " + b.zone_name : ""}`} · {b.since_local || "-"} น. ({b.minutes} นาที)</div>
                 </button>
                 <button onClick={() => clearBay(b)} title="เอารถออกจากรายการ"

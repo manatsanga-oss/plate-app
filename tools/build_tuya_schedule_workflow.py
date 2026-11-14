@@ -60,7 +60,8 @@ const cmd = (action === 'cmd' && b.remote_id) ? { remote_id: String(b.remote_id)
 const hhmm = (v) => { const m = String(v || '').trim().match(/^(\\d{1,2}):(\\d{2})$/); return m ? (m[1].padStart(2, '0') + ':' + m[2]) : null; };
 const sched = (action === 'save_schedule' && b.remote_id) ? { remote_id: String(b.remote_id).slice(0, 40), blaster: String(b.blaster || '').slice(0, 40), kind: String(b.kind || '').slice(0, 8), name: String(b.name || '').slice(0, 80),
   on_time: hhmm(b.on_time), off_time: hhmm(b.off_time), days: String(b.days || '1234567').replace(/[^1-7]/g, '') || '1234567', enabled: b.enabled !== false && b.enabled !== 'false' } : null;
-return [{ json: { cfg, blasters: BLASTERS, plugs: PLUGS, action, slot: String(b.slot || ''), th, dow, today, cmd, sched } }];
+const refresh = b.refresh === true || b.refresh === 'true';   // list + refresh = ดึงรายการรีโมทจาก Tuya ใหม่ (ปกติใช้ cache)
+return [{ json: { cfg, blasters: BLASTERS, plugs: PLUGS, action, slot: String(b.slot || ''), th, dow, today, cmd, sched, refresh } }];
 """.replace("__CID__", CLIENT_ID).replace("__SEC__", SECRET).replace("__BASE__", BASE)
 
 SCHED_SQL = ("""// ตารางเวลาต่ออุปกรณ์ใน Postgres: สร้างตาราง + seed ค่าเริ่มต้น (08:00 เปิด · 17:00 ปิดทีวี · 17:10 ปิดแอร์) + บันทึกเมื่อ save_schedule → คืนทุกแถว
@@ -103,24 +104,73 @@ return d.blasters.map((bl) => { const t = String(Date.now()); const path = `/v1.
 """
 
 CMD_PREP = HELPERS + """
-// รวมรีโมท + ตารางเวลา แล้วตัดสินคำสั่งตาม action: tick (ถึงเวลาของอุปกรณ์ไหน → ยิง) · cmd · run(slot) · list/save_schedule (ไม่ยิง)
-const d = $('Prepare').first().json; const lists = $('List Prep').all().map((x) => x.json); const res = $input.all().map((x) => x.json);
+// v3 (2026-11-13) ประหยัดโควต้า Tuya IoT Core (trial หมดเพราะเดิมยิง token + list รีโมททุกนาที ~5,760 calls/วัน):
+//   - tick ที่ไม่มีอุปกรณ์ถึงเวลา = ไม่เรียก Tuya เลย (ตัดสินจากตาราง Postgres อย่างเดียว)
+//   - token เก็บใน workflow static data ใช้ซ้ำจนใกล้หมดอายุ (~2 ชม.) · รายการรีโมท IR เก็บ cache ใน static data (ดึงใหม่เมื่อ list + refresh หรือยังไม่มี cache)
+//   - คำสั่งตามตาราง/สั่งเดี่ยว ใช้ข้อมูล blaster/kind จากตาราง tuya_device_schedules ได้เลย ไม่ต้อง list ก่อน
+const d = $('Prepare').first().json;
 const schedules = $('PG Schedules').all().map((x) => x.json).filter((r) => r && r.remote_id);
-const access = lists[0].access;
-const remotes = [];
-res.forEach((r, i) => { const bl = lists[i] || {}; (r.result || []).forEach((rm) => remotes.push({ blaster: bl.blaster, blasterName: bl.blasterName, id: rm.remote_id, name: rm.remote_name, category: String(rm.category_id), brand: rm.brand_name })); });
+const sd = $getWorkflowStaticData('global');
+let apiCalls = 0, tuyaError = '', tokenDead = false;   // tokenDead: ขอ token ไม่ผ่านในรอบนี้ (เช่นโควต้าหมด) → ไม่ขอซ้ำอีกในรอบเดียวกัน
+const http = async (method, path, body, access) => {
+  apiCalls++;
+  const t = String(Date.now()); const bodyStr = body ? JSON.stringify(body) : '';
+  const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + (access || '') + t + method + '\\n' + sha256Hex(bodyStr) + '\\n\\n' + path).toUpperCase();
+  const headers = { client_id: d.cfg.clientId, sign, t, sign_method: 'HMAC-SHA256', Accept: 'application/json' };
+  if (access) headers.access_token = access;
+  const opt = { method, url: d.cfg.base + path, json: true, timeout: 15000, headers };
+  if (body) { headers['Content-Type'] = 'application/json'; opt.body = body; }   // body เป็น object + json:true (string body → sign invalid)
+  let r = null;
+  try { r = await this.helpers.httpRequest(opt); if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { r = { success: false, msg: String(r).slice(0, 200) }; } } }
+  catch (e) { r = { success: false, msg: String((e && e.message) || e).slice(0, 200) }; }
+  return r || { success: false, msg: 'empty response' };
+};
+const getToken = async (force) => {
+  const now = Date.now();
+  if (tokenDead) return null;
+  if (!force && sd.token && Number(sd.tokenExp || 0) > now + 60000) return sd.token;
+  const r = await http('GET', '/v1.0/token?grant_type=1', null, null);
+  if (!(r && r.success && r.result && r.result.access_token)) { tuyaError = 'token: ' + String((r && (r.msg || r.code)) || 'failed'); tokenDead = true; return null; }
+  sd.token = r.result.access_token; sd.tokenExp = now + (Number(r.result.expire_time) || 7200) * 1000 - 300000;
+  return sd.token;
+};
+const api = async (method, path, body) => {
+  let tok = await getToken(false); if (!tok) return { success: false, msg: tuyaError };
+  let r = await http(method, path, body, tok);
+  if (r && !r.success && [1010, 1011].includes(Number(r.code))) { tok = await getToken(true); if (tok) r = await http(method, path, body, tok); }   // token หมดอายุ/ไม่ถูกต้อง → ขอใหม่ครั้งเดียว
+  if (r && !r.success && !tuyaError) tuyaError = String(r.msg || r.code || 'tuya error');
+  return r;
+};
+const blName = (id) => ((d.blasters || []).find((b) => b.id === id) || {}).name || '';
+// รีโมทจากตารางเวลา (รู้ blaster/kind อยู่แล้ว) — ใช้ยิงคำสั่งได้โดยไม่ต้อง list
+const fromSched = schedules.filter((s) => s.kind === 'ac' || s.kind === 'tv').map((s) => ({ blaster: s.blaster || '', blasterName: blName(s.blaster), id: s.remote_id, name: s.name || s.remote_id, category: s.kind === 'ac' ? '5' : '2', brand: '' }));
+let irRemotes = Array.isArray(sd.remotes) && sd.remotes.length ? sd.remotes : null; let remotesFrom = irRemotes ? 'cache' : '';
+const cmdNeedsList = d.action === 'cmd' && d.cmd && !(irRemotes || fromSched).find((x) => x.id === d.cmd.remote_id) && !(d.plugs || []).find((x) => x.id === d.cmd.remote_id);
+if ((d.action === 'list' && (d.refresh || !irRemotes)) || (d.action === 'run' && !irRemotes) || cmdNeedsList) {
+  const fresh = []; let okAny = false;
+  for (const bl of (d.blasters || [])) {
+    const r = await api('GET', `/v1.0/infrareds/${bl.id}/remotes`, null);
+    if (r && r.success && Array.isArray(r.result)) { okAny = true; r.result.forEach((rm) => fresh.push({ blaster: bl.id, blasterName: bl.name, id: rm.remote_id, name: rm.remote_name, category: String(rm.category_id), brand: rm.brand_name })); }
+  }
+  if (okAny && fresh.length) { irRemotes = fresh; sd.remotes = fresh; sd.remotesAt = Date.now(); remotesFrom = 'tuya'; }
+}
+if (!irRemotes) { irRemotes = fromSched; remotesFrom = 'schedules'; }
+// อุปกรณ์ในตารางที่ไม่อยู่ใน cache (เพิ่มใหม่) ให้โผล่ด้วย
+fromSched.forEach((x) => { if (!irRemotes.find((y) => y.id === x.id)) irRemotes.push(x); });
+const remotes = irRemotes.map((r) => Object.assign({}, r));
 (d.plugs || []).forEach((p) => remotes.push({ blaster: '', blasterName: '', id: p.id, name: p.name, category: 'plug', brand: 'Smart Plug' }));
 const AC = remotes.filter((r) => r.category === '5');
 const TV = remotes.filter((r) => r.category === '2');
 const PLUG = remotes.filter((r) => r.category === 'plug');
 const plugCmd = (r, on) => ({ kind: 'plug', name: r.name, remote_id: r.id, method: 'POST', path: `/v1.0/iot-03/devices/${r.id}/commands`, body: { commands: [{ code: 'switch_1', value: !!on }] }, what: on ? 'on' : 'off' });
-const cmdFor = (r, on, what) => r.category === '5' ? acCmd(r, on) : (r.category === 'plug' ? plugCmd(r, on) : tvCmd(r, what));
 const acCmd = (r, on) => ({ kind: 'ac', name: r.name, remote_id: r.id, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/air-conditioners/${r.id}/command`, body: { code: 'power', value: on ? 1 : 0 }, what: on ? 'on' : 'off' });
 const tvCmd = (r, what) => ({ kind: 'tv', name: r.name, remote_id: r.id, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/remotes/${r.id}/command`, body: { key: 'Power' }, what: what || 'power' });
+const cmdFor = (r, on, what) => r.category === '5' ? acCmd(r, on) : (r.category === 'plug' ? plugCmd(r, on) : tvCmd(r, what));
+const meta = () => ({ api_calls: apiCalls, remotes_from: remotesFrom, tuya_error: tuyaError || null });
 const calls = [];
 if (d.action === 'cmd' && d.cmd) {   // สั่งเดี่ยวจากหน้า Smart Office
   const r = remotes.find((x) => x.id === d.cmd.remote_id);
-  if (!r) return [{ json: { ok: false, action: 'cmd', error: 'remote not found: ' + d.cmd.remote_id, remotes, schedules } }];
+  if (!r) return [{ json: Object.assign({ ok: false, action: 'cmd', error: 'remote not found: ' + d.cmd.remote_id, remotes, schedules }, meta()) }];
   calls.push(cmdFor(r, !!d.cmd.power));
 }
 if (d.action === 'run') {   // ปุ่มสั่งทั้งหมด
@@ -128,43 +178,29 @@ if (d.action === 'run') {   // ปุ่มสั่งทั้งหมด
   if (d.slot === 'tv') TV.forEach((r) => calls.push(tvCmd(r)));
   if (d.slot === 'on') { AC.forEach((r) => calls.push(acCmd(r, true))); TV.forEach((r) => calls.push(tvCmd(r))); }
 }
-if (d.action === 'tick') {   // ตารางรายอุปกรณ์: ถึงเวลา (นาทีตรง, วันที่เลือก, เปิดใช้) และยังไม่เคยยิงในนาทีนี้
+if (d.action === 'tick') {   // ตารางรายอุปกรณ์: ถึงเวลา (นาทีตรง, วันที่เลือก, เปิดใช้) และยังไม่เคยยิงในนาทีนี้ — ไม่ถึงเวลา = ไม่แตะ Tuya
   for (const s of schedules) {
     if (!s.enabled || !String(s.days || '').includes(d.dow)) continue;
-    const r = remotes.find((x) => x.id === s.remote_id); if (!r) continue;
     const what = s.on_time === d.th ? 'on' : (s.off_time === d.th ? 'off' : null); if (!what) continue;
     const stamp = d.today + ' ' + d.th + ' ' + what; if (s.last_fired === stamp) continue;
+    const r = remotes.find((x) => x.id === s.remote_id); if (!r) continue;
     calls.push(Object.assign(cmdFor(r, what === 'on', what), { stamp }));
   }
 }
-if (d.action === 'list') {   // สถานะปลั๊ก (เปิด/ปิดอยู่) ให้หน้า Smart Office โชว์ — GET status เซ็นด้วย body ว่าง
+if (d.action === 'list') {   // สถานะปลั๊ก (เปิด/ปิดอยู่) ให้หน้า Smart Office โชว์
   for (const r of PLUG) {
-    try {
-      const t = String(Date.now()); const path = `/v1.0/iot-03/devices/${r.id}/status`;
-      const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + access + t + 'GET\\n' + sha256Hex('') + '\\n\\n' + path).toUpperCase();
-      let st = await this.helpers.httpRequest({ method: 'GET', url: d.cfg.base + path, json: true, timeout: 10000, headers: { client_id: d.cfg.clientId, sign, t, sign_method: 'HMAC-SHA256', access_token: access, Accept: 'application/json' } });
-      if (typeof st === 'string') { try { st = JSON.parse(st); } catch { st = null; } }
-      const sw = (st && Array.isArray(st.result) ? st.result : []).find((x) => x.code === 'switch_1');
-      r.state = sw ? (sw.value ? 'on' : 'off') : null; r.online = !!(st && st.success);
-    } catch (e) { r.state = null; r.online = false; }
+    const st = await api('GET', `/v1.0/iot-03/devices/${r.id}/status`, null);
+    const sw = (st && Array.isArray(st.result) ? st.result : []).find((x) => x.code === 'switch_1');
+    r.state = sw ? (sw.value ? 'on' : 'off') : null; r.online = !!(st && st.success);
   }
 }
-if (!calls.length) return [{ json: { ok: true, noop: true, action: d.action, slot: d.slot, th: d.th, dow: d.dow, sent: 0, remotes, schedules, saved: !!d.sched } }];
-// ยิงเองใน Code node ด้วย body object + json:true (string body ทำให้ hash ไม่ตรง "sign invalid")
+if (!calls.length) return [{ json: Object.assign({ ok: true, noop: true, action: d.action, slot: d.slot, th: d.th, dow: d.dow, sent: 0, remotes, schedules, saved: !!d.sched }, meta()) }];
 const results = [];
 for (const c of calls) {
-  const t = String(Date.now()); const bodyStr = JSON.stringify(c.body);
-  const strToSign = c.method + '\\n' + sha256Hex(bodyStr) + '\\n\\n' + c.path;
-  const sign = hmacSha256Hex(d.cfg.secret, d.cfg.clientId + access + t + strToSign).toUpperCase();
-  let r = null;
-  try {
-    r = await this.helpers.httpRequest({ method: c.method, url: d.cfg.base + c.path, body: c.body, json: true, returnFullResponse: false, timeout: 15000,
-      headers: { client_id: d.cfg.clientId, sign, t, sign_method: 'HMAC-SHA256', access_token: access, 'Content-Type': 'application/json', Accept: 'application/json' } });
-    if (typeof r === 'string') { try { r = JSON.parse(r); } catch { r = { raw: String(r).slice(0, 200) }; } }
-  } catch (e) { r = { success: false, msg: String(e && e.message || e).slice(0, 200) }; }
+  const r = await api(c.method, c.path, c.body);
   results.push({ name: c.name, kind: c.kind, remote_id: c.remote_id, what: c.what, stamp: c.stamp || null, success: !!(r && r.success && r.result !== false), msg: r && (r.msg || r.code || '') });
 }
-return [{ json: { ok: results.every((x) => x.success), action: d.action, slot: d.slot, th: d.th, sent: results.length, results, remotes, schedules } }];
+return [{ json: Object.assign({ ok: results.every((x) => x.success), action: d.action, slot: d.slot, th: d.th, sent: results.length, results, remotes, schedules }, meta()) }];
 """
 
 FIRED_SQL = """// บันทึก last_fired ของอุปกรณ์ที่ยิงตามตารางสำเร็จ (กันยิงซ้ำในนาทีเดียวกัน) — ไม่มีอะไรยิง = SELECT 1
@@ -189,27 +225,17 @@ w = {
         {"parameters": {"jsCode": PREPARE}, "id": "ts03", "name": "Prepare", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [440, 300]},
         {"parameters": {"jsCode": SCHED_SQL}, "id": "ts11", "name": "Build Sched SQL", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [640, 300]},
         {"parameters": {"operation": "executeQuery", "query": "={{ $json.query }}", "options": {}}, "id": "ts12", "name": "PG Schedules", "type": "n8n-nodes-base.postgres", "typeVersion": 2.5, "position": [840, 300], "credentials": {}, "alwaysOutputData": True},
-        {"parameters": {"jsCode": TOKEN_SIGN}, "id": "ts04", "name": "Token Sign", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1040, 300]},
-        {"parameters": {"method": "GET", "url": "={{ $json.url }}", "sendHeaders": True, "headerParameters": {"parameters": http_hdr}, "options": {"timeout": 15000}},
-         "id": "ts05", "name": "Tuya Token", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1240, 300]},
-        {"parameters": {"jsCode": LIST_PREP}, "id": "ts06", "name": "List Prep", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1440, 300]},
-        {"parameters": {"method": "GET", "url": "={{ $json.url }}", "sendHeaders": True, "headerParameters": {"parameters": http_hdr + [{"name": "access_token", "value": "={{ $json.access }}"}]}, "options": {"timeout": 15000}},
-         "id": "ts07", "name": "Tuya List", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [1640, 300], "onError": "continueRegularOutput"},
-        {"parameters": {"jsCode": CMD_PREP}, "id": "ts08", "name": "Command Prep", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1840, 300]},
-        {"parameters": {"jsCode": FIRED_SQL}, "id": "ts13", "name": "Build Fired SQL", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [2040, 300]},
-        {"parameters": {"operation": "executeQuery", "query": "={{ $json.query }}", "options": {}}, "id": "ts14", "name": "PG Fired", "type": "n8n-nodes-base.postgres", "typeVersion": 2.5, "position": [2240, 300], "credentials": {}, "alwaysOutputData": True},
-        {"parameters": {"jsCode": RESULT}, "id": "ts15", "name": "Result", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [2440, 300]},
+        {"parameters": {"jsCode": CMD_PREP}, "id": "ts08", "name": "Command Prep", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1040, 300]},
+        {"parameters": {"jsCode": FIRED_SQL}, "id": "ts13", "name": "Build Fired SQL", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1240, 300]},
+        {"parameters": {"operation": "executeQuery", "query": "={{ $json.query }}", "options": {}}, "id": "ts14", "name": "PG Fired", "type": "n8n-nodes-base.postgres", "typeVersion": 2.5, "position": [1440, 300], "credentials": {}, "alwaysOutputData": True},
+        {"parameters": {"jsCode": RESULT}, "id": "ts15", "name": "Result", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [1640, 300]},
     ],
     "connections": {
         "Schedule": {"main": [[{"node": "Prepare", "type": "main", "index": 0}]]},
         "Webhook": {"main": [[{"node": "Prepare", "type": "main", "index": 0}]]},
         "Prepare": {"main": [[{"node": "Build Sched SQL", "type": "main", "index": 0}]]},
         "Build Sched SQL": {"main": [[{"node": "PG Schedules", "type": "main", "index": 0}]]},
-        "PG Schedules": {"main": [[{"node": "Token Sign", "type": "main", "index": 0}]]},
-        "Token Sign": {"main": [[{"node": "Tuya Token", "type": "main", "index": 0}]]},
-        "Tuya Token": {"main": [[{"node": "List Prep", "type": "main", "index": 0}]]},
-        "List Prep": {"main": [[{"node": "Tuya List", "type": "main", "index": 0}]]},
-        "Tuya List": {"main": [[{"node": "Command Prep", "type": "main", "index": 0}]]},
+        "PG Schedules": {"main": [[{"node": "Command Prep", "type": "main", "index": 0}]]},
         "Command Prep": {"main": [[{"node": "Build Fired SQL", "type": "main", "index": 0}]]},
         "Build Fired SQL": {"main": [[{"node": "PG Fired", "type": "main", "index": 0}]]},
         "PG Fired": {"main": [[{"node": "Result", "type": "main", "index": 0}]]},
@@ -219,8 +245,8 @@ w = {
 }
 json.dump(w, open(OUT, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
 open(os.path.join(D, "Tuya_Schedule_DDL.sql"), "w", encoding="utf-8").write("-- ตารางเวลาเปิด/ปิดอุปกรณ์ (Smart Office) — workflow รัน CREATE TABLE + seed เองทุกครั้ง\n" + DDL + "\n" + SEED + "\n")
-for name, code in (("PREPARE", PREPARE), ("SCHED_SQL", SCHED_SQL), ("TOKEN_SIGN", TOKEN_SIGN), ("LIST_PREP", LIST_PREP), ("CMD_PREP", CMD_PREP), ("FIRED_SQL", FIRED_SQL), ("RESULT", RESULT)):
-    stub = "const $=(x)=>({first:()=>({json:{body:{}}}),all:()=>[]});const $input={first:()=>({json:{body:{}}}),all:()=>[]};\n(async function(){" + code + "\n})();"
+for name, code in (("PREPARE", PREPARE), ("SCHED_SQL", SCHED_SQL), ("CMD_PREP", CMD_PREP), ("FIRED_SQL", FIRED_SQL), ("RESULT", RESULT)):
+    stub = "const $getWorkflowStaticData=()=>({});const $=(x)=>({first:()=>({json:{body:{}}}),all:()=>[]});const $input={first:()=>({json:{body:{}}}),all:()=>[]};\n(async function(){" + code + "\n})();"
     f = os.path.join(tempfile.gettempdir(), "chk_" + name + ".js"); open(f, "w", encoding="utf-8").write(stub)
     r = subprocess.run(["node", "--check", f], capture_output=True, text=True, encoding="utf-8", errors="replace")
     print(name, "=>", "OK" if r.returncode == 0 else r.stderr[-400:])
