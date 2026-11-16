@@ -17,6 +17,8 @@ const QUOTE_LINE_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/part-q
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/part-price-api";
 const RETAIL_API = "https://n8n-new-project-gwf2.onrender.com/webhook/retail-sale-api"; // ค้นรถ+ข้อมูลการขายด้วยเลขเครื่อง/เลขตัวถัง
+// สำรอง: รถที่ขายก่อนมีระบบขายใหม่ (ไม่อยู่ใน retail-sale get_vehicle) ค้นจากประวัติขาย/ทะเบียน Excel ของ Service History API (user 2026-11-16: MLHKF5020R5134039 Click160 ปี 67 ค้นไม่พบ)
+const SVC_API = "https://n8n-new-project-gwf2.onrender.com/webhook/service-history-api";
 // สต๊อกคงเหลืออะไหล่รายสาขา (action search_inventory เดียวกับหน้าคืนอะไหล่/สั่งซื้อ): HONDA=honda_inventory · YAMAHA=yamaha
 const STOCK_API = {
   HONDA: "https://n8n-new-project-gwf2.onrender.com/webhook/spare-parts-api",
@@ -325,8 +327,29 @@ export default function PartImageLookupPage({ currentUser } = {}) {
         body: JSON.stringify({ action: "get_vehicle", keyword: kw }),
       });
       const data = await res.json().catch(() => null);
-      const v = Array.isArray(data) ? data[0] : data;
-      if (!v || (!v.engine_no && !v.chassis_no)) { setVehInfo(null); setSearchMsg(`ไม่พบรถที่ตรงกับ "${kw}" ในระบบ`); return; }
+      let v = Array.isArray(data) ? data[0] : data;
+      if (!v || (!v.engine_no && !v.chassis_no)) {
+        // ไม่พบในระบบขายใหม่ → ลองประวัติขายเก่า/ทะเบียน Excel (search_vehicles) แล้วแปลงเป็นรูปเดียวกับ get_vehicle
+        let r = null;
+        try {
+          const r2 = await fetch(SVC_API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "search_vehicles", field: "all", keyword: kw }) });
+          const d2 = await r2.json().catch(() => null);
+          const list = Array.isArray(d2) ? d2 : (Array.isArray(d2?.data) ? d2.data : []);
+          const nk = (x) => String(x || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+          r = list.find((x) => nk(x.frame_no) === nk(kw) || nk(x.engine_no) === nk(kw)) || (list.length === 1 ? list[0] : null);
+        } catch { r = null; }
+        if (!r) { setVehInfo(null); setSearchMsg(`ไม่พบรถที่ตรงกับ "${kw}" ในระบบ`); return; }
+        const txt = String(r.model_code || "").trim();                       // เช่น "ACB160CATR (2TH) CLICK 160 ABS Special (…)"
+        const codeTok = (txt.split(/\s+/)[0] || r.model_series || "").trim();
+        const typeTok = (txt.toUpperCase().match(/\d?TH/g) || []).find((t) => /\d/.test(t)) || (/(^|[^A-Z])TH([^A-Z]|$)/i.test(txt) ? "TH" : "");
+        const brandMap = { "ฮอนด้า": "HONDA", "ยามาฮ่า": "YAMAHA" };
+        v = {
+          brand: brandMap[r.brand] || r.brand || "", model_code: codeTok, model_name: r.model_series || "", model_type: typeTok,
+          color_name: r.color || "", model_color: "", engine_no: r.engine_no || "", chassis_no: r.frame_no || "", sold_at: r.sale_date || "ขายแล้ว",
+          sale: { sale_no: r.sale_doc_no || "(ประวัติขายเดิม)", sale_date: r.sale_date, customer_name: r.customer_name || "" },
+          from_history: true,
+        };
+      }
       setVehInfo(v);
       const matched = matchModel(`${v.model_code || v.model_name || ""} ${v.model_type || ""}`.trim(), v.model_color, v.color_name);
       if (!matched) setSearchMsg(`พบข้อมูลรถ ${v.model_code || v.model_name || ""} — แต่ยังไม่มีสมุดภาพของรุ่นนี้`);

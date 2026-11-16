@@ -452,6 +452,14 @@ export default function PartWithdrawalPage({ currentUser } = {}) {
                     border: sel ? "3px solid #f59e0b" : "2px solid #d1d5db", background: sel ? "#fffbeb" : "#fff", color: "#1f2937" }}>
                   <div style={{ fontSize: 28, fontWeight: 800, fontFamily: "monospace", color: b.plate_no ? "#072d6b" : "#9ca3af" }}>{b.plate_no || "ไม่ทราบทะเบียน"}</div>
                   <div style={{ fontSize: 16, color: "#374151" }}>{b.plate_province || ""}</div>
+                  {/* กล้องอ่านได้เฉพาะเลข (หมวดโดนบัง) → ทะเบียนเป็นเลขล้วน (2026-11-14) */}
+                  {/^[0-9]{1,4}$/.test(String(b.plate_no || "")) && <div style={{ fontSize: 13, color: "#b45309", fontWeight: 700 }}>⚠️ อ่านได้เฉพาะเลข ไม่พบหมวด</div>}
+                  {/* ป้ายแดง 99-xxx (2026-11-14): list_bays แนบชื่อลูกค้า/รุ่นจากใบมัดจำป้ายแดงที่ยังถืออยู่ */}
+                  {/^[0-9]{2}-[0-9]{3}$/.test(String(b.plate_no || "")) && (
+                    <div style={{ fontSize: 13, color: "#b91c1c", fontWeight: 700, maxWidth: 260, lineHeight: 1.25 }}>
+                      🔴 ป้ายแดง{b.red_customer ? ` · ${b.red_customer}` : " · ไม่พบใบมัดจำ"}{b.red_model ? <span style={{ fontWeight: 400, color: "#6b7280" }}> · {b.red_model}</span> : null}
+                    </div>
+                  )}
                   {(() => { const n = withdrawnFor(b).length; return n > 0 ? <div style={{ position: "absolute", top: 6, right: 36, fontSize: 12, fontWeight: 700, color: "#1e40af", background: "#dbeafe", border: "1px solid #93c5fd", borderRadius: 999, padding: "1px 8px" }}>🔩 เบิกแล้ว {n}</div> : null; })()}
                   <div style={{ fontSize: 14, color: b.in_bay ? "#166534" : "#6b7280" }}>{b.in_bay ? `🟢 อยู่ใน${b.zone_name || "ช่องซ่อม"}` : `เข้ามา${b.zone_name ? " " + b.zone_name : ""}`} · {b.since_local || "-"} น. ({b.minutes} นาที)</div>
                 </button>
