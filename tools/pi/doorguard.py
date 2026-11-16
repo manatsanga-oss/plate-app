@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""doorguard — ตรวจกล้องขอบประตูม้วนก่อนสั่งปิด (รันบน shoppi เป็น systemd service doorguard.service ใน venv /home/pi/pw ที่มี ultralytics)
+"""doorguard — ตรวจกล้องขอบประตูม้วนก่อนสั่งปิด + ตัวเชื่อม Home Assistant (รันบน shoppi เป็น systemd service doorguard.service ใน venv /home/pi/pw ที่มี ultralytics)
 
 user 2026-11-10: "กล้องหน้าร้าน 3 ตัว ตรวจว่ามีวัตถุอยู่ที่ขอบประตูไหม ถ้ามีให้หยุดการปิด" → ตกลงแบบ "รอจนว่างแล้วปิดเอง"
-การทำงาน:
-  1. poll door-api action close_take ทุก POLL_SEC → ได้คำขอปิด (จากปุ่ม "ปิด" บนเว็บหรือตารางเวลา) {id, shutter both/1/2}
+การทำงาน (ตรวจกล้องก่อนปิด):
+  1. เธรด poller ถาม door-api action pi_poll ทุก POLL_SEC → ได้คำขอปิด (จากปุ่ม "ปิด" บนเว็บหรือตารางเวลา) {id, shutter both/1/2}
   2. ดึงภาพสดจาก NVR ของกล้องที่เห็นขอบประตูบานนั้น (zones ใน doorguard.json) → YOLOv8s ทั้งเฟรม → วัตถุที่กล่องทับแถบขอบประตู ≥ ROI_FRAC = กีดขวาง
-  3. ว่าง → close_update closing → door-api close force:true (เส้นทาง Tuya scene เดิม) → close_update closed/error
+  3. ว่าง → close_update closing → สั่งปิด (ผ่าน Home Assistant ในเครื่อง ถ้าไม่มีใช้ door-api close force:true) → close_update closed/error
      ไม่ว่าง → close_update waiting + ภาพ (ย่อ) → รอ RETRY_SEC แล้วตรวจใหม่ จนครบ MAX_WAIT_SEC → close_update timeout + LINE แจ้งผู้ดูแลพร้อมภาพ
   ⚠️ ไม่ใช่อุปกรณ์กันหนีบ: ตรวจก่อนสั่งปิดเท่านั้น (คน/รถที่เข้ามาหลังตรวจ ระบบไม่เห็น) — ควรติดเซ็นเซอร์ลำแสงที่ขอบประตูเพิ่ม
-config: ~/nvr/doorguard.json · secrets: ~/nvr/doorguard_secrets.json {line_token, line_to[], door_api}
-ทดสอบ: python doorguard.py check  (ตรวจทุกบานครั้งเดียว ไม่สั่งปิด) · python doorguard.py once (รับคิว 1 รอบ)
+
+ตัวเชื่อม Home Assistant (2026-11-16 — โควต้า Tuya IoT Core trial หมด จึงสั่งอุปกรณ์ผ่าน HA บน Pi ที่ล็อกอิน Smart Life แทน):
+  - pi_poll เดียวกันได้ "commands" [{id, target, command}] ที่ n8n เข้าคิวไว้ (เปิด/หยุด/ปิดประตูจากเว็บ/LINE ฯลฯ) → เรียก HA REST ตามตารางผูกใน ~/nvr/habridge.json → ส่งผลกลับรอบถัดไป (done)
+  - ส่งสถานะเซนเซอร์ประตู/ปลั๊กจาก HA ไปเก็บที่ n8n (states) เมื่อเปลี่ยนหรือทุก 60 วิ · pi_poll แต่ละครั้งนับเป็น heartbeat (n8n ใช้เส้นทาง HA เมื่อ heartbeat < 90 วิ)
+  - HA ใช้ไม่ได้ (ไม่มี token/ล่ม) หรือ workflow ยังเป็นรุ่นเก่า → กลับไปถาม close_take แบบเดิม (ไม่มี heartbeat → n8n ใช้เส้นทาง Tuya)
+config: ~/nvr/doorguard.json · secrets: ~/nvr/doorguard_secrets.json {line_token, line_to[], door_api} · HA: ~/nvr/ha_secrets.json {url, token} (วางด้วย set_ha_token.sh) + ~/nvr/habridge.json
+ทดสอบ: python doorguard.py check  (ตรวจทุกบานครั้งเดียว ไม่สั่งปิด) · python doorguard.py once (รับคิว 1 รอบ) · python doorguard.py ha (เช็คการเชื่อม HA + สถานะ ไม่สั่งอุปกรณ์)
 """
-import base64, io, json, os, sys, time, traceback
+import base64, io, json, os, queue, sys, threading, time, traceback
 import requests
 from requests.auth import HTTPDigestAuth
 from PIL import Image, ImageDraw
@@ -19,6 +24,8 @@ from PIL import Image, ImageDraw
 HOME = os.path.expanduser("~")
 CFG_FILE = os.path.join(HOME, "nvr", "doorguard.json")
 SEC_FILE = os.path.join(HOME, "nvr", "doorguard_secrets.json")
+HA_SEC_FILE = os.path.join(HOME, "nvr", "ha_secrets.json")
+HA_MAP_FILE = os.path.join(HOME, "nvr", "habridge.json")
 DEFAULT_CFG = {
     "nvr_host": "192.168.1.100", "nvr_user": "admin", "pw_file": os.path.join(HOME, "nvr", ".pw"),
     "model": os.path.join(HOME, "nvr", "yolov8s.pt"), "imgsz": 1280, "conf": 0.3, "roi_frac": 0.2,
@@ -26,10 +33,26 @@ DEFAULT_CFG = {
     # ชื่อคลาส COCO ที่ถือว่ากีดขวาง (รถ/คน/ของวางพื้นที่ YOLO รู้จัก)
     "watch": ["person", "bicycle", "car", "motorcycle", "bus", "truck", "dog", "cat", "chair", "bench", "potted plant",
               "suitcase", "backpack", "handbag", "umbrella", "skateboard", "fire hydrant", "stop sign", "bottle"],
-    # บาน → กล้อง + แถบขอบประตู [x0,y0,x1,y1] บนภาพ 2560x1440 (user ชี้ 2026-11-10: CH03 คอลัมน์ F = ประตูม้วน 1, CH13 คอลัมน์ A = ประตูม้วน 2 — สลับได้ถ้าผิด)
+    # บาน → กล้อง + แถบขอบประตู [x0,y0,x1,y1] บนภาพ 2560x1440 (user ยืนยัน 2026-11-10: CH03 คอลัมน์ F = ประตูม้วน 1 ฝ่ายขาย, CH13 คอลัมน์ A = ประตูม้วน 2 ฝ่ายบริการ)
     "zones": {
         "1": {"channel": 3, "roi": [2133, 0, 2560, 1440], "name": "ประตูม้วน 1 (CH03)"},
         "2": {"channel": 13, "roi": [0, 0, 427, 1440], "name": "ประตูม้วน 2 (CH13)"},
+    },
+}
+# ตารางผูกคำสั่งจาก n8n ("target:command") → บริการของ Home Assistant [domain, service, entity_id] และสถานะที่ส่งกลับ
+# (entity จากการเชื่อม Tuya 2026-11-16 — ประตูม้วนสั่งผ่านฉาก Tap-to-Run ที่ HA ดึงมาเป็น scene; ประตูม้วน 2 ยังไม่มีฉาก; แอร์/ทีวีรอ user สร้างฉากในแอป Smart Life แล้วเพิ่มที่นี่)
+DEFAULT_HA_MAP = {
+    "commands": {
+        "door1:open": ["scene", "turn_on", "scene.pratuu_1_epid"],
+        "door1:stop": ["scene", "turn_on", "scene.hyud_pratuuhnaaraan"],
+        "door1:close": ["scene", "turn_on", "scene.puue_pratuuhnaaraan"],
+        "plug:eb009dfb93fb11e468r3xb:on": ["switch", "turn_on", "switch.aifsaalecchaa_socket"],
+        "plug:eb009dfb93fb11e468r3xb:off": ["switch", "turn_off", "switch.aifsaalecchaa_socket"],
+    },
+    "states": {
+        "sensor:eb4e442c2dad986d38e5eu": {"entity": "binary_sensor.pratuuh_ng_faaykhaay_door", "battery": "sensor.pratuuh_ng_faaykhaay_battery"},
+        "sensor:ebca18f706cd85f01eh0yh": {"entity": "binary_sensor.pratuuh_ng_faaybrikaar_door", "battery": "sensor.pratuuh_ng_faaybrikaar_battery"},
+        "plug:eb009dfb93fb11e468r3xb": {"entity": "switch.aifsaalecchaa_socket"},
     },
 }
 
@@ -47,14 +70,89 @@ def load_cfg():
     return cfg
 
 
-class Guard:
+class HA:
+    """Home Assistant REST ในเครื่อง (token อยู่ใน ha_secrets.json chmod 600 — ไม่ log token)"""
     def __init__(self):
+        self.url, self.token = "", ""
+        try:
+            s = json.load(open(HA_SEC_FILE, encoding="utf-8"))
+            self.url, self.token = str(s.get("url") or "http://127.0.0.1:8123").rstrip("/"), str(s.get("token") or "")
+        except Exception:
+            pass
+        try:
+            self.map = json.load(open(HA_MAP_FILE, encoding="utf-8"))
+        except FileNotFoundError:
+            self.map = DEFAULT_HA_MAP
+            json.dump(DEFAULT_HA_MAP, open(HA_MAP_FILE, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
+        except Exception as e:
+            log("habridge.json อ่านไม่ได้ ใช้ค่าเริ่มต้น:", e); self.map = DEFAULT_HA_MAP
+        self.map.setdefault("commands", {}); self.map.setdefault("states", {})
+
+    def _h(self):
+        return {"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}
+
+    def alive(self):
+        if not self.token:
+            return False
+        try:
+            return requests.get(self.url + "/api/", headers=self._h(), timeout=4).status_code == 200
+        except Exception:
+            return False
+
+    def has(self, target, command):
+        return f"{target}:{command}" in self.map["commands"]
+
+    def run(self, target, command):
+        """สั่งตามตารางผูก → (ok, ข้อความ)"""
+        key = f"{target}:{command}"
+        m = self.map["commands"].get(key)
+        if not m:
+            return False, f"ยังไม่ได้ผูก {key} กับ Home Assistant (habridge.json)"
+        try:
+            r = requests.post(f"{self.url}/api/services/{m[0]}/{m[1]}", headers=self._h(), json={"entity_id": m[2]}, timeout=15)
+            return (r.status_code == 200), (f"{m[2]} ok" if r.status_code == 200 else f"HA http {r.status_code} {r.text[:80]}")
+        except Exception as e:
+            return False, f"HA เรียกไม่ได้: {str(e)[:80]}"
+
+    def state(self, entity):
+        try:
+            r = requests.get(f"{self.url}/api/states/{entity}", headers=self._h(), timeout=4)
+            return r.json().get("state") if r.status_code == 200 else None
+        except Exception:
+            return None
+
+    def snapshot_states(self):
+        out = {}
+        for key, spec in self.map["states"].items():
+            s = self.state(spec.get("entity", ""))
+            if s in (None, "unavailable", "unknown"):
+                continue
+            if key.startswith("sensor:"):
+                v = {"open": s == "on"}
+                if spec.get("battery"):
+                    b = self.state(spec["battery"])
+                    try:
+                        v["battery"] = int(float(b))
+                    except Exception:
+                        pass
+                out[key] = v
+            else:
+                out[key] = {"on": s == "on"}
+        return out
+
+
+class Guard:
+    def __init__(self, load_model=True):
         self.cfg = load_cfg()
         self.sec = json.load(open(SEC_FILE, encoding="utf-8"))
         self.auth = HTTPDigestAuth(self.cfg["nvr_user"], open(self.cfg["pw_file"]).read().strip())
-        from ultralytics import YOLO
-        self.model = YOLO(self.cfg["model"])
-        self.names = self.model.names
+        self.ha = HA()
+        self.q = queue.Queue()      # คำขอปิดประตูจากเธรด poller → เธรดหลัก (ตรวจกล้อง)
+        self.current = None         # id คำขอที่กำลังทำ (กันรับซ้ำ)
+        if load_model:
+            from ultralytics import YOLO
+            self.model = YOLO(self.cfg["model"])
+            self.names = self.model.names
 
     # ---------- door-api ----------
     def api(self, **body):
@@ -125,17 +223,26 @@ class Guard:
         tok, to = self.sec.get("line_token"), self.sec.get("line_to") or []
         if not tok or not to:
             return
-        msgs = [{"type": "text", "text": text}]
-        if image_b64 and req_id:
-            url = f"{self.sec['door_api'].replace('/webhook/door-api', '')}/webhook/door-api-image?id={req_id}"   # (ยังไม่มี endpoint รูป → ส่งข้อความอย่างเดียว)
-            url = None
-            if url:
-                msgs.append({"type": "image", "originalContentUrl": url, "previewImageUrl": url})
+        msgs = [{"type": "text", "text": text}]   # (ยังไม่มี endpoint รูป → ส่งข้อความอย่างเดียว)
         try:
             requests.post("https://api.line.me/v2/bot/message/multicast", headers={"Authorization": tok, "Content-Type": "application/json"},
                           json={"to": to, "messages": msgs}, timeout=15)
         except Exception as e:
             log("LINE failed:", e)
+
+    # ---------- สั่งปิดจริง (หลังตรวจว่าขอบประตูว่าง) ----------
+    def close_now(self, sh, who):
+        """คืน (ok, detail) — HA ในเครื่องใช้ได้: สั่งฉากปิดตรง ๆ (เร็ว ไม่อ้อมผ่าน n8n) · ไม่งั้น door-api close force (เส้นทาง Tuya เดิม)"""
+        if self.ha.alive():
+            res = []
+            for d in (["1", "2"] if sh == "both" else [sh]):
+                name = f"ประตูม้วน {d}"
+                ok, msg = self.ha.run(f"door{d}", "close") if self.ha.has(f"door{d}", "close") else (False, "ยังไม่มีฉากปิดใน Home Assistant")
+                res.append((name, ok, msg))
+            return all(r[1] for r in res), " | ".join(f"{n}: {'ok' if ok else msg}" for n, ok, msg in res)
+        r = self.api(action="close", shutter=sh, force=True, source="pi", user=f"doorguard ({who})")
+        detail = " | ".join(f"{x.get('name')}: {'ok' if x.get('ok') else x.get('msg')}" for x in (r.get("results") or []))
+        return bool(r.get("ok")), detail or (r.get("error") or "ไม่มีผลตอบกลับ")
 
     # ---------- main loop ----------
     def handle(self, req):
@@ -152,9 +259,8 @@ class Guard:
                 log(f"  #{rid} ถูกยกเลิก"); return
             if not blocked:
                 self.update(rid, "closing", "ขอบประตูว่าง กำลังสั่งปิด")
-                r = self.api(action="close", shutter=sh, force=True, source="pi", user=f"doorguard ({req.get('requested_by') or 'ตารางเวลา'})")
-                ok = bool(r.get("ok")); detail = " | ".join(f"{x.get('name')}: {'ok' if x.get('ok') else x.get('msg')}" for x in (r.get("results") or []))
-                self.update(rid, "closed" if ok else "error", detail or (r.get("error") or "ไม่มีผลตอบกลับ"))
+                ok, detail = self.close_now(sh, req.get("requested_by") or "ตารางเวลา")
+                self.update(rid, "closed" if ok else "error", detail)
                 log(f"  #{rid} {'ปิดแล้ว' if ok else 'ปิดไม่สำเร็จ'}: {detail}")
                 return
             waited = int(time.time() - t0)
@@ -168,30 +274,81 @@ class Guard:
                 log(f"  #{rid} timeout"); return
             time.sleep(self.cfg["retry_sec"])
 
-    def run(self, once=False):
-        log("doorguard start", {k: self.cfg[k] for k in ("poll_sec", "retry_sec", "max_wait_sec", "conf", "roi_frac")}, "zones:", {k: v["channel"] for k, v in self.cfg["zones"].items()})
+    def poll_once(self, st):
+        """1 รอบของ poller: st = dict สถานะข้ามรอบ {done, last_states, last_push, mode}"""
+        ha_ok = self.ha.alive()
+        if ha_ok:
+            body = {"action": "pi_poll"}
+            if st["done"]:
+                body["done"] = st["done"]
+            states = self.ha.snapshot_states()
+            if states != st["last_states"] or time.time() - st["last_push"] > 60:
+                body["states"] = states
+            r = self.api(**body)
+            if r.get("ok") and "commands" in r:
+                if st["mode"] != "ha":
+                    log("โหมด Home Assistant: รับคำสั่งผ่าน pi_poll"); st["mode"] = "ha"
+                st["done"] = []
+                if "states" in body:
+                    st["last_states"], st["last_push"] = states, time.time()
+                for c in r.get("commands") or []:
+                    ok, msg = self.ha.run(str(c.get("target")), str(c.get("command")))
+                    log(f"HA คำสั่ง #{c.get('id')} {c.get('target')} {c.get('command')} จาก {c.get('requested_by') or c.get('source')}: {'ok' if ok else msg}")
+                    st["done"].append({"id": c.get("id"), "ok": ok, "msg": msg, "target": c.get("target"), "command": c.get("command")})
+                return r.get("close_request")
+            # workflow ยังเป็นรุ่นเก่า (ไม่รู้จัก pi_poll) → ตกไปใช้ close_take ด้านล่าง
+        if st["mode"] != "legacy":
+            log("โหมดเดิม: ถาม close_take (" + ("workflow ยังไม่รองรับ pi_poll" if ha_ok else "Home Assistant ใช้ไม่ได้/ยังไม่ตั้ง token") + ")"); st["mode"] = "legacy"
+        return (self.api(action="close_take") or {}).get("request")
+
+    def poller(self):
+        st = {"done": [], "last_states": None, "last_push": 0, "mode": ""}
         while True:
             try:
-                req = (self.api(action="close_take") or {}).get("request")
-                if req and req.get("id"):
-                    self.handle(req)
-                elif once:
-                    log("ไม่มีคำขอค้าง"); return
+                req = self.poll_once(st)
+                if req and req.get("id") and req.get("id") != self.current and self.q.empty():
+                    self.q.put(req)
+            except Exception as e:
+                log("poll error:", e); traceback.print_exc()
+            time.sleep(self.cfg["poll_sec"])
+
+    def run(self, once=False):
+        log("doorguard start", {k: self.cfg[k] for k in ("poll_sec", "retry_sec", "max_wait_sec", "conf", "roi_frac")}, "zones:", {k: v["channel"] for k, v in self.cfg["zones"].items()},
+            "| HA:", "พร้อม" if self.ha.alive() else "ไม่พร้อม", "| คำสั่งที่ผูก:", len(self.ha.map["commands"]))
+        if once:
+            req = self.poll_once({"done": [], "last_states": None, "last_push": 0, "mode": ""})
+            if req and req.get("id"):
+                self.handle(req)
+            else:
+                log("ไม่มีคำขอค้าง")
+            return
+        threading.Thread(target=self.poller, daemon=True).start()
+        while True:
+            try:
+                req = self.q.get()
+                self.current = req.get("id")
+                self.handle(req)
             except Exception as e:
                 log("loop error:", e); traceback.print_exc()
-            if once:
-                return
-            time.sleep(self.cfg["poll_sec"])
+            finally:
+                self.current = None
 
 
 if __name__ == "__main__":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg == "ha":      # เช็คการเชื่อม Home Assistant (ไม่โหลด YOLO ไม่สั่งอุปกรณ์)
+        g = Guard(load_model=False)
+        print("HA alive:", g.ha.alive(), "| url:", g.ha.url, "| token:", "มี" if g.ha.token else "ไม่มี")
+        print("commands:", ", ".join(sorted(g.ha.map["commands"])))
+        print("states:", json.dumps(g.ha.snapshot_states(), ensure_ascii=False))
+        sys.exit(0)
     g = Guard()
-    if len(sys.argv) > 1 and sys.argv[1] == "check":
+    if arg == "check":
         for d in g.cfg["zones"]:
             hits, im = g.check_zone(d)
             p = f"/tmp/doorguard_ch{g.cfg['zones'][d]['channel']:02d}.jpg"; im.thumbnail((1600, 900)); im.save(p, quality=80)
             print(g.cfg["zones"][d]["name"], "→", ("กีดขวาง " + json.dumps(hits, ensure_ascii=False)) if hits else "ว่าง", "|", p)
-    elif len(sys.argv) > 1 and sys.argv[1] == "once":
+    elif arg == "once":
         g.run(once=True)
     else:
         g.run()
