@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
+import { loadPartFrt, frtForRow } from "../lib/partFrt";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/fast-moving-api";
 const MASTER_API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/spare-master-api";
@@ -119,6 +120,9 @@ export default function FastMovingPage({ currentUser }) {
   }
 
   useEffect(() => { fetchData(); fetchCarModels(); fetchProductGroups(); }, []);
+  // เวลาในการบริการจากคู่มืออะไหล่ Honda (ไฟล์ใหญ่ โหลดแยกหลังหน้าเปิด — user 2026-11-16 ขอช่องเวลาบริการต่อรหัส)
+  const [frtData, setFrtData] = useState(null);
+  useEffect(() => { let alive = true; loadPartFrt().then((d) => { if (alive) setFrtData(d); }); return () => { alive = false; }; }, []);
 
   async function fetchProductGroups() {
     try {
@@ -426,7 +430,9 @@ export default function FastMovingPage({ currentUser }) {
       if (!models.some(m => m.sel_brand === filterBrand)) return false;
     }
     if (filterCode !== "all") {
-      if (!models.some(m => m.sel_code === filterCode)) return false;
+      // tag ที่ไม่ระบุแบบ (= ใช้ทั้งรุ่น) ของรุ่นเดียวกับแบบที่เลือก นับว่าใช้กับแบบนั้นด้วย — เดิมเลือกแบบแล้วรายการที่ผูกแค่ระดับรุ่นหายหมด (user 2026-11-16: เลือก Wave125/AFS125CSBT แล้วไม่ขึ้นสเตอร์หน้า)
+      const codeRun = filterRun !== "all" ? filterRun : (carModels.find(cm => cm.model_code === filterCode)?.marketing_name || "");
+      if (!models.some(m => m.sel_code === filterCode || (!m.sel_code && codeRun && m.sel_run === codeRun))) return false;
     }
     if (filterRun !== "all") {
       if (!models.some(runMatches)) return false;
@@ -596,6 +602,7 @@ export default function FastMovingPage({ currentUser }) {
               <th style={th}>ชื่อสินค้า</th>
               <th style={{ ...th, textAlign: "center" }}>รูป</th>
               <th style={th}>รุ่นที่ใช้</th>
+              <th style={{ ...th, textAlign: "center" }} title="เวลาในการบริการ (FRT) ตามคู่มือรายการอะไหล่ Honda · 0.1 ชม. = 6 นาที · ≈ = เทียบจากชื่อหัวข้อบริการ · เลือกรุ่นในตัวกรองเพื่อดูเวลาของรุ่นนั้น">เวลาบริการ</th>
               <th style={{ ...th, textAlign: "right" }}>คงเหลือ</th>
               <th style={{ ...th, textAlign: "right" }}>ราคา</th>
               <th style={th}>หน่วย</th>
@@ -609,6 +616,7 @@ export default function FastMovingPage({ currentUser }) {
               <tr><td colSpan={13} style={{ textAlign: "center", padding: 20 }}>ไม่พบข้อมูล</td></tr>
             ) : paged.map((r, i) => {
               const qty = Number(r.quantity || 0);
+              const frt = frtData ? frtForRow(frtData, r, filterRun) : null;
               return (
                 <tr key={r.id || i} style={{ borderBottom: "1px solid #e5e7eb", background: selected[r.id] ? "#fef9c3" : qty <= 0 ? "#fef2f2" : i % 2 === 0 ? "#fff" : "#f9fafb" }}>
                   <td style={{ ...td, textAlign: "center" }}><input type="checkbox" checked={!!selected[r.id]} onChange={() => toggleOne(r.id)} /></td>
@@ -640,6 +648,14 @@ export default function FastMovingPage({ currentUser }) {
                         ))}
                       </div>
                     ) : <span style={{ color: "#9ca3af" }}>ทั่วไป +</span>}
+                  </td>
+                  <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }} title={frt ? frt.title : "ไม่มีเวลาบริการของรหัสนี้ในคู่มืออะไหล่ Honda"}>
+                    {frt ? (
+                      <>
+                        <div style={{ fontWeight: 700, color: frt.approx ? "#92400e" : "#0f766e" }}>{frt.approx ? "≈ " : ""}{frt.label} ชม.</div>
+                        <div style={{ fontSize: 10, color: "#6b7280" }}>{frt.minutes} นาที</div>
+                      </>
+                    ) : <span style={{ color: "#d1d5db" }}>-</span>}
                   </td>
                   <td style={{ ...td, textAlign: "right", fontWeight: 700, color: qty <= 0 ? "#ef4444" : "#065f46" }}>{fmtQty(qty)}</td>
                   <td style={{ ...td, textAlign: "right" }}>{fmt(r.unit_price)}</td>

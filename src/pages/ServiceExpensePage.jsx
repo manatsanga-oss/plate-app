@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/master-data-api";
 
@@ -31,6 +31,8 @@ export default function ServiceExpensePage({ currentUser }) {
   const [filterIncomeType, setFilterIncomeType] = useState("");
   const [includeInactive, setIncludeInactive] = useState(true);
   const [message, setMessage] = useState("");
+  const [formError, setFormError] = useState("");  // "" | "name" | "amount" | "save:<รายละเอียด>"
+  const nameRef = useRef(null);
 
   useEffect(() => {
     fetchData();
@@ -67,12 +69,18 @@ export default function ServiceExpensePage({ currentUser }) {
   }
 
   async function handleSave() {
-    if (!form.expense_name.trim()) { setMessage("❌ กรุณากรอกชื่อรายการ"); return; }
+    // แจ้งเตือนในกล่องฟอร์ม (ข้อความบนหน้าหลักถูกกล่องฟอร์มบัง มองไม่เห็น)
+    if (!form.expense_name.trim()) {
+      setFormError("name");
+      nameRef.current?.focus();
+      nameRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      return;
+    }
     // amount required only for "fixed" expense type
     if (form.expense_type === "fixed" && (!form.amount || isNaN(Number(form.amount)))) {
-      setMessage("❌ กรุณากรอกจำนวนเงิน (ค่าใช้จ่ายแบบคงที่)"); return;
+      setFormError("amount"); return;
     }
-    setSaving(true); setMessage("");
+    setSaving(true); setMessage(""); setFormError("");
     try {
       const payload = {
         action: editTarget ? "update_service_expense" : "save_service_expense",
@@ -80,16 +88,17 @@ export default function ServiceExpensePage({ currentUser }) {
         ...form,
         group_by: tab,
       };
-      await fetch(API_URL, {
+      const res = await fetch(API_URL, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setShowForm(false);
       setEditTarget(null);
       setForm(emptyForm());
       setMessage(`✅ ${editTarget ? "แก้ไข" : "เพิ่ม"}สำเร็จ`);
       fetchData();
-    } catch { setMessage("❌ เกิดข้อผิดพลาด"); }
+    } catch (e) { setFormError(`save:${e?.message || ""}`); }
     setSaving(false);
   }
 
@@ -123,11 +132,13 @@ export default function ServiceExpensePage({ currentUser }) {
       status: r.status || "active",
     });
     setEditTarget(r);
+    setFormError("");
     setShowForm(true);
   }
   function openAdd() {
     setForm({ ...emptyForm(), group_by: tab });
     setEditTarget(null);
+    setFormError("");
     setShowForm(true);
   }
 
@@ -278,8 +289,11 @@ export default function ServiceExpensePage({ currentUser }) {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div style={{ gridColumn: "1 / span 2" }}>
                 <label style={lbl}>ชื่อรายการค่าใช้จ่าย *</label>
-                <input value={form.expense_name} onChange={e => setForm(f => ({ ...f, expense_name: e.target.value }))}
-                  placeholder="เช่น ค่าตรวจสภาพรถ, ค่าธรรมเนียมขนส่ง..." style={inp} />
+                <input ref={nameRef} value={form.expense_name}
+                  onChange={e => { setForm(f => ({ ...f, expense_name: e.target.value })); if (formError === "name") setFormError(""); }}
+                  placeholder="เช่น ค่าตรวจสภาพรถ, ค่าธรรมเนียมขนส่ง..."
+                  style={{ ...inp, ...(formError === "name" ? { border: "2px solid #dc2626", background: "#fef2f2" } : {}) }} />
+                {formError === "name" && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 3, fontWeight: 600 }}>กรุณากรอกชื่อรายการค่าใช้จ่าย (เช่น ค่าธรรมเนียมขนส่ง) ก่อนบันทึก</div>}
               </div>
 
               <div>
@@ -327,10 +341,11 @@ export default function ServiceExpensePage({ currentUser }) {
               <div>
                 <label style={lbl}>จำนวนเงิน {form.expense_type === "fixed" ? "*" : ""}</label>
                 <input type="number" step="0.01" min="0" value={form.amount}
-                  onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                  onChange={e => { setForm(f => ({ ...f, amount: e.target.value })); if (formError === "amount") setFormError(""); }}
                   disabled={form.expense_type === "variable"}
                   placeholder={form.expense_type === "variable" ? "ผู้ใช้กำหนดตอนใช้งาน" : ""}
-                  style={{ ...inp, fontFamily: "monospace", background: form.expense_type === "variable" ? "#f3f4f6" : "#fff", color: form.expense_type === "variable" ? "#9ca3af" : "#1f2937" }} />
+                  style={{ ...inp, fontFamily: "monospace", background: form.expense_type === "variable" ? "#f3f4f6" : "#fff", color: form.expense_type === "variable" ? "#9ca3af" : "#1f2937", ...(formError === "amount" ? { border: "2px solid #dc2626", background: "#fef2f2" } : {}) }} />
+                {formError === "amount" && <div style={{ fontSize: 12, color: "#dc2626", marginTop: 3, fontWeight: 600 }}>กรุณากรอกจำนวนเงิน (ค่าใช้จ่ายแบบคงที่)</div>}
                 <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
                   {form.expense_type === "variable" ? "ไม่ต้องระบุ — ผู้ใช้กรอกตอนใช้จริง" : "ใส่เป็นบาท"}
                 </div>
@@ -380,10 +395,18 @@ export default function ServiceExpensePage({ currentUser }) {
               </div>
             </div>
 
+            {formError && (
+              <div style={{ marginTop: 12, padding: "8px 12px", borderRadius: 8, background: "#fee2e2", color: "#991b1b", fontSize: 13, fontWeight: 600 }}>
+                {formError === "name" ? "❌ ยังไม่ได้กรอก \"ชื่อรายการค่าใช้จ่าย\" (ช่องบนสุด)"
+                  : formError === "amount" ? "❌ ยังไม่ได้กรอกจำนวนเงิน"
+                  : `❌ บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง${formError.slice(5) ? ` (${formError.slice(5)})` : ""}`}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
               <button onClick={() => setShowForm(false)} disabled={saving}
                 style={{ padding: "8px 16px", background: "#e5e7eb", color: "#374151", border: "none", borderRadius: 8, cursor: "pointer" }}>ยกเลิก</button>
-              <button onClick={handleSave} disabled={saving || !form.expense_name.trim()}
+              <button onClick={handleSave} disabled={saving}
                 style={{ padding: "8px 20px", background: saving ? "#9ca3af" : "#072d6b", color: "#fff", border: "none", borderRadius: 8, cursor: saving ? "not-allowed" : "pointer", fontWeight: 700 }}>
                 {saving ? "กำลังบันทึก..." : "💾 บันทึก"}
               </button>

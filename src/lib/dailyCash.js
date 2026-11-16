@@ -416,7 +416,7 @@ export function buildDailyCashItems(src, ctx) {
     addTransferBy(split, [], d.payment_account);
     return {
       kind: "deposit", category: "รายได้เงินมัดจำจองรถ",
-      doc_no: d.deposit_no, date: d.deposit_date, ref_no: "",
+      doc_no: d.deposit_no, date: d.deposit_date, ref_no: String(d.manual_receipt_no || "").trim(), // เลขที่/เล่มที่ ใบเสร็จรับเงิน (ใบเสร็จมือ) ของเงินมัดจำจองรถ — แสดงในช่องเอกสารอ้างอิง (user 2026-11-13)
       customer_name: d.customer_name, seller: "", saleAmount: 0,
       split, received: amt,
       branch_key: bc5(d.branch_code), branch_name: d.branch_name || d.branch_code || "ไม่ระบุสาขา",
