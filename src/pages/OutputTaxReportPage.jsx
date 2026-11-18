@@ -11,6 +11,12 @@ const TAXINV_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/list-tax-i
 const ACC_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/accounting-api";
 const FLOWTAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/flow-input-tax-api";
 const INTAX_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/input-tax-api"; // เตรียมแบบภาษีรายเดือน (tax_monthly_filings)
+// ค่าบริการรับฝากค่างวด 15 บาท/รายการ (เมนูรับฝากเงิน — other_income_items.fee ผ่าน deposit-income-api) — user 2026-11-18:
+//   สนง.บัญชีออกใบกำกับ "สรุปเดือนละใบต่อสาขา" (รายงานภาษีขาย: OI1…=SCY01, OI2…=SCY04, OI3…=SCY07 ลูกค้า "เงินสด") → เพิ่มบรรทัดสรุปต่อสาขาให้ยอดตรง ภ.พ.30
+//   เริ่มงวด ต.ค.69 (งวดแรกที่ไม่มีแถว "· ค่าบริการ" จากไฟล์ upload แล้ว — งวดก่อนหน้านั้นค่าบริการมาจาก upload/สอบทานไปแล้ว ไม่แตะย้อนหลัง)
+const DEPOSIT_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/deposit-income-api";
+const DEPOSIT_FEE_FROM = "2026-10";
+const FEE_BRANCH_AFF = { SCY05: "ป.เปา", SCY06: "ป.เปา", SCY01: "สิงห์ชัย", SCY04: "สิงห์ชัย", SCY07: "สิงห์ชัย", SCY10: "สิงห์ชัย" };
 
 const AFF_BRANCHES = { "ป.เปา": ["PAPAO", "NAKORNLUANG"], "สิงห์ชัย": ["SINGCHAI"] };
 const BRANCH_AFF = { PAPAO: "ป.เปา", NAKORNLUANG: "ป.เปา", SINGCHAI: "สิงห์ชัย" };
@@ -162,8 +168,36 @@ export default function OutputTaxReportPage({ currentUser }) {
           amount_before_vat: Number(x.amount_before_vat || 0), vat_amount: Number(x.vat_amount || 0),
           total_amount: Number(x.difference_amount || 0), cancelled: false,
         }));
+      // ค่าบริการรับฝากค่างวด — สรุปเดือนละบรรทัดต่อสาขา (ยอดรวม VAT ถอด 7/107 เช่น 105 → 98.13 + 6.87 ตรงใบสรุปของ สนง.บัญชี)
+      let feeRows = [];
+      if (month >= DEPOSIT_FEE_FROM) {
+        const dep = await fetch(DEPOSIT_URL, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "list_deposit_income", date_from: from, date_to: to }),
+        }).then(r => r.json()).catch(() => null);
+        let depList = [];
+        try { depList = typeof dep?.listjson === "string" ? JSON.parse(dep.listjson) : []; } catch { depList = []; }
+        const g = {};
+        (Array.isArray(depList) ? depList : []).forEach(x => {
+          const br = String(x.branch_code || "").split(" ")[0];
+          const fee = Number(x.fee || 0);
+          if (fee <= 0 || FEE_BRANCH_AFF[br] !== affiliation) return;
+          if (!g[br]) g[br] = { total: 0, n: 0 };
+          g[br].total += fee; g[br].n += 1;
+        });
+        feeRows = Object.keys(g).sort().map(br => {
+          const total = Math.round(g[br].total * 100) / 100;
+          const base = Math.round(total * 100 / 107 * 100) / 100;
+          return {
+            source: "fee_insurance", branch: br, summary: true,
+            invoice_date: to, tax_invoice_no: `${br}-FEE${ym.slice(2)} · ค่าบริการรับฝาก`,
+            customer_name: `เงินสด — ค่าบริการรับฝากค่างวด ${g[br].n} รายการ (ใบกำกับสรุปรายเดือน)`, customer_tax_id: null,
+            amount_before_vat: base, vat_amount: Math.round((total - base) * 100) / 100, total_amount: total, cancelled: false,
+          };
+        });
+      }
       // เรียงตามวันที่ + เลขใบกำกับ
-      const all = [...veh, ...others, ...partSvc, ...debitNotes].sort((a, b) =>
+      const all = [...veh, ...others, ...partSvc, ...debitNotes, ...feeRows].sort((a, b) =>
         String(a.invoice_date || "").localeCompare(String(b.invoice_date || "")) ||
         String(a.tax_invoice_no || "").localeCompare(String(b.tax_invoice_no || "")));
       setRows(all);
@@ -380,7 +414,7 @@ export default function OutputTaxReportPage({ currentUser }) {
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.amount_before_vat)}</td>
                   <td style={{ ...td, textAlign: "right", fontFamily: "monospace" }}>{fmt(r.vat_amount)}</td>
                   <td style={{ ...td, textAlign: "center", whiteSpace: "nowrap" }}>
-                    {(r.source === "part_service" || r.source === "fee_insurance") && !r.cancelled && (
+                    {(r.source === "part_service" || r.source === "fee_insurance") && !r.cancelled && !r.summary && (
                       movedInSet.has(stripDoc(r.tax_invoice_no)) ? (
                         <button onClick={() => cancelMove(stripDoc(r.tax_invoice_no))}
                           title={`ย้ายเข้าจากงวด ${fmtPeriod(moveOf(stripDoc(r.tax_invoice_no))?.from_period)} — กดเพื่อยกเลิกย้าย`}

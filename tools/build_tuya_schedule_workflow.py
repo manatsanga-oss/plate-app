@@ -36,7 +36,12 @@ SEED = ("INSERT INTO tuya_device_schedules (remote_id, blaster, kind, name, on_t
         "('eb070b3f31c73fee51vth8','eb57949ab6012fb6644pat','tv','TV','08:00','17:00'), "
         "('eb009dfb93fb11e468r3xb','','plug','ไฟศาลเจ้า','18:00','06:00') ON CONFLICT (remote_id) DO NOTHING;")   # ไฟศาลเจ้า: เปิดค่ำ ปิดเช้า (ข้ามคืนได้ เพราะเวลาเปิด/ปิดเช็คแยกกัน)
 
-PREPARE = """// Tuya Schedule v2 — action: tick (จาก Schedule ทุกนาที) · list · save_schedule · cmd · run(slot on/ac/tv)
+# Home Assistant บน Pi (2026-11-16): ตารางคิวคำสั่ง/สถานะชุดเดียวกับ Door_Control_Workflow (doorguard บน Pi มารับผ่าน door-api pi_poll) — CREATE TABLE IF NOT EXISTS เท่านั้น ห้าม ALTER
+HA_DDL = ("CREATE TABLE IF NOT EXISTS ha_commands (id SERIAL PRIMARY KEY, target TEXT NOT NULL, command TEXT NOT NULL, source TEXT, requested_by TEXT, status TEXT NOT NULL DEFAULT 'pending', result TEXT, created_at TIMESTAMPTZ DEFAULT now(), taken_at TIMESTAMPTZ, done_at TIMESTAMPTZ); "
+          "CREATE TABLE IF NOT EXISTS ha_states (key TEXT PRIMARY KEY, state JSONB, updated_at TIMESTAMPTZ DEFAULT now());")
+HA_SEL = "(SELECT COALESCE(json_object_agg(h.key, json_build_object('state', h.state, 'age', EXTRACT(EPOCH FROM (now() - h.updated_at))::int)), '{}'::json) FROM ha_states h)::text AS ha_states"
+
+PREPARE = """// Tuya Schedule v4 (v2 ตารางรายอุปกรณ์ · v3 ประหยัดโควต้า · v4 สั่งผ่าน Home Assistant บน Pi เมื่อผูกไว้) — action: tick (จาก Schedule ทุกนาที) · list · save_schedule · cmd · run(slot on/ac/tv)
 const cfg = { clientId: '__CID__', secret: '__SEC__', base: '__BASE__' };
 const BLASTERS = [
   { id: 'eb57949ab6012fb6644pat', name: 'Smart IR (HMS06WB3S)' },
@@ -57,11 +62,12 @@ const th = parts.hour + ':' + parts.minute;
 const dow = String({ Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[parts.weekday] || 0);
 const today = parts.year + '-' + parts.month + '-' + parts.day;
 const cmd = (action === 'cmd' && b.remote_id) ? { remote_id: String(b.remote_id), power: Number(b.power) ? 1 : 0, key: String(b.key || 'Power') } : null;
+const who = String(b.user || '').slice(0, 60);
 const hhmm = (v) => { const m = String(v || '').trim().match(/^(\\d{1,2}):(\\d{2})$/); return m ? (m[1].padStart(2, '0') + ':' + m[2]) : null; };
 const sched = (action === 'save_schedule' && b.remote_id) ? { remote_id: String(b.remote_id).slice(0, 40), blaster: String(b.blaster || '').slice(0, 40), kind: String(b.kind || '').slice(0, 8), name: String(b.name || '').slice(0, 80),
   on_time: hhmm(b.on_time), off_time: hhmm(b.off_time), days: String(b.days || '1234567').replace(/[^1-7]/g, '') || '1234567', enabled: b.enabled !== false && b.enabled !== 'false' } : null;
 const refresh = b.refresh === true || b.refresh === 'true';   // list + refresh = ดึงรายการรีโมทจาก Tuya ใหม่ (ปกติใช้ cache)
-return [{ json: { cfg, blasters: BLASTERS, plugs: PLUGS, action, slot: String(b.slot || ''), th, dow, today, cmd, sched, refresh } }];
+return [{ json: { cfg, blasters: BLASTERS, plugs: PLUGS, action, slot: String(b.slot || ''), th, dow, today, cmd, sched, refresh, who } }];
 """.replace("__CID__", CLIENT_ID).replace("__SEC__", SECRET).replace("__BASE__", BASE)
 
 SCHED_SQL = ("""// ตารางเวลาต่ออุปกรณ์ใน Postgres: สร้างตาราง + seed ค่าเริ่มต้น (08:00 เปิด · 17:00 ปิดทีวี · 17:10 ปิดแอร์) + บันทึกเมื่อ save_schedule → คืนทุกแถว
@@ -70,6 +76,7 @@ const esc = (s) => String(s == null ? '' : s).replace(/'/g, "''");
 const sTxt = (v) => (v == null || String(v).trim() === '') ? 'NULL' : `'${esc(v)}'`;
 let q = `__DDL__
 __SEED__
+__HA_DDL__
 `;
 if (d.sched) {
   const s = d.sched;
@@ -77,12 +84,13 @@ if (d.sched) {
 ON CONFLICT (remote_id) DO UPDATE SET blaster = COALESCE(EXCLUDED.blaster, tuya_device_schedules.blaster), kind = COALESCE(EXCLUDED.kind, tuya_device_schedules.kind), name = COALESCE(EXCLUDED.name, tuya_device_schedules.name), on_time = EXCLUDED.on_time, off_time = EXCLUDED.off_time, days = EXCLUDED.days, enabled = EXCLUDED.enabled, updated_at = now();
 `;
 }
-q += `SELECT remote_id, blaster, kind, name, on_time, off_time, days, enabled, last_fired, to_char(updated_at AT TIME ZONE 'Asia/Bangkok', 'DD/MM HH24:MI') AS updated_local FROM tuya_device_schedules ORDER BY kind, name;`;
+q += `SELECT remote_id, blaster, kind, name, on_time, off_time, days, enabled, last_fired, to_char(updated_at AT TIME ZONE 'Asia/Bangkok', 'DD/MM HH24:MI') AS updated_local, __HA_SEL__ FROM tuya_device_schedules ORDER BY kind, name;`;
 return [{ json: { query: q } }];
 """
     # ตัด comment -- ก่อนยุบ DDL เป็นบรรทัดเดียว (comment กลืน SQL ที่เหลือ) และแทน __SEED__ ด้วย INSERT ค่าเริ่มต้น
     .replace("__DDL__", re.sub(r"--[^\n]*", "", DDL).replace("\n", " "))
-    .replace("__SEED__", SEED))
+    .replace("__SEED__", SEED)
+    .replace("__HA_DDL__", HA_DDL).replace("__HA_SEL__", HA_SEL))
 
 TOKEN_SIGN = HELPERS + """
 const d = $('Prepare').first().json; const t = String(Date.now());
@@ -108,8 +116,18 @@ CMD_PREP = HELPERS + """
 //   - tick ที่ไม่มีอุปกรณ์ถึงเวลา = ไม่เรียก Tuya เลย (ตัดสินจากตาราง Postgres อย่างเดียว)
 //   - token เก็บใน workflow static data ใช้ซ้ำจนใกล้หมดอายุ (~2 ชม.) · รายการรีโมท IR เก็บ cache ใน static data (ดึงใหม่เมื่อ list + refresh หรือยังไม่มี cache)
 //   - คำสั่งตามตาราง/สั่งเดี่ยว ใช้ข้อมูล blaster/kind จากตาราง tuya_device_schedules ได้เลย ไม่ต้อง list ก่อน
+// v4 (2026-11-16) เส้นทาง Home Assistant: Pi (doorguard) ส่ง heartbeat + รายการคำสั่งที่ผูกไว้ (_cmds0…) มาเก็บใน ha_states
+//   - อุปกรณ์ที่ Pi ผูกฉาก/สวิตช์ไว้ (plug:<id>:on|off, remote:<id>:on|off|power) และ Pi ยังออนไลน์ (heartbeat < 90 วิ) → เข้าคิว ha_commands ให้ Pi สั่งผ่าน HA (ไม่ใช้โควต้า Tuya)
+//   - ที่เหลือ / Pi เงียบ → ยิง Tuya OpenAPI เหมือนเดิม
 const d = $('Prepare').first().json;
-const schedules = $('PG Schedules').all().map((x) => x.json).filter((r) => r && r.remote_id);
+const rows = $('PG Schedules').all().map((x) => x.json).filter((r) => r && r.remote_id);
+let ha = {}; try { ha = JSON.parse((rows[0] && rows[0].ha_states) || '{}') || {}; } catch (e) { ha = {}; }
+const schedules = rows.map((r) => { const o = Object.assign({}, r); delete o.ha_states; return o; });
+const haAlive = !!(ha._heartbeat && Number(ha._heartbeat.age) < 90);
+const haSet = new Set();
+Object.keys(ha).forEach((k) => { if (k.indexOf('_cmds') === 0 && Number(ha[k].age) < 180 && ha[k].state && Array.isArray(ha[k].state.l)) ha[k].state.l.forEach((x) => haSet.add(String(x))); });
+const haTarget = (c) => (c.kind === 'plug' ? 'plug:' : 'remote:') + c.remote_id;
+const canHa = (c) => haAlive && haSet.has(haTarget(c) + ':' + c.what);
 const sd = $getWorkflowStaticData('global');
 let apiCalls = 0, tuyaError = '', tokenDead = false;   // tokenDead: ขอ token ไม่ผ่านในรอบนี้ (เช่นโควต้าหมด) → ไม่ขอซ้ำอีกในรอบเดียวกัน
 const http = async (method, path, body, access) => {
@@ -146,7 +164,8 @@ const blName = (id) => ((d.blasters || []).find((b) => b.id === id) || {}).name 
 const fromSched = schedules.filter((s) => s.kind === 'ac' || s.kind === 'tv').map((s) => ({ blaster: s.blaster || '', blasterName: blName(s.blaster), id: s.remote_id, name: s.name || s.remote_id, category: s.kind === 'ac' ? '5' : '2', brand: '' }));
 let irRemotes = Array.isArray(sd.remotes) && sd.remotes.length ? sd.remotes : null; let remotesFrom = irRemotes ? 'cache' : '';
 const cmdNeedsList = d.action === 'cmd' && d.cmd && !(irRemotes || fromSched).find((x) => x.id === d.cmd.remote_id) && !(d.plugs || []).find((x) => x.id === d.cmd.remote_id);
-if ((d.action === 'list' && (d.refresh || !irRemotes)) || (d.action === 'run' && !irRemotes) || cmdNeedsList) {
+const noCacheOk = haAlive && !d.refresh;   // Pi ออนไลน์: ไม่มี cache ก็ใช้รายการจากตารางเวลาได้ ไม่ต้องถาม Tuya (กด "โหลดรายการ" = refresh ถึงจะถาม)
+if ((d.action === 'list' && (d.refresh || (!irRemotes && !noCacheOk))) || (d.action === 'run' && !irRemotes && !noCacheOk) || cmdNeedsList) {
   const fresh = []; let okAny = false;
   for (const bl of (d.blasters || [])) {
     const r = await api('GET', `/v1.0/infrareds/${bl.id}/remotes`, null);
@@ -166,7 +185,10 @@ const plugCmd = (r, on) => ({ kind: 'plug', name: r.name, remote_id: r.id, metho
 const acCmd = (r, on) => ({ kind: 'ac', name: r.name, remote_id: r.id, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/air-conditioners/${r.id}/command`, body: { code: 'power', value: on ? 1 : 0 }, what: on ? 'on' : 'off' });
 const tvCmd = (r, what) => ({ kind: 'tv', name: r.name, remote_id: r.id, method: 'POST', path: `/v1.0/infrareds/${r.blaster}/remotes/${r.id}/command`, body: { key: 'Power' }, what: what || 'power' });
 const cmdFor = (r, on, what) => r.category === '5' ? acCmd(r, on) : (r.category === 'plug' ? plugCmd(r, on) : tvCmd(r, what));
-const meta = () => ({ api_calls: apiCalls, remotes_from: remotesFrom, tuya_error: tuyaError || null });
+let viaHa = 0;
+const meta = () => ({ api_calls: apiCalls, remotes_from: remotesFrom, tuya_error: tuyaError || null, ha_alive: haAlive, via_ha: viaHa });
+// หน้า Smart Office: บอกว่าอุปกรณ์ไหนสั่งผ่าน Home Assistant ได้
+remotes.forEach((r) => { const t = (r.category === 'plug' ? 'plug:' : 'remote:') + r.id; r.via_ha = haAlive && (haSet.has(t + ':on') || haSet.has(t + ':power')); });
 const calls = [];
 if (d.action === 'cmd' && d.cmd) {   // สั่งเดี่ยวจากหน้า Smart Office
   const r = remotes.find((x) => x.id === d.cmd.remote_id);
@@ -189,6 +211,8 @@ if (d.action === 'tick') {   // ตารางรายอุปกรณ์: �
 }
 if (d.action === 'list') {   // สถานะปลั๊ก (เปิด/ปิดอยู่) ให้หน้า Smart Office โชว์
   for (const r of PLUG) {
+    const hs = ha['plug:' + r.id];
+    if (haAlive && hs && Number(hs.age) < 180 && hs.state) { r.state = hs.state.on ? 'on' : 'off'; r.online = true; continue; }   // สถานะจาก Home Assistant (ไม่เรียก Tuya)
     const st = await api('GET', `/v1.0/iot-03/devices/${r.id}/status`, null);
     const sw = (st && Array.isArray(st.result) ? st.result : []).find((x) => x.code === 'switch_1');
     r.state = sw ? (sw.value ? 'on' : 'off') : null; r.online = !!(st && st.success);
@@ -197,18 +221,29 @@ if (d.action === 'list') {   // สถานะปลั๊ก (เปิด/ป
 if (!calls.length) return [{ json: Object.assign({ ok: true, noop: true, action: d.action, slot: d.slot, th: d.th, dow: d.dow, sent: 0, remotes, schedules, saved: !!d.sched }, meta()) }];
 const results = [];
 for (const c of calls) {
+  if (canHa(c)) {   // เข้าคิวให้ Pi สั่งผ่าน Home Assistant (Build Fired SQL เป็นคน INSERT ha_commands)
+    viaHa++;
+    results.push({ name: c.name, kind: c.kind, remote_id: c.remote_id, what: c.what, stamp: c.stamp || null, success: true, via: 'ha', msg: 'ส่งให้ Home Assistant แล้ว', ha: { target: haTarget(c), command: c.what } });
+    continue;
+  }
   const r = await api(c.method, c.path, c.body);
   results.push({ name: c.name, kind: c.kind, remote_id: c.remote_id, what: c.what, stamp: c.stamp || null, success: !!(r && r.success && r.result !== false), msg: r && (r.msg || r.code || '') });
 }
-return [{ json: Object.assign({ ok: results.every((x) => x.success), action: d.action, slot: d.slot, th: d.th, sent: results.length, results, remotes, schedules }, meta()) }];
+return [{ json: Object.assign({ ok: results.every((x) => x.success), action: d.action, slot: d.slot, th: d.th, sent: results.length, results, remotes, schedules, who: d.who || '' }, meta()) }];
 """
 
 FIRED_SQL = """// บันทึก last_fired ของอุปกรณ์ที่ยิงตามตารางสำเร็จ (กันยิงซ้ำในนาทีเดียวกัน) — ไม่มีอะไรยิง = SELECT 1
 const r = $input.first().json || {};
 const esc = (s) => String(s == null ? '' : s).replace(/'/g, "''");
 const fired = (r.results || []).filter((x) => x.stamp && x.success);
-if (!fired.length) return [{ json: { query: 'SELECT 1 AS nop' } }];
-const q = fired.map((x) => `UPDATE tuya_device_schedules SET last_fired = '${esc(x.stamp)}' WHERE remote_id = '${esc(x.remote_id)}';`).join('\\n') + '\\nSELECT 1 AS done;';
+// คำสั่งที่ต้องให้ Pi สั่งผ่าน Home Assistant → เข้าคิว ha_commands (doorguard มารับภายใน ~3 วิ)
+const haq = (r.results || []).filter((x) => x.ha && x.ha.target);
+if (!fired.length && !haq.length) return [{ json: { query: 'SELECT 1 AS nop' } }];
+const src = r.action === 'tick' ? 'schedule' : 'smartoffice';
+const by = r.action === 'tick' ? 'ตารางเวลา' : (r.who || 'Smart Office');
+let q = '';
+if (haq.length) q += `INSERT INTO ha_commands (target, command, source, requested_by) VALUES ` + haq.map((x) => `('${esc(x.ha.target)}', '${esc(x.ha.command)}', '${src}', '${esc(by + ' · ' + (x.name || ''))}')`).join(', ') + ';\\n';
+q += fired.map((x) => `UPDATE tuya_device_schedules SET last_fired = '${esc(x.stamp)}' WHERE remote_id = '${esc(x.remote_id)}';`).join('\\n') + '\\nSELECT 1 AS done;';
 return [{ json: { query: q } }];
 """
 

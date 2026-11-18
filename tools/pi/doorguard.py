@@ -11,7 +11,8 @@ user 2026-11-10: "กล้องหน้าร้าน 3 ตัว ตรว�
 
 ตัวเชื่อม Home Assistant (2026-11-16 — โควต้า Tuya IoT Core trial หมด จึงสั่งอุปกรณ์ผ่าน HA บน Pi ที่ล็อกอิน Smart Life แทน):
   - pi_poll เดียวกันได้ "commands" [{id, target, command}] ที่ n8n เข้าคิวไว้ (เปิด/หยุด/ปิดประตูจากเว็บ/LINE ฯลฯ) → เรียก HA REST ตามตารางผูกใน ~/nvr/habridge.json → ส่งผลกลับรอบถัดไป (done)
-  - ส่งสถานะเซนเซอร์ประตู/ปลั๊กจาก HA ไปเก็บที่ n8n (states) เมื่อเปลี่ยนหรือทุก 60 วิ · pi_poll แต่ละครั้งนับเป็น heartbeat (n8n ใช้เส้นทาง HA เมื่อ heartbeat < 90 วิ)
+  - คำสั่งจากตารางเวลา/หน้า Smart Office (Tuya Schedule workflow เข้าคิว ha_commands เหมือนกัน): target "plug:<tuya id>" / "remote:<remote id>" command on|off|power
+  - ส่งสถานะเซนเซอร์ประตู/ปลั๊กจาก HA + รายการคำสั่งที่ผูกไว้ (_cmds0…) ไปเก็บที่ n8n (states) เมื่อเปลี่ยนหรือทุก 60 วิ · pi_poll แต่ละครั้งนับเป็น heartbeat (n8n ใช้เส้นทาง HA เมื่อ heartbeat < 90 วิ)
   - HA ใช้ไม่ได้ (ไม่มี token/ล่ม) หรือ workflow ยังเป็นรุ่นเก่า → กลับไปถาม close_take แบบเดิม (ไม่มี heartbeat → n8n ใช้เส้นทาง Tuya)
 config: ~/nvr/doorguard.json · secrets: ~/nvr/doorguard_secrets.json {line_token, line_to[], door_api} · HA: ~/nvr/ha_secrets.json {url, token} (วางด้วย set_ha_token.sh) + ~/nvr/habridge.json
 ทดสอบ: python doorguard.py check  (ตรวจทุกบานครั้งเดียว ไม่สั่งปิด) · python doorguard.py once (รับคิว 1 รอบ) · python doorguard.py ha (เช็คการเชื่อม HA + สถานะ ไม่สั่งอุปกรณ์)
@@ -46,8 +47,26 @@ DEFAULT_HA_MAP = {
         "door1:open": ["scene", "turn_on", "scene.pratuu_1_epid"],
         "door1:stop": ["scene", "turn_on", "scene.hyud_pratuuhnaaraan"],
         "door1:close": ["scene", "turn_on", "scene.puue_pratuuhnaaraan"],
+        "door2:open": ["scene", "turn_on", "scene.epidpratuu_2"],   # ฉาก "เปิดประตู 2" / "หยุดประตู 2" / "ปิดประตู 2" (user สร้างในแอป Smart Life 2026-11-16)
+        "door2:stop": ["scene", "turn_on", "scene.hyudpratuu_2"],
+        "door2:close": ["scene", "turn_on", "scene.pidpratuu_2"],
         "plug:eb009dfb93fb11e468r3xb:on": ["switch", "turn_on", "switch.aifsaalecchaa_socket"],
         "plug:eb009dfb93fb11e468r3xb:off": ["switch", "turn_off", "switch.aifsaalecchaa_socket"],
+        # แอร์/ทีวี: 2026-11-18 user ลบฉากรวม ("เปิดแอร์"/"ปิด แอร์"/"เปิด ปิด ทีวี") แล้วทำฉากแยกตามตัวยิง IR — ผูกทีละตัวยิงเมื่อ user สร้างเสร็จ
+        # ตัวยิง LCD temp/humidity IR (eb619bef17ce0d7e9behnb): Air1 + TV samsung
+        "remote:eb827759879924b32aqxzr:on": ["scene", "turn_on", "scene.epidae_r_1"],    # Air1 ← ฉาก "เปิดแอร์ 1"
+        "remote:eb827759879924b32aqxzr:off": ["scene", "turn_on", "scene.pidae_r_1"],   # Air1 ← ฉาก "ปิดแอร์ 1"
+        # TV samsung ← ฉาก "เปิด/ปิด ทีวี Samsung" ปุ่ม Power แบบสลับ → on/off/power ชี้ฉากเดียว
+        **{f"remote:eba721ad7095f75fd6soqj:{what}": ["scene", "turn_on", "scene.epid_pid_thiiwii_samsung"] for what in ("on", "off", "power")},
+        # ตัวยิง Smart IR (HMS06WB3S) + IR ขาว (S06-T1-3S) — user ตั้งให้ 2 ตัวยิงคุมอุปกรณ์ชุดเดียวกัน (ฉากหนึ่งยิงจากทั้งสองตัว) · เลขแอร์ตามที่ user ตอบ 2026-11-18
+        "remote:ebcaecc68ae13e7545wnqh:on": ["scene", "turn_on", "scene.epid_ae_r_2"],   # Air Mitsubishi ตัวกลาง ← "เปิด แอร์ 2"
+        "remote:ebcaecc68ae13e7545wnqh:off": ["scene", "turn_on", "scene.pidae_r_2"],    # ← "ปิดแอร์ 2"
+        "remote:eb9d94dc94030307f0hw3l:on": ["scene", "turn_on", "scene.epidae_r_3"],    # แอร์ Mitsubishi IR ขาว ← "เปิดแอร์ 3"
+        "remote:eb9d94dc94030307f0hw3l:off": ["scene", "turn_on", "scene.pidae_r_3"],    # ← "ปิดแอร์ 3"
+        "remote:ebe6c6996c7797e91f5g3p:on": ["scene", "turn_on", "scene.epidae_r_4"],    # Air TCL ← "เปิดแอร์ 4"
+        "remote:ebe6c6996c7797e91f5g3p:off": ["scene", "turn_on", "scene.pidae_r_4"],    # ← "ปิดแอร์ 4"
+        # TV ← ฉาก "เปิดปิด ทีวี 1" ปุ่ม Power แบบสลับ
+        **{f"remote:eb070b3f31c73fee51vth8:{what}": ["scene", "turn_on", "scene.epidpid_thiiwii_1"] for what in ("on", "off", "power")},
     },
     "states": {
         "sensor:eb4e442c2dad986d38e5eu": {"entity": "binary_sensor.pratuuh_ng_faaykhaay_door", "battery": "sensor.pratuuh_ng_faaykhaay_battery"},
@@ -87,6 +106,7 @@ class HA:
         except Exception as e:
             log("habridge.json อ่านไม่ได้ ใช้ค่าเริ่มต้น:", e); self.map = DEFAULT_HA_MAP
         self.map.setdefault("commands", {}); self.map.setdefault("states", {})
+        self._recent = {}   # (domain, service, entity) → เวลาเรียกล่าสุด
 
     def _h(self):
         return {"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}
@@ -108,8 +128,15 @@ class HA:
         m = self.map["commands"].get(key)
         if not m:
             return False, f"ยังไม่ได้ผูก {key} กับ Home Assistant (habridge.json)"
+        # รีโมทหลายตัวผูกฉากเดียวกันได้ (เช่น ฉาก "เปิดแอร์" คุมแอร์ทุกเครื่อง) → ถึงเวลาเดียวกันเรียกฉากครั้งเดียวพอ
+        # (เฉพาะ remote: เท่านั้น — ประตู/ปลั๊กต้องสั่งทุกครั้ง โดยเฉพาะ "หยุด")
+        call = (m[0], m[1], m[2])
+        if target.startswith("remote:") and time.time() - self._recent.get(call, 0) < 30:
+            return True, f"{m[2]} ok (รวมกับคำสั่งก่อนหน้า)"
         try:
             r = requests.post(f"{self.url}/api/services/{m[0]}/{m[1]}", headers=self._h(), json={"entity_id": m[2]}, timeout=15)
+            if r.status_code == 200:
+                self._recent[call] = time.time()
             return (r.status_code == 200), (f"{m[2]} ok" if r.status_code == 200 else f"HA http {r.status_code} {r.text[:80]}")
         except Exception as e:
             return False, f"HA เรียกไม่ได้: {str(e)[:80]}"
@@ -138,6 +165,15 @@ class HA:
                 out[key] = v
             else:
                 out[key] = {"on": s == "on"}
+        # รายการคำสั่งที่ผูกไว้ (ให้ workflow ตั้งเวลา Tuya Schedule รู้ว่าอุปกรณ์ไหนสั่งผ่าน HA ได้ ที่เหลือใช้ Tuya OpenAPI เดิม)
+        # แบ่งเป็นก้อน _cmds0, _cmds1, … ก้อนละไม่เกิน ~350 ตัวอักษร (door-api ตัดค่า state ที่ 400)
+        chunk, n = [], 0
+        for k in sorted(self.map["commands"]):
+            if chunk and len(json.dumps({"l": chunk + [k]})) > 350:
+                out[f"_cmds{n}"] = {"l": chunk}; chunk, n = [], n + 1
+            chunk.append(k)
+        if chunk:
+            out[f"_cmds{n}"] = {"l": chunk}
         return out
 
 
