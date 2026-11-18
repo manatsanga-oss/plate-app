@@ -177,6 +177,8 @@ if (!irRemotes) { irRemotes = fromSched; remotesFrom = 'schedules'; }
 // อุปกรณ์ในตารางที่ไม่อยู่ใน cache (เพิ่มใหม่) ให้โผล่ด้วย
 fromSched.forEach((x) => { if (!irRemotes.find((y) => y.id === x.id)) irRemotes.push(x); });
 const remotes = irRemotes.map((r) => Object.assign({}, r));
+// ชื่อที่แสดง: ยึดชื่อในตารางเวลา (tuya_device_schedules.name) ก่อนชื่อรีโมทจาก Tuya — user 2026-11-18 ตั้งชื่อ "แอร์ 1–4" ให้ตรงกับฉากใน Smart Life (กดโหลดรายการจาก Tuya แล้วชื่อไม่เด้งกลับ)
+remotes.forEach((r) => { const sc = schedules.find((x) => x.remote_id === r.id); if (sc && sc.name) r.name = sc.name; });
 (d.plugs || []).forEach((p) => remotes.push({ blaster: '', blasterName: '', id: p.id, name: p.name, category: 'plug', brand: 'Smart Plug' }));
 const AC = remotes.filter((r) => r.category === '5');
 const TV = remotes.filter((r) => r.category === '2');
