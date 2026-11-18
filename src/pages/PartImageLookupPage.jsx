@@ -303,15 +303,22 @@ export default function PartImageLookupPage({ currentUser } = {}) {
     let colorNote = "";
     const colorPool = cols.filter((c) => (c.model_code || NO_BAEB) === bb && (c.type || "-") === bt);
     let hitColor = null;
+    // สมุดภาพเก็บรหัส 2 แบบ: code = รหัสสีย่อ (W-B, BLK — ชุดเดียวกับรหัสสีในใบรับรถ/ใบขาย HONDA) · color_code = รหัสสีพ่น (NH-C85P)
+    // เดิมเทียบแต่ color_code + ชื่อแบบตรงตัว → รถ "ขาวดำ (W-B)" ไม่ตรงกับ "ขาว-ดำ (CSB 2TH)" เลยตกไปสีแรก (ดำ) — user 2026-11-17 เคส MLHJC9328T5976156
+    const nk = (x) => String(x || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    const nn = (x) => String(x || "").replace(/\(.*?\)/g, "").replace(/[\s\-/]+/g, "");   // ชื่อสี: ตัดวงเล็บ (CSB 2TH) + ขีด/ทับ/ช่องว่าง
     if (colorCode) {
-      const cc = String(colorCode).toUpperCase();
-      hitColor = colorPool.find((c) => String(c.color_code || "").toUpperCase() === cc) || null;
+      const cc = nk(colorCode);
+      if (cc) hitColor = colorPool.find((c) => nk(c.color_code) === cc)
+        || (m.brand !== "YAMAHA" ? colorPool.find((c) => nk(c.code) === cc) : null)   // YAMAHA: รหัสสี DMS คนละชุดกับสมุดภาพ ไม่เทียบรหัสย่อ กันชนผิดสี
+        || null;
     }
     if (!hitColor && colorName) {
-      const cn = String(colorName).replace(/\s+/g, "").trim();
-      hitColor = colorPool.find((c) => String(c.name || "").replace(/\s+/g, "").trim() === cn) || null;
+      const cn = nn(colorName);
+      if (cn) hitColor = colorPool.find((c) => nn(c.name) === cn) || null;
     }
     if (hitColor) { setColorPage(String(hitColor.page)); colorNote = ` · สี${hitColor.name}`; }
+    else if ((colorCode || colorName) && colorPool.length > 1) colorNote = ` · ⚠️ ไม่พบสี ${[colorName, colorCode].filter(Boolean).join(" ")} ในสมุดภาพ — กรุณาเลือกสีเอง`;
     const typeNote = typeTok && !types.some((t) => t.toUpperCase().includes(typeTok)) ? ` (ไม่มี type ${typeTok} ใช้ ${bt} แทน)` : "";
     setSearchMsg(`พบ: ${m.model} · ${bb} · ${bt}${colorNote}${typeNote}`);
     return true;

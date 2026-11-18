@@ -346,6 +346,10 @@ export default function PartServicePaymentPage({ currentUser }) {
         setMessage(`❌ ยอดมัดจำ ${r.deposit_doc_no} เกินคงเหลือ (${fmt(depositAvail(dep))})`); return;
       }
     }
+    // ใบมัดจำใบเดียวกันเลือกได้บรรทัดเดียว — เดิมเช็คยอดทีละบรรทัด เลือกซ้ำ 2 บรรทัดจึงตัดเกินยอดมัดจำได้ (user 2026-11-18 เคส PDS-2611-00009 15,000 × 2)
+    const depDocsPicked = list.filter(r2 => r2.method === "มัดจำ").map(r2 => r2.deposit_doc_no);
+    const depDup = depDocsPicked.find((doc, idx) => depDocsPicked.indexOf(doc) !== idx);
+    if (depDup) { setMessage(`❌ ใบมัดจำ ${depDup} ถูกเลือกซ้ำมากกว่า 1 บรรทัด — ใบมัดจำหนึ่งใบตัดได้ครั้งเดียวไม่เกินยอดคงเหลือ ส่วนที่เหลือให้เลือกวิธีรับชำระอื่น`); return; }
     setSaving(true); setMessage("");
     try {
       const res = await fetch(API, {
@@ -631,7 +635,8 @@ ${pRow.payment_note ? `<div class="tiny" style="margin-top:4px">หมายเ�
                     <select value={r.deposit_doc_no} onChange={e => pickDeposit(i, e.target.value)}
                       style={{ ...inp, background: r.deposit_doc_no ? "#fff" : "#fffbeb" }}>
                       <option value="">{autoOtherMode ? `— เลือกใบมัดจำ SCY01 ที่มียอดคงเหลือ (${matchedDeposits.length} ใบ: ระบบ PDS/PDO + upload NID) —` : `— เลือกใบมัดจำของ ${customerName} (${matchedDeposits.length} ใบ) —`}</option>
-                      {matchedDeposits.map(dp => (
+                      {/* ใบที่บรรทัดมัดจำอื่นเลือกไปแล้วไม่ขึ้นให้เลือกซ้ำ */}
+                      {matchedDeposits.filter(dp => dp.deposit_doc_no === r.deposit_doc_no || !rows.some((x, j) => j !== i && x.method === "มัดจำ" && x.deposit_doc_no === dp.deposit_doc_no)).map(dp => (
                         <option key={dp.deposit_doc_no} value={dp.deposit_doc_no}>
                           {dp.deposit_doc_no} · {dp.customer_name} · คงเหลือ {fmt(depositAvail(dp))}
                         </option>

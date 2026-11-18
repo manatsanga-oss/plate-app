@@ -983,11 +983,12 @@ export default function YamahaOrderPage({ currentUser }) {
                   {!isClosed && NOT_ARRIVED.includes(o.status) && (
                     <button onClick={() => setRefundOrder(o)} title="สั่งซื้อแล้วแต่สินค้ายังไม่มา → คืนเงินมัดจำ + ยกเลิกใบสั่งซื้อ" style={{ background: "#fff", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: 4 }}>↩ คืนเงิน</button>
                   )}
+                  {/* แก้ไขรายการอะไหล่: ใบที่ยังไม่สั่ง + ใบ "อะไหล่ค้างส่ง" (เปลี่ยนรหัส/รายการระหว่างรอของ) — สถานะสั่งแล้วอื่น ๆ แก้ไม่ได้ (user 2026-11-18) */}
+                  {!isClosed && (o.status === "รอดำเนินการ" || o.status === "อะไหล่ค้างส่ง") && (
+                    <button onClick={() => openEdit(o)} title={o.status === "อะไหล่ค้างส่ง" ? "แก้ไขรายการอะไหล่ที่สั่งซื้อ (อะไหล่ค้างส่ง)" : "แก้ไขใบสั่งซื้อ"} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginLeft: o.status === "อะไหล่ค้างส่ง" ? 4 : 0, marginRight: 4 }}>แก้ไข</button>
+                  )}
                   {!isClosed && o.status === "รอดำเนินการ" && (
-                    <>
-                      <button onClick={() => openEdit(o)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", marginRight: 4 }}>แก้ไข</button>
-                      <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
-                    </>
+                    <button onClick={() => { setShowPOModal(o); setPoNumber(o.vendor_po_no || ""); setMessage(""); }} style={{ background: "#10b981", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>สั่ง</button>
                   )}
                   {currentUser?.role === "admin" && !isClosed && o.status !== "รอดำเนินการ" && o.vendor_po_no && (
                     <button onClick={() => { setShowPOModal({ ...o, editMode: true }); setPoNumber(o.vendor_po_no || ""); setMessage(""); }}
