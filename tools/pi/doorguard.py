@@ -224,9 +224,27 @@ class Guard:
         im = self.snapshot(z["channel"])
         res = self.model.predict(im, imgsz=self.cfg["imgsz"], conf=self.cfg["conf"], verbose=False)[0]
         x0, y0, x1, y1 = z["roi"]
+        # รอบ 2: ซูมเฉพาะแถบขอบประตู — ของชิ้นเล็ก (ขวด/กล่อง/รองเท้า) ในภาพเต็ม 2560px เล็กเกินจน YOLO มองไม่เห็น
+        # (เคส 2026-11-18 ขวดหน้าประตู 2: ภาพเต็มไม่เจอเลย, ซูมแล้วเจอเป็น "bird" 0.43) → ในแถบนี้เจออะไรก็ถือว่ากีดขวาง ไม่สนชื่อคลาส
+        small = []
+        try:
+            res2 = self.model.predict(im.crop((x0, y0, x1, y1)), imgsz=self.cfg["imgsz"], conf=self.cfg.get("crop_conf", self.cfg["conf"]), verbose=False)[0]
+            for b in res2.boxes:
+                cx0, cy0, cx1, cy1 = [float(v) for v in b.xyxy[0]]
+                bx0, by0, bx1, by1 = cx0 + x0, cy0 + y0, cx1 + x0, cy1 + y0
+                # กล่องที่ชนขอบแถบด้านที่ติดลานจอด = ของชิ้นใหญ่ที่ยื่นเข้ามา (รถ) → ให้รอบภาพเต็มตัดสินด้วย roi_frac
+                m = 8
+                cut = (x0 > m and bx0 <= x0 + m) or (x1 < im.width - m and bx1 >= x1 - m) or (y0 > m and by0 <= y0 + m) or (y1 < im.height - m and by1 >= y1 - m)
+                if not cut:
+                    small.append((self.names[int(b.cls)], float(b.conf), bx0, by0, bx1, by1))
+        except Exception as e:
+            log("ตรวจรอบซูมไม่ได้:", str(e)[:80])
         dr = ImageDraw.Draw(im, "RGBA")
         dr.rectangle([x0, y0, x1, y1], outline=(255, 255, 0, 255), width=6)
         hits = []
+        for name, conf, bx0, by0, bx1, by1 in small:
+            dr.rectangle([bx0, by0, bx1, by1], outline=(255, 0, 0, 255), width=6)
+            hits.append({"name": name if name in self.cfg["watch"] else "object", "conf": round(conf, 2), "frac": 1.0, "cls": name})
         for b in res.boxes:
             name = self.names[int(b.cls)]; conf = float(b.conf)
             bx0, by0, bx1, by1 = [float(v) for v in b.xyxy[0]]
@@ -234,6 +252,8 @@ class Guard:
             area = max(1.0, (bx1 - bx0) * (by1 - by0))
             frac = inter / area
             hit = name in self.cfg["watch"] and frac >= self.cfg["roi_frac"]
+            if hit and any(min(bx1, s[4]) > max(bx0, s[2]) and min(by1, s[5]) > max(by0, s[3]) and bx0 >= x0 - 8 and bx1 <= x1 + 8 for s in small):
+                hit = False   # ของชิ้นเดียวกับที่รอบซูมนับไปแล้ว
             dr.rectangle([bx0, by0, bx1, by1], outline=(255, 0, 0, 255) if hit else (0, 200, 0, 160), width=6 if hit else 2)
             if hit:
                 hits.append({"name": name, "conf": round(conf, 2), "frac": round(frac, 2)})
@@ -249,7 +269,7 @@ class Guard:
                 notes.append(f"{self.cfg['zones'][str(d)]['name']}: ดึงภาพ/ตรวจไม่ได้ ({str(e)[:60]})")
                 continue   # กล้องพัง = ถือว่าไม่รู้ → ไม่ปิด (ปลอดภัยไว้ก่อน) — note บอกไว้
             if hits:
-                th = {"person": "คน", "motorcycle": "มอเตอร์ไซค์", "bicycle": "จักรยาน", "car": "รถยนต์", "truck": "รถบรรทุก", "bus": "รถบัส", "dog": "สุนัข", "cat": "แมว"}
+                th = {"person": "คน", "motorcycle": "มอเตอร์ไซค์", "bicycle": "จักรยาน", "car": "รถยนต์", "truck": "รถบรรทุก", "bus": "รถบัส", "dog": "สุนัข", "cat": "แมว", "bottle": "ขวด", "object": "วัตถุวางอยู่"}
                 cnt = {}
                 for h in hits:
                     cnt[h["name"]] = cnt.get(h["name"], 0) + 1
