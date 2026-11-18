@@ -107,6 +107,12 @@ class HA:
             log("habridge.json อ่านไม่ได้ ใช้ค่าเริ่มต้น:", e); self.map = DEFAULT_HA_MAP
         self.map.setdefault("commands", {}); self.map.setdefault("states", {})
         self._recent = {}   # (domain, service, entity) → เวลาเรียกล่าสุด
+        # ฉากที่รีโมท "หลายตัว" ใช้ร่วมกัน (เช่น ฉากรวมเปิดแอร์ทุกเครื่อง) — เฉพาะฉากแบบนี้เท่านั้นที่ต้องรวมคำสั่งซ้ำ
+        owners = {}
+        for k, m in self.map["commands"].items():
+            if k.startswith("remote:") and isinstance(m, list) and len(m) >= 3:
+                owners.setdefault((m[0], m[1], m[2]), set()).add(k.rsplit(":", 1)[0])
+        self._shared = {c for c, t in owners.items() if len(t) > 1}
 
     def _h(self):
         return {"Authorization": "Bearer " + self.token, "Content-Type": "application/json"}
@@ -129,9 +135,9 @@ class HA:
         if not m:
             return False, f"ยังไม่ได้ผูก {key} กับ Home Assistant (habridge.json)"
         # รีโมทหลายตัวผูกฉากเดียวกันได้ (เช่น ฉาก "เปิดแอร์" คุมแอร์ทุกเครื่อง) → ถึงเวลาเดียวกันเรียกฉากครั้งเดียวพอ
-        # (เฉพาะ remote: เท่านั้น — ประตู/ปลั๊กต้องสั่งทุกครั้ง โดยเฉพาะ "หยุด")
+        # ฉากแยกเครื่อง (รีโมทเดียวต่อฉาก) ต้องยิงทุกครั้งที่กด — เดิมรวมทุกฉาก 30 วิ ทำให้กดปิด→เปิด→ปิดเร็ว ๆ แล้วคำสั่งหลังหาย
         call = (m[0], m[1], m[2])
-        if target.startswith("remote:") and time.time() - self._recent.get(call, 0) < 30:
+        if call in self._shared and time.time() - self._recent.get(call, 0) < 30:
             return True, f"{m[2]} ok (รวมกับคำสั่งก่อนหน้า)"
         try:
             r = requests.post(f"{self.url}/api/services/{m[0]}/{m[1]}", headers=self._h(), json={"entity_id": m[2]}, timeout=15)
