@@ -181,9 +181,14 @@ export default function OutputTaxReportPage({ currentUser }) {
         (Array.isArray(depList) ? depList : []).forEach(x => {
           const br = String(x.branch_code || "").split(" ")[0];
           const fee = Number(x.fee || 0);
-          if (fee <= 0 || FEE_BRANCH_AFF[br] !== affiliation) return;
-          if (!g[br]) g[br] = { total: 0, n: 0 };
-          g[br].total += fee; g[br].n += 1;
+          // รายได้ค่าฝากส่งไปรษณีย์ (income_kind other, fee = 0 ยอดอยู่ line_amount) — สนง.บัญชีรวมในใบสรุปค่าบริการของสาขาเดียวกัน
+          //   เคส ป.เปา ต.ค.69: OI2569/10 = ค่าบริการรับฝาก SCY06 370 + ค่าฝากส่งไปรษณีย์ 200 (SCY06-RECS2610-0002) = 570 (user 2026-11-19)
+          const postal = x.income_kind === "other" && /ไปรษณีย์/.test(String(x.description || "")) ? Number(x.line_amount || 0) : 0;
+          if (fee + postal <= 0 || FEE_BRANCH_AFF[br] !== affiliation) return;
+          if (!g[br]) g[br] = { total: 0, n: 0, postal: 0 };
+          g[br].total += fee + postal;
+          if (fee > 0) g[br].n += 1;
+          if (postal > 0) g[br].postal += 1;
         });
         feeRows = Object.keys(g).sort().map(br => {
           const total = Math.round(g[br].total * 100) / 100;
@@ -191,7 +196,7 @@ export default function OutputTaxReportPage({ currentUser }) {
           return {
             source: "fee_insurance", branch: br, summary: true,
             invoice_date: to, tax_invoice_no: `${br}-FEE${ym.slice(2)} · ค่าบริการรับฝาก`,
-            customer_name: `เงินสด — ค่าบริการรับฝากค่างวด ${g[br].n} รายการ (ใบกำกับสรุปรายเดือน)`, customer_tax_id: null,
+            customer_name: `เงินสด — ค่าบริการรับฝากค่างวด ${g[br].n} รายการ${g[br].postal ? ` + ค่าฝากส่งไปรษณีย์ ${g[br].postal} รายการ` : ""} (ใบกำกับสรุปรายเดือน)`, customer_tax_id: null,
             amount_before_vat: base, vat_amount: Math.round((total - base) * 100) / 100, total_amount: total, cancelled: false,
           };
         });

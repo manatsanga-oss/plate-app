@@ -512,6 +512,10 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
   const [savedNo, setSavedNo] = useState("");
   const [showHist, setShowHist] = useState(false);
   const [hist, setHist] = useState(null);
+  // ใบประเมินที่กำลังแก้ไข (เลือกจากประวัติ → ปุ่มแก้ไข) — บันทึกทับเลขที่เดิมด้วย update_quote (user 2026-11-19)
+  //   keepModel = รุ่นของใบไม่มีในสมุดภาพแล้ว → คงรุ่น/สีเดิมของใบไว้ ไม่เอารุ่นที่เปิดอยู่บนจอไปทับ
+  const [editRec, setEditRec] = useState(null); // { quote_no, model, color, created_at, created_by, branch, keepModel, sel, noSel }
+  const [histBusy, setHistBusy] = useState("");
 
   // คำนวณเงิน (ราคาอะไหล่ = VAT-incl ตามฟอร์ม)
   const partsTotal = picked.reduce((s, p) => s + (Number(p.price) || 0) * (Number(p.qty) || 1), 0);
@@ -526,7 +530,12 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     branch: currentUser?.branch_code || currentUser?.branch || "", // สังกัดผู้ใช้ → หัวกระดาษใบประเมิน (ป.เปา/สิงห์ชัย)
     customer_code: q.customer_code, customer_name: q.customer_name, customer_phone: q.customer_phone,
     customer_address: q.customer_address, customer_tax_id: q.customer_tax_id, customer_line_user_id: q.customer_line_user_id,
-    model: model?.model || "", color: picked[0]?.color || current?.name || "",
+    // สี = สีรถที่เลือกบนจอ — เดิมเก็บป้ายของอะไหล่ตัวแรก (โหมดคู่มือได้ชื่อบล็อก เช่น "E-1 ฝาครอบฝาสูบ" แทนสีรถ)
+    model: editRec?.keepModel ? editRec.model : (model?.model || ""),
+    color: editRec?.keepModel ? (editRec.color || picked[0]?.color || "") : (current ? current.name + (current.code ? ` (${current.code})` : "") : (picked[0]?.color || "")),
+    // sel = ยี่ห้อ/รุ่น/แบบ/type/สี/โหมดที่เลือกบนจอตอนบันทึก → เปิดใบมาแก้ไขแล้วเด้งกลับที่เดิม (user 2026-11-19 เคส 69ESTM/0000016 เปิดแล้วแบบ/สีกลับไปค่าแรก)
+    sel: editRec?.keepModel ? (editRec.sel || null)
+      : { brand: model?.brand || "HONDA", model: model?.model || "", baeb: baeb || "", type: type || "", color_page: current ? String(current.page) : "", color_name: current?.name || "", color_code: current?.code || "", view_mode: mode, book_slug: selBookSlug || "" },
     plate_no: q.plate_no, model_year: q.model_year, mileage: q.mileage, vin: q.vin, engine_no: q.engine_no, problem: q.problem,
     labor: Number(q.labor) || 0, labor_discount: Number(q.labor_discount) || 0,
     parts_total: partsTotal, parts_discount: Number(q.parts_discount) || 0,
@@ -538,6 +547,19 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
     if (!picked.length) { alert("ยังไม่มีรายการอะไหล่"); return; }
     setSaving(true);
     try {
+      if (editRec) {
+        // แก้ไขใบเดิม — ทับเลขที่เดิม ไม่ออกเลขใหม่ ไม่เปลี่ยนผู้รับแจ้ง/วันที่ และไม่ส่ง LINE ซ้ำอัตโนมัติ (กดปุ่มส่งเองได้)
+        const r = await quoteApi({ action: "update_quote", quote_no: editRec.quote_no, ...buildPayload() });
+        const rows = Array.isArray(r) ? r : r?.data || [];
+        const no = rows[0]?.quote_no || "";
+        if (no !== editRec.quote_no) {
+          alert(no ? `ระบบหลังบ้านยังไม่รองรับการแก้ไขใบประเมิน — ถูกบันทึกเป็นใบใหม่เลขที่ ${no} แทน (ใบ ${editRec.quote_no} ไม่เปลี่ยน) กรุณาแจ้งผู้ดูแลระบบ` : `บันทึกไม่สำเร็จ: ไม่พบใบประเมิน ${editRec.quote_no}`);
+          return;
+        }
+        setSavedNo(no);
+        alert("บันทึกการแก้ไขใบประเมิน " + no + " แล้ว");
+        return;
+      }
       const r = await quoteApi({ action: "save_quote", ...buildPayload() });
       const rows = Array.isArray(r) ? r : r?.data || [];
       const no = rows[0]?.quote_no || "";
@@ -556,13 +578,14 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
   };
 
   const printQuote = (quoteNo) => {
-    const np = nowParts();
+    // ใบที่กำลังแก้ไข: วันที่แจ้ง/ผู้รับแจ้ง/สังกัด ตามใบเดิม
+    const np = nowParts(editRec?.created_at ? new Date(editRec.created_at) : undefined);
     openQuotePrint({
       quote_no: quoteNo || savedNo || "", date: np.date, time: np.time,
-      created_by: currentUser?.name || currentUser?.username || "",
-      branch: currentUser?.branch_code || currentUser?.branch || "",
+      created_by: editRec?.created_by || currentUser?.name || currentUser?.username || "",
+      branch: editRec?.branch || currentUser?.branch_code || currentUser?.branch || "",
       customer_name: q.customer_name, customer_address: q.customer_address, customer_phone: q.customer_phone, customer_tax_id: q.customer_tax_id,
-      model: (model?.model || "") + (current?.name ? " " + current.name : ""), color: current?.code || "",
+      model: editRec?.keepModel ? editRec.model : (model?.model || "") + (current?.name ? " " + current.name : ""), color: editRec?.keepModel ? editRec.color : (current?.code || ""),
       plate_no: q.plate_no, model_year: q.model_year, mileage: q.mileage, vin: q.vin, engine_no: q.engine_no, problem: q.problem,
       items: picked.map((p) => ({ code: p.code, name: p.name || "", qty: Number(p.qty) || 1, price: Number(p.price) || 0, amount: (Number(p.price) || 0) * (Number(p.qty) || 1) })),
       labor: Number(q.labor) || 0, labor_discount: Number(q.labor_discount) || 0, laborNet,
@@ -614,6 +637,64 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
       printSavedQuote(rec);
     } catch (e) { alert("เปิดไม่สำเร็จ: " + (e.message || e)); }
   };
+
+  // เลือกใบประเมินจากประวัติมาแก้ไข — เติมรายการอะไหล่ + ข้อมูลหัวใบลงฟอร์ม แล้วบันทึกทับเลขที่เดิม
+  const loadForEdit = async (quote_no) => {
+    if (picked.length && !window.confirm(`รายการอะไหล่ที่เลือกอยู่ ${picked.length} รายการจะถูกแทนที่ด้วยรายการของใบ ${quote_no}\nต้องการเปิดใบนี้มาแก้ไขหรือไม่?`)) return;
+    setHistBusy(quote_no);
+    try {
+      const r = await quoteApi({ action: "get_quote", quote_no });
+      const rec = (Array.isArray(r) ? r : r?.data || [])[0];
+      if (!rec) { alert("ไม่พบใบประเมิน"); return; }
+      let items = rec.items || [];
+      if (typeof items === "string") { try { items = JSON.parse(items); } catch { items = []; } }
+      if (!Array.isArray(items)) items = [];
+      // เด้งรุ่น/สีบนจอให้ตรงกับใบ (เลือกอะไหล่เพิ่มจากรูปต่อได้เลย) — ไม่พบรุ่นในสมุดภาพ → คงรุ่น/สีเดิมของใบไว้
+      let sel = rec.sel || null;
+      if (typeof sel === "string") { try { sel = JSON.parse(sel); } catch { sel = null; } }
+      if (!sel || typeof sel !== "object" || !sel.model) sel = null;
+      const mi = allModels.findIndex((m) => m.model === (sel?.model || rec.model));
+      if (mi >= 0) {
+        const m = allModels[mi];
+        setSelBrand(m.brand || "HONDA"); setModelIdx(mi);
+        if (sel) {
+          // ใบที่บันทึกหลังเพิ่ม sel — เด้งกลับ แบบ/type/สี/โหมด ที่เลือกไว้ตอนออกใบ
+          setSelBaeb(sel.baeb || ""); setSelType(sel.type || ""); setColorPage(sel.color_page || null);
+          setSelBookSlug(sel.book_slug || ""); if (sel.view_mode === "color" || sel.view_mode === "book") setViewMode(sel.view_mode);
+        } else {
+          // ใบเก่า (ไม่มี sel) — เดาจากชื่อสีเท่าที่ได้ ที่เหลือให้ผู้ใช้เลือกเอง
+          setSelBookSlug("");
+          const c = (m.colors || []).find((x) => x.name === rec.color || `${x.name} (${x.code})` === rec.color);
+          if (c) { setSelBaeb(c.model_code || NO_BAEB); setSelType(c.type || "-"); setColorPage(String(c.page)); }
+        }
+      }
+      const s = (v) => (v == null ? "" : String(v));
+      const n = (v) => (Number(v) ? String(Number(v)) : "");
+      const rows = items.filter((it) => it && it.code).map((it) => ({
+        model: it.model || rec.model || "", code: String(it.code), color: it.color || "", name: it.name || "",
+        price: it.price != null ? Number(it.price) : (it.amount != null ? (Number(it.amount) || 0) / (Number(it.qty) || 1) : null),
+        qty: Number(it.qty) || 1, loading: false, stock: undefined,   // ราคา/ชื่อ ใช้ตามที่บันทึกไว้ในใบ (อาจแก้มือไว้) — ไม่ดึงราคาใหม่มาทับ
+      }));
+      setPicked(rows);
+      setQ({ ...QFORM0, customer_code: s(rec.customer_code), customer_name: s(rec.customer_name), customer_phone: s(rec.customer_phone),
+        customer_address: s(rec.customer_address), customer_tax_id: s(rec.customer_tax_id), customer_line_user_id: s(rec.customer_line_user_id),
+        plate_no: s(rec.plate_no), model_year: s(rec.model_year), mileage: s(rec.mileage), vin: s(rec.vin), engine_no: s(rec.engine_no), problem: s(rec.problem),
+        labor: n(rec.labor), labor_discount: n(rec.labor_discount), parts_discount: n(rec.parts_discount) });
+      setEditRec({ quote_no: rec.quote_no, model: rec.model || "", color: rec.color || "", created_at: rec.created_at, created_by: rec.created_by || "", branch: rec.branch || "", keepModel: mi < 0, sel, noSel: !sel });
+      setSavedNo(rec.quote_no);
+      setEditIdx(null);
+      setShowHist(false);
+      rows.forEach((row) => {
+        const brandOf = (allModels.find((m) => m.model === row.model) || allModels[mi] || {}).brand || "HONDA";
+        fetchStock(row.code, brandOf).then((st) => {
+          setPicked((prev) => prev.map((x) => (x.code === row.code && x.model === row.model ? { ...x, stock: st } : x)));
+        });
+      });
+    } catch (e) { alert("เปิดไม่สำเร็จ: " + (e.message || e)); }
+    finally { setHistBusy(""); }
+  };
+  // ออกจากโหมดแก้ไข → ล้างฟอร์ม เริ่มใบประเมินใบใหม่
+  const startNewQuote = () => { setEditRec(null); setSavedNo(""); setPicked([]); setQ(QFORM0); setEditIdx(null); };
 
   const total = picked.reduce((s, p) => s + (Number(p.price) || 0) * (Number(p.qty) || 1), 0);
   const selStyle = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #cbd5e1", fontSize: 14, background: "#fff" };
@@ -1003,6 +1084,18 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
       {picked.length > 0 && (
         <div className="form-card">
           <div style={{ fontWeight: 700, marginBottom: 10 }}>📄 ข้อมูลใบประเมินราคา</div>
+          {editRec && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", background: "#fef3c7", border: "1px solid #f59e0b", borderRadius: 8, padding: "8px 12px", marginBottom: 10, fontSize: 13 }}>
+              <span>✏️ กำลังแก้ไขใบประเมิน <b style={{ fontFamily: "monospace" }}>{editRec.quote_no}</b> — บันทึกแล้วจะทับใบเดิม (เลขที่เดิม)
+                {editRec.keepModel && <span style={{ color: "#92400e" }}> · รุ่น {editRec.model || "-"} ไม่มีในสมุดภาพ คงรุ่น/สีเดิมของใบไว้</span>}
+                {!editRec.keepModel && editRec.noSel && <div style={{ color: "#92400e", marginTop: 2 }}>⚠️ ใบนี้ออกก่อนที่ระบบจะเก็บ แบบ/type/สี — กรุณาเลือก แบบ/type/สี ด้านบนให้ถูกก่อนบันทึก</div>}
+              </span>
+              <button onClick={() => { if (window.confirm("เลิกแก้ไขใบนี้ และล้างฟอร์มเพื่อเริ่มใบประเมินใบใหม่?")) startNewQuote(); }}
+                style={{ padding: "4px 12px", borderRadius: 6, border: "1px solid #b45309", background: "#fff", color: "#b45309", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+                เลิกแก้ไข / เริ่มใบใหม่
+              </button>
+            </div>
+          )}
 
           {/* ลูกค้า */}
           <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap", marginBottom: 10 }}>
@@ -1059,13 +1152,13 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
           </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn-primary" onClick={saveQuote} disabled={saving}>{saving ? "กำลังบันทึก..." : "💾 บันทึกใบประเมิน"}</button>
+            <button className="btn-primary" onClick={saveQuote} disabled={saving}>{saving ? "กำลังบันทึก..." : editRec ? `💾 บันทึกการแก้ไข ${editRec.quote_no}` : "💾 บันทึกใบประเมิน"}</button>
             <button onClick={() => printQuote(savedNo)} style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid #0369a1", background: "#fff", color: "#0369a1", cursor: "pointer", fontWeight: 600 }}>🖨️ พิมพ์ใบประเมิน</button>
             <button onClick={sendLine} disabled={!savedNo} title={!savedNo ? "บันทึกก่อน" : (q.customer_line_user_id ? "" : "ลูกค้ายังไม่ผูก LINE")}
               style={{ padding: "8px 18px", borderRadius: 8, border: "none", background: savedNo ? "#06c755" : "#cbd5e1", color: "#fff", cursor: savedNo ? "pointer" : "not-allowed", fontWeight: 600 }}>
               📤 ส่งให้ลูกค้าทาง LINE
             </button>
-            {savedNo && <span style={{ alignSelf: "center", fontSize: 13, color: "#15803d" }}>บันทึกแล้ว: {savedNo}</span>}
+            {savedNo && !editRec && <span style={{ alignSelf: "center", fontSize: 13, color: "#15803d" }}>บันทึกแล้ว: {savedNo}</span>}
           </div>
         </div>
       )}
@@ -1102,7 +1195,10 @@ ${urls.map((u) => `<img src="${esc(u)}">`).join("")}
                         <td>{h.customer_name || "-"}</td>
                         <td style={{ fontSize: 12 }}>{h.model} {h.color}</td>
                         <td style={{ textAlign: "right", fontWeight: 600 }}>{fmtMoney(h.grand_total)}</td>
-                        <td style={{ textAlign: "center" }}><button onClick={() => reprint(h.quote_no)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #0369a1", background: "#fff", color: "#0369a1", cursor: "pointer", fontSize: 12 }}>🖨️ พิมพ์</button></td>
+                        <td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                          <button onClick={() => loadForEdit(h.quote_no)} disabled={!!histBusy} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #b45309", background: "#fff", color: "#b45309", cursor: histBusy ? "wait" : "pointer", fontSize: 12, marginRight: 6 }}>{histBusy === h.quote_no ? "กำลังเปิด..." : "✏️ แก้ไข"}</button>
+                          <button onClick={() => reprint(h.quote_no)} style={{ padding: "4px 10px", borderRadius: 6, border: "1px solid #0369a1", background: "#fff", color: "#0369a1", cursor: "pointer", fontSize: 12 }}>🖨️ พิมพ์</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

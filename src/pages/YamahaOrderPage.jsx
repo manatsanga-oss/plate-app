@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
 import BankAccountSelect from "../utils/BankAccountSelect";
 import { loadSubs } from "../utils/usePartStockHints"; // คู่รหัสทดแทน ใช้เทียบสถานะ B2B (user 2026-10-22) // เลือกบัญชีโอนออกตอนคืนมัดจำแบบเงินโอน (user 2026-10-22)
+import QuotePickerButton from "../utils/QuotePickerButton"; // ดึงรายการอะไหล่จากใบประเมินราคา (user 2026-11-19)
 import usePartStockHints, { useAutoStockCheck, PartStockHintRow, useFastMovingFlag, FastMovingBadge, fastMovingNoteHtml } from "../utils/usePartStockHints";
 
 const API_URL = "https://n8n-new-project-gwf2.onrender.com/webhook/yamaha-spare-api";
@@ -512,6 +513,19 @@ export default function YamahaOrderPage({ currentUser }) {
     } catch { setMessage("OCR เกิดข้อผิดพลาด"); }
     setOcrLoading(false);
   }
+  // เลือกเลขที่ใบประเมินราคา → เติมรายการอะไหล่ของใบนั้นต่อท้าย (เหมือน OCR) + เติมเบอร์/ทะเบียนที่ยังว่าง (user 2026-11-19)
+  function applyQuote(qt) {
+    const newItems = (qt.items || []).filter(it => it && (it.code || it.name)).map(it => ({ part_code: it.code || "", part_name: it.name || "", quantity: Number(it.qty) || 1 }));
+    if (!newItems.length) { setMessage(`ใบประเมิน ${qt.quote_no} ไม่มีรายการอะไหล่`); return; }
+    setForm(prev => ({
+      ...prev,
+      customer_phone: prev.customer_phone || qt.customer_phone || "",
+      license_plate: prev.license_plate || qt.plate_no || "",
+      items: [...prev.items.filter(it => it.part_name || it.part_code), ...newItems],
+    }));
+    setMessage(`ดึงจากใบประเมิน ${qt.quote_no}: ${newItems.length} รายการ`);
+  }
+
   function removeItem(idx) {
     setForm(prev => {
       const items = prev.items.filter((_, i) => i !== idx);
@@ -1181,6 +1195,7 @@ export default function YamahaOrderPage({ currentUser }) {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                 <label style={{ fontWeight: 600, fontSize: 14, color: "#072d6b" }}>รายการอะไหล่</label>
                 <div style={{ display: "flex", gap: 8 }}>
+                  <QuotePickerButton onPick={applyQuote} customerName={form.customer_name} customerPhone={form.customer_phone} />
                   <div ref={ocrMenuRef} style={{ position: "relative", display: "inline-block" }}>
                     <button onClick={() => setOcrMenuOpen(!ocrMenuOpen)} style={{ background: "#f59e0b", color: "#fff", border: "none", borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer" }}>
                       ดึงข้อมูล OCR ▾
