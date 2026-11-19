@@ -272,6 +272,11 @@ export default function PartImageLookupPage({ currentUser } = {}) {
       if (ser && codePart.startsWith(ser) && ser.length > bestLen) { bi = i; bestLen = ser.length; }
       const mdl = normCode(m.model);
       if (mdl && codePart.startsWith(mdl) && mdl.length > bestLen) { bi = i; bestLen = mdl.length; }
+      // รหัส "แบบ" ตรงตัวชนะ series — PCX160 ปี 2021-22 ใช้รหัส WW150M/WW150N (series ของ PCX150) ต้องเด้งไป PCX160 ไม่ใช่ PCX150 (user 2026-11-19)
+      for (const c of m.colors || []) {
+        const bb = normCode(c.model_code);
+        if (bb.length >= 5 && codePart.startsWith(bb) && bb.length > bestLen) { bi = i; bestLen = bb.length; }
+      }
     });
     if (bi < 0) allModels.forEach((m, i) => {
       const ser = normCode(m.series);
