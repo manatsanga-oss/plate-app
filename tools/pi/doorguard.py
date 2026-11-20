@@ -63,8 +63,8 @@ DEFAULT_HA_MAP = {
         "remote:ebcaecc68ae13e7545wnqh:off": ["scene", "turn_on", "scene.pidae_r_2"],    # ← "ปิดแอร์ 2"
         "remote:eb9d94dc94030307f0hw3l:on": ["scene", "turn_on", "scene.epidae_r_3"],    # แอร์ Mitsubishi IR ขาว ← "เปิดแอร์ 3"
         "remote:eb9d94dc94030307f0hw3l:off": ["scene", "turn_on", "scene.pidae_r_3"],    # ← "ปิดแอร์ 3"
-        "remote:ebe6c6996c7797e91f5g3p:on": ["scene", "turn_on", "scene.epidae_r_4"],    # Air TCL ← "เปิดแอร์ 4"
-        "remote:ebe6c6996c7797e91f5g3p:off": ["scene", "turn_on", "scene.pidae_r_4"],    # ← "ปิดแอร์ 4"
+        "remote:ebe6c6996c7797e91f5g3p:on": ["scene", "turn_on", "scene.epid_ae_r_4"],    # Air TCL ← "เปิด แอร์ 4" (user ลบ-สร้างฉากใหม่ 2026-11-20 ตอนเปลี่ยนตัวยิง IR ขาวเป็นตัวใหม่)
+        "remote:ebe6c6996c7797e91f5g3p:off": ["scene", "turn_on", "scene.pid_ae_r_4"],    # ← "ปิดแอร์ 4"
         # TV ← ฉาก "เปิดปิด ทีวี 1" ปุ่ม Power แบบสลับ
         **{f"remote:eb070b3f31c73fee51vth8:{what}": ["scene", "turn_on", "scene.epidpid_thiiwii_1"] for what in ("on", "off", "power")},
     },
