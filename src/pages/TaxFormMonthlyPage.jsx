@@ -22,6 +22,7 @@ const SOURCE_META = {
   fuelwd: { label: "เบิกค่าน้ำมัน", color: "#9a3412", bg: "#fed7aa" },    // เมนูเบิกค่าน้ำมันรถใช้จ่าย แบ่งบริษัทตามทะเบียนรถ
   office: { label: "วัสดุสำนักงาน", color: "#0f766e", bg: "#ccfbf1" },   // Office Supplies › รับวัสดุ ที่บันทึกจ่ายเงินมี VAT (receive_payments)
   cardfee: { label: "ค่าธรรมเนียมบัตร", color: "#7c2d12", bg: "#ffedd5" },  // ใบเสร็จค่าธรรมเนียมรูดบัตรจากธนาคาร (credit_card_fee_records) VAT ของค่าธรรมเนียม
+  lockton: { label: "ประกัน LOCKTON", color: "#6d28d9", bg: "#ede9fe" },   // insurance_tax_invoice_receipts — ใบกำกับค่าประกันงานวางบิล LOCKTON (เมนู วางบิล → รับใบกำกับภาษี LOCKTON / COSMOS)
   manual: { label: "บันทึกเพิ่มเอง", color: "#334155", bg: "#e2e8f0" },   // input_tax_manual_docs — ใบกำกับที่ไม่มีต้นทางในระบบ (เช่น ค่าน้ำมัน ส.ค.69 ก่อนมีเมนูเบิก)
 };
 const NO_INVOICE_STATUS = "ยังไม่ได้รับใบกำกับภาษี";
