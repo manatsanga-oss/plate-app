@@ -46,6 +46,14 @@ export default function FastMovingStockPage({ currentUser }) {
   // รหัสทั้งกลุ่มที่ n8n รวมยอดให้แล้ว (สต๊อก/จ่ายเฉลี่ย/ค้างส่ง/JOB/ให้ยืม/สั่ง-รับล่าสุด) = รหัสเดิม + ref + รหัสทดแทน (part_substitutes 2 ทิศ) — alt_codes จาก fast-moving-stock-api (user 2026-11-06: ขึ้นรหัสทดแทน แต่ตัวเลขใช้รหัสเก่า+ใหม่รวมกัน)
   const altCodes = (r) => String(r.alt_codes || "").split(",").map(x => x.trim()).filter(Boolean);
   const codeGroup = (r) => [...new Set([r.part_code, r.ref_code, ...altCodes(r)].map(x => String(x || "").trim()).filter(Boolean))];
+  // รหัสหลักของแถว (user 2026-11-21 "เก็บรหัสที่ใช้บ่อยสุดเป็นรหัสหลัก แล้วขึ้นแทน"): รหัสในกลุ่ม (รหัสเดิม+ทดแทน) ที่จ่ายออกมากสุด 12 เดือนล่าสุด
+  //   = main_code จาก fast-moving-stock-api · ทั้งกลุ่มไม่มีประวัติจ่าย → รหัสทดแทน (กติกาเดิม 2026-10-27) → รหัสในรายการ
+  const mainCodeOf = (r) => r.main_code || subOf(r)?.code || r.part_code;
+  const isOwnMain = (r) => padCode(mainCodeOf(r)) === padCode(r.part_code);
+  const prettyCode = (c) => { const p12 = padCode(c); const f = fmtSubCode(p12); return f !== p12 ? f : String(c || ""); };
+  const shownCode = (r) => (isOwnMain(r) ? r.part_code : prettyCode(mainCodeOf(r)));
+  // รหัสอื่นในกลุ่มที่ยอดถูกรวมอยู่ในแถวนี้ (ไม่รวมรหัสหลักที่แสดงอยู่)
+  const otherCodes = (r) => { const seen = new Set([padCode(mainCodeOf(r))]); return codeGroup(r).filter(c => { const k = padCode(c); if (seen.has(k)) return false; seen.add(k); return true; }); };
   const [filterStockType, setFilterStockType] = useState("all");
   const [filterBackorder, setFilterBackorder] = useState("all");
   const [filterPendingJob, setFilterPendingJob] = useState("all");
@@ -164,7 +172,8 @@ export default function FastMovingStockPage({ currentUser }) {
     for (const p of parts) {
       // อนุญาตให้ไม่มี (location) หรือมี () ว่างก็ได้
       // ที่เก็บอาจมีวงเล็บซ้อน เช่น ".ROOM(FM)" — จับตั้งแต่ "(" แรกถึง ")" สุดท้าย (2026-09-25: เดิม [^)]* ทำให้แถว สช ตลาด ของ DMS ไม่ขึ้นและตัวกรองสต๊อกผิด)
-      const m = p.match(/^(.+?)\s+(\d+(?:\.\d+)?)(?:\s*\((.*)\))?\s*$/);
+      // ท้ายอาจมี "[รหัส]" = ของอยู่ใต้รหัสทดแทน/รหัสเดิมในกลุ่มเดียวกัน เช่น "ห้าห้อง 2 (R1A-21-6-06) [5YPF530K0000]" — เดิมไม่รองรับ ช่องร้านเลยขึ้น "-" ทั้งที่จำนวนรวมมีของ และถูกนับเป็นสินค้าหมด (user 2026-11-21 เคส 1S7F530K0000)
+      const m = p.match(/^(.+?)\s+(\d+(?:\.\d+)?)(?:\s*\((.*)\))?(?:\s*\[[^\]]*\])?\s*$/);
       if (!m) continue;
       const name = m[1].trim();
       const qty = m[2];
@@ -184,7 +193,17 @@ export default function FastMovingStockPage({ currentUser }) {
   const groups = groupCodesInRows.filter(code => { const g = groupMaster.find(x => String(x.group_code).toUpperCase() === code); return !g || String(g.status || "active") === "active"; });
   const brands = [...new Set(rows.map(r => r.brand).filter(Boolean))].sort();
 
-  const filtered = rows.filter(r => {
+  // รหัสเดิมและรหัสทดแทนถูกเพิ่มเป็นแถวหมุนเร็วทั้งคู่ → n8n รวมยอดทั้งกลุ่มให้ทั้ง 2 แถว (ตัวเลขซ้ำกัน) — เหลือแถวเดียวต่อรหัสหลัก
+  //   เลือกแถว: ไม่ยกเลิกผลิต > แถวที่รหัสในรายการ = รหัสหลัก > id น้อยสุด (เคส 1S7F530K0000 + 5YPF530K0000)
+  const viewRows = (() => {
+    const keyOf = (r) => `${r.brand || ""}|${padCode(mainCodeOf(r))}`;
+    const score = (r) => (r.is_discontinued ? 0 : 2) + (isOwnMain(r) ? 1 : 0);
+    const best = new Map();
+    rows.forEach(r => { const k = keyOf(r); const b = best.get(k); if (!b || score(r) > score(b) || (score(r) === score(b) && Number(r.id) < Number(b.id))) best.set(k, r); });
+    return rows.filter(r => best.get(keyOf(r)) === r);
+  })();
+
+  const filtered = viewRows.filter(r => {
     // ซ่อนอะไหล่ที่ยกเลิกผลิต (is_discontinued)
     if (r.is_discontinued) return false;
     if (filterGroup !== "all" && groupCodeOf(r.product_group) !== filterGroup) return false;
@@ -241,7 +260,7 @@ export default function FastMovingStockPage({ currentUser }) {
     }
     if (search) {
       const q = search.toLowerCase();
-      const hit = [r.part_code, r.product_name, r.product_group, subOf(r)?.code, ...altCodes(r)]
+      const hit = [r.part_code, r.product_name, r.product_group, subOf(r)?.code, mainCodeOf(r), ...altCodes(r)]
         .filter(Boolean).some(v => String(v).toLowerCase().includes(q) || normCode(v).toLowerCase().includes(normCode(q).toLowerCase()));
       if (!hit) return false;
     }
@@ -292,7 +311,7 @@ export default function FastMovingStockPage({ currentUser }) {
       return `<tr>
         <td class="c">${i + 1}</td>
         <td>${r.product_group || "-"}</td>
-        <td>${subOf(r) ? `${fmtSubCode(subOf(r).code)} (ทดแทน ${r.part_code})` : r.part_code}${altCodes(r).length ? `<div style="font-size:9px;color:#0e7490">รวม ${altCodes(r).join(", ")}</div>` : ""}</td>
+        <td>${shownCode(r)}${otherCodes(r).length ? `<div style="font-size:9px;color:#0e7490">รวม ${otherCodes(r).join(", ")}</div>` : ""}</td>
         <td>${r.product_name || "-"}</td>
         <td class="r">${Number(r.quantity || 0)}</td>
         <td class="r">${s.ppao}</td>
@@ -501,16 +520,15 @@ export default function FastMovingStockPage({ currentUser }) {
                   <td style={{ ...td, textAlign: "center" }}>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
                   <td style={td}>{r.product_group || "-"}</td>
                   <td style={td}>
-                    {subOf(r) ? (
-                      <span title={`รหัสเดิม ${r.part_code} ถูกแทนด้วย ${subOf(r).code} (จากตารางอะไหล่ใช้แทนกัน)`}>
-                        <span style={{ fontWeight: 700, color: "#b45309" }}>{fmtSubCode(subOf(r).code)}</span>
-                        <span style={{ marginLeft: 4, padding: "0 5px", borderRadius: 4, background: "#fef3c7", color: "#92400e", fontSize: 10, fontWeight: 700 }}>ทดแทน</span>
-                        <div style={{ fontSize: 10.5, color: "#9ca3af" }}>เดิม {r.part_code}</div>
+                    {isOwnMain(r) ? r.part_code : (
+                      <span title={r.main_code ? `รหัสหลัก = รหัสที่จ่ายออกมากที่สุดใน 12 เดือนล่าสุดของกลุ่มรหัสที่ใช้แทนกัน (รหัสในรายการหมุนเร็ว: ${r.part_code})` : `รหัสเดิม ${r.part_code} ถูกแทนด้วย ${mainCodeOf(r)} (จากตารางอะไหล่ใช้แทนกัน)`}>
+                        <span style={{ fontWeight: 700, color: "#b45309" }}>{shownCode(r)}</span>
+                        <span style={{ marginLeft: 4, padding: "0 5px", borderRadius: 4, background: "#fef3c7", color: "#92400e", fontSize: 10, fontWeight: 700 }}>{r.main_code ? "ใช้บ่อยสุด" : "ทดแทน"}</span>
                       </span>
-                    ) : r.part_code}
-                    {altCodes(r).length > 0 && (
+                    )}
+                    {otherCodes(r).length > 0 && (
                       <div style={{ fontSize: 10, color: "#0e7490" }} title="ตัวเลขสต๊อก/จ่ายเฉลี่ย/ค้างส่ง/JOB/ให้ยืม/วันสั่ง-รับ ในแถวนี้รวมของรหัสเหล่านี้ด้วย (รหัสเดิม + รหัสทดแทน)">
-                        Σ รวม {altCodes(r).join(", ")}
+                        Σ รวม {otherCodes(r).join(", ")}
                       </div>
                     )}
                   </td>
